@@ -60,10 +60,6 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	//go func() {
-	//	<-sigs
-	//	cancel()
-	//}()
 
 	metricsURLs := cliCtx.StringSlice(metricsURLsFlag.Name)
 	metricsURL := metricsURLs[0] // TODO: Generalise
