@@ -2,9 +2,11 @@ package stages
 
 import (
 	"context"
+	"runtime"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
@@ -125,9 +127,35 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 			return
 		}
 		for _, block := range newBlocks {
-			if err := cfg.forkChoice.OnBlock(block, true); err != nil {
+			fullValidation :=
+				utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == block.Block.Slot
+			if err := cfg.forkChoice.OnBlock(block, fullValidation); err != nil {
 				log.Warn("Could not download block", "reason", err)
 				return highestSlotProcessed, highestBlockRootProcessed, nil
+			}
+			if fullValidation {
+				// Import the head
+				headRoot, headSlot, err := cfg.forkChoice.GetHead()
+				if err != nil {
+					log.Debug("Could not fetch head data", "err", err)
+					continue
+				}
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				log.Info("New block imported",
+					"slot", block.Block.Slot, "head", headSlot, "headRoot", headRoot,
+					"alloc", libcommon.ByteCount(m.Alloc))
+				// Do forkchoice if possible
+				if cfg.forkChoice.Engine() != nil {
+					finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
+					// Run forkchoice
+					if err := cfg.forkChoice.Engine().ForkChoiceUpdate(
+						cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
+						cfg.forkChoice.GetEth1Hash(headRoot),
+					); err != nil {
+						log.Warn("Could send not forkchoice", "err", err)
+					}
+				}
 			}
 			highestSlotProcessed = block.Block.Slot
 			highestBlockRootProcessed, err = block.Block.HashSSZ()
@@ -159,7 +187,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 
 		triggerInterval := time.NewTicker(150 * time.Millisecond)
 		// Process blocks until we reach our target
-		for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)-1 > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
+		for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
 			currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 			// Send request every 50 Millisecond only if not on chain tip
 			if currentSlot != highestProcessed {
