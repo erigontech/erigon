@@ -67,6 +67,9 @@ func NewState(db *DB) (*State, error) {
 			MuirGlacierBlock:      big.NewInt(0),
 			BerlinBlock:           big.NewInt(0),
 			LondonBlock:           big.NewInt(0),
+			ArrowGlacierBlock:     big.NewInt(0),
+			GrayGlacierBlock:      big.NewInt(0),
+			MergeNetsplitBlock:    big.NewInt(0),
 		}
 		genesis.Config = &chainConfig
 		_, _, err := core.CommitGenesisBlock(db.GetChain(), &genesis, "")
