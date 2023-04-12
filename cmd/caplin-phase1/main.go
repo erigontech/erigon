@@ -83,6 +83,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 	}
+
 	log.Info("Sentinel started", "addr", cfg.ServerAddr)
 
 	if err != nil {
