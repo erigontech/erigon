@@ -372,14 +372,30 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 
 // ================ Erigon3 End ================
 
-func getPageFaultCounter() (int64, int64) {
-	var rusage unix.Rusage
-	if err := unix.Getrusage(unix.RUSAGE_SELF, &rusage); err != nil {
-		return 0, 0
-	}
-	return rusage.Minflt, rusage.Majflt
-
+type pageFaultCounters struct {
+	threadMinorFaults  int64
+	threadMajorFaults  int64
+	processMinorFaults int64
+	processMajorFaults int64
 }
+
+func getPageFaultCounter() pageFaultCounters {
+	var result pageFaultCounters
+	var rusage unix.Rusage
+	// #define RUSAGE_THREAD 1  /* only the calling thread */
+	// This is to prevent counting page faults of other goroutines like rpcdaemon.
+	// It only makes sense because the goroutine has been locked to a single OS thread, when creating mdbx transaction.
+	if err := unix.Getrusage(0x1, &rusage); err != nil {
+		return pageFaultCounters{}
+	}
+	result.threadMinorFaults, result.threadMajorFaults = rusage.Minflt, rusage.Majflt
+	if err := unix.Getrusage(unix.RUSAGE_SELF, &rusage); err != nil {
+		return pageFaultCounters{}
+	}
+	result.processMinorFaults, result.processMajorFaults = rusage.Minflt, rusage.Majflt
+	return result
+}
+
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, quiet bool) (err error) {
 	if cfg.historyV3 {
 		if err = ExecBlockV3(s, u, tx, toBlock, ctx, cfg, initialCycle); err != nil {
@@ -444,7 +460,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	}()
 
 	var stageCounters ExeuctionPerformanceCounters
-	lastMinflt, lastMajflt := getPageFaultCounter()
+	lastFlt := getPageFaultCounter()
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
@@ -516,11 +532,12 @@ Loop:
 		select {
 		default:
 		case <-logEvery.C:
-			minflt, majflt := getPageFaultCounter()
+			flt := getPageFaultCounter()
 			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas,
 				float64(currentStateGas)/float64(gasState), batch, stageCounters,
-				minflt-lastMinflt, majflt-lastMajflt)
-			lastMinflt, lastMajflt = minflt, majflt
+				flt.processMajorFaults-lastFlt.processMajorFaults,
+				flt.threadMajorFaults-lastFlt.threadMajorFaults)
+			lastFlt = flt
 			gas = 0
 			stageCounters.Reset()
 			tx.CollectMetrics()
@@ -555,7 +572,7 @@ Loop:
 func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64,
 	gasState float64, batch ethdb.DbWithPendingMutations,
 	counters ExeuctionPerformanceCounters,
-	minflt, majflt int64,
+	processMajorFaults, threadMajorFaults int64,
 ) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
@@ -566,7 +583,8 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	sloadSpeed := float64(counters.NumSload) / (float64(interval) / float64(time.Second))
 	sstoreSpeed := float64(counters.NumSstore) / (float64(interval) / float64(time.Second))
 	opSpeed := float64(counters.NumOp) / (float64(interval) / float64(time.Second))
-	majfltSpeed := float64(majflt) / (float64(interval) / float64(time.Second))
+	processMajorFaultsSpeed := float64(processMajorFaults) / (float64(interval) / float64(time.Second))
+	threadMajorFaultsSpeed := float64(threadMajorFaults) / (float64(interval) / float64(time.Second))
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	var logpairs = []interface{}{
@@ -578,8 +596,10 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 		"sstore/s", fmt.Sprintf("%.1f", sstoreSpeed),
 		"op/s", fmt.Sprintf("%.1f", opSpeed),
 		"calls", counters.NumCall,
-		"majflt/s", fmt.Sprintf("%.1f", majfltSpeed),
-		"majflt", majflt,
+		"tmajflt/s", fmt.Sprintf("%.1f", threadMajorFaultsSpeed),
+		"tmajflt", threadMajorFaults,
+		"pmajflt/s", fmt.Sprintf("%.1f", processMajorFaultsSpeed),
+		"pmajflt", processMajorFaults,
 		"gasState", fmt.Sprintf("%.2f", gasState),
 	}
 	if batch != nil {
