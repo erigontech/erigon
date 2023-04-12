@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -53,28 +52,14 @@ The support command connects a running Erigon instances to a diagnostics system 
 by the URL.`,
 }
 
-// Conn is client/server symmetric connection.
-// It implements the io.Reader/io.Writer/io.Closer to read/write or close the connection to the other side.
-// It also has a Send/Recv function to use channels to communicate with the other side.
-type Conn struct {
-	r  io.Reader
-	wc io.WriteCloser
-
-	cancel context.CancelFunc
-
-	wLock sync.Mutex
-	rLock sync.Mutex
-}
+const Version = 1
 
 func connectDiagnostics(cliCtx *cli.Context) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		<-sigs
-		cancel()
-	}()
+	defer cancel()
 
 	metricsURLs := cliCtx.StringSlice(metricsURLsFlag.Name)
 	metricsURL := metricsURLs[0] // TODO: Generalise
@@ -104,17 +89,18 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 
 	// Perform the requests in a loop (reconnect)
 	for {
-		if err := tunnel(ctx, tlsConfig, diagnosticsUrl, metricsURL); err != nil {
+		if err := tunnel(ctx, cancel, sigs, tlsConfig, diagnosticsUrl, metricsURL); err != nil {
 			return err
 		}
-		log.Info("Reconnecting in 1 second...")
-		timer := time.NewTimer(1 * time.Second)
 		select {
-		case <-timer.C:
 		case <-ctx.Done():
 			// Quit immediately if the context was cancelled (by Ctrl-C or TERM signal)
 			return nil
+		default:
 		}
+		log.Info("Reconnecting in 1 second...")
+		timer := time.NewTimer(1 * time.Second)
+		<-timer.C
 	}
 }
 
@@ -122,7 +108,7 @@ var successLine = []byte("SUCCESS")
 
 // tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
 // needs to be called repeatedly to implement re-connect logic
-func tunnel(ctx context.Context, tlsConfig *tls.Config, diagnosticsUrl string, metricsURL string) error {
+func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, tlsConfig *tls.Config, diagnosticsUrl string, metricsURL string) error {
 	diagnosticsClient := &http.Client{Transport: &http2.Transport{TLSClientConfig: tlsConfig}}
 	defer diagnosticsClient.CloseIdleConnections()
 	metricsClient := &http.Client{}
@@ -131,6 +117,15 @@ func tunnel(ctx context.Context, tlsConfig *tls.Config, diagnosticsUrl string, m
 	reader, writer := io.Pipe()
 	ctx1, cancel1 := context.WithCancel(ctx)
 	defer cancel1()
+	go func() {
+		select {
+		case <-sigs:
+			cancel()
+		case <-ctx1.Done():
+		}
+		reader.Close()
+		writer.Close()
+	}()
 	req, err := http.NewRequestWithContext(ctx1, http.MethodPost, diagnosticsUrl, reader)
 	if err != nil {
 		return err
@@ -158,10 +153,15 @@ func tunnel(ctx context.Context, tlsConfig *tls.Config, diagnosticsUrl string, m
 	if !bytes.Equal(line, successLine) {
 		return fmt.Errorf("connecting to diagnostics system, first line [%s]", line)
 	}
+	var versionBytes [8]byte
+	binary.BigEndian.PutUint64(versionBytes[:], Version)
+	if _, err = writer.Write(versionBytes[:]); err != nil {
+		return fmt.Errorf("sending version: %v", err)
+	}
+
 	log.Info("Connected")
 
 	for line, isPrefix, err = r.ReadLine(); err == nil && !isPrefix; line, isPrefix, err = r.ReadLine() {
-		fmt.Printf("Got request: %s\n", line)
 		metricsBuf.Reset()
 		metricsResponse, err := metricsClient.Get(metricsURL + string(line))
 		if err != nil {
@@ -186,7 +186,11 @@ func tunnel(ctx context.Context, tlsConfig *tls.Config, diagnosticsUrl string, m
 		}
 	}
 	if err != nil {
-		log.Error("Breaking connection", "err", err)
+		select {
+		case <-ctx.Done():
+		default:
+			log.Error("Breaking connection", "err", err)
+		}
 	}
 	if isPrefix {
 		log.Error("Request too long, circuit breaker")
