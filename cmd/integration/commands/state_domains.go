@@ -516,14 +516,14 @@ func (b *blockProcessor) applyBlock(
 	}
 
 	getHashFn := core.GetHashFn(header, b.getHeader)
-
+	parentHeader := b.getHeader(block.ParentHash(), b.blockNum-1)
 	for i, tx := range block.Transactions() {
 		if b.txNum >= b.startTxNum {
 			ibs := state.New(b.reader)
 			ibs.Prepare(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			b.vmConfig.Tracer = ct
-			receipt, _, err := core.ApplyTransaction(b.chainConfig, getHashFn, b.engine, nil, gp, ibs, b.writer, header, tx, usedGas, b.vmConfig, nil /*excessDataGas*/)
+			receipt, _, err := core.ApplyTransaction(b.chainConfig, getHashFn, b.engine, nil, gp, ibs, b.writer, header, tx, usedGas, b.vmConfig, parentHeader.ExcessDataGas)
 			if err != nil {
 				return nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}
