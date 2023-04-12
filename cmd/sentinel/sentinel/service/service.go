@@ -153,7 +153,7 @@ func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (
 func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyMessage) (*sentinelrpc.PeerCount, error) {
 	// Send the request and get the data if we get an answer.
 	return &sentinelrpc.PeerCount{
-		Amount: uint64(s.sentinel.GetPeersCount()),
+		Amount: uint64(s.sentinel.GetPeersCount(true)),
 	}, nil
 }
 
