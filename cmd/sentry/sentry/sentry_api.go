@@ -142,7 +142,7 @@ func (cs *MultiClient) Penalize(ctx context.Context, penalties []headerdownload.
 	for i := range penalties {
 		outreq := proto_sentry.PenalizePeerRequest{
 			PeerId:  gointerfaces.ConvertHashToH512(penalties[i].PeerID),
-			Penalty: proto_sentry.PenaltyKind_KICK, // TODO: Extend penalty kinds
+			Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 		}
 		for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
 			if !cs.sentries[i].Ready() {
