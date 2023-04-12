@@ -31,7 +31,8 @@ services:
   otterscan:
     image: otterscan/otterscan:v1.30.0
     environment:
-      ERIGON_URL: "http://${VM_PUBLIC_IP:-localost}:8555"
+      # ERIGON_URL: "http://${VM_PUBLIC_IP:-localost}:8555"
+      ERIGON_URL: "${ERIGON_VIA_HTTPS_PROXY}"
     ports: ["80:${OTTERSCAN_PORT:-80}"]
     restart: unless-stopped
 
