@@ -56,7 +56,7 @@ func TestNonceFromAddress(t *testing.T) {
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
 	change := &remote.StateChangeBatch{
-		StateVersionID:      stateVersionID,
+		StateVersionId:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
 		ChangeBatch: []*remote.StateChange{
@@ -176,7 +176,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
 	change := &remote.StateChangeBatch{
-		StateVersionID:      stateVersionID,
+		StateVersionId:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
 		ChangeBatch: []*remote.StateChange{
@@ -293,7 +293,7 @@ func TestReverseNonces(t *testing.T) {
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
 	change := &remote.StateChangeBatch{
-		StateVersionID:      stateVersionID,
+		StateVersionId:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
 		ChangeBatch: []*remote.StateChange{
@@ -420,7 +420,7 @@ func TestTxPoke(t *testing.T) {
 	// start blocks from 0, set empty hash - then kvcache will also work on this
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
 	change := &remote.StateChangeBatch{
-		StateVersionID:      stateVersionID,
+		StateVersionId:      stateVersionID,
 		PendingBlockBaseFee: pendingBaseFee,
 		BlockGasLimit:       1000000,
 		ChangeBatch: []*remote.StateChange{

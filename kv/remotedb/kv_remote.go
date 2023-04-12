@@ -178,7 +178,7 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		streamCancelFn()
 		return nil, err
 	}
-	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewID, id: msg.TxID}, nil
+	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
 }
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx)
@@ -364,7 +364,7 @@ func (tx *tx) Cursor(bucket string) (kv.Cursor, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.id = msg.CursorID
+	c.id = msg.CursorId
 	return c, nil
 }
 
@@ -619,7 +619,7 @@ func (tx *tx) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.id = msg.CursorID
+	c.id = msg.CursorId
 	return &remoteCursorDupSort{remoteCursor: c}, nil
 }
 
