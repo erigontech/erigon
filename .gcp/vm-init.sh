@@ -54,8 +54,8 @@ adduser --disabled-password --uid $ERIGON_UID --gecos $ERIGON_UID --home /erigon
 sudo usermod -aG docker erigon
 
 mkdir -p /erigon/.ssh
-echo -e "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDWJXs3KUVwNmiUcHtRmYw6XWyS58aK4u68DIVsVEBz3RSpdlyLbPbPY1V19cQeUoS+IxKm9q6agm/4XrhOY4ReALDZ1Wmyq9Oy4ZA8tEogU0cUly+WIRgO7mjD+783J0+UIp9mmsxE0qQt0RdmWeh/74v+5YN3qanh09bxSrQ5vTFShBdl5n9fv8OMaw7xM4Etnv+RsichQWjXHDwnrAuGmt9yGRbpmGweX+RBusCjvG05jdnYv8AqlyNnTyp3f3zAOcHe69CNG/noHv22LCzAkYbl8xK74Kckopqlg2z3KDRUuzIglSt16Q5hr6GDLPP2iiJhfiUYEX8kcJz2txbz erigon\n" > /erigon/.ssh/authorized_keys
-chmod -R erigon:erigon /erigon/.ssh
+echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDWJXs3KUVwNmiUcHtRmYw6XWyS58aK4u68DIVsVEBz3RSpdlyLbPbPY1V19cQeUoS+IxKm9q6agm/4XrhOY4ReALDZ1Wmyq9Oy4ZA8tEogU0cUly+WIRgO7mjD+783J0+UIp9mmsxE0qQt0RdmWeh/74v+5YN3qanh09bxSrQ5vTFShBdl5n9fv8OMaw7xM4Etnv+RsichQWjXHDwnrAuGmt9yGRbpmGweX+RBusCjvG05jdnYv8AqlyNnTyp3f3zAOcHe69CNG/noHv22LCzAkYbl8xK74Kckopqlg2z3KDRUuzIglSt16Q5hr6GDLPP2iiJhfiUYEX8kcJz2txbz erigon\n" > /erigon/.ssh/authorized_keys
+chown -R erigon:erigon /erigon/.ssh
 
 echo "Authorize docker/GCP"
 su erigon -c "printf 'yes' | gcloud auth configure-docker us-central1-docker.pkg.dev"

@@ -11,8 +11,8 @@ on:
 
 env:
   GC_BUCKET: "is-env-confg"
-  VM_INSTANCE_NAME: "erigon-dev-explorer-1"
-  VM_ZONE: "europe-west1-b"
+  VM_INSTANCE_NAME: "erigon-dev-explorer-ci"
+  VM_ZONE: "europe-west2-c"
 
 jobs:
   erigon-compose-refresh:
