@@ -903,8 +903,8 @@ github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46/go.mod h1:uAQ5P
 github.com/samuel/go-zookeeper v0.0.0-20190923202752-2cc03de413da/go.mod h1:gi+0XIa01GRL2eRQVjQkKGqKF3SF9vZR/HnPullcV2E=
 github.com/sclevine/agouti v3.0.0+incompatible/go.mod h1:b4WX9W9L1sfQKXeJf1mUTLZKJ48R1S7H23Ji7oFO5Bw=
 github.com/sean-/seed v0.0.0-20170313163322-e2103e2c3529/go.mod h1:DxrIzT+xaE7yg65j358z/aeFdxmN0P9QXhEzd20vsDc=
-github.com/sentioxyz/erigon-lib v0.0.0-20230315234346-a057da6ba8f7 h1:vvkG5eQL2bnJs5Aea8e65lqAknOnHP7P5+cl0tXoKoc=
-github.com/sentioxyz/erigon-lib v0.0.0-20230315234346-a057da6ba8f7/go.mod h1:HbqSyXJh/Xd7a5WQScXOhAOTFyCuFu7OLJQfpCsYMnc=
+github.com/sentioxyz/erigon-lib v0.0.0-20230413075446-f57cc1028c8c h1:8MhwuBT/9EkGlg/cfOe3YyTxkLLLIQCIf5jh9P+eqNU=
+github.com/sentioxyz/erigon-lib v0.0.0-20230413075446-f57cc1028c8c/go.mod h1:HbqSyXJh/Xd7a5WQScXOhAOTFyCuFu7OLJQfpCsYMnc=
 github.com/sergi/go-diff v1.0.0/go.mod h1:0CfEIISq7TuYL3j771MWULgwwjU+GofnZX9QAmXWZgo=
 github.com/sergi/go-diff v1.1.0/go.mod h1:STckp+ISIX8hZLjrqAeVduY0gWCT9IjLuqbuNXdaHfM=
 github.com/shurcooL/component v0.0.0-20170202220835-f88ec8f54cc4/go.mod h1:XhFIlyj5a1fBNx5aJTbKoIq0mNaPvOagO+HjB3EtxrY=
