@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -22,8 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -31,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type SnapshotsCfg struct {
@@ -214,7 +215,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			// for now easier just store them in db
 			td := big.NewInt(0)
 			blockNumBytes := make([]byte, 8)
-			chainReader := &ChainReaderImpl{config: &chainConfig, tx: tx, blockReader: blockReader}
 			if err := snapshotsync.ForEachHeader(ctx, sn, func(header *types.Header) error {
 				blockNum, blockHash := header.Number.Uint64(), header.Hash()
 				td.Add(td, header.Difficulty)
@@ -230,20 +230,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					return err
 				}
 
-				if engine != nil {
-					// consensus may have own database, let's fill it
-					// different consensuses may have some conditions for validators snapshots
-					need := false
-					switch engine.(type) {
-					case *parlia.Parlia:
-						need = (blockNum-1)%(100*parlia.CheckpointInterval) == 0
-					}
-					if need {
-						if err := engine.VerifyHeader(chainReader, header, true /* seal */); err != nil {
-							return err
-						}
-					}
-				}
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
