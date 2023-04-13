@@ -3,7 +3,8 @@ package commands
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
@@ -11,7 +12,7 @@ import (
 // Web3API provides interfaces for the web3_ RPC commands
 type Web3API interface {
 	ClientVersion(_ context.Context) (string, error)
-	Sha3(_ context.Context, input hexutil.Bytes) hexutil.Bytes
+	Sha3(_ context.Context, input hexutility.Bytes) hexutility.Bytes
 }
 
 type Web3APIImpl struct {
@@ -33,6 +34,6 @@ func (api *Web3APIImpl) ClientVersion(ctx context.Context) (string, error) {
 }
 
 // Sha3 implements web3_sha3. Returns Keccak-256 (not the standardized SHA3-256) of the given data.
-func (api *Web3APIImpl) Sha3(_ context.Context, input hexutil.Bytes) hexutil.Bytes {
+func (api *Web3APIImpl) Sha3(_ context.Context, input hexutility.Bytes) hexutility.Bytes {
 	return crypto.Keccak256(input)
 }

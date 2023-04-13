@@ -7,18 +7,13 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/turbo/trie"
-
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
-
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
@@ -33,10 +28,14 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 func TestEstimateGas(t *testing.T) {
@@ -91,7 +90,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000)
 
 	callData := hexutil.MustDecode("0x2e64cec1")
-	callDataBytes := hexutil.Bytes(callData)
+	callDataBytes := hexutility.Bytes(callData)
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &bankAddress,
@@ -184,7 +183,7 @@ func decodeNode(t *testing.T, encoded []byte) any {
 }
 
 // proofMap creates a map from hash to proof node
-func proofMap(t *testing.T, proof []hexutil.Bytes) (map[libcommon.Hash]any, map[libcommon.Hash][]byte) {
+func proofMap(t *testing.T, proof []hexutility.Bytes) (map[libcommon.Hash]any, map[libcommon.Hash][]byte) {
 	res := map[libcommon.Hash]any{}
 	raw := map[libcommon.Hash][]byte{}
 	for _, proofB := range proof {

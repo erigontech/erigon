@@ -26,9 +26,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -59,7 +62,7 @@ type callContext struct {
 type callLog struct {
 	Address libcommon.Address `json:"address"`
 	Topics  []libcommon.Hash  `json:"topics"`
-	Data    hexutil.Bytes     `json:"data"`
+	Data    hexutility.Bytes  `json:"data"`
 }
 
 // callTrace is the result of a callTracer run.
@@ -68,8 +71,8 @@ type callTrace struct {
 	Gas      *hexutil.Uint64   `json:"gas"`
 	GasUsed  *hexutil.Uint64   `json:"gasUsed"`
 	To       libcommon.Address `json:"to,omitempty"`
-	Input    hexutil.Bytes     `json:"input"`
-	Output   hexutil.Bytes     `json:"output,omitempty"`
+	Input    hexutility.Bytes  `json:"input"`
+	Output   hexutility.Bytes  `json:"output,omitempty"`
 	Error    string            `json:"error,omitempty"`
 	Revertal string            `json:"revertReason,omitempty"`
 	Calls    []callTrace       `json:"calls,omitempty"`
