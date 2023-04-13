@@ -67,16 +67,6 @@ type Config struct {
 	CancunTime   *big.Int `json:"cancunTime,omitempty"`
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 
-	// Parlia fork blocks
-	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`
-	NielsBlock      *big.Int `json:"nielsBlock,omitempty" toml:",omitempty"`
-	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty" toml:",omitempty"`
-	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`
-	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`
-	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty" toml:",omitempty"`
-	NanoBlock       *big.Int `json:"nanoBlock,omitempty" toml:",omitempty"`
-	MoranBlock      *big.Int `json:"moranBlock,omitempty" toml:",omitempty"`
-
 	// Forks specific to Gnosis Chain
 	PosdaoBlock *big.Int `json:"posdaoBlock,omitempty"`
 
@@ -87,28 +77,11 @@ type Config struct {
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
-	Parlia *ParliaConfig `json:"parlia,omitempty" toml:",omitempty"`
 	Bor    *BorConfig    `json:"bor,omitempty"`
 }
 
 func (c *Config) String() string {
 	engine := c.getEngine()
-
-	if c.Consensus == ParliaConsensus {
-		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Nano: %v, Moran: %v, Gibbs: %v, Engine: %v}",
-			c.ChainID,
-			c.RamanujanBlock,
-			c.NielsBlock,
-			c.MirrorSyncBlock,
-			c.BrunoBlock,
-			c.EulerBlock,
-			c.GibbsBlock,
-			c.NanoBlock,
-			c.MoranBlock,
-			c.GibbsBlock,
-			engine,
-		)
-	}
 
 	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Engine: %v}",
 		c.ChainID,
@@ -140,8 +113,6 @@ func (c *Config) getEngine() string {
 		return c.Ethash.String()
 	case c.Clique != nil:
 		return c.Clique.String()
-	case c.Parlia != nil:
-		return c.Parlia.String()
 	case c.Bor != nil:
 		return c.Bor.String()
 	case c.Aura != nil:
@@ -179,81 +150,6 @@ func (c *Config) IsByzantium(num uint64) bool {
 // IsConstantinople returns whether num is either equal to the Constantinople fork block or greater.
 func (c *Config) IsConstantinople(num uint64) bool {
 	return isForked(c.ConstantinopleBlock, num)
-}
-
-// IsRamanujan returns whether num is either equal to the IsRamanujan fork block or greater.
-func (c *Config) IsRamanujan(num uint64) bool {
-	return isForked(c.RamanujanBlock, num)
-}
-
-// IsOnRamanujan returns whether num is equal to the Ramanujan fork block
-func (c *Config) IsOnRamanujan(num *big.Int) bool {
-	return numEqual(c.RamanujanBlock, num)
-}
-
-// IsNiels returns whether num is either equal to the Niels fork block or greater.
-func (c *Config) IsNiels(num uint64) bool {
-	return isForked(c.NielsBlock, num)
-}
-
-// IsOnNiels returns whether num is equal to the IsNiels fork block
-func (c *Config) IsOnNiels(num *big.Int) bool {
-	return numEqual(c.NielsBlock, num)
-}
-
-// IsMirrorSync returns whether num is either equal to the MirrorSync fork block or greater.
-func (c *Config) IsMirrorSync(num uint64) bool {
-	return isForked(c.MirrorSyncBlock, num)
-}
-
-// IsOnMirrorSync returns whether num is equal to the MirrorSync fork block
-func (c *Config) IsOnMirrorSync(num *big.Int) bool {
-	return numEqual(c.MirrorSyncBlock, num)
-}
-
-// IsBruno returns whether num is either equal to the Burn fork block or greater.
-func (c *Config) IsBruno(num uint64) bool {
-	return isForked(c.BrunoBlock, num)
-}
-
-// IsOnBruno returns whether num is equal to the Burn fork block
-func (c *Config) IsOnBruno(num *big.Int) bool {
-	return numEqual(c.BrunoBlock, num)
-}
-
-// IsEuler returns whether num is either equal to the euler fork block or greater.
-func (c *Config) IsEuler(num *big.Int) bool {
-	return isForked(c.EulerBlock, num.Uint64())
-}
-
-func (c *Config) IsOnEuler(num *big.Int) bool {
-	return numEqual(c.EulerBlock, num)
-}
-
-// IsGibbs returns whether num is either equal to the euler fork block or greater.
-func (c *Config) IsGibbs(num *big.Int) bool {
-	return isForked(c.GibbsBlock, num.Uint64())
-}
-
-func (c *Config) IsOnGibbs(num *big.Int) bool {
-	return numEqual(c.GibbsBlock, num)
-}
-
-func (c *Config) IsMoran(num uint64) bool {
-	return isForked(c.MoranBlock, num)
-}
-
-func (c *Config) IsOnMoran(num *big.Int) bool {
-	return numEqual(c.MoranBlock, num)
-}
-
-// IsNano returns whether num is either equal to the euler fork block or greater.
-func (c *Config) IsNano(num uint64) bool {
-	return isForked(c.NanoBlock, num)
-}
-
-func (c *Config) IsOnNano(num *big.Int) bool {
-	return numEqual(c.NanoBlock, num)
 }
 
 // IsMuirGlacier returns whether num is either equal to the Muir Glacier (EIP-2384) fork block or greater.
@@ -347,8 +243,6 @@ func (c *Config) forkBlockNumbers() []forkBlockNumber {
 		{name: "petersburgBlock", blockNumber: c.PetersburgBlock},
 		{name: "istanbulBlock", blockNumber: c.IstanbulBlock},
 		{name: "muirGlacierBlock", blockNumber: c.MuirGlacierBlock, optional: true},
-		{name: "eulerBlock", blockNumber: c.EulerBlock, optional: true},
-		{name: "gibbsBlock", blockNumber: c.GibbsBlock, optional: true},
 		{name: "berlinBlock", blockNumber: c.BerlinBlock},
 		{name: "londonBlock", blockNumber: c.LondonBlock},
 		{name: "arrowGlacierBlock", blockNumber: c.ArrowGlacierBlock, optional: true},
@@ -444,31 +338,6 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 		return newCompatError("Merge netsplit block", c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock)
 	}
 
-	// Parlia forks
-	if incompatible(c.RamanujanBlock, newcfg.RamanujanBlock, head) {
-		return newCompatError("Ramanujan fork block", c.RamanujanBlock, newcfg.RamanujanBlock)
-	}
-	if incompatible(c.NielsBlock, newcfg.NielsBlock, head) {
-		return newCompatError("Niels fork block", c.NielsBlock, newcfg.NielsBlock)
-	}
-	if incompatible(c.MirrorSyncBlock, newcfg.MirrorSyncBlock, head) {
-		return newCompatError("MirrorSync fork block", c.MirrorSyncBlock, newcfg.MirrorSyncBlock)
-	}
-	if incompatible(c.BrunoBlock, newcfg.BrunoBlock, head) {
-		return newCompatError("Bruno fork block", c.BrunoBlock, newcfg.BrunoBlock)
-	}
-	if incompatible(c.EulerBlock, newcfg.EulerBlock, head) {
-		return newCompatError("Euler fork block", c.EulerBlock, newcfg.EulerBlock)
-	}
-	if incompatible(c.GibbsBlock, newcfg.GibbsBlock, head) {
-		return newCompatError("Gibbs fork block", c.GibbsBlock, newcfg.GibbsBlock)
-	}
-	if incompatible(c.NanoBlock, newcfg.NanoBlock, head) {
-		return newCompatError("Nano fork block", c.NanoBlock, newcfg.NanoBlock)
-	}
-	if incompatible(c.MoranBlock, newcfg.MoranBlock, head) {
-		return newCompatError("moran fork block", c.MoranBlock, newcfg.MoranBlock)
-	}
 	return nil
 }
 
@@ -542,18 +411,6 @@ type AuRaConfig struct {
 // String implements the stringer interface, returning the consensus engine details.
 func (c *AuRaConfig) String() string {
 	return "aura"
-}
-
-type ParliaConfig struct {
-	DBPath   string
-	InMemory bool
-	Period   uint64 `json:"period"` // Number of seconds between blocks to enforce
-	Epoch    uint64 `json:"epoch"`  // Epoch length to update validatorSet
-}
-
-// String implements the stringer interface, returning the consensus engine details.
-func (b *ParliaConfig) String() string {
-	return "parlia"
 }
 
 // BorConfig is the consensus engine configs for Matic bor based sealing.
@@ -656,9 +513,7 @@ type Rules struct {
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
-	IsNano, IsMoran, IsGibbs                                bool
-	IsEip1559FeeCollector                                   bool
-	IsParlia, IsAura                                        bool
+	IsEip1559FeeCollector, IsAura                           bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -682,10 +537,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsShanghai:            c.IsShanghai(time),
 		IsCancun:              c.IsCancun(time),
 		IsPrague:              c.IsPrague(time),
-		IsNano:                c.IsNano(num),
-		IsMoran:               c.IsMoran(num),
 		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),
-		IsParlia:              c.Parlia != nil,
 		IsAura:                c.Aura != nil,
 	}
 }
