@@ -135,6 +135,7 @@ func (r *ChangeSet) OnPreviousJustifiedCheckpointChange(c cltypes.Checkpoint) {
 	if r.inverseChangeset && r.previousJustifiedCheckpointChange != nil {
 		return
 	}
+	r.previousJustifiedCheckpointChange = new(cltypes.Checkpoint)
 	*r.previousJustifiedCheckpointChange = c
 }
 
@@ -142,6 +143,7 @@ func (r *ChangeSet) OnCurrentJustifiedCheckpointChange(c cltypes.Checkpoint) {
 	if r.inverseChangeset && r.currentJustifiedCheckpointChange != nil {
 		return
 	}
+	r.currentJustifiedCheckpointChange = new(cltypes.Checkpoint)
 	*r.currentJustifiedCheckpointChange = c
 }
 
@@ -149,6 +151,7 @@ func (r *ChangeSet) OnFinalizedCheckpointChange(c cltypes.Checkpoint) {
 	if r.inverseChangeset && r.finalizedCheckpointChange != nil {
 		return
 	}
+	r.finalizedCheckpointChange = new(cltypes.Checkpoint)
 	*r.finalizedCheckpointChange = c
 }
 

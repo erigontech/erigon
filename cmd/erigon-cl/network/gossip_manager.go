@@ -67,6 +67,17 @@ func (g *GossipManager) Start() {
 				continue
 			}
 			block := object.(*cltypes.SignedBeaconBlock)
+
+			currentSlotByTime := utils.GetCurrentSlot(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot)
+			maxGossipSlotThreshold := uint64(4)
+			// Skip if slot is too far behind.
+			if block.Block.Slot+maxGossipSlotThreshold < currentSlotByTime {
+				continue
+			}
+			// Publish the block
+			/*if _, err := g.sentinel.PublishGossip(g.ctx, data); err != nil {
+				log.Debug("cannot publish gossip", "err", err)
+			}*/
 			log.Debug("Received block via gossip", "slot", block.Block.Slot)
 
 			if err := g.forkChoice.OnBlock(block, true); err != nil {
@@ -79,8 +90,7 @@ func (g *GossipManager) Start() {
 					continue
 				}
 			}
-			// Publish the block
-			g.sentinel.PublishGossip(g.ctx, data)
+
 			// Now check the head
 			headRoot, headSlot, err := g.forkChoice.GetHead()
 			if err != nil {
