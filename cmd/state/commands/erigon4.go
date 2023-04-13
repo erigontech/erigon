@@ -605,7 +605,6 @@ func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots)
 	if cc.Clique != nil {
 		consensusConfig = params.CliqueSnapshot
 	} else if cc.Aura != nil {
-		config.Aura.Etherbase = config.Miner.Etherbase
 		consensusConfig = &config.Aura
 	} else if cc.Parlia != nil {
 		consensusConfig = &config.Parlia

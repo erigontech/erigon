@@ -1342,10 +1342,6 @@ func setClique(ctx *cli.Context, cfg *params.ConsensusSnapshotConfig, datadir st
 	}
 }
 
-func setAuRa(ctx *cli.Context, cfg *chain.AuRaConfig, datadir string) {
-	cfg.DBPath = filepath.Join(datadir, "aura")
-}
-
 func setParlia(ctx *cli.Context, cfg *chain.ParliaConfig, datadir string) {
 	cfg.DBPath = filepath.Join(datadir, "parlia")
 }
@@ -1504,7 +1500,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
 	setClique(ctx, &cfg.Clique, nodeConfig.Dirs.DataDir)
-	setAuRa(ctx, &cfg.Aura, nodeConfig.Dirs.DataDir)
 	setParlia(ctx, &cfg.Parlia, nodeConfig.Dirs.DataDir)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
