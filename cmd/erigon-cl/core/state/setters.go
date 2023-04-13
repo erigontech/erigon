@@ -28,10 +28,10 @@ func (b *BeaconState) SetSlot(slot uint64) {
 func (b *BeaconState) SetFork(fork *cltypes.Fork) {
 	b.touchedLeaves[ForkLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnForkChange(b.fork)
+		b.reverseChangeset.OnForkChange(*b.fork)
 	}
 	if b.forwardChangeset != nil {
-		b.forwardChangeset.OnForkChange(fork)
+		b.forwardChangeset.OnForkChange(*fork)
 	}
 	b.fork = fork
 }
@@ -39,10 +39,10 @@ func (b *BeaconState) SetFork(fork *cltypes.Fork) {
 func (b *BeaconState) SetLatestBlockHeader(header *cltypes.BeaconBlockHeader) {
 	b.touchedLeaves[LatestBlockHeaderLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnLatestHeaderChange(b.latestBlockHeader)
+		b.reverseChangeset.OnLatestHeaderChange(*b.latestBlockHeader)
 	}
 	if b.forwardChangeset != nil {
-		b.forwardChangeset.OnLatestHeaderChange(header)
+		b.forwardChangeset.OnLatestHeaderChange(*header)
 	}
 	b.latestBlockHeader = header
 }
@@ -149,10 +149,10 @@ func (b *BeaconState) SetActivationEligibilityEpochForValidatorAtIndex(index int
 func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
 	b.touchedLeaves[Eth1DataLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnEth1DataChange(eth1Data)
+		b.reverseChangeset.OnEth1DataChange(*eth1Data)
 	}
 	if b.forwardChangeset != nil {
-		b.forwardChangeset.OnEth1DataChange(eth1Data)
+		b.forwardChangeset.OnEth1DataChange(*eth1Data)
 	}
 	b.eth1Data = eth1Data
 }
@@ -306,10 +306,10 @@ func (b *BeaconState) SetJustificationBits(justificationBits cltypes.Justificati
 func (b *BeaconState) SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint *cltypes.Checkpoint) {
 	b.touchedLeaves[PreviousJustifiedCheckpointLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnPreviousJustifiedCheckpointChange(b.previousJustifiedCheckpoint)
+		b.reverseChangeset.OnPreviousJustifiedCheckpointChange(*b.previousJustifiedCheckpoint)
 	}
 	if b.forwardChangeset != nil {
-		b.forwardChangeset.OnPreviousJustifiedCheckpointChange(previousJustifiedCheckpoint)
+		b.forwardChangeset.OnPreviousJustifiedCheckpointChange(*previousJustifiedCheckpoint)
 	}
 	b.previousJustifiedCheckpoint = previousJustifiedCheckpoint
 }
@@ -317,10 +317,10 @@ func (b *BeaconState) SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint
 func (b *BeaconState) SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint *cltypes.Checkpoint) {
 	b.touchedLeaves[CurrentJustifiedCheckpointLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnCurrentJustifiedCheckpointChange(b.currentJustifiedCheckpoint)
+		b.reverseChangeset.OnCurrentJustifiedCheckpointChange(*b.currentJustifiedCheckpoint)
 	}
 	if b.forwardChangeset != nil {
-		b.forwardChangeset.OnCurrentJustifiedCheckpointChange(currentJustifiedCheckpoint)
+		b.forwardChangeset.OnCurrentJustifiedCheckpointChange(*currentJustifiedCheckpoint)
 	}
 	b.currentJustifiedCheckpoint = currentJustifiedCheckpoint
 }
@@ -328,10 +328,10 @@ func (b *BeaconState) SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint *
 func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint *cltypes.Checkpoint) {
 	b.touchedLeaves[FinalizedCheckpointLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnFinalizedCheckpointChange(b.finalizedCheckpoint)
+		b.reverseChangeset.OnFinalizedCheckpointChange(*b.finalizedCheckpoint)
 	}
 	if b.forwardChangeset != nil {
-		b.forwardChangeset.OnFinalizedCheckpointChange(finalizedCheckpoint)
+		b.forwardChangeset.OnFinalizedCheckpointChange(*finalizedCheckpoint)
 	}
 	b.finalizedCheckpoint = finalizedCheckpoint
 }
@@ -339,10 +339,10 @@ func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint *cltypes.Checkp
 func (b *BeaconState) SetCurrentSyncCommittee(currentSyncCommittee *cltypes.SyncCommittee) {
 	b.touchedLeaves[CurrentSyncCommitteeLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnCurrentSyncCommitteeChange(b.currentSyncCommittee)
+		b.reverseChangeset.OnCurrentSyncCommitteeChange(*b.currentSyncCommittee)
 	}
 	if b.forwardChangeset != nil {
-		b.forwardChangeset.OnCurrentSyncCommitteeChange(currentSyncCommittee)
+		b.forwardChangeset.OnCurrentSyncCommitteeChange(*currentSyncCommittee)
 	}
 	b.currentSyncCommittee = currentSyncCommittee
 }
@@ -350,10 +350,10 @@ func (b *BeaconState) SetCurrentSyncCommittee(currentSyncCommittee *cltypes.Sync
 func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *cltypes.SyncCommittee) {
 	b.touchedLeaves[NextSyncCommitteeLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnNextSyncCommitteeChange(b.nextSyncCommittee)
+		b.reverseChangeset.OnNextSyncCommitteeChange(*b.nextSyncCommittee)
 	}
 	if b.forwardChangeset != nil {
-		b.forwardChangeset.OnNextSyncCommitteeChange(nextSyncCommittee)
+		b.forwardChangeset.OnNextSyncCommitteeChange(*nextSyncCommittee)
 	}
 	b.nextSyncCommittee = nextSyncCommittee
 }
@@ -361,10 +361,10 @@ func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *cltypes.SyncCommit
 func (b *BeaconState) SetLatestExecutionPayloadHeader(header *cltypes.Eth1Header) {
 	b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnEth1Header(b.latestExecutionPayloadHeader)
+		b.reverseChangeset.OnEth1Header(*b.latestExecutionPayloadHeader)
 	}
 	if b.forwardChangeset != nil {
-		b.forwardChangeset.OnEth1Header(header)
+		b.forwardChangeset.OnEth1Header(*header)
 	}
 	b.latestExecutionPayloadHeader = header
 }

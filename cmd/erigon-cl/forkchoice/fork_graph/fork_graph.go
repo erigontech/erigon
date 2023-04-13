@@ -236,6 +236,66 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash) (*state.BeaconState, erro
 	return f.lastState, nil
 }
 
+func (f *ForkGraph) GetStateCopy(blockRoot libcommon.Hash) (*state.BeaconState, error) {
+	state, err := f.lastState.Copy()
+	if err != nil {
+		return nil, err
+	}
+
+	currentStateBlockRoot, err := state.BlockRoot()
+	if err != nil {
+		return nil, err
+	}
+	if currentStateBlockRoot == blockRoot {
+		return state, nil
+	}
+	// collect all blocks beetwen greatest extending node path and block.
+	blockRootsFromFarthestExtendingPath := []libcommon.Hash{}
+	// Use the parent root as a reverse iterator.
+	currentIteratorRoot := blockRoot
+	// try and find the point of recconection
+	for reconnect, ok := f.farthestExtendingPath[currentIteratorRoot]; !ok || !reconnect; reconnect, ok = f.farthestExtendingPath[currentIteratorRoot] {
+		parent, isSegmentPresent := f.GetHeader(currentIteratorRoot)
+		if !isSegmentPresent {
+			log.Debug("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
+			return nil, nil
+		}
+		blockRootsFromFarthestExtendingPath = append(blockRootsFromFarthestExtendingPath, currentIteratorRoot)
+		currentIteratorRoot = parent.ParentRoot
+	}
+	// Initalize edge.
+	edge := libcommon.Hash(currentStateBlockRoot)
+	inverseChangesets := make([]*beacon_changeset.ChangeSet, 0, len(blockRootsFromFarthestExtendingPath))
+	// Unwind to the recconection root.
+	for edge != currentIteratorRoot {
+		changeset, isChangesetPreset := f.inverseEdges[edge]
+		if !isChangesetPreset {
+			log.Debug("Could not retrieve state: Missing changeset", "missing", edge)
+			return nil, nil
+		}
+		// you need the parent for the root
+		parent, isSegmentPresent := f.GetHeader(edge)
+		if !isSegmentPresent {
+			log.Debug("Could not retrieve state: Missing header in history reconstruction", "missing", currentIteratorRoot)
+			return nil, nil
+		}
+		inverseChangesets = append(inverseChangesets, changeset)
+		// go on.
+		edge = parent.ParentRoot
+	}
+	// Reverse changeset ONLY if we can
+	for _, changeset := range inverseChangesets {
+		state.RevertWithChangeset(changeset)
+	}
+
+	// Traverse the graph forward now (the nodes are in reverse order).
+	for i := len(blockRootsFromFarthestExtendingPath) - 1; i >= 0; i-- {
+		changeset := f.forwardEdges[blockRootsFromFarthestExtendingPath[i]]
+		state.RevertWithChangeset(changeset)
+	}
+	return state, nil
+}
+
 // updateChildren adds a new child to the parent node hash.
 func (f *ForkGraph) updateChildren(parent, child libcommon.Hash) {
 	childrens := f.childrens[parent]

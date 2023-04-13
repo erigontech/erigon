@@ -91,28 +91,28 @@ func (r *ChangeSet) OnSlotChange(prevSlot uint64) {
 	*r.slotChange = prevSlot
 }
 
-func (r *ChangeSet) OnForkChange(fork *cltypes.Fork) {
+func (r *ChangeSet) OnForkChange(fork cltypes.Fork) {
 	if r.inverseChangeset && r.forkChange != nil {
 		return
 	}
 	r.forkChange = new(cltypes.Fork)
-	*r.forkChange = *fork
+	*r.forkChange = fork
 }
 
-func (r *ChangeSet) OnLatestHeaderChange(h *cltypes.BeaconBlockHeader) {
+func (r *ChangeSet) OnLatestHeaderChange(h cltypes.BeaconBlockHeader) {
 	if r.inverseChangeset && r.latestBlockHeaderChange != nil {
 		return
 	}
 	r.latestBlockHeaderChange = new(cltypes.BeaconBlockHeader)
-	*r.latestBlockHeaderChange = *h
+	*r.latestBlockHeaderChange = h
 }
 
-func (r *ChangeSet) OnEth1DataChange(e *cltypes.Eth1Data) {
+func (r *ChangeSet) OnEth1DataChange(e cltypes.Eth1Data) {
 	if r.inverseChangeset && r.latestBlockHeaderChange != nil {
 		return
 	}
 	r.eth1DataChange = new(cltypes.Eth1Data)
-	*r.eth1DataChange = *e
+	*r.eth1DataChange = e
 }
 
 func (r *ChangeSet) OnJustificationBitsChange(j cltypes.JustificationBits) {
@@ -131,53 +131,53 @@ func (r *ChangeSet) OnEth1DepositIndexChange(e uint64) {
 	*r.eth1DepositIndexChange = e
 }
 
-func (r *ChangeSet) OnPreviousJustifiedCheckpointChange(c *cltypes.Checkpoint) {
+func (r *ChangeSet) OnPreviousJustifiedCheckpointChange(c cltypes.Checkpoint) {
 	if r.inverseChangeset && r.previousJustifiedCheckpointChange != nil {
 		return
 	}
-	r.previousJustifiedCheckpointChange = c.Copy()
+	*r.previousJustifiedCheckpointChange = c
 }
 
-func (r *ChangeSet) OnCurrentJustifiedCheckpointChange(c *cltypes.Checkpoint) {
+func (r *ChangeSet) OnCurrentJustifiedCheckpointChange(c cltypes.Checkpoint) {
 	if r.inverseChangeset && r.currentJustifiedCheckpointChange != nil {
 		return
 	}
-	r.currentJustifiedCheckpointChange = c.Copy()
+	*r.currentJustifiedCheckpointChange = c
 }
 
-func (r *ChangeSet) OnFinalizedCheckpointChange(c *cltypes.Checkpoint) {
+func (r *ChangeSet) OnFinalizedCheckpointChange(c cltypes.Checkpoint) {
 	if r.inverseChangeset && r.finalizedCheckpointChange != nil {
 		return
 	}
-	r.finalizedCheckpointChange = c.Copy()
+	*r.finalizedCheckpointChange = c
 }
 
-func (r *ChangeSet) OnCurrentSyncCommitteeChange(c *cltypes.SyncCommittee) {
+func (r *ChangeSet) OnCurrentSyncCommitteeChange(c cltypes.SyncCommittee) {
 	if r.inverseChangeset && r.currentSyncCommitteeChange != nil {
 		return
 	}
 	r.currentSyncCommitteeChange = new(cltypes.SyncCommittee)
-	*r.currentSyncCommitteeChange = *c
+	*r.currentSyncCommitteeChange = c
 	r.currentSyncCommitteeChange.PubKeys = make([][48]byte, len(c.PubKeys))
 	copy(r.currentSyncCommitteeChange.PubKeys, c.PubKeys)
 }
 
-func (r *ChangeSet) OnNextSyncCommitteeChange(c *cltypes.SyncCommittee) {
+func (r *ChangeSet) OnNextSyncCommitteeChange(c cltypes.SyncCommittee) {
 	if r.inverseChangeset && r.nextSyncCommitteeChange != nil {
 		return
 	}
 	r.nextSyncCommitteeChange = new(cltypes.SyncCommittee)
-	*r.nextSyncCommitteeChange = *c
+	*r.nextSyncCommitteeChange = c
 	r.nextSyncCommitteeChange.PubKeys = make([][48]byte, len(c.PubKeys))
 	copy(r.nextSyncCommitteeChange.PubKeys, c.PubKeys)
 }
 
-func (r *ChangeSet) OnEth1Header(e *cltypes.Eth1Header) {
+func (r *ChangeSet) OnEth1Header(e cltypes.Eth1Header) {
 	if r.inverseChangeset && r.latestExecutionPayloadHeaderChange != nil {
 		return
 	}
 	r.latestExecutionPayloadHeaderChange = new(cltypes.Eth1Header)
-	*r.latestExecutionPayloadHeaderChange = *e
+	*r.latestExecutionPayloadHeaderChange = e
 	r.latestExecutionPayloadHeaderChange.Extra = libcommon.Copy(e.Extra)
 }
 
