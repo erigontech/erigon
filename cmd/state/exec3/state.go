@@ -5,11 +5,12 @@ import (
 	"math/big"
 	"sync"
 
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -17,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -42,8 +42,6 @@ type Worker struct {
 	genesis  *types.Genesis
 	resultCh *exec22.ResultsQueue
 	chain    ChainReader
-	isPoSA   bool
-	posa     consensus.PoSA
 
 	callTracer  *CallTracer
 	taskGasPool *core.GasPool
@@ -83,7 +81,6 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 
 	w.ibs = state.New(w.stateReader)
 
-	w.posa, w.isPoSA = engine.(consensus.PoSA)
 	return w
 }
 
@@ -154,9 +151,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
-		if rw.isPoSA {
-			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, header.Number, ibs)
-		}
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
 		}
@@ -184,14 +178,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		}
 	} else {
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
-		if rw.isPoSA {
-			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, header); err != nil {
-				panic(err)
-			} else if isSystemTx {
-				//fmt.Printf("System tx\n")
-				return
-			}
-		}
 		txHash := txTask.Tx.Hash()
 		rw.taskGasPool.Reset(txTask.Tx.GetGas())
 		rw.callTracer.Reset()
