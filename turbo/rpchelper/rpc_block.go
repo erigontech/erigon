@@ -17,19 +17,22 @@ var UnknownBlockError = &rpc.CustomError{
 }
 
 func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
-	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
-	if forkchoiceHeadHash != (libcommon.Hash{}) {
-		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
-		if forkchoiceHeadNum != nil {
-			return *forkchoiceHeadNum, nil
-		}
-	}
-
 	headHash := rawdb.ReadHeadBlockHash(tx)
 	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
 	if headNumber == nil {
 		return 0, fmt.Errorf("getting latest block number: head is not set")
 	}
+
+	// On PoS networks, the forkchoice head is the latest block that has been finalized.
+	// Only exception is when syncing (header updated but the rest have not yet), in which case we use the head block instead.
+	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
+	if forkchoiceHeadHash != (libcommon.Hash{}) {
+		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
+		if forkchoiceHeadNum != nil && *forkchoiceHeadNum <= *headNumber {
+			return *forkchoiceHeadNum, nil
+		}
+	}
+
 	return *headNumber, nil
 }
 
