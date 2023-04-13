@@ -8,10 +8,9 @@ type ListChangeSet[T any] struct {
 	list       *btree.Map[int, T]
 	listLength int
 	replace    bool
-	hitTable   []bool
+	// maps hits for each index
+	hitTable map[int]bool
 }
-
-const extraForHitTable = 1024
 
 // NewListChangeSet creates new list with given length.
 func NewListChangeSet[T any](length int, replace bool) *ListChangeSet[T] {
@@ -19,7 +18,6 @@ func NewListChangeSet[T any](length int, replace bool) *ListChangeSet[T] {
 		listLength: length,
 		list:       btree.NewMap[int, T](32),
 		replace:    replace,
-		hitTable:   make([]bool, length+extraForHitTable),
 	}
 }
 
@@ -34,7 +32,6 @@ func (l *ListChangeSet[T]) AddChange(index int, elem T) {
 
 // OnAddNewElement handles addition of new element to list set of changes.
 func (l *ListChangeSet[T]) OnAddNewElement(elem T) {
-	l.hitTable = append(l.hitTable, false)
 	l.AddChange(l.listLength, elem)
 	l.listLength++
 }
