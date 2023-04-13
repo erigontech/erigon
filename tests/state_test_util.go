@@ -26,15 +26,16 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -65,14 +66,14 @@ type stJSON struct {
 	Env  stEnv                    `json:"env"`
 	Pre  types.GenesisAlloc       `json:"pre"`
 	Tx   stTransactionMarshaling  `json:"transaction"`
-	Out  hexutil.Bytes            `json:"out"`
+	Out  hexutility.Bytes         `json:"out"`
 	Post map[string][]stPostState `json:"post"`
 }
 
 type stPostState struct {
 	Root            common.UnprefixedHash `json:"hash"`
 	Logs            common.UnprefixedHash `json:"logs"`
-	Tx              hexutil.Bytes         `json:"txbytes"`
+	Tx              hexutility.Bytes      `json:"txbytes"`
 	ExpectException string                `json:"expectException"`
 	Indexes         struct {
 		Data  int `json:"data"`
@@ -87,7 +88,7 @@ type stTransactionMarshaling struct {
 	MaxPriorityFeePerGas *math.HexOrDecimal256 `json:"maxPriorityFeePerGas"`
 	Nonce                math.HexOrDecimal64   `json:"nonce"`
 	GasLimit             []math.HexOrDecimal64 `json:"gasLimit"`
-	PrivateKey           hexutil.Bytes         `json:"secretKey"`
+	PrivateKey           hexutility.Bytes      `json:"secretKey"`
 	To                   string                `json:"to"`
 	Data                 []string              `json:"data"`
 	Value                []string              `json:"value"`

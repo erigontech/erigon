@@ -8,6 +8,7 @@ import (
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
@@ -29,7 +30,7 @@ func (h Header) MarshalJSON() ([]byte, error) {
 		GasLimit        hexutil.Uint64    `json:"gasLimit"         gencodec:"required"`
 		GasUsed         hexutil.Uint64    `json:"gasUsed"          gencodec:"required"`
 		Time            hexutil.Uint64    `json:"timestamp"        gencodec:"required"`
-		Extra           hexutil.Bytes     `json:"extraData"        gencodec:"required"`
+		Extra           hexutility.Bytes  `json:"extraData"        gencodec:"required"`
 		MixDigest       libcommon.Hash    `json:"mixHash"`
 		Nonce           BlockNonce        `json:"nonce"`
 		BaseFee         *hexutil.Big      `json:"baseFeePerGas"`
@@ -73,7 +74,7 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 		GasLimit        *hexutil.Uint64    `json:"gasLimit"         gencodec:"required"`
 		GasUsed         *hexutil.Uint64    `json:"gasUsed"          gencodec:"required"`
 		Time            *hexutil.Uint64    `json:"timestamp"        gencodec:"required"`
-		Extra           *hexutil.Bytes     `json:"extraData"        gencodec:"required"`
+		Extra           *hexutility.Bytes  `json:"extraData"        gencodec:"required"`
 		MixDigest       *libcommon.Hash    `json:"mixHash"`
 		Nonce           *BlockNonce        `json:"nonce"`
 		BaseFee         *hexutil.Big       `json:"baseFeePerGas"`

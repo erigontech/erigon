@@ -22,7 +22,9 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -126,7 +128,7 @@ type JsonSpec struct {
 	// See https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
 	WithdrawalContractAddress *libcommon.Address `json:"withdrawalContractAddress"`
 
-	RewriteBytecode map[uint64]map[libcommon.Address]hexutil.Bytes `json:"rewriteBytecode"`
+	RewriteBytecode map[uint64]map[libcommon.Address]hexutility.Bytes `json:"rewriteBytecode"`
 }
 
 type Code struct {
