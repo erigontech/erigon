@@ -74,10 +74,12 @@ func (g *GossipManager) Start() {
 			if block.Block.Slot+maxGossipSlotThreshold < currentSlotByTime {
 				continue
 			}
-			// Publish the block
-			/*if _, err := g.sentinel.PublishGossip(g.ctx, data); err != nil {
-				log.Debug("cannot publish gossip", "err", err)
-			}*/
+			if block.Block.Slot+maxGossipSlotThreshold == currentSlotByTime {
+				if _, err := g.sentinel.PublishGossip(g.ctx, data); err != nil {
+					log.Debug("cannot publish gossip", "err", err)
+				}
+			}
+
 			log.Debug("Received block via gossip", "slot", block.Block.Slot)
 
 			if err := g.forkChoice.OnBlock(block, true); err != nil {
