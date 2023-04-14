@@ -401,18 +401,6 @@ func (c *CliqueConfig) String() string {
 	return "clique"
 }
 
-// AuRaConfig is the consensus engine configs for proof-of-authority based sealing.
-type AuRaConfig struct {
-	DBPath    string
-	InMemory  bool
-	Etherbase common.Address // same as miner etherbase
-}
-
-// String implements the stringer interface, returning the consensus engine details.
-func (c *AuRaConfig) String() string {
-	return "aura"
-}
-
 // BorConfig is the consensus engine configs for Matic bor based sealing.
 type BorConfig struct {
 	Period                map[string]uint64 `json:"period"`                // Number of seconds between blocks to enforce
