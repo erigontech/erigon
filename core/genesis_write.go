@@ -545,7 +545,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			}
 
 			if len(account.Constructor) > 0 {
-				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head, nil /*excessDataGas*/); err != nil {
+				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head, g.ExcessDataGas); err != nil {
 					return
 				}
 			}
