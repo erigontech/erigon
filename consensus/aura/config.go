@@ -192,7 +192,7 @@ func FromJson(jsonParams *chain.AuRaConfig) (AuthorityRoundParams, error) {
 		params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: u256.Num0})
 	} else {
 		if jsonParams.BlockReward != nil {
-			params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: uint256.NewInt(uint64(*jsonParams.BlockReward))})
+			params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: uint256.NewInt(*jsonParams.BlockReward)})
 		}
 	}
 	sort.Sort(params.BlockReward)
