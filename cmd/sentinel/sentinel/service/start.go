@@ -39,8 +39,6 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *Serv
 		//sentinel.VoluntaryExitSsz,
 		//sentinel.ProposerSlashingSsz,
 		//sentinel.AttesterSlashingSsz,
-		//sentinel.LightClientFinalityUpdateSsz,
-		//sentinel.LightClientOptimisticUpdateSsz,
 	}
 	for _, v := range gossip_topics {
 		// now lets separately connect to the gossip topics. this joins the room

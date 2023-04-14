@@ -112,30 +112,22 @@ func (s *GossipManager) AddSubscription(topic string, sub *GossipSubscription) {
 }
 
 func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
-	paths := s.getTopics(topic)
-	for _, path := range paths {
-		sub = &GossipSubscription{
-			gossip_topic: topic,
-			ch:           s.subManager.ch,
-			host:         s.host.ID(),
-			ctx:          s.ctx,
-		}
-		sub.topic, err = s.pubsub.Join(path, opts...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
-		}
-		s.subManager.AddSubscription(path, sub)
-	}
-
-	return sub, nil
-}
-
-func (s *Sentinel) getTopics(topic GossipTopic) []string {
 	digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
-	return []string{
-		fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr),
+	sub = &GossipSubscription{
+		gossip_topic: topic,
+		ch:           s.subManager.ch,
+		host:         s.host.ID(),
+		ctx:          s.ctx,
 	}
+	path := fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr)
+	sub.topic, err = s.pubsub.Join(path, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
+	}
+	s.subManager.AddSubscription(path, sub)
+
+	return sub, nil
 }
