@@ -160,7 +160,6 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 			hashed := crypto.Keccak256(pmsg.Data)
 			return string(hashed)
 		}), pubsub.WithNoAuthor(),
-		pubsub.WithSubscriptionFilter(nil),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
 		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSize)),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
@@ -236,8 +235,6 @@ func New(
 
 	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host)
 
-	// removed IdDelta in recent version of libp2p
-	host.RemoveStreamHandler("/p2p/id/delta/1.0.0")
 	s.host = host
 	s.peers = peers.New(s.host)
 
