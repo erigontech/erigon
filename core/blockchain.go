@@ -22,16 +22,12 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	metrics2 "github.com/VictoriaMetrics/metrics"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/rlp"
-
-	metrics2 "github.com/VictoriaMetrics/metrics"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -40,6 +36,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 var (
@@ -70,154 +68,6 @@ type EphemeralExecResult struct {
 	Difficulty       *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
 	GasUsed          math.HexOrDecimal64   `json:"gasUsed"`
 	StateSyncReceipt *types.Receipt        `json:"-"`
-}
-
-func ExecuteBlockEphemerallyForBSC(
-	chainConfig *chain.Config,
-	vmConfig *vm.Config,
-	blockHashFunc func(n uint64) libcommon.Hash,
-	engine consensus.Engine, block *types.Block,
-	stateReader state.StateReader, stateWriter state.WriterWithChangeSets,
-	chainReader consensus.ChainHeaderReader, getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
-) (*EphemeralExecResult, error) {
-	defer BlockExecutionTimer.UpdateDuration(time.Now())
-	block.Uncles()
-	ibs := state.New(stateReader)
-	header := block.Header()
-	usedGas := new(uint64)
-	gp := new(GasPool)
-	gp.AddGas(block.GasLimit())
-
-	var (
-		rejectedTxs []*RejectedTx
-		includedTxs types.Transactions
-		receipts    types.Receipts
-	)
-
-	var excessDataGas *big.Int
-	ph := chainReader.GetHeaderByHash(block.ParentHash())
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
-	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, chainReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs, nil); err != nil {
-			return nil, err
-		}
-	}
-
-	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
-	systemcontracts.UpgradeBuildInSystemContract(chainConfig, header.Number, ibs)
-	noop := state.NewNoopWriter()
-	posa, isPoSA := engine.(consensus.PoSA)
-	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
-	for i, tx := range block.Transactions() {
-		if isPoSA {
-			if isSystemTx, err := posa.IsSystemTransaction(tx, block.Header()); err != nil {
-				return nil, err
-			} else if isSystemTx {
-				continue
-			}
-		}
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		writeTrace := false
-		if vmConfig.Debug && vmConfig.Tracer == nil {
-			tracer, err := getTracer(i, tx.Hash())
-			if err != nil {
-				return nil, fmt.Errorf("could not obtain tracer: %w", err)
-			}
-			vmConfig.Tracer = tracer
-			writeTrace = true
-		}
-
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas)
-		if writeTrace {
-			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
-				ftracer.Flush(tx)
-			}
-
-			vmConfig.Tracer = nil
-		}
-		if err != nil {
-			if !vmConfig.StatelessExec {
-				return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
-			}
-			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
-		} else {
-			includedTxs = append(includedTxs, tx)
-			if !vmConfig.NoReceipts {
-				receipts = append(receipts, receipt)
-			}
-		}
-	}
-
-	var newBlock *types.Block
-	var receiptSha libcommon.Hash
-	if !vmConfig.ReadOnly {
-		// We're doing this hack for BSC to avoid changing consensus interfaces a lot. BSC modifies txs and receipts by appending
-		// system transactions, and they increase used gas and write cumulative gas to system receipts, that's why we need
-		// to deduct system gas before. This line is equal to "blockGas-systemGas", but since we don't know how much gas is
-		// used by system transactions we just override. Of course, we write used by block gas back. It also always true
-		// that used gas by block is always equal to original's block header gas, and it's checked by receipts root verification
-		// otherwise it causes block verification error.
-		header.GasUsed = *usedGas
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, *chainConfig, ibs, header, engine, false /* constCall */, excessDataGas)
-		}
-		outTxs, outReceipts, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), chainReader, syscall)
-		if err != nil {
-			return nil, err
-		}
-		*usedGas = header.GasUsed
-
-		// We need repack this block because transactions and receipts might be changed by consensus, and
-		// it won't pass receipts hash or bloom verification
-		newBlock = types.NewBlock(block.Header(), outTxs, block.Uncles(), outReceipts, block.Withdrawals())
-		// Update receipts
-		if !vmConfig.NoReceipts {
-			receipts = outReceipts
-		}
-		receiptSha = newBlock.ReceiptHash()
-	} else {
-		newBlock = block
-		receiptSha = types.DeriveSha(receipts)
-	}
-
-	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
-		if !vmConfig.StatelessExec && receiptSha != block.ReceiptHash() {
-			return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
-		}
-	}
-	if !vmConfig.StatelessExec && newBlock.GasUsed() != header.GasUsed {
-		return nil, fmt.Errorf("gas used by execution: %d, in header: %d, in new Block: %v", *usedGas, header.GasUsed, newBlock.GasUsed())
-	}
-
-	var bloom types.Bloom
-	if !vmConfig.NoReceipts {
-		bloom = newBlock.Bloom()
-		if !vmConfig.StatelessExec && bloom != header.Bloom {
-			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
-		}
-	}
-
-	if err := ibs.CommitBlock(chainConfig.Rules(header.Number.Uint64(), header.Time), stateWriter); err != nil {
-		return nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
-	} else if err := stateWriter.WriteChangeSets(); err != nil {
-		return nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
-	}
-
-	execRs := &EphemeralExecResult{
-		TxRoot:      types.DeriveSha(includedTxs),
-		ReceiptRoot: receiptSha,
-		Bloom:       bloom,
-		Receipts:    receipts,
-		Difficulty:  (*math.HexOrDecimal256)(block.Header().Difficulty),
-		GasUsed:     math.HexOrDecimal64(*usedGas),
-		Rejected:    rejectedTxs,
-	}
-
-	return execRs, nil
 }
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
