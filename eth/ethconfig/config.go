@@ -206,7 +206,6 @@ type Config struct {
 
 	Clique params.ConsensusSnapshotConfig
 	Aura   chain.AuRaConfig
-	Parlia chain.ParliaConfig
 	Bor    chain.BorConfig
 
 	// Transaction pool options

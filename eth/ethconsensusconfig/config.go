@@ -3,12 +3,11 @@ package ethconsensusconfig
 import (
 	"path/filepath"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
@@ -21,7 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/parlia"
+	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -69,13 +68,6 @@ func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify
 			if err != nil {
 				panic(err)
 			}
-		}
-	case *chain.ParliaConfig:
-		if chainConfig.Parlia != nil {
-			if consensusCfg.DBPath == "" {
-				consensusCfg.DBPath = filepath.Join(datadir, "parlia")
-			}
-			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory, readonly), snapshots, chainDb[0])
 		}
 	case *chain.BorConfig:
 		// If Matic bor consensus is requested, set it up
