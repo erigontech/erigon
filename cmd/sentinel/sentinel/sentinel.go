@@ -42,6 +42,20 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+const (
+	// overlay parameters
+	gossipSubD   = 8  // topic stable mesh target count
+	gossipSubDlo = 6  // topic stable mesh low watermark
+	gossipSubDhi = 12 // topic stable mesh high watermark
+
+	// gossip parameters
+	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
+	gossipSubMcacheGossip = 3   // number of windows to gossip about
+	gossipSubSeenTTL      = 550 // number of heartbeat intervals to retain message IDs
+	// heartbeat interval
+	gossipSubHeartbeatInterval = 700 * time.Millisecond // frequency of heartbeat, milliseconds
+)
+
 type Sentinel struct {
 	started    bool
 	listener   *discover.UDPv5 // this is us in the network.
@@ -151,9 +165,19 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	return net, err
 }
 
+// creates a custom gossipsub parameter set.
+func pubsubGossipParam() pubsub.GossipSubParams {
+	gParams := pubsub.DefaultGossipSubParams()
+	gParams.Dlo = gossipSubDlo
+	gParams.D = gossipSubD
+	gParams.HeartbeatInterval = gossipSubHeartbeatInterval
+	gParams.HistoryLength = gossipSubMcacheLen
+	gParams.HistoryGossip = gossipSubMcacheGossip
+	return gParams
+}
+
 func (s *Sentinel) pubsubOptions() []pubsub.Option {
 	pubsubQueueSize := 600
-	gsp := pubsub.DefaultGossipSubParams()
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
 		pubsub.WithMessageIdFn(func(pmsg *pubsub_pb.Message) string {
@@ -163,7 +187,7 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
 		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSize)),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
-		pubsub.WithGossipSubParams(gsp),
+		pubsub.WithGossipSubParams(pubsubGossipParam()),
 	}
 	return psOpts
 }
