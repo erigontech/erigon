@@ -18,6 +18,7 @@ func NewListChangeSet[T any](length int, replace bool) *ListChangeSet[T] {
 		listLength: length,
 		list:       btree.NewMap[int, T](32),
 		replace:    replace,
+		hitTable:   map[int]bool{},
 	}
 }
 
