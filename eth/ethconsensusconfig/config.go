@@ -11,7 +11,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
-	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
@@ -60,11 +59,9 @@ func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify
 		}
 	case *chain.AuRaConfig:
 		if chainConfig.Aura != nil {
-			if consensusCfg.DBPath == "" {
-				consensusCfg.DBPath = filepath.Join(datadir, "aura")
-			}
+			dbPath := filepath.Join(datadir, "aura")
 			var err error
-			eng, err = aura.NewAuRa(chainConfig.Aura, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory, readonly), chainConfig.Aura.Etherbase, consensusconfig.GetConfigByChain(chainConfig.ChainName))
+			eng, err = aura.NewAuRa(chainConfig.Aura, db.OpenDatabase(dbPath, false, readonly))
 			if err != nil {
 				panic(err)
 			}

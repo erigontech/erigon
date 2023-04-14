@@ -27,7 +27,6 @@ import (
 	"strings"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -1342,10 +1341,6 @@ func setClique(ctx *cli.Context, cfg *params.ConsensusSnapshotConfig, datadir st
 	}
 }
 
-func setAuRa(ctx *cli.Context, cfg *chain.AuRaConfig, datadir string) {
-	cfg.DBPath = filepath.Join(datadir, "aura")
-}
-
 func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
@@ -1500,7 +1495,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
 	setClique(ctx, &cfg.Clique, nodeConfig.Dirs.DataDir)
-	setAuRa(ctx, &cfg.Aura, nodeConfig.Dirs.DataDir)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg)

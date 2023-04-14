@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"container/list"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"sort"
@@ -28,14 +27,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
@@ -44,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -275,7 +275,6 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, e *NonTransactionalEp
 // AuRa
 // nolint
 type AuRa struct {
-	db     kv.RwDB // Database to store and retrieve snapshot checkpoints
 	e      *NonTransactionalEpochReader
 	exitCh chan struct{}
 	lock   sync.RWMutex // Protects the signer fields
@@ -284,10 +283,9 @@ type AuRa struct {
 	// History of step hashes recently received from peers.
 	receivedStepHashes ReceivedStepHashes
 
-	OurSigningAddress libcommon.Address // Same as Etherbase in Mining
-	cfg               AuthorityRoundParams
-	EmptyStepsSet     *EmptyStepSet
-	EpochManager      *EpochManager // Mutex<EpochManager>,
+	cfg           AuthorityRoundParams
+	EmptyStepsSet *EmptyStepSet
+	EpochManager  *EpochManager // Mutex<EpochManager>,
 
 	certifier     *libcommon.Address // certifies service transactions
 	certifierLock sync.RWMutex
@@ -323,12 +321,7 @@ func (pb *GasLimitOverride) Add(hash libcommon.Hash, b *uint256.Int) {
 	pb.cache.ContainsOrAdd(hash, b)
 }
 
-func NewAuRa(config *chain.AuRaConfig, db kv.RwDB, ourSigningAddress libcommon.Address, engineParamsJson []byte) (*AuRa, error) {
-	spec := JsonSpec{}
-	err := json.Unmarshal(engineParamsJson, &spec)
-	if err != nil {
-		return nil, err
-	}
+func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 	auraParams, err := FromJson(spec)
 	if err != nil {
 		return nil, err
@@ -395,17 +388,14 @@ func NewAuRa(config *chain.AuRaConfig, db kv.RwDB, ourSigningAddress libcommon.A
 	exitCh := make(chan struct{})
 
 	c := &AuRa{
-		db:                 db,
 		e:                  newEpochReader(db),
 		exitCh:             exitCh,
 		step:               PermissionedStep{inner: step},
-		OurSigningAddress:  ourSigningAddress,
 		cfg:                auraParams,
 		receivedStepHashes: ReceivedStepHashes{},
 		EpochManager:       NewEpochManager(),
 	}
 	c.step.canPropose.Store(true)
-	_ = config
 
 	return c, nil
 }

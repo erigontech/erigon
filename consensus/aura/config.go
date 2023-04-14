@@ -23,10 +23,9 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 )
@@ -40,19 +39,7 @@ func GetFromValidatorSet(set ValidatorSet, parent libcommon.Hash, nonce uint, ca
 	return set.getWithCaller(parent, nonce, call)
 }
 
-// Different ways of specifying validators.
-type ValidatorSetJson struct {
-	// A simple list of authorities.
-	List []libcommon.Address `json:"list"`
-	// Address of a contract that indicates the list of authorities.
-	SafeContract *libcommon.Address `json:"safeContract"`
-	// Address of a contract that indicates the list of authorities and enables reporting of their misbehaviour using transactions.
-	Contract *libcommon.Address `json:"contract"`
-	// A map of starting blocks for each validator set.
-	Multi map[uint64]*ValidatorSetJson `json:"multi"`
-}
-
-func newValidatorSetFromJson(j *ValidatorSetJson, posdaoTransition *uint64) ValidatorSet {
+func newValidatorSetFromJson(j *chain.ValidatorSetJson, posdaoTransition *uint64) ValidatorSet {
 	if j.List != nil {
 		return &SimpleList{validators: j.List}
 	}
@@ -75,60 +62,6 @@ func newValidatorSetFromJson(j *ValidatorSetJson, posdaoTransition *uint64) Vali
 	}
 
 	return nil
-}
-
-// TODO: StepDuration and BlockReward - now are uint64, but it can be an object in non-sokol consensus
-type JsonSpec struct {
-	StepDuration *uint64           `json:"stepDuration"` // Block duration, in seconds.
-	Validators   *ValidatorSetJson `json:"validators"`   // Valid authorities
-
-	// Starting step. Determined automatically if not specified.
-	// To be used for testing only.
-	StartStep               *uint64         `json:"startStep"`
-	ValidateScoreTransition *uint64         `json:"validateScoreTransition"` // Block at which score validation should start.
-	ValidateStepTransition  *uint64         `json:"validateStepTransition"`  // Block from which monotonic steps start.
-	ImmediateTransitions    *bool           `json:"immediateTransitions"`    // Whether transitions should be immediate.
-	BlockReward             *hexutil.Uint64 `json:"blockReward"`             // Reward per block in wei.
-	// Block at which the block reward contract should start being used. This option allows one to
-	// add a single block reward contract transition and is compatible with the multiple address
-	// option `block_reward_contract_transitions` below.
-	BlockRewardContractTransition *uint64 `json:"blockRewardContractTransition"`
-	/// Block reward contract address which overrides the `block_reward` setting. This option allows
-	/// one to add a single block reward contract address and is compatible with the multiple
-	/// address option `block_reward_contract_transitions` below.
-	BlockRewardContractAddress *libcommon.Address `json:"blockRewardContractAddress"`
-	// Block reward contract addresses with their associated starting block numbers.
-	//
-	// Setting the block reward contract overrides `block_reward`. If the single block reward
-	// contract address is also present then it is added into the map at the block number stored in
-	// `block_reward_contract_transition` or 0 if that block number is not provided. Therefore both
-	// a single block reward contract transition and a map of reward contract transitions can be
-	// used simultaneously in the same configuration. In such a case the code requires that the
-	// block number of the single transition is strictly less than any of the block numbers in the
-	// map.
-	BlockRewardContractTransitions map[uint]libcommon.Address `json:"blockRewardContractTransitions"`
-	// Block at which maximum uncle count should be considered.
-	MaximumUncleCountTransition *uint64 `json:"maximumUncleCountTransition"`
-	// Maximum number of accepted uncles.
-	MaximumUncleCount *uint `json:"maximumUncleCount"`
-	// Strict validation of empty steps transition block.
-	StrictEmptyStepsTransition *uint `json:"strictEmptyStepsTransition"`
-	// The random number contract's address, or a map of contract transitions.
-	RandomnessContractAddress map[uint64]libcommon.Address `json:"randomnessContractAddress"`
-	// The addresses of contracts that determine the block gas limit starting from the block number
-	// associated with each of those contracts.
-	BlockGasLimitContractTransitions map[uint64]libcommon.Address `json:"blockGasLimitContractTransitions"`
-	// The block number at which the consensus engine switches from AuRa to AuRa with POSDAO
-	// modifications.
-	PosdaoTransition *uint64 `json:"PosdaoTransition"`
-	// Stores human-readable keys associated with addresses, like DNS information.
-	// This contract is primarily required to store the address of the Certifier contract.
-	Registrar *libcommon.Address `json:"registrar"`
-
-	// See https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
-	WithdrawalContractAddress *libcommon.Address `json:"withdrawalContractAddress"`
-
-	RewriteBytecode map[uint64]map[libcommon.Address]hexutility.Bytes `json:"rewriteBytecode"`
 }
 
 type Code struct {
@@ -208,7 +141,7 @@ type AuthorityRoundParams struct {
 	RewriteBytecode map[uint64]map[libcommon.Address][]byte
 }
 
-func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
+func FromJson(jsonParams *chain.AuRaConfig) (AuthorityRoundParams, error) {
 	params := AuthorityRoundParams{
 		Validators:                       newValidatorSetFromJson(jsonParams.Validators, jsonParams.PosdaoTransition),
 		StartStep:                        jsonParams.StartStep,
@@ -259,7 +192,7 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: u256.Num0})
 	} else {
 		if jsonParams.BlockReward != nil {
-			params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: uint256.NewInt(uint64(*jsonParams.BlockReward))})
+			params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: uint256.NewInt(*jsonParams.BlockReward)})
 		}
 	}
 	sort.Sort(params.BlockReward)

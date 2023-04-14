@@ -1433,7 +1433,6 @@ func initConsensusEngine(cc *chain2.Config, datadir string, db kv.RwDB) (engine 
 	if cc.Clique != nil {
 		consensusConfig = params.CliqueSnapshot
 	} else if cc.Aura != nil {
-		config.Aura.Etherbase = config.Miner.Etherbase
 		consensusConfig = &config.Aura
 	} else if cc.Bor != nil {
 		consensusConfig = &config.Bor

@@ -1,21 +1,18 @@
 package aura
 
 import (
-	"encoding/json"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
-	"github.com/ledgerwatch/erigon/params/networkname"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon/params"
 )
 
 func TestGnosisBlockRewardContractTransitions(t *testing.T) {
-	config := consensusconfig.GetConfigByChain(networkname.GnosisChainName)
-	spec := JsonSpec{}
-	require.NoError(t, json.Unmarshal(config, &spec))
+	spec := params.GnosisChainConfig.Aura
 
 	param, err := FromJson(spec)
 	require.NoError(t, err)
@@ -28,14 +25,12 @@ func TestGnosisBlockRewardContractTransitions(t *testing.T) {
 }
 
 func TestInvalidBlockRewardContractTransition(t *testing.T) {
-	config := consensusconfig.GetConfigByChain(networkname.GnosisChainName)
-	spec := JsonSpec{}
-	require.NoError(t, json.Unmarshal(config, &spec))
+	spec := *(params.GnosisChainConfig.Aura)
 
 	// blockRewardContractTransition should be smaller than any block number in blockRewardContractTransitions
 	invalidTransition := uint64(10_000_000)
 	spec.BlockRewardContractTransition = &invalidTransition
 
-	_, err := FromJson(spec)
+	_, err := FromJson(&spec)
 	assert.Error(t, err)
 }
