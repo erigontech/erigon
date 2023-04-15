@@ -291,7 +291,7 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	cfg.agg.SetTx(tx)
 	doms := cfg.agg.SharedDomains()
 	rs := state.NewStateV3(cfg.dirs.Tmp, doms)
-	rs.SetIO(state.NewWrappedStateReaderV4(tx.(kv.TemporalTx)), state.NewWrappedStateWriterV4(tx.(kv.TemporalTx)))
+	//rs.SetIO(state.NewWrappedStateReaderV4(tx.(kv.TemporalTx)), state.NewWrappedStateWriterV4(tx.(kv.TemporalTx)))
 
 	parallel := initialCycle && tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix, log.New(), to); err != nil {
