@@ -182,7 +182,7 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
 		pubsub.WithMessageIdFn(func(pmsg *pubsub_pb.Message) string {
 			hashed := crypto.Keccak256(pmsg.Data)
-			return string(hashed)
+			return string(hashed[:8])
 		}), pubsub.WithNoAuthor(),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
 		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSize)),
