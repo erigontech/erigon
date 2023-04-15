@@ -178,7 +178,7 @@ func pubsubGossipParam() pubsub.GossipSubParams {
 func (s *Sentinel) pubsubOptions() []pubsub.Option {
 	pubsubQueueSize := 600
 	psOpts := []pubsub.Option{
-		// pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
+		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
 		pubsub.WithMessageIdFn(s.msgId),
 		pubsub.WithNoAuthor(),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
