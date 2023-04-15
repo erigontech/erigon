@@ -191,6 +191,8 @@ func TraceTx(
 		if streaming {
 			stream.WriteArrayEnd()
 			stream.WriteObjectEnd()
+			stream.WriteMore()
+			stream.WriteObjectField("resultHack") // higher-level func will assing it to NULL
 		}
 		// If an error will be returned, no need to write null (see rpc/handler.go).
 		// stream.WriteNil()
