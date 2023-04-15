@@ -68,7 +68,6 @@ type EphemeralExecResult struct {
 	Rejected         RejectedTxs           `json:"rejected,omitempty"`
 	Difficulty       *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
 	GasUsed          math.HexOrDecimal64   `json:"gasUsed"`
-	DataGasUsed      math.HexOrDecimal64   `json:"dataGasUsed"`
 	StateSyncReceipt *types.Receipt        `json:"-"`
 }
 
@@ -88,7 +87,6 @@ func ExecuteBlockEphemerally(
 	header := block.Header()
 
 	usedGas := new(uint64)
-	usedDataGas := new(uint64)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
@@ -129,7 +127,7 @@ func ExecuteBlockEphemerally(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, usedDataGas, *vmConfig, excessDataGas)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -181,7 +179,6 @@ func ExecuteBlockEphemerally(
 		Receipts:    receipts,
 		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty),
 		GasUsed:     math.HexOrDecimal64(*usedGas),
-		DataGasUsed: math.HexOrDecimal64(*usedDataGas),
 		Rejected:    rejectedTxs,
 	}
 
@@ -204,7 +201,6 @@ func ExecuteBlockEphemerallyBor(
 	header := block.Header()
 
 	usedGas := new(uint64)
-	usedDataGas := new(uint64)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
@@ -242,7 +238,7 @@ func ExecuteBlockEphemerallyBor(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, usedDataGas, *vmConfig, excessDataGas)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -313,7 +309,6 @@ func ExecuteBlockEphemerallyBor(
 		Receipts:         receipts,
 		Difficulty:       (*math.HexOrDecimal256)(header.Difficulty),
 		GasUsed:          math.HexOrDecimal64(*usedGas),
-		DataGasUsed:      math.HexOrDecimal64(*usedDataGas),
 		Rejected:         rejectedTxs,
 		StateSyncReceipt: stateSyncReceipt,
 	}
@@ -405,7 +400,6 @@ func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Con
 	gp := new(GasPool)
 	gp.AddGas(50_000_000)
 	var gasUsed uint64
-	var dataGasUsed uint64
 	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
@@ -415,7 +409,7 @@ func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Con
 		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
 	vmConfig := vm.Config{NoReceipts: true}
-	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, &dataGasUsed, vmConfig, excessDataGas)
+	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, excessDataGas)
 	if err != nil {
 		return result, fmt.Errorf("SysCallContract: %w ", err)
 	}

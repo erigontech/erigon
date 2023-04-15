@@ -719,14 +719,13 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 
 	b.pendingState.Prepare(tx.Hash(), libcommon.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
-	dataGasUsed := new(uint64)
 	excessDataGas := b.pendingHeader.ParentExcessDataGas(b.getHeader)
 	if _, _, err := core.ApplyTransaction(
 		b.m.ChainConfig, core.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
-		&b.pendingHeader.GasUsed, dataGasUsed, vm.Config{},
+		&b.pendingHeader.GasUsed, vm.Config{},
 		excessDataGas); err != nil {
 		return err
 	}

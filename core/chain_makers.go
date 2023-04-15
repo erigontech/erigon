@@ -118,8 +118,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uin
 	}
 	excessDataGas := b.parent.ExcessDataGas()
 	b.ibs.Prepare(tx.Hash(), libcommon.Hash{}, len(b.txs))
-	usedDataGas := new(uint64)
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, usedDataGas, vm.Config{}, excessDataGas)
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, excessDataGas)
 	if err != nil {
 		panic(err)
 	}
@@ -133,8 +132,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash libcommon.Hash, numb
 	}
 	excessDataGas := b.parent.ExcessDataGas()
 	b.ibs.Prepare(tx.Hash(), libcommon.Hash{}, len(b.txs))
-	usedDataGas := new(uint64)
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, usedDataGas, vm.Config{}, excessDataGas)
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, excessDataGas)
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
