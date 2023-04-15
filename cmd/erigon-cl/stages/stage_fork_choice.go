@@ -88,44 +88,8 @@ func SpawnStageForkChoice(cfg StageForkChoiceCfg, s *stagedsync.StageState, tx k
 func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 	cfg.downloader.SetHighestProcessedRoot(libcommon.Hash{})
 	cfg.downloader.SetHighestProcessedSlot(cfg.state.Slot())
-	cfg.downloader.SetProcessFunction(func(highestSlotProcessed uint64, highestBlockRootProcessed libcommon.Hash, newBlocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed libcommon.Hash, err error) {
-		// Setup
-		newHighestSlotProcessed = highestSlotProcessed
-		newHighestBlockRootProcessed = highestBlockRootProcessed
-		// Skip if segment is empty
-		if len(newBlocks) == 0 {
-			return
-		}
-		// Retrieve last blocks to do reverse soft checks
-		lastBlockInSegment := newBlocks[len(newBlocks)-1]
-		parentRoot := lastBlockInSegment.Block.ParentRoot
-
-		if err != nil {
-			return
-		}
-
-		for i := len(newBlocks) - 2; i >= 0; i-- {
-			var blockRoot libcommon.Hash
-			blockRoot, err = newBlocks[i].Block.HashSSZ()
-			if err != nil {
-				return
-			}
-			// Check if block root makes sense, if not segment is invalid
-			if blockRoot != parentRoot {
-				return
-			}
-			// Update the parent root.
-			parentRoot = newBlocks[i].Block.ParentRoot
-			if parentRoot == highestBlockRootProcessed {
-				// We found a connection point? interrupt cycle and move on.
-				newBlocks = newBlocks[i:]
-				break
-			}
-		}
-		// If segment is not recconecting then skip.
-		if parentRoot != highestBlockRootProcessed && highestBlockRootProcessed != (libcommon.Hash{}) {
-			return
-		}
+	cfg.downloader.SetProcessFunction(func(highestSlotProcessed uint64, highestBlockRootProcessed libcommon.Hash, newBlocks []*cltypes.SignedBeaconBlock) (uint64, libcommon.Hash, error) {
+		var err error
 		for _, block := range newBlocks {
 			fullValidation :=
 				utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == block.Block.Slot

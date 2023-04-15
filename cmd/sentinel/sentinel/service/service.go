@@ -100,6 +100,8 @@ func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sen
 func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
 	retryReqInterval := time.NewTicker(200 * time.Millisecond)
 	defer retryReqInterval.Stop()
+	timeout := time.NewTimer(1 * time.Second)
+	defer retryReqInterval.Stop()
 	doneCh := make(chan *sentinelrpc.ResponseData)
 	// Try finding the data to our peers
 	for {
@@ -134,6 +136,11 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 			}()
 		case resp := <-doneCh:
 			return resp, nil
+		case <-timeout.C:
+			return &sentinelrpc.ResponseData{
+				Data:  []byte("Erigon had stroke on networking related issues"),
+				Error: true,
+			}, nil
 		}
 	}
 }

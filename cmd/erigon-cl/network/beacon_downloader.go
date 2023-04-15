@@ -2,6 +2,7 @@ package network
 
 import (
 	"sync"
+	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/net/context"
@@ -76,10 +77,12 @@ func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlock) {
 }
 
 func (f *ForwardBeaconDownloader) RequestMore() {
-	count := uint64(16)
+	count := uint64(4) // dont need many
 
 	responses, err := f.rpc.SendBeaconBlocksByRangeReq(f.highestSlotProcessed+1, count)
 	if err != nil {
+		// Wait a bit in this case (we do not need to be super performant here).
+		time.Sleep(time.Second)
 		return
 	}
 	for _, response := range responses {
