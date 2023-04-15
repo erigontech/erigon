@@ -332,7 +332,7 @@ func (a *Aggregator) SetWorkers(i int) {
 }
 
 func (a *Aggregator) SetCommitmentMode(mode CommitmentMode) {
-	a.commitment.mode = mode
+	a.commitment.SetCommitmentMode(mode)
 }
 
 func (a *Aggregator) EndTxNumMinimax() uint64 {
@@ -963,12 +963,12 @@ func (a *Aggregator) FinishTx() (err error) {
 }
 
 func (a *Aggregator) UpdateAccountData(addr []byte, account []byte) error {
-	a.commitment.TouchPlainKey(addr, account, a.commitment.TouchPlainKeyAccount)
+	a.commitment.TouchPlainKey(addr, account, a.commitment.TouchAccount)
 	return a.accounts.Put(addr, nil, account)
 }
 
 func (a *Aggregator) UpdateAccountCode(addr []byte, code []byte) error {
-	a.commitment.TouchPlainKey(addr, code, a.commitment.TouchPlainKeyCode)
+	a.commitment.TouchPlainKey(addr, code, a.commitment.TouchCode)
 	if len(code) == 0 {
 		return a.code.Delete(addr, nil)
 	}
@@ -980,7 +980,7 @@ func (a *Aggregator) UpdateCommitmentData(prefix []byte, code []byte) error {
 }
 
 func (a *Aggregator) DeleteAccount(addr []byte) error {
-	a.commitment.TouchPlainKey(addr, nil, a.commitment.TouchPlainKeyAccount)
+	a.commitment.TouchPlainKey(addr, nil, a.commitment.TouchAccount)
 
 	if err := a.accounts.Delete(addr, nil); err != nil {
 		return err
@@ -993,7 +993,7 @@ func (a *Aggregator) DeleteAccount(addr []byte) error {
 		if !bytes.HasPrefix(k, addr) {
 			return
 		}
-		a.commitment.TouchPlainKey(k, nil, a.commitment.TouchPlainKeyStorage)
+		a.commitment.TouchPlainKey(k, nil, a.commitment.TouchStorage)
 		if e == nil {
 			e = a.storage.Delete(k, nil)
 		}
@@ -1008,7 +1008,7 @@ func (a *Aggregator) WriteAccountStorage(addr, loc []byte, value []byte) error {
 	copy(composite, addr)
 	copy(composite[length.Addr:], loc)
 
-	a.commitment.TouchPlainKey(composite, value, a.commitment.TouchPlainKeyStorage)
+	a.commitment.TouchPlainKey(composite, value, a.commitment.TouchStorage)
 	if len(value) == 0 {
 		return a.storage.Delete(addr, loc)
 	}
@@ -1235,9 +1235,9 @@ func (ac *AggregatorContext) accountFn(plainKey []byte, cell *commitment.Cell) e
 		return err
 	}
 	if code != nil {
-		ac.a.commitment.keccak.Reset()
-		ac.a.commitment.keccak.Write(code)
-		copy(cell.CodeHash[:], ac.a.commitment.keccak.Sum(nil))
+		ac.a.commitment.updates.keccak.Reset()
+		ac.a.commitment.updates.keccak.Write(code)
+		copy(cell.CodeHash[:], ac.a.commitment.updates.keccak.Sum(nil))
 	}
 	cell.Delete = len(encAccount) == 0 && len(code) == 0
 	return nil

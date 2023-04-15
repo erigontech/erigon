@@ -50,6 +50,7 @@ import (
 type AggregatorV3 struct {
 	rwTx             kv.RwTx
 	db               kv.RoDB
+	domains          *SharedDomains
 	accounts         *Domain
 	storage          *Domain
 	code             *Domain
@@ -213,6 +214,15 @@ func (a *AggregatorV3) CleanDir() {
 	a.tracesTo.CleanupDir()
 }
 */
+
+func (a *AggregatorV3) SharedDomains() *SharedDomains {
+	if a.domains == nil {
+		a.domains = NewSharedDomains(a.accounts, a.storage, a.code, a.commitment)
+		a.domains.aggCtx = a.MakeContext()
+		a.domains.roTx = a.rwTx
+	}
+	return a.domains
+}
 
 func (a *AggregatorV3) SetWorkers(i int) {
 	a.accounts.compressWorkers = i
@@ -1571,12 +1581,12 @@ func (a *AggregatorV3) AddLogTopic(topic []byte) error {
 }
 
 func (a *AggregatorV3) UpdateAccount(addr []byte, data, prevData []byte) error {
-	a.commitment.TouchPlainKey(addr, data, a.commitment.TouchPlainKeyAccount)
+	a.commitment.TouchPlainKey(addr, data, a.commitment.TouchAccount)
 	return a.accounts.PutWithPrev(addr, nil, data, prevData)
 }
 
 func (a *AggregatorV3) UpdateCode(addr []byte, code, prevCode []byte) error {
-	a.commitment.TouchPlainKey(addr, code, a.commitment.TouchPlainKeyCode)
+	a.commitment.TouchPlainKey(addr, code, a.commitment.TouchCode)
 	if len(code) == 0 {
 		return a.code.DeleteWithPrev(addr, nil, prevCode)
 	}
@@ -1584,7 +1594,7 @@ func (a *AggregatorV3) UpdateCode(addr []byte, code, prevCode []byte) error {
 }
 
 func (a *AggregatorV3) DeleteAccount(addr, prev []byte) error {
-	a.commitment.TouchPlainKey(addr, nil, a.commitment.TouchPlainKeyAccount)
+	a.commitment.TouchPlainKey(addr, nil, a.commitment.TouchAccount)
 
 	if err := a.accounts.DeleteWithPrev(addr, nil, prev); err != nil {
 		return err
@@ -1594,7 +1604,7 @@ func (a *AggregatorV3) DeleteAccount(addr, prev []byte) error {
 	}
 	var e error
 	if err := a.storage.defaultDc.IteratePrefix(addr, func(k, v []byte) {
-		a.commitment.TouchPlainKey(k, nil, a.commitment.TouchPlainKeyStorage)
+		a.commitment.TouchPlainKey(k, nil, a.commitment.TouchStorage)
 		if e == nil {
 			e = a.storage.DeleteWithPrev(k, nil, v)
 		}
@@ -1605,7 +1615,7 @@ func (a *AggregatorV3) DeleteAccount(addr, prev []byte) error {
 }
 
 func (a *AggregatorV3) UpdateStorage(addr, loc []byte, value, preVal []byte) error {
-	a.commitment.TouchPlainKey(common2.Append(addr, loc), value, a.commitment.TouchPlainKeyStorage)
+	a.commitment.TouchPlainKey(common2.Append(addr, loc), value, a.commitment.TouchStorage)
 	if len(value) == 0 {
 		return a.storage.DeleteWithPrev(addr, loc, preVal)
 	}
@@ -1894,9 +1904,9 @@ func (ac *AggregatorV3Context) accountFn(plainKey []byte, cell *commitment.Cell)
 		return err
 	}
 	if ok && code != nil {
-		ac.a.commitment.keccak.Reset()
-		ac.a.commitment.keccak.Write(code)
-		copy(cell.CodeHash[:], ac.a.commitment.keccak.Sum(nil))
+		ac.a.commitment.updates.keccak.Reset()
+		ac.a.commitment.updates.keccak.Write(code)
+		copy(cell.CodeHash[:], ac.a.commitment.updates.keccak.Sum(nil))
 	}
 	cell.Delete = len(encAccount) == 0 && len(code) == 0
 	return nil
