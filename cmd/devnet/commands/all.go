@@ -22,7 +22,7 @@ func ExecuteAllMethods() {
 
 	// confirm that the txpool is empty
 	fmt.Println("CONFIRMING TXPOOL IS EMPTY BEFORE SENDING TRANSACTION...")
-	services.CheckTxPoolContent(0, 0)
+	services.CheckTxPoolContent(0, 0, 0)
 	fmt.Println()
 
 	/*
@@ -39,14 +39,21 @@ func ExecuteAllMethods() {
 	//}
 	//fmt.Println()
 
-	// initiate a contract transaction
-	fmt.Println("INITIATING A CONTRACT TRANSACTION...")
-	_, err := callContractTx()
+	_, err := callSendTxWithDynamicFee(recipientAddress, models.DevAddress)
 	if err != nil {
-		fmt.Printf("callContractTx error: %v\n", err)
+		fmt.Printf("callSendTxWithDynamicFee error: %v\n", err)
 		return
 	}
 	fmt.Println()
+
+	// initiate a contract transaction
+	//fmt.Println("INITIATING A CONTRACT TRANSACTION...")
+	//_, err := callContractTx()
+	//if err != nil {
+	//	fmt.Printf("callContractTx error: %v\n", err)
+	//	return
+	//}
+	//fmt.Println()
 
 	fmt.Print("SEND SIGNAL TO QUIT ALL RUNNING NODES")
 	models.QuitNodeChan <- true

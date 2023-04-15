@@ -31,13 +31,13 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/protolambda/ztyp/codec"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/protolambda/ztyp/codec"
 )
 
 var (
@@ -571,6 +571,22 @@ func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
 }
 
+func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
+	gas := globalGasCap
+	if gas == 0 {
+		gas = uint64(math.MaxUint64 / 2)
+	}
+	if desiredGas > 0 {
+		gas = desiredGas
+	}
+	if globalGasCap != 0 && globalGasCap < gas {
+		log.Warn("Caller gas above allowance, capping", "requested", gas, "cap", globalGasCap)
+		gas = globalGasCap
+	}
+
+	m.gasLimit = gas
+}
+
 func (m Message) DataHashes() []libcommon.Hash { return m.dataHashes }
 
 func DecodeSSZ(data []byte, dest codec.Deserializable) error {
@@ -589,20 +605,4 @@ func copyAddressPtr(a *libcommon.Address) *libcommon.Address {
 	}
 	cpy := *a
 	return &cpy
-}
-
-func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
-	gas := globalGasCap
-	if gas == 0 {
-		gas = uint64(math.MaxUint64 / 2)
-	}
-	if desiredGas > 0 {
-		gas = desiredGas
-	}
-	if globalGasCap != 0 && globalGasCap < gas {
-		log.Warn("Caller gas above allowance, capping", "requested", gas, "cap", globalGasCap)
-		gas = globalGasCap
-	}
-
-	m.gasLimit = gas
 }

@@ -85,7 +85,7 @@ type ExecuteBlockCfg struct {
 	dirs      datadir.Dirs
 	historyV3 bool
 	syncCfg   ethconfig.Sync
-	genesis   *core.Genesis
+	genesis   *types.Genesis
 	agg       *libstate.AggregatorV3
 }
 
@@ -105,7 +105,7 @@ func StageExecuteBlocksCfg(
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
 	hd headerDownloader,
-	genesis *core.Genesis,
+	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	agg *libstate.AggregatorV3,
 ) ExecuteBlockCfg {
@@ -165,16 +165,13 @@ func executeBlock(
 	var receipts types.Receipts
 	var stateSyncReceipt *types.Receipt
 	var execRs *core.EphemeralExecResult
-	_, isPoSa := cfg.engine.(consensus.PoSA)
 	isBor := cfg.chainConfig.Bor != nil
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
 
-	if isPoSa {
-		execRs, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, EpochReaderImpl{tx: tx}, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
-	} else if isBor {
-		execRs, err = core.ExecuteBlockEphemerallyBor(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, EpochReaderImpl{tx: tx}, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
+	if isBor {
+		execRs, err = core.ExecuteBlockEphemerallyBor(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
 	} else {
-		execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, EpochReaderImpl{tx: tx}, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
+		execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
 	}
 	if err != nil {
 		return err
@@ -281,10 +278,9 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-	rs := state.NewStateV3()
 	parallel := initialCycle && tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix,
-		log.New(), to); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, logPrefix,
+		to); err != nil {
 		return fmt.Errorf("ExecV3: %w", err)
 	}
 	return nil
@@ -312,7 +308,7 @@ func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint
 
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) (err error) {
 	cfg.agg.SetLogPrefix(s.LogPrefix())
-	rs := state.NewStateV3()
+	rs := state.NewStateV3(cfg.dirs.Tmp)
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
 	if err != nil {

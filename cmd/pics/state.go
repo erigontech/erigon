@@ -273,9 +273,9 @@ func initialState1() error {
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		theAddr  = libcommon.Address{1}
-		gspec    = &core.Genesis{
+		gspec    = &types.Genesis{
 			Config: params.AllProtocolChanges,
-			Alloc: core.GenesisAlloc{
+			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
 				address2: {Balance: big.NewInt(300000000000000000)},
@@ -421,7 +421,7 @@ func initialState1() error {
 		return err
 	}
 
-	emptyKv := memdb.New()
+	emptyKv := memdb.New("")
 	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}

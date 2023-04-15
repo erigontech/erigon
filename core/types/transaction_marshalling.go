@@ -6,10 +6,12 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
 	. "github.com/protolambda/ztyp/view"
 	"github.com/valyala/fastjson"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
@@ -25,7 +27,7 @@ type txJSON struct {
 	Tip      *hexutil.Big       `json:"maxPriorityFeePerGas"`
 	Gas      *hexutil.Uint64    `json:"gas"`
 	Value    *hexutil.Big       `json:"value"`
-	Data     *hexutil.Bytes     `json:"input"`
+	Data     *hexutility.Bytes  `json:"input"`
 	V        *hexutil.Big       `json:"v"`
 	R        *hexutil.Big       `json:"r"`
 	S        *hexutil.Big       `json:"s"`
@@ -38,10 +40,10 @@ type txJSON struct {
 	// Blob transaction fields:
 	MaxFeePerDataGas    *hexutil.Big     `json:"maxFeePerDataGas,omitempty"`
 	BlobVersionedHashes []libcommon.Hash `json:"blobVersionedHashes,omitempty"`
-	// Blob werapper fields:
-	Blobs              Blobs    `json:"blobs,omitempty"`
-	BlobKzgs           BlobKzgs `json:"blobKzgs,omitempty"`
-	KzgAggregatedProof KZGProof `json:"kzgAggregatedProof,omitempty"`
+	// Blob wrapper fields:
+	Blobs    Blobs     `json:"blobs,omitempty"`
+	BlobKzgs BlobKzgs  `json:"blobKzgs,omitempty"`
+	Proofs   KZGProofs `json:"proofs,omitempty"`
 
 	// Only used for encoding:
 	Hash libcommon.Hash `json:"hash"`
@@ -56,7 +58,7 @@ func (tx LegacyTx) MarshalJSON() ([]byte, error) {
 	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
 	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutil.Bytes)(&tx.Data)
+	enc.Data = (*hexutility.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -75,7 +77,7 @@ func (tx AccessListTx) MarshalJSON() ([]byte, error) {
 	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
 	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutil.Bytes)(&tx.Data)
+	enc.Data = (*hexutility.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -95,7 +97,7 @@ func (tx DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	enc.FeeCap = (*hexutil.Big)(tx.FeeCap.ToBig())
 	enc.Tip = (*hexutil.Big)(tx.Tip.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutil.Bytes)(&tx.Data)
+	enc.Data = (*hexutility.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -118,7 +120,7 @@ func toSignedBlobTxJSON(tx *SignedBlobTx) *txJSON {
 	enc.FeeCap = (*hexutil.Big)(tx.GetFeeCap().ToBig())
 	enc.Tip = (*hexutil.Big)(tx.GetTip().ToBig())
 	enc.Value = (*hexutil.Big)(tx.GetValue().ToBig())
-	enc.Data = (*hexutil.Bytes)(&tx.Message.Data)
+	enc.Data = (*hexutility.Bytes)(&tx.Message.Data)
 	enc.To = tx.GetTo()
 	enc.V = (*hexutil.Big)(tx.Signature.GetV().ToBig())
 	enc.R = (*hexutil.Big)(tx.Signature.GetR().ToBig())
@@ -137,7 +139,7 @@ func (tx BlobTxWrapper) MarshalJSON() ([]byte, error) {
 
 	enc.Blobs = tx.Blobs
 	enc.BlobKzgs = tx.BlobKzgs
-	enc.KzgAggregatedProof = tx.KzgAggregatedProof
+	enc.Proofs = tx.Proofs
 
 	return json.Marshal(enc)
 }
@@ -523,29 +525,20 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 		}
 	}
 
-	// All blob tx wrappers should have non-zero aggregated proof, even if there are 0 blobs.
-	empty := KZGProof{}
-	if dec.KzgAggregatedProof == empty {
+	if len(dec.Blobs) == 0 {
+		// if no blobs are specified in the json we assume it is an unwrapped blob tx
 		return &tx, nil
 	}
 
 	btx := BlobTxWrapper{
-		Tx:                 tx,
-		BlobKzgs:           dec.BlobKzgs,
-		Blobs:              dec.Blobs,
-		KzgAggregatedProof: dec.KzgAggregatedProof,
+		Tx:       tx,
+		BlobKzgs: dec.BlobKzgs,
+		Blobs:    dec.Blobs,
+		Proofs:   dec.Proofs,
 	}
-	// Make sure the blob & kzg lists are non-nil
-	if btx.Blobs == nil {
-		btx.Blobs = Blobs([]Blob{})
-	}
-	if btx.BlobKzgs == nil {
-		btx.BlobKzgs = BlobKzgs([]KZGCommitment{})
-	}
-	err := btx.VerifyBlobs()
+	err := btx.ValidateBlobTransactionWrapper()
 	if err != nil {
 		return nil, err
 	}
 	return &btx, nil
-
 }

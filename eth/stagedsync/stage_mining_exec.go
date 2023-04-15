@@ -62,6 +62,8 @@ func StageMiningExecCfg(
 	payloadId uint64,
 	txPool2 *txpool.TxPool,
 	txPool2DB kv.RoDB,
+	snapshots *snapshotsync.RoSnapshots,
+	transactionsV3 bool,
 ) MiningExecCfg {
 	return MiningExecCfg{
 		db:          db,
@@ -69,7 +71,7 @@ func StageMiningExecCfg(
 		notifier:    notifier,
 		chainConfig: chainConfig,
 		engine:      engine,
-		blockReader: snapshotsync.NewBlockReader(),
+		blockReader: snapshotsync.NewBlockReaderWithSnapshots(snapshots, transactionsV3),
 		vmConfig:    vmConfig,
 		tmpdir:      tmpdir,
 		interrupt:   interrupt,
@@ -94,7 +96,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
 	stateWriter := state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
-	if cfg.chainConfig.DAOForkSupport && cfg.chainConfig.DAOForkBlock != nil && cfg.chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
+	if cfg.chainConfig.DAOForkBlock != nil && cfg.chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
 	systemcontracts.UpgradeBuildInSystemContract(&cfg.chainConfig, current.Header.Number, ibs)
@@ -173,8 +175,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	if parentHeader != nil {
 		excessDataGas = parentHeader.ExcessDataGas
 	}
-	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, excessDataGas, current.Txs, current.Uncles, stateWriter,
-		&cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, EpochReaderImpl{tx: tx}, ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, true)
+	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, true, excessDataGas)
 	if err != nil {
 		return err
 	}
@@ -249,7 +250,7 @@ func getNextTransactions(
 func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, baseFee *big.Int, simulationTx *memdb.MemoryMutation) ([]types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
-	gasBailout := config.Consensus == chain.ParliaConsensus
+	gasBailout := false
 
 	missedTxs := 0
 	noSenderCnt := 0
@@ -381,7 +382,9 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		dataGasSnap := gasPool.DataGas()
 		snap := ibs.Snapshot()
 		log.Debug("addTransactionsToMiningBlock", "txn hash", txn.Hash())
-		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, parentHeader.ExcessDataGas, txn, &header.GasUsed, dataGasUsed, *vmConfig)
+
+		dataGasUsed = new(uint64)
+		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, dataGasUsed, *vmConfig, parentHeader.ExcessDataGas)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
 			gasPool = new(core.GasPool).AddGas(gasSnap).AddDataGas(dataGasSnap) // restore gasPool as well as ibs

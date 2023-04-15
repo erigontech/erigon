@@ -6,6 +6,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
@@ -27,7 +28,7 @@ const AccountRangeMaxResults = 256
 
 // PrivateDebugAPI Exposed RPC endpoints for debugging use
 type PrivateDebugAPI interface {
-	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
+	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutility.Bytes, maxResult int) (StorageRangeResult, error)
 	TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error
 	TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error
 	TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *tracers.TraceConfig, stream *jsoniter.Stream) error
@@ -55,7 +56,7 @@ func NewPrivateDebugAPI(base *BaseAPI, db kv.RoDB, gascap uint64) *PrivateDebugA
 }
 
 // storageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
-func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
+func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutility.Bytes, maxResult int) (StorageRangeResult, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return StorageRangeResult{}, err
@@ -205,8 +206,12 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 // getModifiedAccountsV3 returns a list of addresses that were modified in the block range
 // [startNum:endNum)
 func getModifiedAccountsV3(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
+	it, err := tx.HistoryRange(temporal.AccountsHistory, int(startTxNum), int(endTxNum), order.Asc, kv.Unlim)
+	if err != nil {
+		return nil, err
+	}
+
 	changedAddrs := make(map[common.Address]struct{})
-	it, _ := tx.HistoryRange(temporal.AccountsHistory, int(startTxNum), int(endTxNum), order.Asc, -1)
 	for it.HasNext() {
 		k, _, err := it.Next()
 		if err != nil {
@@ -300,7 +305,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 			return nil, err
 		}
 		ttx := tx.(kv.TemporalTx)
-		v, ok, err := ttx.DomainGet(temporal.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
+		v, ok, err := ttx.DomainGetAsOf(temporal.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
 		if err != nil {
 			return nil, err
 		}
@@ -317,7 +322,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 		result.Nonce = hexutil.Uint64(a.Nonce)
 		result.CodeHash = a.CodeHash
 
-		code, _, err := ttx.DomainGet(temporal.CodeDomain, address[:], a.CodeHash[:], minTxNum+txIndex)
+		code, _, err := ttx.DomainGetAsOf(temporal.CodeDomain, address[:], a.CodeHash[:], minTxNum+txIndex)
 		if err != nil {
 			return nil, err
 		}
@@ -351,8 +356,8 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 }
 
 type AccountResult struct {
-	Balance  hexutil.Big    `json:"balance"`
-	Nonce    hexutil.Uint64 `json:"nonce"`
-	Code     hexutil.Bytes  `json:"code"`
-	CodeHash common.Hash    `json:"codeHash"`
+	Balance  hexutil.Big      `json:"balance"`
+	Nonce    hexutil.Uint64   `json:"nonce"`
+	Code     hexutility.Bytes `json:"code"`
+	CodeHash common.Hash      `json:"codeHash"`
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 var _ = (*stEnvMarshaling)(nil)
@@ -30,6 +31,8 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 		Ommers           []ommer                                `json:"ommers,omitempty"`
 		BaseFee          *math.HexOrDecimal256                  `json:"currentBaseFee,omitempty"`
 		ParentUncleHash  libcommon.Hash                         `json:"parentUncleHash"`
+		UncleHash        libcommon.Hash                         `json:"uncleHash,omitempty"`
+		Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
 	}
 	var enc stEnv
 	enc.Coinbase = common.UnprefixedAddress(s.Coinbase)
@@ -44,6 +47,8 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 	enc.Ommers = s.Ommers
 	enc.BaseFee = (*math.HexOrDecimal256)(s.BaseFee)
 	enc.ParentUncleHash = s.ParentUncleHash
+	enc.UncleHash = s.UncleHash
+	enc.Withdrawals = s.Withdrawals
 	return json.Marshal(&enc)
 }
 
@@ -62,6 +67,8 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 		Ommers           []ommer                                `json:"ommers,omitempty"`
 		BaseFee          *math.HexOrDecimal256                  `json:"currentBaseFee,omitempty"`
 		ParentUncleHash  *libcommon.Hash                        `json:"parentUncleHash"`
+		UncleHash        libcommon.Hash                         `json:"uncleHash,omitempty"`
+		Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
 	}
 	var dec stEnv
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -107,5 +114,10 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 	if dec.ParentUncleHash != nil {
 		s.ParentUncleHash = *dec.ParentUncleHash
 	}
+    s.UncleHash = dec.UncleHash
+	if dec.Withdrawals != nil {
+		s.Withdrawals = dec.Withdrawals
+	}
+
 	return nil
 }

@@ -32,6 +32,8 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
@@ -42,7 +44,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -169,6 +170,10 @@ type Config struct {
 
 	// it is actually used but a linter got confused
 	clock mclock.Clock //nolint:structcheck
+
+	TmpDir string
+
+	MetricsEnabled bool
 }
 
 // Server manages all peer connections.
@@ -191,12 +196,13 @@ type Server struct {
 	peerFeed     event.Feed
 	log          log.Logger
 
-	nodedb    *enode.DB
-	localnode *enode.LocalNode
-	ntab      *discover.UDPv4
-	DiscV5    *discover.UDPv5
-	discmix   *enode.FairMix
-	dialsched *dialScheduler
+	nodedb           *enode.DB
+	localnode        *enode.LocalNode
+	localnodeAddress string
+	ntab             *discover.UDPv4
+	DiscV5           *discover.UDPv5
+	discmix          *enode.FairMix
+	dialsched        *dialScheduler
 
 	// Channels into the run loop.
 	quitCtx                 context.Context
@@ -533,13 +539,14 @@ func (srv *Server) setupLocalNode() error {
 	}
 	sort.Sort(capsByNameAndVersion(srv.ourHandshake.Caps))
 	// Create the local node
-	db, err := enode.OpenDB(srv.Config.NodeDatabase)
+	db, err := enode.OpenDB(srv.Config.NodeDatabase, srv.Config.TmpDir)
 	if err != nil {
 		return err
 	}
 	srv.nodedb = db
 	srv.localnode = enode.NewLocalNode(db, srv.PrivateKey)
 	srv.localnode.SetFallbackIP(net.IP{127, 0, 0, 1})
+	srv.localnodeAddress = srv.localnode.Node().URLv4()
 	// TODO: check conflicts
 	for _, p := range srv.Protocols {
 		for _, e := range p.Attributes {
@@ -740,7 +747,7 @@ func (srv *Server) doPeerOp(fn peerOpFunc) {
 func (srv *Server) run() {
 	defer debug.LogPanic()
 	if len(srv.Config.Protocols) > 0 {
-		srv.log.Info("Started P2P networking", "version", srv.Config.Protocols[0].Version, "self", srv.localnode.Node().URLv4(), "name", srv.Name)
+		srv.log.Info("Started P2P networking", "version", srv.Config.Protocols[0].Version, "self", srv.localnodeAddress, "name", srv.Name)
 	}
 	defer srv.loopWG.Done()
 	defer srv.nodedb.Close()
@@ -1055,7 +1062,7 @@ func (srv *Server) checkpoint(c *conn, stage chan<- *conn) error {
 }
 
 func (srv *Server) launchPeer(c *conn, pubkey [64]byte) *Peer {
-	p := newPeer(srv.log, c, srv.Protocols, pubkey)
+	p := newPeer(srv.log, c, srv.Protocols, pubkey, srv.MetricsEnabled)
 	if srv.EnableMsgEvents {
 		// If message events are enabled, pass the peerFeed
 		// to the peer.

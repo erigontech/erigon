@@ -394,7 +394,7 @@ type segPrefix struct {
 
 // OpcodeTracer re-executes historical transactions in read-only mode
 // and traces them at the opcode level
-func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numBlocks uint64,
+func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, numBlocks uint64,
 	saveOpcodes bool, saveBblocks bool) error {
 	blockNumOrig := blockNum
 
@@ -710,14 +710,14 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	usedGas := new(uint64)
 	usedDataGas := new(uint64)
 	var receipts types.Receipts
-	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
+	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
 	systemcontracts.UpgradeBuildInSystemContract(chainConfig, header.Number, ibs)
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, txnWriter, header, excessDataGas, tx, usedGas, usedDataGas, vmConfig)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, txnWriter, header, tx, usedGas, usedDataGas, vmConfig, excessDataGas)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
@@ -730,7 +730,7 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	if !vmConfig.ReadOnly {
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 		tx := block.Transactions()
-		if _, _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, tx, block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil, nil); err != nil {
+		if _, _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, tx, block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil); err != nil {
 			return nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 

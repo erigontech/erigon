@@ -235,7 +235,7 @@ func readMessage(conn *rlpx.Conn, expectedMessageID uint64, decodeError Handshak
 }
 
 func makeOurHelloMessage(myPrivateKey *ecdsa.PrivateKey) HelloMessage {
-	version := params.VersionWithCommit(params.GitCommit, "")
+	version := params.VersionWithCommit(params.GitCommit)
 	clientID := common.MakeName("observer", version)
 
 	caps := []p2p.Cap{

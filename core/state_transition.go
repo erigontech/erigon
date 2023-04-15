@@ -21,6 +21,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -28,9 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -74,8 +73,7 @@ type StateTransition struct {
 	sharedBuyGas        *uint256.Int
 	sharedBuyGasBalance *uint256.Int
 
-	isParlia bool
-	isBor    bool
+	isBor bool
 }
 
 // Message represents a message sent to a contract.
@@ -156,7 +154,6 @@ func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation 
 
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTransition {
-	isParlia := evm.ChainConfig().Parlia != nil
 	isBor := evm.ChainConfig().Bor != nil
 	return &StateTransition{
 		gp:        gp,
@@ -172,8 +169,7 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 		sharedBuyGas:        uint256.NewInt(0),
 		sharedBuyGasBalance: uint256.NewInt(0),
 
-		isParlia: isParlia,
-		isBor:    isBor,
+		isBor: isBor,
 	}
 }
 
@@ -210,7 +206,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	// compute data fee for eip-4844 data blobs if any
 	dgBig := new(big.Int)
 	var dataGasUsed uint64
-	if st.evm.ChainRules().IsSharding {
+	if st.evm.ChainRules().IsCancun {
 		dataGasUsed = st.dataGasUsed()
 		if st.evm.Context().ExcessDataGas == nil {
 			return fmt.Errorf("%w: sharding is active but ExcessDataGas is nil", ErrInternalFailure)
@@ -311,7 +307,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
-	if st.dataGasUsed() > 0 && st.evm.ChainRules().IsSharding {
+	if st.dataGasUsed() > 0 && st.evm.ChainRules().IsCancun {
 		dataGasPrice := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
 		bigMaxFeePerDataGas := st.msg.MaxFeePerDataGas().ToBig()
 		if dataGasPrice.Cmp(bigMaxFeePerDataGas) > 0 {
@@ -355,12 +351,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	// 5. there is no overflow when calculating intrinsic gas
 	// 6. caller has enough balance to cover asset transfer for **topmost** call
 
-	// BSC always gave gas bailout due to system transactions that set 2^256/2 gas limit and
-	// for Parlia consensus this flag should be always be set
-	if st.isParlia {
-		gasBailout = true
-	}
-
 	// Check clauses 1-3 and 6, buy gas if everything is correct
 	if err := st.preCheck(gasBailout); err != nil {
 		return nil, err
@@ -378,17 +368,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
-
-	if rules.IsNano {
-		for _, blackListAddr := range types.NanoBlackList {
-			if blackListAddr == sender.Address() {
-				return nil, fmt.Errorf("block blacklist account")
-			}
-			if msg.To() != nil && *msg.To() == blackListAddr {
-				return nil, fmt.Errorf("block blacklist account")
-			}
-		}
-	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
 	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860)
@@ -456,11 +435,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-	if st.isParlia {
-		st.state.AddBalance(consensus.SystemAddress, amount)
-	} else {
-		st.state.AddBalance(st.evm.Context().Coinbase, amount)
-	}
+	st.state.AddBalance(st.evm.Context().Coinbase, amount)
 	if !msg.IsFree() && rules.IsLondon && rules.IsEip1559FeeCollector {
 		burntContractAddress := *st.evm.ChainConfig().Eip1559FeeCollector
 		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)

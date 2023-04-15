@@ -1,7 +1,7 @@
 package cltypes
 
 import (
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
 
@@ -59,9 +59,9 @@ func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	offset := 8
 	// Write offsets
-	buf = append(buf, ssz_utils.OffsetSSZ(uint32(offset))...)
+	buf = append(buf, ssz.OffsetSSZ(uint32(offset))...)
 	offset += a.Attestation_1.EncodingSizeSSZ()
-	buf = append(buf, ssz_utils.OffsetSSZ(uint32(offset))...)
+	buf = append(buf, ssz.OffsetSSZ(uint32(offset))...)
 	// Write the attestations
 	var err error
 	buf, err = a.Attestation_1.EncodeSSZ(buf)
@@ -78,7 +78,7 @@ func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 func (a *AttesterSlashing) DecodeSSZ(buf []byte) error {
 	a.Attestation_1 = new(IndexedAttestation)
 	a.Attestation_2 = new(IndexedAttestation)
-	attestation2Offset := ssz_utils.DecodeOffset(buf[4:])
+	attestation2Offset := ssz.DecodeOffset(buf[4:])
 	if err := a.Attestation_1.DecodeSSZ(buf[8:attestation2Offset]); err != nil {
 		return err
 	}

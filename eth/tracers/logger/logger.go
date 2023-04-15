@@ -11,10 +11,11 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -70,8 +71,8 @@ type structLogMarshaling struct {
 	Stack       []*math.HexOrDecimal256
 	Gas         math.HexOrDecimal64
 	GasCost     math.HexOrDecimal64
-	Memory      hexutil.Bytes
-	ReturnData  hexutil.Bytes
+	Memory      hexutility.Bytes
+	ReturnData  hexutility.Bytes
 	OpName      string `json:"opName"` // adds call to OpName() in MarshalJSON
 	ErrorString string `json:"error"`  // adds call to ErrorString() in MarshalJSON
 }

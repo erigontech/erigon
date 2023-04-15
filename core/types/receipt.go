@@ -24,6 +24,7 @@ import (
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -62,6 +63,8 @@ type Receipt struct {
 	TxHash          libcommon.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
 	ContractAddress libcommon.Address `json:"contractAddress" codec:"-"`
 	GasUsed         uint64            `json:"gasUsed" gencodec:"required" codec:"-"`
+	DataGasUsed     uint64            `json:"dataGasUsed,omitempty" codec:"-"`
+	DataGasPrice    *big.Int          `json:"dataGasPrice,omitempty" codec:"-"`
 
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
@@ -72,7 +75,7 @@ type Receipt struct {
 
 type receiptMarshaling struct {
 	Type              hexutil.Uint64
-	PostState         hexutil.Bytes
+	PostState         hexutility.Bytes
 	Status            hexutil.Uint64
 	CumulativeGasUsed hexutil.Uint64
 	GasUsed           hexutil.Uint64

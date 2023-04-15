@@ -79,20 +79,11 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 			uncles = append(uncles, h)
 		}
 		// Withdrawals processing
-		withdrawals := make([]*types.Withdrawal, 0, len(body.Withdrawals))
-		for _, withdrawal := range body.Withdrawals {
-			withdrawals = append(withdrawals, &types.Withdrawal{
-				Index:     withdrawal.Index,
-				Validator: withdrawal.ValidatorIndex,
-				Address:   gointerfaces.ConvertH160toAddress(withdrawal.Address),
-				Amount:    withdrawal.Amount,
-			})
-		}
 		if _, _, err := rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
 			body.BlockNumber, &types.RawBody{
 				Transactions: body.Transactions,
 				Uncles:       uncles,
-				Withdrawals:  withdrawals,
+				Withdrawals:  privateapi.ConvertWithdrawalsFromRpc(body.Withdrawals),
 			}); err != nil {
 			return nil, err
 		}
@@ -351,7 +342,6 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 	if blockHash != h.Hash() {
 		return nil, fmt.Errorf("block %d, %x has invalid hash. expected: %x", header.BlockNumber, h.Hash(), blockHash)
 	}
-	h.BlockHashCL = blockHash
 	return h, nil
 }
 

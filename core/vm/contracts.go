@@ -83,51 +83,6 @@ var PrecompiledContractsIstanbul = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{9}): &blake2F{},
 }
 
-var PrecompiledContractsIstanbulForBSC = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{1}): &ecrecover{},
-	libcommon.BytesToAddress([]byte{2}): &sha256hash{},
-	libcommon.BytesToAddress([]byte{3}): &ripemd160hash{},
-	libcommon.BytesToAddress([]byte{4}): &dataCopy{},
-	libcommon.BytesToAddress([]byte{5}): &bigModExp{},
-	libcommon.BytesToAddress([]byte{6}): &bn256AddIstanbul{},
-	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
-	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
-	libcommon.BytesToAddress([]byte{9}): &blake2F{},
-
-	libcommon.BytesToAddress([]byte{100}): &tmHeaderValidate{},
-	libcommon.BytesToAddress([]byte{101}): &iavlMerkleProofValidate{},
-}
-
-var PrecompiledContractsNano = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{1}): &ecrecover{},
-	libcommon.BytesToAddress([]byte{2}): &sha256hash{},
-	libcommon.BytesToAddress([]byte{3}): &ripemd160hash{},
-	libcommon.BytesToAddress([]byte{4}): &dataCopy{},
-	libcommon.BytesToAddress([]byte{5}): &bigModExp{},
-	libcommon.BytesToAddress([]byte{6}): &bn256AddIstanbul{},
-	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
-	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
-	libcommon.BytesToAddress([]byte{9}): &blake2F{},
-
-	libcommon.BytesToAddress([]byte{100}): &tmHeaderValidateNano{},
-	libcommon.BytesToAddress([]byte{101}): &iavlMerkleProofValidateNano{},
-}
-
-var PrecompiledContractsIsMoran = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{1}): &ecrecover{},
-	libcommon.BytesToAddress([]byte{2}): &sha256hash{},
-	libcommon.BytesToAddress([]byte{3}): &ripemd160hash{},
-	libcommon.BytesToAddress([]byte{4}): &dataCopy{},
-	libcommon.BytesToAddress([]byte{5}): &bigModExp{},
-	libcommon.BytesToAddress([]byte{6}): &bn256AddIstanbul{},
-	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
-	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
-	libcommon.BytesToAddress([]byte{9}): &blake2F{},
-
-	libcommon.BytesToAddress([]byte{100}): &tmHeaderValidate{},
-	libcommon.BytesToAddress([]byte{101}): &iavlMerkleProofValidateMoran{},
-}
-
 // PrecompiledContractsBerlin contains the default set of pre-compiled Ethereum
 // contracts used in the Berlin release.
 var PrecompiledContractsBerlin = map[libcommon.Address]PrecompiledContract{
@@ -156,7 +111,7 @@ var PrecompiledContractsBLS = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{18}): &bls12381MapG2{},
 }
 
-var PrecompiledContractsDanksharding = map[libcommon.Address]PrecompiledContract{
+var PrecompiledContractsCancun = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{1}):  &ecrecover{},
 	libcommon.BytesToAddress([]byte{2}):  &sha256hash{},
 	libcommon.BytesToAddress([]byte{3}):  &ripemd160hash{},
@@ -170,14 +125,11 @@ var PrecompiledContractsDanksharding = map[libcommon.Address]PrecompiledContract
 }
 
 var (
-	PrecompiledAddressesMoran          []libcommon.Address
-	PrecompiledAddressesNano           []libcommon.Address
-	PrecompiledAddressesDanksharding   []libcommon.Address
-	PrecompiledAddressesBerlin         []libcommon.Address
-	PrecompiledAddressesIstanbul       []libcommon.Address
-	PrecompiledAddressesIstanbulForBSC []libcommon.Address
-	PrecompiledAddressesByzantium      []libcommon.Address
-	PrecompiledAddressesHomestead      []libcommon.Address
+	PrecompiledAddressesCancun    []libcommon.Address
+	PrecompiledAddressesBerlin    []libcommon.Address
+	PrecompiledAddressesIstanbul  []libcommon.Address
+	PrecompiledAddressesByzantium []libcommon.Address
+	PrecompiledAddressesHomestead []libcommon.Address
 )
 
 func init() {
@@ -190,38 +142,22 @@ func init() {
 	for k := range PrecompiledContractsIstanbul {
 		PrecompiledAddressesIstanbul = append(PrecompiledAddressesIstanbul, k)
 	}
-	for k := range PrecompiledContractsIstanbulForBSC {
-		PrecompiledAddressesIstanbulForBSC = append(PrecompiledAddressesIstanbulForBSC, k)
-	}
 	for k := range PrecompiledContractsBerlin {
 		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
 	}
-	for k := range PrecompiledContractsNano {
-		PrecompiledAddressesNano = append(PrecompiledAddressesNano, k)
-	}
-	for k := range PrecompiledContractsIsMoran {
-		PrecompiledAddressesMoran = append(PrecompiledAddressesMoran, k)
-	}
-	for k := range PrecompiledContractsDanksharding {
-		PrecompiledAddressesDanksharding = append(PrecompiledAddressesDanksharding, k)
+	for k := range PrecompiledContractsCancun {
+		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
 	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 	switch {
-	case rules.IsMoran:
-		return PrecompiledAddressesMoran
-	case rules.IsNano:
-		return PrecompiledAddressesNano
-	case rules.IsSharding:
-		return PrecompiledAddressesDanksharding
+	case rules.IsCancun:
+		return PrecompiledAddressesCancun
 	case rules.IsBerlin:
 		return PrecompiledAddressesBerlin
 	case rules.IsIstanbul:
-		if rules.IsParlia {
-			return PrecompiledAddressesIstanbulForBSC
-		}
 		return PrecompiledAddressesIstanbul
 	case rules.IsByzantium:
 		return PrecompiledAddressesByzantium

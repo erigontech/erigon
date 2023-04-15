@@ -26,6 +26,7 @@ import (
 )
 
 var activators = map[int]func(*JumpTable){
+	4844: enable4844,
 	3855: enable3855,
 	3860: enable3860,
 	3529: enable3529,
@@ -199,9 +200,9 @@ func enable3860(jt *JumpTable) {
 	jt[CREATE2].dynamicGas = gasCreate2Eip3860
 }
 
-// enable3198 applies mini-danksharding (DATAHASH Opcode)
+// enable4844 applies mini-danksharding (DATAHASH Opcode)
 // - Adds an opcode that returns the versioned data hash of the tx at a index.
-func enableSharding(jt *JumpTable) {
+func enable4844(jt *JumpTable) {
 	jt[DATAHASH] = &operation{
 		execute:     opDataHash,
 		constantGas: GasFastestStep,

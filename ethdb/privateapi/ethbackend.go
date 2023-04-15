@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"reflect"
 	"sync"
 	"time"
 
@@ -60,15 +61,17 @@ type EthBackendServer struct {
 	db          kv.RoDB
 	blockReader services.BlockAndTxnReader
 	config      *chain.Config
-	// Block proposing for proof-of-stake
-	payloadId uint64
-	builders  map[uint64]*builder.BlockBuilder
 
-	builderFunc builder.BlockBuilderFunc
-	proposing   bool
-	lock        sync.Mutex // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
-	logsFilter  *LogsFilterAggregator
-	hd          *headerdownload.HeaderDownload
+	// Block proposing for proof-of-stake
+	payloadId      uint64
+	lastParameters *core.BlockBuilderParameters
+	builders       map[uint64]*builder.BlockBuilder
+	builderFunc    builder.BlockBuilderFunc
+	proposing      bool
+
+	lock       sync.Mutex // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
+	logsFilter *LogsFilterAggregator
+	hd         *headerdownload.HeaderDownload
 }
 
 type EthBackend interface {
@@ -275,11 +278,12 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 	if !ok {
 		select {
 		case <-wait:
+			return false
 		case <-ctx.Done():
+			return true
 		}
 	}
-
-	return !s.hd.BeaconRequestList.IsWaiting()
+	return false
 }
 
 func (s *EthBackendServer) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
@@ -330,7 +334,7 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 		header.ExcessDataGas = gointerfaces.ConvertH256ToUint256Int(req.ExcessDataGas).ToBig()
 	}
 
-	if !s.config.IsSharding(header.Time) && header.ExcessDataGas != nil || s.config.IsSharding(header.Time) && header.ExcessDataGas == nil {
+	if !s.config.IsCancun(header.Time) && header.ExcessDataGas != nil || s.config.IsCancun(header.Time) && header.ExcessDataGas == nil {
 		return nil, &rpc.InvalidParamsError{Message: "excess data gas setting doesn't match sharding state"}
 	}
 
@@ -520,11 +524,12 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash libcommon.H
 }
 
 // The expected value to be received by the feeRecipient in wei
-func blockValue(block *types.Block, baseFee *uint256.Int) *uint256.Int {
+func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int {
 	blockValue := uint256.NewInt(0)
-	for _, tx := range block.Transactions() {
-		gas := new(uint256.Int).SetUint64(tx.GetGas())
-		effectiveTip := tx.GetEffectiveGasTip(baseFee)
+	txs := br.Block.Transactions()
+	for i := range txs {
+		gas := new(uint256.Int).SetUint64(br.Receipts[i].GasUsed)
+		effectiveTip := txs[i].GetEffectiveGasTip(baseFee)
 		txValue := new(uint256.Int).Mul(gas, effectiveTip)
 		blockValue.Add(blockValue, txValue)
 	}
@@ -559,9 +564,9 @@ func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remo
 	}
 
 	blobsBundle := &types2.BlobsBundleV1{
-		BlockHash: gointerfaces.ConvertHashToH256(block.Header().Hash()),
+		BlockHash: gointerfaces.ConvertHashToH256(block.Block.Header().Hash()),
 	}
-	for i, tx := range block.Transactions() {
+	for i, tx := range block.Block.Transactions() {
 		if tx.Type() != types.BlobTxType {
 			continue
 		}
@@ -569,24 +574,14 @@ func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remo
 		if !ok {
 			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobtx)
 		}
-		versionedHashes, kzgs, blobs, aggProof := blobtx.GetDataHashes(), blobtx.BlobKzgs, blobtx.Blobs, blobtx.KzgAggregatedProof
-		if len(versionedHashes) != len(kzgs) || len(versionedHashes) != len(blobs) {
-			return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d)"+
-				" / versioned hashes (%d)", i, block.Hash(), len(blobs), len(kzgs), len(versionedHashes))
+		versionedHashes, kzgs, blobs, proofs := blobtx.GetDataHashes(), blobtx.BlobKzgs, blobtx.Blobs, blobtx.Proofs
+		lenCheck := len(versionedHashes)
+		if lenCheck != len(kzgs) || lenCheck != len(blobs) || lenCheck != len(blobtx.Proofs) {
+			return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d) / proofs (%d)"+
+				" / versioned hashes (%d)", i, block.Block.Hash(), len(blobs), len(kzgs), len(proofs), lenCheck)
 		}
-		var zProof types.KZGProof
-		if zProof == aggProof {
-			return nil, errors.New("aggregated proof is missing")
-		}
-		// Convert each blob of field elements into a flat blob of bytes
 		for _, blob := range blobs {
-			out := make([]byte, params.FieldElementsPerBlob*32)
-			j := 0
-			for _, elem := range blob {
-				copy(out[j:j+32], elem[:])
-				j += 32
-			}
-			blobsBundle.Blobs = append(blobsBundle.Blobs, out)
+			blobsBundle.Blobs = append(blobsBundle.Blobs, blob[:])
 		}
 		for _, kzg := range kzgs {
 			blobsBundle.Kzgs = append(blobsBundle.Kzgs, kzg[:])
@@ -616,11 +611,12 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		return nil, &UnknownPayloadErr
 	}
 
-	block, err := builder.Stop()
+	blockWithReceipts, err := builder.Stop()
 	if err != nil {
 		log.Error("Failed to build PoS block", "err", err)
 		return nil, err
 	}
+	block := blockWithReceipts.Block
 
 	baseFee := new(uint256.Int)
 	baseFee.SetFromBig(block.Header().BaseFee)
@@ -667,7 +663,7 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		payload.ExcessDataGas = gointerfaces.ConvertUint256IntToH256(&excessDataGas)
 	}
 
-	blockValue := blockValue(block, baseFee)
+	blockValue := blockValue(blockWithReceipts, baseFee)
 	return &remote.EngineGetPayloadResponse{
 		ExecutionPayload: payload,
 		BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
@@ -751,20 +747,31 @@ func (s *EthBackendServer) EngineForkChoiceUpdated(ctx context.Context, req *rem
 	if payloadAttributes.Version >= 2 {
 		param.Withdrawals = ConvertWithdrawalsFromRpc(payloadAttributes.Withdrawals)
 	}
-
 	if err := s.checkWithdrawalsPresence(payloadAttributes.Timestamp, param.Withdrawals); err != nil {
 		return nil, err
 	}
 
-	// Initiate payload building
+	// First check if we're already building a block with the requested parameters
+	if reflect.DeepEqual(s.lastParameters, &param) {
+		log.Info("[ForkChoiceUpdated] duplicate build request")
+		return &remote.EngineForkChoiceUpdatedResponse{
+			PayloadStatus: &remote.EnginePayloadStatus{
+				Status:          remote.EngineStatus_VALID,
+				LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
+			},
+			PayloadId: s.payloadId,
+		}, nil
+	}
 
+	// Initiate payload building
 	s.evictOldBuilders()
 
-	// payload IDs start from 1 (0 signifies null)
 	s.payloadId++
+	param.PayloadId = s.payloadId
+	s.lastParameters = &param
 
 	s.builders[s.payloadId] = builder.NewBlockBuilder(s.builderFunc, &param)
-	log.Debug("BlockBuilder added", "payload", s.payloadId)
+	log.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", s.payloadId)
 
 	return &remote.EngineForkChoiceUpdatedResponse{
 		PayloadStatus: &remote.EnginePayloadStatus{
@@ -780,6 +787,7 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByHashV1(ctx context.Context, r
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 
 	bodies := make([]*types2.ExecutionPayloadBodyV1, len(request.Hashes))
 
@@ -805,6 +813,7 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByRangeV1(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 
 	bodies := make([]*types2.ExecutionPayloadBodyV1, 0, request.Count)
 

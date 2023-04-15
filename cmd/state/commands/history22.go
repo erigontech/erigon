@@ -12,6 +12,7 @@ import (
 	"time"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -34,6 +35,11 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
+var (
+	blockTo    int
+	traceBlock int
+)
+
 func init() {
 	withBlock(history22Cmd)
 	withDataDir(history22Cmd)
@@ -51,7 +57,7 @@ var history22Cmd = &cobra.Command{
 	},
 }
 
-func History22(genesis *core.Genesis, logger log.Logger) error {
+func History22(genesis *types.Genesis, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -73,7 +79,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer historyTx.Rollback()
 	aggPath := filepath.Join(datadirCli, "erigon23")
-	h, err := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep)
+	h, err := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep, libstate.CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
@@ -142,8 +148,8 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	if err := allSnapshots.ReopenWithDB(db); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	readWrapper := state.NewHistoryReader23(h.MakeContext(), ri)
+	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, ethconfig.Defaults.TransactionsV3)
+	readWrapper := state.NewHistoryReaderV4(h.MakeContext(), ri)
 
 	for !interrupt {
 		select {
@@ -237,7 +243,7 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryRead
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	txNum := txNumStart
 	hw.SetTxNum(txNum)
-	daoFork := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
+	daoFork := chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	if daoFork {
 		ibs := state.New(hw)
 		misc.ApplyDAOHardFork(ibs)
@@ -253,7 +259,7 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryRead
 		hw.SetTxNum(txNum)
 		ibs := state.New(hw)
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, excessDataGas, tx, usedGas, usedDataGas, vmConfig)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, tx, usedGas, usedDataGas, vmConfig, excessDataGas)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}

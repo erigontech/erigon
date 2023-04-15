@@ -12,12 +12,13 @@ var CLDefaultFlags = []cli.Flag{
 	&SentinelTcpPort,
 	&NoDiscovery,
 	&ChaindataFlag,
-	&ELEnabledFlag,
 	&BeaconDBModeFlag,
 	&BootnodesFlag,
 	&BeaconConfigFlag,
 	&GenesisSSZFlag,
 	&CheckpointSyncUrlFlag,
+	&SentinelStaticPeersFlag,
+	&TransitionChainFlag,
 }
 
 var LCDefaultFlags = []cli.Flag{
@@ -30,11 +31,11 @@ var LCDefaultFlags = []cli.Flag{
 	&SentinelTcpPort,
 	&NoDiscovery,
 	&ChaindataFlag,
-	&ELEnabledFlag,
 	&BeaconDBModeFlag,
 	&BootnodesFlag,
 	&BeaconConfigFlag,
 	&GenesisSSZFlag,
 	&CheckpointSyncUrlFlag,
+	&SentinelStaticPeersFlag,
 	&ErigonPrivateApiFlag,
 }

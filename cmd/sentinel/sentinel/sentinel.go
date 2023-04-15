@@ -18,9 +18,10 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
+	"net/http"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
@@ -32,11 +33,14 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p-core/network"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
+	"github.com/libp2p/go-libp2p/core/network"
+	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
+	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type Sentinel struct {
@@ -54,15 +58,16 @@ type Sentinel struct {
 	discoverConfig discover.Config
 	pubsub         *pubsub.PubSub
 	subManager     *GossipManager
-	gossipTopics   []GossipTopic
+	metrics        bool
 }
 
 func (s *Sentinel) createLocalNode(
 	privKey *ecdsa.PrivateKey,
 	ipAddr net.IP,
 	udpPort, tcpPort int,
+	tmpDir string,
 ) (*enode.LocalNode, error) {
-	db, err := enode.OpenDB("")
+	db, err := enode.OpenDB("", tmpDir)
 	if err != nil {
 		return nil, fmt.Errorf("could not open node's peer database: %w", err)
 	}
@@ -125,7 +130,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
-	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, int(s.cfg.TCPPort))
+	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, int(s.cfg.TCPPort), s.cfg.TmpDir)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +157,6 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 	gsp := pubsub.DefaultGossipSubParams()
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
-		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
 		pubsub.WithMessageIdFn(func(pmsg *pubsub_pb.Message) string {
 			return fork.MsgID(pmsg, s.cfg.NetworkConfig, s.cfg.BeaconConfig, s.cfg.GenesisConfig)
 		}), pubsub.WithNoAuthor(),
@@ -170,12 +174,12 @@ func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
 	db kv.RoDB,
-	rule handshake.RuleFunc,
 ) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx: ctx,
 		cfg: cfg,
 		db:  db,
+		// metrics: true,
 	}
 
 	// Setup discovery
@@ -200,15 +204,40 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	if s.metrics {
+		http.Handle("/metrics", promhttp.Handler())
+		go func() {
+			server := &http.Server{
+				Addr:              ":2112",
+				ReadHeaderTimeout: time.Hour,
+			}
+			if err := server.ListenAndServe(); err != nil {
+				panic(err)
+			}
+		}()
 
+		rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
+
+		str, err := rcmgrObs.NewStatsTraceReporter()
+		if err != nil {
+			return nil, err
+		}
+
+		rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(rcmgr.DefaultLimits.AutoScale()), rcmgr.WithTraceReporter(str))
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, libp2p.ResourceManager(rmgr))
+	}
 	host, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host, rule)
+	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host)
 
-	host.RemoveStreamHandler(identify.IDDelta)
+	// removed IdDelta in recent version of libp2p
+	host.RemoveStreamHandler("/p2p/id/delta/1.0.0")
 	s.host = host
 	s.peers = peers.New(s.host)
 
@@ -218,10 +247,6 @@ func New(
 	}
 
 	return s, nil
-}
-
-func (s *Sentinel) ChainConfigs() (clparams.BeaconChainConfig, clparams.GenesisConfig) {
-	return *s.cfg.BeaconConfig, *s.cfg.GenesisConfig
 }
 
 func (s *Sentinel) RecvGossip() <-chan *pubsub.Message {
@@ -261,7 +286,7 @@ func (s *Sentinel) HasTooManyPeers() bool {
 }
 
 func (s *Sentinel) GetPeersCount() int {
-	sub := s.subManager.GetMatchingSubscription(string(LightClientFinalityUpdateTopic))
+	sub := s.subManager.GetMatchingSubscription(string(LightClientOptimisticUpdateTopic))
 
 	if sub == nil {
 		return len(s.host.Network().Peers())
@@ -275,4 +300,8 @@ func (s *Sentinel) Host() host.Host {
 
 func (s *Sentinel) Peers() *peers.Peers {
 	return s.peers
+}
+
+func (s *Sentinel) GossipManager() *GossipManager {
+	return s.subManager
 }

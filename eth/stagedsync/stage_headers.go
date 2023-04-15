@@ -118,15 +118,15 @@ func SpawnStageHeaders(
 		preProgress = s.BlockNumber
 	}
 
-	notBorAndParlia := cfg.chainConfig.Bor == nil && cfg.chainConfig.Parlia == nil
+	notBor := cfg.chainConfig.Bor == nil
 
 	unsettledForkChoice, headHeight := cfg.hd.GetUnsettledForkChoice()
-	if notBorAndParlia && unsettledForkChoice != nil { // some work left to do after unwind
+	if notBor && unsettledForkChoice != nil { // some work left to do after unwind
 		return finishHandlingForkChoice(unsettledForkChoice, headHeight, s, tx, cfg, useExternalTx)
 	}
 
 	transitionedToPoS := cfg.chainConfig.TerminalTotalDifficultyPassed
-	if notBorAndParlia && !transitionedToPoS {
+	if notBor && !transitionedToPoS {
 		var err error
 		transitionedToPoS, err = rawdb.Transitioned(tx, preProgress, cfg.chainConfig.TerminalTotalDifficulty)
 		if err != nil {
@@ -158,16 +158,15 @@ func HeadersPOS(
 	useExternalTx bool,
 	preProgress uint64,
 ) error {
-	/*
-		if initialCycle {
-			// Let execution and other stages to finish before waiting for CL, but only if other stages aren't ahead
-			if execProgress, err := stages.GetStageProgress(tx, stages.Execution); err != nil {
-				return err
-			} else if s.BlockNumber >= execProgress {
-				return nil
-			}
+	if initialCycle {
+		// Let execution and other stages to finish before waiting for CL, but only if other stages aren't ahead.
+		// Specifically, this allows to execute snapshot blocks before waiting for CL.
+		if execProgress, err := s.ExecutionAt(tx); err != nil {
+			return err
+		} else if s.BlockNumber >= execProgress {
+			return nil
 		}
-	*/
+	}
 
 	cfg.hd.SetPOSSync(true)
 	syncing := cfg.hd.PosStatus() != headerdownload.Idle
@@ -798,10 +797,11 @@ func HeadersPOW(
 	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	stopped := false
+	var noProgressCounter uint = 0
 	prevProgress := headerProgress
-	var noProgressCounter int
 	var wasProgress bool
 	var lastSkeletonTime time.Time
+	var peer [64]byte
 	var sentToPeer bool
 Loop:
 	for !stopped {
@@ -817,10 +817,10 @@ Loop:
 			break
 		}
 
+		sentToPeer = false
 		currentTime := time.Now()
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
-			var peer [64]byte
 			peer, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
 				cfg.hd.UpdateStats(req, false /* skeleton */, peer)
@@ -834,7 +834,6 @@ Loop:
 		for req != nil && sentToPeer && maxRequests > 0 {
 			req, penalties = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
-				var peer [64]byte
 				peer, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
 					cfg.hd.UpdateStats(req, false /* skeleton */, peer)
@@ -851,7 +850,6 @@ Loop:
 		if time.Since(lastSkeletonTime) > 1*time.Second {
 			req = cfg.hd.RequestSkeleton()
 			if req != nil {
-				var peer [64]byte
 				peer, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
 					cfg.hd.UpdateStats(req, true /* skeleton */, peer)
@@ -893,15 +891,17 @@ Loop:
 			stats := cfg.hd.ExtractStats()
 			if prevProgress == progress {
 				noProgressCounter++
-				if noProgressCounter >= 5 {
-					log.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
-						"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
-						"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates)
-					cfg.hd.LogAnchorState()
-					if wasProgress {
-						log.Warn("Looks like chain is not progressing, moving to the next stage")
-						break Loop
-					}
+			} else {
+				noProgressCounter = 0 // Reset, there was progress
+			}
+			if noProgressCounter >= 5 {
+				log.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
+					"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
+					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates)
+				cfg.hd.LogAnchorState()
+				if wasProgress {
+					log.Warn("Looks like chain is not progressing, moving to the next stage")
+					break Loop
 				}
 			}
 			prevProgress = progress
@@ -1147,26 +1147,6 @@ func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 		return nil
 	}
 	return td
-}
-
-type EpochReaderImpl struct {
-	tx kv.RwTx
-}
-
-func (cr EpochReaderImpl) GetEpoch(hash libcommon.Hash, number uint64) ([]byte, error) {
-	return rawdb.ReadEpoch(cr.tx, number, hash)
-}
-func (cr EpochReaderImpl) PutEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
-	return rawdb.WriteEpoch(cr.tx, number, hash, proof)
-}
-func (cr EpochReaderImpl) GetPendingEpoch(hash libcommon.Hash, number uint64) ([]byte, error) {
-	return rawdb.ReadPendingEpoch(cr.tx, number, hash)
-}
-func (cr EpochReaderImpl) PutPendingEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
-	return rawdb.WritePendingEpoch(cr.tx, number, hash, proof)
-}
-func (cr EpochReaderImpl) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error) {
-	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 
 func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context) (err error) {

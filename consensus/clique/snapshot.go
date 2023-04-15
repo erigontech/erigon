@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
-	lru "github.com/hashicorp/golang-lru"
+	"github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -124,7 +124,7 @@ func lastSnapshot(db kv.RwDB) (uint64, error) {
 
 	lastEnc, err := tx.GetOne(kv.CliqueLastSnapshot, LastSnapshotKey())
 	if err != nil {
-		return 0, fmt.Errorf("failed check last clique snapshot: %d", err)
+		return 0, fmt.Errorf("failed check last clique snapshot: %w", err)
 	}
 	if len(lastEnc) == 0 {
 		return 0, ErrNotFound
@@ -196,7 +196,7 @@ func (s *Snapshot) uncast(address libcommon.Address, authorize bool) bool {
 
 // apply creates a new authorization snapshot by applying the given headers to
 // the original one.
-func (s *Snapshot) apply(sigcache *lru.ARCCache, headers ...*types.Header) (*Snapshot, error) {
+func (s *Snapshot) apply(sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], headers ...*types.Header) (*Snapshot, error) {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return s, nil

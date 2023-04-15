@@ -99,7 +99,7 @@ var (
 )
 
 func init() {
-	app = cli2.NewApp(params.GitCommit, "", "ethereum checkpoint helper tool")
+	app = cli2.NewApp(params.GitCommit, "ethereum checkpoint helper tool")
 	app.Flags = []cli.Flag{
 		&abiFlag,
 		&binFlag,
@@ -119,6 +119,8 @@ func init() {
 }
 
 func abigen(c *cli.Context) error {
+	//fmt.Printf("a? %s\n", c.FlagNames())
+
 	utils.CheckExclusive(c, &abiFlag, &jsonFlag, &solFlag, &vyFlag) // Only one source can be selected.
 	if c.String(pkgFlag.Name) == "" {
 		utils.Fatalf("No destination package specified (--pkg)")

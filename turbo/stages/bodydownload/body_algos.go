@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/maps"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -40,9 +41,10 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	bd.delivered.Clear()
 	bd.deliveredCount = 0
 	bd.wastedCount = 0
-	bd.deliveriesH = make(map[uint64]*types.Header)
-	bd.requests = make(map[uint64]*BodyRequest)
-	bd.peerMap = make(map[[64]byte]int)
+	maps.Clear(bd.deliveriesH)
+	maps.Clear(bd.requests)
+	maps.Clear(bd.peerMap)
+	bd.ClearBodyCache()
 	headHeight = bodyProgress
 	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
 	if err != nil {
@@ -136,17 +138,23 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			}
 		}
 		if request {
-			if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash ||
-				(header.WithdrawalsHash != nil && *header.WithdrawalsHash != types.EmptyRootHash) {
+			if header.UncleHash == types.EmptyUncleHash && header.TxHash == types.EmptyRootHash &&
+				(header.WithdrawalsHash == nil || *header.WithdrawalsHash == types.EmptyRootHash) {
+				// Empty block body
+				body := &types.RawBody{}
+				if header.WithdrawalsHash != nil {
+					// implies *header.WithdrawalsHash == types.EmptyRootHash
+					body.Withdrawals = make([]*types.Withdrawal, 0)
+				}
+				bd.addBodyToCache(blockNum, body)
+				request = false
+			} else {
 				// Perhaps we already have this block
 				block := rawdb.ReadBlock(tx, hash, blockNum)
 				if block != nil {
 					bd.addBodyToCache(blockNum, block.RawBody())
 					request = false
 				}
-			} else {
-				bd.addBodyToCache(blockNum, &types.RawBody{})
-				request = false
 			}
 		}
 		if request {
@@ -412,8 +420,8 @@ func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 	}
 }
 
-func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, delete bool) *types.RawBody {
-	if delete {
+func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, del bool) *types.RawBody {
+	if del {
 		if item, ok := bd.bodyCache.Delete(BodyTreeItem{blockNum: blockNum}); ok {
 			bd.bodyCacheSize -= item.payloadSize
 			return item.rawBody

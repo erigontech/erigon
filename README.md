@@ -1,6 +1,8 @@
 # Erigon
 
-Erigon is an implementation of Ethereum (execution client), on the efficiency frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node) by default.
+Erigon is an implementation of Ethereum (execution client with light client for consensus layer), on the efficiency
+frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
+by default.
 
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
@@ -24,7 +26,7 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
     + [Faster Initial Sync](#faster-initial-sync)
     + [JSON-RPC daemon](#json-rpc-daemon)
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
-    + [Grafana dashboar god](#grafana-dashboard)
+    + [Grafana dashboard](#grafana-dashboard)
 - [Documentation](#documentation)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
@@ -39,7 +41,8 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
 **Disclaimer**: this software is currently a tech preview. We will do our best to keep it stable and make no breaking
 changes but we don't guarantee anything. Things can and will break.
 
-**Important defaults**: Erigon is an Archive Node by default (to remove history see: `--prune` flags in `erigon --help`). We don't allow change this flag after first start.
+**Important defaults**: Erigon is an Archive Node by default (to remove history see: `--prune` flags
+in `erigon --help`). We don't allow change this flag after first start.
 
 <code>In-depth links are marked by the microscope sign (🔬) </code>
 
@@ -54,16 +57,14 @@ System Requirements
 
 * Gnosis Chain Archive: 370GB (January 2023).
 
-* BSC Archive: 7TB. BSC Full: 1TB.
-
-* Polygon Mainnet Archive: 5TB. Polygon Mumbai Archive: 1TB.
+* Polygon Mainnet Archive: 5TB. Polygon Mumbai Archive: 1TB. (April 2022).
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture.
 
-[Golang version >= 1.18](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
+[Golang version >= 1.19](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
@@ -94,39 +95,41 @@ make erigon
 ./build/bin/erigon
 ```
 
-Default `--snapshots` for `mainnet`, `goerli`, `gnosis`, `bsc`. Other networks now have default `--snapshots=false`. Increase
+Default `--snapshots` for `mainnet`, `goerli`, `gnosis`, `chiado`. Other networks now have default `--snapshots=false`.
+Increase
 download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code>
 
 Use `--datadir` to choose where to store data.
 
-Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet, and `--chain=mumbai` for Polygon Mumbai.
-For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside Erigon (https://docs.gnosischain.com/node/guide/beacon).
+Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
+and `--chain=mumbai` for Polygon Mumbai.
+For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
+Erigon (https://docs.gnosischain.com/node/guide/beacon).
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
 
 ### Datadir structure
 
-- chaindata: recent blocks, state, recent state history. low-latency disk recommended. 
+- chaindata: recent blocks, state, recent state history. low-latency disk recommended.
 - snapshots: old blocks, old state history. can symlink/mount it to cheaper disk. mostly immutable.
 - temp: can grow to ~100gb, but usually empty. can symlink/mount it to cheaper disk.
 - txpool: pending transactions. safe to remove.
 - nodes:  p2p peers. safe to remove.
 
-
 ### Logging
 
-_Flags:_ 
+_Flags:_
 
-  - `verbosity`
-  - `log.console.verbosity` (overriding alias for `verbosity`)
-  - `log.json`
-  - `log.console.json` (alias for `log.json`)
-  - `log.dir.path`
-  - `log.dir.verbosity`
-  - `log.dir.json`
+- `verbosity`
+- `log.console.verbosity` (overriding alias for `verbosity`)
+- `log.json`
+- `log.console.json` (alias for `log.json`)
+- `log.dir.path`
+- `log.dir.verbosity`
+- `log.dir.json`
 
-
-In order to log only to the stdout/stderr the `--verbosity` (or `log.console.verbosity`) flag can be used to supply an int value specifying the highest output log level:
+In order to log only to the stdout/stderr the `--verbosity` (or `log.console.verbosity`) flag can be used to supply an
+int value specifying the highest output log level:
 
 ```
   LvlCrit = 0
@@ -137,9 +140,12 @@ In order to log only to the stdout/stderr the `--verbosity` (or `log.console.ver
   LvlTrace = 5
 ```
 
-To set an output dir for logs to be collected on disk, please set `--log.dir.path`. The flag `--log.dir.verbosity` is also available to control the verbosity of this logging, with the same int value as above, or the string value e.g. 'debug' or 'info'. Default verbosity is 'debug' (4), for disk logging.
+To set an output dir for logs to be collected on disk, please set `--log.dir.path`. The flag `--log.dir.verbosity` is
+also available to control the verbosity of this logging, with the same int value as above, or the string value e.g. '
+debug' or 'info'. Default verbosity is 'debug' (4), for disk logging.
 
-Log format can be set to json by the use of the boolean flags `log.json` or `log.console.json`, or for the disk output `--log.dir.json`.
+Log format can be set to json by the use of the boolean flags `log.json` or `log.console.json`, or for the disk
+output `--log.dir.json`.
 
 ### Modularity
 
@@ -151,7 +157,8 @@ How to start Erigon's services as separated processes, see in [docker-compose.ym
 
 ### Embedded Consensus Layer
 
-By default, on Ethereum Mainnet, Görli, and Sepolia, the Engine API is disabled in favour of the Erigon native Embedded Consensus Layer.
+By default, on Ethereum Mainnet, Görli, and Sepolia, the Engine API is disabled in favour of the Erigon native Embedded
+Consensus Layer.
 If you want to use an external Consensus Layer, run Erigon with flag `--externalcl`.
 _Warning:_ Staking (block production) is not possible with the embedded CL – use `--externalcl` instead.
 
@@ -202,7 +209,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.18
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.19
     * GNU CC Compiler at least version 10 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
@@ -369,7 +376,8 @@ Examples of stages are:
 
 ### JSON-RPC daemon
 
-Most of Erigon's components (txpool, rpcdaemon, snapshots downloader, sentry, ...) can work inside Erigon and as independent process.
+Most of Erigon's components (txpool, rpcdaemon, snapshots downloader, sentry, ...) can work inside Erigon and as
+independent process.
 
 To enable built-in RPC server: `--http` and `--ws` (sharing same port with http)
 
@@ -492,7 +500,8 @@ Windows support for docker-compose is not ready yet. Please help us with .ps1 po
 
 `docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
 
-### 
+###  
+
 old data
 
 Disabled by default. To enable see `./build/bin/erigon --help` for flags `--prune`
@@ -538,11 +547,11 @@ node.
 
 #### `RPC` ports
 
-| Port | Protocol |      Purpose      | Expose  |
-|:----:|:--------:|:-----------------:|:-------:|
-| 8545 |   TCP    | HTTP & WebSockets | Private |
+| Port | Protocol |           Purpose           | Expose  |
+|:----:|:--------:|:---------------------------:|:-------:|
+| 8545 |   TCP    | HTTP & WebSockets & GraphQL | Private |
 
-Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same
+Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket and GraphQL are on the same
 port.
 
 #### `sentry` ports
@@ -558,12 +567,11 @@ Port
 
 #### `sentinel` ports
 
-| Port  | Protocol  |     Purpose      | Expose  |
-|:-----:|:---------:|:----------------:|:-------:|
-| 4000  |    UDP    |     Peering      | Public  |
-| 4001  |    TCP    |     Peering      | Public  |
-| 7777  |    TCP    | gRPC Connections | Private |
-
+| Port | Protocol |     Purpose      | Expose  |
+|:----:|:--------:|:----------------:|:-------:|
+| 4000 |   UDP    |     Peering      | Public  |
+| 4001 |   TCP    |     Peering      | Public  |
+| 7777 |   TCP    | gRPC Connections | Private |
 
 #### Other ports
 
@@ -577,7 +585,8 @@ you'll have to change one if you want to run both at the same time. use `--help`
 
 Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 
-Hetzner may want strict firewall rules, like: 
+Hetzner may want strict firewall rules, like:
+
 ```
 0.0.0.0/8             "This" Network             RFC 1122, Section 3.2.1.3
 10.0.0.0/8            Private-Use Networks       RFC 1918

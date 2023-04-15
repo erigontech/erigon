@@ -74,6 +74,9 @@ type Config struct {
 	// relative), then that specific path is enforced. An empty path disables IPC.
 	IPCPath string
 
+	// GraphQLEnabled decides if we enable the GraphQL endpoint or not.
+	GraphQLEnabled bool
+
 	// HTTPHost is the host interface on which to start the HTTP RPC server. If this
 	// field is empty, no HTTP API endpoint will be started.
 	HTTPHost string

@@ -1,19 +1,21 @@
 package devnetutils
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os/exec"
 	"strconv"
 	"strings"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
+	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
-
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 )
 
 // ClearDevDB cleans up the dev folder used for the operations
@@ -116,7 +118,7 @@ func HashSlicesAreEqual(s1, s2 []libcommon.Hash) bool {
 	return true
 }
 
-func BuildLog(hash libcommon.Hash, blockNum string, address libcommon.Address, topics []libcommon.Hash, data hexutil.Bytes, txIndex hexutil.Uint, blockHash libcommon.Hash, index hexutil.Uint, removed bool) rpctest.Log {
+func BuildLog(hash libcommon.Hash, blockNum string, address libcommon.Address, topics []libcommon.Hash, data hexutility.Bytes, txIndex hexutil.Uint, blockHash libcommon.Hash, index hexutil.Uint, removed bool) rpctest.Log {
 	return rpctest.Log{
 		Address:     address,
 		Topics:      topics,
@@ -154,4 +156,20 @@ func CompareLogEvents(expected, actual rpctest.Log) ([]error, bool) {
 func GenerateTopic(signature string) []libcommon.Hash {
 	hashed := crypto.Keccak256([]byte(signature))
 	return []libcommon.Hash{libcommon.BytesToHash(hashed)}
+}
+
+// RandomNumberInRange returns a random number between min and max NOT inclusive
+func RandomNumberInRange(min, max uint64) (uint64, error) {
+	if max <= min {
+		return 0, fmt.Errorf("Invalid range: upper bound %d less or equal than lower bound %d", max, min)
+	}
+
+	diff := int64(max - min)
+
+	n, err := rand.Int(rand.Reader, big.NewInt(diff))
+	if err != nil {
+		return 0, err
+	}
+
+	return uint64(n.Int64() + int64(min)), nil
 }

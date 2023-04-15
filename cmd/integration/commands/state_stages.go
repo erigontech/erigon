@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -52,12 +53,12 @@ Examples:
 --chaindata.reference # When finish all cycles, does comparison to this db file.
 		`,
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		ethConfig.Genesis = core.DefaultGenesisBlockByChainName(chain)
+		ethConfig.Genesis = core.GenesisBlockByChainName(chain)
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
@@ -65,23 +66,26 @@ Examples:
 		defer db.Close()
 
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
-			log.Error("Error", "err", err)
-			return nil
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
 
 		if referenceChaindata != "" {
 			if err := compareStates(ctx, chaindata, referenceChaindata); err != nil {
-				log.Error(err.Error())
-				return nil
+				if !errors.Is(err, context.Canceled) {
+					log.Error(err.Error())
+				}
+				return
 			}
 		}
-		return nil
 	},
 }
 
 var loopIhCmd = &cobra.Command{
 	Use: "loop_ih",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
@@ -90,17 +94,17 @@ var loopIhCmd = &cobra.Command{
 			unwind = 1
 		}
 		if err := loopIh(db, ctx, unwind); err != nil {
-			log.Error("Error", "err", err)
-			return err
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
-
-		return nil
 	},
 }
 
 var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
@@ -108,15 +112,16 @@ var loopExecCmd = &cobra.Command{
 			unwind = 1
 		}
 		if err := loopExec(db, ctx, unwind); err != nil {
-			log.Error("Error", "err", err)
-			return nil
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
-
-		return nil
 	},
 }
 
 func init() {
+	withConfig(stateStages)
 	withDataDir2(stateStages)
 	withReferenceChaindata(stateStages)
 	withUnwind(stateStages)
@@ -127,24 +132,23 @@ func init() {
 	withChain(stateStages)
 	withHeimdall(stateStages)
 	withWorkers(stateStages)
-
 	rootCmd.AddCommand(stateStages)
 
+	withConfig(loopIhCmd)
 	withDataDir(loopIhCmd)
 	withBatchSize(loopIhCmd)
 	withUnwind(loopIhCmd)
 	withChain(loopIhCmd)
 	withHeimdall(loopIhCmd)
-
 	rootCmd.AddCommand(loopIhCmd)
 
+	withConfig(loopExecCmd)
 	withDataDir(loopExecCmd)
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
 	withChain(loopExecCmd)
 	withHeimdall(loopExecCmd)
 	withWorkers(loopExecCmd)
-
 	rootCmd.AddCommand(loopExecCmd)
 }
 
@@ -191,7 +195,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	stateStages.DisableStages(stages.Snapshots, stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 	changesAcc := shards.NewAccumulator()
 
-	genesis := core.DefaultGenesisBlockByChainName(chain)
+	genesis := core.GenesisBlockByChainName(chain)
 	syncCfg := ethconfig.Defaults.Sync
 	syncCfg.ExecWorkerCount = int(workers)
 	syncCfg.ReconWorkerCount = int(reconWorkers)
@@ -376,7 +380,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		defer tx.Rollback()
 
 		// allow backward loop
-		if unwind > 0 && unwindEvery == 0 {
+		if unwind > 0 && unwindEvery > 0 {
 			stopAt -= unwind
 		}
 	}
@@ -521,7 +525,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	from := progress(tx, stages.Execution)
 	to := from + unwind
 
-	genesis := core.DefaultGenesisBlockByChainName(chain)
+	genesis := core.GenesisBlockByChainName(chain)
 	syncCfg := ethconfig.Defaults.Sync
 	syncCfg.ExecWorkerCount = int(workers)
 	syncCfg.ReconWorkerCount = int(reconWorkers)

@@ -25,7 +25,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -101,6 +101,37 @@ func ComputeForkDigest(
 	}
 
 	return ComputeForkDigestForVersion(currentForkVersion, genesisConfig.GenesisValidatorRoot)
+}
+
+func ComputeNextForkDigest(
+	beaconConfig *clparams.BeaconChainConfig,
+	genesisConfig *clparams.GenesisConfig,
+) ([4]byte, error) {
+	if genesisConfig.GenesisTime == 0 {
+		return [4]byte{}, errors.New("genesis time is not set")
+	}
+	if genesisConfig.GenesisValidatorRoot == (libcommon.Hash{}) {
+		return [4]byte{}, errors.New("genesis validators root is not set")
+	}
+
+	currentEpoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
+	// Retrieve next fork version.
+	nextForkIndex := 0
+	forkList := forkList(beaconConfig.ForkVersionSchedule)
+	for _, fork := range forkList {
+		if currentEpoch >= fork.epoch {
+			nextForkIndex++
+			continue
+		}
+		break
+	}
+	nextForkIndex--
+	if nextForkIndex == len(forkList)-1 {
+		return [4]byte{}, nil
+	}
+	nextForkIndex++
+
+	return ComputeForkDigestForVersion(forkList[nextForkIndex].version, genesisConfig.GenesisValidatorRoot)
 }
 
 type fork struct {
@@ -190,7 +221,7 @@ func ComputeDomain(
 }
 
 func ComputeSigningRoot(
-	obj ssz_utils.HashableSSZ,
+	obj ssz.HashableSSZ,
 	domain []byte,
 ) ([32]byte, error) {
 	objRoot, err := obj.HashSSZ()

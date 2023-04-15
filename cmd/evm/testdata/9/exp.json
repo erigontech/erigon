@@ -49,6 +49,7 @@
       }
     ],
     "currentDifficulty": "0x20000",
-    "gasUsed": "0xcde4"
+    "gasUsed": "0xcde4",
+    "dataGasUsed": "0x0"
   }
 }

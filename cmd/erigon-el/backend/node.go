@@ -58,12 +58,6 @@ func NewNodConfigUrfave(ctx *cli.Context) *nodecfg.Config {
 		log.Info("Starting Erigon on Rinkeby testnet...")
 	case networkname.GoerliChainName:
 		log.Info("Starting Erigon on Görli testnet...")
-	case networkname.BSCChainName:
-		log.Info("Starting Erigon on BSC mainnet...")
-	case networkname.ChapelChainName:
-		log.Info("Starting Erigon on Chapel testnet...")
-	case networkname.RialtoChainName:
-		log.Info("Starting Erigon on Chapel testnet...")
 	case networkname.DevChainName:
 		log.Info("Starting Erigon in ephemeral dev mode...")
 	case networkname.MumbaiChainName:
@@ -119,7 +113,7 @@ func NewNodeConfig() *nodecfg.Config {
 	nodeConfig := nodecfg.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {
-		nodeConfig.Version = params.VersionWithCommit(commit, "")
+		nodeConfig.Version = params.VersionWithCommit(commit)
 	} else {
 		nodeConfig.Version = params.Version
 	}

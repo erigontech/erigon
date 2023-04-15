@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
@@ -194,6 +196,12 @@ var (
 		Usage: "Maximum amount of time to wait for the answer from EVM call.",
 		Value: rpccfg.DefaultEvmCallTimeout,
 	}
+
+	TxPoolCommitEvery = cli.DurationFlag{
+		Name:  "txpool.commit.every",
+		Usage: "How often transactions should be committed to the storage",
+		Value: txpoolcfg.DefaultConfig.CommitEvery,
+	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -356,6 +364,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		TLSCACert:   cfg.TLSCACert,
 		TLSCertfile: cfg.TLSCertFile,
 
+		GraphQLEnabled:           ctx.Bool(utils.GraphQLEnabledFlag.Name),
 		HttpListenAddress:        ctx.String(utils.HTTPListenAddrFlag.Name),
 		HttpPort:                 ctx.Int(utils.HTTPPortFlag.Name),
 		AuthRpcHTTPListenAddress: ctx.String(utils.AuthRpcAddr.Name),

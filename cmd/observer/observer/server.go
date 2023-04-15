@@ -87,7 +87,7 @@ func NewServer(flags CommandFlags) (*Server, error) {
 }
 
 func makeLocalNode(nodeDBPath string, privateKey *ecdsa.PrivateKey, chain string) (*enode.LocalNode, error) {
-	db, err := enode.OpenDB(nodeDBPath)
+	db, err := enode.OpenDB(nodeDBPath, "")
 	if err != nil {
 		return nil, err
 	}

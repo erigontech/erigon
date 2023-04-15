@@ -45,6 +45,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//}
 
 	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts, current.Withdrawals)
+	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts}
 	*current = MiningBlock{} // hack to clean global data
 
 	//sealHash := engine.SealHash(block.Header())
@@ -56,7 +57,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//prev = sealHash
 
 	if cfg.miningState.MiningResultPOSCh != nil {
-		cfg.miningState.MiningResultPOSCh <- block
+		cfg.miningState.MiningResultPOSCh <- blockWithReceipts
 		return nil
 	}
 	// Tests may set pre-calculated nonce

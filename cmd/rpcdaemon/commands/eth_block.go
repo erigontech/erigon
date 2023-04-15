@@ -231,9 +231,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields)
-	if chainConfig.Bor != nil {
-		response["miner"], _ = ecrecover(b.Header(), chainConfig.Bor)
-	}
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {

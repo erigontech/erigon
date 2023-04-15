@@ -25,9 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/maps"
-
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -120,29 +117,21 @@ func (sdb *IntraBlockState) Error() error {
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
-	maps.Clear(sdb.nilAccounts)
-	maps.Clear(sdb.stateObjects)
-	maps.Clear(sdb.stateObjectsDirty)
+	//if len(sdb.nilAccounts) == 0 || len(sdb.stateObjects) == 0 || len(sdb.stateObjectsDirty) == 0 || len(sdb.balanceInc) == 0 {
+	//	log.Warn("zero", "len(sdb.nilAccounts)", len(sdb.nilAccounts),
+	//		"len(sdb.stateObjects)", len(sdb.stateObjects),
+	//		"len(sdb.stateObjectsDirty)", len(sdb.stateObjectsDirty),
+	//		"len(sdb.balanceInc)", len(sdb.balanceInc))
+	//}
+	sdb.nilAccounts = make(map[libcommon.Address]struct{})
+	sdb.stateObjects = make(map[libcommon.Address]*stateObject)
+	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
+	sdb.logs = make(map[libcommon.Hash][]*types.Log)
+	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 	sdb.thash = libcommon.Hash{}
 	sdb.bhash = libcommon.Hash{}
 	sdb.txIndex = 0
-	maps.Clear(sdb.logs)
 	sdb.logSize = 0
-	//sdb.clearJournalAndRefund()
-	//sdb.accessList = newAccessList() // this reset by .Prepare() method
-	maps.Clear(sdb.balanceInc)
-
-	//sdb.nilAccounts = make(map[libcommon.Address]struct{})
-	//sdb.stateObjects = make(map[libcommon.Address]*stateObject)
-	//sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
-	//sdb.thash = libcommon.Hash{}
-	//sdb.bhash = libcommon.Hash{}
-	//sdb.txIndex = 0
-	//sdb.logs = make(map[libcommon.Hash][]*types.Log)
-	//sdb.logSize = 0
-	//sdb.clearJournalAndRefund()
-	//sdb.accessList = newAccessList()
-	//sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
@@ -246,11 +235,11 @@ func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) int {
 	if stateObject.code != nil {
 		return len(stateObject.code)
 	}
-	len, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation, stateObject.data.CodeHash)
+	l, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation, stateObject.data.CodeHash)
 	if err != nil {
 		sdb.setErrorUnsafe(err)
 	}
-	return len
+	return l
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
@@ -514,21 +503,19 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 		if previous != nil && previous.selfdestructed {
 			prevInc = previous.data.Incarnation
 		} else {
-			inc, err := sdb.stateReader.ReadAccountIncarnation(addr)
-			if sdb.trace && err != nil {
-				log.Error("error while ReadAccountIncarnation", "err", err)
-			}
-			if err == nil {
+			if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
 				prevInc = inc
+			} else {
+				sdb.savedErr = err
 			}
 		}
 	}
 
 	newObj := sdb.createObject(addr, previous)
-	if previous != nil {
+	if previous != nil && !previous.selfdestructed {
 		newObj.data.Balance.Set(&previous.data.Balance)
-		newObj.data.Initialised = true
 	}
+	newObj.data.Initialised = true
 
 	if contractCreation {
 		newObj.created = true

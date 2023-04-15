@@ -82,11 +82,6 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	// If all checks passed, validate any special fields for hard forks
-	if err := misc.VerifyForkHashes(c.chainConfig, header, false); err != nil {
-		return err
-	}
-
 	// All basic checks passed, verify cascading fields
 	return c.verifyCascadingFields(chain, header, parents)
 }
@@ -135,7 +130,7 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 		// Verify the header's EIP-1559 attributes.
 		return err
 	}
-	if !chain.Config().IsSharding(header.Time) {
+	if !chain.Config().IsCancun(header.Time) {
 		if header.ExcessDataGas != nil {
 			return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
 		}
@@ -176,7 +171,7 @@ func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	for snap == nil {
 		// If an in-memory snapshot was found, use that
 		if s, ok := c.recents.Get(hash); ok {
-			snap = s.(*Snapshot)
+			snap = s
 			break
 		}
 		// If an on-disk checkpoint snapshot can be found, use that

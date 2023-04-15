@@ -27,11 +27,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
@@ -47,6 +49,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -69,7 +72,7 @@ type MockSentry struct {
 	DB             kv.RwDB
 	Dirs           datadir.Dirs
 	Engine         consensus.Engine
-	gspec          *core.Genesis
+	gspec          *types.Genesis
 	ChainConfig    *chain.Config
 	Sync           *stagedsync.Sync
 	MiningSync     *stagedsync.Sync
@@ -97,6 +100,7 @@ type MockSentry struct {
 	txPoolDB         kv.RwDB
 
 	HistoryV3      bool
+	TransactionsV3 bool
 	agg            *libstate.AggregatorV3
 	BlockSnapshots *snapshotsync.RoSnapshots
 }
@@ -199,20 +203,20 @@ func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*ptypes.NodeInf
 	return nil, nil
 }
 
-func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool) *MockSentry {
+func MockWithGenesis(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool) *MockSentry {
 	return MockWithGenesisPruneMode(t, gspec, key, prune.DefaultMode, withPosDownloader)
 }
 
-func MockWithGenesisEngine(t *testing.T, gspec *core.Genesis, engine consensus.Engine, withPosDownloader bool) *MockSentry {
+func MockWithGenesisEngine(t *testing.T, gspec *types.Genesis, engine consensus.Engine, withPosDownloader bool) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	return MockWithEverything(t, gspec, key, prune.DefaultMode, engine, false, withPosDownloader)
 }
 
-func MockWithGenesisPruneMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, withPosDownloader bool) *MockSentry {
+func MockWithGenesisPruneMode(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, withPosDownloader bool) *MockSentry {
 	return MockWithEverything(t, gspec, key, prune, ethash.NewFaker(), false, withPosDownloader)
 }
 
-func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool, withPosDownloader bool) *MockSentry {
+func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool, withPosDownloader bool) *MockSentry {
 	var tmpdir string
 	if t != nil {
 		tmpdir = t.TempDir()
@@ -234,7 +238,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	if t != nil {
 		db = memdb.NewTestDB(t)
 	} else {
-		db = memdb.New()
+		db = memdb.New(tmpdir)
 	}
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	_ = db.Update(ctx, func(tx kv.RwTx) error {
@@ -249,7 +253,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		if err != nil {
 			panic(err)
 		}
-		if err := agg.ReopenFolder(); err != nil {
+		if err := agg.OpenFolder(); err != nil {
 			panic(err)
 		}
 	}
@@ -262,6 +266,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil)
+	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap)
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
 		t:           t,
@@ -279,13 +284,14 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		UpdateHead: func(Ctx context.Context, headHeight, headTime uint64, hash libcommon.Hash, td *uint256.Int) {
 		},
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
-		BlockSnapshots: snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap),
+		BlockSnapshots: allSnapshots,
 		HistoryV3:      cfg.HistoryV3,
+		TransactionsV3: cfg.TransactionsV3,
 	}
 	if t != nil {
 		t.Cleanup(mock.Close)
 	}
-	blockReader := snapshotsync.NewBlockReaderWithSnapshots(mock.BlockSnapshots)
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(mock.BlockSnapshots, mock.TransactionsV3)
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
@@ -300,7 +306,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 
 	if !cfg.DeprecatedTxPool.Disable {
-		poolCfg := txpool.DefaultConfig
+		poolCfg := txpoolcfg.DefaultConfig
 		newTxs := make(chan types2.Announcements, 1024)
 		if t != nil {
 			t.Cleanup(func() {
@@ -313,7 +319,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		if err != nil {
 			t.Fatal(err)
 		}
-		mock.txPoolDB = memdb.NewPoolDB()
+		mock.txPoolDB = memdb.NewPoolDB(tmpdir)
 
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
 
@@ -331,7 +337,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec)
+	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec, "")
 	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
 		if t != nil {
 			t.Fatal(err)
@@ -340,6 +346,28 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		}
 	}
 
+	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+		notifications *shards.Notifications) error {
+		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
+		stateSync, err := NewInMemoryExecution(ctx, mock.DB, &ethconfig.Defaults, mock.sentriesClient, dirs, notifications, allSnapshots, agg)
+		if err != nil {
+			return err
+		}
+		// We start the mining step
+		if err := StateStep(ctx, batch, stateSync, mock.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain, true /* quiet */); err != nil {
+			log.Warn("Could not validate block", "err", err)
+			return err
+		}
+		progress, err := stages.GetStageProgress(batch, stages.IntermediateHashes)
+		if err != nil {
+			return err
+		}
+		if progress < header.Number.Uint64() {
+			return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, header.Number.Uint64())
+		}
+		return nil
+	}
+	forkValidator := engineapi.NewForkValidator(1, inMemoryExecution, dirs.Tmp)
 	networkID := uint64(1)
 	mock.sentriesClient, err = sentry.NewMultiClient(
 		mock.DB,
@@ -352,7 +380,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		cfg.Sync,
 		blockReader,
 		false,
-		nil,
+		forkValidator,
+		cfg.DropUselessPeers,
 	)
 
 	mock.sentriesClient.IsMock = true
@@ -410,8 +439,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.BlockSnapshots,
 				blockReader,
 				cfg.HistoryV3,
+				cfg.TransactionsV3,
 			),
-			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockRetire, nil),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockRetire, mock.sentriesClient.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				prune,
@@ -432,12 +462,12 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.agg,
 			),
 			stagedsync.StageHashStateCfg(mock.DB, mock.Dirs, cfg.HistoryV3, mock.agg),
-			stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV3, mock.agg),
+			stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, mock.sentriesClient.Hd, cfg.HistoryV3, mock.agg),
 			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp),
 			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.BlockSnapshots, mock.ChainConfig.Bor),
-			stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, nil),
+			stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, forkValidator),
 			!withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
@@ -462,9 +492,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.MiningSync = stagedsync.New(
 		stagedsync.MiningStages(mock.Ctx,
 			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, dirs.Tmp),
-			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, nil),
+			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, nil, mock.BlockSnapshots, cfg.TransactionsV3),
 			stagedsync.StageHashStateCfg(mock.DB, dirs, cfg.HistoryV3, mock.agg),
-			stagedsync.StageTrieCfg(mock.DB, false, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV3, mock.agg),
+			stagedsync.StageTrieCfg(mock.DB, false, true, false, dirs.Tmp, blockReader, mock.sentriesClient.Hd, cfg.HistoryV3, mock.agg),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, miningCancel),
 		),
 		stagedsync.MiningUnwindOrder,
@@ -490,9 +520,9 @@ func Mock(t *testing.T) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.TestChainConfig
-	gspec := &core.Genesis{
+	gspec := &types.Genesis{
 		Config: chainConfig,
-		Alloc: core.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},
 	}
@@ -504,9 +534,9 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.TestChainConfig
-	gspec := &core.Genesis{
+	gspec := &types.Genesis{
 		Config: chainConfig,
-		Alloc: core.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},
 	}
@@ -520,13 +550,30 @@ func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.AllProtocolChanges
 	chainConfig.TerminalTotalDifficulty = libcommon.Big0
-	gspec := &core.Genesis{
+	gspec := &types.Genesis{
 		Config: chainConfig,
-		Alloc: core.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},
 	}
 	return MockWithGenesis(t, gspec, key, withPosDownloader)
+}
+
+func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
+	funds := big.NewInt(1 * params.Ether)
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	address := crypto.PubkeyToAddress(key.PublicKey)
+	chainConfig := params.TestChainAuraConfig
+	chainConfig.TerminalTotalDifficulty = libcommon.Big0
+	chainConfig.TerminalTotalDifficultyPassed = true
+	gspec := &types.Genesis{
+		Config: chainConfig,
+		Alloc: types.GenesisAlloc{
+			address: {Balance: funds},
+		},
+	}
+	engine := ethconsensusconfig.CreateConsensusEngine(chainConfig, chainConfig.Aura, nil, true, "", "", true, "", nil, false /* readonly */, nil)
+	return MockWithGenesisEngine(t, gspec, engine, withPosDownloader)
 }
 
 func (ms *MockSentry) EnableLogs() {

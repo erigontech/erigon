@@ -3,22 +3,26 @@ package commands
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -26,7 +30,9 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rpc"
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -45,9 +51,9 @@ type EthAPI interface {
 	GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error)
 	GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error)
 	GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, txIndex hexutil.Uint) (*RPCTransaction, error)
-	GetRawTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (hexutil.Bytes, error)
-	GetRawTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index hexutil.Uint) (hexutil.Bytes, error)
-	GetRawTransactionByHash(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
+	GetRawTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (hexutility.Bytes, error)
+	GetRawTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index hexutil.Uint) (hexutility.Bytes, error)
+	GetRawTransactionByHash(ctx context.Context, hash common.Hash) (hexutility.Bytes, error)
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
@@ -73,7 +79,7 @@ type EthAPI interface {
 	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
-	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
+	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error)
 
 	// System related (see ./eth_system.go)
 	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
@@ -83,13 +89,13 @@ type EthAPI interface {
 	GasPrice(_ context.Context) (*hexutil.Big, error)
 
 	// Sending related (see ./eth_call.go)
-	Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error)
+	Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutility.Bytes, error)
 	EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error)
-	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
+	SendRawTransaction(ctx context.Context, encodedTx hexutility.Bytes) (common.Hash, error)
 	SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
-	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
+	Sign(ctx context.Context, _ common.Address, _ hexutility.Bytes) (hexutility.Bytes, error)
 	SignTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
-	GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error)
+	GetProof(ctx context.Context, address common.Address, storageKeys []common.Hash, blockNr rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
 	CreateAccessList(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)
@@ -102,15 +108,13 @@ type EthAPI interface {
 }
 
 type BaseAPI struct {
-	stateCache   kvcache.Cache // thread-safe
-	blocksLRU    *lru.Cache    // thread-safe
+	stateCache   kvcache.Cache                         // thread-safe
+	blocksLRU    *lru.Cache[common.Hash, *types.Block] // thread-safe
 	filters      *rpchelper.Filters
-	_chainConfig *chain.Config
-	_genesis     *types.Block
-	_genesisLock sync.RWMutex
-
-	_historyV3     *bool
-	_historyV3Lock sync.RWMutex
+	_chainConfig atomic.Pointer[chain.Config]
+	_genesis     atomic.Pointer[types.Block]
+	_historyV3   atomic.Pointer[bool]
+	_pruneMode   atomic.Pointer[prune.Mode]
 
 	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
@@ -118,19 +122,20 @@ type BaseAPI struct {
 	_engine      consensus.EngineReader
 
 	evmCallTimeout time.Duration
+	dirs           datadir.Dirs
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.AggregatorV3, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.AggregatorV3, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
 	}
-	blocksLRU, err := lru.New(blocksLRUSize)
+	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
 	if err != nil {
 		panic(err)
 	}
 
-	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader, _agg: agg, evmCallTimeout: evmCallTimeout, _engine: engine}
+	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader, _agg: agg, evmCallTimeout: evmCallTimeout, _engine: engine, dirs: dirs}
 }
 
 func (api *BaseAPI) chainConfig(tx kv.Tx) (*chain.Config, error) {
@@ -163,7 +168,7 @@ func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Bl
 func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.(*types.Block), nil
+			return it, nil
 		}
 	}
 	number := rawdb.ReadHeaderNumber(tx, hash)
@@ -177,7 +182,7 @@ func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.B
 func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.(*types.Block), nil
+			return it, nil
 		}
 	}
 	block, _, err := api._blockReader.BlockWithSenders(context.Background(), tx, hash, number)
@@ -204,10 +209,7 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 }
 
 func (api *BaseAPI) historyV3(tx kv.Tx) bool {
-	api._historyV3Lock.RLock()
-	historyV3 := api._historyV3
-	api._historyV3Lock.RUnlock()
-
+	historyV3 := api._historyV3.Load()
 	if historyV3 != nil {
 		return *historyV3
 	}
@@ -216,20 +218,16 @@ func (api *BaseAPI) historyV3(tx kv.Tx) bool {
 		log.Warn("HisoryV3Enabled: read", "err", err)
 		return false
 	}
-	api._historyV3Lock.Lock()
-	api._historyV3 = &enabled
-	api._historyV3Lock.Unlock()
+	api._historyV3.Store(&enabled)
 	return enabled
 }
 
 func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*chain.Config, *types.Block, error) {
-	api._genesisLock.RLock()
-	cc, genesisBlock := api._chainConfig, api._genesis
-	api._genesisLock.RUnlock()
-
-	if cc != nil {
+	cc, genesisBlock := api._chainConfig.Load(), api._genesis.Load()
+	if cc != nil && genesisBlock != nil {
 		return cc, genesisBlock, nil
 	}
+
 	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
 		return nil, nil, err
@@ -239,10 +237,8 @@ func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*chain.Config, *types.Bloc
 		return nil, nil, err
 	}
 	if cc != nil && genesisBlock != nil {
-		api._genesisLock.Lock()
-		api._genesis = genesisBlock
-		api._chainConfig = cc
-		api._genesisLock.Unlock()
+		api._genesis.Store(genesisBlock)
+		api._chainConfig.Store(cc)
 	}
 	return cc, genesisBlock, nil
 }
@@ -267,6 +263,52 @@ func (api *BaseAPI) headerByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.
 		return nil, err
 	}
 	return api._blockReader.Header(context.Background(), tx, h, n)
+}
+
+// checks the pruning state to see if we would hold information about this
+// block in state history or not.  Some strange issues arise getting account
+// history for blocks that have been pruned away giving nonce too low errors
+// etc. as red herrings
+func (api *BaseAPI) checkPruneHistory(tx kv.Tx, block uint64) error {
+	p, err := api.pruneMode(tx)
+	if err != nil {
+		return err
+	}
+	if p == nil {
+		// no prune info found
+		return nil
+	}
+	if p.History.Enabled() {
+		latest, err := api.blockByRPCNumber(rpc.LatestBlockNumber, tx)
+		if err != nil {
+			return err
+		}
+		if latest == nil {
+			return nil
+		}
+		prunedTo := p.History.PruneTo(latest.Number().Uint64())
+		if block < prunedTo {
+			return fmt.Errorf("history has been pruned for this block")
+		}
+	}
+
+	return nil
+}
+
+func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
+	p := api._pruneMode.Load()
+	if p != nil {
+		return p, nil
+	}
+
+	mode, err := prune.Get(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	api._pruneMode.Store(&mode)
+
+	return p, nil
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -309,7 +351,7 @@ type RPCTransaction struct {
 	Tip                 *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
 	FeeCap              *hexutil.Big       `json:"maxFeePerGas,omitempty"`
 	Hash                common.Hash        `json:"hash"`
-	Input               hexutil.Bytes      `json:"input"`
+	Input               hexutility.Bytes   `json:"input"`
 	Nonce               hexutil.Uint64     `json:"nonce"`
 	To                  *common.Address    `json:"to"`
 	TransactionIndex    *hexutil.Uint64    `json:"transactionIndex"`
@@ -334,10 +376,9 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	chainId := new(uint256.Int).Set(tx.GetChainID())
 	result := &RPCTransaction{
 		Type:                hexutil.Uint64(tx.Type()),
-		ChainID:             (*hexutil.Big)(chainId.ToBig()),
 		Gas:                 hexutil.Uint64(tx.GetGas()),
 		Hash:                tx.Hash(),
-		Input:               hexutil.Bytes(tx.GetData()),
+		Input:               hexutility.Bytes(tx.GetData()),
 		Nonce:               hexutil.Uint64(tx.GetNonce()),
 		To:                  tx.GetTo(),
 		BlobVersionedHashes: tx.GetDataHashes(),
@@ -409,7 +450,7 @@ func newRPCBorTransaction(opaqueTx types.Transaction, txHash common.Hash, blockH
 		GasPrice: (*hexutil.Big)(tx.GasPrice.ToBig()),
 		Gas:      hexutil.Uint64(tx.GetGas()),
 		Hash:     txHash,
-		Input:    hexutil.Bytes(tx.GetData()),
+		Input:    hexutility.Bytes(tx.GetData()),
 		Nonce:    hexutil.Uint64(tx.GetNonce()),
 		From:     common.Address{},
 		To:       tx.GetTo(),
@@ -437,7 +478,7 @@ func newRPCPendingTransaction(tx types.Transaction, current *types.Header, confi
 }
 
 // newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.
-func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) (hexutil.Bytes, error) {
+func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) (hexutility.Bytes, error) {
 	txs := b.Transactions()
 	if index >= uint64(len(txs)) {
 		return nil, nil

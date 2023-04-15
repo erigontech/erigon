@@ -51,7 +51,7 @@ func main() {
 	)
 	flag.Parse()
 
-	_ = logging.GetLogger("bootnode")
+	logging.SetupLogger("bootnode")
 
 	natm, err := nat.Parse(*natdesc)
 	if err != nil {
@@ -117,7 +117,7 @@ func main() {
 
 	printNotice(&nodeKey.PublicKey, *realaddr)
 
-	db, err := enode.OpenDB("")
+	db, err := enode.OpenDB("" /* path */, "" /* tmpDir */)
 	if err != nil {
 		panic(err)
 	}

@@ -16,18 +16,18 @@ var (
 	Mainnet    = fromToml(snapshothashes.Mainnet)
 	Sepolia    = fromToml(snapshothashes.Sepolia)
 	Goerli     = fromToml(snapshothashes.Goerli)
-	Bsc        = fromToml(snapshothashes.Bsc)
 	Mumbai     = fromToml(snapshothashes.Mumbai)
 	BorMainnet = fromToml(snapshothashes.BorMainnet)
 	Gnosis     = fromToml(snapshothashes.Gnosis)
+	Chiado     = fromToml(snapshothashes.Chiado)
 
 	MainnetHistory    = fromToml(snapshothashes.MainnetHistory)
 	SepoliaHistory    = fromToml(snapshothashes.SepoliaHistory)
 	GoerliHistory     = fromToml(snapshothashes.GoerliHistory)
-	BscHistory        = fromToml(snapshothashes.BscHistory)
 	MumbaiHistory     = fromToml(snapshothashes.MumbaiHistory)
 	BorMainnetHistory = fromToml(snapshothashes.BorMainnetHistory)
 	GnosisHistory     = fromToml(snapshothashes.GnosisHistory)
+	ChiadoHistory     = fromToml(snapshothashes.ChiadoHistory)
 )
 
 type PreverifiedItem struct {
@@ -57,10 +57,10 @@ var (
 	MainnetChainSnapshotCfg    = newCfg(Mainnet, MainnetHistory)
 	SepoliaChainSnapshotCfg    = newCfg(Sepolia, SepoliaHistory)
 	GoerliChainSnapshotCfg     = newCfg(Goerli, GoerliHistory)
-	BscChainSnapshotCfg        = newCfg(Bsc, BscHistory)
 	MumbaiChainSnapshotCfg     = newCfg(Mumbai, MumbaiHistory)
 	BorMainnetChainSnapshotCfg = newCfg(BorMainnet, BorMainnetHistory)
 	GnosisChainSnapshotCfg     = newCfg(Gnosis, GnosisHistory)
+	ChiadoChainSnapshotCfg     = newCfg(Chiado, ChiadoHistory)
 )
 
 func newCfg(preverified, preverifiedHistory Preverified) *Cfg {
@@ -107,10 +107,10 @@ var KnownCfgs = map[string]*Cfg{
 	networkname.MainnetChainName:    MainnetChainSnapshotCfg,
 	networkname.SepoliaChainName:    SepoliaChainSnapshotCfg,
 	networkname.GoerliChainName:     GoerliChainSnapshotCfg,
-	networkname.BSCChainName:        BscChainSnapshotCfg,
 	networkname.MumbaiChainName:     MumbaiChainSnapshotCfg,
 	networkname.BorMainnetChainName: BorMainnetChainSnapshotCfg,
 	networkname.GnosisChainName:     GnosisChainSnapshotCfg,
+	networkname.ChiadoChainName:     ChiadoChainSnapshotCfg,
 }
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
@@ -143,7 +143,7 @@ func KnownCfg(networkName string, whiteList, whiteListHistory []string) *Cfg {
 	} else {
 		wlMap2 := make(map[string]struct{}, len(whiteListHistory))
 		for _, fName := range whiteListHistory {
-			wlMap2[fName] = struct{}{}
+			wlMap2[filepath.Join("history", fName)] = struct{}{}
 		}
 
 		result2 = make(Preverified, 0, len(c.PreverifiedHistory))

@@ -9,7 +9,6 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/ledgerwatch/erigon/core"
@@ -44,7 +43,7 @@ func TestGasPrice(t *testing.T) {
 			m := createGasPriceTestKV(t, testCase.chainSize)
 			defer m.DB.Close()
 			stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-			base := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+			base := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3), nil, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 			eth := NewEthAPI(base, m.DB, nil, nil, nil, 5000000, 100_000)
 
 			ctx := context.Background()
@@ -65,9 +64,9 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *stages.MockSentry {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
-		gspec  = &core.Genesis{
+		gspec  = &types.Genesis{
 			Config: params.TestChainConfig,
-			Alloc:  core.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)

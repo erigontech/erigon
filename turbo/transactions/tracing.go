@@ -10,10 +10,12 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
+	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -62,7 +64,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	if parentHeader != nil {
 		excessDataGas = parentHeader.ExcessDataGas
 	}
-	BlockContext := core.NewEVMBlockContext(header, excessDataGas, core.GetHashFn(header, getHeader), engine, nil)
+	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, excessDataGas)
 
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, block.NumberU64())
@@ -73,7 +75,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *cfg, statedb, header, excessDataGas, engine, true /* constCall */)
+				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */, excessDataGas)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
@@ -85,7 +87,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
 
-	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, nil, header, excessDataGas, block.Transactions(), block.Uncles(), cfg, statedb)
+	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, block.Transactions(), block.Uncles(), cfg, statedb, excessDataGas)
 
 	for idx, txn := range block.Transactions() {
 		select {
@@ -99,7 +101,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *cfg, statedb, header, excessDataGas, engine, true /* constCall */)
+				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */, excessDataGas)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
@@ -194,11 +196,21 @@ func TraceTx(
 		stream.WriteObjectField("structLogs")
 		stream.WriteArrayStart()
 	}
-	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
+
+	var result *core.ExecutionResult
+	if config != nil && config.BorTx != nil && *config.BorTx {
+		callmsg := prepareCallMessage(message)
+		result, err = statefull.ApplyBorMessage(*vmenv, callmsg)
+	} else {
+		result, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
+	}
+
 	if err != nil {
 		if streaming {
 			stream.WriteArrayEnd()
 			stream.WriteObjectEnd()
+			stream.WriteMore()
+			stream.WriteObjectField("resultHack") // higher-level func will assing it to NULL
 		} else {
 			stream.WriteNil()
 		}
@@ -230,4 +242,17 @@ func TraceTx(
 		}
 	}
 	return nil
+}
+
+func prepareCallMessage(msg core.Message) statefull.Callmsg {
+	return statefull.Callmsg{
+		CallMsg: ethereum.CallMsg{
+			From:       msg.From(),
+			To:         msg.To(),
+			Gas:        msg.Gas(),
+			GasPrice:   msg.GasPrice(),
+			Value:      msg.Value(),
+			Data:       msg.Data(),
+			AccessList: msg.AccessList(),
+		}}
 }

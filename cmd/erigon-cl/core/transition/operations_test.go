@@ -78,7 +78,7 @@ func getSuccessfulAttesterSlashing() *cltypes.AttesterSlashing {
 
 func TestProcessProposerSlashing(t *testing.T) {
 	unchangingState := getTestState(t)
-	unchangingState.SetValidatorAt(propInd, &cltypes.Validator{
+	unchangingState.SetValidatorAtIndex(propInd, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
 		WithdrawableEpoch: 10000,
@@ -86,7 +86,7 @@ func TestProcessProposerSlashing(t *testing.T) {
 	})
 
 	successState := getTestState(t)
-	successState.SetValidatorAt(propInd, &cltypes.Validator{
+	successState.SetValidatorAtIndex(propInd, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
 		WithdrawableEpoch: 10000,
@@ -170,8 +170,7 @@ func TestProcessProposerSlashing(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, false)
-			err := s.ProcessProposerSlashing(tc.slashing)
+			err := ProcessProposerSlashing(tc.state, tc.slashing)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("unexpected success, want error")
@@ -188,13 +187,13 @@ func TestProcessProposerSlashing(t *testing.T) {
 
 func TestProcessAttesterSlashing(t *testing.T) {
 	unchangingState := getTestState(t)
-	unchangingState.SetValidatorAt(0, &cltypes.Validator{
+	unchangingState.SetValidatorAtIndex(0, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
 		WithdrawableEpoch: 10000,
 		PublicKey:         testPublicKeySlashing,
 	})
-	unchangingState.SetValidatorAt(1, &cltypes.Validator{
+	unchangingState.SetValidatorAtIndex(1, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
 		WithdrawableEpoch: 10000,
@@ -202,13 +201,13 @@ func TestProcessAttesterSlashing(t *testing.T) {
 	})
 
 	successState := getTestState(t)
-	successState.SetValidatorAt(0, &cltypes.Validator{
+	successState.SetValidatorAtIndex(0, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
 		WithdrawableEpoch: 10000,
 		PublicKey:         testPublicKeySlashing,
 	})
-	successState.SetValidatorAt(1, &cltypes.Validator{
+	successState.SetValidatorAtIndex(1, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
 		WithdrawableEpoch: 10000,
@@ -282,8 +281,7 @@ func TestProcessAttesterSlashing(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, false)
-			err := s.ProcessAttesterSlashing(tc.slashing)
+			err := ProcessAttesterSlashing(tc.state, tc.slashing)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("unexpected success, want error")
@@ -330,8 +328,7 @@ func TestProcessDeposit(t *testing.T) {
 		WithdrawalCredentials: [32]byte{1, 2, 3},
 	}, 0)
 	testState.SetEth1Data(eth1Data)
-	s := New(testState, &clparams.MainnetBeaconConfig, nil, true)
-	require.NoError(t, s.ProcessDeposit(deposit))
+	require.NoError(t, ProcessDeposit(testState, deposit, false))
 	require.Equal(t, deposit.Data.Amount, testState.Balances()[1])
 }
 
@@ -348,48 +345,8 @@ func TestProcessVoluntaryExits(t *testing.T) {
 		ActivationEpoch: 0,
 	}, 0)
 	state.SetSlot((clparams.MainnetBeaconConfig.SlotsPerEpoch * 5) + (clparams.MainnetBeaconConfig.SlotsPerEpoch * clparams.MainnetBeaconConfig.ShardCommitteePeriod))
-	transitioner := New(state, &clparams.MainnetBeaconConfig, nil, true)
 
-	require.NoError(t, transitioner.ProcessVoluntaryExit(exit), "Could not process exits")
+	require.NoError(t, ProcessVoluntaryExit(state, exit, false), "Could not process exits")
 	newRegistry := state.Validators()
 	require.Equal(t, newRegistry[0].ExitEpoch, uint64(266))
-}
-
-func TestProcessAttestation(t *testing.T) {
-	beaconState := state.GetEmptyBeaconState()
-	beaconState.SetSlot(beaconState.Slot() + clparams.MainnetBeaconConfig.MinAttestationInclusionDelay)
-	for i := 0; i < 64; i++ {
-		beaconState.AddValidator(&cltypes.Validator{
-			EffectiveBalance:  clparams.MainnetBeaconConfig.MaxEffectiveBalance,
-			ExitEpoch:         clparams.MainnetBeaconConfig.FarFutureEpoch,
-			WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch,
-		}, clparams.MainnetBeaconConfig.MaxEffectiveBalance)
-		beaconState.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
-	}
-
-	aggBits := []byte{7}
-	r, err := beaconState.GetBlockRootAtSlot(0)
-	require.NoError(t, err)
-	att := &cltypes.Attestation{
-		Data: &cltypes.AttestationData{
-			BeaconBlockHash: r,
-			Source:          &cltypes.Checkpoint{},
-			Target:          &cltypes.Checkpoint{},
-		},
-		AggregationBits: aggBits,
-	}
-	s := New(beaconState, &clparams.MainnetBeaconConfig, nil, true)
-
-	require.NoError(t, s.ProcessAttestations([]*cltypes.Attestation{att}))
-
-	p := beaconState.CurrentEpochParticipation()
-	require.NoError(t, err)
-
-	indices, err := beaconState.GetAttestingIndicies(att.Data, att.AggregationBits)
-	require.NoError(t, err)
-	for _, index := range indices {
-		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelyHeadFlagIndex)))
-		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelySourceFlagIndex)))
-		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelyTargetFlagIndex)))
-	}
 }

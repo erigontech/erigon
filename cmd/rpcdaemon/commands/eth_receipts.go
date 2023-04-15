@@ -67,7 +67,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 	excessDataGas := header.ParentExcessDataGas(getHeader)
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, excessDataGas, txn, usedGas, usedDataGas, vm.Config{})
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, usedDataGas, vm.Config{}, excessDataGas)
 		if err != nil {
 			return nil, err
 		}
@@ -369,7 +369,7 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 		if out == nil {
 			out = addrBitmap
 		} else {
-			out = iter.Intersect[uint64](out, addrBitmap)
+			out = iter.Intersect[uint64](out, addrBitmap, -1)
 		}
 	}
 	if out == nil {
@@ -550,87 +550,32 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 
 		var topicsUnion iter.U64
 		for _, topic := range sub {
-			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), int(from), int(to), order.Asc, -1)
+			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
 			if err != nil {
 				return nil, err
 			}
-			topicsUnion = iter.Union[uint64](topicsUnion, it)
+			topicsUnion = iter.Union[uint64](topicsUnion, it, order.Asc, -1)
 		}
 
 		if res == nil {
 			res = topicsUnion
 			continue
 		}
-		res = iter.Intersect[uint64](res, topicsUnion)
+		res = iter.Intersect[uint64](res, topicsUnion, -1)
 	}
 	return res, nil
 }
 
 func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (res iter.U64, err error) {
 	for _, addr := range addrs {
-		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], int(from), int(to), true, -1)
+		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], int(from), int(to), true, kv.Unlim)
 		if err != nil {
 			return nil, err
 		}
-		res = iter.Union[uint64](res, it)
+		res = iter.Union[uint64](res, it, order.Asc, -1)
 	}
 	return res, nil
 }
-
-/*
-func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
-	var result *roaring64.Bitmap
-	for _, sub := range topics {
-		bitmapForORing := bitmapdb.NewBitmap64()
-		defer bitmapdb.ReturnToPool64(bitmapForORing)
-
-		for _, topic := range sub {
-			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), from, to, true, -1)
-			if err != nil {
-				return nil, err
-			}
-			bm, err := it.(bitmapdb.ToBitmap).ToBitmap()
-			if err != nil {
-				return nil, err
-			}
-			bitmapForORing.Or(bm)
-		}
-
-		if bitmapForORing.GetCardinality() == 0 {
-			continue
-		}
-		if result == nil {
-			result = bitmapForORing.Clone()
-			continue
-		}
-		result = roaring64.And(bitmapForORing, result)
-	}
-	return result, nil
-}
-
-func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (*roaring64.Bitmap, error) {
-	if len(addrs) == 0 {
-		return nil, nil
-	}
-	rx := make([]*roaring64.Bitmap, len(addrs))
-	defer func() {
-		for _, bm := range rx {
-			bitmapdb.ReturnToPool64(bm)
-		}
-	}()
-	for idx, addr := range addrs {
-		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], from, to, true, -1)
-		if err != nil {
-			return nil, err
-		}
-		rx[idx], err = it.(bitmapdb.ToBitmap).ToBitmap()
-		if err != nil {
-			return nil, err
-		}
-	}
-	return roaring64.FastOr(rx...), nil
-}
-*/
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
 func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Hash) (map[string]interface{}, error) {
@@ -821,44 +766,6 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		fields["contractAddress"] = receipt.ContractAddress
 	}
 	return fields
-}
-
-func includes(addresses []common.Address, a common.Address) bool {
-	for _, addr := range addresses {
-		if addr == a {
-			return true
-		}
-	}
-	return false
-}
-
-// filterLogs creates a slice of logs matching the given criteria.
-func filterLogsOld(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
-	result := make(types.Logs, 0, len(logs))
-Logs:
-	for _, log := range logs {
-		if len(addresses) > 0 && !includes(addresses, log.Address) {
-			continue
-		}
-		// If the to filtered topics is greater than the amount of topics in logs, skip.
-		if len(topics) > len(log.Topics) {
-			continue Logs
-		}
-		for i, sub := range topics {
-			match := len(sub) == 0 // empty rule set == wildcard
-			for _, topic := range sub {
-				if log.Topics[i] == topic {
-					match = true
-					break
-				}
-			}
-			if !match {
-				continue Logs
-			}
-		}
-		result = append(result, log)
-	}
-	return result
 }
 
 // MapTxNum2BlockNumIter - enrich iterator by TxNumbers, adding more info:

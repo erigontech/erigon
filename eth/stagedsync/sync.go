@@ -237,6 +237,11 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
 			// we relax the rules for Stage1
 			firstCycle = false
 		}
+		if badBlockUnwind {
+			// If there was a bad block, the current step needs to complete, to send the corresponding reply to the Consensus Layer
+			// Otherwise, the staged sync will get stuck in the Headers stage with "Waiting for Consensus Layer..."
+			break
+		}
 
 		stage := s.stages[s.currentStage]
 

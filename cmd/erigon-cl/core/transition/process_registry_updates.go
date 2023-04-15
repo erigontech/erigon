@@ -1,56 +1,54 @@
 package transition
 
-import "sort"
+import (
+	"sort"
 
-const preAllocatedSizeActivationQueue = 8192
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+)
 
 // computeActivationExitEpoch is Implementation of compute_activation_exit_epoch. Defined in https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#compute_activation_exit_epoch.
-func (s *StateTransistor) computeActivationExitEpoch(epoch uint64) uint64 {
-	return epoch + 1 + s.beaconConfig.MaxSeedLookahead
+func computeActivationExitEpoch(beaconConfig *clparams.BeaconChainConfig, epoch uint64) uint64 {
+	return epoch + 1 + beaconConfig.MaxSeedLookahead
 }
 
 // ProcessRegistyUpdates updates every epoch the activation status of validators. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#registry-updates.
-func (s *StateTransistor) ProcessRegistryUpdates() error {
-	currentEpoch := s.state.Epoch()
+func ProcessRegistryUpdates(state *state.BeaconState) error {
+	beaconConfig := state.BeaconConfig()
+	currentEpoch := state.Epoch()
 	// start also initializing the activation queue.
-	activationQueue := make([]uint64, 0, preAllocatedSizeActivationQueue)
-	validators := s.state.Validators()
+	activationQueue := make([]uint64, 0)
+	validators := state.Validators()
 	// Process activation eligibility and ejections.
 	for validatorIndex, validator := range validators {
-		if s.state.IsValidatorEligibleForActivationQueue(validator) {
-			validator.ActivationEligibilityEpoch = currentEpoch + 1
-			if err := s.state.SetValidatorAt(validatorIndex, validator); err != nil {
-				return err
-			}
+		if state.IsValidatorEligibleForActivationQueue(validator) {
+			state.SetActivationEligibilityEpochForValidatorAtIndex(validatorIndex, currentEpoch+1)
 		}
-		if validator.Active(currentEpoch) && validator.EffectiveBalance <= s.beaconConfig.EjectionBalance {
-			if err := s.state.InitiateValidatorExit(uint64(validatorIndex)); err != nil {
+		if validator.Active(currentEpoch) && validator.EffectiveBalance <= beaconConfig.EjectionBalance {
+			if err := state.InitiateValidatorExit(uint64(validatorIndex)); err != nil {
 				return err
 			}
 		}
 		// Insert in the activation queue in case.
-		if s.state.IsValidatorEligibleForActivation(validator) {
+		if state.IsValidatorEligibleForActivation(validator) {
 			activationQueue = append(activationQueue, uint64(validatorIndex))
 		}
 	}
 	// order the queue accordingly.
 	sort.Slice(activationQueue, func(i, j int) bool {
 		//  Order by the sequence of activation_eligibility_epoch setting and then index.
-		if validators[i].ActivationEligibilityEpoch != validators[j].ActivationEligibilityEpoch {
-			return validators[i].ActivationEligibilityEpoch < validators[j].ActivationEligibilityEpoch
+		if validators[activationQueue[i]].ActivationEligibilityEpoch != validators[activationQueue[j]].ActivationEligibilityEpoch {
+			return validators[activationQueue[i]].ActivationEligibilityEpoch < validators[activationQueue[j]].ActivationEligibilityEpoch
 		}
 		return activationQueue[i] < activationQueue[j]
 	})
+	activationQueueLength := state.GetValidatorChurnLimit()
+	if len(activationQueue) > int(activationQueueLength) {
+		activationQueue = activationQueue[:activationQueueLength]
+	}
 	// Only process up to epoch limit.
-	for _, validatorIndex := range activationQueue[:s.state.GetValidatorChurnLimit()] {
-		validator, err := s.state.ValidatorAt(int(validatorIndex))
-		if err != nil {
-			return err
-		}
-		validator.ActivationEpoch = s.computeActivationExitEpoch(currentEpoch)
-		if err := s.state.SetValidatorAt(int(validatorIndex), &validator); err != nil {
-			return err
-		}
+	for _, validatorIndex := range activationQueue {
+		state.SetActivationEpochForValidatorAtIndex(int(validatorIndex), computeActivationExitEpoch(beaconConfig, currentEpoch))
 	}
 	return nil
 }

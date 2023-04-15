@@ -41,6 +41,7 @@ type structInfoReceiver interface {
 	topHash() []byte
 	topHashes(prefix []byte, branches, children uint16) []byte
 	printTopHashes(prefix []byte, branches, children uint16)
+	setProofElement(pe *proofElement)
 }
 
 // hashCollector gets called whenever there might be a need to create intermediate hash record
@@ -99,7 +100,10 @@ func (GenStructStepHashData) GenStructStepData() {}
 // Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
-func GenStructStep(
+
+// GenStructStepEx is extended to support optional generation of an Account Proof during trie_root.go CalcTrieRoot().
+// The wrapper below calls it with nil/false defaults so that other callers do not need to be modified.
+func GenStructStepEx(
 	retain func(prefix []byte) bool,
 	curr, succ []byte,
 	e structInfoReceiver,
@@ -109,6 +113,8 @@ func GenStructStep(
 	hasTree []uint16,
 	hasHash []uint16,
 	trace bool,
+	retainProof func(prefix []byte) *proofElement,
+	cutoff bool,
 ) ([]uint16, []uint16, []uint16, error) {
 	for precLen, buildExtensions := calcPrecLen(groups), false; precLen >= 0; precLen, buildExtensions = calcPrecLen(groups), true {
 		var precExists = len(groups) > 0
@@ -145,6 +151,20 @@ func GenStructStep(
 		}
 		//fmt.Printf("groups is now %x,%d,%b\n", extraDigit, maxLen, groups)
 
+		// retainIfProving will call setProofElement to a new proof element
+		// it is the caller's responsibility set the proof element to nil after the
+		// next element invocation. This function returns whether a proof is needed
+		// for this node.
+		retainIfProving := func(key []byte) bool {
+			if retainProof != nil {
+				if pe := retainProof(key); pe != nil {
+					e.setProofElement(pe)
+					return true
+				}
+			}
+			return false
+		}
+
 		if !buildExtensions {
 			switch v := data.(type) {
 			case *GenStructStepHashData:
@@ -164,9 +184,13 @@ func GenStructStep(
 				}
 				buildExtensions = true
 			case *GenStructStepAccountData:
-				if retain(curr[:maxLen]) {
+				proving := retainIfProving(curr[:len(curr)-1])
+				if proving || retain(curr[:maxLen]) {
 					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet, codeSizeUncached); err != nil {
 						return nil, nil, nil, err
+					}
+					if proving {
+						e.setProofElement(nil)
 					}
 				} else {
 					if err := e.accountLeafHash(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
@@ -175,9 +199,13 @@ func GenStructStep(
 				}
 			case *GenStructStepLeafData:
 				/* building leafs */
-				if retain(curr[:maxLen]) {
+				proving := retainIfProving(curr[:len(curr)-1])
+				if proving || retain(curr[:maxLen]) {
 					if err := e.leaf(remainderLen, curr, v.Value); err != nil {
 						return nil, nil, nil, err
+					}
+					if proving {
+						e.setProofElement(nil)
 					}
 				} else {
 					if err := e.leafHash(remainderLen, curr, v.Value); err != nil {
@@ -218,9 +246,13 @@ func GenStructStep(
 					fmt.Printf("Extension: %x, %b, %b, %b\n", curr[remainderStart:remainderStart+remainderLen], hasHash, hasTree, groups)
 				}
 				/* building extensions */
-				if retain(curr[:maxLen]) {
+				proving := retainIfProving(curr[:remainderStart])
+				if proving || retain(curr[:maxLen]) {
 					if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
 						return nil, nil, nil, err
+					}
+					if proving {
+						e.setProofElement(nil)
 					}
 				} else {
 					if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
@@ -270,9 +302,13 @@ func GenStructStep(
 			if trace {
 				e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
 			}
-			if retain(curr[:maxLen]) {
+			proving := retainIfProving(curr[:maxLen])
+			if proving || retain(curr[:maxLen]) {
 				if err := e.branch(groups[maxLen]); err != nil {
 					return nil, nil, nil, err
+				}
+				if proving {
+					e.setProofElement(nil)
 				}
 			} else {
 				if err := e.branchHash(groups[maxLen]); err != nil {
@@ -304,6 +340,19 @@ func GenStructStep(
 		}
 	}
 	return nil, nil, nil, nil
+}
+func GenStructStep(
+	retain func(prefix []byte) bool,
+	curr, succ []byte,
+	e structInfoReceiver,
+	h HashCollector2,
+	data GenStructStepData,
+	groups []uint16,
+	hasTree []uint16,
+	hasHash []uint16,
+	trace bool,
+) ([]uint16, []uint16, []uint16, error) {
+	return GenStructStepEx(retain, curr, succ, e, h, data, groups, hasTree, hasHash, trace, nil, false)
 }
 
 func GenStructStepOld(

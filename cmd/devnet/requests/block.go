@@ -11,6 +11,21 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
+func BlockNumber(reqId int) (uint64, error) {
+	reqGen := initialiseRequestGenerator(reqId)
+	var b rpctest.EthBlockNumber
+
+	req := reqGen.BlockNumber()
+	res := reqGen.Erigon(models.ETHBlockNumber, req, &b)
+	number := uint64(b.Number)
+
+	if res.Err != nil {
+		return number, fmt.Errorf("error getting current block number: %v", res.Err)
+	}
+
+	return number, nil
+}
+
 func GetBlockByNumber(reqId int, blockNum uint64, withTxs bool) (rpctest.EthBlockByNumber, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthBlockByNumber
@@ -27,6 +42,32 @@ func GetBlockByNumber(reqId int, blockNum uint64, withTxs bool) (rpctest.EthBloc
 	}
 
 	return b, nil
+}
+
+func GetBlockByNumberDetails(reqId int, blockNum string, withTxs bool) (map[string]interface{}, error) {
+	reqGen := initialiseRequestGenerator(reqId)
+	var b struct {
+		rpctest.CommonResponse
+		Result interface{} `json:"result"`
+	}
+
+	req := reqGen.GetBlockByNumberI(blockNum, withTxs)
+
+	res := reqGen.Erigon(models.ETHGetBlockByNumber, req, &b)
+	if res.Err != nil {
+		return nil, fmt.Errorf("error getting block by number: %v", res.Err)
+	}
+
+	if b.Error != nil {
+		return nil, fmt.Errorf("error populating response object: %v", b.Error)
+	}
+
+	m, ok := b.Result.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("cannot convert type")
+	}
+
+	return m, nil
 }
 
 func GetTransactionCount(reqId int, address libcommon.Address, blockNum models.BlockNumber) (rpctest.EthGetTransactionCount, error) {

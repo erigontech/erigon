@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/rpc"
@@ -20,9 +21,9 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/stages"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
+
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/log/v3"
@@ -58,23 +59,31 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 		log.Error("Could load beacon data configuration", "err", err)
 		return err
 	}
+
+	tmpdir := "/tmp"
+	executionClient, err := execution_client.NewExecutionClient(ctx, "127.0.0.1:8989")
+	if err != nil {
+		log.Warn("Could not connect to execution client", "err", err)
+		return err
+	}
+
+	if cfg.TransitionChain {
+		state, err := initial_state.GetGenesisState(cfg.NetworkType)
+		if err != nil {
+			return err
+		}
+		// Execute from genesis to whatever we have.
+		return stages.SpawnStageBeaconState(stages.StageBeaconState(db, cfg.BeaconCfg, state, executionClient), nil, ctx)
+	}
+
 	// Fetch the checkpoint state.
 	cpState, err := getCheckpointState(ctx, db, cfg.BeaconCfg, cfg.GenesisCfg, cfg.CheckpointUri)
 	if err != nil {
 		log.Error("Could not get checkpoint", "err", err)
 		return err
 	}
-	var executionClient *execution_client.ExecutionClient
-	if cfg.ELEnabled {
-		executionClient, err = execution_client.NewExecutionClient(ctx, "127.0.0.1:8989")
-		if err != nil {
-			log.Warn("Could not connect to execution client", "err", err)
-			return err
-		}
-	}
 
 	log.Info("Starting sync from checkpoint.")
-	tmpdir := "/tmp"
 	// Start the sentinel service
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", cfg)
@@ -92,7 +101,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	gossipManager := network.NewGossipReceiver(ctx, s)
 	gossipManager.AddReceiver(sentinelrpc.GossipType_BeaconBlockGossipType, downloader)
 	go gossipManager.Loop()
-	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, nil, false, tmpdir, executionClient, cfg.BeaconDataCfg)
+	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, tmpdir, executionClient, cfg.BeaconDataCfg)
 	if err != nil {
 		return err
 	}
@@ -127,9 +136,9 @@ func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, beaconS
 		ForkDigest:     forkDigest,
 		FinalizedRoot:  beaconState.FinalizedCheckpoint().Root,
 		FinalizedEpoch: beaconState.FinalizedCheckpoint().Epoch,
-		HeadSlot:       beaconState.FinalizedCheckpoint().Epoch * 32,
+		HeadSlot:       beaconState.FinalizedCheckpoint().Epoch * cfg.BeaconCfg.SlotsPerEpoch,
 		HeadRoot:       beaconState.FinalizedCheckpoint().Root,
-	}, handshake.FullClientRule)
+	})
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 		return nil, err

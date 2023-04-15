@@ -63,11 +63,6 @@ var (
 		Usage: "chaindata of database",
 		Value: "",
 	}
-	ELEnabledFlag = cli.BoolFlag{
-		Name:  "el.enabled",
-		Usage: "enables EL support",
-		Value: false,
-	}
 	BeaconDBModeFlag = cli.StringFlag{
 		Name:  "beacon-db-mode",
 		Usage: "level of storing on beacon chain, minimal(only 500k blocks stored), full (all blocks stored), light (no blocks stored)",
@@ -82,5 +77,14 @@ var (
 		Name:  "private.api.addr",
 		Usage: "connect to existing erigon instance",
 		Value: "",
+	}
+	SentinelStaticPeersFlag = cli.StringFlag{
+		Name:  "sentinel.staticpeers",
+		Usage: "connect to comma-separated Consensus static peers",
+		Value: "",
+	}
+	TransitionChainFlag = cli.BoolFlag{
+		Name:  "transition-chain",
+		Usage: "enable chain transition",
 	}
 )
