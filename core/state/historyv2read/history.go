@@ -78,6 +78,12 @@ func newV2MergedSeeker(indexC kv.Cursor, bitmapDB2 *bitmapdb2.DB) mergedSeeker {
 		if bitmapDB2 == nil {
 			return 0, false, nil
 		}
+		if storage {
+			keyWithoutInc := make([]byte, length.Addr+length.Hash)
+			copy(keyWithoutInc, key[:length.Addr])
+			copy(keyWithoutInc[length.Addr:], key[length.Addr+length.Incarnation:])
+			key = keyWithoutInc
+		}
 		v, err := bitmapDB2.SeekFirstGTE(historyv2.Mapper[csBucket].IndexBucket, key, uint32(block))
 		if err != nil {
 			return 0, false, err
