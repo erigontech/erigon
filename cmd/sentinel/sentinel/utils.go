@@ -116,11 +116,11 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error
 		return peer.ID(""), fmt.Errorf("no peers")
 	}
 
-	/*validPeerList := sub.topic.ListPeers()
+	validPeerList := s.Host().Network().Peers()
+	//validPeerList := sub.topic.ListPeers()
 	if len(validPeerList) == 0 {
 		return peer.ID(""), fmt.Errorf("no peers")
-	}*/
-	validPeerList := s.Host().Network().Peers()
+	}
 
 	connectedPeer := false
 	maxTries := peers.DefaultMaxPeers
