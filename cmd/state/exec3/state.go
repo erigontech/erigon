@@ -296,7 +296,7 @@ func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chai
 	resultChSize := workerCount * 8
 	resultCh = make(chan *exec22.TxTask, resultChSize)
 	{
-		// we all errors in background workers (except ctx.Cancele), because applyLoop will detect this error anyway.
+		// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 		// and in applyLoop all errors are critical
 		ctx, cancel := context.WithCancel(ctx)
 		g, ctx := errgroup.WithContext(ctx)

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -117,6 +118,14 @@ func ExecV3(ctx context.Context,
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 	blockSnapshots := blockReader.(WithSnapshots).Snapshots()
+
+	defer func() {
+		if err := recover(); err != nil {
+			log.Error("panic", "err", err)
+			debug.PrintStack()
+			panic(err)
+		}
+	}()
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
@@ -679,6 +688,13 @@ Loop:
 					t2 = time.Since(tt)
 
 					tt = time.Now()
+					rh, err := rs.Commitment(inputTxNum, true)
+					if err != nil {
+						return err
+					}
+					if !bytes.Equal(rh, header.Root.Bytes()) {
+						return fmt.Errorf("root hash mismatch: %x != %x, bn=%d", rh, header.Root.Bytes(), blockNum)
+					}
 					if err := agg.Flush(ctx, applyTx); err != nil {
 						return err
 					}
@@ -699,13 +715,6 @@ Loop:
 			}
 		}
 
-		//rh, err := rs.Commitment(inputTxNum, agg)
-		//if err != nil {
-		//	return err
-		//}
-		//if !bytes.Equal(rh, header.Root.Bytes()) {
-		//	return fmt.Errorf("root hash mismatch: %x != %x, bn=%d", rh, header.Root.Bytes(), blockNum)
-		//}
 		if blockSnapshots.Cfg().Produce {
 			agg.BuildFilesInBackground()
 		}
@@ -731,6 +740,13 @@ Loop:
 		if err = agg.Flush(ctx, applyTx); err != nil {
 			return err
 		}
+		//rh, err := rs.Commitment(inputTxNum, agg)
+		//if err != nil {
+		//	return err
+		//}
+		//if !bytes.Equal(rh, header.Root.Bytes()) {
+		//	return fmt.Errorf("root hash mismatch: %x != %x, bn=%d", rh, header.Root.Bytes(), blockNum)
+		//}
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
 			return err
 		}
@@ -747,6 +763,7 @@ Loop:
 	}
 	return nil
 }
+
 func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
 	if tx == nil {
 		tx, err = db.BeginRo(context.Background())

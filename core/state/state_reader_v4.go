@@ -10,35 +10,15 @@ import (
 var _ StateReader = (*ReaderV4)(nil)
 
 type ReaderV4 struct {
-	tx  kv.TemporalTx
-	htx kv.RwTx
+	tx kv.TemporalTx
 }
 
 func NewReaderV4(tx kv.TemporalTx) *ReaderV4 {
 	return &ReaderV4{tx: tx}
 }
 
-func (r *ReaderV4) SetTx(htx kv.RwTx) {
-	r.htx = htx
-}
-
 func (r *ReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
-	var enc []byte
-	var ok bool
-	var err error
-
-	switch r.htx != nil {
-	case true:
-		enc, err = r.htx.GetOne(string(temporal.AccountsDomain), address.Bytes())
-		if err == nil {
-			break
-		}
-		err = nil
-		fallthrough
-	default:
-		enc, ok, err = r.tx.DomainGet(temporal.AccountsDomain, address.Bytes(), nil)
-	}
-
+	enc, ok, err := r.tx.DomainGet(temporal.AccountsDomain, address.Bytes(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -53,18 +33,7 @@ func (r *ReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account
 }
 
 func (r *ReaderV4) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) (enc []byte, err error) {
-	var ok bool
-	switch r.htx != nil {
-	case true:
-		enc, err = r.htx.GetOne(string(temporal.AccountsDomain), append(address.Bytes(), key.Bytes()...))
-		if err == nil {
-			break
-		}
-		err = nil
-		fallthrough
-	default:
-		enc, ok, err = r.tx.DomainGet(temporal.StorageDomain, address.Bytes(), key.Bytes())
-	}
+	enc, ok, err := r.tx.DomainGet(temporal.StorageDomain, address.Bytes(), key.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -78,18 +47,7 @@ func (r *ReaderV4) ReadAccountCode(address libcommon.Address, incarnation uint64
 	if codeHash == emptyCodeHashH {
 		return nil, nil
 	}
-	var ok bool
-	switch r.htx != nil {
-	case true:
-		code, err = r.htx.GetOne(string(temporal.CodeDomain), address.Bytes())
-		if err == nil {
-			break
-		}
-		err = nil
-		fallthrough
-	default:
-		code, ok, err = r.tx.DomainGet(temporal.CodeDomain, address.Bytes(), nil)
-	}
+	code, ok, err := r.tx.DomainGet(temporal.CodeDomain, address.Bytes(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -109,18 +67,7 @@ func (r *ReaderV4) ReadAccountIncarnation(address libcommon.Address) (uint64, er
 }
 
 func (r *ReaderV4) ReadCommitment(prefix []byte) (enc []byte, err error) {
-	var ok bool
-	switch r.htx != nil {
-	case true:
-		enc, err = r.htx.GetOne(string(temporal.CommitmentDomain), prefix)
-		if err == nil {
-			break
-		}
-		err = nil
-		fallthrough
-	default:
-		enc, ok, err = r.tx.DomainGet(temporal.CommitmentDomain, prefix, nil)
-	}
+	enc, ok, err := r.tx.DomainGet(temporal.CommitmentDomain, prefix, nil)
 	if err != nil {
 		return nil, err
 	}

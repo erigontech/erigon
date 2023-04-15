@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
@@ -36,8 +37,9 @@ var ExecTxsDone = metrics.NewCounter(`exec_txs_done`)
 type StateV3 struct {
 	lock           sync.RWMutex
 	sizeEstimate   int
-	sharedWriter   *WriterV4
-	sharedReader   *ReaderV4
+	domains        *libstate.SharedDomains
+	sharedWriter   StateWriter
+	sharedReader   StateReader
 	chCode         map[string][]byte
 	chAccs         map[string][]byte
 	chStorage      *btree2.Map[string, []byte]
@@ -58,9 +60,15 @@ type StateV3 struct {
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 }
 
-func NewStateV3(tmpdir string, sr *ReaderV4, wr *WriterV4) *StateV3 {
+func NewStateV3(tmpdir string, domains *libstate.SharedDomains) *StateV3 {
+	var sr StateReader
+	var wr StateWriter
+	if domains != nil {
+		wr, sr = WrapStateIO(domains)
+	}
 	rs := &StateV3{
 		tmpdir:         tmpdir,
+		domains:        domains,
 		sharedWriter:   wr,
 		sharedReader:   sr,
 		triggers:       map[uint64]*exec22.TxTask{},
@@ -77,6 +85,11 @@ func NewStateV3(tmpdir string, sr *ReaderV4, wr *WriterV4) *StateV3 {
 		receiveWork: make(chan *exec22.TxTask, 10_000),
 	}
 	return rs
+}
+
+func (rs *StateV3) SetIO(rd StateReader, wr StateWriter) {
+	rs.sharedWriter = wr
+	rs.sharedReader = rd
 }
 
 func (rs *StateV3) put(table string, key, val []byte) {
@@ -392,6 +405,12 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) (count int) {
 	ExecTxsDone.Inc()
 
+	if txNum > 0 && txNum%ethconfig.HistoryV3AggregationStep == 0 {
+		if _, err := rs.Commitment(txNum, true); err != nil {
+			panic(fmt.Errorf("txnum %d: %w", txNum, err))
+		}
+	}
+
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	if triggered, ok := rs.triggers[txNum]; ok {
@@ -526,42 +545,6 @@ func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *lib
 	return nil
 }
 
-//func (rs *StateV3) applyUpdates(roTx kv.Tx, task *exec22.TxTask, agg *libstate.AggregatorV3) {
-//	//emptyRemoval := task.Rules.IsSpuriousDragon
-//	rs.lock.Lock()
-//	defer rs.lock.Unlock()
-//
-//	var p2 []byte
-//	for table, wl := range task.WriteLists {
-//		var d *libstate.DomainMem
-//		switch table {
-//		case kv.PlainState:
-//			d = rs.shared.Account
-//		case kv.Code:
-//			d = rs.shared.Code
-//		case StorageTable:
-//			d = rs.shared.Storage
-//		default:
-//			panic(fmt.Errorf("unknown table %s", table))
-//		}
-//
-//		for i := 0; i < len(wl.Keys); i++ {
-//			addr, err := hex.DecodeString(wl.Keys[i])
-//			if err != nil {
-//				panic(err)
-//			}
-//			if len(addr) > 28 {
-//				p2 = addr[length.Addr+8:]
-//			}
-//			if err := d.Put(addr[:length.Addr], p2, wl.Vals[i]); err != nil {
-//				panic(err)
-//			}
-//			p2 = p2[:0]
-//		}
-//	}
-//	//rs.shared.Commitment.Compu()
-//}
-
 func (rs *StateV3) applyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	rs.lock.Lock()
@@ -628,19 +611,18 @@ func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.A
 	return nil
 }
 
-func (rs *StateV3) Commitment(txNum uint64, agg *libstate.AggregatorV3) ([]byte, error) {
+func (rs *StateV3) Commitment(txNum uint64, saveState bool) ([]byte, error) {
 	//defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	rs.sharedWriter.SetTxNum(txNum)
-	return rs.sharedWriter.Commitment(true, false)
+	rs.domains.SetTxNum(txNum)
+	return rs.domains.Commit(saveState, false)
 }
 
 func (rs *StateV3) ApplyState4(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) ([]byte, error) {
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	//agg.SetTxNum(txTask.TxNum)
-	rs.sharedWriter.SetTxNum(txTask.TxNum)
-	rh, err := rs.sharedWriter.Commitment(true, false)
+	rs.domains.SetTxNum(txTask.TxNum)
+	rh, err := rs.domains.Commit(true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -860,10 +842,6 @@ func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.
 		}
 	}
 	return true
-}
-
-func (rs *StateV3) CalcCommitment(saveAfter, trace bool) ([]byte, error) {
-	return rs.sharedWriter.Commitment(saveAfter, trace)
 }
 
 type StateWriterV3 struct {
@@ -1116,9 +1094,6 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 	if r.trace {
 		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, r.txNum)
 	}
-	if size == 0 {
-		return r.ReadAccountCodeSize(address, incarnation, codeHash)
-	}
 	return size, nil
 }
 
@@ -1194,90 +1169,3 @@ func returnReadList(v map[string]*exec22.KvList) {
 	readListPool.Put(v)
 }
 
-type StateWriter4 struct {
-	*libstate.SharedDomains
-}
-
-func WrapStateIO(s *libstate.SharedDomains) (*StateWriter4, *StateReader4) {
-	w, r := &StateWriter4{s}, &StateReader4{s}
-	return w, r
-}
-
-func (w *StateWriter4) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
-	//enc := libstate.EncodeAccountBytes(account.Nonce, &account.Balance, account.CodeHash[:], 0)
-	enc := accounts.SerialiseV3(account)
-	return w.SharedDomains.UpdateAccountData(address.Bytes(), enc)
-}
-
-func (w *StateWriter4) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	//addressBytes, codeHashBytes := address.Bytes(), codeHash.Bytes()
-	//fmt.Printf("code [%x] => [%x] CodeHash: %x, txNum: %d\n", address, code, codeHash, w.txNum)
-	return w.SharedDomains.UpdateAccountCode(address.Bytes(), codeHash.Bytes())
-}
-
-func (w *StateWriter4) DeleteAccount(address common.Address, original *accounts.Account) error {
-	addressBytes := address.Bytes()
-	return w.SharedDomains.DeleteAccount(addressBytes)
-}
-
-func (w *StateWriter4) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	if *original == *value {
-		return nil
-	}
-	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
-	return w.SharedDomains.WriteAccountStorage(address[:], key.Bytes(), value.Bytes())
-}
-
-func (w *StateWriter4) CreateContract(address common.Address) error { return nil }
-func (w *StateWriter4) WriteChangeSets() error                      { return nil }
-func (w *StateWriter4) WriteHistory() error                         { return nil }
-
-type StateReader4 struct {
-	*libstate.SharedDomains
-}
-
-func (s *StateReader4) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := s.Account.Get(address.Bytes(), nil)
-	if err != nil {
-		return nil, err
-	}
-	if len(enc) == 0 {
-		return nil, nil
-	}
-	var a accounts.Account
-	if err := accounts.DeserialiseV3(&a, enc); err != nil {
-		return nil, err
-	}
-	return &a, nil
-}
-
-func (s *StateReader4) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	enc, err := s.Storage.Get(address.Bytes(), key.Bytes())
-	if err != nil {
-		return nil, err
-	}
-	if enc == nil {
-		return nil, nil
-	}
-	if len(enc) == 1 && enc[0] == 0 {
-		return nil, nil
-	}
-	return enc, nil
-}
-
-func (s *StateReader4) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	return s.Code.Get(codeHash.Bytes(), nil)
-}
-
-func (s *StateReader4) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	c, err := s.ReadAccountCode(address, incarnation, codeHash)
-	if err != nil {
-		return 0, err
-	}
-	return len(c), nil
-}
-
-func (s *StateReader4) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	return 0, nil
-}

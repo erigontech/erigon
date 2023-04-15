@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -134,8 +135,8 @@ func StageExecuteBlocksCfg(
 func executeBlock(
 	block *types.Block,
 	tx kv.RwTx,
-	stateWriter *state.WriterV4,
-	stateReader *state.ReaderV4,
+	stateWriter *state.WrappedStateWriterV4,
+	stateReader *state.WrappedStateReaderV4,
 	cfg ExecuteBlockCfg,
 	vmConfig vm.Config, // emit copy, because will modify it
 	writeChangesets bool,
@@ -242,12 +243,16 @@ func newStateReaderWriter(
 
 func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	workersCount := cfg.syncCfg.ExecWorkerCount
-	//workersCount := 2
 	if !initialCycle {
 		workersCount = 1
 	}
 	cfg.agg.SetWorkers(estimate.CompressSnapshot.WorkersQuarter())
 	defer cfg.agg.StartWrites().FinishWrites()
+
+	defer func() {
+		log.Warn("Exit ExecBlockV3", "err", err)
+		debug.PrintStack()
+	}()
 
 	if initialCycle {
 		reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)
@@ -283,10 +288,11 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
-	writer := state.NewWriterV4(tx.(kv.TemporalTx))
-	reader := state.NewReaderV4(tx.(kv.TemporalTx))
+	cfg.agg.SetTx(tx)
+	doms := cfg.agg.SharedDomains()
+	rs := state.NewStateV3(cfg.dirs.Tmp, doms)
+	rs.SetIO(state.NewWrappedStateReaderV4(tx.(kv.TemporalTx)), state.NewWrappedStateWriterV4(tx.(kv.TemporalTx)))
 
-	rs := state.NewStateV3(cfg.dirs.Tmp, reader, writer)
 	parallel := initialCycle && tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix, log.New(), to); err != nil {
 		return fmt.Errorf("ExecV3: %w", err)
@@ -316,10 +322,9 @@ func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint
 
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) (err error) {
 	cfg.agg.SetLogPrefix(s.LogPrefix())
-	reader := state.NewReaderV4(tx.(kv.TemporalTx))
-	writer := state.NewWriterV4(tx.(kv.TemporalTx))
 
-	rs := state.NewStateV3(cfg.dirs.Tmp, reader, writer)
+	rs := state.NewStateV3(cfg.dirs.Tmp, nil)
+	rs.SetIO(state.NewWrappedStateReaderV4(tx.(kv.TemporalTx)), state.NewWrappedStateWriterV4(tx.(kv.TemporalTx)))
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
 	if err != nil {
@@ -368,12 +373,12 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 // ================ Erigon3 End ================
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, quiet bool) (err error) {
-	//if cfg.historyV3 {
-	//	if err = ExecBlockV3(s, u, tx, toBlock, ctx, cfg, initialCycle); err != nil {
-	//		return err
-	//	}
-	//	return nil
-	//}
+	if cfg.historyV3 {
+		if err = ExecBlockV3(s, u, tx, toBlock, ctx, cfg, initialCycle); err != nil {
+			return err
+		}
+		return nil
+	}
 
 	defer func() {
 		s := make([]byte, 2048)
@@ -429,8 +434,8 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	defer cfg.agg.StartWrites().FinishWrites()
 
-	stateWriter := state.NewWriterV4(tx.(kv.TemporalTx))
-	stateReader := state.NewReaderV4(tx.(kv.TemporalTx))
+	stateWriter := state.NewWrappedStateWriterV4(tx.(kv.TemporalTx))
+	stateReader := state.NewWrappedStateReaderV4(tx.(kv.TemporalTx))
 	batch := memdb.NewMemoryBatch(tx, cfg.dirs.Tmp)
 	////batch := olddb.NewHashBatch(tx, nil, cfg.dirs.Tmp)
 	cfg.agg.SetTx(batch)
@@ -539,7 +544,7 @@ Loop:
 			cfg.agg.SetTx(batch)
 			cfg.agg.AggregateFilesInBackground()
 			//batch = olddb.NewHashBatch(tx, nil, cfg.dirs.Tmp)
-			stateReader = state.NewReaderV4(tx.(kv.TemporalTx))
+			stateReader = state.NewWrappedStateReaderV4(tx.(kv.TemporalTx))
 			//stateReader.SetTx(batch)
 			//stateWriter.SetTx(batch)
 		}

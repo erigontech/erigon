@@ -237,8 +237,8 @@ func ExecuteBlockEphemerally(
 
 	incTxNum := func() {}
 	switch sw := stateWriter.(type) {
-	case *state.WriterV4:
-		incTxNum = func() { sw.IncTxNum() }
+	case *state.WrappedStateWriterV4:
+		incTxNum = sw.IncTxNum
 	default:
 	}
 
