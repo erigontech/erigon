@@ -31,13 +31,6 @@ func (s *Sentinel) msgId(pmsg *pubsubpb.Message) string {
 				len(topicLenBytes) +
 				topicLen +
 				len(pmsg.Data)
-
-		if err != nil {
-			// should never happen
-			msg := make([]byte, 20)
-			copy(msg, "invalid")
-			return string(msg)
-		}
 		if uint64(totalLength) > gossipPubSubSize {
 			// this should never happen
 			msg := make([]byte, 20)
