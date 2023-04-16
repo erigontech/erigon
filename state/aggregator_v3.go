@@ -340,6 +340,10 @@ func (a *AggregatorV3) SetLogPrefix(v string) { a.logPrefix = v }
 
 func (a *AggregatorV3) SetTx(tx kv.RwTx) {
 	a.rwTx = tx
+	if a.domains != nil {
+		a.domains.SetTx(tx)
+	}
+
 	a.accounts.SetTx(tx)
 	a.storage.SetTx(tx)
 	a.code.SetTx(tx)
@@ -352,6 +356,9 @@ func (a *AggregatorV3) SetTx(tx kv.RwTx) {
 
 func (a *AggregatorV3) SetTxNum(txNum uint64) {
 	a.txNum.Store(txNum)
+	if a.domains != nil {
+		a.domains.SetTxNum(txNum)
+	}
 	a.accounts.SetTxNum(txNum)
 	a.storage.SetTxNum(txNum)
 	a.code.SetTxNum(txNum)
@@ -1587,6 +1594,7 @@ func (a *AggregatorV3) UpdateAccount(addr []byte, data, prevData []byte) error {
 
 func (a *AggregatorV3) UpdateCode(addr []byte, code, prevCode []byte) error {
 	a.commitment.TouchPlainKey(addr, code, a.commitment.TouchCode)
+	// TODO  prev value should be read from code db?
 	if len(code) == 0 {
 		return a.code.DeleteWithPrev(addr, nil, prevCode)
 	}

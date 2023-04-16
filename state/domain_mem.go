@@ -239,6 +239,14 @@ func (sd *SharedDomains) SetContext(ctx *AggregatorV3Context) {
 	sd.aggCtx = ctx
 }
 
+func (sd *SharedDomains) SetTx(tx kv.RwTx) {
+	sd.roTx = tx
+	sd.Commitment.SetTx(tx)
+	sd.Code.SetTx(tx)
+	sd.Account.SetTx(tx)
+	sd.Storage.SetTx(tx)
+}
+
 func (sd *SharedDomains) SetTxNum(txNum uint64) { sd.txNum.Store(txNum) }
 
 func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, err error) {
