@@ -88,14 +88,13 @@ func SpawnStageForkChoice(cfg StageForkChoiceCfg, s *stagedsync.StageState, tx k
 func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 	cfg.downloader.SetHighestProcessedRoot(libcommon.Hash{})
 	cfg.downloader.SetHighestProcessedSlot(cfg.state.Slot())
-	cfg.downloader.SetProcessFunction(func(highestSlotProcessed uint64, highestBlockRootProcessed libcommon.Hash, newBlocks []*cltypes.SignedBeaconBlock) (uint64, libcommon.Hash, error) {
-		var err error
+	cfg.downloader.SetProcessFunction(func(highestSlotProcessed uint64, _ libcommon.Hash, newBlocks []*cltypes.SignedBeaconBlock) (uint64, libcommon.Hash, error) {
 		for _, block := range newBlocks {
 			fullValidation :=
 				utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == block.Block.Slot
 			if err := cfg.forkChoice.OnBlock(block, fullValidation); err != nil {
 				log.Warn("Could not download block", "reason", err)
-				return highestSlotProcessed, highestBlockRootProcessed, nil
+				return highestSlotProcessed, libcommon.Hash{}, nil
 			}
 			if fullValidation {
 				// Import the head
@@ -121,14 +120,10 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 					}
 				}
 			}
-			highestSlotProcessed = block.Block.Slot
-			highestBlockRootProcessed, err = block.Block.HashSSZ()
-			if err != nil {
-				return 0, libcommon.Hash{}, err
-			}
+			highestSlotProcessed = utils.Max64(block.Block.Slot, highestSlotProcessed)
 		}
 		// Checks done, update all internals accordingly
-		return highestSlotProcessed, highestBlockRootProcessed, nil
+		return highestSlotProcessed, libcommon.Hash{}, nil
 	})
 	maxBlockBehindBeforeDownload := int64(5)
 	firstTime := true

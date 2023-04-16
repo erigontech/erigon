@@ -28,5 +28,4 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	gossipManager := network.NewGossipReceiver(ctx, sentinel, forkChoice, beaconConfig, genesisConfig)
 
 	return stages.SpawnStageForkChoice(stages.StageForkChoice(nil, downloader, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice), &stagedsync.StageState{ID: "Caplin"}, nil, ctx)
-
 }

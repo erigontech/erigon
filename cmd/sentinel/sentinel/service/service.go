@@ -138,7 +138,7 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 			return resp, nil
 		case <-timeout.C:
 			return &sentinelrpc.ResponseData{
-				Data:  []byte("Erigon had stroke on networking related issues"),
+				Data:  []byte("sentinel timeout"),
 				Error: true,
 			}, nil
 		}
