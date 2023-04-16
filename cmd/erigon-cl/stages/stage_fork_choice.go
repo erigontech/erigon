@@ -105,9 +105,10 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 				}
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				log.Info("New block imported",
+				log.Debug("New block imported",
 					"slot", block.Block.Slot, "head", headSlot, "headRoot", headRoot,
 					"alloc", libcommon.ByteCount(m.Alloc))
+
 				// Do forkchoice if possible
 				if cfg.forkChoice.Engine() != nil {
 					finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
@@ -139,12 +140,10 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 			cfg.downloader.SetHighestProcessedRoot(libcommon.Hash{})
 			cfg.downloader.SetHighestProcessedSlot(cfg.forkChoice.HighestSeen() - uint64(maxBlockBehindBeforeDownload))
 		}
+		// Wait small time
+		time.Sleep(100 * time.Millisecond)
 		firstTime = false
 		log.Debug("Caplin has missed some slots, started downloading chain")
-		// If we are too behind we download
-		logInterval := time.NewTicker(30 * time.Second)
-
-		triggerInterval := time.NewTicker(150 * time.Millisecond)
 		// Process blocks until we reach our target
 		for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
 			currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
@@ -156,15 +155,8 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 			if err := cfg.downloader.ProcessBlocks(); err != nil {
 				log.Warn("Could not download block in processing", "reason", err)
 			}
-			select {
-			case <-logInterval.C:
-				log.Info("Collected blocks", "slot", cfg.downloader.GetHighestProcessedSlot())
-			case <-triggerInterval.C:
-			}
 		}
-		log.Info("Finished catching up")
-		logInterval.Stop()
-		triggerInterval.Stop()
+		log.Debug("Finished catching up", "slot")
 	}
 }
 
