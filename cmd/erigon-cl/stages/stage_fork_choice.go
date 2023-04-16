@@ -130,7 +130,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 
 	for {
 		targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-		if int64(targetSlot)-int64(cfg.forkChoice.HighestSeen()) < maxBlockBehindBeforeDownload {
+		if int64(targetSlot) >= int64(cfg.forkChoice.HighestSeen())+1 {
 			time.Sleep(time.Second)
 			continue
 		}
@@ -140,7 +140,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 			cfg.downloader.SetHighestProcessedSlot(cfg.forkChoice.HighestSeen() - uint64(maxBlockBehindBeforeDownload))
 		}
 		firstTime = false
-		log.Info("Caplin is behind, started downloading chain")
+		log.Debug("Caplin has missed some slots, started downloading chain")
 		// If we are too behind we download
 		logInterval := time.NewTicker(30 * time.Second)
 

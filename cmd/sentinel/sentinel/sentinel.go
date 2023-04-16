@@ -301,17 +301,18 @@ func (s *Sentinel) String() string {
 }
 
 func (s *Sentinel) HasTooManyPeers() bool {
-	return s.GetPeersCount() >= peers.DefaultMaxPeers
+	nPeers, _ := s.GetPeersCount()
+	return nPeers >= peers.DefaultMaxPeers
 }
 
-func (s *Sentinel) GetPeersCount() int {
+func (s *Sentinel) GetPeersCount() (int, int) {
 	sub := s.subManager.GetMatchingSubscription(string(BeaconBlockTopic))
 
 	if sub == nil {
-		return len(s.host.Network().Peers())
+		return len(s.host.Network().Peers()), 0
 	}
 
-	return len(sub.topic.ListPeers())
+	return len(s.host.Network().Peers()), len(sub.topic.ListPeers())
 }
 
 func (s *Sentinel) Host() host.Host {
