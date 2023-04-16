@@ -5,6 +5,8 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
@@ -153,7 +155,7 @@ func callContractTx() (*libcommon.Hash, error) {
 	}
 
 	expectedLog := devnetutils.BuildLog(*eventHash, blockNum, address,
-		devnetutils.GenerateTopic(models.SolContractMethodSignature), hexutil.Bytes{}, hexutil.Uint(1),
+		devnetutils.GenerateTopic(models.SolContractMethodSignature), hexutility.Bytes{}, hexutil.Uint(1),
 		block.Result.Hash, hexutil.Uint(0), false)
 
 	if err = requests.GetAndCompareLogs(models.ReqId, 0, 20, expectedLog); err != nil {

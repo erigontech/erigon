@@ -61,18 +61,24 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	} else {
 		transferFunc = Transfer
 	}
-
+	// In the event excessDataGas is nil (which happens if the parent block is pre-sharding),
+	// we bootstrap BlockContext.ExcessDataGas with the zero value.
+	edg := new(big.Int)
+	if excessDataGas != nil {
+		edg.Set(excessDataGas)
+	}
 	return evmtypes.BlockContext{
-		CanTransfer: CanTransfer,
-		Transfer:    transferFunc,
-		GetHash:     blockHashFunc,
-		Coinbase:    beneficiary,
-		BlockNumber: header.Number.Uint64(),
-		Time:        header.Time,
-		Difficulty:  new(big.Int).Set(header.Difficulty),
-		BaseFee:     &baseFee,
-		GasLimit:    header.GasLimit,
-		PrevRanDao:  prevRandDao,
+		CanTransfer:   CanTransfer,
+		Transfer:      transferFunc,
+		GetHash:       blockHashFunc,
+		Coinbase:      beneficiary,
+		BlockNumber:   header.Number.Uint64(),
+		Time:          header.Time,
+		Difficulty:    new(big.Int).Set(header.Difficulty),
+		BaseFee:       &baseFee,
+		GasLimit:      header.GasLimit,
+		PrevRanDao:    prevRandDao,
+		ExcessDataGas: edg,
 	}
 }
 

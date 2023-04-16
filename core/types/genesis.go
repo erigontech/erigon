@@ -26,8 +26,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+
 	common2 "github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -98,7 +99,7 @@ type GenesisAccount struct {
 type genesisSpecMarshaling struct {
 	Nonce         math.HexOrDecimal64
 	Timestamp     math.HexOrDecimal64
-	ExtraData     hexutil.Bytes
+	ExtraData     hexutility.Bytes
 	GasLimit      math.HexOrDecimal64
 	GasUsed       math.HexOrDecimal64
 	Number        math.HexOrDecimal64
@@ -109,12 +110,12 @@ type genesisSpecMarshaling struct {
 }
 
 type genesisAccountMarshaling struct {
-	Constructor hexutil.Bytes
-	Code        hexutil.Bytes
+	Constructor hexutility.Bytes
+	Code        hexutility.Bytes
 	Balance     *math.HexOrDecimal256
 	Nonce       math.HexOrDecimal64
 	Storage     map[storageJSON]storageJSON
-	PrivateKey  hexutil.Bytes
+	PrivateKey  hexutility.Bytes
 }
 
 // storageJSON represents a 256 bit byte array, but allows less than 256 bits when
@@ -134,7 +135,7 @@ func (h *storageJSON) UnmarshalText(text []byte) error {
 }
 
 func (h storageJSON) MarshalText() ([]byte, error) {
-	return hexutil.Bytes(h[:]).MarshalText()
+	return hexutility.Bytes(h[:]).MarshalText()
 }
 
 // GenesisMismatchError is raised when trying to overwrite an existing

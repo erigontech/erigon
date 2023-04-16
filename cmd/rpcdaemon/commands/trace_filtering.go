@@ -949,6 +949,13 @@ func (api *TraceAPIImpl) callManyTransactions(
 	parentNo := rpc.BlockNumber(pNo)
 	rules := cfg.Rules(blockNumber, block.Time())
 	header := block.Header()
+	var excessDataGas *big.Int
+	parentBlock, err := api.blockByRPCNumber(parentNo, dbtx)
+	if err != nil {
+		return nil, err
+	} else if parentBlock != nil {
+		excessDataGas = parentBlock.ExcessDataGas()
+	}
 	txs := block.Transactions()
 	callParams := make([]TraceCallParam, 0, len(txs))
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNumber, txIndex, api.historyV3(dbtx), cfg.ChainName)
@@ -961,7 +968,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	}
 	engine := api.engine()
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), block.Transactions(), block.Uncles(), cfg, stateDb, nil)
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), block.Transactions(), block.Uncles(), cfg, stateDb, excessDataGas)
 	if err != nil {
 		return nil, err
 	}
@@ -982,7 +989,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 		// gnosis might have a fee free account here
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *cfg, stateDb, header, engine, true /* constCall */, nil /*excessDataGas*/)
+				return core.SysCallContract(contract, data, *cfg, stateDb, header, engine, true /* constCall */, excessDataGas)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}

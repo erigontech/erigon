@@ -7,13 +7,14 @@ import (
 	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
@@ -21,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -231,8 +231,6 @@ type ReconWorker struct {
 	logger      log.Logger
 	genesis     *types.Genesis
 	chain       ChainReader
-	isPoSA      bool
-	posa        consensus.PoSA
 
 	evm *vm.EVM
 	ibs *state.IntraBlockState
@@ -258,7 +256,6 @@ func NewReconWorker(lock sync.Locker, ctx context.Context, rs *state.ReconState,
 	}
 	rw.chain = NewChainReader(chainConfig, chainTx, blockReader)
 	rw.ibs = state.New(rw.stateReader)
-	rw.posa, rw.isPoSA = engine.(consensus.PoSA)
 	return rw
 }
 
@@ -325,24 +322,12 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 		}
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
-		if rw.isPoSA {
-			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, txTask.Header.Number, ibs)
-		}
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
 		}
 
 		rw.engine.Initialize(rw.chainConfig, rw.chain, txTask.Header, ibs, txTask.Txs, txTask.Uncles, syscall)
 	} else {
-		if rw.isPoSA {
-			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
-				if _, readError := rw.stateReader.ReadError(); !readError {
-					return err
-				}
-			} else if isSystemTx {
-				return nil
-			}
-		}
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
 		ibs.Prepare(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)

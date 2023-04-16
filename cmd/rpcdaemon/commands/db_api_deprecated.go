@@ -4,15 +4,15 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 )
 
 // DBAPI the interface for the db_ RPC commands (deprecated)
 type DBAPI interface {
 	GetString(_ context.Context, _ string, _ string) (string, error)
 	PutString(_ context.Context, _ string, _ string, _ string) (bool, error)
-	GetHex(_ context.Context, _ string, _ string) (hexutil.Bytes, error)
-	PutHex(_ context.Context, _ string, _ string, _ hexutil.Bytes) (bool, error)
+	GetHex(_ context.Context, _ string, _ string) (hexutility.Bytes, error)
+	PutHex(_ context.Context, _ string, _ string, _ hexutility.Bytes) (bool, error)
 }
 
 // DBAPIImpl data structure to store things needed for db_ commands
@@ -41,12 +41,12 @@ func (api *DBAPIImpl) PutString(_ context.Context, _ string, _ string, _ string)
 
 // GetHex implements db_getHex. Returns binary data from the local database.
 // Deprecated: This function will be removed in the future.
-func (api *DBAPIImpl) GetHex(_ context.Context, _ string, _ string) (hexutil.Bytes, error) {
-	return hexutil.Bytes(""), fmt.Errorf(NotAvailableDeprecated, "db_getHex")
+func (api *DBAPIImpl) GetHex(_ context.Context, _ string, _ string) (hexutility.Bytes, error) {
+	return hexutility.Bytes(""), fmt.Errorf(NotAvailableDeprecated, "db_getHex")
 }
 
 // PutHex implements db_putHex. Stores binary data in the local database.
 // Deprecated: This function will be removed in the future.
-func (api *DBAPIImpl) PutHex(_ context.Context, _ string, _ string, _ hexutil.Bytes) (bool, error) {
+func (api *DBAPIImpl) PutHex(_ context.Context, _ string, _ string, _ hexutility.Bytes) (bool, error) {
 	return false, fmt.Errorf(NotAvailableDeprecated, "db_putHex")
 }
