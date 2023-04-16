@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
-	logging2 "github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
@@ -56,7 +56,7 @@ var (
 )
 
 func init() {
-	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging2.Flags)
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	withDataDir(rootCmd)
 
@@ -114,7 +114,7 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		_ = logging2.GetLoggerCmd("downloader", cmd)
+		logging.SetupLoggerCmd("downloader", cmd)
 		if err := Downloader(cmd.Context()); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Error(err.Error())

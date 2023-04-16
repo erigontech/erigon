@@ -2,7 +2,6 @@ package state
 
 import (
 	"bytes"
-	"container/heap"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -50,11 +49,6 @@ type StateV3 struct {
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.Mutex
 
-	workFinished bool
-	receiveWork  chan *exec22.TxTask
-	queue        exec22.TxTaskQueue
-	queueLock    sync.Mutex
-
 	tmpdir              string
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
@@ -81,8 +75,6 @@ func NewStateV3(tmpdir string, domains *libstate.SharedDomains) *StateV3 {
 
 		applyPrevAccountBuf: make([]byte, 256),
 		addrIncBuf:          make([]byte, 20+8),
-
-		receiveWork: make(chan *exec22.TxTask, 10_000),
 	}
 	return rs
 }
@@ -261,101 +253,15 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	return nil
 }
 
-func (rs *StateV3) QueueLen() (l int) {
-	rs.queueLock.Lock()
-	l = rs.queue.Len()
-	rs.queueLock.Unlock()
-	return l
+func (rs *StateV3) ReTry(txTask *exec22.TxTask, in *exec22.QueueWithRetry) {
+	rs.resetTxTask(txTask)
+	in.ReTry(txTask)
 }
-func (rs *StateV3) QueueAndChLen() (l int) {
-	rs.queueLock.Lock()
-	l = rs.queue.Len()
-	rs.queueLock.Unlock()
-	return l + len(rs.receiveWork)
+func (rs *StateV3) AddWork(ctx context.Context, txTask *exec22.TxTask, in *exec22.QueueWithRetry) {
+	rs.resetTxTask(txTask)
+	in.Add(ctx, txTask)
 }
-
-func (rs *StateV3) popWait(ctx context.Context) (task *exec22.TxTask, ok bool) {
-	for {
-		select {
-		case inTask, ok := <-rs.receiveWork:
-			if !ok {
-				rs.queueLock.Lock()
-				if rs.queue.Len() > 0 {
-					task = heap.Pop(&rs.queue).(*exec22.TxTask)
-				}
-				rs.queueLock.Unlock()
-				return task, task != nil
-			}
-
-			rs.queueLock.Lock()
-			if inTask != nil {
-				heap.Push(&rs.queue, inTask)
-			}
-			if rs.queue.Len() > 0 {
-				task = heap.Pop(&rs.queue).(*exec22.TxTask)
-			}
-			rs.queueLock.Unlock()
-			if task != nil {
-				return task, true
-			}
-		case <-ctx.Done():
-			return nil, false
-		}
-	}
-}
-func (rs *StateV3) popNoWait() (task *exec22.TxTask, ok bool) {
-	rs.queueLock.Lock()
-	has := rs.queue.Len() > 0
-	if has { // means have conflicts to re-exec: it has higher priority than new tasks
-		task = heap.Pop(&rs.queue).(*exec22.TxTask)
-	}
-	rs.queueLock.Unlock()
-
-	if has {
-		return task, task != nil
-	}
-
-	// otherwise get some new task. non-blocking way. without adding to queue.
-	for task == nil {
-		select {
-		case task, ok = <-rs.receiveWork:
-			if !ok {
-				return nil, false
-			}
-		default:
-			return nil, false
-		}
-	}
-	return task, task != nil
-}
-
-func (rs *StateV3) Schedule(ctx context.Context) (*exec22.TxTask, bool) {
-	task, ok := rs.popNoWait()
-	if ok {
-		return task, true
-	}
-	return rs.popWait(ctx)
-}
-
-func (rs *StateV3) queuePush(ctx context.Context, t *exec22.TxTask) {
-	select {
-	case rs.receiveWork <- t:
-	case <-ctx.Done():
-		return
-	}
-}
-func (rs *StateV3) queueForcePush(t *exec22.TxTask) {
-	//add work without caring of channel limit
-	rs.queueLock.Lock()
-	heap.Push(&rs.queue, t)
-	rs.queueLock.Unlock()
-	select {
-	case rs.receiveWork <- nil:
-	default:
-	}
-}
-
-func (rs *StateV3) AddWork(ctx context.Context, txTask *exec22.TxTask, force bool) {
+func (rs *StateV3) resetTxTask(txTask *exec22.TxTask) {
 	txTask.BalanceIncreaseSet = nil
 	returnReadList(txTask.ReadLists)
 	txTask.ReadLists = nil
@@ -373,11 +279,6 @@ func (rs *StateV3) AddWork(ctx context.Context, txTask *exec22.TxTask, force boo
 		txTask.StoragePrevs = nil
 		txTask.CodePrevs = nil
 	*/
-	if force {
-		rs.queueForcePush(txTask)
-	} else {
-		rs.queuePush(ctx, txTask)
-	}
 }
 
 func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
@@ -402,7 +303,7 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 	return !deferral
 }
 
-func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) (count int) {
+func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *exec22.QueueWithRetry) (count int) {
 	ExecTxsDone.Inc()
 
 	if txNum > 0 && txNum%ethconfig.HistoryV3AggregationStep == 0 {
@@ -414,7 +315,7 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) (count int)
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	if triggered, ok := rs.triggers[txNum]; ok {
-		rs.queueForcePush(triggered)
+		in.ReTry(triggered)
 		count++
 		delete(rs.triggers, txNum)
 	}
@@ -425,14 +326,6 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) (count int)
 		}
 	}
 	return count
-}
-
-func (rs *StateV3) WorkFinish() {
-	if rs.workFinished {
-		return
-	}
-	rs.workFinished = true
-	close(rs.receiveWork)
 }
 
 func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {

@@ -18,6 +18,8 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
+	"net/http"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -35,6 +37,10 @@ import (
 	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
+	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
+	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type Sentinel struct {
@@ -52,6 +58,7 @@ type Sentinel struct {
 	discoverConfig discover.Config
 	pubsub         *pubsub.PubSub
 	subManager     *GossipManager
+	metrics        bool
 }
 
 func (s *Sentinel) createLocalNode(
@@ -167,12 +174,12 @@ func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
 	db kv.RoDB,
-	rule handshake.RuleFunc,
 ) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx: ctx,
 		cfg: cfg,
 		db:  db,
+		// metrics: true,
 	}
 
 	// Setup discovery
@@ -197,13 +204,37 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	if s.metrics {
+		http.Handle("/metrics", promhttp.Handler())
+		go func() {
+			server := &http.Server{
+				Addr:              ":2112",
+				ReadHeaderTimeout: time.Hour,
+			}
+			if err := server.ListenAndServe(); err != nil {
+				panic(err)
+			}
+		}()
 
+		rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
+
+		str, err := rcmgrObs.NewStatsTraceReporter()
+		if err != nil {
+			return nil, err
+		}
+
+		rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(rcmgr.DefaultLimits.AutoScale()), rcmgr.WithTraceReporter(str))
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, libp2p.ResourceManager(rmgr))
+	}
 	host, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host, rule)
+	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host)
 
 	// removed IdDelta in recent version of libp2p
 	host.RemoveStreamHandler("/p2p/id/delta/1.0.0")

@@ -284,7 +284,7 @@ func (n *Node) DataDir() string {
 	return n.config.Dirs.DataDir
 }
 
-func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv.RwDB, error) {
+func OpenDatabase(config *nodecfg.Config, label kv.Label) (kv.RwDB, error) {
 	var name string
 	switch label {
 	case kv.ChainDB:
@@ -309,7 +309,7 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 			roTxLimit = int64(config.Http.DBReadConcurrency)
 		}
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
-		opts := mdbx.NewMDBX(logger).
+		opts := mdbx.NewMDBX(log.Root()).
 			Path(dbPath).Label(label).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
 		if exclusive {

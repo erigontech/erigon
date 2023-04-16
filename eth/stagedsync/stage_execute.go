@@ -288,18 +288,8 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
-	doms := cfg.agg.SharedDomains()
-	cfg.agg.SetTx(tx)
-	//batch := memdb.NewMemoryBatch(tx, cfg.dirs.Tmp)
-	//cfg.agg.SetTx(batch)
-	rs := state.NewStateV3(cfg.dirs.Tmp, nil)
-	ssw, ssr := state.WrapStateIO(doms)
-	mrdr := state.NewMultiStateReader(true, state.NewWrappedStateReaderV4(tx.(kv.TemporalTx)), ssr)
-	mwrr := state.NewMultiStateWriter(state.NewWrappedStateWriterV4(tx.(kv.TemporalTx)), ssw)
-	rs.SetIO(mrdr, mwrr)
-
 	parallel := initialCycle && tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix, log.New(), to); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, logPrefix, to); err != nil {
 		return fmt.Errorf("ExecV3: %w", err)
 	}
 	return nil
@@ -386,9 +376,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	}
 
 	defer func() {
-		s := make([]byte, 2048)
-		n := runtime.Stack(s, true)
-		log.Info("SpawnExecuteBlocksStage exit ", "err", err, "stack", string(s[:n]))
+		log.Info("SpawnExecuteBlocksStage exit ", "err", err, "stack", dbg.Stack())
 	}()
 
 	quit := ctx.Done()
