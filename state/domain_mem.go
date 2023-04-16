@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -211,7 +212,7 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	}
 
 	var e error
-	sd.Commitment.updates.UpdatePrefix(addr, nil, sd.Commitment.TouchStorage)
+	//sd.Commitment.updates.UpdatePrefix(addr, nil, sd.Commitment.TouchStorage)
 	if err := sd.Storage.defaultDc.IteratePrefix(addr, func(k, v []byte) {
 		sd.Commitment.TouchPlainKey(addr, nil, sd.Commitment.TouchStorage)
 		if e == nil {
@@ -224,9 +225,7 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 }
 
 func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value, preVal []byte) error {
-	composite := make([]byte, len(addr)+len(loc))
-	copy(composite, addr)
-	copy(composite[length.Addr:], loc)
+	composite := common.Append(addr, loc)
 
 	sd.Commitment.TouchPlainKey(composite, value, sd.Commitment.TouchStorage)
 	if len(value) == 0 {
