@@ -130,7 +130,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 
 	for {
 		targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-		if int64(targetSlot) >= int64(cfg.forkChoice.HighestSeen())+1 {
+		if targetSlot != cfg.forkChoice.HighestSeen() {
 			time.Sleep(time.Second)
 			continue
 		}
