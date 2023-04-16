@@ -1,9 +1,12 @@
 package state
 
 import (
+	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -22,6 +25,7 @@ type WrappedStateWriterV4 struct {
 	txnum uint64
 }
 
+// Deprecated
 func (w *WrappedStateWriterV4) SetTx(htx kv.RwTx) {
 	w.htx = htx
 }
@@ -363,4 +367,151 @@ func (m MultiStateWriter) CreateContract(address common.Address) error {
 		}
 	}
 	return nil
+}
+
+type MultiStateReader struct {
+	readers []StateReader
+	compare bool // use first read as ethalon value for current read iteration
+}
+
+func NewMultiStateReader(compare bool, r ...StateReader) *MultiStateReader {
+	return &MultiStateReader{readers: r, compare: compare}
+}
+func (m *MultiStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	var vo accounts.Account
+	var isnil bool
+	for i, r := range m.readers {
+		v, err := r.ReadAccountData(address)
+		if err != nil {
+			return nil, err
+		}
+		if i == 0 {
+			if v == nil {
+				isnil = true
+				continue
+			}
+			vo = *v
+		}
+
+		if !m.compare {
+			continue
+		}
+		if isnil {
+			if v != nil {
+				log.Warn("state read invalid",
+					"reader", fmt.Sprintf("%d %T", i, r), "addr", address.String(),
+					"m", "nil expected, got something")
+
+			} else {
+				continue
+			}
+		}
+		buf := new(strings.Builder)
+		if vo.Nonce != v.Nonce {
+			buf.WriteString(fmt.Sprintf("nonce exp: %d, %d", vo.Nonce, v.Nonce))
+		}
+		if !bytes.Equal(vo.CodeHash[:], v.CodeHash[:]) {
+			buf.WriteString(fmt.Sprintf("code exp: %x, %x", vo.CodeHash[:], v.CodeHash[:]))
+		}
+		if !vo.Balance.Eq(&v.Balance) {
+			buf.WriteString(fmt.Sprintf("bal exp: %v, %v", vo.Balance.String(), v.Balance.String()))
+		}
+		if !bytes.Equal(vo.Root[:], v.Root[:]) {
+			buf.WriteString(fmt.Sprintf("root exp: %x, %x", vo.Root[:], v.Root[:]))
+		}
+		if buf.Len() > 0 {
+			log.Warn("state read invalid",
+				"reader", fmt.Sprintf("%d %T", i, r), "addr", address.String(),
+				"m", buf.String())
+		}
+	}
+	return &vo, nil
+}
+
+func (m *MultiStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	var so []byte
+	for i, r := range m.readers {
+		s, err := r.ReadAccountStorage(address, incarnation, key)
+		if err != nil {
+			return nil, err
+		}
+		if i == 0 {
+			so = common.Copy(s)
+		}
+		if !m.compare {
+			continue
+		}
+		if !bytes.Equal(so, s) {
+			log.Warn("state storage invalid read",
+				"reader", fmt.Sprintf("%d %T", i, r),
+				"addr", address.String(), "loc", key.String(), "expected", so, "got", s)
+		}
+	}
+	return so, nil
+}
+
+func (m MultiStateReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	var so []byte
+	for i, r := range m.readers {
+		s, err := r.ReadAccountCode(address, incarnation, codeHash)
+		if err != nil {
+			return nil, err
+		}
+		if i == 0 {
+			so = common.Copy(s)
+		}
+		if !m.compare {
+			continue
+		}
+		if !bytes.Equal(so, s) {
+			log.Warn("state code invalid read",
+				"reader", fmt.Sprintf("%d %T", i, r),
+				"addr", address.String(), "expected", so, "got", s)
+		}
+	}
+	return so, nil
+}
+
+func (m MultiStateReader) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	var so int
+	for i, r := range m.readers {
+		s, err := r.ReadAccountCodeSize(address, incarnation, codeHash)
+		if err != nil {
+			return 0, err
+		}
+		if i == 0 {
+			so = s
+		}
+		if !m.compare {
+			continue
+		}
+		if so != s {
+			log.Warn("state code size invalid read",
+				"reader", fmt.Sprintf("%d %T", i, r),
+				"addr", address.String(), "expected", so, "got", s)
+		}
+	}
+	return so, nil
+}
+
+func (m MultiStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	var so uint64
+	for i, r := range m.readers {
+		s, err := r.ReadAccountIncarnation(address)
+		if err != nil {
+			return 0, err
+		}
+		if i == 0 {
+			so = s
+		}
+		if !m.compare {
+			continue
+		}
+		if so != s {
+			log.Warn("state incarnation invalid read",
+				"reader", fmt.Sprintf("%d %T", i, r),
+				"addr", address.String(), "expected", so, "got", s)
+		}
+	}
+	return so, nil
 }

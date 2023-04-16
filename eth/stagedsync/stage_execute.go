@@ -288,12 +288,15 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
-	//doms := cfg.agg.SharedDomains()
+	doms := cfg.agg.SharedDomains()
 	cfg.agg.SetTx(tx)
 	//batch := memdb.NewMemoryBatch(tx, cfg.dirs.Tmp)
 	//cfg.agg.SetTx(batch)
 	rs := state.NewStateV3(cfg.dirs.Tmp, nil)
-	rs.SetIO(state.NewWrappedStateReaderV4(tx.(kv.TemporalTx)), state.NewWrappedStateWriterV4(tx.(kv.TemporalTx)))
+	ssw, ssr := state.WrapStateIO(doms)
+	mrdr := state.NewMultiStateReader(true, state.NewWrappedStateReaderV4(tx.(kv.TemporalTx)), ssr)
+	mwrr := state.NewMultiStateWriter(state.NewWrappedStateWriterV4(tx.(kv.TemporalTx)), ssw)
+	rs.SetIO(mrdr, mwrr)
 
 	parallel := initialCycle && tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix, log.New(), to); err != nil {
