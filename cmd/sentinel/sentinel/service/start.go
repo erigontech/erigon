@@ -40,18 +40,28 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *Serv
 		//sentinel.ProposerSlashingSsz,
 		//sentinel.AttesterSlashingSsz,
 	}
-	for _, v := range gossip_topics {
-		// now lets separately connect to the gossip topics. this joins the room
-		subscriber, err := sent.SubscribeGossip(v)
-		if err != nil {
-			log.Error("[Sentinel] failed to start sentinel", "err", err)
+	go func() {
+		for {
+			for _, v := range gossip_topics {
+				if err := sent.Unsubscribe(v); err != nil {
+					log.Error("[Sentinel] failed to start sentinel", "err", err)
+					continue
+				}
+				// now lets separately connect to the gossip topics. this joins the room
+				subscriber, err := sent.SubscribeGossip(v)
+				if err != nil {
+					log.Error("[Sentinel] failed to start sentinel", "err", err)
+				}
+				// actually start the subscription, aka listening and sending packets to the sentinel recv channel
+				err = subscriber.Listen()
+				if err != nil {
+					log.Error("[Sentinel] failed to start sentinel", "err", err)
+				}
+			}
+			time.Sleep(time.Hour)
 		}
-		// actually start the subscription, aka listening and sending packets to the sentinel recv channel
-		err = subscriber.Listen()
-		if err != nil {
-			log.Error("[Sentinel] failed to start sentinel", "err", err)
-		}
-	}
+	}()
+
 	log.Info("[Sentinel] Sentinel started", "enr", sent.String())
 	if initialStatus != nil {
 		sent.SetStatus(initialStatus)

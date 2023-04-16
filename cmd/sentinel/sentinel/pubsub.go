@@ -111,6 +111,16 @@ func (s *GossipManager) AddSubscription(topic string, sub *GossipSubscription) {
 	s.subscriptions[topic] = sub
 }
 
+func (s *GossipManager) unsubscribe(topic string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.subscriptions[topic]; !ok {
+		return
+	}
+	s.subscriptions[topic].Close()
+	delete(s.subscriptions, topic)
+}
+
 func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
 	digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
 	if err != nil {
@@ -130,4 +140,14 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (
 	s.subManager.AddSubscription(path, sub)
 
 	return sub, nil
+}
+
+func (s *Sentinel) Unsubscribe(topic GossipTopic, opts ...pubsub.TopicOpt) (err error) {
+	digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	if err != nil {
+		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
+	}
+	s.subManager.unsubscribe(fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr))
+
+	return nil
 }
