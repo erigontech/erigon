@@ -114,7 +114,7 @@ func (g *GossipManager) Start() {
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
 			// Log final result
-			log.Info("New block imported",
+			log.Debug("New block imported",
 				"slot", block.Block.Slot, "head", headSlot, "headRoot", headRoot,
 				"alloc", libcommon.ByteCount(m.Alloc))
 		case sentinel.GossipType_VoluntaryExitGossipType:
