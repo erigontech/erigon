@@ -995,6 +995,7 @@ func (r *StateReaderV3) SetTrace(trace bool)                { r.trace = trace }
 func (r *StateReaderV3) ResetReadSet()                      { r.readLists = newReadList() }
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	return r.rs.sharedReader.ReadAccountData(address)
 	addr := address.Bytes()
 	enc, ok := r.rs.Get(kv.PlainState, addr)
 	if !ok {
@@ -1024,6 +1025,8 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 }
 
 func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	return r.rs.sharedReader.ReadAccountStorage(address, incarnation, key)
+
 	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, ok := r.rs.Get(StorageTable, composite)
 	if !ok || enc == nil {
@@ -1052,6 +1055,8 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 }
 
 func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	return r.rs.sharedReader.ReadAccountCode(address, incarnation, codeHash)
+
 	addr, codeHashBytes := address.Bytes(), codeHash.Bytes()
 	enc, ok := r.rs.Get(kv.Code, codeHashBytes)
 	if !ok || enc == nil {
@@ -1075,6 +1080,7 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 }
 
 func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	return r.rs.sharedReader.ReadAccountCodeSize(address, incarnation, codeHash)
 	codeHashBytes := codeHash.Bytes()
 	enc, ok := r.rs.Get(kv.Code, codeHashBytes)
 	if !ok || enc == nil {
@@ -1098,6 +1104,7 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 }
 
 func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	return r.rs.sharedReader.ReadAccountIncarnation(address)
 	addrBytes := address[:]
 	enc, ok := r.rs.Get(kv.IncarnationMap, addrBytes)
 	if !ok || enc == nil {
