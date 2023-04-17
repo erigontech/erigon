@@ -56,27 +56,28 @@ type ChangeSet struct {
 }
 
 func New(validatorSetSize, blockRootsLength, stateRootsLength, slashingsLength, historicalSummariesLength, historicalRootsLength, votesLength, randaoMixesLength int, inverseChangeset bool) *ChangeSet {
+	replace := !inverseChangeset
 	return &ChangeSet{
-		BlockRootsChanges:                 NewListChangeSet[libcommon.Hash](blockRootsLength),
-		StateRootsChanges:                 NewListChangeSet[libcommon.Hash](stateRootsLength),
-		HistoricalRootsChanges:            NewListChangeSet[libcommon.Hash](historicalRootsLength),
-		eth1DataVotesChanges:              NewListChangeSet[cltypes.Eth1Data](votesLength),
-		BalancesChanges:                   NewListChangeSet[uint64](validatorSetSize),
-		RandaoMixesChanges:                NewListChangeSet[libcommon.Hash](randaoMixesLength),
-		SlashingsChanges:                  NewListChangeSet[uint64](slashingsLength),
-		PreviousEpochParticipationChanges: NewListChangeSet[cltypes.ParticipationFlags](validatorSetSize),
-		CurrentEpochParticipationChanges:  NewListChangeSet[cltypes.ParticipationFlags](validatorSetSize),
-		InactivityScoresChanges:           NewListChangeSet[uint64](validatorSetSize),
-		historicalSummaryChange:           NewListChangeSet[cltypes.HistoricalSummary](historicalSummariesLength),
+		BlockRootsChanges:                 NewListChangeSet[libcommon.Hash](blockRootsLength, replace),
+		StateRootsChanges:                 NewListChangeSet[libcommon.Hash](stateRootsLength, replace),
+		HistoricalRootsChanges:            NewListChangeSet[libcommon.Hash](historicalRootsLength, replace),
+		eth1DataVotesChanges:              NewListChangeSet[cltypes.Eth1Data](votesLength, replace),
+		BalancesChanges:                   NewListChangeSet[uint64](validatorSetSize, replace),
+		RandaoMixesChanges:                NewListChangeSet[libcommon.Hash](randaoMixesLength, replace),
+		SlashingsChanges:                  NewListChangeSet[uint64](slashingsLength, replace),
+		PreviousEpochParticipationChanges: NewListChangeSet[cltypes.ParticipationFlags](validatorSetSize, replace),
+		CurrentEpochParticipationChanges:  NewListChangeSet[cltypes.ParticipationFlags](validatorSetSize, replace),
+		InactivityScoresChanges:           NewListChangeSet[uint64](validatorSetSize, replace),
+		historicalSummaryChange:           NewListChangeSet[cltypes.HistoricalSummary](historicalSummariesLength, replace),
 		// Validators section
-		PublicKeyChanges:                 NewListChangeSet[[48]byte](validatorSetSize),
-		WithdrawalCredentialsChange:      NewListChangeSet[libcommon.Hash](validatorSetSize),
-		EffectiveBalanceChange:           NewListChangeSet[uint64](validatorSetSize),
-		ActivationEligibilityEpochChange: NewListChangeSet[uint64](validatorSetSize),
-		ActivationEpochChange:            NewListChangeSet[uint64](validatorSetSize),
-		ExitEpochChange:                  NewListChangeSet[uint64](validatorSetSize),
-		WithdrawalEpochChange:            NewListChangeSet[uint64](validatorSetSize),
-		SlashedChange:                    NewListChangeSet[bool](validatorSetSize),
+		PublicKeyChanges:                 NewListChangeSet[[48]byte](validatorSetSize, replace),
+		WithdrawalCredentialsChange:      NewListChangeSet[libcommon.Hash](validatorSetSize, replace),
+		EffectiveBalanceChange:           NewListChangeSet[uint64](validatorSetSize, replace),
+		ActivationEligibilityEpochChange: NewListChangeSet[uint64](validatorSetSize, replace),
+		ActivationEpochChange:            NewListChangeSet[uint64](validatorSetSize, replace),
+		ExitEpochChange:                  NewListChangeSet[uint64](validatorSetSize, replace),
+		WithdrawalEpochChange:            NewListChangeSet[uint64](validatorSetSize, replace),
+		SlashedChange:                    NewListChangeSet[bool](validatorSetSize, replace),
 		// Additional internal
 		inverseChangeset: inverseChangeset,
 	}
@@ -90,28 +91,28 @@ func (r *ChangeSet) OnSlotChange(prevSlot uint64) {
 	*r.slotChange = prevSlot
 }
 
-func (r *ChangeSet) OnForkChange(fork *cltypes.Fork) {
+func (r *ChangeSet) OnForkChange(fork cltypes.Fork) {
 	if r.inverseChangeset && r.forkChange != nil {
 		return
 	}
 	r.forkChange = new(cltypes.Fork)
-	*r.forkChange = *fork
+	*r.forkChange = fork
 }
 
-func (r *ChangeSet) OnLatestHeaderChange(h *cltypes.BeaconBlockHeader) {
+func (r *ChangeSet) OnLatestHeaderChange(h cltypes.BeaconBlockHeader) {
 	if r.inverseChangeset && r.latestBlockHeaderChange != nil {
 		return
 	}
 	r.latestBlockHeaderChange = new(cltypes.BeaconBlockHeader)
-	*r.latestBlockHeaderChange = *h
+	*r.latestBlockHeaderChange = h
 }
 
-func (r *ChangeSet) OnEth1DataChange(e *cltypes.Eth1Data) {
+func (r *ChangeSet) OnEth1DataChange(e cltypes.Eth1Data) {
 	if r.inverseChangeset && r.latestBlockHeaderChange != nil {
 		return
 	}
 	r.eth1DataChange = new(cltypes.Eth1Data)
-	*r.eth1DataChange = *e
+	*r.eth1DataChange = e
 }
 
 func (r *ChangeSet) OnJustificationBitsChange(j cltypes.JustificationBits) {
@@ -130,53 +131,56 @@ func (r *ChangeSet) OnEth1DepositIndexChange(e uint64) {
 	*r.eth1DepositIndexChange = e
 }
 
-func (r *ChangeSet) OnPreviousJustifiedCheckpointChange(c *cltypes.Checkpoint) {
+func (r *ChangeSet) OnPreviousJustifiedCheckpointChange(c cltypes.Checkpoint) {
 	if r.inverseChangeset && r.previousJustifiedCheckpointChange != nil {
 		return
 	}
-	r.previousJustifiedCheckpointChange = c.Copy()
+	r.previousJustifiedCheckpointChange = new(cltypes.Checkpoint)
+	*r.previousJustifiedCheckpointChange = c
 }
 
-func (r *ChangeSet) OnCurrentJustifiedCheckpointChange(c *cltypes.Checkpoint) {
+func (r *ChangeSet) OnCurrentJustifiedCheckpointChange(c cltypes.Checkpoint) {
 	if r.inverseChangeset && r.currentJustifiedCheckpointChange != nil {
 		return
 	}
-	r.currentJustifiedCheckpointChange = c.Copy()
+	r.currentJustifiedCheckpointChange = new(cltypes.Checkpoint)
+	*r.currentJustifiedCheckpointChange = c
 }
 
-func (r *ChangeSet) OnFinalizedCheckpointChange(c *cltypes.Checkpoint) {
+func (r *ChangeSet) OnFinalizedCheckpointChange(c cltypes.Checkpoint) {
 	if r.inverseChangeset && r.finalizedCheckpointChange != nil {
 		return
 	}
-	r.finalizedCheckpointChange = c.Copy()
+	r.finalizedCheckpointChange = new(cltypes.Checkpoint)
+	*r.finalizedCheckpointChange = c
 }
 
-func (r *ChangeSet) OnCurrentSyncCommitteeChange(c *cltypes.SyncCommittee) {
+func (r *ChangeSet) OnCurrentSyncCommitteeChange(c cltypes.SyncCommittee) {
 	if r.inverseChangeset && r.currentSyncCommitteeChange != nil {
 		return
 	}
 	r.currentSyncCommitteeChange = new(cltypes.SyncCommittee)
-	*r.currentSyncCommitteeChange = *c
+	*r.currentSyncCommitteeChange = c
 	r.currentSyncCommitteeChange.PubKeys = make([][48]byte, len(c.PubKeys))
 	copy(r.currentSyncCommitteeChange.PubKeys, c.PubKeys)
 }
 
-func (r *ChangeSet) OnNextSyncCommitteeChange(c *cltypes.SyncCommittee) {
+func (r *ChangeSet) OnNextSyncCommitteeChange(c cltypes.SyncCommittee) {
 	if r.inverseChangeset && r.nextSyncCommitteeChange != nil {
 		return
 	}
 	r.nextSyncCommitteeChange = new(cltypes.SyncCommittee)
-	*r.nextSyncCommitteeChange = *c
+	*r.nextSyncCommitteeChange = c
 	r.nextSyncCommitteeChange.PubKeys = make([][48]byte, len(c.PubKeys))
 	copy(r.nextSyncCommitteeChange.PubKeys, c.PubKeys)
 }
 
-func (r *ChangeSet) OnEth1Header(e *cltypes.Eth1Header) {
+func (r *ChangeSet) OnEth1Header(e cltypes.Eth1Header) {
 	if r.inverseChangeset && r.latestExecutionPayloadHeaderChange != nil {
 		return
 	}
 	r.latestExecutionPayloadHeaderChange = new(cltypes.Eth1Header)
-	*r.latestExecutionPayloadHeaderChange = *e
+	*r.latestExecutionPayloadHeaderChange = e
 	r.latestExecutionPayloadHeaderChange.Extra = libcommon.Copy(e.Extra)
 }
 
@@ -230,24 +234,24 @@ func (r *ChangeSet) ApplyHistoricalSummaryChanges(input []*cltypes.HistoricalSum
 }
 
 func (r *ChangeSet) CompactChanges() {
-	r.BlockRootsChanges.CompactChanges(r.inverseChangeset)
-	r.StateRootsChanges.CompactChanges(r.inverseChangeset)
-	r.HistoricalRootsChanges.CompactChanges(r.inverseChangeset)
-	r.SlashingsChanges.CompactChanges(r.inverseChangeset)
-	r.RandaoMixesChanges.CompactChanges(r.inverseChangeset)
-	r.BalancesChanges.CompactChanges(r.inverseChangeset)
-	r.eth1DataVotesChanges.CompactChanges(r.inverseChangeset)
-	r.PreviousEpochParticipationChanges.CompactChanges(r.inverseChangeset)
-	r.CurrentEpochParticipationChanges.CompactChanges(r.inverseChangeset)
-	r.InactivityScoresChanges.CompactChanges(r.inverseChangeset)
-	r.HistoricalRootsChanges.CompactChanges(r.inverseChangeset)
-	r.WithdrawalCredentialsChange.CompactChanges(r.inverseChangeset)
-	r.EffectiveBalanceChange.CompactChanges(r.inverseChangeset)
-	r.ExitEpochChange.CompactChanges(r.inverseChangeset)
-	r.ActivationEligibilityEpochChange.CompactChanges(r.inverseChangeset)
-	r.ActivationEpochChange.CompactChanges(r.inverseChangeset)
-	r.SlashedChange.CompactChanges(r.inverseChangeset)
-	r.WithdrawalEpochChange.CompactChanges(r.inverseChangeset)
+	r.BlockRootsChanges.CompactChanges()
+	r.StateRootsChanges.CompactChanges()
+	r.HistoricalRootsChanges.CompactChanges()
+	r.SlashingsChanges.CompactChanges()
+	r.RandaoMixesChanges.CompactChanges()
+	r.BalancesChanges.CompactChanges()
+	r.eth1DataVotesChanges.CompactChanges()
+	r.PreviousEpochParticipationChanges.CompactChanges()
+	r.CurrentEpochParticipationChanges.CompactChanges()
+	r.InactivityScoresChanges.CompactChanges()
+	r.HistoricalRootsChanges.CompactChanges()
+	r.WithdrawalCredentialsChange.CompactChanges()
+	r.EffectiveBalanceChange.CompactChanges()
+	r.ExitEpochChange.CompactChanges()
+	r.ActivationEligibilityEpochChange.CompactChanges()
+	r.ActivationEpochChange.CompactChanges()
+	r.SlashedChange.CompactChanges()
+	r.WithdrawalEpochChange.CompactChanges()
 }
 
 func (r *ChangeSet) ReportVotesReset(votes []*cltypes.Eth1Data) {

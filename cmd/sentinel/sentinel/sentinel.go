@@ -18,12 +18,12 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
+
 	"net/http"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
@@ -34,13 +34,26 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+const (
+	// overlay parameters
+	gossipSubD   = 8  // topic stable mesh target count
+	gossipSubDlo = 6  // topic stable mesh low watermark
+	gossipSubDhi = 12 // topic stable mesh high watermark
+
+	// gossip parameters
+	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
+	gossipSubMcacheGossip = 3   // number of windows to gossip about
+	gossipSubSeenTTL      = 550 // number of heartbeat intervals to retain message IDs
+	// heartbeat interval
+	gossipSubHeartbeatInterval = 700 * time.Millisecond // frequency of heartbeat, milliseconds
 )
 
 type Sentinel struct {
@@ -152,19 +165,27 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	return net, err
 }
 
+// creates a custom gossipsub parameter set.
+func pubsubGossipParam() pubsub.GossipSubParams {
+	gParams := pubsub.DefaultGossipSubParams()
+	gParams.Dlo = gossipSubDlo
+	gParams.D = gossipSubD
+	gParams.HeartbeatInterval = gossipSubHeartbeatInterval
+	gParams.HistoryLength = gossipSubMcacheLen
+	gParams.HistoryGossip = gossipSubMcacheGossip
+	return gParams
+}
+
 func (s *Sentinel) pubsubOptions() []pubsub.Option {
 	pubsubQueueSize := 600
-	gsp := pubsub.DefaultGossipSubParams()
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
-		pubsub.WithMessageIdFn(func(pmsg *pubsub_pb.Message) string {
-			return fork.MsgID(pmsg, s.cfg.NetworkConfig, s.cfg.BeaconConfig, s.cfg.GenesisConfig)
-		}), pubsub.WithNoAuthor(),
-		pubsub.WithSubscriptionFilter(nil),
+		pubsub.WithMessageIdFn(s.msgId),
+		pubsub.WithNoAuthor(),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
 		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSize)),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
-		pubsub.WithGossipSubParams(gsp),
+		pubsub.WithGossipSubParams(pubsubGossipParam()),
 	}
 	return psOpts
 }
@@ -236,8 +257,6 @@ func New(
 
 	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host)
 
-	// removed IdDelta in recent version of libp2p
-	host.RemoveStreamHandler("/p2p/id/delta/1.0.0")
 	s.host = host
 	s.peers = peers.New(s.host)
 
@@ -282,16 +301,18 @@ func (s *Sentinel) String() string {
 }
 
 func (s *Sentinel) HasTooManyPeers() bool {
-	return s.GetPeersCount() >= peers.DefaultMaxPeers
+	nPeers, _ := s.GetPeersCount()
+	return nPeers >= peers.DefaultMaxPeers
 }
 
-func (s *Sentinel) GetPeersCount() int {
-	sub := s.subManager.GetMatchingSubscription(string(LightClientOptimisticUpdateTopic))
+func (s *Sentinel) GetPeersCount() (int, int) {
+	sub := s.subManager.GetMatchingSubscription(string(BeaconBlockTopic))
 
 	if sub == nil {
-		return len(s.host.Network().Peers())
+		return len(s.host.Network().Peers()), 0
 	}
-	return len(sub.topic.ListPeers())
+
+	return len(s.host.Network().Peers()), len(sub.topic.ListPeers())
 }
 
 func (s *Sentinel) Host() host.Host {
