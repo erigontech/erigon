@@ -126,7 +126,7 @@ func TestEviction(t *testing.T) {
 	require.Equal(0, c.stateEvict.Len())
 	//require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
 	c.OnNewBlock(&remote.StateChangeBatch{
-		StateVersionID: id + 1,
+		StateVersionId: id + 1,
 		ChangeBatch: []*remote.StateChange{
 			{
 				Direction: remote.Direction_FORWARD,
@@ -228,7 +228,7 @@ func TestAPI(t *testing.T) {
 	txID3 := put(k1[:], []byte{3})               // even if core already on block 3
 
 	c.OnNewBlock(&remote.StateChangeBatch{
-		StateVersionID:      txID2,
+		StateVersionId:      txID2,
 		PendingBlockBaseFee: 1,
 		ChangeBatch: []*remote.StateChange{
 			{
@@ -259,7 +259,7 @@ func TestAPI(t *testing.T) {
 
 	res5, res6 := get(k1, txID3), get(k2, txID3) // will see View of transaction 3, even if notification has not enough changes
 	c.OnNewBlock(&remote.StateChangeBatch{
-		StateVersionID:      txID3,
+		StateVersionId:      txID3,
 		PendingBlockBaseFee: 1,
 		ChangeBatch: []*remote.StateChange{
 			{
@@ -291,7 +291,7 @@ func TestAPI(t *testing.T) {
 	txID4 := put(k1[:], []byte{2})
 	_ = txID4
 	c.OnNewBlock(&remote.StateChangeBatch{
-		StateVersionID:      txID4,
+		StateVersionId:      txID4,
 		PendingBlockBaseFee: 1,
 		ChangeBatch: []*remote.StateChange{
 			{
@@ -309,7 +309,7 @@ func TestAPI(t *testing.T) {
 	fmt.Printf("-----4\n")
 	txID5 := put(k1[:], []byte{4}) // reorg to new chain
 	c.OnNewBlock(&remote.StateChangeBatch{
-		StateVersionID:      txID4,
+		StateVersionId:      txID4,
 		PendingBlockBaseFee: 1,
 		ChangeBatch: []*remote.StateChange{
 			{

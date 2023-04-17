@@ -13,32 +13,51 @@ import (
 
 func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Run("> 2 unmerged files", func(t *testing.T) {
-		ii := &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
-		ii.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.scanStateFiles([]string{
+			"test.0-2.ef",
+			"test.2-3.ef",
+			"test.3-4.ef",
+		})
+		ii.reCalcRoFiles()
+
+		ic := ii.MakeContext()
+		defer ic.Close()
+
 		needMerge, from, to := ii.findMergeRange(4, 32)
 		assert.True(t, needMerge)
 		assert.Equal(t, 0, int(from))
 		assert.Equal(t, 4, int(to))
-		idxF, _ := ii.staticFilesInRange(from, to, nil)
+
+		idxF, _ := ii.staticFilesInRange(from, to, ic)
 		assert.Equal(t, 3, len(idxF))
 
-		ii = &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		ii.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
-		ii.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
+		ii = &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.scanStateFiles([]string{
+			"test.0-1.ef",
+			"test.1-2.ef",
+			"test.2-3.ef",
+			"test.3-4.ef",
+		})
+		ii.reCalcRoFiles()
+		ic = ii.MakeContext()
+		defer ic.Close()
+
 		needMerge, from, to = ii.findMergeRange(4, 32)
 		assert.True(t, needMerge)
 		assert.Equal(t, 0, int(from))
 		assert.Equal(t, 2, int(to))
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		h.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		h.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
-		h.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
+		h.scanStateFiles([]string{
+			"test.0-1.v",
+			"test.1-2.v",
+			"test.2-3.v",
+			"test.3-4.v",
+		})
+		h.reCalcRoFiles()
+		ic = ii.MakeContext()
+		defer ic.Close()
 
 		r := h.findMergeRange(4, 32)
 		assert.True(t, r.history)
@@ -46,15 +65,24 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.indexEndTxNum))
 	})
 	t.Run("not equal amount of files", func(t *testing.T) {
-		ii := &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		ii.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
-		ii.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.scanStateFiles([]string{
+			"test.0-1.ef",
+			"test.1-2.ef",
+			"test.2-3.ef",
+			"test.3-4.ef",
+		})
+		ii.reCalcRoFiles()
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		h.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
+		h.scanStateFiles([]string{
+			"test.0-1.v",
+			"test.1-2.v",
+		})
+		h.reCalcRoFiles()
+
+		hc := h.MakeContext()
+		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
 		assert.True(t, r.index)
@@ -64,14 +92,23 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.indexEndTxNum))
 	})
 	t.Run("idx merged, history not yet", func(t *testing.T) {
-		ii := &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
-		ii.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.scanStateFiles([]string{
+			"test.0-2.ef",
+			"test.2-3.ef",
+			"test.3-4.ef",
+		})
+		ii.reCalcRoFiles()
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		h.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
+		h.scanStateFiles([]string{
+			"test.0-1.v",
+			"test.1-2.v",
+		})
+		h.reCalcRoFiles()
+
+		hc := h.MakeContext()
+		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
 		assert.True(t, r.history)
@@ -80,140 +117,197 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.historyEndTxNum))
 	})
 	t.Run("idx merged, history not yet, 2", func(t *testing.T) {
-		ii := &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		ii.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
-		ii.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 4})
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.scanStateFiles([]string{
+			"test.0-1.ef",
+			"test.1-2.ef",
+			"test.2-3.ef",
+			"test.3-4.ef",
+			"test.0-4.ef",
+		})
+		ii.reCalcRoFiles()
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		h.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		h.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
-		h.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
+		h.scanStateFiles([]string{
+			"test.0-1.v",
+			"test.1-2.v",
+			"test.2-3.v",
+			"test.3-4.v",
+		})
+		h.reCalcRoFiles()
+
+		hc := h.MakeContext()
+		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
 		assert.False(t, r.index)
 		assert.True(t, r.history)
 		assert.Equal(t, 2, int(r.historyEndTxNum))
-		idxFiles, histFiles, _, err := h.staticFilesInRange(r, nil)
+		idxFiles, histFiles, _, err := h.staticFilesInRange(r, hc)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(idxFiles))
 		require.Equal(t, 2, len(histFiles))
 	})
 	t.Run("idx merged and small files lost", func(t *testing.T) {
-		ii := &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 4})
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.scanStateFiles([]string{
+			"test.0-4.ef",
+		})
+		ii.reCalcRoFiles()
 
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		h.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		h.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
-		h.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
+		h.scanStateFiles([]string{
+			"test.0-1.v",
+			"test.1-2.v",
+			"test.2-3.v",
+			"test.3-4.v",
+		})
+		h.reCalcRoFiles()
+
+		hc := h.MakeContext()
+		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
 		assert.False(t, r.index)
 		assert.True(t, r.history)
 		assert.Equal(t, 2, int(r.historyEndTxNum))
-		_, _, _, err := h.staticFilesInRange(r, nil)
+		_, _, _, err := h.staticFilesInRange(r, hc)
 		require.Error(t, err)
 	})
 
 	t.Run("history merged, but index not and history garbage left", func(t *testing.T) {
-		ii := &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		ii.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.scanStateFiles([]string{
+			"test.0-1.ef",
+			"test.1-2.ef",
+		})
+		ii.reCalcRoFiles()
 
 		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		h.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		h.files.Set(&filesItem{startTxNum: 0, endTxNum: 2})
+		h.scanStateFiles([]string{
+			"test.0-1.v",
+			"test.1-2.v",
+			"test.0-2.v",
+		})
+		h.reCalcRoFiles()
+
+		hc := h.MakeContext()
+		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
 		assert.True(t, r.index)
 		assert.False(t, r.history)
 		assert.Equal(t, uint64(2), r.indexEndTxNum)
-		idxFiles, histFiles, _, err := h.staticFilesInRange(r, nil)
+		idxFiles, histFiles, _, err := h.staticFilesInRange(r, hc)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(idxFiles))
 		require.Equal(t, 0, len(histFiles))
 	})
 	t.Run("history merge progress ahead of idx", func(t *testing.T) {
-		ii := &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		ii.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
-		ii.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.scanStateFiles([]string{
+			"test.0-1.ef",
+			"test.1-2.ef",
+			"test.0-2.ef",
+			"test.2-3.ef",
+			"test.3-4.ef",
+		})
+		ii.reCalcRoFiles()
 
-		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		h.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		h.files.Set(&filesItem{startTxNum: 0, endTxNum: 2})
-		h.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
-		h.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
+		h.scanStateFiles([]string{
+			"test.0-1.v",
+			"test.1-2.v",
+			"test.0-2.v",
+			"test.2-3.v",
+			"test.3-4.v",
+		})
+		h.reCalcRoFiles()
+
+		hc := h.MakeContext()
+		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
 		assert.True(t, r.index)
 		assert.True(t, r.history)
 		assert.Equal(t, 4, int(r.indexEndTxNum))
-		idxFiles, histFiles, _, err := h.staticFilesInRange(r, nil)
+		idxFiles, histFiles, _, err := h.staticFilesInRange(r, hc)
 		require.NoError(t, err)
 		require.Equal(t, 3, len(idxFiles))
 		require.Equal(t, 3, len(histFiles))
 	})
 	t.Run("idx merge progress ahead of history", func(t *testing.T) {
-		ii := &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		ii.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.scanStateFiles([]string{
+			"test.0-1.ef",
+			"test.1-2.ef",
+			"test.0-2.ef",
+			"test.2-3.ef",
+		})
+		ii.reCalcRoFiles()
 
-		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		h.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		h.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		h.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
+		h.scanStateFiles([]string{
+			"test.0-1.v",
+			"test.1-2.v",
+			"test.2-3.v",
+		})
+		h.reCalcRoFiles()
+
+		hc := h.MakeContext()
+		defer hc.Close()
 
 		r := h.findMergeRange(4, 32)
 		assert.False(t, r.index)
 		assert.True(t, r.history)
 		assert.Equal(t, 2, int(r.historyEndTxNum))
-		idxFiles, histFiles, _, err := h.staticFilesInRange(r, nil)
+		idxFiles, histFiles, _, err := h.staticFilesInRange(r, hc)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(idxFiles))
 		require.Equal(t, 2, len(histFiles))
 	})
 	t.Run("idx merged, but garbage left", func(t *testing.T) {
-		ii := &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		ii.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 2})
-		needMerge, _, _ := ii.findMergeRange(4, 32)
-		assert.False(t, needMerge)
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.scanStateFiles([]string{
+			"test.0-1.ef",
+			"test.1-2.ef",
+			"test.0-2.ef",
+		})
+		ii.reCalcRoFiles()
 
-		ii = &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		ii.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
-		needMerge, _, _ = ii.findMergeRange(4, 32)
-		assert.False(t, needMerge)
+		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		h.scanStateFiles([]string{
+			"test.0-1.v",
+			"test.1-2.v",
+			"test.0-2.v",
+			"test.2-3.v",
+		})
+		h.reCalcRoFiles()
 
-		ii = &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
-		ii.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 2})
-		ii.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
-		ii.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
+		hc := h.MakeContext()
+		defer hc.Close()
+		r := h.findMergeRange(4, 32)
+		assert.False(t, r.index)
+		assert.False(t, r.history)
+	})
+	t.Run("idx merged, but garbage left2", func(t *testing.T) {
+		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.scanStateFiles([]string{
+			"test.0-1.ef",
+			"test.1-2.ef",
+			"test.0-2.ef",
+			"test.2-3.ef",
+			"test.3-4.ef",
+		})
+		ii.reCalcRoFiles()
+		ic := ii.MakeContext()
+		defer ic.Close()
 		needMerge, from, to := ii.findMergeRange(4, 32)
 		assert.True(t, needMerge)
 		require.Equal(t, 0, int(from))
 		require.Equal(t, 4, int(to))
-		idxFiles, _ := ii.staticFilesInRange(from, to, nil)
+		idxFiles, _ := ii.staticFilesInRange(from, to, ic)
 		require.Equal(t, 3, len(idxFiles))
 	})
 }

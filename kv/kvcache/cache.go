@@ -271,7 +271,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	c.waitExceededCount.Store(0) // reset the circuit breaker
-	id := stateChanges.StateVersionID
+	id := stateChanges.StateVersionId
 	r := c.advanceRoot(id)
 	for _, sc := range stateChanges.ChangeBatch {
 		for i := range sc.Changes {

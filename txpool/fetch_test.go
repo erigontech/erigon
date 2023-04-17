@@ -166,7 +166,7 @@ func TestOnNewBlock(t *testing.T) {
 			}
 			i++
 			return &remote.StateChangeBatch{
-				StateVersionID: 1,
+				StateVersionId: 1,
 				ChangeBatch: []*remote.StateChange{
 					{Txs: [][]byte{decodeHex(types3.TxParseMainnetTests[0].PayloadStr), decodeHex(types3.TxParseMainnetTests[1].PayloadStr), decodeHex(types3.TxParseMainnetTests[2].PayloadStr)}, BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256([32]byte{})},
 				},

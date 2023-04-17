@@ -67,13 +67,17 @@ type AggregatorV3 struct {
 	blockNum         atomic.Uint64
 	aggregationStep  uint64
 	keepInDB         uint64
-	maxTxNum         atomic.Uint64
+
+	minimaxTxNumInFiles atomic.Uint64
 
 	filesMutationLock sync.Mutex
 
-	working                atomic.Bool
-	workingMerge           atomic.Bool
-	workingOptionalIndices atomic.Bool
+	// To keep DB small - need move data to small files ASAP.
+	// It means goroutine which creating small files - can't be locked by merge or indexing.
+	buildingFiles           atomic.Bool
+	mergeingFiles           atomic.Bool
+	buildingOptionalIndices atomic.Bool
+
 	//warmupWorking          atomic.Bool
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -253,13 +257,13 @@ func (a *AggregatorV3) Files() (res []string) {
 	return res
 }
 func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Context, workers int) {
-	if ok := a.workingOptionalIndices.CompareAndSwap(false, true); !ok {
+	if ok := a.buildingOptionalIndices.CompareAndSwap(false, true); !ok {
 		return
 	}
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
-		defer a.workingOptionalIndices.Store(false)
+		defer a.buildingOptionalIndices.Store(false)
 		if err := a.BuildOptionalMissedIndices(ctx, workers); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return
@@ -730,29 +734,37 @@ func (a *AggregatorV3) mergeDomainSteps(ctx context.Context) error {
 	return nil
 }
 
-func (a *AggregatorV3) BuildFiles(ctx context.Context, db kv.RoDB) (err error) {
+func (a *AggregatorV3) BuildFiles(toTxNum uint64) (err error) {
 	txn := a.txNum.Load() + 1
 	if txn <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
 		return nil
 	}
-
 	if _, err = a.ComputeCommitment(true, false); err != nil {
 		return err
 	}
 
-	// trying to create as much small-step-files as possible:
-	// - to reduce amount of small merges
-	// - to remove old data from db as early as possible
-	// - during files build, may happen commit of new data. on each loop step getting latest id in db
-	step := a.EndTxNumMinimax() / a.aggregationStep
-	for ; step < lastIdInDB(db, a.accounts.indexKeysTable)/a.aggregationStep; step++ {
-		if err := a.buildFilesInBackground(ctx, step); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				log.Warn("buildFilesInBackground", "err", err)
+	a.BuildFilesInBackground(toTxNum)
+	if !(a.buildingFiles.Load() || a.mergeingFiles.Load() || a.buildingOptionalIndices.Load()) {
+		return nil
+	}
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+Loop:
+	for {
+		select {
+		case <-a.ctx.Done():
+			return a.ctx.Err()
+		case <-logEvery.C:
+			if !(a.buildingFiles.Load() || a.mergeingFiles.Load() || a.buildingOptionalIndices.Load()) {
+				break Loop
 			}
-			break
+			if a.HasBackgroundFilesBuild() {
+				log.Info("[snapshots] Files build", "progress", a.BackgroundProgress())
+			}
 		}
 	}
+
 	return nil
 }
 
@@ -793,7 +805,7 @@ func (a *AggregatorV3) FinishTx(rwTx kv.RwTx) (rootHash []byte, err error) {
 func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {
 	closeAll := true
 	maxSpan := a.aggregationStep * StepsInBiggestFile
-	r := a.findMergeRange(a.maxTxNum.Load(), maxSpan)
+	r := a.findMergeRange(a.minimaxTxNumInFiles.Load(), maxSpan)
 	if !r.any() {
 		return false, nil
 	}
@@ -1008,7 +1020,9 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (a *AggregatorV3) CanPrune(tx kv.Tx) bool { return a.CanPruneFrom(tx) < a.maxTxNum.Load() }
+func (a *AggregatorV3) CanPrune(tx kv.Tx) bool {
+	return a.CanPruneFrom(tx) < a.minimaxTxNumInFiles.Load()
+}
 func (a *AggregatorV3) CanPruneFrom(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, kv.TracesToKeys)
 	fst2, _ := kv.FirstKey(tx, kv.StorageHistoryKeys)
@@ -1041,7 +1055,7 @@ func (a *AggregatorV3) Prune(ctx context.Context, limit uint64) error {
 	//		_ = a.Warmup(ctx, 0, cmp.Max(a.aggregationStep, limit)) // warmup is asyn and moving faster than data deletion
 	//	}()
 	//}
-	return a.prune(ctx, 0, a.maxTxNum.Load(), limit)
+	return a.prune(ctx, 0, a.minimaxTxNumInFiles.Load(), limit)
 }
 
 func (a *AggregatorV3) prune(ctx context.Context, txFrom, txTo, limit uint64) error {
@@ -1076,10 +1090,10 @@ func (a *AggregatorV3) prune(ctx context.Context, txFrom, txTo, limit uint64) er
 }
 
 func (a *AggregatorV3) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) uint64) {
-	if a.maxTxNum.Load() == 0 {
+	if a.minimaxTxNumInFiles.Load() == 0 {
 		return
 	}
-	histBlockNumProgress := tx2block(a.maxTxNum.Load())
+	histBlockNumProgress := tx2block(a.minimaxTxNumInFiles.Load())
 	str := make([]string, 0, a.accounts.InvertedIndex.files.Len())
 	a.accounts.InvertedIndex.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
@@ -1108,13 +1122,13 @@ func (a *AggregatorV3) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) 
 	dbg.ReadMemStats(&m)
 	log.Info("[snapshots] History Stat",
 		"blocks", fmt.Sprintf("%dk", (histBlockNumProgress+1)/1000),
-		"txs", fmt.Sprintf("%dm", a.maxTxNum.Load()/1_000_000),
+		"txs", fmt.Sprintf("%dm", a.minimaxTxNumInFiles.Load()/1_000_000),
 		"txNum2blockNum", strings.Join(str, ","),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
-func (a *AggregatorV3) EndTxNumMinimax() uint64 { return a.maxTxNum.Load() }
+func (a *AggregatorV3) EndTxNumMinimax() uint64 { return a.minimaxTxNumInFiles.Load() }
 func (a *AggregatorV3) EndTxNumFrozenAndIndexed() uint64 {
 	return cmp.Min(
 		cmp.Min(
@@ -1150,7 +1164,7 @@ func (a *AggregatorV3) recalcMaxTxNum() {
 	if txNum := a.tracesTo.endTxNumMinimax(); txNum < min {
 		min = txNum
 	}
-	a.maxTxNum.Store(min)
+	a.minimaxTxNumInFiles.Store(min)
 }
 
 type RangesV3 struct {
@@ -1486,23 +1500,23 @@ func (a *AggregatorV3) AggregateFilesInBackground() {
 	a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 }
 
-func (a *AggregatorV3) BuildFilesInBackground() {
-	if (a.txNum.Load() + 1) <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
+func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) {
+	if (txNum + 1) <= a.minimaxTxNumInFiles.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
 		return
 	}
 
-	step := a.maxTxNum.Load() / a.aggregationStep
-	if ok := a.working.CompareAndSwap(false, true); !ok {
+	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return
 	}
 
+	step := a.minimaxTxNumInFiles.Load() / a.aggregationStep
 	toTxNum := (step + 1) * a.aggregationStep
 	hasData := false
 
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
-		defer a.working.Store(false)
+		defer a.buildingFiles.Store(false)
 
 		// check if db has enough data (maybe we didn't commit them yet)
 		lastInDB := lastIdInDB(a.db, a.accounts.keysTable)
@@ -1531,13 +1545,13 @@ func (a *AggregatorV3) BuildFilesInBackground() {
 			step++
 		}
 
-		if ok := a.workingMerge.CompareAndSwap(false, true); !ok {
+		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
 			return
 		}
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
-			defer a.workingMerge.Store(false)
+			defer a.mergeingFiles.Store(false)
 			if err := a.MergeLoop(a.ctx, 1); err != nil {
 				if errors.Is(err, context.Canceled) {
 					return

@@ -501,3 +501,46 @@ func TestScanStaticFiles(t *testing.T) {
 	ii.scanStateFiles(files)
 	require.Equal(t, 0, ii.files.Len())
 }
+
+func TestCtxFiles(t *testing.T) {
+	ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1,
+		files: btree2.NewBTreeG[*filesItem](filesItemLess),
+	}
+	files := []string{
+		"test.0-1.ef", // overlap with same `endTxNum=4`
+		"test.1-2.ef",
+		"test.0-4.ef",
+		"test.2-3.ef",
+		"test.3-4.ef",
+		"test.4-5.ef",     // no overlap
+		"test.480-484.ef", // overlap with same `startTxNum=480`
+		"test.480-488.ef",
+		"test.480-496.ef",
+		"test.480-512.ef",
+	}
+	ii.scanStateFiles(files)
+	require.Equal(t, 10, ii.files.Len())
+
+	roFiles := ctxFiles(ii.files)
+	for i, item := range roFiles {
+		if item.src.canDelete.Load() {
+			require.Failf(t, "deleted file", "%d-%d", item.src.startTxNum, item.src.endTxNum)
+		}
+		if i == 0 {
+			continue
+		}
+		if item.src.isSubsetOf(roFiles[i-1].src) || roFiles[i-1].src.isSubsetOf(item.src) {
+			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.src.startTxNum, item.src.endTxNum, roFiles[i-1].src.startTxNum, roFiles[i-1].src.endTxNum)
+		}
+	}
+	require.Equal(t, 3, len(roFiles))
+
+	require.Equal(t, 0, int(roFiles[0].startTxNum))
+	require.Equal(t, 4, int(roFiles[0].endTxNum))
+
+	require.Equal(t, 4, int(roFiles[1].startTxNum))
+	require.Equal(t, 5, int(roFiles[1].endTxNum))
+
+	require.Equal(t, 480, int(roFiles[2].startTxNum))
+	require.Equal(t, 512, int(roFiles[2].endTxNum))
+}

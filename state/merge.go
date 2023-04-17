@@ -318,19 +318,16 @@ func (d *Domain) staticFilesInRange(r DomainRanges, dc *DomainContext) (valuesFi
 		}
 	}
 	if r.values {
-		d.files.Walk(func(items []*filesItem) bool {
-			for _, item := range items {
-				if item.startTxNum < r.valuesStartTxNum {
-					startJ++
-					continue
-				}
-				if item.endTxNum > r.valuesEndTxNum {
-					return false
-				}
-				valuesFiles = append(valuesFiles, item)
+		for _, item := range dc.files {
+			if item.startTxNum < r.valuesStartTxNum {
+				startJ++
+				continue
 			}
-			return true
-		})
+			if item.endTxNum > r.valuesEndTxNum {
+				break
+			}
+			valuesFiles = append(valuesFiles, item.src)
+		}
 		for _, f := range valuesFiles {
 			if f == nil {
 				panic("must not happen")
@@ -339,38 +336,20 @@ func (d *Domain) staticFilesInRange(r DomainRanges, dc *DomainContext) (valuesFi
 	}
 	return
 }
-
 func (ii *InvertedIndex) staticFilesInRange(startTxNum, endTxNum uint64, ic *InvertedIndexContext) ([]*filesItem, int) {
-	_ = ic
-	var files []*filesItem
+	files := make([]*filesItem, 0, len(ic.files))
 	var startJ int
 
-	var prevStart uint64
-	ii.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.startTxNum < startTxNum {
-				startJ++
-				continue
-			}
-			if item.endTxNum > endTxNum {
-				return false
-			}
-
-			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
-			// see super-set file, just drop sub-set files from list
-			if item.startTxNum < prevStart {
-				for len(files) > 0 {
-					if files[len(files)-1].startTxNum < item.startTxNum {
-						break
-					}
-					files = files[:len(files)-1]
-				}
-			}
-			files = append(files, item)
-			prevStart = item.startTxNum
+	for _, item := range ic.files {
+		if item.startTxNum < startTxNum {
+			startJ++
+			continue
 		}
-		return true
-	})
+		if item.endTxNum > endTxNum {
+			break
+		}
+		files = append(files, item.src)
+	}
 	for _, f := range files {
 		if f == nil {
 			panic("must not happen")
@@ -381,52 +360,32 @@ func (ii *InvertedIndex) staticFilesInRange(startTxNum, endTxNum uint64, ic *Inv
 }
 
 func (h *History) staticFilesInRange(r HistoryRanges, hc *HistoryContext) (indexFiles, historyFiles []*filesItem, startJ int, err error) {
-	_ = hc // maybe will move this method to `hc` object
 	if !r.history && r.index {
-		indexFiles, startJ = h.InvertedIndex.staticFilesInRange(r.indexStartTxNum, r.indexEndTxNum, nil)
+		indexFiles, startJ = h.InvertedIndex.staticFilesInRange(r.indexStartTxNum, r.indexEndTxNum, hc.ic)
 		return indexFiles, historyFiles, startJ, nil
 	}
+
 	if r.history {
+		// Get history files from HistoryContext (no "garbage/overalps"), but index files not from InvertedIndexContext
+		// because index files may already be merged (before `kill -9`) and it means not visible in InvertedIndexContext
 		startJ = 0
-
-		var prevStart uint64
-		var walkErr error
-		h.files.Walk(func(items []*filesItem) bool {
-			for _, item := range items {
-				if item.startTxNum < r.historyStartTxNum {
-					startJ++
-					continue
-				}
-				if item.endTxNum > r.historyEndTxNum {
-					return false
-				}
-
-				// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
-				// see super-set file, just drop sub-set files from list
-				if item.startTxNum < prevStart {
-					for len(historyFiles) > 0 {
-						if historyFiles[len(historyFiles)-1].startTxNum < item.startTxNum {
-							break
-						}
-						historyFiles = historyFiles[:len(historyFiles)-1]
-						indexFiles = indexFiles[:len(indexFiles)-1]
-					}
-				}
-
-				prevStart = item.startTxNum
-				historyFiles = append(historyFiles, item)
-				idxFile, ok := h.InvertedIndex.files.Get(item)
-				if ok {
-					indexFiles = append(indexFiles, idxFile)
-				} else {
-					walkErr = fmt.Errorf("file not found for merge: %s.%d-%d.efi", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
-					return false
-				}
+		for _, item := range hc.files {
+			if item.startTxNum < r.historyStartTxNum {
+				startJ++
+				continue
 			}
-			return true
-		})
-		if walkErr != nil {
-			return nil, nil, 0, walkErr
+			if item.endTxNum > r.historyEndTxNum {
+				break
+			}
+
+			historyFiles = append(historyFiles, item.src)
+			idxFile, ok := h.InvertedIndex.files.Get(item.src)
+			if ok {
+				indexFiles = append(indexFiles, idxFile)
+			} else {
+				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s.%d-%d.efi", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
+				return nil, nil, 0, walkErr
+			}
 		}
 
 		for _, f := range historyFiles {
@@ -720,6 +679,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 
 	var cp CursorHeap
 	heap.Init(&cp)
+
 	for _, item := range files {
 		g := item.decompressor.MakeGetter()
 		g.Reset(0)

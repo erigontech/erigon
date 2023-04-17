@@ -28,13 +28,13 @@ const (
 // UnmarshalFixedText decodes the input as a string with 0x prefix. The length of out
 // determines the required input length. This function is commonly used to implement the
 // UnmarshalText method for fixed-size types.
-func UnmarshalFixedText(typname string, input, out []byte) error {
+func UnmarshalFixedText(typeName string, input, out []byte) error {
 	raw, err := checkText(input, true)
 	if err != nil {
 		return err
 	}
 	if len(raw)/2 != len(out) {
-		return fmt.Errorf("hex string has length %d, want %d for %s", len(raw), len(out)*2, typname)
+		return fmt.Errorf("hex string has length %d, want %d for %s", len(raw), len(out)*2, typeName)
 	}
 	// Pre-verify syntax before modifying out.
 	for _, b := range raw {

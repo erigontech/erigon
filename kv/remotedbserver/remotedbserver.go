@@ -27,8 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -39,6 +37,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 )
 
 // MaxTxTTL - kv interface provide high-consistancy guaranties: Serializable Isolations Level https://en.wikipedia.org/wiki/Isolation_(database_systems)
@@ -218,7 +218,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 	}); err != nil {
 		return err
 	}
-	if err := stream.Send(&remote.Pair{ViewID: viewID, TxID: id}); err != nil {
+	if err := stream.Send(&remote.Pair{ViewId: viewID, TxId: id}); err != nil {
 		return fmt.Errorf("server-side error: %w", err)
 	}
 
@@ -315,7 +315,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 				bucket: in.BucketName,
 				c:      c,
 			}
-			if err := stream.Send(&remote.Pair{CursorID: CursorID}); err != nil {
+			if err := stream.Send(&remote.Pair{CursorId: CursorID}); err != nil {
 				return fmt.Errorf("server-side error: %w", err)
 			}
 			continue
@@ -335,7 +335,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 				bucket: in.BucketName,
 				c:      c,
 			}
-			if err := stream.Send(&remote.Pair{CursorID: CursorID}); err != nil {
+			if err := stream.Send(&remote.Pair{CursorId: CursorID}); err != nil {
 				return fmt.Errorf("server-side error: %w", err)
 			}
 			continue
