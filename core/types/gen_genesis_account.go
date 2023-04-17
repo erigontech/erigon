@@ -8,8 +8,8 @@ import (
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 )
 
@@ -18,12 +18,12 @@ var _ = (*genesisAccountMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (g GenesisAccount) MarshalJSON() ([]byte, error) {
 	type GenesisAccount struct {
-		Constructor hexutil.Bytes               `json:"constructor,omitempty"`
-		Code        hexutil.Bytes               `json:"code,omitempty"`
+		Constructor hexutility.Bytes            `json:"constructor,omitempty"`
+		Code        hexutility.Bytes            `json:"code,omitempty"`
 		Storage     map[storageJSON]storageJSON `json:"storage,omitempty"`
 		Balance     *math.HexOrDecimal256       `json:"balance" gencodec:"required"`
 		Nonce       math.HexOrDecimal64         `json:"nonce,omitempty"`
-		PrivateKey  hexutil.Bytes               `json:"secretKey,omitempty"`
+		PrivateKey  hexutility.Bytes            `json:"secretKey,omitempty"`
 	}
 	var enc GenesisAccount
 	enc.Constructor = g.Constructor
@@ -43,12 +43,12 @@ func (g GenesisAccount) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON unmarshals from JSON.
 func (g *GenesisAccount) UnmarshalJSON(input []byte) error {
 	type GenesisAccount struct {
-		Constructor *hexutil.Bytes              `json:"constructor,omitempty"`
-		Code        *hexutil.Bytes              `json:"code,omitempty"`
+		Constructor *hexutility.Bytes           `json:"constructor,omitempty"`
+		Code        *hexutility.Bytes           `json:"code,omitempty"`
 		Storage     map[storageJSON]storageJSON `json:"storage,omitempty"`
 		Balance     *math.HexOrDecimal256       `json:"balance" gencodec:"required"`
 		Nonce       *math.HexOrDecimal64        `json:"nonce,omitempty"`
-		PrivateKey  *hexutil.Bytes              `json:"secretKey,omitempty"`
+		PrivateKey  *hexutility.Bytes           `json:"secretKey,omitempty"`
 	}
 	var dec GenesisAccount
 	if err := json.Unmarshal(input, &dec); err != nil {

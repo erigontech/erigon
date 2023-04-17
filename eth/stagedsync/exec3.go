@@ -475,9 +475,6 @@ func ExecV3(ctx context.Context,
 		applyWorker.ResetTx(applyTx)
 	}
 
-	_, isPoSa := cfg.engine.(consensus.PoSA)
-	//isBor := cfg.chainConfig.Bor != nil
-
 	slowDownLimit := time.NewTicker(time.Second)
 	defer slowDownLimit.Stop()
 
@@ -493,7 +490,7 @@ Loop:
 			return err
 		}
 		if b == nil {
-			// TODO: panic here and see that overall prodcess deadlock
+			// TODO: panic here and see that overall process deadlock
 			return fmt.Errorf("nil block %d", blockNum)
 		}
 		txs := b.Transactions()
@@ -594,7 +591,7 @@ Loop:
 				count++
 				applyWorker.RunTxTask(txTask)
 				if err := func() error {
-					if txTask.Final && !isPoSa {
+					if txTask.Final {
 						gasUsed += txTask.UsedGas
 						if gasUsed != txTask.Header.GasUsed {
 							if txTask.BlockNum > 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
@@ -683,7 +680,7 @@ Loop:
 		}
 
 		if blockSnapshots.Cfg().Produce {
-			agg.BuildFilesInBackground()
+			agg.BuildFilesInBackground(outputTxNum.Load())
 		}
 		select {
 		case <-ctx.Done():
@@ -718,7 +715,7 @@ Loop:
 	}
 
 	if blockSnapshots.Cfg().Produce {
-		agg.BuildFilesInBackground()
+		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
 	if !useExternalTx && applyTx != nil {

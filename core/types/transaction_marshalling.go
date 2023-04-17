@@ -6,9 +6,11 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/valyala/fastjson"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
@@ -24,7 +26,7 @@ type txJSON struct {
 	Tip      *hexutil.Big       `json:"maxPriorityFeePerGas"`
 	Gas      *hexutil.Uint64    `json:"gas"`
 	Value    *hexutil.Big       `json:"value"`
-	Data     *hexutil.Bytes     `json:"input"`
+	Data     *hexutility.Bytes  `json:"input"`
 	V        *hexutil.Big       `json:"v"`
 	R        *hexutil.Big       `json:"r"`
 	S        *hexutil.Big       `json:"s"`
@@ -47,7 +49,7 @@ func (tx LegacyTx) MarshalJSON() ([]byte, error) {
 	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
 	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutil.Bytes)(&tx.Data)
+	enc.Data = (*hexutility.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -66,7 +68,7 @@ func (tx AccessListTx) MarshalJSON() ([]byte, error) {
 	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
 	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutil.Bytes)(&tx.Data)
+	enc.Data = (*hexutility.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
@@ -86,7 +88,7 @@ func (tx DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	enc.FeeCap = (*hexutil.Big)(tx.FeeCap.ToBig())
 	enc.Tip = (*hexutil.Big)(tx.Tip.ToBig())
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
-	enc.Data = (*hexutil.Bytes)(&tx.Data)
+	enc.Data = (*hexutility.Bytes)(&tx.Data)
 	enc.To = tx.To
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())

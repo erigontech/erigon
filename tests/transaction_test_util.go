@@ -23,10 +23,11 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -35,8 +36,8 @@ import (
 
 // TransactionTest checks RLP decoding and sender derivation of transactions.
 type TransactionTest struct {
-	RLP   hexutil.Bytes `json:"txbytes"`
-	Forks ttForks       `json:"result"`
+	RLP   hexutility.Bytes `json:"txbytes"`
+	Forks ttForks          `json:"result"`
 }
 
 type ttForks struct {
@@ -60,7 +61,7 @@ type ttFork struct {
 }
 
 func (tt *TransactionTest) Run(chainID *big.Int) error {
-	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, rules *chain.Rules) (*libcommon.Address, *libcommon.Hash, uint64, error) {
+	validateTx := func(rlpData hexutility.Bytes, signer types.Signer, rules *chain.Rules) (*libcommon.Address, *libcommon.Hash, uint64, error) {
 		tx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(rlpData), 0))
 		if err != nil {
 			return nil, nil, 0, err
