@@ -373,7 +373,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo); err != nil {
 			panic(err)
 		}
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
+		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files(), agg.Files()); err != nil {
 				return err
 			}
@@ -394,7 +394,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	log.Info("Prune state history")
 	for i := 0; i < 1024; i++ {
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
+		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
 			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/2); err != nil {
 				return err
@@ -431,7 +431,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
 		return err
 	}
-
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteSnapshots(tx, snapshots.Files(), agg.Files())
 	}); err != nil {
@@ -440,7 +439,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	log.Info("Prune state history")
 	for i := 0; i < 1024; i++ {
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
+		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
 			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
 				return err
@@ -449,6 +448,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}); err != nil {
 			return err
 		}
+	}
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteSnapshots(tx, snapshots.Files(), agg.Files())
+	}); err != nil {
+		return err
 	}
 
 	return nil
