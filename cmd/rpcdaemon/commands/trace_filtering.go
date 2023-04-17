@@ -1003,7 +1003,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
-	}, header, false /* gasBailout */, txIndex)
+	}, header, true /* gasBailout */, txIndex)
 
 	if cmErr != nil {
 		return nil, cmErr
