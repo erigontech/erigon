@@ -714,6 +714,10 @@ var (
 		Usage: "set mdbx pagesize on db creation: must be power of 2 and '256b <= pagesize <= 64kb'. default: equal to OperationSystem's pageSize",
 		Value: datasize.ByteSize(kv.DefaultPageSize()).String(),
 	}
+	DbSizeLimitFlag = cli.StringFlag{
+		Name:  "db.size.limit",
+		Value: (8 * datasize.TB).String(),
+	}
 
 	HealthCheckFlag = cli.BoolFlag{
 		Name:  "healthcheck",
@@ -1148,9 +1152,16 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.String(DbPageSizeFlag.Name))); err != nil {
 		panic(err)
 	}
+	if err := cfg.MdbxDBSizeLimit.UnmarshalText([]byte(ctx.String(DbSizeLimitFlag.Name))); err != nil {
+		panic(err)
+	}
 	sz := cfg.MdbxPageSize.Bytes()
 	if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
 		panic(fmt.Errorf("invalid --db.pagesize: %s=%d, see: %s", ctx.String(DbPageSizeFlag.Name), sz, DbPageSizeFlag.Usage))
+	}
+	szLimit := cfg.MdbxDBSizeLimit.Bytes()
+	if !isPowerOfTwo(szLimit) || szLimit < 256 {
+		panic(fmt.Errorf("invalid --db.size.limit: %s=%d, see: %s", ctx.String(DbSizeLimitFlag.Name), sz, DbSizeLimitFlag.Usage))
 	}
 }
 
