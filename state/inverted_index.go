@@ -214,37 +214,25 @@ Loop:
 	return uselessFiles
 }
 
-func (ii *InvertedIndex) reCalcRoFiles() {
-	roFiles := make([]ctxItem, 0, ii.files.Len())
-	var prevStart uint64
-	ii.files.Walk(func(items []*filesItem) bool {
+func ctxFiles(files *btree2.BTreeG[*filesItem]) []ctxItem {
+	roFiles := make([]ctxItem, 0, files.Len())
+	files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.canDelete.Load() {
 				continue
 			}
-			//if item.startTxNum > h.endTxNumMinimax() {
-			//	continue
-			//}
+
 			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 			// see super-set file, just drop sub-set files from list
-			if item.startTxNum < prevStart {
-				for len(roFiles) > 0 {
-					if roFiles[len(roFiles)-1].startTxNum < item.startTxNum {
-						break
-					}
-					roFiles[len(roFiles)-1].src = nil
-					roFiles = roFiles[:len(roFiles)-1]
-				}
+			for len(roFiles) > 0 && roFiles[len(roFiles)-1].src.isSubsetOf(item) {
+				roFiles[len(roFiles)-1].src = nil
+				roFiles = roFiles[:len(roFiles)-1]
 			}
-
 			roFiles = append(roFiles, ctxItem{
 				startTxNum: item.startTxNum,
 				endTxNum:   item.endTxNum,
-				//getter:     item.decompressor.MakeGetter(),
-				//reader:     recsplit.NewIndexReader(item.index),
-
-				i:   len(roFiles),
-				src: item,
+				i:          len(roFiles),
+				src:        item,
 			})
 		}
 		return true
@@ -252,6 +240,11 @@ func (ii *InvertedIndex) reCalcRoFiles() {
 	if roFiles == nil {
 		roFiles = []ctxItem{}
 	}
+	return roFiles
+}
+
+func (ii *InvertedIndex) reCalcRoFiles() {
+	roFiles := ctxFiles(ii.files)
 	ii.roFiles.Store(&roFiles)
 }
 

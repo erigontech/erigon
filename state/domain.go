@@ -365,43 +365,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcRoFiles() {
-	roFiles := make([]ctxItem, 0, d.files.Len())
-	var prevStart uint64
-	d.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.canDelete.Load() {
-				continue
-			}
-			//if item.startTxNum > h.endTxNumMinimax() {
-			//	continue
-			//}
-			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
-			// see super-set file, just drop sub-set files from list
-			if item.startTxNum < prevStart {
-				for len(roFiles) > 0 {
-					if roFiles[len(roFiles)-1].startTxNum < item.startTxNum {
-						break
-					}
-					roFiles[len(roFiles)-1].src = nil
-					roFiles = roFiles[:len(roFiles)-1]
-				}
-			}
-
-			roFiles = append(roFiles, ctxItem{
-				startTxNum: item.startTxNum,
-				endTxNum:   item.endTxNum,
-				//getter:     item.decompressor.MakeGetter(),
-				//reader:     recsplit.NewIndexReader(item.index),
-
-				i:   len(roFiles),
-				src: item,
-			})
-		}
-		return true
-	})
-	if roFiles == nil {
-		roFiles = []ctxItem{}
-	}
+	roFiles := ctxFiles(d.files)
 	d.roFiles.Store(&roFiles)
 }
 
