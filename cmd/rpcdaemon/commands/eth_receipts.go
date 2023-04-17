@@ -747,7 +747,10 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		"logs":              receipt.Logs,
 		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
-
+	if receipt.DataGasUsed > 0 {
+		fields["dataGasUsed"] = hexutil.Uint64(receipt.DataGasUsed)
+		fields["dataGasPrice"] = hexutil.Uint64(receipt.DataGasPrice.Uint64())
+	}
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
 		fields["effectiveGasPrice"] = hexutil.Uint64(txn.GetPrice().Uint64())
 	} else {
