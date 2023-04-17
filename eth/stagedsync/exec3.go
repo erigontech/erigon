@@ -298,7 +298,7 @@ func ExecV3(ctx context.Context,
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
 					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
 					if agg.HasBackgroundFilesBuild() {
-						log.Info(fmt.Sprintf("[%s] Background files sdfd", logPrefix), "progress", agg.BackgroundProgress())
+						log.Info(fmt.Sprintf("[%s] Background files build", logPrefix), "progress", agg.BackgroundProgress())
 					}
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
