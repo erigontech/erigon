@@ -90,13 +90,13 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 	cfg.downloader.SetHighestProcessedSlot(cfg.state.Slot())
 	cfg.downloader.SetProcessFunction(func(highestSlotProcessed uint64, _ libcommon.Hash, newBlocks []*cltypes.SignedBeaconBlock) (uint64, libcommon.Hash, error) {
 		for _, block := range newBlocks {
-			fullValidation :=
+			sendForckchoice :=
 				utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == block.Block.Slot
-			if err := cfg.forkChoice.OnBlock(block, fullValidation); err != nil {
+			if err := cfg.forkChoice.OnBlock(block, true); err != nil {
 				log.Warn("Could not download block", "reason", err)
 				return highestSlotProcessed, libcommon.Hash{}, nil
 			}
-			if fullValidation {
+			if sendForckchoice {
 				// Import the head
 				headRoot, headSlot, err := cfg.forkChoice.GetHead()
 				if err != nil {
