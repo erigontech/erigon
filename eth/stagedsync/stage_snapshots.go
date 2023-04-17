@@ -520,7 +520,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		}
 
 		br.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlDebug)
-		cfg.agg.BuildFilesInBackground()
+		//cfg.agg.BuildFilesInBackground()
 	}
 
 	if !useExternalTx {
