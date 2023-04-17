@@ -736,7 +736,7 @@ func (a *AggregatorV3) mergeDomainSteps(ctx context.Context) error {
 
 func (a *AggregatorV3) BuildFiles(toTxNum uint64) (err error) {
 	txn := a.txNum.Load() + 1
-	if txn <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
+	if txn <= a.minimaxTxNumInFiles.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
 		return nil
 	}
 	if _, err = a.ComputeCommitment(true, false); err != nil {
@@ -1471,25 +1471,25 @@ func (a *AggregatorV3) cleanFrozenParts(in MergedFilesV3) {
 func (a *AggregatorV3) KeepInDB(v uint64) { a.keepInDB = v }
 
 func (a *AggregatorV3) AggregateFilesInBackground() {
-	if (a.txNum.Load() + 1) <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
+	if (a.txNum.Load() + 1) <= a.minimaxTxNumInFiles.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
 		return
 	}
 
-	step := a.maxTxNum.Load() / a.aggregationStep
-	if ok := a.working.CompareAndSwap(false, true); !ok {
+	step := a.minimaxTxNumInFiles.Load() / a.aggregationStep
+	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return
 	}
-	defer a.working.Store(false)
+	defer a.buildingFiles.Store(false)
 
 	if _, err := a.ComputeCommitment(true, false); err != nil {
 		log.Warn("ComputeCommitment before aggregation has failed", "err", err)
 		return
 	}
 
-	if ok := a.workingMerge.CompareAndSwap(false, true); !ok {
+	if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
 		return
 	}
-	defer a.workingMerge.Store(false)
+	defer a.mergeingFiles.Store(false)
 
 	if err := a.buildFilesInBackground(a.ctx, step); err != nil {
 		if errors.Is(err, context.Canceled) {
