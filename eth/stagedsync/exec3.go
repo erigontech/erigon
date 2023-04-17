@@ -662,7 +662,7 @@ Loop:
 		}
 
 		if blockSnapshots.Cfg().Produce {
-			agg.BuildFilesInBackground()
+			agg.BuildFilesInBackground(outputTxNum.Load())
 		}
 		select {
 		case <-ctx.Done():
@@ -689,7 +689,7 @@ Loop:
 	}
 
 	if blockSnapshots.Cfg().Produce {
-		agg.BuildFilesInBackground()
+		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
 	if !useExternalTx && applyTx != nil {
