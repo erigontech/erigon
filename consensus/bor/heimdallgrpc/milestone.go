@@ -65,7 +65,7 @@ func (h *HeimdallGRPCClient) FetchNoAckMilestone(ctx context.Context, milestoneI
 		MilestoneID: milestoneID,
 	}
 
-	log.Info("Fetching no ack milestone", "milestoneaID", milestoneID)
+	log.Info("Fetching no ack milestone", "milestoneID", milestoneID)
 
 	res, err := h.client.FetchNoAckMilestone(ctx, req)
 	if err != nil {
@@ -76,7 +76,7 @@ func (h *HeimdallGRPCClient) FetchNoAckMilestone(ctx context.Context, milestoneI
 		return fmt.Errorf("Not in rejected list: milestoneID %q", milestoneID)
 	}
 
-	log.Info("Fetched no ack milestone", "milestoneaID", milestoneID)
+	log.Info("Fetched no ack milestone", "milestoneID", milestoneID)
 
 	return nil
 }

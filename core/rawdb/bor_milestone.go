@@ -6,7 +6,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common/gererics"
+	"github.com/ledgerwatch/erigon/common/generics"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -105,7 +105,7 @@ type BlockFinality[T any] interface {
 }
 
 func getKey[T BlockFinality[T]]() (T, []byte) {
-	lastT := gererics.Empty[T]().clone()
+	lastT := generics.Empty[T]().clone()
 
 	var key []byte
 
