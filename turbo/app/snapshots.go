@@ -424,9 +424,10 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	log.Info("Build state history snapshots")
-	if err = agg.BuildFiles(ctx, db); err != nil {
+	if err = agg.BuildFiles(); err != nil {
 		return err
 	}
+
 	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
 		return err
 	}
