@@ -9,10 +9,11 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -41,6 +42,34 @@ func TestGenesisBlockHashes(t *testing.T) {
 	}
 }
 
+func TestHermezBlockRoots(t *testing.T) {
+	require := require.New(t)
+
+	t.Run("Hermez Mainnet", func(t *testing.T) {
+		block, _, err := core.GenesisToBlock(core.HermezMainnetGenesisBlock(), "")
+		require.NoError(err)
+		if block.Root() != params.HermezMainnetGenesisHash {
+			t.Errorf("wrong Hermez Mainnet genesis state root, got %v, want %v", block.Root(), params.HermezMainnetGenesisHash)
+		}
+	})
+
+	t.Run("Hermez Testnet", func(t *testing.T) {
+		block, _, err := core.GenesisToBlock(core.HermezTestnetGenesisBlock(), "")
+		require.NoError(err)
+		if block.Root() != params.HermezTestnetGenesisHash {
+			t.Errorf("wrong Hermez Testnet genesis state root, got %v, want %v", block.Root(), params.HermezTestnetGenesisHash)
+		}
+	})
+
+	t.Run("Hermez Devnet", func(t *testing.T) {
+		block, _, err := core.GenesisToBlock(core.HermezDevnetGenesisBlock(), "")
+		require.NoError(err)
+		if block.Root() != params.HermezDevnetGenesisHash {
+			t.Errorf("wrong Hermez Testnet genesis state root, got %v, want %v", block.Root(), params.HermezTestnetGenesisHash)
+		}
+	})
+}
+
 func TestGenesisBlockRoots(t *testing.T) {
 	require := require.New(t)
 	var err error
@@ -67,11 +96,23 @@ func TestGenesisBlockRoots(t *testing.T) {
 	if block.Hash() != params.ChiadoGenesisHash {
 		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.ChiadoGenesisHash)
 	}
+
+	block, _, err = core.GenesisToBlock(core.HermezMainnetGenesisBlock(), "")
+	require.NoError(err)
+	if block.Root() != params.HermezMainnetGenesisHash {
+		t.Errorf("wrong Hermez Mainnet genesis state root, got %v, want %v", block.Root(), params.HermezMainnetGenesisHash)
+	}
+
+	block, _, err = core.GenesisToBlock(core.HermezTestnetGenesisBlock(), "")
+	require.NoError(err)
+	if block.Root() != params.HermezTestnetGenesisHash {
+		t.Errorf("wrong Hermez Testnet genesis state root, got %v, want %v", block.Root(), params.HermezTestnetGenesisHash)
+	}
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
-	genesis := core.GenesisBlockByChainName(networkname.MainnetChainName)
+	genesis := core.GenesisBlockByChainName(networkname.HermezMainnetChainName)
 	_, _, err := core.WriteGenesisBlock(tx, genesis, nil, "")
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)

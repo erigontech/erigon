@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 
@@ -23,8 +23,8 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
@@ -64,7 +64,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpd
 	}
 }
 
-func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, quiet bool) error {
+func SpawnRecoverSendersStage(cfg SendersCfg, s *sync_stages.StageState, u sync_stages.Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, quiet bool) error {
 	if cfg.blockRetire != nil && cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled && s.BlockNumber < cfg.blockRetire.Snapshots().BlocksAvailable() {
 		s.BlockNumber = cfg.blockRetire.Snapshots().BlocksAvailable()
 	}
@@ -80,9 +80,17 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		defer tx.Rollback()
 	}
 
-	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Bodies)
+	// zk
+	prevStageProgress, errStart := sync_stages.GetStageProgress(tx, sync_stages.Batches)
 	if errStart != nil {
 		return errStart
+	}
+
+	if prevStageProgress == 0 {
+		prevStageProgress, errStart = sync_stages.GetStageProgress(tx, sync_stages.Headers)
+		if errStart != nil {
+			return errStart
+		}
 	}
 
 	var to = prevStageProgress
@@ -355,7 +363,7 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 	}
 }
 
-func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+func UnwindSendersStage(s *sync_stages.UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -376,7 +384,7 @@ func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 	return nil
 }
 
-func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+func PruneSendersStage(s *sync_stages.PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	useExternalTx := tx != nil

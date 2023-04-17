@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -14,9 +13,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
@@ -25,7 +26,7 @@ type TxLookupCfg struct {
 	prune     prune.Mode
 	tmpdir    string
 	snapshots *snapshotsync.RoSnapshots
-	borConfig *chain.BorConfig
+	borConfig *erigonchain.BorConfig
 }
 
 func StageTxLookupCfg(
@@ -33,7 +34,7 @@ func StageTxLookupCfg(
 	prune prune.Mode,
 	tmpdir string,
 	snapshots *snapshotsync.RoSnapshots,
-	borConfig *chain.BorConfig,
+	borConfig *erigonchain.BorConfig,
 ) TxLookupCfg {
 	return TxLookupCfg{
 		db:        db,
@@ -44,7 +45,11 @@ func StageTxLookupCfg(
 	}
 }
 
-func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, ctx context.Context) (err error) {
+func SpawnTxLookup(s *sync_stages.StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, ctx context.Context) (err error) {
+
+	// TODO: abstract
+	return nil
+
 	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -163,7 +168,7 @@ func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint
 	})
 }
 
-func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
+func UnwindTxLookup(u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
 	if s.BlockNumber <= u.UnwindPoint {
 		return nil
 	}
@@ -203,7 +208,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	return nil
 }
 
-func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, initialCycle bool) (err error) {
+func PruneTxLookup(s *sync_stages.PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, initialCycle bool) (err error) {
 	logPrefix := s.LogPrefix()
 	useExternalTx := tx != nil
 	if !useExternalTx {

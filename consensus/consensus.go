@@ -20,8 +20,10 @@ package consensus
 import (
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -82,7 +84,7 @@ type EngineReader interface {
 	// Service transactions are free and don't pay baseFee after EIP-1559
 	IsServiceTransaction(sender libcommon.Address, syscall SystemCall) bool
 
-	Type() chain.ConsensusName
+	Type() erigonchain.ConsensusName
 }
 
 // EngineReader are write methods of the consensus engine

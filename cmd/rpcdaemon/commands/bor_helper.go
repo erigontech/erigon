@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
@@ -88,7 +88,7 @@ func getHeaderByHash(ctx context.Context, api *BorImpl, tx kv.Tx, hash common.Ha
 }
 
 // ecrecover extracts the Ethereum account address from a signed header.
-func ecrecover(header *types.Header, c *chain.BorConfig) (common.Address, error) {
+func ecrecover(header *types.Header, c *erigonchain.BorConfig) (common.Address, error) {
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < extraSeal {
 		return common.Address{}, errMissingSignature

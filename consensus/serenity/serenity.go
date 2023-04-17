@@ -7,8 +7,9 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
@@ -63,7 +64,7 @@ func (s *Serenity) InnerEngine() consensus.Engine {
 }
 
 // Type returns the type of the underlying consensus engine.
-func (s *Serenity) Type() chain.ConsensusName {
+func (s *Serenity) Type() erigonchain.ConsensusName {
 	return s.eth1Engine.Type()
 }
 

@@ -25,8 +25,8 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
-	"github.com/hashicorp/golang-lru/v2"
-	"github.com/ledgerwatch/erigon-lib/chain"
+	lru "github.com/hashicorp/golang-lru/v2"
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
@@ -55,7 +55,7 @@ type Tally struct {
 
 // Snapshot is the state of the authorization voting at a given point in time.
 type Snapshot struct {
-	config *chain.CliqueConfig // Consensus engine parameters to fine tune behavior
+	config *erigonchain.CliqueConfig // Consensus engine parameters to fine tune behavior
 
 	Number  uint64                         `json:"number"`  // Block number where the snapshot was created
 	Hash    libcommon.Hash                 `json:"hash"`    // Block hash where the snapshot was created
@@ -75,7 +75,7 @@ func (s SignersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // newSnapshot creates a new snapshot with the specified startup parameters. This
 // method does not initialize the set of recent signers, so only ever use if for
 // the genesis block.
-func newSnapshot(config *chain.CliqueConfig, number uint64, hash libcommon.Hash, signers []libcommon.Address) *Snapshot {
+func newSnapshot(config *erigonchain.CliqueConfig, number uint64, hash libcommon.Hash, signers []libcommon.Address) *Snapshot {
 	snap := &Snapshot{
 		config:  config,
 		Number:  number,
@@ -93,7 +93,7 @@ func newSnapshot(config *chain.CliqueConfig, number uint64, hash libcommon.Hash,
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *chain.CliqueConfig, db kv.RwDB, num uint64, hash libcommon.Hash) (*Snapshot, error) {
+func loadSnapshot(config *erigonchain.CliqueConfig, db kv.RwDB, num uint64, hash libcommon.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err

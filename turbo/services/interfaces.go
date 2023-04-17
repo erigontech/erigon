@@ -37,6 +37,7 @@ type BodyReader interface {
 type TxnReader interface {
 	TxnLookup(ctx context.Context, tx kv.Getter, txnHash libcommon.Hash) (uint64, bool, error)
 	TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error)
+	TxnEffectiveGasPricePercentage(ctx context.Context, tx kv.Tx, txnHash libcommon.Hash) (uint8, error)
 }
 type HeaderAndCanonicalReader interface {
 	HeaderReader

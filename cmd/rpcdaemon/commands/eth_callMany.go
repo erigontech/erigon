@@ -212,6 +212,11 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		if err != nil {
 			return nil, err
 		}
+		effectiveGasPricePercentage, err := api.getEffectiveGasPricePercentage(tx, txn.Hash())
+		if err != nil {
+			return nil, err
+		}
+		msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
 		txCtx = core.NewEVMTxContext(msg)
 		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})
 		// Execute the transaction message

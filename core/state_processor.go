@@ -19,8 +19,9 @@ package core
 import (
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -34,12 +35,13 @@ import (
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config) (*types.Receipt, []byte, error) {
+func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config, effectiveGasPricePercentage uint8) (*types.Receipt, []byte, error) {
 	rules := evm.ChainRules()
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee, rules)
 	if err != nil {
 		return nil, nil, err
 	}
+	msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
 	msg.SetCheckNonce(!cfg.StatelessExec)
 
 	if msg.FeeCap().IsZero() && engine != nil {
@@ -55,6 +57,9 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		txContext.TxHash = tx.Hash()
 	}
 
+	// [zkevm] - set txnum in magic account
+	ibs.ScalableSetTxNum()
+
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
 
@@ -62,6 +67,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	if err != nil {
 		return nil, nil, err
 	}
+
 	// Update the state with pending changes
 	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, nil, err
@@ -87,7 +93,11 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		}
 		// Set the receipt logs and create a bloom for filtering
 		receipt.Logs = ibs.GetLogs(tx.Hash())
-		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+
+		// [zkevm] - ignore the bloom at this point due to a bug in zknode where the bloom is not included
+		// in the block during execution
+		//receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+
 		receipt.BlockNumber = header.Number
 		receipt.TransactionIndex = uint(ibs.TxIndex())
 	}
@@ -99,7 +109,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config, excessDataGas *big.Int) (*types.Receipt, []byte, error) {
+func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config, excessDataGas *big.Int, effectiveGasPricePercentage uint8) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment
 
 	// Add addresses to access list if applicable
@@ -109,5 +119,5 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) libcomm
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, excessDataGas)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 
-	return applyTransaction(config, engine, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg, effectiveGasPricePercentage)
 }

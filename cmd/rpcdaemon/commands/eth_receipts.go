@@ -9,7 +9,6 @@ import (
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -18,6 +17,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -65,7 +67,11 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 	excessDataGas := header.ParentExcessDataGas(getHeader)
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{}, excessDataGas)
+		effectiveGasPricePercentage, err := api._blockReader.TxnEffectiveGasPricePercentage(ctx, tx, txn.Hash())
+		if err != nil {
+			return nil, err
+		}
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{}, excessDataGas, effectiveGasPricePercentage)
 		if err != nil {
 			return nil, err
 		}
@@ -520,6 +526,15 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// add the effective gas price percentage
+	hermezReader := hermez_db.NewHermezDbReader(e.tx)
+	effectiveGasPricePercentage, err := hermezReader.GetEffectiveGasPricePercentage(txn.Hash())
+	if err != nil {
+		return nil, nil, err
+	}
+	msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
+
 	e.evm.ResetBetweenBlocks(*e.blockCtx, core.NewEVMTxContext(msg), e.ibs, *e.vmConfig, e.rules)
 	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {

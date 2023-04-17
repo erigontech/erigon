@@ -10,10 +10,12 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
-	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
+	ethereum "github.com/ledgerwatch/erigon"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/core"
@@ -26,7 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
 type BlockGetter interface {
@@ -90,6 +92,8 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, block.Transactions(), block.Uncles(), cfg, statedb, excessDataGas)
 
+	hermezReader := hermez_db.NewHermezDbReader(dbtx)
+
 	for idx, txn := range block.Transactions() {
 		select {
 		default:
@@ -100,6 +104,10 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
+
+		effectiveGasPricePercentage, _ := hermezReader.GetEffectiveGasPricePercentage(txn.Hash())
+		msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
+
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */, excessDataGas)

@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
+	"sync"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -56,6 +58,8 @@ type TransactOpts struct {
 	GasLimit uint64   // Gas limit to set for the transaction execution (0 = estimate)
 
 	Context context.Context // Network context to support cancellation and timeouts (nil = no timeout)
+
+	NoSend bool // Do all transact steps but do not send the transaction
 }
 
 // FilterOpts is the collection of options to fine tune filtering for events
@@ -269,6 +273,10 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *libcommon.Address
 	if err != nil {
 		return nil, err
 	}
+	// Do all transact steps but do not send the transaction
+	if opts.NoSend {
+		return signedTx, nil
+	}
 	if err := c.transactor.SendTransaction(ensureContext(opts.Context), signedTx); err != nil {
 		return nil, err
 	}
@@ -391,4 +399,27 @@ func ensureContext(ctx context.Context) context.Context {
 		return context.TODO()
 	}
 	return ctx
+}
+
+// MetaData collects all metadata for a bound contract.
+type MetaData struct {
+	mu   sync.Mutex
+	Sigs map[string]string
+	Bin  string
+	ABI  string
+	ab   *abi.ABI
+}
+
+func (m *MetaData) GetAbi() (*abi.ABI, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ab != nil {
+		return m.ab, nil
+	}
+	if parsed, err := abi.JSON(strings.NewReader(m.ABI)); err != nil {
+		return nil, err
+	} else {
+		m.ab = &parsed
+	}
+	return m.ab, nil
 }

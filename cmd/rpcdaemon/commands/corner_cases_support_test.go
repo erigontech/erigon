@@ -24,7 +24,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(
 		NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs),
-		m.DB, nil, nil, nil, 5000000, 100_000)
+		m.DB, nil, nil, nil, 5000000, 100_000, "")
 	ctx := context.Background()
 
 	a, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)

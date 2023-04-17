@@ -23,7 +23,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -39,7 +39,7 @@ func GetFromValidatorSet(set ValidatorSet, parent libcommon.Hash, nonce uint, ca
 	return set.getWithCaller(parent, nonce, call)
 }
 
-func newValidatorSetFromJson(j *chain.ValidatorSetJson, posdaoTransition *uint64) ValidatorSet {
+func newValidatorSetFromJson(j *erigonchain.ValidatorSetJson, posdaoTransition *uint64) ValidatorSet {
 	if j.List != nil {
 		return &SimpleList{validators: j.List}
 	}
@@ -141,7 +141,7 @@ type AuthorityRoundParams struct {
 	RewriteBytecode map[uint64]map[libcommon.Address][]byte
 }
 
-func FromJson(jsonParams *chain.AuRaConfig) (AuthorityRoundParams, error) {
+func FromJson(jsonParams *erigonchain.AuRaConfig) (AuthorityRoundParams, error) {
 	params := AuthorityRoundParams{
 		Validators:                       newValidatorSetFromJson(jsonParams.Validators, jsonParams.PosdaoTransition),
 		StartStep:                        jsonParams.StartStep,

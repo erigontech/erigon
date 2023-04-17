@@ -1,0 +1,46 @@
+package zk
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/ledgerwatch/log/v3"
+)
+
+// prints progress every 10 seconds
+// returns a channel to send progress to, and a function to stop the printer routine
+func ProgressPrinter(logPrefix string, total uint64) (chan uint64, func()) {
+	progress := make(chan uint64)
+	ctDone := make(chan bool)
+
+	go func() {
+		defer close(progress)
+		defer close(ctDone)
+
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		var pc uint64
+		var pct uint64
+
+		for {
+			select {
+			case newPc := <-progress:
+				pc = newPc
+				if total > 0 {
+					pct = (pc * 100) / total
+				}
+			case <-ticker.C:
+				if total > 0 {
+					log.Info(fmt.Sprintf("[%s] Progress: %d/%d (%d%%)", logPrefix, pc, total, pct))
+				} else {
+					log.Info(fmt.Sprintf("[%s] Progress: %d / unknown", logPrefix, pc))
+				}
+			case <-ctDone:
+				return
+			}
+		}
+	}()
+
+	return progress, func() { ctDone <- true }
+}

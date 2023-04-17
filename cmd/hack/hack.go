@@ -45,11 +45,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -311,16 +311,16 @@ func dumpStorage() {
 	}
 }
 
-func printBucket(chaindata string) {
+func printBucket(chaindata, bucket string) {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	f, err := os.Create("bucket.txt")
+	f, err := os.Create(fmt.Sprintf("bucket-%s.txt", bucket))
 	tool.Check(err)
 	defer f.Close()
 	fb := bufio.NewWriter(f)
 	defer fb.Flush()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.StorageHistory)
+		c, err := tx.Cursor(bucket)
 		if err != nil {
 			return err
 		}
@@ -328,11 +328,37 @@ func printBucket(chaindata string) {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(fb, "%x %x\n", k, v)
+			fmt.Println(formatBucketKVPair(k, v, bucket))
+			fmt.Fprintf(fb, "%s\n", formatBucketKVPair(k, v, bucket))
 		}
 		return nil
 	}); err != nil {
 		panic(err)
+	}
+}
+
+func formatBucketKVPair(k, v []byte, bucket string) string {
+	// switch statement on bucket (found in tables.go)
+	switch bucket {
+	case kv.SyncStageProgress:
+		val := binary.BigEndian.Uint64(v)
+		return fmt.Sprintf("%s %d", string(k), val)
+
+	case kv.Sequence:
+		return fmt.Sprintf("%s %x", k, v)
+
+	default:
+		return fmt.Sprintf("%x %x", k, v)
+	}
+	return ""
+}
+
+func printBuckets(chaindata, buckets string) {
+	if buckets == "" {
+		buckets = kv.EthTx
+	}
+	for _, b := range strings.Split(buckets, ",") {
+		printBucket(chaindata, b)
 	}
 }
 
@@ -773,15 +799,15 @@ func advanceExec(chaindata string) error {
 	}
 	defer tx.Rollback()
 
-	stageExec, err := stages.GetStageProgress(tx, stages.Execution)
+	stageExec, err := sync_stages.GetStageProgress(tx, sync_stages.Execution)
 	if err != nil {
 		return err
 	}
 	log.Info("ID exec", "progress", stageExec)
-	if err = stages.SaveStageProgress(tx, stages.Execution, stageExec+1); err != nil {
+	if err = sync_stages.SaveStageProgress(tx, sync_stages.Execution, stageExec+1); err != nil {
 		return err
 	}
-	stageExec, err = stages.GetStageProgress(tx, stages.Execution)
+	stageExec, err = sync_stages.GetStageProgress(tx, sync_stages.Execution)
 	if err != nil {
 		return err
 	}
@@ -801,15 +827,15 @@ func backExec(chaindata string) error {
 	}
 	defer tx.Rollback()
 
-	stageExec, err := stages.GetStageProgress(tx, stages.Execution)
+	stageExec, err := sync_stages.GetStageProgress(tx, sync_stages.Execution)
 	if err != nil {
 		return err
 	}
 	log.Info("ID exec", "progress", stageExec)
-	if err = stages.SaveStageProgress(tx, stages.Execution, stageExec-1); err != nil {
+	if err = sync_stages.SaveStageProgress(tx, sync_stages.Execution, stageExec-1); err != nil {
 		return err
 	}
-	stageExec, err = stages.GetStageProgress(tx, stages.Execution)
+	stageExec, err = sync_stages.GetStageProgress(tx, sync_stages.Execution)
 	if err != nil {
 		return err
 	}
@@ -1418,7 +1444,10 @@ func main() {
 		printCurrentBlockNumber(*chaindata)
 
 	case "bucket":
-		printBucket(*chaindata)
+		printBucket(*chaindata, kv.PlainState)
+
+	case "buckets":
+		printBuckets(*chaindata, *bucket)
 
 	case "slice":
 		dbSlice(*chaindata, *bucket, common.FromHex(*hash))

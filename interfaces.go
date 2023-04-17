@@ -60,7 +60,7 @@ type ChainReader interface {
 	HeaderByHash(ctx context.Context, hash libcommon.Hash) (*types.Header, error)
 	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
 	TransactionCount(ctx context.Context, blockHash libcommon.Hash) (uint, error)
-	TransactionInBlock(ctx context.Context, blockHash libcommon.Hash, index uint) (*types.Transaction, error)
+	TransactionInBlock(ctx context.Context, blockHash libcommon.Hash, index uint) (types.Transaction, error)
 
 	// This method subscribes to notifications about changes of the head block of
 	// the canonical chain.
@@ -81,7 +81,7 @@ type TransactionReader interface {
 	// blockchain. The isPending return value indicates whether the transaction has been
 	// mined yet. Note that the transaction may not be part of the canonical chain even if
 	// it's not pending.
-	TransactionByHash(ctx context.Context, txHash libcommon.Hash) (tx *types.Transaction, isPending bool, err error)
+	TransactionByHash(ctx context.Context, txHash libcommon.Hash) (tx types.Transaction, isPending bool, err error)
 	// TransactionReceipt returns the receipt of a mined transaction. Note that the
 	// transaction may not be included in the current canonical chain even if a receipt
 	// exists.
@@ -92,7 +92,7 @@ type TransactionReader interface {
 // implementations of the interface may be unable to return state values for old blocks.
 // In many cases, using CallContract can be preferable to reading raw contract storage.
 type ChainStateReader interface {
-	BalanceAt(ctx context.Context, account libcommon.Address, blockNumber *big.Int) (*big.Int, error)
+	BalanceAt(ctx context.Context, account libcommon.Address, blockNumber *big.Int) (*uint256.Int, error)
 	StorageAt(ctx context.Context, account libcommon.Address, key libcommon.Hash, blockNumber *big.Int) ([]byte, error)
 	CodeAt(ctx context.Context, account libcommon.Address, blockNumber *big.Int) ([]byte, error)
 	NonceAt(ctx context.Context, account libcommon.Address, blockNumber *big.Int) (uint64, error)
@@ -176,7 +176,7 @@ type LogFilterer interface {
 // API can use package accounts to maintain local private keys and need can retrieve the
 // next available nonce using PendingNonceAt.
 type TransactionSender interface {
-	SendTransaction(ctx context.Context, tx *types.Transaction) error
+	SendTransaction(ctx context.Context, tx types.Transaction) error
 }
 
 // GasPricer wraps the gas price oracle, which monitors the blockchain to determine the

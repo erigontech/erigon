@@ -17,10 +17,11 @@ import (
 
 	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/ledgerwatch/erigon-lib/chain"
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -126,7 +127,7 @@ var (
 type SignerFn func(signer libcommon.Address, mimeType string, message []byte) ([]byte, error)
 
 // ecrecover extracts the Ethereum account address from a signed header.
-func ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], c *chain.BorConfig) (libcommon.Address, error) {
+func ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], c *erigonchain.BorConfig) (libcommon.Address, error) {
 	// If the signature's already cached, return that
 	hash := header.Hash()
 	if address, known := sigcache.Get(hash); known {
@@ -153,7 +154,7 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libc
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
-func SealHash(header *types.Header, c *chain.BorConfig) (hash libcommon.Hash) {
+func SealHash(header *types.Header, c *erigonchain.BorConfig) (hash libcommon.Hash) {
 	hasher := cryptopool.NewLegacyKeccak256()
 	defer cryptopool.ReturnToPoolKeccak256(hasher)
 
@@ -163,7 +164,7 @@ func SealHash(header *types.Header, c *chain.BorConfig) (hash libcommon.Hash) {
 	return hash
 }
 
-func encodeSigHeader(w io.Writer, header *types.Header, c *chain.BorConfig) {
+func encodeSigHeader(w io.Writer, header *types.Header, c *erigonchain.BorConfig) {
 	enc := []interface{}{
 		header.ParentHash,
 		header.UncleHash,
@@ -194,7 +195,7 @@ func encodeSigHeader(w io.Writer, header *types.Header, c *chain.BorConfig) {
 }
 
 // CalcProducerDelay is the block delay algorithm based on block time, period, producerDelay and turn-ness of a signer
-func CalcProducerDelay(number uint64, succession int, c *chain.BorConfig) uint64 {
+func CalcProducerDelay(number uint64, succession int, c *erigonchain.BorConfig) uint64 {
 	// When the block is the first block of the sprint, it is expected to be delayed by `producerDelay`.
 	// That is to allow time for block propagation in the last sprint
 	delay := c.CalculatePeriod(number)
@@ -216,7 +217,7 @@ func CalcProducerDelay(number uint64, succession int, c *chain.BorConfig) uint64
 // Note, the method requires the extra data to be at least 65 bytes, otherwise it
 // panics. This is done to avoid accidentally using both forms (signature present
 // or not), which could be abused to produce different hashes for the same header.
-func BorRLP(header *types.Header, c *chain.BorConfig) []byte {
+func BorRLP(header *types.Header, c *erigonchain.BorConfig) []byte {
 	b := new(bytes.Buffer)
 	encodeSigHeader(b, header, c)
 
@@ -225,9 +226,9 @@ func BorRLP(header *types.Header, c *chain.BorConfig) []byte {
 
 // Bor is the matic-bor consensus engine
 type Bor struct {
-	chainConfig *chain.Config    // Chain config
-	config      *chain.BorConfig // Consensus engine configuration parameters for bor consensus
-	DB          kv.RwDB          // Database to store and retrieve snapshot checkpoints
+	chainConfig *chain.Config          // Chain config
+	config      *erigonchain.BorConfig // Consensus engine configuration parameters for bor consensus
+	DB          kv.RwDB                // Database to store and retrieve snapshot checkpoints
 
 	recents    *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
@@ -304,8 +305,8 @@ func New(
 }
 
 // Type returns underlying consensus engine
-func (c *Bor) Type() chain.ConsensusName {
-	return chain.BorConsensus
+func (c *Bor) Type() erigonchain.ConsensusName {
+	return erigonchain.BorConsensus
 }
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
@@ -678,7 +679,7 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 	return nil
 }
 
-func IsBlockOnTime(parent *types.Header, header *types.Header, number uint64, succession int, cfg *chain.BorConfig) bool {
+func IsBlockOnTime(parent *types.Header, header *types.Header, number uint64, succession int, cfg *erigonchain.BorConfig) bool {
 	return parent != nil && header.Time < parent.Time+CalcProducerDelay(number, succession, cfg)
 }
 

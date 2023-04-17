@@ -1,0 +1,152 @@
+[
+  {
+    "addresses": [
+      {
+        "address": "0x617b3a3528F9cDd6630fd3301B9c8911F7Bf063D",
+        "balance": "100000000000000000000",
+        "nonce": "0"
+      },
+      {
+        "address": "0x4d5Cf5032B2a844602278b01199ED191A86c93ff",
+        "balance": "200000000000000000000",
+        "nonce": "0"
+      }
+    ],
+    "expectedRoot": "33746756112715549509799501069416620287488781321139344085581028504667736843869"
+  },
+  {
+    "addresses": [
+      {
+        "address": "0x617b3a3528F9cDd6630fd3301B9c8911F7Bf063D",
+        "balance": "100000000000000000000",
+        "nonce": "0"
+      },
+      {
+        "address": "0x4d5Cf5032B2a844602278b01199ED191A86c93ff",
+        "balance": "200000000000000000000",
+        "nonce": "0"
+      }
+    ],
+    "expectedRoot": "33746756112715549509799501069416620287488781321139344085581028504667736843869"
+  },
+  {
+    "addresses": [
+      {
+        "address": "0x617b3a3528F9cDd6630fd3301B9c8911F7Bf063D",
+        "balance": "100000000000000000000",
+        "nonce": "2"
+      },
+      {
+        "address": "0x4d5Cf5032B2a844602278b01199ED191A86c93ff",
+        "balance": "200000000000000000000",
+        "nonce": "3"
+      }
+    ],
+    "expectedRoot": "21325877998580057082261372401435859725504729767606579433194632371488285785841"
+  },
+  {
+    "addresses": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "balance": "10000000000000000000000",
+        "nonce": "982487"
+      },
+      {
+        "address": "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+        "balance": "324989324865345874387554",
+        "nonce": "916348"
+      },
+      {
+        "address": "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0",
+        "balance": "0",
+        "nonce": "0"
+      }
+    ],
+    "expectedRoot": "19446318495734678640980943684709715379686010146624499051284653837571603843329"
+  },
+  {
+    "addresses": [
+      {
+        "address": "0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e",
+        "balance": "1614500000000000000000",
+        "nonce": "3"
+      },
+      {
+        "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        "balance": "3000000000000000000",
+        "nonce": "291"
+      },
+      {
+        "address": "0xd51a44d3fae010294c616388b506acda1bfaae46",
+        "balance": "1000000000000000001",
+        "nonce": "96302"
+      },
+      {
+        "address": "0xa258c4606ca8206d8aa700ce2143d7db854d168c",
+        "balance": "1",
+        "nonce": "0"
+      },
+      {
+        "address": "0x08638ef1a205be6762a8b935f5da9b700cf7322c",
+        "balance": "11000000000000000000",
+        "nonce": "92"
+      },
+      {
+        "address": "0x5aa40c7c8158d8e29ca480d7e05e5a32dd819332",
+        "balance": "121200000000000000000",
+        "nonce": "256"
+      },
+      {
+        "address": "0x8ff42fd8f5fe291f02e276a0b0aa8243f2fe311d",
+        "balance": "1466490276",
+        "nonce": "257"
+      },
+      {
+        "address": "0xbf49b8f00a6d9826907fa72f8edbcbcc0eede1cc",
+        "balance": "991227364",
+        "nonce": "255"
+      },
+      {
+        "address": "0x08638ef1a205be6762a8b935f5da9b700cf7322d",
+        "balance": "75557863725914323419135",
+        "nonce": "2"
+      },
+      {
+        "address": "0xd51a44d3fae010294c616388b506acda1bfaae43",
+        "balance": "5519830474000000000",
+        "nonce": "238"
+      },
+      {
+        "address": "0x3ee18b2214aff97000d974cf647e7c347e8fa585",
+        "balance": "9246730474000000000",
+        "nonce": "2091"
+      },
+      {
+        "address": "0x5934807cc0654d46755ebd2848840b616256c6ef",
+        "balance": "92876344",
+        "nonce": "7"
+      },
+      {
+        "address": "0x4f868c1aa37fcf307ab38d215382e88fca6275e2",
+        "balance": "11123936",
+        "nonce": "10348"
+      },
+      {
+        "address": "0x2feb1512183545f48f6b9c5b4ebfcaf49cfca6f3",
+        "balance": "71093487",
+        "nonce": "2"
+      },
+      {
+        "address": "0x56178a0d5f301baf6cf3e1cd53d9863437345bf9",
+        "balance": "4289283480297365542397649264",
+        "nonce": "111"
+      },
+      {
+        "address": "0xbcf844fbf125bb023d94422a40fbe2036a497e1d",
+        "balance": "138365423",
+        "nonce": "103"
+      }
+    ],
+    "expectedRoot": "47775479333750920215959756780611148904583164867627893827197694804520800728132"
+  }
+]

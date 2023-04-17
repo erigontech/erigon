@@ -163,6 +163,14 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if err != nil {
 			return nil, err
 		}
+
+		// get the effective gas price percentage and apply it to the message
+		effectiveGasPricePercentage, err := api.getEffectiveGasPricePercentage(tx, txn.Hash())
+		if err != nil {
+			return nil, err
+		}
+		msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
+
 		// Execute the transaction message
 		result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
@@ -217,18 +225,18 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 	}
 
-	chainConfig, err := api.chainConfig(tx)
+	_, err = api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
 	var borTx types.Transaction
 	var borTxHash common.Hash
-	if chainConfig.Bor != nil {
-		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, b)
-		if borTx != nil {
-			borTxHash = types.ComputeBorTxHash(b.NumberU64(), b.Hash())
-		}
-	}
+	//if chainConfig.Bor != nil {
+	//	borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, b)
+	//	if borTx != nil {
+	//		borTxHash = types.ComputeBorTxHash(b.NumberU64(), b.Hash())
+	//	}
+	//}
 
 	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields)
 	if err == nil && number == rpc.PendingBlockNumber {

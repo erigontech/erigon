@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/verkle/verkletrie"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/sync_stages"
 )
 
 type optionsCfg struct {
@@ -63,12 +63,12 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 	}
 	defer tx.Rollback()
 
-	from, err := stages.GetStageProgress(vTx, stages.VerkleTrie)
+	from, err := sync_stages.GetStageProgress(vTx, sync_stages.VerkleTrie)
 	if err != nil {
 		return err
 	}
 
-	to, err := stages.GetStageProgress(tx, stages.Execution)
+	to, err := sync_stages.GetStageProgress(tx, sync_stages.Execution)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func IncrementVerkleTree(cfg optionsCfg) error {
 	if _, err := verkletrie.IncrementStorage(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(vTx, stages.VerkleTrie, to); err != nil {
+	if err := sync_stages.SaveStageProgress(vTx, sync_stages.VerkleTrie, to); err != nil {
 		return err
 	}
 
@@ -182,10 +182,10 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 	log.Info("Verkle Tree Generation completed", "elapsed", time.Since(start), "root", common.Bytes2Hex(root[:]))
 
 	var progress uint64
-	if progress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+	if progress, err = sync_stages.GetStageProgress(tx, sync_stages.Execution); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(vTx, stages.VerkleTrie, progress); err != nil {
+	if err := sync_stages.SaveStageProgress(vTx, sync_stages.VerkleTrie, progress); err != nil {
 		return err
 	}
 	return vTx.Commit()
@@ -307,7 +307,7 @@ func dump_acc_preimages(cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
-	num, err := stages.GetStageProgress(tx, stages.Execution)
+	num, err := sync_stages.GetStageProgress(tx, sync_stages.Execution)
 	if err != nil {
 		return err
 	}
@@ -363,7 +363,7 @@ func dump_storage_preimages(cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
-	num, err := stages.GetStageProgress(tx, stages.Execution)
+	num, err := sync_stages.GetStageProgress(tx, sync_stages.Execution)
 	if err != nil {
 		return err
 	}

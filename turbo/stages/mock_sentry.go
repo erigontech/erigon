@@ -11,7 +11,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -52,10 +53,10 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -74,8 +75,8 @@ type MockSentry struct {
 	Engine         consensus.Engine
 	gspec          *types.Genesis
 	ChainConfig    *chain.Config
-	Sync           *stagedsync.Sync
-	MiningSync     *stagedsync.Sync
+	Sync           *sync_stages.Sync
+	MiningSync     *sync_stages.Sync
 	PendingBlocks  chan *types.Block
 	MinedBlocks    chan *types.Block
 	sentriesClient *sentry.MultiClient
@@ -338,7 +339,7 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 
 	// Committed genesis will be shared between download and mock sentry
 	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec, "")
-	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
+	if _, ok := err.(*erigonchain.ConfigCompatError); err != nil && !ok {
 		if t != nil {
 			t.Fatal(err)
 		} else {
@@ -358,7 +359,7 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 			log.Warn("Could not validate block", "err", err)
 			return err
 		}
-		progress, err := stages.GetStageProgress(batch, stages.IntermediateHashes)
+		progress, err := sync_stages.GetStageProgress(batch, sync_stages.IntermediateHashes)
 		if err != nil {
 			return err
 		}
@@ -396,7 +397,7 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 	var snapshotsDownloader proto_downloader.DownloaderClient
 
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, mock.BlockSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)
-	mock.Sync = stagedsync.New(
+	mock.Sync = sync_stages.New(
 		stagedsync.DefaultStages(mock.Ctx,
 			stagedsync.StageSnapshotsCfg(
 				mock.DB,
@@ -489,7 +490,7 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 	miner := stagedsync.NewMiningState(&miningConfig)
 	mock.PendingBlocks = miner.PendingResultCh
 	mock.MinedBlocks = miner.MiningResultCh
-	mock.MiningSync = stagedsync.New(
+	mock.MiningSync = sync_stages.New(
 		stagedsync.MiningStages(mock.Ctx,
 			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, dirs.Tmp),
 			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, nil, mock.BlockSnapshots, cfg.TransactionsV3),
@@ -709,7 +710,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		if rawdb.ReadHeader(tx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
 			return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 		}
-		execAt, err := stages.GetStageProgress(tx, stages.Execution)
+		execAt, err := sync_stages.GetStageProgress(tx, sync_stages.Execution)
 		if err != nil {
 			return err
 		}

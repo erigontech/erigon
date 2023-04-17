@@ -20,9 +20,9 @@ import (
 	"hash"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/math"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/vm/stack"
@@ -124,16 +124,13 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 func NewEVMInterpreter(evm VMInterpreter, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
-	case evm.ChainRules().IsPrague:
-		jt = &pragueInstructionSet
-	case evm.ChainRules().IsCancun:
-		jt = &cancunInstructionSet
-	case evm.ChainRules().IsShanghai:
-		jt = &shanghaiInstructionSet
-	case evm.ChainRules().IsLondon:
-		jt = &londonInstructionSet
+	// to add our own IsRohan chain rule, we would need to fork or code or chain.Config
+	// that is why we hard code it here for POC
+	// our fork extends berlin anyways and starts from block 1
+	case evm.ChainRules().IsMordor:
+		jt = &mordorInstructionSet
 	case evm.ChainRules().IsBerlin:
-		jt = &berlinInstructionSet
+		jt = &rohanInstructionSet
 	case evm.ChainRules().IsIstanbul:
 		jt = &istanbulInstructionSet
 	case evm.ChainRules().IsConstantinople:
@@ -255,6 +252,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(_pc)
+		//[zkevm] - SELFDESTRUCT removed and replaced by SENDALL
+		if op == SELFDESTRUCT {
+			op = SENDALL
+		}
 		operation := in.jt[op]
 		cost = operation.constantGas // For tracing
 		// Validate stack

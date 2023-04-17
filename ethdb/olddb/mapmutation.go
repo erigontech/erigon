@@ -13,6 +13,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/ethdb"
+	"sort"
+	"strings"
 )
 
 type mapmutation struct {
@@ -195,9 +197,69 @@ func (m *mapmutation) BatchSize() int {
 	return m.size
 }
 
+//func (m *mapmutation) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+//	m.panicOnEmptyDB()
+//	return m.db.ForEach(bucket, fromPrefix, walker)
+//}
+
 func (m *mapmutation) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
 	m.panicOnEmptyDB()
-	return m.db.ForEach(bucket, fromPrefix, walker)
+
+	// take a readlock on the cache
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// if the bucket is not in the cache, then we can just use the db
+	if _, ok := m.puts[bucket]; !ok {
+		return m.db.ForEach(bucket, fromPrefix, walker)
+	}
+
+	// create an ordered structure to hold our data
+	var keys []string
+	values := make(map[string][]byte)
+
+	// otherwise fill the ordered data structure
+	// range the db table
+	err := m.db.ForEach(bucket, fromPrefix, func(k, v []byte) error {
+		keys = append(keys, string(k))
+		values[string(k)] = v
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// range the cache, and perform an ordered insert to the local structure
+	for k, v := range m.puts[bucket] {
+		// ordered insert to keys
+		index := sort.Search(len(keys), func(i int) bool { return keys[i] >= k })
+		keys = append(keys, "")
+		copy(keys[index+1:], keys[index:])
+		keys[index] = k
+
+		// collect value in map
+		values[k] = v
+	}
+
+	// temp check to see if we are in order
+	sort.SliceStable(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
+
+	// range the ordered structure and call the walker
+	for _, k := range keys {
+		// only where the prefix matches
+		sp := string(fromPrefix)
+		if !strings.HasPrefix(k, sp) {
+			continue
+		}
+		err := walker([]byte(k), values[k])
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (m *mapmutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {

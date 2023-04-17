@@ -63,7 +63,7 @@ This optimization sometimes leads to dramatic (orders of magnitude) write speed 
 In the Proof-of-Stake world staged sync becomes somewhat more complicated, as the following diagram shows.
 ![](/docs/pos_downloader.png)
 
-## Stages (for the up to date list see [`stages.go`](/eth/stagedsync/stages/stages.go) and [`stagebuilder.go`](/eth/stagedsync/stagebuilder.go)):
+## Stages (for the up to date list see [`stages.go`](/sync/stages/stages.go) and [`stagebuilder.go`](/eth/stagedsync/stagebuilder.go)):
 
 Each stage consists of 2 functions `ExecFunc` that progesses the stage forward and `UnwindFunc` that unwinds the stage backwards.
 

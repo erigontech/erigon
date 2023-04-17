@@ -205,6 +205,42 @@ func (s *PlainState) ReadAccountData(address libcommon.Address) (*accounts.Accou
 	return &a, nil
 }
 
+func (s *PlainState) ReadAccountDataMaybeNil(address libcommon.Address) (*accounts.Account, error) {
+	enc, err := historyv2read.GetAsOfNilIfNotExists(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr)
+	if err != nil {
+		return nil, err
+	}
+	if len(enc) == 0 {
+		if s.trace {
+			fmt.Printf("ReadAccountData [%x] => []\n", address)
+		}
+		return nil, nil
+	}
+	var a accounts.Account
+	if err = a.DecodeForStorage(enc); err != nil {
+		return nil, err
+	}
+	//restore codehash
+	if records, ok := s.systemContractLookup[address]; ok {
+		p := sort.Search(len(records), func(i int) bool {
+			return records[i].BlockNumber > s.blockNr
+		})
+		a.CodeHash = records[p-1].CodeHash
+	} else if a.Incarnation > 0 && a.IsEmptyCodeHash() {
+		if codeHash, err1 := s.tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
+			if len(codeHash) > 0 {
+				a.CodeHash = libcommon.BytesToHash(codeHash)
+			}
+		} else {
+			return nil, err1
+		}
+	}
+	if s.trace {
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
+	}
+	return &a, nil
+}
+
 func (s *PlainState) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, err := historyv2read.GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr)

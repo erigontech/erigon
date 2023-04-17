@@ -27,9 +27,9 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
 
@@ -325,7 +325,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 		if err != nil {
 			return err
 		}
-		hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
+		hd.highestInDb, err = sync_stages.GetStageProgress(tx, sync_stages.Headers)
 		if err != nil {
 			return err
 		}
@@ -369,7 +369,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 func (hd *HeaderDownload) ReadProgressFromDb(tx kv.RwTx) (err error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
+	hd.highestInDb, err = sync_stages.GetStageProgress(tx, sync_stages.Headers)
 	if err != nil {
 		return err
 	}

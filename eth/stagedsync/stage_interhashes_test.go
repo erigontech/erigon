@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 
+	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -147,7 +148,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	err = tx.Put(kv.AccountChangeSet, hexutility.EncodeTs(1), newAddress[:])
 	assert.Nil(t, err)
 
-	var s StageState
+	var s sync.StageState
 	s.BlockNumber = 0
 	_, err = incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, libcommon.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
@@ -297,7 +298,7 @@ func TestStorageDeletion(t *testing.T) {
 	err = tx.Put(kv.StorageChangeSet, append(hexutility.EncodeTs(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation3[:])
 	assert.Nil(t, err)
 
-	var s StageState
+	var s sync.StageState
 	s.BlockNumber = 0
 	_, err = incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, libcommon.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
@@ -394,7 +395,7 @@ func TestHiveTrieRoot(t *testing.T) {
 	require.Nil(t, tx.Put(kv.HashedAccounts, newHash[:], common.FromHex("02081bc16d674ec80000")))
 	require.Nil(t, tx.Put(kv.AccountChangeSet, hexutility.EncodeTs(1), newAddress[:]))
 
-	var s StageState
+	var s sync.StageState
 	s.BlockNumber = 0
 	incrementalRoot, err := incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, libcommon.Hash{} /* expectedRootHash */, nil /* quit */)
 	require.Nil(t, err)

@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -19,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	chain2 "github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 

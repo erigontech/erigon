@@ -163,4 +163,16 @@ var DefaultFlags = []cli.Flag{
 	&utils.LightClientDiscoveryTCPPortFlag,
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
+
+	&utils.L2ChainIdFlag,
+	&utils.L2RpcUrlFlag,
+	&utils.L2DataStreamerUrlFlag,
+	&utils.L1ChainIdFlag,
+	&utils.L1RpcUrlFlag,
+	&utils.L1ContractAddressFlag,
+	&utils.L1MaticContractAddressFlag,
+	&utils.L1GERManagerContractAddressFlag,
+	&utils.L1FirstBlockFlag,
+	&utils.RpcRateLimitsFlag,
+	&utils.RebuildTreeAfterFlag,
 }

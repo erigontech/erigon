@@ -26,8 +26,13 @@ import (
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon/chain"
+	zktypes "github.com/ledgerwatch/erigon/zk/types"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -76,8 +81,12 @@ func ExecuteBlockEphemerally(
 	chainConfig *chain.Config, vmConfig *vm.Config,
 	blockHashFunc func(n uint64) libcommon.Hash,
 	engine consensus.Engine, block *types.Block,
-	stateReader state.StateReader, stateWriter state.WriterWithChangeSets,
-	chainReader consensus.ChainHeaderReader, getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
+	stateReader state.StateReader,
+	stateWriter state.WriterWithChangeSets,
+	chainReader consensus.ChainHeaderReader,
+	getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
+	dbTx kv.RwTx,
+	roHermezDb state.ReadOnlyHermezDb,
 ) (*EphemeralExecResult, error) {
 
 	defer BlockExecutionTimer.UpdateDuration(time.Now())
@@ -113,7 +122,6 @@ func ExecuteBlockEphemerally(
 		misc.ApplyDAOHardFork(ibs)
 	}
 	noop := state.NewNoopWriter()
-	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		writeTrace := false
@@ -126,7 +134,14 @@ func ExecuteBlockEphemerally(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas)
+		gp.Reset(block.GasLimit())
+
+		effectiveGasPricePercentage, err := roHermezDb.GetEffectiveGasPricePercentage(tx.Hash())
+		if err != nil {
+			return nil, err
+		}
+
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas, effectiveGasPricePercentage)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -134,6 +149,7 @@ func ExecuteBlockEphemerally(
 
 			vmConfig.Tracer = nil
 		}
+
 		if err != nil {
 			if !vmConfig.StatelessExec {
 				return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
@@ -145,23 +161,32 @@ func ExecuteBlockEphemerally(
 				receipts = append(receipts, receipt)
 			}
 		}
+
+		// [zkevm] - set smt root hash in magic account
+		err = ibs.ScalableSetSmtRootHash(roHermezDb)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	receiptSha := types.DeriveSha(receipts)
-	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
-		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
-	}
+	// [zkevm] todo
+	//if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
+	//	return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
+	//}
 
-	if !vmConfig.StatelessExec && *usedGas != header.GasUsed {
-		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
-	}
+	// in zkEVM we don't have headers to check GasUsed against
+	//if !vmConfig.StatelessExec && *usedGas != header.GasUsed && header.GasUsed > 0 {
+	//	return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+	//}
 
 	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
 		bloom = types.CreateBloom(receipts)
-		if !vmConfig.StatelessExec && bloom != header.Bloom {
-			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
-		}
+		// [zkevm] todo
+		//if !vmConfig.StatelessExec && bloom != header.Bloom {
+		//	return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+		//}
 	}
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
@@ -224,7 +249,6 @@ func ExecuteBlockEphemerallyBor(
 		misc.ApplyDAOHardFork(ibs)
 	}
 	noop := state.NewNoopWriter()
-	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		writeTrace := false
@@ -236,8 +260,9 @@ func ExecuteBlockEphemerallyBor(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
+		gp.Reset(block.GasLimit())
 
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas, zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -288,7 +313,7 @@ func ExecuteBlockEphemerallyBor(
 
 	blockLogs := ibs.Logs()
 	stateSyncReceipt := &types.Receipt{}
-	if chainConfig.Consensus == chain.BorConsensus && len(blockLogs) > 0 {
+	if chainConfig.Consensus == erigonchain.BorConsensus && len(blockLogs) > 0 {
 		slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
 
 		if len(blockLogs) > len(logs) {
@@ -408,7 +433,7 @@ func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Con
 		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
 	vmConfig := vm.Config{NoReceipts: true}
-	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, excessDataGas)
+	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, excessDataGas, zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED)
 	if err != nil {
 		return result, fmt.Errorf("SysCallContract: %w ", err)
 	}
@@ -442,6 +467,11 @@ func FinalizeBlockExecution(
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
+	//err = ibs.ScalableSetSmtRootHash(ibs.DbTx, true)
+	//if err != nil {
+	//	return nil, nil, nil, err
+	//}
 
 	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64(), header.Time), stateWriter); err != nil {
 		return nil, nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)

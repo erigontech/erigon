@@ -28,11 +28,13 @@ import (
 	"sync"
 	"time"
 
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
+
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -177,7 +179,7 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libc
 // Ethereum testnet following the Ropsten attacks.
 type Clique struct {
 	chainConfig    *chain.Config
-	config         *chain.CliqueConfig             // Consensus engine configuration parameters
+	config         *erigonchain.CliqueConfig       // Consensus engine configuration parameters
 	snapshotConfig *params.ConsensusSnapshotConfig // Consensus engine configuration parameters
 	db             kv.RwDB                         // Database to store and retrieve snapshot checkpoints
 
@@ -244,8 +246,8 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliq
 }
 
 // Type returns underlying consensus engine
-func (c *Clique) Type() chain.ConsensusName {
-	return chain.CliqueConsensus
+func (c *Clique) Type() erigonchain.ConsensusName {
+	return erigonchain.CliqueConsensus
 }
 
 // Author implements consensus.Engine, returning the Ethereum address recovered

@@ -30,6 +30,14 @@ func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
 }
 func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
+func (hr *HistoryReaderV3) GetTxCount() (uint64, error) {
+	cursor, err := hr.ttx.Cursor(kv.EthTx)
+	if err != nil {
+		return 0, err
+	}
+
+	return cursor.Count()
+}
 
 func (hr *HistoryReaderV3) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	enc, ok, err := hr.ttx.DomainGetAsOf(temporal.AccountsDomain, address.Bytes(), nil, hr.txNum)

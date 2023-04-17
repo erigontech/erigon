@@ -27,14 +27,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
+
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
@@ -321,7 +323,7 @@ func (pb *GasLimitOverride) Add(hash libcommon.Hash, b *uint256.Int) {
 	pb.cache.ContainsOrAdd(hash, b)
 }
 
-func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
+func NewAuRa(spec *erigonchain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 	auraParams, err := FromJson(spec)
 	if err != nil {
 		return nil, err
@@ -469,8 +471,8 @@ func nextStepTimeDuration(info StepDurationInfo, time uint64) (uint64, uint64, b
 }
 
 // Type returns underlying consensus engine
-func (c *AuRa) Type() chain.ConsensusName {
-	return chain.AuRaConsensus
+func (c *AuRa) Type() erigonchain.ConsensusName {
+	return erigonchain.AuRaConsensus
 }
 
 // Author implements consensus.Engine, returning the Ethereum address recovered

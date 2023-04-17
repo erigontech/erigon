@@ -6,15 +6,15 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -44,8 +44,8 @@ func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(
 
 // BodiesForward progresses Bodies stage in the forward direction
 func BodiesForward(
-	s *StageState,
-	u Unwinder,
+	s *sync_stages.StageState,
+	u sync_stages.Unwinder,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg BodiesCfg,
@@ -84,7 +84,7 @@ func BodiesForward(
 	}
 	defer cfg.bd.ClearBodyCache()
 	var headerProgress, bodyProgress uint64
-	headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
+	headerProgress, err = sync_stages.GetStageProgress(tx, sync_stages.Headers)
 	if err != nil {
 		return err
 	}
@@ -356,7 +356,7 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64) {
 	)
 }
 
-func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
+func UnwindBodiesStage(u *sync_stages.UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -390,7 +390,7 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 	return nil
 }
 
-func PruneBodiesStage(s *PruneState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
+func PruneBodiesStage(s *sync_stages.PruneState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

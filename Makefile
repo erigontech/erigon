@@ -5,7 +5,7 @@ DOCKER := $(shell command -v docker 2> /dev/null)
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
+GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty 2>/dev/null || echo "untagged")
 ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
 DOCKER_UID ?= $(shell id -u)
@@ -98,11 +98,8 @@ dbg:
 	@cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
 
-## geth:                              run erigon (TODO: remove?)
-geth: erigon
-
 ## erigon:                            build erigon
-erigon: go-version erigon.cmd
+zkevm-erigon: go-version zkevm-erigon.cmd
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
 COMMANDS += devnet
@@ -128,7 +125,7 @@ COMMANDS += erigon-el
 $(COMMANDS): %: %.cmd
 
 ## all:                               run erigon with all commands
-all: erigon $(COMMANDS)
+all: zkevm-erigon $(COMMANDS)
 
 ## db-tools:                          build db tools
 db-tools:
@@ -214,7 +211,7 @@ git-submodules:
 	@git submodule sync --quiet --recursive || true
 	@git submodule update --quiet --init --recursive --force || true
 
-PACKAGE_NAME          := github.com/ledgerwatch/erigon
+PACKAGE_NAME          := github.com/gateway-fm/zkevm-erigon
 GOLANG_CROSS_VERSION  ?= v1.20.2
 
 .PHONY: release-dry-run

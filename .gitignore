@@ -79,6 +79,9 @@ erigon-lib/
 docker-compose.*.yml
 .env
 coverage.out
+hermezconfig*.yaml
+rpcConfig.yaml
+local.yml
 
 dist
 __debug_bin

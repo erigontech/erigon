@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/chain"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/protolambda/ztyp/codec"
@@ -274,12 +274,12 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 
 	cryptoCtx := kzg.CrpytoCtx()
 	for i, blob := range blobs {
-		commitment, err := cryptoCtx.BlobToKZGCommitment(gokzg4844.Blob(blob))
+		commitment, err := cryptoCtx.BlobToKZGCommitment(gokzg4844.Blob(blob), 1)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %v", err)
 		}
 
-		proof, err := cryptoCtx.ComputeBlobKZGProof(gokzg4844.Blob(blob), commitment)
+		proof, err := cryptoCtx.ComputeBlobKZGProof(gokzg4844.Blob(blob), commitment, 1)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not compute proof for blob: %v", err)
 		}

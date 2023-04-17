@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -88,8 +89,8 @@ func StageHeadersCfg(
 }
 
 func SpawnStageHeaders(
-	s *StageState,
-	u Unwinder,
+	s *sync_stages.StageState,
+	u sync_stages.Unwinder,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
@@ -148,8 +149,8 @@ func SpawnStageHeaders(
 // HeadersPOS processes Proof-of-Stake requests (newPayload, forkchoiceUpdated).
 // It also saves PoS headers downloaded by (*HeaderDownload)StartPoSDownloader into the DB.
 func HeadersPOS(
-	s *StageState,
-	u Unwinder,
+	s *sync_stages.StageState,
+	u sync_stages.Unwinder,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
@@ -235,7 +236,7 @@ func HeadersPOS(
 
 func writeForkChoiceHashes(
 	forkChoice *engineapi.ForkChoiceMessage,
-	s *StageState,
+	s *sync_stages.StageState,
 	tx kv.RwTx,
 	cfg HeadersCfg,
 ) (bool, error) {
@@ -276,8 +277,8 @@ func startHandlingForkChoice(
 	forkChoice *engineapi.ForkChoiceMessage,
 	requestStatus engineapi.RequestStatus,
 	requestId int,
-	s *StageState,
-	u Unwinder,
+	s *sync_stages.StageState,
+	u sync_stages.Unwinder,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
@@ -428,7 +429,7 @@ func startHandlingForkChoice(
 func finishHandlingForkChoice(
 	forkChoice *engineapi.ForkChoiceMessage,
 	headHeight uint64,
-	s *StageState,
+	s *sync_stages.StageState,
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	useExternalTx bool,
@@ -478,7 +479,7 @@ func handleNewPayload(
 	block *types.Block,
 	requestStatus engineapi.RequestStatus,
 	requestId int,
-	s *StageState,
+	s *sync_stages.StageState,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
@@ -545,7 +546,7 @@ func handleNewPayload(
 
 func verifyAndSaveNewPoSHeader(
 	requestStatus engineapi.RequestStatus,
-	s *StageState,
+	s *sync_stages.StageState,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
@@ -598,7 +599,7 @@ func schedulePoSDownload(
 	hashToDownload libcommon.Hash,
 	heightToDownload uint64,
 	downloaderTip libcommon.Hash,
-	s *StageState,
+	s *sync_stages.StageState,
 	cfg HeadersCfg,
 ) bool {
 	cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
@@ -739,8 +740,8 @@ func handleInterrupt(interrupt engineapi.Interrupt, cfg HeadersCfg, tx kv.RwTx, 
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
 func HeadersPOW(
-	s *StageState,
-	u Unwinder,
+	s *sync_stages.StageState,
+	u sync_stages.Unwinder,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
@@ -979,7 +980,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	return nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
+func HeadersUnwind(u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
@@ -1149,7 +1150,7 @@ func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	return td
 }
 
-func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context) (err error) {
+func HeadersPrune(p *sync_stages.PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

@@ -12,7 +12,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -24,12 +23,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
@@ -80,7 +80,7 @@ func StageSnapshotsCfg(
 }
 
 func SpawnStageSnapshots(
-	s *StageState,
+	s *sync_stages.StageState,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg SnapshotsCfg,
@@ -98,8 +98,8 @@ func SpawnStageSnapshots(
 		return err
 	}
 	var minProgress uint64
-	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.Senders, stages.TxLookup} {
-		progress, err := stages.GetStageProgress(tx, stage)
+	for _, stage := range []sync_stages.SyncStage{sync_stages.Headers, sync_stages.Bodies, sync_stages.Senders, sync_stages.TxLookup} {
+		progress, err := sync_stages.GetStageProgress(tx, stage)
 		if err != nil {
 			return err
 		}
@@ -121,7 +121,7 @@ func SpawnStageSnapshots(
 	return nil
 }
 
-func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool) error {
+func DownloadAndIndexSnapshotsIfNeed(s *sync_stages.StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool) error {
 	if !initialCycle || cfg.snapshots == nil || !cfg.snapshots.Cfg().Enabled {
 		return nil
 	}
@@ -193,8 +193,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
-	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
-		progress, err := stages.GetStageProgress(tx, stage)
+	for _, stage := range []sync_stages.SyncStage{sync_stages.Headers, sync_stages.Bodies, sync_stages.BlockHashes, sync_stages.Senders} {
+		progress, err := sync_stages.GetStageProgress(tx, stage)
 		if err != nil {
 			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
 		}
@@ -202,11 +202,11 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			continue
 		}
 
-		if err = stages.SaveStageProgress(tx, stage, blocksAvailable); err != nil {
+		if err = sync_stages.SaveStageProgress(tx, stage, blocksAvailable); err != nil {
 			return fmt.Errorf("advancing %s stage: %w", stage, err)
 		}
 		switch stage {
-		case stages.Headers:
+		case sync_stages.Headers:
 			h2n := etl.NewCollector(logPrefix, dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 			defer h2n.Close()
 			h2n.LogLvl(log.LvlDebug)
@@ -252,7 +252,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				return err
 			}
 
-		case stages.Bodies:
+		case sync_stages.Bodies:
 			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
 			ok, err := sn.ViewTxs(blocksAvailable, func(sn *snapshotsync.TxnSegment) error {
 				lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
@@ -321,7 +321,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx kv.RwTx) error {
+func WaitForDownloader(s *sync_stages.StageState, ctx context.Context, cfg SnapshotsCfg, tx kv.RwTx) error {
 	if cfg.snapshots.Cfg().NoDownloader {
 		if err := cfg.snapshots.ReopenFolder(); err != nil {
 			return err
@@ -495,7 +495,7 @@ func calculateTime(amountLeft, rate uint64) string {
 /* ====== PRUNING ====== */
 // snapshots pruning sections works more as a retiring of blocks
 // retiring blocks means moving block data from db into snapshots
-func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
+func SnapshotsPrune(s *sync_stages.PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

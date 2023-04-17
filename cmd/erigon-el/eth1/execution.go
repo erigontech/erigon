@@ -18,9 +18,8 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -28,12 +27,12 @@ type Eth1Execution struct {
 	execution.UnimplementedExecutionServer
 
 	db                kv.RwDB
-	executionPipeline *stagedsync.Sync
+	executionPipeline *sync_stages.Sync
 	blockReader       services.FullBlockReader
 	mu                sync.Mutex
 }
 
-func NewEth1Execution(db kv.RwDB, blockReader services.FullBlockReader, executionPipeline *stagedsync.Sync) *Eth1Execution {
+func NewEth1Execution(db kv.RwDB, blockReader services.FullBlockReader, executionPipeline *sync_stages.Sync) *Eth1Execution {
 	return &Eth1Execution{
 		db:                db,
 		executionPipeline: executionPipeline,
@@ -166,10 +165,10 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 		}
 	}
 	// Set Progress for headers and bodies accordingly.
-	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
+	if err := sync_stages.SaveStageProgress(tx, sync_stages.Headers, fcuHeader.Number.Uint64()); err != nil {
 		return nil, err
 	}
-	if err := stages.SaveStageProgress(tx, stages.Bodies, fcuHeader.Number.Uint64()); err != nil {
+	if err := sync_stages.SaveStageProgress(tx, sync_stages.Bodies, fcuHeader.Number.Uint64()); err != nil {
 		return nil, err
 	}
 	if err = rawdb.WriteHeadHeaderHash(tx, blockHash); err != nil {

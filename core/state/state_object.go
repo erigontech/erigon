@@ -93,6 +93,10 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (so *stateObject) empty() bool {
+	// [zkevm] return false if it is the magic acc
+	if so.address.Hex() == "0x000000000000000000000000000000005Ca1aB1E" {
+		return false
+	}
 	return so.data.Nonce == 0 && so.data.Balance.IsZero() && bytes.Equal(so.data.CodeHash[:], emptyCodeHash)
 }
 

@@ -20,9 +20,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 
-	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	chain2 "github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"

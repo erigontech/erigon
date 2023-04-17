@@ -28,7 +28,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon/chain"
 	"golang.org/x/exp/slices"
 )
 

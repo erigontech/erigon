@@ -26,12 +26,13 @@ import (
 
 	mapset "github.com/deckarep/golang-set"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -100,8 +101,8 @@ var (
 )
 
 // Type returns underlying consensus engine
-func (ethash *Ethash) Type() chain.ConsensusName {
-	return chain.EtHashConsensus
+func (ethash *Ethash) Type() erigonchain.ConsensusName {
+	return erigonchain.EtHashConsensus
 }
 
 // Author implements consensus.Engine, returning the header's coinbase as the

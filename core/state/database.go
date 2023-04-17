@@ -39,6 +39,15 @@ type StateReader interface {
 	ReadAccountIncarnation(address libcommon.Address) (uint64, error)
 }
 
+type StateReaderIterator interface {
+	StateReader
+	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
+}
+
+type TxCountReader interface {
+	GetTxCount() (uint64, error)
+}
+
 type StateWriter interface {
 	UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error
 	UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error

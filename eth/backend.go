@@ -32,13 +32,13 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -60,6 +60,8 @@ import (
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+
+	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	clcore "github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
@@ -89,7 +91,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethstats"
@@ -98,6 +99,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -105,6 +107,9 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/zk/datastream/client"
+	"github.com/ledgerwatch/erigon/zk/syncer"
+	"github.com/ledgerwatch/erigon/zkevm/etherman"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -145,10 +150,10 @@ type Ethereum struct {
 	sentriesClient *sentry.MultiClient
 	sentryServers  []*sentry.GrpcServer
 
-	stagedSync      *stagedsync.Sync
-	syncStages      []*stagedsync.Stage
-	syncUnwindOrder stagedsync.UnwindOrder
-	syncPruneOrder  stagedsync.PruneOrder
+	stagedSync      *sync_stages.Sync
+	syncStages      []*sync_stages.Stage
+	syncUnwindOrder sync_stages.UnwindOrder
+	syncPruneOrder  sync_stages.PruneOrder
 
 	downloaderClient proto_downloader.DownloaderClient
 
@@ -221,7 +226,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 		var genesisErr error
 		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime, tmpdir)
-		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
+		if _, ok := genesisErr.(*erigonchain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
 
@@ -236,7 +241,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-		if err = stagedsync.UpdateMetrics(tx); err != nil {
+		if err = sync_stages.UpdateMetrics(tx); err != nil {
 			return err
 		}
 
@@ -417,7 +422,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			log.Warn("Could not validate block", "err", err)
 			return err
 		}
-		progress, err := stages.GetStageProgress(batch, stages.IntermediateHashes)
+		progress, err := sync_stages.GetStageProgress(batch, sync_stages.IntermediateHashes)
 		if err != nil {
 			return err
 		}
@@ -492,7 +497,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	backend.minedBlocks = miner.MiningResultCh
 
 	// proof-of-work mining
-	mining := stagedsync.New(
+	mining := sync_stages.New(
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool2, backend.txPool2DB, allSnapshots, config.TransactionsV3),
@@ -510,7 +515,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error) {
 		miningStatePos := stagedsync.NewProposingState(&config.Miner)
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
-		proposingSync := stagedsync.New(
+		proposingSync := sync_stages.New(
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool2, backend.txPool2DB, allSnapshots, config.TransactionsV3),
@@ -669,12 +674,57 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	backend.ethBackendRPC, backend.miningRPC, backend.stateChangesClient = ethBackendRPC, miningRPC, stateDiffClient
 
-	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine)
-	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
-	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
+	if backend.config.Zk != nil {
+		cfg := backend.config.Zk
+
+		// datastream
+		// Create client
+		log.Info("Starting datastream client...")
+		datastreamClient := client.NewClient(cfg.L2DataStreamerUrl)
+		// retry connection
+		for {
+			// Start client (connect to the server)
+			if err := datastreamClient.Start(); err == nil {
+				break
+			}
+			log.Warn(fmt.Sprintf("Error when starting datastream client, retrying... Error: %s", err))
+		}
+		//datastream end
+
+		etherMan := newEtherMan(cfg)
+		zkVerificationsSyncer := syncer.NewVerificationsSyncer(etherMan.EthClient, cfg.L1ContractAddress)
+		zkSequencesSyncer := syncer.NewSequencesSyncer(etherMan.EthClient, cfg.L1ContractAddress)
+
+		backend.syncStages = stages2.NewDefaultZkStages(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine, zkVerificationsSyncer, zkSequencesSyncer, &datastreamClient)
+		backend.syncUnwindOrder = stagedsync.ZkUnwindOrder
+		// TODO: prune order
+	} else {
+		backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine)
+		backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
+		backend.syncPruneOrder = stagedsync.DefaultPruneOrder
+	}
 
 	return backend, nil
 }
+
+// creates an EtherMan instance with default parameters
+func newEtherMan(cfg *ethconfig.Zk) *etherman.Client {
+	ethmanConf := etherman.Config{
+		URL:                       cfg.L1RpcUrl,
+		L1ChainID:                 cfg.L1ChainId,
+		PoEAddr:                   cfg.L1ContractAddress,
+		MaticAddr:                 cfg.L1MaticContractAddress,
+		GlobalExitRootManagerAddr: cfg.L1GERManagerContractAddress,
+	}
+
+	em, err := etherman.NewClient(ethmanConf)
+	//panic on error
+	if err != nil {
+		panic(err)
+	}
+	return em
+}
+
 func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	ethBackendRPC, miningRPC, stateDiffClient := backend.ethBackendRPC, backend.miningRPC, backend.stateChangesClient
 	blockReader := backend.blockReader
@@ -682,7 +732,7 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 	chainKv := backend.chainDB
 	var err error
 
-	backend.stagedSync = stagedsync.New(backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder)
+	backend.stagedSync = sync_stages.New(backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder)
 
 	backend.sentriesClient.Hd.StartPoSDownloader(backend.sentryCtx, backend.sentriesClient.SendHeaderRequest, backend.sentriesClient.Penalize)
 
@@ -727,7 +777,7 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 	if casted, ok := backend.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine)
+	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, config.Zk.L2RpcUrl)
 	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine)
 	go func() {
 		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList); err != nil {
@@ -797,7 +847,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string) error {
+func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *sync_stages.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -1079,7 +1129,7 @@ func (s *Ethereum) ChainConfig() *chain.Config {
 	return s.chainConfig
 }
 
-func (s *Ethereum) StagedSync() *stagedsync.Sync {
+func (s *Ethereum) StagedSync() *sync_stages.Sync {
 	return s.stagedSync
 }
 

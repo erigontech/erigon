@@ -27,11 +27,12 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/protolambda/ztyp/codec"
+
+	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -456,20 +457,21 @@ func (t *TransactionsFixedOrder) Pop() {
 
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
-	to               *libcommon.Address
-	from             libcommon.Address
-	nonce            uint64
-	amount           uint256.Int
-	gasLimit         uint64
-	gasPrice         uint256.Int
-	feeCap           uint256.Int
-	tip              uint256.Int
-	maxFeePerDataGas uint256.Int
-	data             []byte
-	accessList       types2.AccessList
-	checkNonce       bool
-	isFree           bool
-	dataHashes       []libcommon.Hash
+	to                          *libcommon.Address
+	from                        libcommon.Address
+	nonce                       uint64
+	amount                      uint256.Int
+	gasLimit                    uint64
+	gasPrice                    uint256.Int
+	feeCap                      uint256.Int
+	tip                         uint256.Int
+	maxFeePerDataGas            uint256.Int
+	data                        []byte
+	accessList                  types2.AccessList
+	checkNonce                  bool
+	isFree                      bool
+	dataHashes                  []libcommon.Hash
+	effectiveGasPricePercentage uint8
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList types2.AccessList, checkNonce bool, isFree bool) Message {
@@ -532,6 +534,10 @@ func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
 }
 
 func (m Message) DataHashes() []libcommon.Hash { return m.dataHashes }
+func (m *Message) SetEffectiveGasPricePercentage(effectiveGasPricePercentage uint8) {
+	m.effectiveGasPricePercentage = effectiveGasPricePercentage
+}
+func (m Message) EffectiveGasPricePercentage() uint8 { return m.effectiveGasPricePercentage }
 
 func DecodeSSZ(data []byte, dest codec.Deserializable) error {
 	err := dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))

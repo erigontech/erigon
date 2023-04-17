@@ -6,8 +6,9 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
@@ -57,7 +58,7 @@ func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify
 			}
 			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory, readonly))
 		}
-	case *chain.AuRaConfig:
+	case *erigonchain.AuRaConfig:
 		if chainConfig.Aura != nil {
 			dbPath := filepath.Join(datadir, "aura")
 			var err error
@@ -66,7 +67,7 @@ func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify
 				panic(err)
 			}
 		}
-	case *chain.BorConfig:
+	case *erigonchain.BorConfig:
 		// If Matic bor consensus is requested, set it up
 		// In order to pass the ethereum transaction tests, we need to set the burn contract which is in the bor config
 		// Then, bor != nil will also be enabled for ethash and clique. Only enable Bor for real if there is a validator contract present.

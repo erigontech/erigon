@@ -22,7 +22,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 
 	"github.com/ledgerwatch/log/v3"

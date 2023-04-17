@@ -23,9 +23,9 @@ import (
 	"math/big"
 	"path"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
@@ -50,15 +50,18 @@ func readChainSpec(filename string) *chain.Config {
 
 // Genesis hashes to enforce below configs on.
 var (
-	MainnetGenesisHash    = libcommon.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
-	SepoliaGenesisHash    = libcommon.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
-	RinkebyGenesisHash    = libcommon.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
-	GoerliGenesisHash     = libcommon.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
-	MumbaiGenesisHash     = libcommon.HexToHash("0x7b66506a9ebdbf30d32b43c5f15a3b1216269a1ec3a75aa3182b86176a2b1ca7")
-	BorMainnetGenesisHash = libcommon.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
-	BorDevnetGenesisHash  = libcommon.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
-	GnosisGenesisHash     = libcommon.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
-	ChiadoGenesisHash     = libcommon.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
+	MainnetGenesisHash       = libcommon.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+	SepoliaGenesisHash       = libcommon.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
+	RinkebyGenesisHash       = libcommon.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
+	GoerliGenesisHash        = libcommon.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
+	MumbaiGenesisHash        = libcommon.HexToHash("0x7b66506a9ebdbf30d32b43c5f15a3b1216269a1ec3a75aa3182b86176a2b1ca7")
+	BorMainnetGenesisHash    = libcommon.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
+	BorDevnetGenesisHash     = libcommon.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
+	GnosisGenesisHash        = libcommon.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
+	ChiadoGenesisHash        = libcommon.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
+	HermezMainnetGenesisHash = libcommon.HexToHash("0x3f86b09b43e3e49a41fc20a07579b79eba044253367817d5c241d23c0e2bc5c9")
+	HermezTestnetGenesisHash = libcommon.HexToHash("0x13a14c4a8288e782863d7ce916d224546c69dc428fbfa7115a0cc33a27a05b26")
+	HermezDevnetGenesisHash  = libcommon.HexToHash("0x45cff376044a08f8f33f0244d589f2178ea4f4c5234d912daa2ff3c496b17862")
 )
 
 var (
@@ -83,7 +86,7 @@ var (
 	// and accepted by the Ethereum core developers into the main net protocol.
 	AllProtocolChanges = &chain.Config{
 		ChainID:                       big.NewInt(1337),
-		Consensus:                     chain.EtHashConsensus,
+		Consensus:                     erigonchain.EtHashConsensus,
 		HomesteadBlock:                big.NewInt(0),
 		TangerineWhistleBlock:         big.NewInt(0),
 		SpuriousDragonBlock:           big.NewInt(0),
@@ -99,14 +102,15 @@ var (
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  big.NewInt(0),
-		Ethash:                        new(chain.EthashConfig),
+		Ethash:                        new(erigonchain.EthashConfig),
+		MordorBlock:                   big.NewInt(0),
 	}
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Clique consensus.
 	AllCliqueProtocolChanges = &chain.Config{
 		ChainID:               big.NewInt(1337),
-		Consensus:             chain.CliqueConsensus,
+		Consensus:             erigonchain.CliqueConsensus,
 		HomesteadBlock:        big.NewInt(0),
 		TangerineWhistleBlock: big.NewInt(0),
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -117,7 +121,8 @@ var (
 		MuirGlacierBlock:      big.NewInt(0),
 		BerlinBlock:           big.NewInt(0),
 		LondonBlock:           big.NewInt(0),
-		Clique:                &chain.CliqueConfig{Period: 0, Epoch: 30000},
+		Clique:                &erigonchain.CliqueConfig{Period: 0, Epoch: 30000},
+		MordorBlock:           big.NewInt(0),
 	}
 
 	MumbaiChainConfig = readChainSpec("chainspecs/mumbai.json")
@@ -130,11 +135,17 @@ var (
 
 	ChiadoChainConfig = readChainSpec("chainspecs/chiado.json")
 
+	HermezMainnetChainConfig = readChainSpec("chainspecs/hermez.json")
+
+	HermezTestnetChainConfig = readChainSpec("chainspecs/hermez-testnet.json")
+
+	HermezDevnetChainConfig = readChainSpec("chainspecs/hermez-devnet.json")
+
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
 	TestChainConfig = &chain.Config{
 		ChainID:               big.NewInt(1337),
-		Consensus:             chain.EtHashConsensus,
+		Consensus:             erigonchain.EtHashConsensus,
 		HomesteadBlock:        big.NewInt(0),
 		TangerineWhistleBlock: big.NewInt(0),
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -144,12 +155,12 @@ var (
 		IstanbulBlock:         big.NewInt(0),
 		MuirGlacierBlock:      big.NewInt(0),
 		BerlinBlock:           big.NewInt(0),
-		Ethash:                new(chain.EthashConfig),
+		Ethash:                new(erigonchain.EthashConfig),
 	}
 
 	TestChainAuraConfig = &chain.Config{
 		ChainID:               big.NewInt(1),
-		Consensus:             chain.AuRaConsensus,
+		Consensus:             erigonchain.AuRaConsensus,
 		HomesteadBlock:        big.NewInt(0),
 		TangerineWhistleBlock: big.NewInt(0),
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -160,7 +171,7 @@ var (
 		MuirGlacierBlock:      big.NewInt(0),
 		BerlinBlock:           big.NewInt(0),
 		LondonBlock:           big.NewInt(0),
-		Aura:                  &chain.AuRaConfig{},
+		Aura:                  &erigonchain.AuRaConfig{},
 	}
 
 	TestRules = TestChainConfig.Rules(0, 0)
@@ -210,6 +221,12 @@ func ChainConfigByChainName(chain string) *chain.Config {
 		return GnosisChainConfig
 	case networkname.ChiadoChainName:
 		return ChiadoChainConfig
+	case networkname.HermezMainnetChainName:
+		return HermezMainnetChainConfig
+	case networkname.HermezTestnetChainName:
+		return HermezTestnetChainConfig
+	case networkname.HermezDevnetChainName:
+		return HermezDevnetChainConfig
 	default:
 		return nil
 	}
@@ -235,6 +252,12 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &GnosisGenesisHash
 	case networkname.ChiadoChainName:
 		return &ChiadoGenesisHash
+	case networkname.HermezMainnetChainName:
+		return &HermezMainnetGenesisHash
+	case networkname.HermezTestnetChainName:
+		return &HermezTestnetGenesisHash
+	case networkname.HermezDevnetChainName:
+		return &HermezDevnetGenesisHash
 	default:
 		return nil
 	}
@@ -260,6 +283,12 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 		return GnosisChainConfig
 	case genesisHash == ChiadoGenesisHash:
 		return ChiadoChainConfig
+	case genesisHash == HermezMainnetGenesisHash:
+		return HermezMainnetChainConfig
+	case genesisHash == HermezTestnetGenesisHash:
+		return HermezTestnetChainConfig
+	case genesisHash == HermezDevnetGenesisHash:
+		return HermezDevnetChainConfig
 	default:
 		return nil
 	}

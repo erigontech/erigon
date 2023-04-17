@@ -26,12 +26,12 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 
@@ -51,6 +51,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	zktypes "github.com/ledgerwatch/erigon/zk/types"
 )
 
 // This nil assignment ensures at compile time that SimulatedBackend implements bind.ContractBackend.
@@ -725,7 +726,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
 		&b.pendingHeader.GasUsed, vm.Config{},
-		b.pendingHeader.ParentExcessDataGas(b.getHeader)); err != nil {
+		b.pendingHeader.ParentExcessDataGas(b.getHeader), 0); err != nil {
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
@@ -806,6 +807,9 @@ func (m callMsg) Value() *uint256.Int           { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                  { return m.CallMsg.Data }
 func (m callMsg) AccessList() types2.AccessList { return m.CallMsg.AccessList }
 func (m callMsg) IsFree() bool                  { return false }
+func (m callMsg) EffectiveGasPricePercentage() uint8 {
+	return zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED
+}
 
 /*
 // filterBackend implements filters.Backend to support filtering for logs without

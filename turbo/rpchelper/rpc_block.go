@@ -7,8 +7,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/sync_stages"
 )
 
 var UnknownBlockError = &rpc.CustomError{
@@ -25,7 +25,7 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
-	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	blockNum, err := sync_stages.GetStageProgress(tx, sync_stages.Execution)
 	if err != nil {
 		return 0, fmt.Errorf("getting latest block number: %w", err)
 	}
@@ -57,7 +57,7 @@ func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {
 }
 
 func GetLatestExecutedBlockNumber(tx kv.Tx) (uint64, error) {
-	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	blockNum, err := sync_stages.GetStageProgress(tx, sync_stages.Execution)
 	if err != nil {
 		return 0, err
 	}

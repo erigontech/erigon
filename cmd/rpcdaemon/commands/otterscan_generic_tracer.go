@@ -3,11 +3,13 @@ package commands
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -84,10 +86,14 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 	header := block.Header()
 	excessDataGas := header.ParentExcessDataGas(getHeader)
 	rules := chainConfig.Rules(block.NumberU64(), header.Time)
+	hermezReader := hermez_db.NewHermezDbReader(dbtx)
 	for idx, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), idx)
 
 		msg, _ := tx.AsMessage(*signer, header.BaseFee, rules)
+
+		effectiveGasPricePercentage, _ := hermezReader.GetEffectiveGasPricePercentage(tx.Hash())
+		msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
 
 		BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, excessDataGas)
 		TxContext := core.NewEVMTxContext(msg)

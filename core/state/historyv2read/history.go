@@ -59,3 +59,23 @@ func GetAsOf(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool
 	}
 	return tx.GetOne(kv.PlainState, key)
 }
+
+func GetAsOfNilIfNotExists(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool, key []byte, timestamp uint64) ([]byte, error) {
+	v, ok, err := historyv2.FindByHistory(indexC, changesC, storage, key, timestamp)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		//restore codehash
+		if !storage {
+			//restore codehash
+			v, err = RestoreCodeHash(tx, key, v, nil)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return v, nil
+	}
+	return nil, nil
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
 type RemoteBlockReader struct {
@@ -150,6 +151,15 @@ func (back *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash l
 		return nil, err
 	}
 	return bodyRlp, nil
+}
+
+func (back *RemoteBlockReader) TxnEffectiveGasPricePercentage(ctx context.Context, tx kv.Tx, txnHash libcommon.Hash) (uint8, error) {
+	data, err := tx.GetOne(hermez_db.TX_PRICE_PERCENTAGE, txnHash.Bytes())
+	if err != nil {
+		return 0, err
+	}
+
+	return hermez_db.BytesToUint8(data), nil
 }
 
 // BlockReaderWithSnapshots can read blocks from db and snapshots
@@ -701,4 +711,13 @@ func (back *BlockReaderWithSnapshots) TxnLookup(ctx context.Context, tx kv.Gette
 		return 0, false, nil
 	}
 	return blockNum, true, nil
+}
+
+func (back *BlockReaderWithSnapshots) TxnEffectiveGasPricePercentage(ctx context.Context, tx kv.Tx, txnHash libcommon.Hash) (uint8, error) {
+	data, err := tx.GetOne(hermez_db.TX_PRICE_PERCENTAGE, txnHash.Bytes())
+	if err != nil {
+		return 0, err
+	}
+
+	return hermez_db.BytesToUint8(data), nil
 }

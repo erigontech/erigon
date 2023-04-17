@@ -21,7 +21,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -56,7 +56,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	}
 
 	var transferFunc evmtypes.TransferFunc
-	if engine != nil && engine.Type() == chain.BorConsensus {
+	if engine != nil && engine.Type() == erigonchain.BorConsensus {
 		transferFunc = BorTransfer
 	} else {
 		transferFunc = Transfer

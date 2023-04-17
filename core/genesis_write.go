@@ -22,16 +22,22 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
+	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+
+	"github.com/ledgerwatch/erigon/chain"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -43,9 +49,9 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
-	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
+	"github.com/ledgerwatch/erigon/smt/pkg/db"
+	"github.com/ledgerwatch/erigon/smt/pkg/smt"
+	"github.com/ledgerwatch/erigon/zkevm/hex"
 )
 
 // CommitGenesisBlock writes or updates the genesis block in db.
@@ -168,6 +174,14 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 	if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {
 		return newCfg, nil, err
 	}
+
+	// set unwanted forks block to max number, so they are not activated
+	maxInt := new(big.Int).SetUint64(math.MaxUint64)
+	newCfg.LondonBlock = maxInt
+	newCfg.ShanghaiTime = maxInt
+	newCfg.CancunTime = maxInt
+	newCfg.PragueTime = maxInt
+
 	return newCfg, storedBlock, nil
 }
 
@@ -269,7 +283,7 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.In
 		return nil, nil, err
 	}
 	// We support ethash/serenity for issuance (for now)
-	if g.Config.Consensus != chain.EtHashConsensus {
+	if g.Config.Consensus != erigonchain.EtHashConsensus {
 		return block, statedb, nil
 	}
 	// Issuance is the sum of allocs
@@ -427,6 +441,36 @@ func ChiadoGenesisBlock() *types.Genesis {
 	}
 }
 
+func HermezMainnetGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.HermezMainnetChainConfig,
+		Timestamp:  1679653163,
+		GasLimit:   0x0,
+		Difficulty: big.NewInt(0x0),
+		Alloc:      readPrealloc("allocs/hermez.json"),
+	}
+}
+
+func HermezTestnetGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.HermezTestnetChainConfig,
+		Timestamp:  1677601932,
+		GasLimit:   0x0,
+		Difficulty: big.NewInt(0x0),
+		Alloc:      readPrealloc("allocs/hermez-testnet.json"),
+	}
+}
+
+func HermezDevnetGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.HermezDevnetChainConfig,
+		Timestamp:  1676996964,
+		GasLimit:   0x0,
+		Difficulty: big.NewInt(0x0),
+		Alloc:      readPrealloc("allocs/hermez-devnet.json"),
+	}
+}
+
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
@@ -453,6 +497,39 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 var genesisTmpDB kv.RwDB
 var genesisDBLock sync.Mutex
 
+func processAccount(s *smt.SMT, root *big.Int, a *types.GenesisAccount, addr libcommon.Address) (*big.Int, error) {
+
+	if root == nil {
+		root = big.NewInt(0)
+	}
+
+	// store the account balance and nonce
+	r, err := s.SetAccountState(addr.String(), a.Balance, new(big.Int).SetUint64(a.Nonce))
+	if err != nil {
+		return nil, err
+	}
+
+	if len(a.Code) > 0 {
+		xs := hex.EncodeToString(a.Code)
+		err = s.SetContractBytecode(addr.String(), xs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// parse the storage into map[string]string by splitting the storage hex into two 32 bit values
+	sm := make(map[string]string)
+	for k, v := range a.Storage {
+		sm[k.String()] = v.String()
+	}
+
+	// store the account storage
+	if len(sm) > 0 {
+		r, err = s.SetContractStorage(addr.String(), sm)
+	}
+	return r, nil
+}
+
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
@@ -474,9 +551,12 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 		AuRaStep:      g.AuRaStep,
 		AuRaSeal:      g.AuRaSeal,
 	}
-	if g.GasLimit == 0 {
-		head.GasLimit = params.GenesisGasLimit
-	}
+
+	// [zkevm] - do not override the gas limit for the genesis block
+	//if g.GasLimit == 0 {
+	//	head.GasLimit = params.GenesisGasLimit
+	//}
+
 	if g.Difficulty == nil {
 		head.Difficulty = params.GenesisDifficulty
 	}
@@ -526,6 +606,11 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			statedb.CreateAccount(libcommon.Address{}, false)
 		}
 
+		// use SMT
+		db := db.NewMemDb()
+		s := smt.NewSMT(db)
+		var ro *big.Int
+
 		keys := sortedAllocKeys(g.Alloc)
 		for _, key := range keys {
 			addr := libcommon.BytesToAddress([]byte(key))
@@ -538,6 +623,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			statedb.AddBalance(addr, balance)
 			statedb.SetCode(addr, account.Code)
 			statedb.SetNonce(addr, account.Nonce)
+
 			for key, value := range account.Storage {
 				key := key
 				val := uint256.NewInt(0).SetBytes(value.Bytes())
@@ -553,13 +639,21 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
 				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 			}
+
+			ro, err = processAccount(s, ro, &account, addr)
+			if err != nil {
+				return
+			}
 		}
 		if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
 			return
 		}
-		if root, err = trie.CalcRoot("genesis", tx); err != nil {
-			return
-		}
+
+		//if root, err = trie.CalcRoot("genesis", tx); err != nil {
+		//	return
+		//}
+
+		root = libcommon.BigToHash(ro)
 	}()
 	wg.Wait()
 	if err != nil {
@@ -620,6 +714,12 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return GnosisGenesisBlock()
 	case networkname.ChiadoChainName:
 		return ChiadoGenesisBlock()
+	case networkname.HermezMainnetChainName:
+		return HermezMainnetGenesisBlock()
+	case networkname.HermezTestnetChainName:
+		return HermezTestnetGenesisBlock()
+	case networkname.HermezDevnetChainName:
+		return HermezDevnetGenesisBlock()
 	default:
 		return nil
 	}

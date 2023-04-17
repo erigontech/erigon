@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	chain2 "github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/spf13/cobra"
 

@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/sync_stages"
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
@@ -359,8 +360,8 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		batch := memdb.NewMemoryBatch(tx, api.dirs.Tmp)
 		defer batch.Rollback()
 
-		unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr}
-		stageState := &stagedsync.StageState{BlockNumber: latestBlock}
+		unwindState := &sync_stages.UnwindState{UnwindPoint: blockNr}
+		stageState := &sync_stages.StageState{BlockNumber: latestBlock}
 
 		hashStageCfg := stagedsync.StageHashStateCfg(nil, api.dirs, api.historyV3(batch), api._agg)
 		if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx); err != nil {
