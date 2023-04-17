@@ -500,7 +500,7 @@ Windows support for docker-compose is not ready yet. Please help us with .ps1 po
 
 `docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
 
-###  
+###    
 
 old data
 
@@ -527,8 +527,7 @@ FAQ
 
 Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
 
-### Default Ports and Protocols / 
-alls?
+### Default Ports and Firewalls
 
 #### `erigon` ports
 
@@ -586,7 +585,7 @@ you'll have to change one if you want to run both at the same time. use `--help`
 
 Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 
-Hetzner may want strict firewall rules, like:
+#### Hetzner expecting strict firewall rules
 
 ```
 0.0.0.0/8             "This" Network             RFC 1122, Section 3.2.1.3
