@@ -411,9 +411,10 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
+	var lastTxNum uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
-		lastTxNum, err := rawdbv3.TxNums.Max(tx, execProgress)
+		lastTxNum, err = rawdbv3.TxNums.Max(tx, execProgress)
 		if err != nil {
 			return err
 		}
@@ -424,7 +425,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	log.Info("Build state history snapshots")
-	if err = agg.BuildFiles(); err != nil {
+	if err = agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
 
