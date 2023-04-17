@@ -527,7 +527,8 @@ FAQ
 
 Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
 
-### Default Ports and Protocols / Firewalls?
+### Default Ports and Protocols / 
+alls?
 
 #### `erigon` ports
 
@@ -607,6 +608,8 @@ Hetzner may want strict firewall rules, like:
 255.255.255.255/32    Limited Broadcast          RFC 919, Section 7
                                                  RFC 922, Section 7
 ```
+
+See also about [IpTables](https://github.com/ledgerwatch/erigon/issues/6034#issuecomment-1510246635)
 
 ### How to get diagnostic for bug report?
 
