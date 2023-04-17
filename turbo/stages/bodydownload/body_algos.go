@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -20,6 +21,11 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
+
+var blockBodyRequested = metrics.GetOrCreateCounter("blockBodyRequested")
+var blockBodyRequestsExpired = metrics.GetOrCreateCounter("blockBodyRequestsExpired")
+var blockBodyDelivered = metrics.GetOrCreateCounter("blockBodyDelivered")
+var blockBodyRequestsCleared = metrics.GetOrCreateCounter("blockBodyRequestsCleared")
 
 const BlockBufferSize = 128
 
@@ -88,6 +94,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 				continue
 			}
 			bd.peerMap[req.peerID]++
+			blockBodyRequestsExpired.Add(1)
 			delete(bd.requests, blockNum)
 		}
 
@@ -215,6 +222,7 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 	//}
 	for _, num := range bodyReq.BlockNums {
 		bd.requests[num] = bodyReq
+		blockBodyRequested.Add(1)
 	}
 	bodyReq.waitUntil = timeWithTimeout
 	bodyReq.peerID = peer
@@ -317,9 +325,11 @@ Loop:
 			bd.addBodyToCache(blockNum, &types.RawBody{Transactions: txs[i], Uncles: uncles[i], Withdrawals: withdrawals[i]})
 			bd.delivered.Add(blockNum)
 			delivered++
+			blockBodyDelivered.Add(1)
 		}
 		// Clean up the requests
 		//var clearedNums []uint64
+		blockBodyRequestsCleared.Add(len(toClean))
 		for blockNum := range toClean {
 			delete(bd.requests, blockNum)
 			//clearedNums = append(clearedNums, blockNum)
