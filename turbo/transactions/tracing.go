@@ -176,11 +176,14 @@ func TraceTx(
 		streaming = true
 	}
 	// Run the transaction with tracing enabled.
-	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{
-		Debug:                 true,
-		Tracer:                tracer,
-		CreationCodeOverrides: config.CreationCodeOverrides,
-	})
+	vmConfig := vm.Config{
+		Debug:  true,
+		Tracer: tracer,
+	}
+	if config != nil {
+		vmConfig.CreationCodeOverrides = config.CreationCodeOverrides
+	}
+	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 	var refunds = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
