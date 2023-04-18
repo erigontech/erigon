@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
@@ -32,12 +33,12 @@ func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
 	path := t.TempDir()
 	logger := log.New()
 	table := "Table"
-	db := NewMDBX(logger).Path(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
 		}
-	}).MustOpen()
+	}).MapSize(128 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
 
 	tx, err := db.BeginRw(context.Background())
@@ -648,7 +649,7 @@ func baseAutoConversion(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursor) {
 	t.Helper()
 	path := t.TempDir()
 	logger := log.New()
-	db := NewMDBX(logger).Path(path).MustOpen()
+	db := NewMDBX(logger).InMem(path).MustOpen()
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
