@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"golang.org/x/crypto/sha3"
 
@@ -264,7 +265,13 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	}
 
 	if ethconfig.EnableHistoryV4InTest {
-		panic("implement me: calc state root")
+		var root libcommon.Hash
+		aggCtx := tx.(kv.TemporalTx).(*temporal.Tx).AggCtx()
+		rootBytes, err := tx.(kv.TemporalTx).(*temporal.Tx).Agg().ComputeCommitmentOnCtx(false, false, aggCtx)
+		if err != nil {
+			return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
+		}
+		return statedb, libcommon.BytesToHash(rootBytes), nil
 	}
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
