@@ -357,10 +357,10 @@ func ExecV3(ctx context.Context,
 							rs.ReTry(txTask, in)
 						})
 
-						lastTxNumInDb, _ := rawdbv3.TxNums.Max(tx, outputBlockNum.Get())
-						if lastTxNumInDb != outputTxNum.Load()-1 {
-							panic(fmt.Sprintf("assert: %d != %d", lastTxNumInDb, outputTxNum.Load()))
-						}
+						//lastTxNumInDb, _ := rawdbv3.TxNums.Max(tx, outputBlockNum.Get())
+						//if lastTxNumInDb != outputTxNum.Load()-1 {
+						//	panic(fmt.Sprintf("assert: %d != %d", lastTxNumInDb, outputTxNum.Load()))
+						//}
 
 						t1 = time.Since(commitStart)
 						tt := time.Now()

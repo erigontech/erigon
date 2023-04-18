@@ -7,9 +7,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
+	"github.com/ledgerwatch/log/v3"
 )
-
-var noChangeCheckpointEncoding = []byte{0xff}
 
 // Slot calculates the current slot number using the time and genesis slot.
 func (f *ForkChoiceStore) Slot() uint64 {
@@ -23,6 +22,14 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 	}
 	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Epoch {
 		f.finalizedCheckpoint = finalizedCheckpoint
+		// We cannot go past point of finalization
+		pruneSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+		// Lets not prune too much if we are behind with the state
+		if pruneSlot >= f.forkGraph.LastState().Slot() {
+			return
+		}
+		log.Debug("Pruning old blocks", "pruneSlot", pruneSlot)
+		f.forkGraph.RemoveOldBlocks(pruneSlot)
 	}
 }
 
@@ -71,20 +78,19 @@ func (f *ForkChoiceStore) Ancestor(root libcommon.Hash, slot uint64) libcommon.H
 func (f *ForkChoiceStore) getCheckpointState(checkpoint cltypes.Checkpoint) (*state.BeaconState, error) {
 	// check if it can be found in cache.
 	if state, ok := f.checkpointStates.Get(checkpoint); ok {
-		fmt.Println(state.GetActiveValidatorsIndices(state.Epoch()))
 		return state, nil
 	}
 	// If it is not in cache compute it and then put in cache.
-	baseState, err := f.forkGraph.GetState(checkpoint.Root)
+	baseState, err := f.forkGraph.GetStateCopy(checkpoint.Root)
 	if err != nil {
 		return nil, err
 	}
 	if baseState == nil {
 		return nil, fmt.Errorf("getCheckpointState: baseState not found in graph")
 	}
-	baseState = baseState.Copy()
 	// By default use the no change encoding to signal that there is no future epoch here.
 	if baseState.Slot() < f.computeStartSlotAtEpoch(checkpoint.Epoch) {
+		log.Debug("Long checkpoint detected")
 		// If we require to change it then process the future epoch
 		if err := transition.ProcessSlots(baseState, f.computeStartSlotAtEpoch(checkpoint.Epoch)); err != nil {
 			return nil, err

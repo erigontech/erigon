@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/forkchoice"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/stages"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
@@ -98,10 +99,13 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	downloader := network.NewForwardBeaconDownloader(ctx, beaconRpc)
 	bdownloader := network.NewBackwardBeaconDownloader(ctx, beaconRpc)
 
-	gossipManager := network.NewGossipReceiver(ctx, s)
-	gossipManager.AddReceiver(sentinelrpc.GossipType_BeaconBlockGossipType, downloader)
-	go gossipManager.Loop()
-	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, tmpdir, executionClient, cfg.BeaconDataCfg)
+	forkChoice, err := forkchoice.NewForkChoiceStore(cpState, nil)
+	if err != nil {
+		log.Error("Could not start forkchoice service", "err", err)
+		return nil
+	}
+	gossipManager := network.NewGossipReceiver(ctx, s, forkChoice, beaconConfig, genesisCfg)
+	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, tmpdir, executionClient, cfg.BeaconDataCfg, gossipManager, forkChoice)
 	if err != nil {
 		return err
 	}

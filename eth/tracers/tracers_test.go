@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -33,6 +32,8 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests"
+	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/stretchr/testify/require"
 
 	"github.com/holiman/uint256"
 
@@ -94,7 +95,10 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Balance: big.NewInt(500000000000000),
 	}
 
-	_, tx := memdb.NewTestTx(t)
+	m := stages.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
 	rules := params.AllProtocolChanges.Rules(context.BlockNumber, context.Time)
 	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
 

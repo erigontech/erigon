@@ -67,7 +67,7 @@ type MockSentry struct {
 	proto_sentry.UnimplementedSentryServer
 	Ctx            context.Context
 	Log            log.Logger
-	t              *testing.T
+	tb             testing.TB
 	cancel         context.CancelFunc
 	DB             kv.RwDB
 	Dirs           datadir.Dirs
@@ -203,23 +203,23 @@ func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*ptypes.NodeInf
 	return nil, nil
 }
 
-func MockWithGenesis(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool) *MockSentry {
-	return MockWithGenesisPruneMode(t, gspec, key, prune.DefaultMode, withPosDownloader)
+func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool) *MockSentry {
+	return MockWithGenesisPruneMode(tb, gspec, key, prune.DefaultMode, withPosDownloader)
 }
 
-func MockWithGenesisEngine(t *testing.T, gspec *types.Genesis, engine consensus.Engine, withPosDownloader bool) *MockSentry {
+func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine consensus.Engine, withPosDownloader bool) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, engine, false, withPosDownloader)
+	return MockWithEverything(tb, gspec, key, prune.DefaultMode, engine, false, withPosDownloader)
 }
 
-func MockWithGenesisPruneMode(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, withPosDownloader bool) *MockSentry {
-	return MockWithEverything(t, gspec, key, prune, ethash.NewFaker(), false, withPosDownloader)
+func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, withPosDownloader bool) *MockSentry {
+	return MockWithEverything(tb, gspec, key, prune, ethash.NewFaker(), false, withPosDownloader)
 }
 
-func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool, withPosDownloader bool) *MockSentry {
+func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool, withPosDownloader bool) *MockSentry {
 	var tmpdir string
-	if t != nil {
-		tmpdir = t.TempDir()
+	if tb != nil {
+		tmpdir = tb.TempDir()
 	} else {
 		tmpdir = os.TempDir()
 	}
@@ -235,8 +235,8 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 	cfg.DeprecatedTxPool.StartOnInit = true
 
 	var db kv.RwDB
-	if t != nil {
-		db = memdb.NewTestDB(t)
+	if tb != nil {
+		db = memdb.NewTestDB(tb)
 	} else {
 		db = memdb.New(tmpdir)
 	}
@@ -269,7 +269,7 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap)
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
-		t:           t,
+		tb:          tb,
 		Log:         log.New(),
 		Dirs:        dirs,
 		Engine:      engine,
@@ -288,8 +288,8 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 		HistoryV3:      cfg.HistoryV3,
 		TransactionsV3: cfg.TransactionsV3,
 	}
-	if t != nil {
-		t.Cleanup(mock.Close)
+	if tb != nil {
+		tb.Cleanup(mock.Close)
 	}
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(mock.BlockSnapshots, mock.TransactionsV3)
 
@@ -308,8 +308,8 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 	if !cfg.DeprecatedTxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
 		newTxs := make(chan types2.Announcements, 1024)
-		if t != nil {
-			t.Cleanup(func() {
+		if tb != nil {
+			tb.Cleanup(func() {
 				close(newTxs)
 			})
 		}
@@ -317,7 +317,7 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 		shanghaiTime := mock.ChainConfig.ShanghaiTime
 		mock.TxPool, err = txpool.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID, shanghaiTime)
 		if err != nil {
-			t.Fatal(err)
+			tb.Fatal(err)
 		}
 		mock.txPoolDB = memdb.NewPoolDB(tmpdir)
 
@@ -339,8 +339,8 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 	// Committed genesis will be shared between download and mock sentry
 	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec, "")
 	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
-		if t != nil {
-			t.Fatal(err)
+		if tb != nil {
+			tb.Fatal(err)
 		} else {
 			panic(err)
 		}
@@ -386,8 +386,8 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 
 	mock.sentriesClient.IsMock = true
 	if err != nil {
-		if t != nil {
-			t.Fatal(err)
+		if tb != nil {
+			tb.Fatal(err)
 		} else {
 			panic(err)
 		}
@@ -515,7 +515,7 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 }
 
 // Mock is convenience function to create a mock with some pre-set values
-func Mock(t *testing.T) *MockSentry {
+func Mock(tb testing.TB) *MockSentry {
 	funds := big.NewInt(1 * params.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
@@ -526,7 +526,7 @@ func Mock(t *testing.T) *MockSentry {
 			address: {Balance: funds},
 		},
 	}
-	return MockWithGenesis(t, gspec, key, false)
+	return MockWithGenesis(tb, gspec, key, false)
 }
 
 func MockWithTxPool(t *testing.T) *MockSentry {
@@ -578,7 +578,7 @@ func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
 
 func (ms *MockSentry) EnableLogs() {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	ms.t.Cleanup(func() {
+	ms.tb.Cleanup(func() {
 		log.Root().SetHandler(log.Root().GetHandler())
 	})
 }
