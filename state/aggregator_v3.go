@@ -976,34 +976,34 @@ func (sf SelectedStaticFilesV3) Close() {
 func (a *AggregatorV3) staticFilesInRange(r RangesV3, ac *AggregatorV3Context) (sf SelectedStaticFilesV3, err error) {
 	_ = ac // maybe will move this method to `ac` object
 	if r.accounts.any() {
-		sf.accountsIdx, sf.accountsHist, sf.accountsI, err = a.accounts.staticFilesInRange(r.accounts, ac.accounts)
+		sf.accountsIdx, sf.accountsHist, sf.accountsI, err = ac.accounts.staticFilesInRange(r.accounts)
 		if err != nil {
 			return sf, err
 		}
 	}
 	if r.storage.any() {
-		sf.storageIdx, sf.storageHist, sf.storageI, err = a.storage.staticFilesInRange(r.storage, ac.storage)
+		sf.storageIdx, sf.storageHist, sf.storageI, err = ac.storage.staticFilesInRange(r.storage)
 		if err != nil {
 			return sf, err
 		}
 	}
 	if r.code.any() {
-		sf.codeIdx, sf.codeHist, sf.codeI, err = a.code.staticFilesInRange(r.code, ac.code)
+		sf.codeIdx, sf.codeHist, sf.codeI, err = ac.code.staticFilesInRange(r.code)
 		if err != nil {
 			return sf, err
 		}
 	}
 	if r.logAddrs {
-		sf.logAddrs, sf.logAddrsI = a.logAddrs.staticFilesInRange(r.logAddrsStartTxNum, r.logAddrsEndTxNum, ac.logAddrs)
+		sf.logAddrs, sf.logAddrsI = ac.logAddrs.staticFilesInRange(r.logAddrsStartTxNum, r.logAddrsEndTxNum)
 	}
 	if r.logTopics {
-		sf.logTopics, sf.logTopicsI = a.logTopics.staticFilesInRange(r.logTopicsStartTxNum, r.logTopicsEndTxNum, ac.logTopics)
+		sf.logTopics, sf.logTopicsI = ac.logTopics.staticFilesInRange(r.logTopicsStartTxNum, r.logTopicsEndTxNum)
 	}
 	if r.tracesFrom {
-		sf.tracesFrom, sf.tracesFromI = a.tracesFrom.staticFilesInRange(r.tracesFromStartTxNum, r.tracesFromEndTxNum, ac.tracesFrom)
+		sf.tracesFrom, sf.tracesFromI = ac.tracesFrom.staticFilesInRange(r.tracesFromStartTxNum, r.tracesFromEndTxNum)
 	}
 	if r.tracesTo {
-		sf.tracesTo, sf.tracesToI = a.tracesTo.staticFilesInRange(r.tracesToStartTxNum, r.tracesToEndTxNum, ac.tracesTo)
+		sf.tracesTo, sf.tracesToI = ac.tracesTo.staticFilesInRange(r.tracesToStartTxNum, r.tracesToEndTxNum)
 	}
 	return sf, err
 }
