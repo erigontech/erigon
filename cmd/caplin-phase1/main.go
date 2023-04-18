@@ -25,8 +25,9 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cmd/caplin-phase1/caplin1"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
@@ -35,7 +36,7 @@ import (
 )
 
 func main() {
-	app := lightclientapp.MakeApp(runLightClientNode, flags.LCDefaultFlags)
+	app := lightclientapp.MakeApp(runCaplinNode, flags.LCDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -45,15 +46,15 @@ func main() {
 	}
 }
 
-func runLightClientNode(cliCtx *cli.Context) error {
+func runCaplinNode(cliCtx *cli.Context) error {
 	ctx := context.Background()
 	cfg, err := lcCli.SetupConsensusClientCfg(cliCtx)
 	if err != nil {
-		log.Error("[Lightclient] Could not initialize lightclient", "err", err)
+		log.Error("[Phase1] Could not initialize caplin", "err", err)
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
-	log.Info("[LightClient]", "chain", cliCtx.String(flags.Chain.Name))
-	log.Info("[LightClient] Running lightclient", "cfg", cfg)
+	log.Info("[Phase1]", "chain", cliCtx.String(flags.Chain.Name))
+	log.Info("[Phase1] Running Caplin", "cfg", cfg)
 	state, err := core.RetrieveBeaconState(ctx, cfg.BeaconCfg, cfg.GenesisCfg, cfg.CheckpointUri)
 	if err != nil {
 		return err
@@ -82,30 +83,21 @@ func runLightClientNode(cliCtx *cli.Context) error {
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 	}
+
 	log.Info("Sentinel started", "addr", cfg.ServerAddr)
 
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
 		return err
 	}
-	var execution remote.ETHBACKENDClient
+	var engine execution_client.ExecutionEngine
 	if cfg.ErigonPrivateApi != "" {
 		cc, err := grpc.Dial(cfg.ErigonPrivateApi, grpc.WithInsecure())
 		if err != nil {
 			log.Error("could not connect to erigon private api", "err", err)
 		}
 		defer cc.Close()
-		execution = remote.NewETHBACKENDClient(cc)
+		engine = execution_client.NewExecutionEnginePhase1FromClient(ctx, remote.NewETHBACKENDClient(cc))
 	}
-	lc, err := lightclient.NewLightClient(ctx, cfg.GenesisCfg, cfg.BeaconCfg, nil, execution, sentinel, 0, true)
-	if err != nil {
-		log.Error("Could not make Lightclient", "err", err)
-		return err
-	}
-	if err := lc.BootstrapCheckpoint(ctx, state.FinalizedCheckpoint().Root); err != nil {
-		log.Error("[Bootstrap] failed to bootstrap", "err", err)
-		return err
-	}
-	lc.Start()
-	return nil
+	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, engine, state)
 }

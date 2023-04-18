@@ -509,7 +509,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 		genesisDBLock.Lock()
 		defer genesisDBLock.Unlock()
 		if genesisTmpDB == nil {
-			genesisTmpDB = mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).PageSize(2 * 4096).MustOpen()
+			genesisTmpDB = mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).MustOpen()
 		}
 		var tx kv.RwTx
 		if tx, err = genesisTmpDB.BeginRw(context.Background()); err != nil {

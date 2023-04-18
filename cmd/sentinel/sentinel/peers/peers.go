@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -87,7 +87,6 @@ func (p *Peers) Penalize(pid peer.ID) {
 	// Drop peer and delete the map element.
 	if penalties > MaxBadResponses {
 		p.DisconnectPeer(pid)
-		p.penalties.Remove(pid)
 	}
 }
 
@@ -113,6 +112,7 @@ func (p *Peers) DisconnectPeer(pid peer.ID) {
 	log.Trace("[Sentinel Peers] disconnecting from peer", "peer-id", pid)
 	p.host.Peerstore().RemovePeer(pid)
 	p.host.Network().ClosePeer(pid)
+	p.penalties.Remove(pid)
 }
 
 // PeerDoRequest signals that the peer is doing a request.

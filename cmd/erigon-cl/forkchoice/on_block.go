@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock) error {
+func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, fullValidation bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	blockRoot, err := block.Block.HashSSZ()
@@ -23,13 +23,25 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock) error {
 	}
 
 	config := f.forkGraph.Config()
-
-	status, err := f.forkGraph.AddChainSegment(block)
+	if fullValidation && f.engine != nil {
+		if err := f.engine.NewPayload(block.Block.Body.ExecutionPayload); err != nil {
+			log.Warn("newPayload failed", "err", err)
+			return err
+		}
+	}
+	status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if status != fork_graph.Success {
 		if status != fork_graph.PreValidated {
 			log.Debug("Could not replay block", "slot", block.Block.Slot, "code", status, "reason", err)
+			return fmt.Errorf("could not replay block, err: %s, code: %d", err, status)
 		}
-		return err
+		return nil
+	}
+	if block.Block.Body.ExecutionPayload != nil {
+		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
+	}
+	if block.Block.Slot > f.highestSeen {
+		f.highestSeen = block.Block.Slot
 	}
 	lastProcessedState := f.forkGraph.LastState()
 	// Add proposer score boost if the block is timely
@@ -46,10 +58,6 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock) error {
 		lastProcessedState.RevertWithChangeset(lastProcessedState.StopCollectingReverseChangeSet())
 		return err
 	}
-	// Add justied checkpoint
-	copiedCheckpoint := *lastProcessedState.CurrentJustifiedCheckpoint()
-	f.unrealizedJustifications.Add(blockRoot, &copiedCheckpoint)
-
 	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	// If the block is from a prior epoch, apply the realized values
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
