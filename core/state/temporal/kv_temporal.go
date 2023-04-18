@@ -120,6 +120,9 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	return db.BeginTemporalRw(ctx)
 }
+func (db *DB) BeginRwNoSync(ctx context.Context) (kv.RwTx, error) {
+	return db.BeginTemporalRwNosync(ctx)
+}
 func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -140,6 +143,8 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
 	tx.agg = db.agg.MakeContext()
+	db.agg.StartUnbufferedWrites()
+	db.agg.SetTx(tx.MdbxTx)
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
