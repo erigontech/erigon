@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/math"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/vm/stack"
@@ -41,6 +42,8 @@ type Config struct {
 	RestoreState  bool      // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+
+	CreationCodeOverrides map[libcommon.Address]hexutil.Bytes
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
