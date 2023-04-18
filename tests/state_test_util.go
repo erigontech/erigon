@@ -262,6 +262,10 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
 		return nil, libcommon.Hash{}, err
 	}
+
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement me")
+	}
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
 	if err != nil {
@@ -306,7 +310,6 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	if err != nil {
 		return nil, libcommon.Hash{}, fmt.Errorf("error calculating state root: %w", err)
 	}
-
 	return statedb, root, nil
 }
 
