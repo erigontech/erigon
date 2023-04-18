@@ -204,7 +204,7 @@ func (ii *InvertedIndex) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint
 func (ii *InvertedIndex) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan uint64, workers int, ictx *InvertedIndexContext, ps *background.ProgressSet) (err error) {
 	closeAll := true
 	for updated, startTx, endTx := ii.findMergeRange(maxSpan, maxTxNum); updated; updated, startTx, endTx = ii.findMergeRange(maxTxNum, maxSpan) {
-		staticFiles, _ := ii.staticFilesInRange(startTx, endTx, ictx)
+		staticFiles, _ := ictx.staticFilesInRange(startTx, endTx)
 		defer func() {
 			if closeAll {
 				for _, i := range staticFiles {
@@ -302,17 +302,17 @@ func (h *History) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
 
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)
 // files are in the descending order of endTxNum
-func (d *Domain) staticFilesInRange(r DomainRanges, dc *DomainContext) (valuesFiles, indexFiles, historyFiles []*filesItem, startJ int) {
+func (dc *DomainContext) staticFilesInRange(r DomainRanges) (valuesFiles, indexFiles, historyFiles []*filesItem, startJ int) {
 	if r.index || r.history {
 		var err error
-		indexFiles, historyFiles, startJ, err = d.History.staticFilesInRange(HistoryRanges{
+		indexFiles, historyFiles, startJ, err = dc.hc.staticFilesInRange(HistoryRanges{
 			historyStartTxNum: r.historyStartTxNum,
 			historyEndTxNum:   r.historyEndTxNum,
 			history:           r.history,
 			indexStartTxNum:   r.indexStartTxNum,
 			indexEndTxNum:     r.indexEndTxNum,
 			index:             r.index,
-		}, dc.hc)
+		})
 		if err != nil {
 			panic(err)
 		}
@@ -336,7 +336,10 @@ func (d *Domain) staticFilesInRange(r DomainRanges, dc *DomainContext) (valuesFi
 	}
 	return
 }
-func (ii *InvertedIndex) staticFilesInRange(startTxNum, endTxNum uint64, ic *InvertedIndexContext) ([]*filesItem, int) {
+func (d *Domain) staticFilesInRange(r DomainRanges, dc *DomainContext) (valuesFiles, indexFiles, historyFiles []*filesItem, startJ int) {
+	panic("deprecated: use DomainContext.staticFilesInRange")
+}
+func (ic *InvertedIndexContext) staticFilesInRange(startTxNum, endTxNum uint64) ([]*filesItem, int) {
 	files := make([]*filesItem, 0, len(ic.files))
 	var startJ int
 
@@ -358,10 +361,13 @@ func (ii *InvertedIndex) staticFilesInRange(startTxNum, endTxNum uint64, ic *Inv
 
 	return files, startJ
 }
+func (ii *InvertedIndex) staticFilesInRange(startTxNum, endTxNum uint64, ic *InvertedIndexContext) ([]*filesItem, int) {
+	panic("deprecated: use InvertedIndexContext.staticFilesInRange")
+}
 
-func (h *History) staticFilesInRange(r HistoryRanges, hc *HistoryContext) (indexFiles, historyFiles []*filesItem, startJ int, err error) {
+func (hc *HistoryContext) staticFilesInRange(r HistoryRanges) (indexFiles, historyFiles []*filesItem, startJ int, err error) {
 	if !r.history && r.index {
-		indexFiles, startJ = h.InvertedIndex.staticFilesInRange(r.indexStartTxNum, r.indexEndTxNum, hc.ic)
+		indexFiles, startJ = hc.ic.staticFilesInRange(r.indexStartTxNum, r.indexEndTxNum)
 		return indexFiles, historyFiles, startJ, nil
 	}
 
@@ -379,11 +385,11 @@ func (h *History) staticFilesInRange(r HistoryRanges, hc *HistoryContext) (index
 			}
 
 			historyFiles = append(historyFiles, item.src)
-			idxFile, ok := h.InvertedIndex.files.Get(item.src)
+			idxFile, ok := hc.h.InvertedIndex.files.Get(item.src)
 			if ok {
 				indexFiles = append(indexFiles, idxFile)
 			} else {
-				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s.%d-%d.efi", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
+				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s.%d-%d.efi", hc.h.filenameBase, item.startTxNum/hc.h.aggregationStep, item.endTxNum/hc.h.aggregationStep)
 				return nil, nil, 0, walkErr
 			}
 		}
@@ -411,6 +417,9 @@ func (h *History) staticFilesInRange(r HistoryRanges, hc *HistoryContext) (index
 		}
 	}
 	return
+}
+func (h *History) staticFilesInRange(r HistoryRanges, hc *HistoryContext) (indexFiles, historyFiles []*filesItem, startJ int, err error) {
+	panic("deprecated: use HistoryContext.staticFilesInRange")
 }
 
 func mergeEfs(preval, val, buf []byte) ([]byte, error) {

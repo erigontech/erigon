@@ -1256,28 +1256,28 @@ func (sf SelectedStaticFilesV3) Close() {
 func (a *AggregatorV3) staticFilesInRange(r RangesV3, ac *AggregatorV3Context) (sf SelectedStaticFilesV3, err error) {
 	_ = ac // maybe will move this method to `ac` object
 	if r.accounts.any() {
-		sf.accounts, sf.accountsIdx, sf.accountsHist, sf.accountsI = a.accounts.staticFilesInRange(r.accounts, ac.accounts)
+		sf.accounts, sf.accountsIdx, sf.accountsHist, sf.accountsI = ac.accounts.staticFilesInRange(r.accounts)
 	}
 	if r.storage.any() {
-		sf.storage, sf.storageIdx, sf.storageHist, sf.storageI = a.storage.staticFilesInRange(r.storage, ac.storage)
+		sf.storage, sf.storageIdx, sf.storageHist, sf.storageI = ac.storage.staticFilesInRange(r.storage)
 	}
 	if r.code.any() {
-		sf.code, sf.codeIdx, sf.codeHist, sf.codeI = a.code.staticFilesInRange(r.code, ac.code)
+		sf.code, sf.codeIdx, sf.codeHist, sf.codeI = ac.code.staticFilesInRange(r.code)
 	}
 	if r.commitment.any() {
-		sf.commitment, sf.commitmentIdx, sf.commitmentHist, sf.commitmentI = a.commitment.staticFilesInRange(r.commitment, ac.commitment)
+		sf.commitment, sf.commitmentIdx, sf.commitmentHist, sf.commitmentI = ac.commitment.staticFilesInRange(r.commitment)
 	}
 	if r.logAddrs {
-		sf.logAddrs, sf.logAddrsI = a.logAddrs.staticFilesInRange(r.logAddrsStartTxNum, r.logAddrsEndTxNum, ac.logAddrs)
+		sf.logAddrs, sf.logAddrsI = ac.logAddrs.staticFilesInRange(r.logAddrsStartTxNum, r.logAddrsEndTxNum)
 	}
 	if r.logTopics {
-		sf.logTopics, sf.logTopicsI = a.logTopics.staticFilesInRange(r.logTopicsStartTxNum, r.logTopicsEndTxNum, ac.logTopics)
+		sf.logTopics, sf.logTopicsI = ac.logTopics.staticFilesInRange(r.logTopicsStartTxNum, r.logTopicsEndTxNum)
 	}
 	if r.tracesFrom {
-		sf.tracesFrom, sf.tracesFromI = a.tracesFrom.staticFilesInRange(r.tracesFromStartTxNum, r.tracesFromEndTxNum, ac.tracesFrom)
+		sf.tracesFrom, sf.tracesFromI = ac.tracesFrom.staticFilesInRange(r.tracesFromStartTxNum, r.tracesFromEndTxNum)
 	}
 	if r.tracesTo {
-		sf.tracesTo, sf.tracesToI = a.tracesTo.staticFilesInRange(r.tracesToStartTxNum, r.tracesToEndTxNum, ac.tracesTo)
+		sf.tracesTo, sf.tracesToI = ac.tracesTo.staticFilesInRange(r.tracesToStartTxNum, r.tracesToEndTxNum)
 	}
 	return sf, err
 }

@@ -445,7 +445,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		func() {
 			dc := d.MakeContext()
 			defer dc.Close()
-			valuesOuts, indexOuts, historyOuts, _ := d.staticFilesInRange(r, dc)
+			valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
 			valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1, background.NewProgressSet())
 			require.NoError(t, err)
 			d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
@@ -479,7 +479,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	maxSpan := d.aggregationStep * StepsInBiggestFile
 	for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
 		dc := d.MakeContext()
-		valuesOuts, indexOuts, historyOuts, _ := d.staticFilesInRange(r, dc)
+		valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
 		valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1, background.NewProgressSet())
 		require.NoError(t, err)
 

@@ -29,7 +29,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 0, int(from))
 		assert.Equal(t, 4, int(to))
 
-		idxF, _ := ii.staticFilesInRange(from, to, ic)
+		idxF, _ := ic.staticFilesInRange(from, to)
 		assert.Equal(t, 3, len(idxF))
 
 		ii = &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
@@ -143,7 +143,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.False(t, r.index)
 		assert.True(t, r.history)
 		assert.Equal(t, 2, int(r.historyEndTxNum))
-		idxFiles, histFiles, _, err := h.staticFilesInRange(r, hc)
+		idxFiles, histFiles, _, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(idxFiles))
 		require.Equal(t, 2, len(histFiles))
@@ -171,7 +171,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.False(t, r.index)
 		assert.True(t, r.history)
 		assert.Equal(t, 2, int(r.historyEndTxNum))
-		_, _, _, err := h.staticFilesInRange(r, hc)
+		_, _, _, err := hc.staticFilesInRange(r)
 		require.Error(t, err)
 	})
 
@@ -199,7 +199,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.True(t, r.index)
 		assert.False(t, r.history)
 		assert.Equal(t, uint64(2), r.indexEndTxNum)
-		idxFiles, histFiles, _, err := h.staticFilesInRange(r, hc)
+		idxFiles, histFiles, _, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(idxFiles))
 		require.Equal(t, 0, len(histFiles))
@@ -232,7 +232,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.True(t, r.index)
 		assert.True(t, r.history)
 		assert.Equal(t, 4, int(r.indexEndTxNum))
-		idxFiles, histFiles, _, err := h.staticFilesInRange(r, hc)
+		idxFiles, histFiles, _, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
 		require.Equal(t, 3, len(idxFiles))
 		require.Equal(t, 3, len(histFiles))
@@ -262,7 +262,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.False(t, r.index)
 		assert.True(t, r.history)
 		assert.Equal(t, 2, int(r.historyEndTxNum))
-		idxFiles, histFiles, _, err := h.staticFilesInRange(r, hc)
+		idxFiles, histFiles, _, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(idxFiles))
 		require.Equal(t, 2, len(histFiles))
@@ -307,7 +307,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.True(t, needMerge)
 		require.Equal(t, 0, int(from))
 		require.Equal(t, 4, int(to))
-		idxFiles, _ := ii.staticFilesInRange(from, to, ic)
+		idxFiles, _ := ic.staticFilesInRange(from, to)
 		require.Equal(t, 3, len(idxFiles))
 	})
 }
