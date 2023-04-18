@@ -177,6 +177,12 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	return d, nil
 }
 
+func (d *Domain) StartUnbufferedWrites() {
+	d.defaultDc = d.MakeContext()
+	d.wal = d.newWriter(d.tmpdir, false, false)
+	d.History.StartUnbufferedWrites()
+}
+
 func (d *Domain) StartWrites() {
 	d.defaultDc = d.MakeContext()
 	d.wal = d.newWriter(d.tmpdir, true, false)

@@ -971,14 +971,14 @@ func (a *AggregatorV3) StartWrites() *AggregatorV3 {
 func (a *AggregatorV3) StartUnbufferedWrites() *AggregatorV3 {
 	a.walLock.Lock()
 	defer a.walLock.Unlock()
-	a.accounts.StartWrites()
-	a.storage.StartWrites()
-	a.code.StartWrites()
-	a.commitment.StartWrites()
-	a.logAddrs.StartWrites()
-	a.logTopics.StartWrites()
-	a.tracesFrom.StartWrites()
-	a.tracesTo.StartWrites()
+	a.accounts.StartUnbufferedWrites()
+	a.storage.StartUnbufferedWrites()
+	a.code.StartUnbufferedWrites()
+	a.commitment.StartUnbufferedWrites()
+	a.logAddrs.StartUnbufferedWrites()
+	a.logTopics.StartUnbufferedWrites()
+	a.tracesFrom.StartUnbufferedWrites()
+	a.tracesTo.StartUnbufferedWrites()
 	return a
 }
 func (a *AggregatorV3) FinishWrites() {

@@ -484,6 +484,10 @@ func (h *History) DiscardHistory() {
 	h.InvertedIndex.StartWrites()
 	h.wal = h.newWriter(h.tmpdir, false, true)
 }
+func (h *History) StartUnbufferedWrites() {
+	h.InvertedIndex.StartUnbufferedWrites()
+	h.wal = h.newWriter(h.tmpdir, false, false)
+}
 func (h *History) StartWrites() {
 	h.InvertedIndex.StartWrites()
 	h.wal = h.newWriter(h.tmpdir, true, false)
@@ -615,6 +619,16 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 	historyKey1 := historyKey[:lk]
 	historyVal := historyKey[lk:]
 	invIdxVal := historyKey[:lk]
+
+	if !h.buffered {
+		if err := h.h.tx.Put(h.h.historyValsTable, historyKey1, historyVal); err != nil {
+			return err
+		}
+		if err := ii.tx.Put(ii.indexKeysTable, ii.txNumBytes[:], invIdxVal); err != nil {
+			return err
+		}
+		return nil
+	}
 	if err := h.historyVals.Collect(historyKey1, historyVal); err != nil {
 		return err
 	}
