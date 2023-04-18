@@ -113,6 +113,8 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
 	tx.agg = db.agg.MakeContext()
+	db.agg.StartUnbufferedWrites()
+	db.agg.SetTx(tx.MdbxTx)
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -171,6 +173,8 @@ func (tx *Tx) Rollback() {
 	if tx.agg != nil {
 		tx.agg.Close()
 	}
+	tx.db.agg.FinishWrites()
+	tx.db.agg.SetTx(nil)
 	tx.MdbxTx.Rollback()
 }
 
@@ -178,6 +182,8 @@ func (tx *Tx) Commit() error {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
+	tx.db.agg.FinishWrites()
+	tx.db.agg.SetTx(nil)
 	return tx.MdbxTx.Commit()
 }
 

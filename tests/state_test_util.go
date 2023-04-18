@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -191,8 +192,21 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
-	statedb := state.New(state.NewPlainStateReader(tx))
-	w := state.NewPlainStateWriter(tx, nil, writeBlockNr)
+
+	var r state.StateReader
+	if ethconfig.EnableHistoryV4InTest {
+		r = state.NewReaderV4(tx.(kv.TemporalTx))
+	} else {
+		r = state.NewPlainStateReader(tx)
+	}
+	statedb := state.New(r)
+
+	var w state.StateWriter
+	if ethconfig.EnableHistoryV4InTest {
+		w = state.NewWriterV4(tx.(kv.TemporalTx))
+	} else {
+		w = state.NewPlainStateWriter(tx, nil, writeBlockNr)
+	}
 
 	var baseFee *big.Int
 	if config.IsLondon(0) {
@@ -297,8 +311,12 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 }
 
 func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-
-	r := state.NewPlainStateReader(tx)
+	var r state.StateReader
+	if ethconfig.EnableHistoryV4InTest {
+		r = state.NewReaderV4(tx.(kv.TemporalTx))
+	} else {
+		r = state.NewPlainStateReader(tx)
+	}
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
@@ -325,11 +343,17 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		}
 	}
 
+	var w state.StateWriter
+	if ethconfig.EnableHistoryV4InTest {
+		w = state.NewWriterV4(tx.(kv.TemporalTx))
+	} else {
+		w = state.NewPlainStateWriter(tx, nil, blockNr+1)
+	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(rules, state.NewPlainStateWriter(tx, nil, blockNr+1)); err != nil {
+	if err := statedb.FinalizeTx(rules, w); err != nil {
 		return nil, err
 	}
-	if err := statedb.CommitBlock(rules, state.NewPlainStateWriter(tx, nil, blockNr+1)); err != nil {
+	if err := statedb.CommitBlock(rules, w); err != nil {
 		return nil, err
 	}
 	return statedb, nil
