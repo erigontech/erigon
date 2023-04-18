@@ -341,6 +341,16 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	var err error
 	var gasConsumption uint64
 
+	isOverridden := false
+	if evm.config.CreationCodeOverrides != nil {
+		if code, ok := evm.config.CreationCodeOverrides[address]; ok {
+			isOverridden = true
+			codeAndHash.code = code
+			codeAndHash.hash = libcommon.Hash{}
+			_ = codeAndHash.Hash()
+		}
+	}
+
 	if evm.config.Debug {
 		if evm.interpreter.Depth() == 0 {
 			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
@@ -404,7 +414,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	ret, err = run(evm, contract, nil, false)
 
 	// EIP-170: Contract code size limit
-	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > params.MaxCodeSize {
+	// hack: skip the check if we are overriding creation code
+	if err == nil && !isOverridden && evm.chainRules.IsSpuriousDragon && len(ret) > params.MaxCodeSize {
 		// Gnosis Chain prior to Shanghai didn't have EIP-170 enabled,
 		// but EIP-3860 (part of Shanghai) requires EIP-170.
 		if !evm.chainRules.IsAura || evm.config.HasEip3860(evm.chainRules) {
@@ -449,11 +460,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
-	if evm.config.CreationCodeOverrides != nil {
-		if override, ok := evm.config.CreationCodeOverrides[contractAddr]; ok {
-			code = override
-		}
-	}
 	return evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, true /* incrementNonce */)
 }
 
@@ -464,14 +470,9 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *u
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	// calculate contract address using the old bytecode, and replace the real code
-	c := &codeAndHash{code: code}
-	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), c.Hash().Bytes())
-	if evm.config.CreationCodeOverrides != nil {
-		if override, ok := evm.config.CreationCodeOverrides[contractAddr]; ok {
-			c = &codeAndHash{code: override}
-		}
-	}
-	return evm.create(caller, c, gas, endowment, contractAddr, CREATE2, true /* incrementNonce */)
+	codeAndHash := &codeAndHash{code: code}
+	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, CREATE2, true /* incrementNonce */)
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
