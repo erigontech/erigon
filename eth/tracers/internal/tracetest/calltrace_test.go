@@ -150,10 +150,13 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 					Difficulty:  (*big.Int)(test.Context.Difficulty),
 					GasLimit:    uint64(test.Context.GasLimit),
 				}
-				_, dbTx    = memdb.NewTestTx(t)
-				rules      = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
-				statedb, _ = tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
+				rules = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 			)
+			m := stages.Mock(t)
+			dbTx, err := m.DB.BeginRw(m.Ctx)
+			require.NoError(t, err)
+			defer dbTx.Rollback()
+			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
 			if test.Genesis.BaseFee != nil {
 				context.BaseFee, _ = uint256.FromBig(test.Genesis.BaseFee)
 			}
