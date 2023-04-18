@@ -449,6 +449,11 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
+	if evm.config.CreationCodeOverrides != nil {
+		if override, ok := evm.config.CreationCodeOverrides[contractAddr]; ok {
+			code = override
+		}
+	}
 	return evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, true /* incrementNonce */)
 }
 
@@ -458,9 +463,15 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *u
 // instead of the usual sender-and-nonce-hash as the address where the contract is initialized at.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
-	codeAndHash := &codeAndHash{code: code}
-	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
-	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, CREATE2, true /* incrementNonce */)
+	// calculate contract address using the old bytecode, and replace the real code
+	c := &codeAndHash{code: code}
+	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), c.Hash().Bytes())
+	if evm.config.CreationCodeOverrides != nil {
+		if override, ok := evm.config.CreationCodeOverrides[contractAddr]; ok {
+			c = &codeAndHash{code: override}
+		}
+	}
+	return evm.create(caller, c, gas, endowment, contractAddr, CREATE2, true /* incrementNonce */)
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
