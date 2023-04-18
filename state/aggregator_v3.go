@@ -1773,6 +1773,10 @@ func (ac *AggregatorV3Context) CodeHistoryIdxRange(addr []byte, startTxNum, endT
 
 // -- range end
 
+func (ac *AggregatorV3Context) ReadAccountData(addr []byte, txNum uint64, tx kv.Tx) ([]byte, error) {
+	return ac.accounts.GetBeforeTxNum(addr, txNum, tx)
+}
+
 func (ac *AggregatorV3Context) ReadAccountDataNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	return ac.accounts.hc.GetNoStateWithRecent(addr, txNum, tx)
 }
@@ -1795,6 +1799,10 @@ func (ac *AggregatorV3Context) ReadAccountStorageNoStateWithRecent2(key []byte, 
 	return ac.storage.hc.GetNoStateWithRecent(key, txNum, tx)
 }
 
+func (ac *AggregatorV3Context) ReadAccountStorage(key []byte, txNum uint64, tx kv.Tx) ([]byte, error) {
+	return ac.storage.GetBeforeTxNum(key, txNum, tx)
+}
+
 func (ac *AggregatorV3Context) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, error) {
 	if cap(ac.keyBuf) < len(addr)+len(loc) {
 		ac.keyBuf = make([]byte, len(addr)+len(loc))
@@ -1806,6 +1814,9 @@ func (ac *AggregatorV3Context) ReadAccountStorageNoState(addr []byte, loc []byte
 	return ac.storage.hc.GetNoState(ac.keyBuf, txNum)
 }
 
+func (ac *AggregatorV3Context) ReadAccountCode(addr []byte, txNum uint64, tx kv.Tx) ([]byte, error) {
+	return ac.code.GetBeforeTxNum(addr, txNum, tx)
+}
 func (ac *AggregatorV3Context) ReadAccountCodeNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	return ac.code.hc.GetNoStateWithRecent(addr, txNum, tx)
 }
