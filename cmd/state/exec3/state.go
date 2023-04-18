@@ -198,14 +198,18 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
 		vmenv := rw.evm
 
+		// MA applytx
 		applyRes, err := core.ApplyMessage(vmenv, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			txTask.Error = err
 			//fmt.Printf("error=%v\n", err)
 		} else {
-			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
-			ibs.SoftFinalise()
+			if err = ibs.FinalizeTx(rules, rw.stateWriter); err != nil {
+				txTask.Error = err
+				return
+			}
+			txTask.UsedGas = applyRes.UsedGas
 			txTask.Logs = ibs.GetLogs(txHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()

@@ -514,8 +514,9 @@ func (rs *StateV3) Commitment(txNum uint64, saveState bool) ([]byte, error) {
 func (rs *StateV3) ApplyState4(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) ([]byte, error) {
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	rs.domains.SetTxNum(txTask.TxNum)
-	rh, err := rs.domains.Commit(true, false)
+	rh, err := agg.ComputeCommitment(true, false)
+
+	//rh, err := rs.Commitment(txTask.TxNum, false)
 	if err != nil {
 		return nil, err
 	}

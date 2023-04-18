@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -199,10 +200,16 @@ func ExecV3(ctx context.Context,
 	var count uint64
 	var lock sync.RWMutex
 
+	// MA setio
+	//doms := cfg.agg.SharedDomains()
 	rs := state.NewStateV3(cfg.dirs.Tmp, nil)
-	ssw, ssr := state.WrapStateIO(cfg.agg.SharedDomains())
-	reader := state.NewMultiStateReader(true, state.NewWrappedStateReaderV4(applyTx.(kv.TemporalTx)), ssr)
-	writer := state.NewMultiStateWriter(state.NewWrappedStateWriterV4(applyTx.(kv.TemporalTx)), ssw)
+	//ssw, ssr := state.WrapStateIO(doms)
+	//writer, reader := state.WrapStateIO(doms)
+	////_ = ssw
+	////reader := state.NewMultiStateReader(true, state.NewWrappedStateReaderV4(applyTx.(kv.TemporalTx)), ssr)
+	////writer := state.NewMultiStateWriter(state.NewWrappedStateWriterV4(applyTx.(kv.TemporalTx)), ssw)
+	reader := state.NewWrappedStateReaderV4(applyTx.(kv.TemporalTx))
+	writer := state.NewWrappedStateWriterV4(applyTx.(kv.TemporalTx))
 	rs.SetIO(reader, writer)
 	//TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -632,6 +639,15 @@ Loop:
 
 		if !parallel {
 			outputBlockNum.Set(blockNum)
+			// MA commitment
+			rh, err := agg.ComputeCommitment(false, false)
+			if err != nil {
+				return fmt.Errorf("StateV3.Apply: %w", err)
+			}
+			if !bytes.Equal(rh, header.Root.Bytes()) {
+				log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(header.Root.Bytes()), "bn", blockNum)
+				return fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, header.Root.Bytes(), blockNum)
+			}
 
 			select {
 			case <-logEvery.C:
@@ -773,7 +789,7 @@ func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueueIter,
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
 			}
 			if !bytes.Equal(rh, txTask.BlockRoot[:]) {
-				log.Error("block hash mismatch", "rh", rh, "blockRoot", txTask.BlockRoot, "bn", txTask.BlockNum)
+				log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(txTask.BlockRoot[:]), "bn", txTask.BlockNum)
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, txTask.BlockRoot[:], txTask.BlockNum)
 			}
 		}
