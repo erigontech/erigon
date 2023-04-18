@@ -26,11 +26,11 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -149,10 +149,13 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 					Difficulty:  (*big.Int)(test.Context.Difficulty),
 					GasLimit:    uint64(test.Context.GasLimit),
 				}
-				_, dbTx    = memdb.NewTestTx(t)
-				rules      = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
-				statedb, _ = tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
+				rules = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 			)
+			m := stages.Mock(t)
+			dbTx, err := m.DB.BeginRw(m.Ctx)
+			require.NoError(t, err)
+			defer dbTx.Rollback()
+			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
 			if test.Genesis.BaseFee != nil {
 				context.BaseFee, _ = uint256.FromBig(test.Genesis.BaseFee)
 			}
@@ -255,7 +258,10 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		Difficulty:  (*big.Int)(test.Context.Difficulty),
 		GasLimit:    uint64(test.Context.GasLimit),
 	}
-	_, dbTx := memdb.NewTestTx(b)
+	m := stages.Mock(b)
+	dbTx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(b, err)
+	defer dbTx.Rollback()
 	statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
 
 	b.ReportAllocs()
@@ -328,7 +334,11 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		},
 	}
 	rules := params.MainnetChainConfig.Rules(context.BlockNumber, context.Time)
-	_, dbTx := memdb.NewTestTx(t)
+	m := stages.Mock(t)
+	dbTx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer dbTx.Rollback()
+
 	statedb, _ := tests.MakePreState(rules, dbTx, alloc, context.BlockNumber)
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("callTracer", nil, nil)
