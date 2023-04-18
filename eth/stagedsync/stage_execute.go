@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"runtime/debug"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -248,7 +247,7 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 	defer func() {
 		log.Warn("Exit ExecBlockV3", "err", err)
-		debug.PrintStack()
+		//debug.PrintStack()
 	}()
 
 	if initialCycle {

@@ -27,7 +27,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -144,7 +143,7 @@ func (bt *BlockTest) Run(t *testing.T, _ bool) error {
 	if libcommon.Hash(bt.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
 	}
-	newDB := state.New(state.NewPlainStateReader(tx))
+	newDB := state.New(m.NewStateReader(tx))
 	if err = bt.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %w", err)
 	}
