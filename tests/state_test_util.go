@@ -297,6 +297,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 }
 
 func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+
 	r := state.NewPlainStateReader(tx)
 	statedb := state.New(r)
 	for addr, a := range accounts {
