@@ -364,16 +364,16 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 // ================ Erigon3 End ================
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, quiet bool) (err error) {
+	defer func() {
+		log.Info("SpawnExecuteBlocksStage exit ", "err", err, "stack", dbg.Stack())
+	}()
+
 	if cfg.historyV3 {
 		if err = ExecBlockV3(s, u, tx, toBlock, ctx, cfg, initialCycle); err != nil {
 			return err
 		}
 		return nil
 	}
-
-	defer func() {
-		log.Info("SpawnExecuteBlocksStage exit ", "err", err, "stack", dbg.Stack())
-	}()
 
 	quit := ctx.Done()
 	useExternalTx := tx != nil

@@ -175,9 +175,6 @@ func (tx *Tx) Rollback() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
-	if tx.agg != nil {
-		tx.agg.Close()
-	}
 	tx.db.agg.FinishWrites()
 	tx.db.agg.SetTx(nil)
 	tx.MdbxTx.Rollback()

@@ -642,14 +642,28 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 			}
 			return nil
 		}
+
+		var err error
+		if len(k) < length.Addr {
+			if len(v) == 0 {
+				err = next(k, k, nil)
+			} else {
+				err = next(k, k, v)
+			}
+			if err != nil {
+				return err
+			}
+		}
+
+		var address common.Address
+		var location common.Hash
+		copy(address[:], k[:length.Addr])
+		copy(location[:], k[length.Addr:])
 		if accumulator != nil {
-			var address common.Address
-			var location common.Hash
-			copy(address[:], k[:length.Addr])
-			copy(location[:], k[length.Addr:])
 			accumulator.ChangeStorage(address, currentInc, location, common.Copy(v))
 		}
-		newKeys := dbutils.PlainGenerateCompositeStorageKey(k[:20], currentInc, k[20:])
+
+		newKeys := dbutils.PlainGenerateCompositeStorageKey(address[:], currentInc, location[:])
 		if len(v) > 0 {
 			if err := next(k, newKeys, v); err != nil {
 				return err
