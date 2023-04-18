@@ -340,8 +340,11 @@ func (txw *BlobTxWrapper) FixedLength() uint64 {
 // validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
 func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	blobTx := txw.Tx.Message
-	l1 := len(txw.BlobKzgs)
-	l2 := len(blobTx.BlobVersionedHashes)
+	l1 := len(blobTx.BlobVersionedHashes)
+	if l1 == 0 {
+		return fmt.Errorf("a blob tx must contain at least one blob")
+	}
+	l2 := len(txw.BlobKzgs)
 	l3 := len(txw.Blobs)
 	l4 := len(txw.Proofs)
 	if l1 != l2 || l1 != l3 || l1 != l4 {
