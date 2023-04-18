@@ -9,12 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBytes2(t *testing.T) {
-	l := 1000
-	buf := rawdb.Bytes2FromLength(l)
-	require.Equal(t, l, rawdb.LengthFromBytes2(buf))
-}
-
 var emptyBlock = &cltypes.Eth1Block{}
 
 func TestBeaconBlock(t *testing.T) {

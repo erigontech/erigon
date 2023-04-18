@@ -133,7 +133,7 @@ func (b *BeaconState) _updateProposerIndex() (err error) {
 
 	hash := sha256.New()
 	// Input for the seed hash.
-	input := b.GetSeed(epoch, clparams.MainnetBeaconConfig.DomainBeaconProposer)
+	input := b.GetSeed(epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, b.slot)
 
@@ -255,7 +255,7 @@ func (b *BeaconState) initBeaconState() error {
 	return nil
 }
 
-func (b *BeaconState) Copy() *BeaconState {
+func (b *BeaconState) Copy() (*BeaconState, error) {
 	copied := New(b.beaconConfig)
 	// Fill all the fields with copies
 	copied.genesisTime = b.genesisTime
@@ -297,8 +297,12 @@ func (b *BeaconState) Copy() *BeaconState {
 	copied.nextWithdrawalIndex = b.nextWithdrawalIndex
 	copied.nextWithdrawalValidatorIndex = b.nextWithdrawalValidatorIndex
 	copied.historicalSummaries = make([]*cltypes.HistoricalSummary, len(b.historicalSummaries))
-	copy(copied.historicalSummaries, b.historicalSummaries)
+	for i := range b.historicalSummaries {
+		copied.historicalSummaries[i] = &cltypes.HistoricalSummary{
+			BlockSummaryRoot: b.historicalSummaries[i].BlockSummaryRoot,
+			StateSummaryRoot: b.historicalSummaries[i].StateSummaryRoot,
+		}
+	}
 	copied.version = b.version
-	b.initBeaconState()
-	return copied
+	return copied, copied.initBeaconState()
 }

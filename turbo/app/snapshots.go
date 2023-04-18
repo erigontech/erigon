@@ -373,7 +373,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo); err != nil {
 			panic(err)
 		}
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
+		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files(), agg.Files()); err != nil {
 				return err
 			}
@@ -394,7 +394,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	log.Info("Prune state history")
 	for i := 0; i < 1024; i++ {
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
+		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
 			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/2); err != nil {
 				return err
@@ -411,9 +411,10 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
+	var lastTxNum uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
-		lastTxNum, err := rawdbv3.TxNums.Max(tx, execProgress)
+		lastTxNum, err = rawdbv3.TxNums.Max(tx, execProgress)
 		if err != nil {
 			return err
 		}
@@ -424,13 +425,13 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	log.Info("Build state history snapshots")
-	if err = agg.BuildFiles(ctx, db); err != nil {
-		return err
-	}
-	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
+	if err = agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
 
+	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
+		return err
+	}
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteSnapshots(tx, snapshots.Files(), agg.Files())
 	}); err != nil {
@@ -439,7 +440,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	log.Info("Prune state history")
 	for i := 0; i < 1024; i++ {
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
+		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
 			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
 				return err
@@ -448,6 +449,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}); err != nil {
 			return err
 		}
+	}
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteSnapshots(tx, snapshots.Files(), agg.Files())
+	}); err != nil {
+		return err
 	}
 
 	return nil

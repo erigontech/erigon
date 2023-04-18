@@ -61,7 +61,7 @@ func (b *BeaconState) UpgradeToBellatrix() error {
 	epoch := b.Epoch()
 	if b.reverseChangeset != nil {
 		b.reverseChangeset.OnVersionChange(b.version)
-		b.reverseChangeset.OnForkChange(b.fork)
+		b.reverseChangeset.OnForkChange(*b.fork)
 	}
 	// update version
 	b.fork.Epoch = epoch
@@ -80,8 +80,8 @@ func (b *BeaconState) UpgradeToCapella() error {
 	epoch := b.Epoch()
 	if b.reverseChangeset != nil {
 		b.reverseChangeset.OnVersionChange(b.version)
-		b.reverseChangeset.OnForkChange(b.fork)
-		b.reverseChangeset.OnEth1Header(b.latestExecutionPayloadHeader)
+		b.reverseChangeset.OnForkChange(*b.fork)
+		b.reverseChangeset.OnEth1Header(*b.latestExecutionPayloadHeader)
 	}
 	// update version
 	b.fork.Epoch = epoch

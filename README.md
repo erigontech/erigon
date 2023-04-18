@@ -57,8 +57,6 @@ System Requirements
 
 * Gnosis Chain Archive: 370GB (January 2023).
 
-* BSC Archive: 7TB. BSC Full: 1TB. (April 2022).
-
 * Polygon Mainnet Archive: 5TB. Polygon Mumbai Archive: 1TB. (April 2022).
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
@@ -97,7 +95,7 @@ make erigon
 ./build/bin/erigon
 ```
 
-Default `--snapshots` for `mainnet`, `goerli`, `gnosis`, `bsc`. Other networks now have default `--snapshots=false`.
+Default `--snapshots` for `mainnet`, `goerli`, `gnosis`, `chiado`. Other networks now have default `--snapshots=false`.
 Increase
 download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code>
 
@@ -502,7 +500,7 @@ Windows support for docker-compose is not ready yet. Please help us with .ps1 po
 
 `docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
 
-###  
+###    
 
 old data
 
@@ -529,7 +527,7 @@ FAQ
 
 Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
 
-### Default Ports and Protocols / Firewalls?
+### Default Ports and Firewalls
 
 #### `erigon` ports
 
@@ -587,7 +585,7 @@ you'll have to change one if you want to run both at the same time. use `--help`
 
 Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 
-Hetzner may want strict firewall rules, like:
+#### Hetzner expecting strict firewall rules
 
 ```
 0.0.0.0/8             "This" Network             RFC 1122, Section 3.2.1.3
@@ -609,6 +607,8 @@ Hetzner may want strict firewall rules, like:
 255.255.255.255/32    Limited Broadcast          RFC 919, Section 7
                                                  RFC 922, Section 7
 ```
+
+See also about [IpTables](https://github.com/ledgerwatch/erigon/issues/6034#issuecomment-1510246635)
 
 ### How to get diagnostic for bug report?
 

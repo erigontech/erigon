@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands/contracts"
@@ -56,11 +58,11 @@ func TestCallMany(t *testing.T) {
 	)
 
 	hexBytes, _ := hex.DecodeString(addr2BalanceCheck)
-	balanceCallAddr2 := hexutil.Bytes(hexBytes)
+	balanceCallAddr2 := hexutility.Bytes(hexBytes)
 	hexBytes, _ = hex.DecodeString(addr1BalanceCheck)
-	balanceCallAddr1 := hexutil.Bytes(hexBytes)
+	balanceCallAddr1 := hexutility.Bytes(hexBytes)
 	hexBytes, _ = hex.DecodeString(transferAddr2)
-	transferCallData := hexutil.Bytes(hexBytes)
+	transferCallData := hexutility.Bytes(hexBytes)
 
 	//submit 3 Transactions and commit the results
 	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, chainID)

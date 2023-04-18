@@ -765,6 +765,9 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.Tx) state.Sta
 }
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
+	if ethconfig.EnableHistoryV4InTest {
+		return state.NewReaderV4(tx.(kv.TemporalTx))
+	}
 	return state.NewPlainStateReader(tx)
 }
 

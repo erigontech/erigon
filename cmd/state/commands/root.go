@@ -46,10 +46,6 @@ var rootCmd = &cobra.Command{
 			utils.Fatalf("provided genesis.json chain configuration is invalid: expected chainId to be %v, got %v",
 				chainConfig.ChainID.String(), genesis.Config.ChainID.String())
 		}
-		// Apply special hacks for BSC params
-		if chainConfig.Parlia != nil {
-			params.ApplyBinanceSmartChainParams()
-		}
 
 		if chaindata == "" {
 			chaindata = filepath.Join(datadirCli, "chaindata")

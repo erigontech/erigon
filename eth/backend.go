@@ -32,6 +32,12 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -54,22 +60,11 @@ import (
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/protobuf/types/known/emptypb"
-
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-
-	"github.com/ledgerwatch/erigon/core/state/historyv2read"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cmd/caplin-phase1/caplin1"
 	clcore "github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
@@ -80,11 +75,14 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state/historyv2read"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -98,6 +96,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethstats"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -236,11 +235,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	config.Snapshot.Enabled = config.Sync.UseSnapshots
 
 	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
-
-	// Apply special hacks for BSC params
-	if chainConfig.Parlia != nil {
-		params.ApplyBinanceSmartChainParams()
-	}
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
 		if err = stagedsync.UpdateMetrics(tx); err != nil {
@@ -444,10 +438,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if chainConfig.Clique != nil {
 		consensusConfig = &config.Clique
 	} else if chainConfig.Aura != nil {
-		config.Aura.Etherbase = config.Miner.Etherbase
 		consensusConfig = &config.Aura
-	} else if chainConfig.Parlia != nil {
-		consensusConfig = &config.Parlia
 	} else if chainConfig.Bor != nil {
 		consensusConfig = &config.Bor
 	} else {
@@ -581,23 +572,15 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if err != nil {
 			return nil, err
 		}
-
-		lc, err := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, ethBackendRPC, nil, client, currentBlockNumber, false)
-		if err != nil {
-			return nil, err
-		}
-		bs, err := clcore.RetrieveBeaconState(ctx, beaconCfg, genesisCfg,
+		engine := execution_client.NewExecutionEnginePhase1FromServer(ctx, ethBackendRPC)
+		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg, genesisCfg,
 			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
 
 		if err != nil {
 			return nil, err
 		}
 
-		if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint().Root); err != nil {
-			return nil, err
-		}
-
-		go lc.Start()
+		go caplin1.RunCaplinPhase1(ctx, client, beaconCfg, genesisCfg, engine, state)
 	}
 
 	if currentBlock == nil {
@@ -835,25 +818,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 
 		clq.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
 			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
-		})
-	}
-
-	var prl *parlia.Parlia
-	if p, ok := s.engine.(*parlia.Parlia); ok {
-		prl = p
-	} else if cl, ok := s.engine.(*serenity.Serenity); ok {
-		if p, ok := cl.InnerEngine().(*parlia.Parlia); ok {
-			prl = p
-		}
-	}
-	if prl != nil {
-		if cfg.SigKey == nil {
-			log.Error("Etherbase account unavailable locally", "err", err)
-			return fmt.Errorf("signer missing: %w", err)
-		}
-
-		prl.Authorize(eb, func(validator libcommon.Address, payload []byte, chainId *big.Int) ([]byte, error) {
-			return crypto.Sign(payload, cfg.SigKey)
 		})
 	}
 
