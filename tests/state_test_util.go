@@ -264,7 +264,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	}
 
 	if ethconfig.EnableHistoryV4InTest {
-		panic("implement me")
+		panic("implement me: calc state root")
 	}
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
