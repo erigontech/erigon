@@ -77,7 +77,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainStateReader(tx))
+	st := state.New(m.NewStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -145,7 +145,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainStateReader(tx))
+	st := state.New(m.NewStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -207,7 +207,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainStateReader(tx))
+	st := state.New(m.NewStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -269,7 +269,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainStateReader(tx))
+	st := state.New(m.NewStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -331,7 +331,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainStateReader(tx))
+	st := state.New(m.NewStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -372,7 +372,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -395,7 +395,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -413,7 +413,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -459,7 +459,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -477,7 +477,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -543,7 +543,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -562,7 +562,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -632,7 +632,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -650,7 +650,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
