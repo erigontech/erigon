@@ -1644,14 +1644,9 @@ func (a *AggregatorV3) UpdateStorage(addr, loc []byte, value, preVal []byte) err
 	return a.storage.PutWithPrev(addr, loc, value, preVal)
 }
 
-// ComputeCommitment evaluates commitment for processed state.
-// If `saveStateAfter`=true, then trie state will be saved to DB after commitment evaluation.
-func (a *AggregatorV3) ComputeCommitment(saveStateAfter, trace bool) (rootHash []byte, err error) {
-	// if commitment mode is Disabled, there will be nothing to compute on.
-	ctx := a.MakeContext()
-	defer ctx.Close()
+func (a *AggregatorV3) ComputeCommitmentOnCtx(saveStateAfter, trace bool, aggCtx *AggregatorV3Context) (rootHash []byte, err error) {
 
-	a.commitment.ResetFns(ctx.branchFn, ctx.accountFn, ctx.storageFn)
+	a.commitment.ResetFns(aggCtx.branchFn, aggCtx.accountFn, aggCtx.storageFn)
 
 	mxCommitmentRunning.Inc()
 	rootHash, branchNodeUpdates, err := a.commitment.ComputeCommitment(trace)
@@ -1669,7 +1664,7 @@ func (a *AggregatorV3) ComputeCommitment(saveStateAfter, trace bool) (rootHash [
 	for pref, update := range branchNodeUpdates {
 		prefix := []byte(pref)
 
-		stateValue, _, err := ctx.CommitmentLatest(prefix, a.rwTx)
+		stateValue, _, err := aggCtx.CommitmentLatest(prefix, a.rwTx)
 		if err != nil {
 			return nil, err
 		}
@@ -1698,6 +1693,15 @@ func (a *AggregatorV3) ComputeCommitment(saveStateAfter, trace bool) (rootHash [
 	}
 
 	return rootHash, nil
+}
+
+// ComputeCommitment evaluates commitment for processed state.
+// If `saveStateAfter`=true, then trie state will be saved to DB after commitment evaluation.
+func (a *AggregatorV3) ComputeCommitment(saveStateAfter, trace bool) (rootHash []byte, err error) {
+	// if commitment mode is Disabled, there will be nothing to compute on.
+	aggCtx := a.MakeContext()
+	defer aggCtx.Close()
+	return a.ComputeCommitmentOnCtx(saveStateAfter, trace, aggCtx)
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
