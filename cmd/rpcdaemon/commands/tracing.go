@@ -242,7 +242,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		var borTx types.Transaction
 		borTx, _, _, _, err = rawdb.ReadBorTransaction(tx, hash)
 		if err != nil {
-			stream.WriteNil()
 			return err
 		}
 

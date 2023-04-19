@@ -127,6 +127,14 @@ func (q *QueueWithRetry) RetriesLen() (l int) {
 	q.retiresLock.Unlock()
 	return l
 }
+func (q *QueueWithRetry) RetryTxNumsList() (out []uint64) {
+	q.retiresLock.Lock()
+	for _, t := range q.retires {
+		out = append(out, t.TxNum)
+	}
+	q.retiresLock.Unlock()
+	return out
+}
 func (q *QueueWithRetry) Len() (l int) { return q.RetriesLen() + len(q.newTasks) }
 
 // Add "new task" (which was never executed yet). May block internal channel is full.

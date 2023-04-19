@@ -131,8 +131,8 @@ var (
 		Usage: `Default: use snapshots "true" for Mainnet, Goerli, Gnosis Chain and Chiado. use snapshots "false" in all other cases`,
 		Value: true,
 	}
-	ExternalConsensusFlag = cli.BoolFlag{
-		Name:  "externalcl",
+	InternalConsensusFlag = cli.BoolFlag{
+		Name:  "internalcl",
 		Usage: "enables external consensus",
 	}
 	// Transaction pool settings
@@ -1585,13 +1585,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.TxPool.OverrideShanghaiTime = cfg.OverrideShanghaiTime
 	}
 
-	if ctx.IsSet(ExternalConsensusFlag.Name) {
-		cfg.ExternalCL = ctx.Bool(ExternalConsensusFlag.Name)
-	} else {
-		cfg.ExternalCL = !clparams.EmbeddedEnabledByDefault(cfg.NetworkID)
+	if ctx.IsSet(InternalConsensusFlag.Name) && clparams.EmbeddedEnabledByDefault(cfg.NetworkID) {
+		cfg.InternalCL = ctx.Bool(InternalConsensusFlag.Name)
 	}
-
-	nodeConfig.Http.InternalCL = !cfg.ExternalCL
+	nodeConfig.Http.InternalCL = cfg.InternalCL
 
 	if ctx.IsSet(SentryDropUselessPeers.Name) {
 		cfg.DropUselessPeers = ctx.Bool(SentryDropUselessPeers.Name)
