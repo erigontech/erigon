@@ -913,8 +913,6 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 		if res, ok := pt.Result.(*CreateTraceResult); ok {
 			if res.Address != nil {
 				_, t = toAddresses[*res.Address]
-			} else {
-				_, t = toAddresses[common.Address{}]
 			}
 		}
 	case *SuicideTraceAction:
