@@ -303,8 +303,6 @@ func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chai
 				w.ResetTx(nil)
 			}
 			//applyWorker.ResetTx(nil)
-			log.Warn("before rws.Close()")
-			rws.Close()
 		}
 	}
 	applyWorker = NewWorker(lock, ctx, false, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine)
