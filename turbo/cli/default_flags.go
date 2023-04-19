@@ -12,7 +12,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DataDirFlag,
 	&utils.EthashDatasetDirFlag,
 	&utils.SnapshotFlag,
-	&utils.ExternalConsensusFlag,
+	&utils.InternalConsensusFlag,
 	&utils.TxPoolDisableFlag,
 	&utils.TxPoolLocalsFlag,
 	&utils.TxPoolNoLocalsFlag,

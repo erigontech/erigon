@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -165,10 +166,11 @@ func withdrawalValues(ptrs []*types.Withdrawal) []types.Withdrawal {
 	return vals
 }
 
+var errEmbedeedConsensus = errors.New("engine api should not be used, restart without --internalcl")
+
 func (e *EngineImpl) forkchoiceUpdated(version uint32, ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
 	if e.internalCL {
-		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
-		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+		return nil, errEmbedeedConsensus
 	}
 	if payloadAttributes == nil {
 		log.Debug("Received ForkchoiceUpdated", "version", version,
@@ -232,8 +234,7 @@ func (e *EngineImpl) NewPayloadV2(ctx context.Context, payload *ExecutionPayload
 
 func (e *EngineImpl) newPayload(version uint32, ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
 	if e.internalCL {
-		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
-		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+		return nil, errEmbedeedConsensus
 	}
 	log.Debug("Received NewPayload", "version", version, "height", uint64(payload.BlockNumber), "hash", payload.BlockHash)
 
@@ -327,8 +328,7 @@ func convertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 
 func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutility.Bytes) (*ExecutionPayload, error) {
 	if e.internalCL {
-		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
-		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+		return nil, errEmbedeedConsensus
 	}
 
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
@@ -344,8 +344,7 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutility.Byte
 
 func (e *EngineImpl) GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*GetPayloadV2Response, error) {
 	if e.internalCL {
-		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
-		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+		return nil, errEmbedeedConsensus
 	}
 
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
@@ -369,8 +368,7 @@ func (e *EngineImpl) GetPayloadV2(ctx context.Context, payloadID hexutility.Byte
 // See https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.1/src/engine/specification.md#engine_exchangetransitionconfigurationv1
 func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beaconConfig *TransitionConfiguration) (*TransitionConfiguration, error) {
 	if e.internalCL {
-		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
-		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+		return nil, errEmbedeedConsensus
 	}
 
 	tx, err := e.db.BeginRo(ctx)
