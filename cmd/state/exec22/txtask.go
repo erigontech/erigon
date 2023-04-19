@@ -181,6 +181,7 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task *TxTask, ok bool) {
 		case inTask, ok := <-q.newTasks:
 			if !ok {
 				q.retiresLock.Lock()
+				log.Warn("[dbg] Next: see closed chan, read task from queue", "q.retires.Len()", q.retires.Len())
 				if q.retires.Len() > 0 {
 					task = heap.Pop(&q.retires).(*TxTask)
 				}
