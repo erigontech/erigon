@@ -902,40 +902,29 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 }
 
 func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}, isIntersectionMode bool) bool {
+	f, t := false, false
 	switch action := pt.Action.(type) {
 	case *CallTraceAction:
-		_, f := fromAddresses[action.From]
-		_, t := toAddresses[action.To]
-
-		if isIntersectionMode {
-			return f && t
-		} else {
-			return f || t
-		}
+		_, f = fromAddresses[action.From]
+		_, t = toAddresses[action.To]
 	case *CreateTraceAction:
-		_, f := fromAddresses[action.From]
-		if f {
-			return true
-		}
+		_, f = fromAddresses[action.From]
 
 		if res, ok := pt.Result.(*CreateTraceResult); ok {
 			if res.Address != nil {
-				if _, t := toAddresses[*res.Address]; t {
-					return true
-				}
+				_, t = toAddresses[*res.Address]
 			}
 		}
 	case *SuicideTraceAction:
-		_, f := fromAddresses[action.Address]
-		_, t := toAddresses[action.RefundAddress]
-		if isIntersectionMode {
-			return f && t
-		} else {
-			return f || t
-		}
+		_, f = fromAddresses[action.Address]
+		_, t = toAddresses[action.RefundAddress]
 	}
 
-	return false
+	if isIntersectionMode {
+		return f && t
+	} else {
+		return f || t
+	}
 }
 
 func (api *TraceAPIImpl) callManyTransactions(
