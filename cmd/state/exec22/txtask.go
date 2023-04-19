@@ -316,14 +316,14 @@ func (q *ResultsQueueIter) PopNext() *TxTask {
 }
 
 func (q *ResultsQueue) Drain(ctx context.Context) error {
-	q.Lock()
-	l := q.results.Len()
-	q.Unlock()
-	// if queue is empty, then need block to wait new results
-	if l > 0 {
-		q.drainNoBlock(nil)
-		return nil
-	}
+	//q.Lock()
+	//l := q.results.Len()
+	//q.Unlock()
+	//if queue is empty, then need block to wait new results
+	//if l > 0 {
+	//	q.drainNoBlock(nil)
+	//	return nil
+	//}
 
 	select {
 	case <-ctx.Done():
