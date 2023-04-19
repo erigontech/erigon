@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -62,9 +61,6 @@ func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.
 	histV3, _ := kvcfg.HistoryV3.Enabled(tx)
 	if histV3 {
 		panic("Please use HistoryStateReaderV3 with HistoryV3")
-	}
-	if ethconfig.EnableHistoryV4InTest {
-		panic("historyV4 require use StateReaderV4/StateWriterV4 instead of StateReader")
 	}
 	ps := &PlainState{
 		tx:                   tx,
