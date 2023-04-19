@@ -24,7 +24,8 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -89,14 +90,17 @@ func TestEIP2200(t *testing.T) {
 
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			address := libcommon.BytesToAddress([]byte("contract"))
-			_, tx := memdb.NewTestTx(t)
+			m := stages.Mock(t)
+			tx, err := m.DB.BeginRw(m.Ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
 
-			s := state.New(state.NewPlainStateReader(tx))
+			s := state.New(m.NewStateReader(tx))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
 			s.SetState(address, &libcommon.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
-			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0), state.NewPlainStateWriter(tx, tx, 0))
+			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0), m.NewStateWriter(tx, 0))
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },
 				Transfer:    func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) {},
@@ -135,12 +139,15 @@ var createGasTests = []struct {
 func TestCreateGas(t *testing.T) {
 	for i, tt := range createGasTests {
 		address := libcommon.BytesToAddress([]byte("contract"))
-		_, tx := memdb.NewTestTx(t)
+		m := stages.Mock(t)
+		tx, err := m.DB.BeginRw(m.Ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
 
-		s := state.New(state.NewPlainStateReader(tx))
+		s := state.New(m.NewStateReader(tx))
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.code))
-		_ = s.CommitBlock(params.TestChainConfig.Rules(0, 0), state.NewPlainStateWriter(tx, tx, 0))
+		_ = s.CommitBlock(params.TestChainConfig.Rules(0, 0), m.NewStateWriter(tx, 0))
 
 		vmctx := evmtypes.BlockContext{
 			CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },

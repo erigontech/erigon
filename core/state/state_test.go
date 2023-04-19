@@ -27,6 +27,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/stretchr/testify/require"
 	checker "gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -324,9 +326,12 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 }
 
 func TestDump(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
-	w := NewPlainStateWriter(tx, tx, 0)
-	state := New(NewPlainStateReader(tx))
+	m := stages.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	w := m.NewStateWriter(tx, 0)
+	state := New(m.NewStateReader(tx))
 
 	// generate a few entries
 	obj1 := state.GetOrNewStateObject(toAddr([]byte{0x01}))
@@ -338,7 +343,7 @@ func TestDump(t *testing.T) {
 	obj3.SetBalance(uint256.NewInt(44))
 
 	// write some of them to the trie
-	err := w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
+	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,18 +357,22 @@ func TestDump(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blockWriter := NewPlainStateWriter(tx, tx, 1)
+	blockWriter := m.NewStateWriter(tx, 1)
 	err = state.CommitBlock(&chain.Rules{}, blockWriter)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = blockWriter.WriteChangeSets()
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = blockWriter.WriteHistory()
-	if err != nil {
-		t.Fatal(err)
+	if casted, ok := blockWriter.(WriterWithChangeSets); ok {
+		err = casted.WriteChangeSets()
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = casted.WriteHistory()
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		panic("implement me")
 	}
 
 	// check that dump contains the state objects that are in trie
