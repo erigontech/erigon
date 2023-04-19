@@ -334,7 +334,9 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 			msg = append(msg, fmt.Sprintf("%d", t.TxNum))
 		}
 	}
-	log.Warn("[dbg] before drain resultqueue", "txnum", strings.Join(msg, ","))
+	if len(msg) > 0 {
+		log.Warn("[dbg] before drain resultqueue", "txnum", strings.Join(msg, ","))
+	}
 	q.Unlock()
 
 	select {
