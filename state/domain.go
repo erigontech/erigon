@@ -163,9 +163,9 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	d := &Domain{
 		keysTable: keysTable,
 		valsTable: valsTable,
-		//topVals:   make(map[string][]byte),
-		files: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		stats: DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
+		topVals:   make(map[string][]byte),
+		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		stats:     DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 	}
 	d.roFiles.Store(&[]ctxItem{})
 
@@ -190,7 +190,9 @@ func (d *Domain) StartWrites() {
 }
 
 func (d *Domain) FinishWrites() {
-	d.defaultDc.Close()
+	if d.defaultDc != nil {
+		d.defaultDc.Close()
+	}
 	d.wal.close()
 	d.wal = nil
 	d.History.FinishWrites()
@@ -421,19 +423,6 @@ func (d *Domain) PutWithPrev(key1, key2, val, preval []byte) error {
 		d.topLock.Unlock()
 		return d.wal.addValue(key1, key2, val, fullkey[kl:])
 	}
-
-	//if d.valsTable == kv.StorageDomain {
-	//	if hex.EncodeToString(fullkey[:kl]) == "0b1ba0af832d7c05fd64161e0db78e85978e8082735a2caee4e287c2ffc6fa5b3ce10111b595166cc277c2d7af5a88896eb4bc21" {
-	//		fmt.Printf("PutWithPrev: %s %s %q -> %q\n", hex.EncodeToString(key1), hex.EncodeToString(key2), hex.EncodeToString(preval), hex.EncodeToString(val))
-	//	}
-	//}
-	//if d.valsTable == kv.AccountDomain {
-	//	fk := hex.EncodeToString(fullkey[:kl])
-	//	if fk == "e0a2bd4258d2768837baa26a28fe71dc079f84c7" ||
-	//		 fk == "8c1e1e5b47980d214965f3bd8ea34c413e120ae4" {
-	//		fmt.Printf("PutWithPrev: %s %s %q -> %q\n", hex.EncodeToString(key1), hex.EncodeToString(key2), hex.EncodeToString(preval), hex.EncodeToString(val))
-	//	}
-	//}
 
 	return nil
 }
@@ -1798,18 +1787,7 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 		return v0, true, nil
 	}
 
-	return dc.get(key, 0, roTx)
-	//_ = err
-	//
-	//if !bytes.Equal(v, v0) {
-	//	dc.diskHits++
-	//	if len(v0) > 0 {
-	//		//log.Error("mismatch", "dom", dc.d.valsTable, "key", hex.EncodeToString(key), "disk", hex.EncodeToString(v), "map", hex.EncodeToString(v0), "err", err)
-	//	}
-	//} else {
-	//	dc.mapHits++
-	//}
-	//return v0, true, nil
+	return dc.get(key, dc.d.txNum, roTx)
 }
 
 func (dc *DomainContext) Get(key1, key2 []byte, roTx kv.Tx) ([]byte, error) {
@@ -1824,6 +1802,6 @@ func (dc *DomainContext) Get(key1, key2 []byte, roTx kv.Tx) ([]byte, error) {
 func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
 	copy(dc.keyBuf[:], key1)
 	copy(dc.keyBuf[len(key1):], key2)
-	return dc.get((dc.keyBuf[:len(key1)+len(key2)]), dc.d.txNum, roTx)
-	//return dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
+	//return dc.get((dc.keyBuf[:len(key1)+len(key2)]), dc.d.txNum, roTx)
+	return dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
 }

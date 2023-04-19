@@ -76,6 +76,7 @@ type SharedDomains struct {
 	roTx   kv.Tx
 
 	txNum      atomic.Uint64
+	blockNum   atomic.Uint64
 	Account    *Domain
 	Storage    *Domain
 	Code       *Domain
@@ -182,13 +183,11 @@ func (sd *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error
 
 func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []byte) error {
 	sd.Commitment.TouchPlainKey(addr, account, sd.Commitment.TouchAccount)
-	sd.Account.SetTxNum(sd.txNum.Load())
 	return sd.Account.PutWithPrev(addr, nil, account, prevAccount)
 }
 
 func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, prevCode []byte) error {
 	sd.Commitment.TouchPlainKey(addr, code, sd.Commitment.TouchCode)
-	sd.Code.SetTxNum(sd.txNum.Load())
 	if len(code) == 0 {
 		return sd.Code.DeleteWithPrev(addr, nil, prevCode)
 	}
@@ -246,7 +245,17 @@ func (sd *SharedDomains) SetTx(tx kv.RwTx) {
 	sd.Storage.SetTx(tx)
 }
 
-func (sd *SharedDomains) SetTxNum(txNum uint64) { sd.txNum.Store(txNum) }
+func (sd *SharedDomains) SetTxNum(txNum uint64) {
+	sd.txNum.Store(txNum)
+	sd.Account.SetTxNum(txNum)
+	sd.Code.SetTxNum(txNum)
+	sd.Storage.SetTxNum(txNum)
+	sd.Commitment.SetTxNum(txNum)
+}
+
+func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
+	sd.blockNum.Store(blockNum)
+}
 
 func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
@@ -282,7 +291,7 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 	}
 
 	if saveStateAfter {
-		if err := sd.Commitment.storeCommitmentState(0, sd.txNum.Load()); err != nil {
+		if err := sd.Commitment.storeCommitmentState(sd.blockNum.Load()); err != nil {
 			return nil, err
 		}
 	}

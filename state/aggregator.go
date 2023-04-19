@@ -900,7 +900,7 @@ func (a *Aggregator) ComputeCommitment(saveStateAfter, trace bool) (rootHash []b
 	}
 
 	if saveStateAfter {
-		if err := a.commitment.storeCommitmentState(a.blockNum, a.txNum); err != nil {
+		if err := a.commitment.storeCommitmentState(a.blockNum); err != nil {
 			return nil, err
 		}
 	}

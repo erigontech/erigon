@@ -271,7 +271,7 @@ func commitmentItemLess(i, j *CommitmentItem) bool {
 	return bytes.Compare(i.hashedKey, j.hashedKey) < 0
 }
 
-func (d *DomainCommitted) storeCommitmentState(blockNum, txNum uint64) error {
+func (d *DomainCommitted) storeCommitmentState(blockNum uint64) error {
 	var state []byte
 	var err error
 
@@ -284,14 +284,14 @@ func (d *DomainCommitted) storeCommitmentState(blockNum, txNum uint64) error {
 	default:
 		return fmt.Errorf("unsupported state storing for patricia trie type: %T", d.patriciaTrie)
 	}
-	cs := &commitmentState{txNum: txNum, trieState: state, blockNum: blockNum}
+	cs := &commitmentState{txNum: d.txNum, trieState: state, blockNum: blockNum}
 	encoded, err := cs.Encode()
 	if err != nil {
 		return err
 	}
 
 	var stepbuf [2]byte
-	step := uint16(txNum / d.aggregationStep)
+	step := uint16(d.txNum / d.aggregationStep)
 	binary.BigEndian.PutUint16(stepbuf[:], step)
 	switch d.Domain.wal {
 	case nil:

@@ -221,7 +221,7 @@ func (a *AggregatorV3) CleanDir() {
 
 func (a *AggregatorV3) SharedDomains() *SharedDomains {
 	if a.domains == nil {
-		a.domains = NewSharedDomains(a.accounts, a.storage, a.code, a.commitment)
+		a.domains = NewSharedDomains(a.accounts, a.code, a.storage, a.commitment)
 		a.domains.aggCtx = a.MakeContext()
 		a.domains.roTx = a.rwTx
 	}
@@ -1602,13 +1602,14 @@ func (a *AggregatorV3) AddLogTopic(topic []byte) error {
 }
 
 func (a *AggregatorV3) UpdateAccount(addr []byte, data, prevData []byte) error {
+	return a.domains.UpdateAccountData(addr, data, prevData)
 	a.commitment.TouchPlainKey(addr, data, a.commitment.TouchAccount)
 	return a.accounts.PutWithPrev(addr, nil, data, prevData)
 }
 
 func (a *AggregatorV3) UpdateCode(addr []byte, code, prevCode []byte) error {
+	return a.domains.UpdateAccountCode(addr, code, prevCode)
 	a.commitment.TouchPlainKey(addr, code, a.commitment.TouchCode)
-	// TODO  prev value should be read from code db?
 	if len(code) == 0 {
 		return a.code.DeleteWithPrev(addr, nil, prevCode)
 	}
@@ -1616,6 +1617,7 @@ func (a *AggregatorV3) UpdateCode(addr []byte, code, prevCode []byte) error {
 }
 
 func (a *AggregatorV3) DeleteAccount(addr, prev []byte) error {
+	return a.domains.DeleteAccount(addr, prev)
 	a.commitment.TouchPlainKey(addr, nil, a.commitment.TouchAccount)
 
 	if err := a.accounts.DeleteWithPrev(addr, nil, prev); err != nil {
@@ -1637,6 +1639,7 @@ func (a *AggregatorV3) DeleteAccount(addr, prev []byte) error {
 }
 
 func (a *AggregatorV3) UpdateStorage(addr, loc []byte, value, preVal []byte) error {
+	return a.domains.WriteAccountStorage(addr, loc, value, preVal)
 	a.commitment.TouchPlainKey(common2.Append(addr, loc), value, a.commitment.TouchStorage)
 	if len(value) == 0 {
 		return a.storage.DeleteWithPrev(addr, loc, preVal)
@@ -1687,7 +1690,7 @@ func (a *AggregatorV3) ComputeCommitmentOnCtx(saveStateAfter, trace bool, aggCtx
 	}
 
 	if saveStateAfter {
-		if err := a.commitment.storeCommitmentState(a.blockNum.Load(), a.txNum.Load()); err != nil {
+		if err := a.commitment.storeCommitmentState(a.blockNum.Load()); err != nil {
 			return nil, err
 		}
 	}
