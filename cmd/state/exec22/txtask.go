@@ -237,6 +237,7 @@ func (q *QueueWithRetry) NewTasksFinish() {
 		return
 	}
 	q.newTasksClosed = true
+	log.Warn("[dbg] closing newTasks")
 	close(q.newTasks)
 }
 
