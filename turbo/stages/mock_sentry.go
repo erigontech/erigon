@@ -773,10 +773,22 @@ func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
 }
 
 func (ms *MockSentry) NewStateWriter(tx kv.RwTx, blockNum uint64) state.StateWriter {
+	if ethconfig.EnableHistoryV4InTest {
+		return state.NewWriterV4(tx.(kv.TemporalTx))
+	}
 	return state.NewPlainStateWriter(tx, tx, blockNum)
 }
 
 func (ms *MockSentry) CalcStateRoot(tx kv.Tx) libcommon.Hash {
+	if ethconfig.EnableHistoryV4InTest {
+		aggCtx := tx.(kv.TemporalTx).(*temporal.Tx).AggCtx()
+		rootBytes, err := tx.(kv.TemporalTx).(*temporal.Tx).Agg().ComputeCommitmentOnCtx(false, false, aggCtx)
+		if err != nil {
+			panic(fmt.Errorf("ComputeCommitment: %w", err))
+		}
+		return libcommon.BytesToHash(rootBytes)
+	}
+
 	h, err := trie.CalcRoot("test", tx)
 	if err != nil {
 		panic(err)
