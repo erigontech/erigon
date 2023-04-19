@@ -241,7 +241,7 @@ type Config struct {
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
-	ExternalCL                  bool
+	InternalCL                  bool
 	LightClientDiscoveryAddr    string
 	LightClientDiscoveryPort    uint64
 	LightClientDiscoveryTCPPort uint64
