@@ -108,11 +108,11 @@ func (l *KvList) Swap(i, j int) {
 // Tasks added by method `ReTry` have higher priority than tasks added by `Add`.
 // Method `Add` expecting already-ordered (by priority) tasks - doesn't do any additional sorting of new tasks.
 type QueueWithRetry struct {
-	newTasksClosed bool
-	newTasks       chan *TxTask
-	retires        TxTaskQueue
-	retiresLock    sync.Mutex
-	capacity       int
+	closed      bool
+	newTasks    chan *TxTask
+	retires     TxTaskQueue
+	retiresLock sync.Mutex
+	capacity    int
 }
 
 func NewQueueWithRetry(capacity int) *QueueWithRetry {
@@ -154,7 +154,7 @@ func (q *QueueWithRetry) ReTry(t *TxTask) {
 	q.retiresLock.Lock()
 	heap.Push(&q.retires, t)
 	q.retiresLock.Unlock()
-	if q.newTasksClosed {
+	if q.closed {
 		return
 	}
 	select {
@@ -228,17 +228,13 @@ func (q *QueueWithRetry) popNoWait() (task *TxTask, ok bool) {
 	return task, task != nil
 }
 
-// NewTasksFinish closing `newTasks` channel
-func (q *QueueWithRetry) NewTasksFinish() {
-	if q.newTasksClosed {
-		return
-	}
-	q.newTasksClosed = true
-	close(q.newTasks)
-}
-
 // Close safe to call multiple times
 func (q *QueueWithRetry) Close() {
+	if q.closed {
+		return
+	}
+	q.closed = true
+	close(q.newTasks)
 }
 
 // ResultsQueue thread-safe priority-queue of execution results
