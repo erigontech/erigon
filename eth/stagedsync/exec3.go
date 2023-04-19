@@ -275,8 +275,6 @@ func ExecV3(ctx context.Context,
 	if parallel {
 		// `rwLoop` lives longer than `applyLoop`
 		rwLoop := func(ctx context.Context) error {
-			defer stopWorkers()
-
 			tx, err := chainDb.BeginRw(ctx)
 			if err != nil {
 				return err
@@ -429,7 +427,6 @@ func ExecV3(ctx context.Context,
 			if err = tx.Commit(); err != nil {
 				return err
 			}
-			rws.Close()
 			return nil
 		}
 
@@ -683,7 +680,6 @@ Loop:
 	}
 
 	if parallel {
-		in.NewTasksFinish()
 		if err := rwLoopG.Wait(); err != nil {
 			return err
 		}
