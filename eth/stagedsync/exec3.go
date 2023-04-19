@@ -229,10 +229,6 @@ func ExecV3(ctx context.Context,
 		var lastBlockNum uint64
 
 		for outputTxNum.Load() <= maxTxNum {
-
-			if outputTxNum.Load() > 9300_000 {
-				log.Warn("[dbg] before drain", "outputTxNum.Load()", outputTxNum.Load(), "maxTxNum", maxTxNum, "rws.ResultChLen()", rws.ResultChLen(), "rws.Len", rws.Len())
-			}
 			if err := rws.Drain(ctx); err != nil {
 				return err
 			}
@@ -300,10 +296,6 @@ func ExecV3(ctx context.Context,
 
 				case <-logEvery.C:
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-					l := in.RetryTxNumsList()
-					if len(l) > 0 {
-						log.Warn("[dbg] stat of in-queue", "newTasks", in.NewTasksLen(), "retires", in.RetriesLen(), "txNums", fmt.Sprintf("%d", l), "outputTxNum.Load()", outputTxNum.Load())
-					}
 					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
 					if agg.HasBackgroundFilesBuild() {
 						log.Info(fmt.Sprintf("[%s] Background files build", logPrefix), "progress", agg.BackgroundProgress())
