@@ -3,6 +3,7 @@ package exec22
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -328,10 +329,10 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 	//	return nil
 	//}
 	q.Lock()
-	msg := []uint64{}
+	msg := []string{}
 	for _, t := range *(q.results) {
 		if t.TxNum > 9299153 {
-			msg = append(msg, t.TxNum)
+			msg = append(msg, fmt.Sprintf("%d", t.TxNum))
 		}
 	}
 	log.Warn("[dbg] before drain resultqueue", "txnum", strings.Join(msg, ","))
