@@ -374,6 +374,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		}
 		return nil
 	}
+	if ethconfig.EnableHistoryV4InTest {
+		panic("must use ExecBlockV3")
+	}
 
 	quit := ctx.Done()
 	useExternalTx := tx != nil
