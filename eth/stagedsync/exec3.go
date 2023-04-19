@@ -229,8 +229,6 @@ func ExecV3(ctx context.Context,
 		var lastBlockNum uint64
 
 		for outputTxNum.Load() <= maxTxNum {
-
-			log.Warn("[dbg] before drain", "outputTxNum.Load()", outputTxNum.Load(), "maxTxNum", maxTxNum, "rws.ResultChLen()", rws.ResultChLen(), "rws.Len", rws.Len())
 			if err := rws.Drain(ctx); err != nil {
 				return err
 			}

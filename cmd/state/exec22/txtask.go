@@ -326,6 +326,11 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 	//	q.drainNoBlock(nil)
 	//	return nil
 	//}
+	q.Lock()
+	for _, t := range *(q.results) {
+		log.Warn("[dbg] before drain resultqueue", "txnum", t.TxNum)
+	}
+	q.Unlock()
 
 	select {
 	case <-ctx.Done():
