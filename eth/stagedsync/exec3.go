@@ -201,13 +201,15 @@ func ExecV3(ctx context.Context,
 	var lock sync.RWMutex
 
 	// MA setio
-	//doms := cfg.agg.SharedDomains()
-	rs := state.NewStateV3(cfg.dirs.Tmp, nil)
-	//ssw, ssr := state.WrapStateIO(doms)
-	//writer, reader := state.WrapStateIO(doms)
-	////_ = ssw
-	////reader := state.NewMultiStateReader(true, state.NewWrappedStateReaderV4(applyTx.(kv.TemporalTx)), ssr)
+	doms := cfg.agg.SharedDomains()
+	rs := state.NewStateV3(cfg.dirs.Tmp, doms)
+
+	//_, reader := state.WrapStateIO(doms)
+	//_ = ssw
+	//reader := state.NewMultiStateReader(true, state.NewWrappedStateReaderV4(applyTx.(kv.TemporalTx)), ssr)
 	////writer := state.NewMultiStateWriter(state.NewWrappedStateWriterV4(applyTx.(kv.TemporalTx)), ssw)
+
+	//rs := state.NewStateV3(cfg.dirs.Tmp, nil)
 	reader := state.NewWrappedStateReaderV4(applyTx.(kv.TemporalTx))
 	writer := state.NewWrappedStateWriterV4(applyTx.(kv.TemporalTx))
 	rs.SetIO(reader, writer)

@@ -254,7 +254,7 @@ func (w *StateWriterV4) DeleteAccount(address common.Address, original *accounts
 }
 
 func (w *StateWriterV4) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	if *original == *value {
+	if original.Eq(value) {
 		return nil
 	}
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
