@@ -304,7 +304,7 @@ func ExecV3(ctx context.Context,
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
 					l := in.RetryTxNumsList()
 					if len(l) > 0 {
-						log.Warn("[dbg] stat of in-queue", "newTasks", in.NewTasksLen(), "retires", in.RetriesLen(), "txNums", fmt.Sprintf("%d", l))
+						log.Warn("[dbg] stat of in-queue", "newTasks", in.NewTasksLen(), "retires", in.RetriesLen(), "txNums", fmt.Sprintf("%d", l), "outputTxNum.Load()", outputTxNum.Load())
 					}
 					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
 					if agg.HasBackgroundFilesBuild() {
