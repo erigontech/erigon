@@ -672,6 +672,7 @@ Loop:
 	}
 
 	if parallel {
+		in.NewTasksFinish()
 		if err := rwLoopG.Wait(); err != nil {
 			return err
 		}
