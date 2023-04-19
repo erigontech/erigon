@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
@@ -157,6 +158,7 @@ func (q *QueueWithRetry) ReTry(t *TxTask) {
 
 // Next - blocks until new task available
 func (q *QueueWithRetry) Next(ctx context.Context) (*TxTask, bool) {
+	log.Warn("[dbg] before next", "newTasks", q.NewTasksLen(), "retires", q.RetriesLen())
 	task, ok := q.popNoWait()
 	if ok {
 		return task, true
