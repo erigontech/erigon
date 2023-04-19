@@ -928,7 +928,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		if st := state.New(state.NewPlainStateReader(tx)); !st.Exist(theAddr) {
+		if st := state.New(m.NewStateReader(tx)); !st.Exist(theAddr) {
 			t.Error("expected account to exist")
 		}
 		return nil
@@ -939,8 +939,8 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		if st := state.New(state.NewPlainStateReader(tx)); st.Exist(theAddr) {
+	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		if st := state.New(m.NewStateReader(tx)); st.Exist(theAddr) {
 			t.Error("account should not exist")
 		}
 		return nil
@@ -951,8 +951,8 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		if st := state.New(state.NewPlainStateReader(tx)); st.Exist(theAddr) {
+	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		if st := state.New(m.NewStateReader(tx)); st.Exist(theAddr) {
 			t.Error("account should not exist")
 		}
 		return nil
@@ -1017,7 +1017,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginRo(m.Ctx)
 	if err != nil {
 		t.Fatalf("read only db tx to read state: %v", err)
 	}
@@ -1074,7 +1074,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
 
-		if err := m2.DB.View(context.Background(), func(tx kv.Tx) error {
+		if err := m2.DB.View(m2.Ctx, func(tx kv.Tx) error {
 			b, h := rawdb.ReadCurrentBlock(tx), rawdb.ReadCurrentHeader(tx)
 			if b.Hash() != h.Hash() {
 				t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
@@ -1385,7 +1385,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
 
 		// If all is correct, then slot 1 and 2 are zero
@@ -1503,7 +1503,7 @@ func TestCVE2020_26265(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		reader := m.NewHistoryStateReader(2, tx)
 		statedb := state.New(reader)
 
@@ -1570,7 +1570,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
 
 		// If all is correct, then both slots are zero
@@ -1880,7 +1880,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 
 		// Import the canonical chain
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
@@ -1978,7 +1978,7 @@ func TestEIP2718Transition(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginRo(m.Ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2088,7 +2088,7 @@ func TestEIP1559Transition(t *testing.T) {
 		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expectedGas, block.GasUsed())
 	}
 
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		statedb := state.New(m.NewHistoryStateReader(1, tx))
 
 		// 3: Ensure that miner received only the tx's tip.
@@ -2129,7 +2129,7 @@ func TestEIP1559Transition(t *testing.T) {
 	}
 
 	block = chain.Blocks[0]
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		statedb := state.New(m.NewHistoryStateReader(1, tx))
 		effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
 
