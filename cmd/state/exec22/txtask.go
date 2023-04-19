@@ -3,6 +3,7 @@ package exec22
 import (
 	"container/heap"
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -327,9 +328,13 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 	//	return nil
 	//}
 	q.Lock()
+	msg := []uint64{}
 	for _, t := range *(q.results) {
-		log.Warn("[dbg] before drain resultqueue", "txnum", t.TxNum)
+		if t.TxNum > 9299153 {
+			msg = append(msg, t.TxNum)
+		}
 	}
+	log.Warn("[dbg] before drain resultqueue", "txnum", strings.Join(msg))
 	q.Unlock()
 
 	select {
