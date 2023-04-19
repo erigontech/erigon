@@ -230,7 +230,9 @@ func ExecV3(ctx context.Context,
 
 		for outputTxNum.Load() <= maxTxNum {
 
-			log.Warn("[dbg] before drain", "outputTxNum.Load()", outputTxNum.Load(), "maxTxNum", maxTxNum, "rws.ResultChLen()", rws.ResultChLen(), "rws.Len", rws.Len())
+			if outputTxNum.Load() > 9300_000 {
+				log.Warn("[dbg] before drain", "outputTxNum.Load()", outputTxNum.Load(), "maxTxNum", maxTxNum, "rws.ResultChLen()", rws.ResultChLen(), "rws.Len", rws.Len())
+			}
 			if err := rws.Drain(ctx); err != nil {
 				return err
 			}
