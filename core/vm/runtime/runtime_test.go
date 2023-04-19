@@ -26,7 +26,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -36,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 func TestDefaults(t *testing.T) {
@@ -106,8 +106,14 @@ func TestExecute(t *testing.T) {
 }
 
 func TestCall(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
-	state := state.New(state.NewDbStateReader(tx))
+	m := stages.Mock(t)
+	db := m.DB
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+	state := state.New(m.NewStateReader(tx))
 	address := libcommon.HexToAddress("0x0a")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
@@ -152,15 +158,15 @@ func BenchmarkCall(b *testing.B) {
 		b.Fatal(err)
 	}
 	cfg := &Config{}
-	db := memdb.New("")
-	defer db.Close()
+	m := stages.Mock(b)
+	db := m.DB
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
 	}
 	defer tx.Rollback()
-	cfg.r = state.NewPlainStateReader(tx)
-	cfg.w = state.NewPlainStateWriter(tx, tx, 0)
+	cfg.r = m.NewStateReader(tx)
+	cfg.w = m.NewStateWriter(tx, 0)
 	cfg.State = state.New(cfg.r)
 
 	cfg.Debug = true
@@ -174,9 +180,16 @@ func BenchmarkCall(b *testing.B) {
 	}
 }
 func benchmarkEVM_Create(b *testing.B, code string) {
-	_, tx := memdb.NewTestTx(b)
+	m := stages.Mock(b)
+	db := m.DB
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+
 	var (
-		statedb  = state.New(state.NewPlainState(tx, 1, nil))
+		statedb  = state.New(m.NewHistoryStateReader(1, tx))
 		sender   = libcommon.BytesToAddress([]byte("sender"))
 		receiver = libcommon.BytesToAddress([]byte("receiver"))
 	)
@@ -341,8 +354,14 @@ func TestBlockhash(t *testing.T) {
 func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name string) { //nolint:unparam
 	cfg := new(Config)
 	setDefaults(cfg)
-	_, tx := memdb.NewTestTx(b)
-	cfg.State = state.New(state.NewPlainState(tx, 1, nil))
+	m := stages.Mock(b)
+	db := m.DB
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+	cfg.State = state.New(m.NewHistoryStateReader(1, tx))
 	cfg.GasLimit = gas
 	var (
 		destination = libcommon.BytesToAddress([]byte("contract"))

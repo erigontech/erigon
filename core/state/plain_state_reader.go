@@ -6,6 +6,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -21,6 +22,9 @@ type PlainStateReader struct {
 }
 
 func NewPlainStateReader(db kv.Getter) *PlainStateReader {
+	if ethconfig.EnableHistoryV4InTest {
+		panic("historyV4 require use StateReaderV4 instead of PlainStateReader")
+	}
 	return &PlainStateReader{
 		db: db,
 	}
