@@ -427,6 +427,7 @@ func ExecV3(ctx context.Context,
 		rwLoopG, rwLoopCtx = errgroup.WithContext(rwLoopCtx)
 		defer rwLoopG.Wait()
 		rwLoopG.Go(func() error {
+			defer rws.Close()
 			defer in.Close()
 			defer applyLoopWg.Wait()
 			return rwLoop(rwLoopCtx)
