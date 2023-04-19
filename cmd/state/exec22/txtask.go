@@ -160,7 +160,6 @@ func (q *QueueWithRetry) ReTry(t *TxTask) {
 
 // Next - blocks until new task available
 func (q *QueueWithRetry) Next(ctx context.Context) (*TxTask, bool) {
-	log.Warn("[dbg] before next", "newTasks", q.NewTasksLen(), "retires", q.RetriesLen())
 	task, ok := q.popNoWait()
 	if ok {
 		return task, true
@@ -331,7 +330,7 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 	q.Lock()
 	msg := []string{}
 	for _, t := range *(q.results) {
-		if t.TxNum > 9299153 {
+		if t.TxNum > 9300_000 {
 			msg = append(msg, fmt.Sprintf("%d", t.TxNum))
 		}
 	}

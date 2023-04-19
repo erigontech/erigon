@@ -104,6 +104,9 @@ func (rw *Worker) Run() error {
 		if err := rw.resultCh.Add(rw.ctx, txTask); err != nil {
 			return err
 		}
+		if txTask.TxNum > 9300_000 {
+			log.Warn("[dbg] before next", "newTasks", rw.in.NewTasksLen(), "retires", rw.in.RetriesLen())
+		}
 	}
 	return nil
 }
