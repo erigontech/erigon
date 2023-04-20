@@ -54,6 +54,7 @@ type GetPayloadV2Response struct {
 type GetPayloadV3Response struct {
 	ExecutionPayload *ExecutionPayload `json:"executionPayload" gencodec:"required"`
 	BlockValue       *hexutil.Big      `json:"blockValue" gencodec:"required"`
+	BlobsBundle      *BlobsBundleV1    `json:"blobsBundle" gencodec:"required"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -99,7 +100,6 @@ type EngineAPI interface {
 	GetPayloadV1(ctx context.Context, payloadID hexutility.Bytes) (*ExecutionPayload, error)
 	GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*GetPayloadV2Response, error)
 	GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*GetPayloadV3Response, error)
-	GetBlobsBundleV1(ctx context.Context, payloadID hexutility.Bytes) (*BlobsBundleV1, error)
 	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration *TransitionConfiguration) (*TransitionConfiguration, error)
 	GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*ExecutionPayloadBodyV1, error)
 	GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*ExecutionPayloadBodyV1, error)
@@ -401,26 +401,11 @@ func (e *EngineImpl) GetPayloadV3(ctx context.Context, payloadID hexutility.Byte
 
 	epl := convertPayloadFromRpc(response.ExecutionPayload)
 	blockValue := gointerfaces.ConvertH256ToUint256Int(response.BlockValue).ToBig()
-	return &GetPayloadV3Response{
-		epl,
-		(*hexutil.Big)(blockValue),
-	}, nil
-}
-
-func (e *EngineImpl) GetBlobsBundleV1(ctx context.Context, payloadID hexutility.Bytes) (*BlobsBundleV1, error) {
-	if e.internalCL {
-		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
-		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
-	}
-
-	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
-	log.Info("Received GetBlobsBundleV1", "payloadId", decodedPayloadId)
 
 	ep, err := e.api.EngineGetBlobsBundleV1(ctx, decodedPayloadId)
 	if err != nil {
 		return nil, err
 	}
-
 	kzgs := ep.GetKzgs()
 	blobs := ep.GetBlobs()
 	if len(kzgs) != len(blobs) {
@@ -432,10 +417,16 @@ func (e *EngineImpl) GetBlobsBundleV1(ctx context.Context, payloadID hexutility.
 		copy(replyKzgs[i][:], kzgs[i])
 		copy(replyBlobs[i][:], blobs[i])
 	}
-	return &BlobsBundleV1{
+	bb := &BlobsBundleV1{
 		BlockHash: gointerfaces.ConvertH256ToHash(ep.BlockHash),
 		KZGs:      replyKzgs,
 		Blobs:     replyBlobs,
+	}
+
+	return &GetPayloadV3Response{
+		epl,
+		(*hexutil.Big)(blockValue),
+		bb,
 	}, nil
 }
 
