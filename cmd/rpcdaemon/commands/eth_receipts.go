@@ -21,6 +21,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -64,6 +65,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 	}
 	header := block.Header()
 	excessDataGas := header.ParentExcessDataGas(getHeader)
+
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{}, excessDataGas)
@@ -646,6 +648,15 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
+	var edg *big.Int
+	if n := block.Number().Uint64(); n > 0 {
+		if parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, n-1); err != nil {
+			return nil, err
+		} else {
+			edg = parentHeader.ExcessDataGas
+		}
+	}
+
 	if txn == nil {
 		borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
 		if err != nil {
@@ -654,14 +665,14 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		if borReceipt == nil {
 			return nil, nil
 		}
-		return marshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
+		return marshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false, edg), nil
 	}
 
 	if len(receipts) <= int(txnIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
 	}
 
-	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
+	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true, edg), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -693,9 +704,17 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 	result := make([]map[string]interface{}, 0, len(receipts))
+	var edg *big.Int
+	if n := block.Number().Uint64(); n > 0 {
+		if parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, n-1); err != nil {
+			return nil, err
+		} else {
+			edg = parentHeader.ExcessDataGas
+		}
+	}
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true))
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, edg))
 	}
 
 	if chainConfig.Bor != nil {
@@ -706,7 +725,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 				return nil, err
 			}
 			if borReceipt != nil {
-				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
+				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false, edg))
 			}
 		}
 	}
@@ -714,7 +733,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	return result, nil
 }
 
-func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, txnHash common.Hash, signed bool) map[string]interface{} {
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, txnHash common.Hash, signed bool, excessDataGas *big.Int) map[string]interface{} {
 	var chainId *big.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
@@ -747,10 +766,6 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		"logs":              receipt.Logs,
 		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
-	if receipt.DataGasUsed > 0 {
-		fields["dataGasUsed"] = hexutil.Uint64(receipt.DataGasUsed)
-		fields["dataGasPrice"] = hexutil.Uint64(receipt.DataGasPrice.Uint64())
-	}
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
 		fields["effectiveGasPrice"] = hexutil.Uint64(txn.GetPrice().Uint64())
 	} else {
@@ -766,6 +781,16 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
+	}
+	// Set derived blob related fields
+	numBlobs := len(txn.GetDataHashes())
+	if numBlobs > 0 {
+		if excessDataGas == nil {
+			log.Warn("excess data gas not set when trying to marshal blob tx")
+		} else {
+			fields["dataGasPrice"] = misc.GetDataGasPrice(excessDataGas)
+			fields["dataGasUsed"] = misc.GetDataGasUsed(numBlobs)
+		}
 	}
 	return fields
 }

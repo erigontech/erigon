@@ -63,8 +63,6 @@ type Receipt struct {
 	TxHash          libcommon.Hash    `json:"transactionHash" gencodec:"required" codec:"-"`
 	ContractAddress libcommon.Address `json:"contractAddress" codec:"-"`
 	GasUsed         uint64            `json:"gasUsed" gencodec:"required" codec:"-"`
-	DataGasUsed     uint64            `json:"dataGasUsed,omitempty" codec:"-"`
-	DataGasPrice    *big.Int          `json:"dataGasPrice,omitempty" codec:"-"`
 
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.

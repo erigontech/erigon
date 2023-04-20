@@ -491,5 +491,5 @@ func (st *StateTransition) gasUsed() uint64 {
 }
 
 func (st *StateTransition) dataGasUsed() uint64 {
-	return uint64(len(st.msg.DataHashes())) * params.DataGasPerBlob
+	return misc.GetDataGasUsed(len(st.msg.DataHashes()))
 }

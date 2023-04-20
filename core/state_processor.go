@@ -23,7 +23,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -82,10 +81,6 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		}
 		receipt.TxHash = tx.Hash()
 		receipt.GasUsed = result.UsedGas
-		if result.UsedDataGas > 0 {
-			receipt.DataGasUsed = result.UsedDataGas
-			receipt.DataGasPrice = misc.GetDataGasPrice(excessDataGas)
-		}
 
 		// if the transaction created a contract, store the creation address in the receipt.
 		if msg.To() == nil {
