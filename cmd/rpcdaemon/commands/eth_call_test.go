@@ -182,20 +182,29 @@ func decodeNode(t *testing.T, encoded []byte) any {
 	}
 }
 
+type rawProofElement struct {
+	index int
+	value []byte
+}
+
 // proofMap creates a map from hash to proof node
-func proofMap(t *testing.T, proof []hexutility.Bytes) (map[libcommon.Hash]any, map[libcommon.Hash][]byte) {
+func proofMap(t *testing.T, proof []hexutility.Bytes) (map[libcommon.Hash]any, map[libcommon.Hash]rawProofElement) {
 	res := map[libcommon.Hash]any{}
-	raw := map[libcommon.Hash][]byte{}
-	for _, proofB := range proof {
+	raw := map[libcommon.Hash]rawProofElement{}
+	for i, proofB := range proof {
 		hash := crypto.Keccak256Hash(proofB)
 		res[hash] = decodeNode(t, proofB)
-		raw[hash] = proofB
+		raw[hash] = rawProofElement{
+			index: i,
+			value: proofB,
+		}
 	}
 	return res, raw
 }
 
-func verifyProof(t *testing.T, root libcommon.Hash, key []byte, proofs map[libcommon.Hash]any, used map[libcommon.Hash][]byte) []byte {
+func verifyProof(t *testing.T, root libcommon.Hash, key []byte, proofs map[libcommon.Hash]any, used map[libcommon.Hash]rawProofElement) []byte {
 	t.Helper()
+	nextIndex := 0
 	key = (&trie.Keybytes{Data: key}).ToHex()
 	var node any = hashNode(root)
 	for {
@@ -212,11 +221,15 @@ func verifyProof(t *testing.T, root libcommon.Hash, key []byte, proofs map[libco
 			var ok bool
 			node, ok = proofs[libcommon.Hash(nt)]
 			require.True(t, ok, "missing hash %x", nt)
+			raw, ok := used[libcommon.Hash(nt)]
+			require.True(t, ok)
+			require.Equal(t, nextIndex, raw.index, "proof elements not in expected order")
+			nextIndex++
 			delete(used, libcommon.Hash(nt))
 		case valueNode:
 			require.Len(t, key, 0)
 			for hash, raw := range used {
-				require.Failf(t, "not all proof elements were used", "hash=%x value=%x decoded=%#v", hash, raw, proofs[hash])
+				require.Failf(t, "not all proof elements were used", "hash=%x index=%d value=%x decoded=%#v", hash, raw.index, raw.value, proofs[hash])
 			}
 			return nt
 		default:

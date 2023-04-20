@@ -14,6 +14,10 @@ func (b *BeaconState) HashSSZ() ([32]byte, error) {
 	if err = b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
+	/*fmt.Println(b.slot)
+	for i, val := range b.leaves {
+		fmt.Println(i, libcommon.Hash(val))
+	}*/
 
 	// Pad to 32 of length
 	return merkle_tree.MerkleRootFromLeaves(b.leaves[:])

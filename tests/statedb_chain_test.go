@@ -104,7 +104,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainStateReader(tx))
+	st := state.New(m.NewStateReader(tx))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -130,7 +130,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		panic(err)
 	}
 	defer tx.Rollback()
-	st = state.New(state.NewPlainStateReader(tx))
+	st = state.New(m.NewStateReader(tx))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}

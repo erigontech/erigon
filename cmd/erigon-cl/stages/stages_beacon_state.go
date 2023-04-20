@@ -20,6 +20,7 @@ type StageBeaconStateCfg struct {
 	beaconCfg       *clparams.BeaconChainConfig
 	state           *state.BeaconState
 	executionClient *execution_client.ExecutionClient
+	enabled         bool
 }
 
 func StageBeaconState(db kv.RwDB,
@@ -29,11 +30,16 @@ func StageBeaconState(db kv.RwDB,
 		beaconCfg:       beaconCfg,
 		state:           state,
 		executionClient: executionClient,
+		enabled:         false,
 	}
 }
 
-// SpawnStageBeaconForward spawn the beacon forward stage
+// SpawnStageBeaconState is used to replay historical states
 func SpawnStageBeaconState(cfg StageBeaconStateCfg, tx kv.RwTx, ctx context.Context) error {
+	if !cfg.enabled {
+		return nil
+	}
+	// This code need to be fixed.
 	useExternalTx := tx != nil
 	var err error
 	if !useExternalTx {
@@ -79,20 +85,6 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, tx kv.RwTx, ctx context.Cont
 		}
 		log.Info("Applied state transition", "from", slot, "to", slot+1)
 	}
-	// If successful update fork choice
-	finalizedRoot, err := rawdb.ReadFinalizedBlockRoot(tx, endSlot)
-	if err != nil {
-		return err
-	}
-	_, _, eth1Hash, _, err := rawdb.ReadBeaconBlockForStorage(tx, finalizedRoot, endSlot)
-	if err != nil {
-		return err
-	}
-	receipt, err := cfg.executionClient.ForkChoiceUpdate(eth1Hash)
-	if err != nil {
-		return err
-	}
-	log.Info("Forkchoice Status", "outcome", receipt.Success)
 
 	log.Info("[BeaconState] Finished transitioning state", "from", fromSlot, "to", endSlot)
 	if !useExternalTx {
