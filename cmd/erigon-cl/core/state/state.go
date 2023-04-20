@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/beacon_changeset"
 )
 
 type HashFunc func([]byte) ([32]byte, error)
@@ -74,9 +73,6 @@ type BeaconState struct {
 	previousStateRoot           common.Hash
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
-	// Changesets
-	reverseChangeset *beacon_changeset.ChangeSet // Revert to parent root
-	forwardChangeset *beacon_changeset.ChangeSet // Forward from parent root
 }
 
 func New(cfg *clparams.BeaconChainConfig) *BeaconState {
@@ -288,14 +284,18 @@ func (b *BeaconState) Copy() (*BeaconState, error) {
 	copy(copied.slashings[:], b.slashings[:])
 	copied.previousEpochParticipation = b.previousEpochParticipation.Copy()
 	copied.currentEpochParticipation = b.currentEpochParticipation.Copy()
+	copied.finalizedCheckpoint = b.finalizedCheckpoint.Copy()
+	copied.currentJustifiedCheckpoint = b.currentJustifiedCheckpoint.Copy()
+	copied.previousJustifiedCheckpoint = b.previousJustifiedCheckpoint.Copy()
+	if b.version == clparams.Phase0Version {
+		return copied, copied.initBeaconState()
+	}
 	copied.currentSyncCommittee = b.currentSyncCommittee.Copy()
 	copied.nextSyncCommittee = b.nextSyncCommittee.Copy()
 	copied.inactivityScores = make([]uint64, len(b.inactivityScores))
 	copy(copied.inactivityScores, b.inactivityScores)
 	copied.justificationBits = b.justificationBits.Copy()
-	copied.finalizedCheckpoint = b.finalizedCheckpoint.Copy()
-	copied.currentJustifiedCheckpoint = b.currentJustifiedCheckpoint.Copy()
-	copied.previousJustifiedCheckpoint = b.previousJustifiedCheckpoint.Copy()
+
 	if b.version >= clparams.BellatrixVersion {
 		copied.latestExecutionPayloadHeader = b.latestExecutionPayloadHeader.Copy()
 	}
