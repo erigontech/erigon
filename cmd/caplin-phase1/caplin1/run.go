@@ -20,7 +20,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
 	downloader := network.NewForwardBeaconDownloader(ctx, beaconRpc)
 
-	forkChoice, err := forkchoice.NewForkChoiceStore(state, engine)
+	forkChoice, err := forkchoice.NewForkChoiceStore(state, engine, true)
 	if err != nil {
 		log.Error("Could not create forkchoice", "err", err)
 		return err

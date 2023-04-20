@@ -6,7 +6,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/beacon_changeset"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 )
 
@@ -31,20 +30,13 @@ func testSanityFunction(context testContext) error {
 	}
 	startSlot := testState.Slot()
 
-	changes := []*beacon_changeset.ChangeSet{}
-	forwardChanges := []*beacon_changeset.ChangeSet{}
 	var block *cltypes.SignedBeaconBlock
 	for _, block = range blocks {
-		testState.StartCollectingReverseChangeSet()
-		testState.StartCollectingForwardChangeSet()
 		err = transition.TransitionState(testState, block, true)
 		if err != nil {
 			break
 		}
-		changes = append(changes, testState.StopCollectingReverseChangeSet())
-		forwardChanges = append(forwardChanges, testState.StopCollectingForwardChangeSet())
 	}
-	_ = forwardChanges
 
 	// Deal with transition error
 	if expectedError && err == nil {

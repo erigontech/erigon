@@ -20,7 +20,6 @@ func forkTest(context testContext) error {
 		return err
 	}
 
-	preState.StartCollectingReverseChangeSet()
 	if preState.Version() == clparams.Phase0Version {
 		if err := preState.UpgradeToAltair(); err != nil {
 			return err
@@ -34,8 +33,6 @@ func forkTest(context testContext) error {
 			return err
 		}
 	}
-	change := preState.StopCollectingReverseChangeSet()
-
 	if expectedError {
 		return fmt.Errorf("expected error")
 	}
@@ -52,23 +49,6 @@ func forkTest(context testContext) error {
 	}
 	if context.version == clparams.AltairVersion {
 		return nil
-	}
-	// now do unwind
-	initialState, err := decodeStateFromFile(prevContext, "pre.ssz_snappy")
-	if err != nil {
-		return err
-	}
-	preState.RevertWithChangeset(change)
-	root, err = preState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	expectedRoot, err = initialState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if root != expectedRoot {
-		return fmt.Errorf("mismatching state roots with unwind")
 	}
 	return nil
 }
