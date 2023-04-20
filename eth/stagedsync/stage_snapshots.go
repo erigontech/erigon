@@ -181,7 +181,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 		s.BlockNumber = blocksAvailable
 	}
-
 	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.snapshots, cfg.blockReader, cfg.chainConfig, cfg.engine, cfg.agg); err != nil {
 		return err
 	}
