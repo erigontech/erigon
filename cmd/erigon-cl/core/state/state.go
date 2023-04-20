@@ -225,6 +225,20 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 	return nil
 }
 
+func (b *BeaconState) initCaches() error {
+	var err error
+	if b.activeValidatorsCache, err = lru.New[uint64, []uint64](5); err != nil {
+		return err
+	}
+	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64](5); err != nil {
+		return err
+	}
+	if b.committeeCache, err = lru.New[[16]byte, []uint64](256); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (b *BeaconState) initBeaconState() error {
 
 	if b.touchedLeaves == nil {
@@ -236,16 +250,7 @@ func (b *BeaconState) initBeaconState() error {
 	for i, validator := range b.validators {
 		b.publicKeyIndicies[validator.PublicKey] = uint64(i)
 	}
-	var err error
-	if b.activeValidatorsCache, err = lru.New[uint64, []uint64](5); err != nil {
-		return err
-	}
-	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64](25); err != nil {
-		return err
-	}
-	if b.committeeCache, err = lru.New[[16]byte, []uint64](256); err != nil {
-		return err
-	}
+	b.initCaches()
 	if err := b._updateProposerIndex(); err != nil {
 		return err
 	}
@@ -304,5 +309,46 @@ func (b *BeaconState) Copy() (*BeaconState, error) {
 		}
 	}
 	copied.version = b.version
-	return copied, copied.initBeaconState()
+	// Now sync internals
+	copy(copied.leaves[:], b.leaves[:])
+	copied.touchedLeaves = make(map[StateLeafIndex]bool)
+	for leafIndex, touchedVal := range b.touchedLeaves {
+		copied.touchedLeaves[leafIndex] = touchedVal
+	}
+	copied.publicKeyIndicies = make(map[[48]byte]uint64)
+	for pk, index := range b.publicKeyIndicies {
+		copied.publicKeyIndicies[pk] = index
+	}
+	// Sync caches
+	if err := copied.initCaches(); err != nil {
+		return nil, err
+	}
+	for _, epoch := range b.activeValidatorsCache.Keys() {
+		val, has := b.activeValidatorsCache.Get(epoch)
+		if !has {
+			continue
+		}
+		copied.activeValidatorsCache.Add(epoch, val)
+	}
+	for _, key := range b.shuffledSetsCache.Keys() {
+		val, has := b.shuffledSetsCache.Get(key)
+		if !has {
+			continue
+		}
+		copied.shuffledSetsCache.Add(key, val)
+	}
+	for _, key := range b.committeeCache.Keys() {
+		val, has := b.committeeCache.Get(key)
+		if !has {
+			continue
+		}
+		copied.committeeCache.Add(key, val)
+	}
+	if b.totalActiveBalanceCache != nil {
+		copied.totalActiveBalanceCache = new(uint64)
+		*copied.totalActiveBalanceCache = *b.totalActiveBalanceCache
+		copied.totalActiveBalanceRootCache = b.totalActiveBalanceRootCache
+	}
+
+	return copied, nil
 }
