@@ -81,9 +81,8 @@ type TransitionConfiguration struct {
 
 // BlobsBundleV1 holds the blobs of an execution payload, to be retrieved separately
 type BlobsBundleV1 struct {
-	BlockHash common.Hash           `json:"blockHash"     gencodec:"required"`
-	KZGs      []types.KZGCommitment `json:"kzgs"      gencodec:"required"`
-	Blobs     []types.Blob          `json:"blobs"      gencodec:"required"`
+	KZGs  []types.KZGCommitment `json:"kzgs"  gencodec:"required"`
+	Blobs []types.Blob          `json:"blobs" gencodec:"required"`
 }
 
 type ExecutionPayloadBodyV1 struct {
@@ -418,9 +417,8 @@ func (e *EngineImpl) GetPayloadV3(ctx context.Context, payloadID hexutility.Byte
 		copy(replyBlobs[i][:], blobs[i])
 	}
 	bb := &BlobsBundleV1{
-		BlockHash: gointerfaces.ConvertH256ToHash(ep.BlockHash),
-		KZGs:      replyKzgs,
-		Blobs:     replyBlobs,
+		KZGs:  replyKzgs,
+		Blobs: replyBlobs,
 	}
 
 	return &GetPayloadV3Response{
