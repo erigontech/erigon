@@ -193,8 +193,10 @@ func (d *Domain) FinishWrites() {
 	if d.defaultDc != nil {
 		d.defaultDc.Close()
 	}
-	d.wal.close()
-	d.wal = nil
+	if d.wal != nil {
+		d.wal.close()
+		d.wal = nil
+	}
 	d.History.FinishWrites()
 }
 
