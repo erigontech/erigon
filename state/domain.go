@@ -611,7 +611,6 @@ func (h *domainWAL) addValue(key1, key2, value []byte, step []byte) error {
 			if err := h.d.tx.Put(h.d.valsTable, fullkey[:kl], fullkey[kl:]); err != nil {
 				return err
 			}
-
 			if err := h.d.tx.Put(h.d.valsTable, fullkey, value); err != nil {
 				return err
 			}
@@ -628,9 +627,15 @@ func (h *domainWAL) addValue(key1, key2, value []byte, step []byte) error {
 		return nil
 	}
 
-	//coverKey := h.key[:len(fullkey)+len(value)]
-	//copy(coverKey, fullkey)
-	//k, v := coverKey[:len(fullkey)], coverKey[len(fullkey):]
+	if !h.buffered {
+		if err := h.d.tx.Put(h.d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
+			return err
+		}
+		if err := h.d.tx.Put(h.d.valsTable, fullkey, value); err != nil {
+			return err
+		}
+		return nil
+	}
 	if err := h.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
 		return err
 	}
