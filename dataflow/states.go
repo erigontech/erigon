@@ -15,6 +15,11 @@ const (
 	BlockBodyExpired
 	BlockBodyRequested
 	BlockBodyReceived
+	BlockBodyEvicted
+	BlockBodySkipped // Delivery requested but was skipped due to limitation on the size of the response
+	BlockBodyEmpty // Identified as empty and no need to be requested
+	BlockBodyPrefetched
+	BlockBodyInDb
 )
 
 type SnapshotItem struct {

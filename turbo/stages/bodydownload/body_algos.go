@@ -149,12 +149,14 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 					body.Withdrawals = make([]*types.Withdrawal, 0)
 				}
 				bd.addBodyToCache(blockNum, body)
+				dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyEmpty)
 				request = false
 			} else {
 				// Perhaps we already have this block
 				block := rawdb.ReadBlock(tx, hash, blockNum)
 				if block != nil {
 					bd.addBodyToCache(blockNum, block.RawBody())
+					dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyInDb)
 					request = false
 				}
 			}
@@ -194,6 +196,7 @@ func (bd *BodyDownload) checkPrefetchedBlock(hash libcommon.Hash, tx kv.RwTx, bl
 	bd.deliveriesH[blockNum] = header
 
 	// make sure we have the body in the bucket for later use
+	dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyPrefetched)
 	bd.addBodyToCache(blockNum, body)
 
 	// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
@@ -326,7 +329,10 @@ Loop:
 		//var clearedNums []uint64
 		for blockNum := range toClean {
 			delete(bd.requests, blockNum)
-			dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyCleared)
+			if !bd.delivered.Contains(blockNum) {
+				// Delivery was requested but was skipped due to the limitation on the size of the response
+				dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodySkipped)
+			}
 			//clearedNums = append(clearedNums, blockNum)
 		}
 		//sort.Slice(deliveredNums, func(i, j int) bool { return deliveredNums[i] < deliveredNums[j] })
@@ -422,6 +428,7 @@ func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 		item, _ := bd.bodyCache.DeleteMax()
 		bd.bodyCacheSize -= item.payloadSize
 		delete(bd.requests, item.blockNum)
+		dataflow.BlockBodyDownloadStates.AddChange(item.blockNum, dataflow.BlockBodyEvicted)
 	}
 }
 

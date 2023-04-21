@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -219,6 +220,9 @@ func BodiesForward(
 				if err := rawdbv3.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
 					return false, err
 				}
+			}
+			if ok {
+				dataflow.BlockBodyDownloadStates.AddChange(blockHeight, dataflow.BlockBodyCleared)
 			}
 
 			if blockHeight > bodyProgress {
