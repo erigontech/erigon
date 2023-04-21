@@ -156,7 +156,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 				log.Warn("Could not download block in processing", "reason", err)
 			}
 		}
-		log.Debug("Finished catching up", "slot")
+		log.Debug("Finished catching up", "slot", cfg.downloader.GetHighestProcessedSlot())
 	}
 }
 

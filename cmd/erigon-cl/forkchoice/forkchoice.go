@@ -49,7 +49,7 @@ type LatestMessage struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(anchorState *state.BeaconState, engine execution_client.ExecutionEngine) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(anchorState *state.BeaconState, engine execution_client.ExecutionEngine, enabledPruning bool) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func NewForkChoiceStore(anchorState *state.BeaconState, engine execution_client.
 		finalizedCheckpoint:           anchorCheckpoint.Copy(),
 		unrealizedJustifiedCheckpoint: anchorCheckpoint.Copy(),
 		unrealizedFinalizedCheckpoint: anchorCheckpoint.Copy(),
-		forkGraph:                     fork_graph.New(anchorState),
+		forkGraph:                     fork_graph.New(anchorState, enabledPruning),
 		equivocatingIndicies:          map[uint64]struct{}{},
 		latestMessages:                map[uint64]*LatestMessage{},
 		checkpointStates:              checkpointStates,

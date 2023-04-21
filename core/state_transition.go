@@ -84,12 +84,15 @@ type Message interface {
 	FeeCap() *uint256.Int
 	Tip() *uint256.Int
 	Gas() uint64
+	DataGas() uint64
+	MaxFeePerDataGas() *uint256.Int
 	Value() *uint256.Int
 
 	Nonce() uint64
 	CheckNonce() bool
 	Data() []byte
 	AccessList() types2.AccessList
+	DataHashes() []libcommon.Hash
 
 	IsFree() bool
 }
@@ -448,4 +451,8 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gas
+}
+
+func (st *StateTransition) dataGasUsed() uint64 {
+	return uint64(len(st.msg.DataHashes())) * params.DataGasPerBlob
 }

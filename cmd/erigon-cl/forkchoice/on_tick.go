@@ -6,7 +6,7 @@ import libcommon "github.com/ledgerwatch/erigon-lib/common"
 func (f *ForkChoiceStore) OnTick(time uint64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	tickSlot := (time - f.forkGraph.GenesisTime()) / f.forkGraph.LastState().BeaconConfig().SecondsPerSlot
+	tickSlot := (time - f.forkGraph.GenesisTime()) / f.forkGraph.Config().SecondsPerSlot
 	for f.Slot() < tickSlot {
 		previousTime := f.forkGraph.GenesisTime() + (f.Slot()+1)*f.forkGraph.Config().SecondsPerSlot
 		f.onTickPerSlot(previousTime)
