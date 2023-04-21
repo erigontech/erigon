@@ -114,7 +114,10 @@ func (pr *ProofRetainer) ProofElement(prefix []byte) *proofElement {
 	pe := &proofElement{
 		hexKey: append([]byte{}, prefix...),
 	}
-	pr.proofs = append(pr.proofs, pe)
+	// Since we do a depth-first traversal, reverse the proof elements so that
+	// they are ordered correctly root -> node -> ... -> leaf as dictated by
+	// EIP-1186
+	pr.proofs = append([]*proofElement{pe}, pr.proofs...)
 	return pe
 }
 

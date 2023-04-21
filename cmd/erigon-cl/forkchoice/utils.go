@@ -22,14 +22,6 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 	}
 	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Epoch {
 		f.finalizedCheckpoint = finalizedCheckpoint
-		// We cannot go past point of finalization
-		pruneSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
-		// Lets not prune too much if we are behind with the state
-		if pruneSlot >= f.forkGraph.LastState().Slot() {
-			return
-		}
-		log.Debug("Pruning old blocks", "pruneSlot", pruneSlot)
-		f.forkGraph.RemoveOldBlocks(pruneSlot)
 	}
 }
 
@@ -81,7 +73,7 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint cltypes.Checkpoint) (*st
 		return state, nil
 	}
 	// If it is not in cache compute it and then put in cache.
-	baseState, err := f.forkGraph.GetStateCopy(checkpoint.Root)
+	baseState, err := f.forkGraph.GetState(checkpoint.Root, true)
 	if err != nil {
 		return nil, err
 	}
