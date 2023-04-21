@@ -4,12 +4,18 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 
 	"github.com/google/btree"
 )
 
 var BlockBodyDownloadStates *States = NewStates(64*1024)
+
+const (
+	BlockBodyCleared = iota
+	BlockBodyExpired
+	BlockBodyRequested
+	BlockBodyReceived
+)
 
 type SnapshotItem struct {
 	id    uint64
@@ -20,10 +26,11 @@ type States struct {
 	lock         sync.Mutex
 	window       int
 	ids          []uint64
-	millis       []int64
+	ticks        []int64
 	states       []byte
 	snapshot     *btree.BTreeG[SnapshotItem]
-	snapshotTime time.Time
+	lastTick	 int64
+	snapshotTick int64
 	idx          int
 }
 
@@ -31,7 +38,7 @@ func NewStates(window int) *States {
 	s := &States{
 		window: window,
 		ids:    make([]uint64, window),
-		millis: make([]int64, window),
+		ticks: make([]int64, window),
 		states: make([]byte, window),
 		snapshot: btree.NewG[SnapshotItem](16, func(a, b SnapshotItem) bool {
 			return a.id < b.id
@@ -41,23 +48,24 @@ func NewStates(window int) *States {
 	return s
 }
 
-func (s *States) AddChange(id uint64, t time.Time, state byte) {
+func (s *States) AddChange(id uint64, state byte) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	if s.idx >= s.window {
 		s.makeSnapshot()
 	}
+	s.lastTick++
 	i := s.idx
 	s.idx++
 	s.ids[i] = id
-	s.millis[i] = t.Sub(s.snapshotTime).Milliseconds() // millis are relative to snapshotTime
+	s.ticks[i] = s.lastTick
 	s.states[i] = state
 }
 
 func (s *States) makeSnapshot() {
 	newSnapshot := map[uint64]byte{}
 	// snapshotTime is now time of the latest change
-	s.snapshotTime = s.snapshotTime.Add(time.Duration(s.millis[s.idx-1]) * time.Millisecond)
+	s.snapshotTick = s.ticks[s.idx-1]
 	// Proceed backwards
 	for i := s.idx - 1; i >= 0; i-- {
 		if _, ok := newSnapshot[s.ids[i]]; !ok {
@@ -74,9 +82,9 @@ func (s *States) makeSnapshot() {
 	s.idx = 0
 }
 
-func (s *States) ChangesSince(t time.Time, w io.Writer) {
-	millis := t.Sub(s.snapshotTime).Milliseconds()
-	if millis <= 0 {
+func (s *States) ChangesSince(tick int64, w io.Writer) {
+	fmt.Fprintf(w, "%d\n", s.snapshotTick)
+	if tick <= s.snapshotTick {
 		// Include snapshot
 		s.snapshot.Ascend(func(a SnapshotItem) bool {
 			fmt.Fprintf(w, "%d,%d\n", a.id, a.state)
@@ -85,9 +93,9 @@ func (s *States) ChangesSince(t time.Time, w io.Writer) {
 	}
 	fmt.Fprintf(w, "\n")
 	for i := 0; i < s.idx; i++ {
-		if s.millis[i] < millis {
+		if s.ticks[i] < tick {
 			continue
 		}
-		fmt.Fprintf(w, "%d,%d,%d\n", s.ids[i], s.states[i], s.millis[i])
+		fmt.Fprintf(w, "%d,%d,%d\n", s.ids[i], s.states[i], s.ticks[i])
 	}
 }

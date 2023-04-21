@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/ledgerwatch/erigon/dataflow"
 )
@@ -22,14 +21,14 @@ func writeBlockBodyDownload(w io.Writer, r *http.Request) {
 		fmt.Fprintf(w, "ERROR: parsing arguments: %v\n", err)
 		return
 	}
-	sinceMilliStr := r.Form.Get("sincemilli")
-	var sinceMilli int64
-	if sinceMilliStr != "" {
+	sinceTickStr := r.Form.Get("sincetick")
+	var tick int64
+	if sinceTickStr != "" {
 		var err error
-		if sinceMilli, err = strconv.ParseInt(sinceMilliStr, 10, 64); err != nil {
+		if tick, err = strconv.ParseInt(sinceTickStr, 10, 64); err != nil {
 			fmt.Fprintf(w, "ERROR: parsing sincemilli: %v\n", err)
 		}
 	}
 	fmt.Fprintf(w, "SUCCESS\n")
-	dataflow.BlockBodyDownloadStates.ChangesSince(time.UnixMilli(sinceMilli), w)
+	dataflow.BlockBodyDownloadStates.ChangesSince(tick, w)
 }
