@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -454,5 +455,5 @@ func (st *StateTransition) gasUsed() uint64 {
 }
 
 func (st *StateTransition) dataGasUsed() uint64 {
-	return uint64(len(st.msg.DataHashes())) * params.DataGasPerBlob
+	return misc.GetDataGasUsed(len(st.msg.DataHashes()))
 }
