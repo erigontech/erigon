@@ -457,13 +457,14 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.WriteObjectEnd()
 			continue
 		}
+		isIntersectionMode := req.Mode == TraceFilterModeIntersection
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
 		for i, trace := range t {
 			txPosition := uint64(i)
 			txHash := txs[i].Hash()
 			// Check if transaction concerns any of the addresses we wanted
 			for _, pt := range trace.Trace {
-				if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
+				if includeAll || filter_trace(pt, fromAddresses, toAddresses, isIntersectionMode) {
 					nSeen++
 					pt.BlockHash = &blockHash
 					pt.BlockNumber = &blockNumber
@@ -872,8 +873,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectEnd()
 			continue
 		}
+		isIntersectionMode := req.Mode == TraceFilterModeIntersection
 		for _, pt := range traceResult.Trace {
-			if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
+			if includeAll || filter_trace(pt, fromAddresses, toAddresses, isIntersectionMode) {
 				nSeen++
 				pt.BlockHash = &lastBlockHash
 				pt.BlockNumber = &blockNum
@@ -907,37 +909,30 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	return stream.Flush()
 }
 
-func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}) bool {
+func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}, isIntersectionMode bool) bool {
+	f, t := false, false
 	switch action := pt.Action.(type) {
 	case *CallTraceAction:
-		_, f := fromAddresses[action.From]
-		_, t := toAddresses[action.To]
-
-		if f || t {
-			return true
-		}
+		_, f = fromAddresses[action.From]
+		_, t = toAddresses[action.To]
 	case *CreateTraceAction:
-		_, f := fromAddresses[action.From]
-		if f {
-			return true
-		}
+		_, f = fromAddresses[action.From]
 
 		if res, ok := pt.Result.(*CreateTraceResult); ok {
 			if res.Address != nil {
-				if _, t := toAddresses[*res.Address]; t {
-					return true
-				}
+				_, t = toAddresses[*res.Address]
 			}
 		}
 	case *SuicideTraceAction:
-		_, f := fromAddresses[action.Address]
-		_, t := toAddresses[action.RefundAddress]
-		if f || t {
-			return true
-		}
+		_, f = fromAddresses[action.Address]
+		_, t = toAddresses[action.RefundAddress]
 	}
 
-	return false
+	if isIntersectionMode {
+		return f && t
+	} else {
+		return f || t
+	}
 }
 
 func (api *TraceAPIImpl) callManyTransactions(
