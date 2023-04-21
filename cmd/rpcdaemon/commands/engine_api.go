@@ -53,8 +53,8 @@ type GetPayloadV2Response struct {
 // GetPayloadV3Response represents the response of the getPayloadV3 method
 type GetPayloadV3Response struct {
 	ExecutionPayload *ExecutionPayload `json:"executionPayload" gencodec:"required"`
-	BlockValue       *hexutil.Big      `json:"blockValue" gencodec:"required"`
-	BlobsBundle      *BlobsBundleV1    `json:"blobsBundle" gencodec:"required"`
+	BlockValue       *hexutil.Big      `json:"blockValue"       gencodec:"required"`
+	BlobsBundle      *BlobsBundleV1    `json:"blobsBundle"      gencodec:"required"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -79,7 +79,7 @@ type TransitionConfiguration struct {
 	TerminalBlockNumber     *hexutil.Big `json:"terminalBlockNumber"     gencodec:"required"`
 }
 
-// BlobsBundleV1 holds the blobs of an execution payload, to be retrieved separately
+// BlobsBundleV1 holds the blobs of an execution payload
 type BlobsBundleV1 struct {
 	KZGs  []types.KZGCommitment `json:"kzgs"  gencodec:"required"`
 	Blobs []types.Blob          `json:"blobs" gencodec:"required"`
