@@ -608,7 +608,7 @@ func (h *domainWAL) addValue(key1, key2, value []byte, step []byte) error {
 
 	if h.largeValues {
 		if !h.buffered {
-			if err := h.d.tx.Put(h.d.valsTable, fullkey[:kl], fullkey[kl:]); err != nil {
+			if err := h.d.tx.Put(h.d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
 				return err
 			}
 			if err := h.d.tx.Put(h.d.valsTable, fullkey, value); err != nil {
