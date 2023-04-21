@@ -12,7 +12,7 @@ require (
 )
 
 require (
-	github.com/99designs/gqlgen v0.17.29
+	github.com/99designs/gqlgen v0.17.30
 	github.com/Giulio2002/bls v0.0.0-20230217173148-c87a29266b6c
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/fastcache v1.12.1
@@ -63,14 +63,14 @@ require (
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.0.7
 	github.com/pion/stun v0.4.0
-	github.com/prometheus/client_golang v1.14.0
+	github.com/prometheus/client_golang v1.15.0
 	github.com/protolambda/eth2-shuffle v1.1.0
 	github.com/protolambda/ztyp v0.2.2
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
 	github.com/prysmaticlabs/gohashtree v0.0.3-alpha
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
-	github.com/rs/cors v1.8.3
-	github.com/shirou/gopsutil/v3 v3.23.2
+	github.com/rs/cors v1.9.0
+	github.com/shirou/gopsutil/v3 v3.23.3
 	github.com/spf13/cobra v1.6.1
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.2
@@ -95,7 +95,7 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v2 v2.4.0
-	modernc.org/sqlite v1.21.1
+	modernc.org/sqlite v1.21.2
 	pgregory.net/rapid v0.5.5
 )
 
@@ -233,6 +233,7 @@ require (
 	github.com/rogpeppe/go-internal v1.9.0 // indirect
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
+	github.com/shoenig/go-m1cpu v0.1.4 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/supranational/blst v0.3.10 // indirect
 	github.com/tklauser/go-sysconf v0.3.11 // indirect
@@ -259,7 +260,7 @@ require (
 	lukechampine.com/uint128 v1.2.0 // indirect
 	modernc.org/cc/v3 v3.40.0 // indirect
 	modernc.org/ccgo/v3 v3.16.13 // indirect
-	modernc.org/libc v1.22.3 // indirect
+	modernc.org/libc v1.22.4 // indirect
 	modernc.org/mathutil v1.5.0 // indirect
 	modernc.org/memory v1.5.0 // indirect
 	modernc.org/opt v0.1.3 // indirect
