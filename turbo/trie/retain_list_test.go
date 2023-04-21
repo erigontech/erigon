@@ -9,6 +9,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// NewManualProofRetainer is a way to allow external tests in this package to
+// manually construct a ProofRetainer based on a set of keys.  This is
+// especially useful for tests which want to manually manipulate the hash
+// databases without worrying about generating and tracking pre-images.
+func NewManualProofRetainer(t *testing.T, rl *RetainList, keys [][]byte) *ProofRetainer {
+	var accHexKey []byte
+	var storageKeys []libcommon.Hash
+	var storageHexKeys [][]byte
+	for _, key := range keys {
+		switch len(key) {
+		case 32:
+			require.Nil(t, accHexKey, "only one account key may be provided")
+			accHexKey = rl.AddKey(key)
+		case 72:
+			if accHexKey == nil {
+				accHexKey = rl.AddKey(key[:32])
+			}
+			storageKeys = append(storageKeys, libcommon.Hash{byte(len(storageKeys))})
+			storageHexKeys = append(storageHexKeys, rl.AddKey(key))
+			require.Equal(t, accHexKey, storageHexKeys[0][:64], "all storage keys must be for the same account")
+		default:
+			require.Fail(t, "unexpected key length %d", len(key))
+		}
+	}
+	return &ProofRetainer{
+		rl:             rl,
+		acc:            &accounts.Account{Incarnation: 1},
+		accHexKey:      accHexKey,
+		storageKeys:    storageKeys,
+		storageHexKeys: storageHexKeys,
+	}
+}
+
 func TestProofRetainerConstruction(t *testing.T) {
 	rl := NewRetainList(0)
 	pr, err := NewProofRetainer(

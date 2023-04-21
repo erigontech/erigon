@@ -22,7 +22,7 @@ import (
 // with the node that proves the absence of the key.
 func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) {
 	var proof [][]byte
-	hasher := newHasher(false)
+	hasher := newHasher(t.valueNodesRLPEncoded)
 	defer returnHasherToPool(hasher)
 	// Collect all nodes on the path to key.
 	key = keybytesToHex(key)
@@ -93,6 +93,8 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 			} else {
 				tn = nil
 			}
+		case valueNode:
+			tn = nil
 		case hashNode:
 			return nil, fmt.Errorf("encountered hashNode unexpectedly, key %x, fromLevel %d", key, fromLevel)
 		default:
@@ -269,12 +271,19 @@ func verifyProof(root libcommon.Hash, key []byte, proofs map[libcommon.Hash]node
 }
 
 func VerifyAccountProof(stateRoot libcommon.Hash, proof *accounts.AccProofResult) error {
-	accountKey := crypto.Keccak256(proof.Address[:])
+	accountKey := crypto.Keccak256Hash(proof.Address[:])
+	return VerifyAccountProofByHash(stateRoot, accountKey, proof)
+}
+
+// VerifyAccountProofByHash will verify an account proof under the assumption
+// that the pre-image of the accountKey hashes to the provided accountKey.
+// Consequently, the Address of the proof is ignored in the validation.
+func VerifyAccountProofByHash(stateRoot libcommon.Hash, accountKey libcommon.Hash, proof *accounts.AccProofResult) error {
 	pm, used, err := proofMap(proof.AccountProof)
 	if err != nil {
 		return fmt.Errorf("could not construct proofMap: %w", err)
 	}
-	value, err := verifyProof(stateRoot, accountKey, pm, used)
+	value, err := verifyProof(stateRoot, accountKey[:], pm, used)
 	if err != nil {
 		return fmt.Errorf("could not verify proof: %w", err)
 	}
@@ -297,12 +306,19 @@ func VerifyAccountProof(stateRoot libcommon.Hash, proof *accounts.AccProofResult
 }
 
 func VerifyStorageProof(storageRoot libcommon.Hash, proof accounts.StorProofResult) error {
-	storageKey := crypto.Keccak256(proof.Key[:])
+	storageKey := crypto.Keccak256Hash(proof.Key[:])
+	return VerifyStorageProofByHash(storageRoot, storageKey, proof)
+}
+
+// VerifyAccountProofByHash will verify a storage proof under the assumption
+// that the pre-image of the storage key hashes to the provided keyHash.
+// Consequently, the Key of the proof is ignored in the validation.
+func VerifyStorageProofByHash(storageRoot libcommon.Hash, keyHash libcommon.Hash, proof accounts.StorProofResult) error {
 	pm, used, err := proofMap(proof.Proof)
 	if err != nil {
 		return fmt.Errorf("could not construct proofMap: %w", err)
 	}
-	value, err := verifyProof(storageRoot, storageKey, pm, used)
+	value, err := verifyProof(storageRoot, keyHash[:], pm, used)
 	if err != nil {
 		return fmt.Errorf("could not verify proof: %w", err)
 	}
