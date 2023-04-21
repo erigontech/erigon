@@ -9,6 +9,8 @@ import (
 	"github.com/google/btree"
 )
 
+var BlockBodyDownloadStates *States = NewStates(64*1024)
+
 type SnapshotItem struct {
 	id    uint64
 	state byte
