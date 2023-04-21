@@ -99,7 +99,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	downloader := network.NewForwardBeaconDownloader(ctx, beaconRpc)
 	bdownloader := network.NewBackwardBeaconDownloader(ctx, beaconRpc)
 
-	forkChoice, err := forkchoice.NewForkChoiceStore(cpState, nil)
+	forkChoice, err := forkchoice.NewForkChoiceStore(cpState, nil, true)
 	if err != nil {
 		log.Error("Could not start forkchoice service", "err", err)
 		return nil
