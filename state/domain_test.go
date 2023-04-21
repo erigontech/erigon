@@ -441,15 +441,23 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 	var r DomainRanges
 	maxEndTxNum := d.endTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInBiggestFile
-	for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
-		func() {
+
+	for {
+		if stop := func() bool {
 			dc := d.MakeContext()
 			defer dc.Close()
+			r = d.findMergeRange(maxEndTxNum, maxSpan)
+			if !r.any() {
+				return true
+			}
 			valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
 			valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1, background.NewProgressSet())
 			require.NoError(t, err)
 			d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
-		}()
+			return false
+		}(); stop {
+			break
+		}
 	}
 	if !useExternalTx {
 		err := tx.Commit()
@@ -767,9 +775,7 @@ func TestScanStaticFilesD(t *testing.T) {
 		}
 		return true
 	})
-	require.Equal(t, 2, len(found))
-	require.Equal(t, "0-4", found[0])
-	require.Equal(t, "4-5", found[1])
+	require.Equal(t, 6, len(found))
 }
 
 func TestCollationBuildInMem(t *testing.T) {

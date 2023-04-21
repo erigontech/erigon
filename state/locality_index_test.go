@@ -30,9 +30,11 @@ func TestLocality(t *testing.T) {
 	const Module uint64 = 31
 	path, db, ii, txs := filledInvIndexOfSize(t, 300, 4, Module)
 	mergeInverted(t, db, ii, txs)
+	ic := ii.MakeContext()
+	defer ic.Close()
 	li, _ := NewLocalityIndex(path, path, 4, "inv")
 	defer li.Close()
-	err := li.BuildMissedIndices(ctx, ii)
+	err := li.BuildMissedIndices(ctx, ic)
 	require.NoError(err)
 	t.Run("locality iterator", func(t *testing.T) {
 		ic := ii.MakeContext()
@@ -55,7 +57,7 @@ func TestLocality(t *testing.T) {
 		require.Equal(Module, binary.BigEndian.Uint64(last))
 	})
 
-	files, err := li.buildFiles(ctx, ii, ii.endTxNumMinimax()/ii.aggregationStep)
+	files, err := li.buildFiles(ctx, ic, ii.endTxNumMinimax()/ii.aggregationStep)
 	require.NoError(err)
 	defer files.Close()
 	t.Run("locality index: get full bitamp", func(t *testing.T) {

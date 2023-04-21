@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -226,7 +227,9 @@ func (ii *InvertedIndex) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan 
 		}()
 
 		ii.integrateMergedFiles(staticFiles, mergedIndex)
-		ii.cleanFrozenParts(mergedIndex)
+		if mergedIndex.frozen {
+			ii.cleanAfterFreeze(mergedIndex.endTxNum)
+		}
 	}
 	closeAll = false
 	return nil
@@ -336,6 +339,8 @@ func (dc *DomainContext) staticFilesInRange(r DomainRanges) (valuesFiles, indexF
 	}
 	return
 }
+
+// nolint
 func (d *Domain) staticFilesInRange(r DomainRanges, dc *DomainContext) (valuesFiles, indexFiles, historyFiles []*filesItem, startJ int) {
 	panic("deprecated: use DomainContext.staticFilesInRange")
 }
@@ -361,6 +366,8 @@ func (ic *InvertedIndexContext) staticFilesInRange(startTxNum, endTxNum uint64) 
 
 	return files, startJ
 }
+
+// nolint
 func (ii *InvertedIndex) staticFilesInRange(startTxNum, endTxNum uint64, ic *InvertedIndexContext) ([]*filesItem, int) {
 	panic("deprecated: use InvertedIndexContext.staticFilesInRange")
 }
@@ -418,6 +425,8 @@ func (hc *HistoryContext) staticFilesInRange(r HistoryRanges) (indexFiles, histo
 	}
 	return
 }
+
+// nolint
 func (h *History) staticFilesInRange(r HistoryRanges, hc *HistoryContext) (indexFiles, historyFiles []*filesItem, startJ int, err error) {
 	panic("deprecated: use HistoryContext.staticFilesInRange")
 }
@@ -608,8 +617,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		comp.Close()
 		comp = nil
 		ps.Delete(p)
-		frozen := (r.valuesEndTxNum-r.valuesStartTxNum)/d.aggregationStep == StepsInBiggestFile
-		valuesIn = &filesItem{startTxNum: r.valuesStartTxNum, endTxNum: r.valuesEndTxNum, frozen: frozen}
+		valuesIn = newFilesItem(r.valuesStartTxNum, r.valuesEndTxNum, d.aggregationStep)
 		if valuesIn.decompressor, err = compress.NewDecompressor(datPath); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
@@ -765,8 +773,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	}
 	comp.Close()
 	comp = nil
-	frozen := (endTxNum-startTxNum)/ii.aggregationStep == StepsInBiggestFile
-	outItem = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
+	outItem = newFilesItem(startTxNum, endTxNum, ii.aggregationStep)
 	if outItem.decompressor, err = compress.NewDecompressor(datPath); err != nil {
 		return nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", ii.filenameBase, startTxNum, endTxNum, err)
 	}
@@ -983,8 +990,10 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 		if index, err = recsplit.OpenIndex(idxPath); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", h.filenameBase, err)
 		}
-		frozen := (r.historyEndTxNum-r.historyStartTxNum)/h.aggregationStep == StepsInBiggestFile
-		historyIn = &filesItem{startTxNum: r.historyStartTxNum, endTxNum: r.historyEndTxNum, decompressor: decomp, index: index, frozen: frozen}
+		historyIn = newFilesItem(r.historyStartTxNum, r.historyEndTxNum, h.aggregationStep)
+		historyIn.decompressor = decomp
+		historyIn.index = index
+
 		closeItem = false
 	}
 
@@ -1079,8 +1088,44 @@ func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, inde
 	h.reCalcRoFiles()
 }
 
-func (d *Domain) cleanAfterFreeze(f *filesItem) {
-	if f == nil || !f.frozen {
+// nolint
+func (dc *DomainContext) frozenTo() uint64 {
+	if len(dc.files) == 0 {
+		return 0
+	}
+	for i := len(dc.files) - 1; i >= 0; i-- {
+		if dc.files[i].src.frozen {
+			return cmp.Min(dc.files[i].endTxNum, dc.hc.frozenTo())
+		}
+	}
+	return 0
+}
+
+func (hc *HistoryContext) frozenTo() uint64 {
+	if len(hc.files) == 0 {
+		return 0
+	}
+	for i := len(hc.files) - 1; i >= 0; i-- {
+		if hc.files[i].src.frozen {
+			return cmp.Min(hc.files[i].endTxNum, hc.ic.frozenTo())
+		}
+	}
+	return 0
+}
+func (ic *InvertedIndexContext) frozenTo() uint64 {
+	if len(ic.files) == 0 {
+		return 0
+	}
+	for i := len(ic.files) - 1; i >= 0; i-- {
+		if ic.files[i].src.frozen {
+			return ic.files[i].endTxNum
+		}
+	}
+	return 0
+}
+
+func (d *Domain) cleanAfterFreeze(frozenTo uint64) {
+	if frozenTo == 0 {
 		return
 	}
 
@@ -1089,7 +1134,7 @@ func (d *Domain) cleanAfterFreeze(f *filesItem) {
 	// but it may be useful for merges, until merge `frozen` file
 	d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			if item.frozen || item.endTxNum > f.endTxNum {
+			if item.frozen || item.endTxNum > frozenTo {
 				continue
 			}
 			outs = append(outs, item)
@@ -1102,14 +1147,18 @@ func (d *Domain) cleanAfterFreeze(f *filesItem) {
 			panic("must not happen: " + d.filenameBase)
 		}
 		d.files.Delete(out)
+		if out.refcount.Load() == 0 {
+			// if it has no readers (invisible even for us) - it's safe to remove file right here
+			out.closeFilesAndRemove()
+		}
 		out.canDelete.Store(true)
 	}
-	d.History.cleanFrozenParts(f)
+	d.History.cleanAfterFreeze(frozenTo)
 }
 
-// cleanFrozenParts - mark all small files before `f` as `canDelete=true`
-func (h *History) cleanFrozenParts(f *filesItem) {
-	if f == nil || !f.frozen {
+// cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
+func (h *History) cleanAfterFreeze(frozenTo uint64) {
+	if frozenTo == 0 {
 		return
 	}
 	var outs []*filesItem
@@ -1117,7 +1166,7 @@ func (h *History) cleanFrozenParts(f *filesItem) {
 	// but it may be useful for merges, until merge `frozen` file
 	h.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			if item.frozen || item.endTxNum > f.endTxNum {
+			if item.frozen || item.endTxNum > frozenTo {
 				continue
 			}
 			outs = append(outs, item)
@@ -1129,15 +1178,20 @@ func (h *History) cleanFrozenParts(f *filesItem) {
 		if out == nil {
 			panic("must not happen: " + h.filenameBase)
 		}
-		h.files.Delete(out)
 		out.canDelete.Store(true)
+
+		// if it has no readers (invisible even for us) - it's safe to remove file right here
+		if out.refcount.Load() == 0 {
+			out.closeFilesAndRemove()
+		}
+		h.files.Delete(out)
 	}
-	h.InvertedIndex.cleanFrozenParts(f)
+	h.InvertedIndex.cleanAfterFreeze(frozenTo)
 }
 
-// cleanFrozenParts - mark all small files before `f` as `canDelete=true`
-func (ii *InvertedIndex) cleanFrozenParts(f *filesItem) {
-	if f == nil || !f.frozen {
+// cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
+func (ii *InvertedIndex) cleanAfterFreeze(frozenTo uint64) {
+	if frozenTo == 0 {
 		return
 	}
 	var outs []*filesItem
@@ -1145,7 +1199,7 @@ func (ii *InvertedIndex) cleanFrozenParts(f *filesItem) {
 	// but it may be useful for merges, until merge `frozen` file
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			if item.frozen || item.endTxNum > f.endTxNum {
+			if item.frozen || item.endTxNum > frozenTo {
 				continue
 			}
 			outs = append(outs, item)
@@ -1157,7 +1211,61 @@ func (ii *InvertedIndex) cleanFrozenParts(f *filesItem) {
 		if out == nil {
 			panic("must not happen: " + ii.filenameBase)
 		}
-		ii.files.Delete(out)
 		out.canDelete.Store(true)
+		if out.refcount.Load() == 0 {
+			// if it has no readers (invisible even for us) - it's safe to remove file right here
+			out.closeFilesAndRemove()
+		}
+		ii.files.Delete(out)
 	}
+}
+
+// nolint
+func (d *Domain) deleteGarbageFiles() {
+	for _, item := range d.garbageFiles {
+		// paranoic-mode: don't delete frozen files
+		steps := item.endTxNum/d.aggregationStep - item.startTxNum/d.aggregationStep
+		if steps%StepsInBiggestFile == 0 {
+			continue
+		}
+		f1 := fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep)
+		os.Remove(filepath.Join(d.dir, f1))
+		log.Debug("[snapshots] delete garbage", f1)
+		f2 := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep)
+		os.Remove(filepath.Join(d.dir, f2))
+		log.Debug("[snapshots] delete garbage", f2)
+	}
+	d.garbageFiles = nil
+	d.History.deleteGarbageFiles()
+}
+func (h *History) deleteGarbageFiles() {
+	for _, item := range h.garbageFiles {
+		// paranoic-mode: don't delete frozen files
+		if item.endTxNum/h.aggregationStep-item.startTxNum/h.aggregationStep == StepsInBiggestFile {
+			continue
+		}
+		f1 := fmt.Sprintf("%s.%d-%d.v", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
+		os.Remove(filepath.Join(h.dir, f1))
+		log.Debug("[snapshots] delete garbage", f1)
+		f2 := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
+		os.Remove(filepath.Join(h.dir, f2))
+		log.Debug("[snapshots] delete garbage", f2)
+	}
+	h.garbageFiles = nil
+	h.InvertedIndex.deleteGarbageFiles()
+}
+func (ii *InvertedIndex) deleteGarbageFiles() {
+	for _, item := range ii.garbageFiles {
+		// paranoic-mode: don't delete frozen files
+		if item.endTxNum/ii.aggregationStep-item.startTxNum/ii.aggregationStep == StepsInBiggestFile {
+			continue
+		}
+		f1 := fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+		os.Remove(filepath.Join(ii.dir, f1))
+		log.Debug("[snapshots] delete garbage", f1)
+		f2 := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
+		os.Remove(filepath.Join(ii.dir, f2))
+		log.Debug("[snapshots] delete garbage", f2)
+	}
+	ii.garbageFiles = nil
 }
