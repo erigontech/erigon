@@ -65,6 +65,13 @@ type filesItem struct {
 	canDelete atomic.Bool
 }
 
+func newFilesItem(startTxNum, endTxNum uint64, stepSize uint64) *filesItem {
+	startStep := startTxNum / stepSize
+	endStep := endTxNum / stepSize
+	frozen := endStep-startStep == StepsInBiggestFile
+	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
+}
+
 func (i *filesItem) isSubsetOf(j *filesItem) bool {
 	return (j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum) && (j.startTxNum != i.startTxNum || i.endTxNum != j.endTxNum)
 }
@@ -80,8 +87,11 @@ func (i *filesItem) closeFilesAndRemove() {
 		if err := i.decompressor.Close(); err != nil {
 			log.Trace("close", "err", err, "file", i.decompressor.FileName())
 		}
-		if err := os.Remove(i.decompressor.FilePath()); err != nil {
-			log.Trace("close", "err", err, "file", i.decompressor.FileName())
+		// paranoic-mode on: don't delete frozen files
+		if !i.frozen {
+			if err := os.Remove(i.decompressor.FilePath()); err != nil {
+				log.Trace("close", "err", err, "file", i.decompressor.FileName())
+			}
 		}
 		i.decompressor = nil
 	}
@@ -89,8 +99,11 @@ func (i *filesItem) closeFilesAndRemove() {
 		if err := i.index.Close(); err != nil {
 			log.Trace("close", "err", err, "file", i.index.FileName())
 		}
-		if err := os.Remove(i.index.FilePath()); err != nil {
-			log.Trace("close", "err", err, "file", i.index.FileName())
+		// paranoic-mode on: don't delete frozen files
+		if !i.frozen {
+			if err := os.Remove(i.index.FilePath()); err != nil {
+				log.Trace("close", "err", err, "file", i.index.FileName())
+			}
 		}
 		i.index = nil
 	}
@@ -144,6 +157,8 @@ type Domain struct {
 	valsTable   string // key + invertedStep -> values
 	stats       DomainStats
 	mergesCount uint64
+
+	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 }
 
 func NewDomain(dir, tmpdir string, aggregationStep uint64,
@@ -188,7 +203,7 @@ func (d *Domain) OpenList(fNames []string) error {
 
 func (d *Domain) openList(fNames []string) error {
 	d.closeWhatNotInList(fNames)
-	_ = d.scanStateFiles(fNames)
+	d.garbageFiles = d.scanStateFiles(fNames)
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("History.OpenList: %s, %w", d.filenameBase, err)
 	}
@@ -211,9 +226,10 @@ func (d *Domain) GetAndResetStats() DomainStats {
 	return r
 }
 
-func (d *Domain) scanStateFiles(fileNames []string) (uselessFiles []string) {
+func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
 	var err error
+Loop:
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 3 {
@@ -237,42 +253,45 @@ func (d *Domain) scanStateFiles(fileNames []string) (uselessFiles []string) {
 		}
 
 		startTxNum, endTxNum := startStep*d.aggregationStep, endStep*d.aggregationStep
-		var newFile = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: endStep-startStep == StepsInBiggestFile}
+		var newFile = newFilesItem(startTxNum, endTxNum, d.aggregationStep)
+
+		for _, ext := range d.integrityFileExtensions {
+			requiredFile := fmt.Sprintf("%s.%d-%d.%s", d.filenameBase, startStep, endStep, ext)
+			if !dir.FileExist(filepath.Join(d.dir, requiredFile)) {
+				log.Debug(fmt.Sprintf("[snapshots] skip %s because %s doesn't exists", name, requiredFile))
+				garbageFiles = append(garbageFiles, newFile)
+				continue Loop
+			}
+		}
+
 		if _, has := d.files.Get(newFile); has {
 			continue
 		}
 
-		{
-			var subSets []*filesItem
-			var superSet *filesItem
-			d.files.Walk(func(items []*filesItem) bool {
-				for _, item := range items {
-					if item.isSubsetOf(newFile) {
-						subSets = append(subSets, item)
-					} else if newFile.isSubsetOf(item) {
-						superSet = item
-					}
+		addNewFile := true
+		var subSets []*filesItem
+		d.files.Walk(func(items []*filesItem) bool {
+			for _, item := range items {
+				if item.isSubsetOf(newFile) {
+					subSets = append(subSets, item)
+					continue
 				}
-				return true
-			})
-			for _, subSet := range subSets {
-				d.files.Delete(subSet)
-				uselessFiles = append(uselessFiles,
-					fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, subSet.startTxNum/d.aggregationStep, subSet.endTxNum/d.aggregationStep),
-					fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, subSet.startTxNum/d.aggregationStep, subSet.endTxNum/d.aggregationStep),
-				)
+
+				if newFile.isSubsetOf(item) {
+					if item.frozen {
+						addNewFile = false
+						garbageFiles = append(garbageFiles, newFile)
+					}
+					continue
+				}
 			}
-			if superSet != nil {
-				uselessFiles = append(uselessFiles,
-					fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, startStep, endStep),
-					fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, startStep, endStep),
-				)
-				continue
-			}
+			return true
+		})
+		if addNewFile {
+			d.files.Set(newFile)
 		}
-		d.files.Set(newFile)
 	}
-	return uselessFiles
+	return garbageFiles
 }
 
 func (d *Domain) openFiles() (err error) {
@@ -1233,14 +1252,13 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 		efHistoryDecomp: sf.efHistoryDecomp,
 		efHistoryIdx:    sf.efHistoryIdx,
 	}, txNumFrom, txNumTo)
-	d.files.Set(&filesItem{
-		frozen:       (txNumTo-txNumFrom)/d.aggregationStep == StepsInBiggestFile,
-		startTxNum:   txNumFrom,
-		endTxNum:     txNumTo,
-		decompressor: sf.valuesDecomp,
-		index:        sf.valuesIdx,
-		bindex:       sf.valuesBt,
-	})
+
+	fi := newFilesItem(txNumFrom, txNumTo, d.aggregationStep)
+	fi.decompressor = sf.valuesDecomp
+	fi.index = sf.valuesIdx
+	fi.bindex = sf.valuesBt
+	d.files.Set(fi)
+
 	d.reCalcRoFiles()
 }
 

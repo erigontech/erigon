@@ -391,20 +391,28 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 
 	maxSpan := h.aggregationStep * StepsInBiggestFile
 
-	for r = h.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = h.findMergeRange(maxEndTxNum, maxSpan) {
-		func() {
+	for {
+		if stop := func() bool {
 			hc := h.MakeContext()
 			defer hc.Close()
-
+			r = h.findMergeRange(maxEndTxNum, maxSpan)
+			if !r.any() {
+				return true
+			}
 			indexOuts, historyOuts, _, err := hc.staticFilesInRange(r)
 			require.NoError(err)
 			indexIn, historyIn, err := h.mergeFiles(ctx, indexOuts, historyOuts, r, 1, background.NewProgressSet())
 			require.NoError(err)
 			h.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
-		}()
+			return false
+		}(); stop {
+			break
+		}
 	}
 
-	err = h.BuildOptionalMissedIndices(ctx)
+	hc := h.MakeContext()
+	defer hc.Close()
+	err = hc.BuildOptionalMissedIndices(ctx)
 	require.NoError(err)
 
 	err = tx.Commit()

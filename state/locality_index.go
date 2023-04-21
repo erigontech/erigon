@@ -130,10 +130,12 @@ func (li *LocalityIndex) scanStateFiles(fNames []string) (uselessFiles []*filesI
 
 		startTxNum, endTxNum := startStep*li.aggregationStep, endStep*li.aggregationStep
 		if li.file == nil {
-			li.file = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: false}
+			li.file = newFilesItem(startTxNum, endTxNum, li.aggregationStep)
+			li.file.frozen = false // LocalityIndex files are never frozen
 		} else if li.file.endTxNum < endTxNum {
 			uselessFiles = append(uselessFiles, li.file)
-			li.file = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: false}
+			li.file = newFilesItem(startTxNum, endTxNum, li.aggregationStep)
+			li.file.frozen = false // LocalityIndex files are never frozen
 		}
 	}
 	return uselessFiles
@@ -267,42 +269,35 @@ func (li *LocalityIndex) lookupIdxFiles(loc *ctxLocalityIdx, key []byte, fromTxN
 	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, loc.file.endTxNum, ok1, ok2
 }
 
-func (li *LocalityIndex) missedIdxFiles(ii *InvertedIndex) (toStep uint64, idxExists bool) {
-	a, _ := ii.files.Max()
-	if a == nil {
-		a = &filesItem{}
+func (li *LocalityIndex) missedIdxFiles(ii *InvertedIndexContext) (toStep uint64, idxExists bool) {
+	if len(ii.files) == 0 {
+		return 0, true
 	}
-	ii.files.Descend(a, func(item *filesItem) bool {
-		if item.endTxNum-item.startTxNum == StepsInBiggestFile*li.aggregationStep {
-			toStep = item.endTxNum / li.aggregationStep
-			return false
+	var item *ctxItem
+	for i := len(ii.files) - 1; i >= 0; i-- {
+		if ii.files[i].src.frozen {
+			item = &ii.files[i]
+			break
 		}
-		return true
-	})
+	}
+	if item != nil {
+		toStep = item.endTxNum / li.aggregationStep
+	}
 	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, 0, toStep)
 	return toStep, dir.FileExist(filepath.Join(li.dir, fName))
 }
-func (li *LocalityIndex) buildFiles(ctx context.Context, ii *InvertedIndex, toStep uint64) (files *LocalityIndexFiles, err error) {
-	defer ii.EnableMadvNormalReadAhead().DisableReadAhead()
+func (li *LocalityIndex) buildFiles(ctx context.Context, ic *InvertedIndexContext, toStep uint64) (files *LocalityIndexFiles, err error) {
+	defer ic.ii.EnableMadvNormalReadAhead().DisableReadAhead()
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
 	fromStep := uint64(0)
-	ic := ii.MakeContext()
-	defer ic.Close()
 	count := 0
 	it := ic.iterateKeysLocality(toStep * li.aggregationStep)
 	for it.HasNext() {
 		_, _ = it.Next()
 		count++
-		//select {
-		//case <-ctx.Done():
-		//	return nil, ctx.Err()
-		//case <-logEvery.C:
-		//	log.Info("[LocalityIndex] build", "name", li.filenameBase, "progress", fmt.Sprintf("%.2f%%", it.Progress()/2))
-		//default:
-		//}
 	}
 
 	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep)
@@ -392,7 +387,7 @@ func (li *LocalityIndex) integrateFiles(sf LocalityIndexFiles, txNumFrom, txNumT
 	li.reCalcRoFiles()
 }
 
-func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, ii *InvertedIndex) error {
+func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, ii *InvertedIndexContext) error {
 	if li == nil {
 		return nil
 	}
@@ -505,26 +500,4 @@ func (ic *InvertedIndexContext) iterateKeysLocality(uptoTxNum uint64) *LocalityI
 	}
 	si.advance()
 	return si
-}
-
-func (li *LocalityIndex) CleanupDir() {
-	if li == nil || li.dir == "" {
-		return
-	}
-	/*
-		files, err := os.ReadDir(li.dir)
-		if err != nil {
-			log.Warn("[clean] can't read dir", "err", err, "dir", li.dir)
-			return
-		}
-		uselessFiles := li.scanStateFiles(files)
-		for _, f := range uselessFiles {
-			fName := fmt.Sprintf("%s.%d-%d.l", li.filenameBase, f.startTxNum/li.aggregationStep, f.endTxNum/li.aggregationStep)
-			err = os.Remove(filepath.Join(li.dir, fName))
-			log.Debug("[clean] remove", "file", fName, "err", err)
-			fIdxName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, f.startTxNum/li.aggregationStep, f.endTxNum/li.aggregationStep)
-			err = os.Remove(filepath.Join(li.dir, fIdxName))
-			log.Debug("[clean] remove", "file", fName, "err", err)
-		}
-	*/
 }
