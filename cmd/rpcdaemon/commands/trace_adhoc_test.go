@@ -89,7 +89,7 @@ func TestReplayTransaction(t *testing.T) {
 	}
 
 	// Call GetTransactionReceipt for transaction which is not in the database
-	results, err := api.ReplayTransaction(context.Background(), txnHash, []string{"stateDiff"})
+	results, err := api.ReplayTransaction(context.Background(), txnHash, []string{"stateDiff"}, new(bool))
 	if err != nil {
 		t.Errorf("calling ReplayTransaction: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestReplayBlockTransactions(t *testing.T) {
 
 	// Call GetTransactionReceipt for transaction which is not in the database
 	n := rpc.BlockNumber(6)
-	results, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"stateDiff"})
+	results, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"stateDiff"}, new(bool))
 	if err != nil {
 		t.Errorf("calling ReplayBlockTransactions: %v", err)
 	}

@@ -702,7 +702,10 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) {
 	}
 }
 
-func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon.Hash, traceTypes []string) (*TraceCallResult, error) {
+func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon.Hash, traceTypes []string, gasBailOut *bool) (*TraceCallResult, error) {
+	if gasBailOut == nil {
+		gasBailOut = new(bool) // false by default
+	}
 	tx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -747,7 +750,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block, traceTypes, int(txnIndex), types.MakeSigner(chainConfig, blockNum), chainConfig)
+	traces, err := api.callManyTransactions(ctx, tx, block, traceTypes, int(txnIndex), *gasBailOut, types.MakeSigner(chainConfig, blockNum), chainConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -787,7 +790,10 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 	return result, nil
 }
 
-func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string, gasBailOut *bool) ([]*TraceCallResult, error) {
+	if gasBailOut == nil {
+		gasBailOut = new(bool) // false by default
+	}
 	tx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -826,7 +832,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block, traceTypes, -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNumber), chainConfig)
+	traces, err := api.callManyTransactions(ctx, tx, block, traceTypes, -1 /* all tx indices */, *gasBailOut, types.MakeSigner(chainConfig, blockNumber), chainConfig)
 	if err != nil {
 		return nil, err
 	}

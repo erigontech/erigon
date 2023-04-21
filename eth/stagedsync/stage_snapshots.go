@@ -165,6 +165,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if cfg.historyV3 {
+		cfg.agg.CleanDir()
+
 		indexWorkers := estimate.IndexSnapshot.Workers()
 		if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 			return err
