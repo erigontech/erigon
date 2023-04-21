@@ -130,9 +130,6 @@ func (ii *InvertedIndex) OpenList(fNames []string) error {
 	}
 	ii.closeWhatNotInList(fNames)
 	ii.garbageFiles = ii.scanStateFiles(fNames)
-	for _, f := range ii.garbageFiles {
-		log.Warn("Garbage file", "f", fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, f.startTxNum/ii.aggregationStep, f.endTxNum/ii.aggregationStep))
-	}
 	if err := ii.openFiles(); err != nil {
 		return fmt.Errorf("NewHistory.openFiles: %s, %w", ii.filenameBase, err)
 	}
