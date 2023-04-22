@@ -789,7 +789,6 @@ func TestCollationBuildInMem(t *testing.T) {
 	var preval1, preval2, preval3 []byte
 	maxTx := uint64(10000)
 	d.aggregationStep = maxTx
-	d.topVals = make(map[string][]byte)
 
 	dctx := d.MakeContext()
 	defer dctx.Close()

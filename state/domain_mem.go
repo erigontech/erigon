@@ -86,8 +86,8 @@ type SharedDomains struct {
 func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 	sd := &SharedDomains{
 		Account:    a,
-		Storage:    s,
 		Code:       c,
+		Storage:    s,
 		Commitment: comm,
 	}
 	sd.Commitment.ResetFns(sd.BranchFn, sd.AccountFn, sd.StorageFn)
@@ -145,12 +145,11 @@ func (sd *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error
 	}
 	cell.Nonce = 0
 	cell.Balance.Clear()
-	copy(cell.CodeHash[:], commitment.EmptyCodeHash)
 	if len(encAccount) > 0 {
 		nonce, balance, chash := DecodeAccountBytes(encAccount)
 		cell.Nonce = nonce
 		cell.Balance.Set(balance)
-		if chash != nil {
+		if len(chash) > 0 {
 			copy(cell.CodeHash[:], chash)
 		}
 	}
@@ -159,10 +158,12 @@ func (sd *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error
 	if err != nil {
 		return fmt.Errorf("accountFn: failed to read latest code: %w", err)
 	}
-	if code != nil {
+	if len(code) > 0 {
 		sd.Commitment.updates.keccak.Reset()
 		sd.Commitment.updates.keccak.Write(code)
 		copy(cell.CodeHash[:], sd.Commitment.updates.keccak.Sum(nil))
+	} else {
+		copy(cell.CodeHash[:], commitment.EmptyCodeHash)
 	}
 	cell.Delete = len(encAccount) == 0 && len(code) == 0
 	return nil
@@ -188,9 +189,11 @@ func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []b
 
 func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, prevCode []byte) error {
 	sd.Commitment.TouchPlainKey(addr, code, sd.Commitment.TouchCode)
+	prevCode, _ = sd.Code.wal.topValue(addr)
 	if len(code) == 0 {
 		return sd.Code.DeleteWithPrev(addr, nil, prevCode)
 	}
+
 	return sd.Code.PutWithPrev(addr, nil, code, prevCode)
 }
 
@@ -211,11 +214,14 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	}
 
 	var e error
-	//sd.Commitment.updates.UpdatePrefix(addr, nil, sd.Commitment.TouchStorage)
+	sd.Commitment.updates.UpdatePrefix(addr, nil, sd.Commitment.TouchStorage)
 	if err := sd.Storage.defaultDc.IteratePrefix(addr, func(k, v []byte) {
-		sd.Commitment.TouchPlainKey(addr, nil, sd.Commitment.TouchStorage)
+		if !bytes.HasPrefix(k, addr) {
+			return
+		}
+		sd.Commitment.TouchPlainKey(k, nil, sd.Commitment.TouchStorage)
 		if e == nil {
-			e = sd.Storage.DeleteWithPrev(k, nil, v)
+			e = sd.Storage.Delete(k, nil)
 		}
 	}); err != nil {
 		return err

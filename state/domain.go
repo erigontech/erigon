@@ -143,13 +143,10 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 // Domain should not have any go routines or locks
 type Domain struct {
 	*History
-	//keyTxNums *btree2.BTreeG[uint64]
 	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
 	roFiles   atomic.Pointer[[]ctxItem]
-	topLock   sync.RWMutex
-	topVals   map[string][]byte
 	defaultDc *DomainContext
 	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
 	valsTable string // key + invertedStep -> values
@@ -163,7 +160,6 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	d := &Domain{
 		keysTable: keysTable,
 		valsTable: valsTable,
-		topVals:   make(map[string][]byte),
 		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:     DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 	}
@@ -405,28 +401,7 @@ func (d *Domain) PutWithPrev(key1, key2, val, preval []byte) error {
 	if err := d.History.AddPrevValue(key1, key2, preval); err != nil {
 		return err
 	}
-
-	fullkey := common.Append(key1, key2, make([]byte, 8))
-	kl := len(key1) + len(key2)
-	istep := ^(d.txNum / d.aggregationStep)
-	binary.BigEndian.PutUint64(fullkey[kl:], istep)
-
-	switch d.topVals {
-	case nil:
-		if err := d.tx.Put(d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
-			return err
-		}
-		if err := d.tx.Put(d.valsTable, fullkey, val); err != nil {
-			return err
-		}
-	default:
-		d.topLock.Lock()
-		d.topVals[hex.EncodeToString(fullkey[:kl])] = val
-		d.topLock.Unlock()
-		return d.wal.addValue(key1, key2, val, fullkey[kl:])
-	}
-
-	return nil
+	return d.wal.addValue(key1, key2, val)
 }
 
 func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) (err error) {
@@ -435,39 +410,7 @@ func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 		return err
 	}
 
-	k := common.Append(key1, key2)
-	switch d.topVals {
-	case nil:
-		istep, err := d.tx.GetOne(d.keysTable, k)
-		if err != nil {
-			return err
-		}
-		err = d.tx.Delete(d.keysTable, k)
-		if err = d.tx.Delete(d.valsTable, common.Append(k, istep)); err != nil {
-			return err
-		}
-	//if d.valsTable == kv.StorageDomain {
-	//	if strings.HasPrefix(hex.EncodeToString(k), "0b1ba0af832d7c05fd64161e0db78e85978e8082") {
-	//		fmt.Printf("PutWithPrev: %s %s %q -> %q\n", hex.EncodeToString(key1), hex.EncodeToString(key2), hex.EncodeToString(prev), []byte{})
-	//	}
-	//}
-	default:
-		d.topLock.Lock()
-		delete(d.topVals, hex.EncodeToString(k))
-		d.topLock.Unlock()
-
-		var invertedStep [8]byte
-		istep := ^(d.txNum / d.aggregationStep)
-		binary.BigEndian.PutUint64(invertedStep[:], istep)
-
-		return d.wal.addValue(key1, key2, nil, invertedStep[:])
-	}
-
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return d.wal.addValue(key1, key2, nil)
 }
 
 func (d *Domain) update(key, original []byte) error {
@@ -535,11 +478,12 @@ type domainWAL struct {
 	d           *Domain
 	keys        *etl.Collector
 	values      *etl.Collector
-	tmpdir      string
+	topLock     sync.RWMutex
+	topVals     map[string][]byte
 	key         []byte
+	tmpdir      string
 	buffered    bool
 	discard     bool
-	topTx       map[string]uint64
 	largeValues bool
 }
 
@@ -549,7 +493,7 @@ func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 		buffered:    buffered,
 		discard:     discard,
 		key:         make([]byte, 0, 128),
-		topTx:       make(map[string]uint64, 100),
+		topVals:     make(map[string][]byte),
 		largeValues: d.largeValues,
 	}
 	if buffered {
@@ -595,7 +539,14 @@ func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (h *domainWAL) addValue(key1, key2, value []byte, step []byte) error {
+func (h *domainWAL) topValue(key []byte) ([]byte, bool) {
+	h.topLock.RLock()
+	v, ok := h.topVals[hex.EncodeToString(key)]
+	h.topLock.RUnlock()
+	return v, ok
+}
+
+func (h *domainWAL) addValue(key1, key2, value []byte) error {
 	if h.discard {
 		return nil
 	}
@@ -604,9 +555,18 @@ func (h *domainWAL) addValue(key1, key2, value []byte, step []byte) error {
 	fullkey := h.key[:kl+8]
 	copy(fullkey, key1)
 	copy(fullkey[len(key1):], key2)
-	//step := ^(txnum / h.d.aggregationStep)
-	//binary.BigEndian.PutUint64(fullkey[kl:], step)
-	copy(fullkey[kl:], step)
+
+	step := ^(h.d.txNum / h.d.aggregationStep)
+	binary.BigEndian.PutUint64(fullkey[kl:], step)
+
+	h.topLock.Lock()
+	switch {
+	case len(value) > 0:
+		h.topVals[hex.EncodeToString(fullkey[:kl])] = value
+	default:
+		delete(h.topVals, hex.EncodeToString(fullkey[:kl]))
+	}
+	h.topLock.Unlock()
 
 	if h.largeValues {
 		if !h.buffered {
@@ -1607,6 +1567,17 @@ func (dc *DomainContext) Close() {
 	dc.hc.Close()
 }
 
+func (h *domainWAL) apply(fn func(k, v []byte) error) error {
+	h.topLock.RLock()
+	for k, v := range h.topVals {
+		if err := fn([]byte(k), v); err != nil {
+			return err
+		}
+	}
+	h.topLock.RUnlock()
+	return nil
+}
+
 // IteratePrefix iterates over key-value pairs of the domain that start with given prefix
 // Such iteration is not intended to be used in public API, therefore it uses read-write transaction
 // inside the domain. Another version of this for public API use needs to be created, that uses
@@ -1614,14 +1585,16 @@ func (dc *DomainContext) Close() {
 func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
 	dc.d.stats.FilesQueries.Add(1)
 
-	if dc.d.topVals != nil {
-		dc.d.topLock.Lock()
-		for k, v := range dc.d.topVals {
-			if bytes.HasPrefix([]byte(k), prefix) {
-				it([]byte(k), v)
+	if dc.d.wal != nil {
+		fn := func(k, v []byte) error {
+			if bytes.HasPrefix(k, prefix) {
+				it(k, v)
 			}
+			return nil
 		}
-		dc.d.topLock.Unlock()
+		if err := dc.d.wal.apply(fn); err != nil {
+			return err
+		}
 	}
 
 	var cp CursorHeap
@@ -1787,11 +1760,11 @@ func (d *Domain) Rotate() flusher {
 func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
 	dc.d.stats.TotalQueries.Add(1)
 
-	dc.d.topLock.RLock()
-	v0, ok := dc.d.topVals[hex.EncodeToString(key)]
-	dc.d.topLock.RUnlock()
-	if ok {
-		return v0, true, nil
+	if dc.d.wal != nil {
+		v0, ok := dc.d.wal.topValue(key)
+		if ok {
+			return v0, true, nil
+		}
 	}
 
 	return dc.get(key, dc.d.txNum, roTx)
@@ -1809,6 +1782,13 @@ func (dc *DomainContext) Get(key1, key2 []byte, roTx kv.Tx) ([]byte, error) {
 func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
 	copy(dc.keyBuf[:], key1)
 	copy(dc.keyBuf[len(key1):], key2)
+	var v []byte
+	if _, ok := lookup[fmt.Sprintf("%x", key1)]; ok {
+		defer func() {
+			log.Info("read", "d", dc.d.valsTable, "key", fmt.Sprintf("%x", key1), "v", fmt.Sprintf("%x", v))
+		}()
+	}
+	v, b, err := dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
+	return v, b, err
 	//return dc.get((dc.keyBuf[:len(key1)+len(key2)]), dc.d.txNum, roTx)
-	return dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
 }

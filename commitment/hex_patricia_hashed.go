@@ -1285,7 +1285,7 @@ func (hph *HexPatriciaHashed) ReviewKeys(plainKeys, hashedKeys [][]byte) (rootHa
 				cell.setAccountFields(stagedCell.CodeHash[:], &stagedCell.Balance, stagedCell.Nonce)
 
 				if hph.trace {
-					fmt.Printf("accountFn reading key %x => balance=%v nonce=%v codeHash=%x\n", cell.apk, cell.Balance.Uint64(), cell.Nonce, cell.CodeHash)
+					fmt.Printf("accountFn update key %x => balance=%v nonce=%v codeHash=%x\n", cell.apk, cell.Balance.Uint64(), cell.Nonce, cell.CodeHash)
 				}
 			}
 		} else {
@@ -1746,7 +1746,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 		if update.Flags == DeleteUpdate {
 			hph.deleteCell(hashedKey)
 			if hph.trace {
-				fmt.Printf("key %x deleted\n", plainKey)
+				fmt.Printf("delete cell %x hash %x\n", plainKey, hashedKey)
 			}
 		} else {
 			cell := hph.updateCell(plainKey, hashedKey)
