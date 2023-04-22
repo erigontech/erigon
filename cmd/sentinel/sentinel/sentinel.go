@@ -183,7 +183,7 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 		pubsub.WithMessageIdFn(s.msgId),
 		pubsub.WithNoAuthor(),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
-		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSize)),
+		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSizeBellatrix)),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
 	}
