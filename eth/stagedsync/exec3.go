@@ -210,9 +210,9 @@ func ExecV3(ctx context.Context,
 	////writer := state.NewMultiStateWriter(state.NewWrappedStateWriterV4(applyTx.(kv.TemporalTx)), ssw)
 
 	//rs := state.NewStateV3(cfg.dirs.Tmp, nil)
-	reader := state.NewWrappedStateReaderV4(applyTx.(kv.TemporalTx))
-	writer := state.NewWrappedStateWriterV4(applyTx.(kv.TemporalTx))
-	rs.SetIO(reader, writer)
+	//reader := state.NewWrappedStateReaderV4(applyTx.(kv.TemporalTx))
+	//writer := state.NewWrappedStateWriterV4(applyTx.(kv.TemporalTx))
+	//rs.SetIO(reader, writer)
 	//TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
 	// Maybe need split channels? Maybe don't exit from ApplyLoop? Maybe current way is also ok?
