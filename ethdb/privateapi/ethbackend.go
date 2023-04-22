@@ -42,7 +42,7 @@ import (
 // 2.2.0 - add NodesInfo function
 // 3.0.0 - adding PoS interfaces
 // 3.1.0 - add Subscribe to logs
-// 3.2.0 - add EngineGetBlobsBundleV1
+// 3.2.0 - add EngineGetPayloadWithBlobs
 var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 2, Patch: 0}
 
 const MaxBuilders = 128
@@ -536,88 +536,8 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 	return blockValue
 }
 
-// GetBlobsBundleV1 returns a bundle of all blobs and their corresponding KZG commitments by payload id
-func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
-	if !s.proposing {
-		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
-	}
-
-	if s.config.TerminalTotalDifficulty == nil {
-		return nil, fmt.Errorf("not a proof-of-stake chain")
-	}
-
-	log.Debug("[GetBlobsBundleV1] acquiring lock")
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	log.Debug("[GetBlobsBundleV1] lock acquired")
-
-	builder, ok := s.builders[req.PayloadId]
-	if !ok {
-		log.Warn("Payload not stored", "payloadId", req.PayloadId)
-		return nil, &UnknownPayloadErr
-	}
-
-	block, err := builder.Stop()
-	if err != nil {
-		log.Error("Failed to build PoS block", "err", err)
-		return nil, err
-	}
-
-	blobsBundle := &types2.BlobsBundleV1{
-		BlockHash: gointerfaces.ConvertHashToH256(block.Block.Header().Hash()),
-	}
-	for i, tx := range block.Block.Transactions() {
-		if tx.Type() != types.BlobTxType {
-			continue
-		}
-		blobtx, ok := tx.(*types.BlobTxWrapper)
-		if !ok {
-			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobtx)
-		}
-		versionedHashes, kzgs, blobs, proofs := blobtx.GetDataHashes(), blobtx.BlobKzgs, blobtx.Blobs, blobtx.Proofs
-		lenCheck := len(versionedHashes)
-		if lenCheck != len(kzgs) || lenCheck != len(blobs) || lenCheck != len(blobtx.Proofs) {
-			return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d) / proofs (%d)"+
-				" / versioned hashes (%d)", i, block.Block.Hash(), len(blobs), len(kzgs), len(proofs), lenCheck)
-		}
-		for _, blob := range blobs {
-			blobsBundle.Blobs = append(blobsBundle.Blobs, blob[:])
-		}
-		for _, kzg := range kzgs {
-			blobsBundle.Kzgs = append(blobsBundle.Kzgs, kzg[:])
-		}
-	}
-	return blobsBundle, nil
-}
-
-// EngineGetPayload retrieves previously assembled payload (Validators only)
-func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.EngineGetPayloadRequest) (*remote.EngineGetPayloadResponse, error) {
-	if !s.proposing {
-		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
-	}
-
-	if s.config.TerminalTotalDifficulty == nil {
-		return nil, fmt.Errorf("not a proof-of-stake chain")
-	}
-
-	log.Debug("[GetPayload] acquiring lock")
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	log.Debug("[GetPayload] lock acquired")
-
-	builder, ok := s.builders[req.PayloadId]
-	if !ok {
-		log.Warn("Payload not stored", "payloadId", req.PayloadId)
-		return nil, &UnknownPayloadErr
-	}
-
-	blockWithReceipts, err := builder.Stop()
-	if err != nil {
-		log.Error("Failed to build PoS block", "err", err)
-		return nil, err
-	}
+func (s *EthBackendServer) getPayload(blockWithReceipts *types.BlockWithReceipts) (*remote.EngineGetPayloadResponse, error) {
 	block := blockWithReceipts.Block
-
 	baseFee := new(uint256.Int)
 	baseFee.SetFromBig(block.Header().BaseFee)
 
@@ -668,6 +588,97 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		ExecutionPayload: payload,
 		BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
 	}, nil
+}
+
+// EngineGetPayload retrieves previously assembled payload (Validators only)
+func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.EngineGetPayloadRequest) (*remote.EngineGetPayloadResponse, error) {
+	if !s.proposing {
+		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
+	}
+
+	if s.config.TerminalTotalDifficulty == nil {
+		return nil, fmt.Errorf("not a proof-of-stake chain")
+	}
+
+	log.Debug("[GetPayload] acquiring lock")
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	log.Debug("[GetPayload] lock acquired")
+
+	builder, ok := s.builders[req.PayloadId]
+	if !ok {
+		log.Warn("Payload not stored", "payloadId", req.PayloadId)
+		return nil, &UnknownPayloadErr
+	}
+
+	block, err := builder.Stop()
+	if err != nil {
+		log.Error("Failed to build PoS block", "err", err)
+		return nil, err
+	}
+
+	return s.getPayload(block)
+}
+
+// GetPayloadWithBlobs returns a bundle of all blobs and their corresponding KZG commitments by payload id
+func (s *EthBackendServer) EngineGetPayloadWithBlobs(ctx context.Context, req *remote.EngineGetPayloadRequest) (*remote.EngineGetPayloadResponse, error) {
+	if !s.proposing {
+		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
+	}
+
+	if s.config.TerminalTotalDifficulty == nil {
+		return nil, fmt.Errorf("not a proof-of-stake chain")
+	}
+
+	log.Debug("[GetPayloadWithBlobs] acquiring lock")
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	log.Debug("[GetPayloadWithBlobs] lock acquired")
+
+	builder, ok := s.builders[req.PayloadId]
+	if !ok {
+		log.Warn("Payload not stored", "payloadId", req.PayloadId)
+		return nil, &UnknownPayloadErr
+	}
+
+	block, err := builder.Stop()
+	if err != nil {
+		log.Error("Failed to build PoS block", "err", err)
+		return nil, err
+	}
+
+	pl, err := s.getPayload(block)
+	if err != nil {
+		return nil, err
+	}
+
+	bb := &types2.BlobsBundleV1{}
+	pl.BlobsBundle = bb
+	for i, tx := range block.Block.Transactions() {
+		if tx.Type() != types.BlobTxType {
+			continue
+		}
+		blobtx, ok := tx.(*types.BlobTxWrapper)
+		if !ok {
+			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobtx)
+		}
+		versionedHashes, kzgs, blobs, proofs := blobtx.GetDataHashes(), blobtx.BlobKzgs, blobtx.Blobs, blobtx.Proofs
+		lenCheck := len(versionedHashes)
+		if lenCheck != len(kzgs) || lenCheck != len(blobs) || lenCheck != len(blobtx.Proofs) {
+			return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d) / proofs (%d)"+
+				" / versioned hashes (%d)", i, block.Block.Hash(), len(blobs), len(kzgs), len(proofs), lenCheck)
+		}
+		for _, blob := range blobs {
+			bb.Blobs = append(bb.Blobs, blob[:])
+		}
+		for _, kzg := range kzgs {
+			bb.Kzgs = append(bb.Kzgs, kzg[:])
+		}
+		for _, proof := range proofs {
+			bb.Proofs = append(bb.Kzgs, proof[:])
+		}
+	}
+	return pl, nil
 }
 
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block

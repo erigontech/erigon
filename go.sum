@@ -913,8 +913,8 @@ github.com/rcrowley/go-metrics v0.0.0-20181016184325-3113b8401b8a/go.mod h1:bCqn
 github.com/remyoudompheng/bigfft v0.0.0-20200410134404-eec4a21b6bb0/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
-github.com/roberto-bayardo/erigon-lib v0.0.0-20230415161829-2b48fa6ec237 h1:nvldlr5w5MbJfG6P3gqaTqd4eETbu9T/tU45tUnhX3E=
-github.com/roberto-bayardo/erigon-lib v0.0.0-20230415161829-2b48fa6ec237/go.mod h1:DMBBUhXADbrQoGvLS6crKlKMCVq+eV+IEp8PUPt0PAw=
+github.com/roberto-bayardo/erigon-lib v0.0.0-20230421235631-2f886fc7bd18 h1:4r3UNb+FYH01+gJabb3uaSdlUllF6RqummSazxKm3aw=
+github.com/roberto-bayardo/erigon-lib v0.0.0-20230421235631-2f886fc7bd18/go.mod h1:sougHjpPFbiTbHTUZPrHgFw4zFY2ilO2sXUm2RJm6Ls=
 github.com/rogpeppe/fastuuid v0.0.0-20150106093220-6724a57986af/go.mod h1:XWv6SoW27p1b0cqNHllgS5HIMJraePCO15w5zCzIWYg=
 github.com/rogpeppe/go-internal v1.3.0/go.mod h1:M8bDsm7K2OlrFYOpmOWEs/qY81heoFRclV5y23lUDJ4=
 github.com/rogpeppe/go-internal v1.6.1/go.mod h1:xXDCJY+GAPziupqXw64V24skbSoqbTEfhy4qGm1nDQc=

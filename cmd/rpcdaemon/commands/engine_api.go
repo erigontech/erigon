@@ -81,8 +81,9 @@ type TransitionConfiguration struct {
 
 // BlobsBundleV1 holds the blobs of an execution payload
 type BlobsBundleV1 struct {
-	KZGs  []types.KZGCommitment `json:"kzgs"  gencodec:"required"`
-	Blobs []types.Blob          `json:"blobs" gencodec:"required"`
+	KZGs   []types.KZGCommitment `json:"kzgs"   gencodec:"required"`
+	Blobs  []types.Blob          `json:"blobs"  gencodec:"required"`
+	Proofs []types.KZGProof      `json:"proofs" gencodec:"required"`
 }
 
 type ExecutionPayloadBodyV1 struct {
@@ -393,32 +394,36 @@ func (e *EngineImpl) GetPayloadV3(ctx context.Context, payloadID hexutility.Byte
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	log.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
 
-	response, err := e.api.EngineGetPayload(ctx, decodedPayloadId)
+	response, err := e.api.EngineGetPayloadWithBlobs(ctx, decodedPayloadId)
 	if err != nil {
 		return nil, err
 	}
 
 	epl := convertPayloadFromRpc(response.ExecutionPayload)
 	blockValue := gointerfaces.ConvertH256ToUint256Int(response.BlockValue).ToBig()
+	bbpl := response.BlobsBundle
 
-	ep, err := e.api.EngineGetBlobsBundleV1(ctx, decodedPayloadId)
-	if err != nil {
-		return nil, err
-	}
-	kzgs := ep.GetKzgs()
-	blobs := ep.GetBlobs()
+	kzgs := bbpl.GetKzgs()
+	blobs := bbpl.GetBlobs()
+	proofs := bbpl.GetProofs()
 	if len(kzgs) != len(blobs) {
 		return nil, fmt.Errorf("should have same number of kzgs and blobs, got %v vs %v", len(kzgs), len(blobs))
 	}
+	if len(proofs) != len(kzgs) {
+		return nil, fmt.Errorf("should have same number of kzgs and proofs, got %v vs %v", len(kzgs), len(proofs))
+	}
 	replyKzgs := make([]types.KZGCommitment, len(kzgs))
 	replyBlobs := make([]types.Blob, len(blobs))
+	replyProofs := make([]types.KZGProof, len(proofs))
 	for i := range kzgs {
 		copy(replyKzgs[i][:], kzgs[i])
 		copy(replyBlobs[i][:], blobs[i])
+		copy(replyProofs[i][:], proofs[i])
 	}
 	bb := &BlobsBundleV1{
-		KZGs:  replyKzgs,
-		Blobs: replyBlobs,
+		KZGs:   replyKzgs,
+		Blobs:  replyBlobs,
+		Proofs: replyProofs,
 	}
 
 	return &GetPayloadV3Response{
