@@ -34,7 +34,10 @@ import (
 )
 
 // Transaction implements trace_transaction
-func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error) {
+func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, gasBailOut *bool) (ParityTraces, error) {
+	if gasBailOut == nil {
+		gasBailOut = new(bool) // false by default
+	}
 	tx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -91,7 +94,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	hash := block.Hash()
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txIndex, types.MakeSigner(chainConfig, blockNumber), chainConfig)
+	traces, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txIndex, *gasBailOut, types.MakeSigner(chainConfig, blockNumber), chainConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -117,13 +120,12 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 }
 
 // Get implements trace_get
-func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64) (*ParityTrace, error) {
+func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64, gasBailOut *bool) (*ParityTrace, error) {
 	// Parity fails if it gets more than a single index. It returns nothing in this case. Must we?
 	if len(indicies) > 1 {
 		return nil, nil
 	}
-
-	traces, err := api.Transaction(ctx, txHash)
+	traces, err := api.Transaction(ctx, txHash, gasBailOut)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +141,10 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 }
 
 // Block implements trace_block
-func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error) {
+func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool) (ParityTraces, error) {
+	if gasBailOut == nil {
+		gasBailOut = new(bool) // false by default
+	}
 	tx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -167,7 +172,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	if err != nil {
 		return nil, err
 	}
-	traces, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNum), chainConfig)
+	traces, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut /* gasBailOut */, types.MakeSigner(chainConfig, blockNum), chainConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +338,10 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
-func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error {
+func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream, gasBailOut *bool) error {
+	if gasBailOut == nil {
+		gasBailOut = new(bool) // false by default
+	}
 	dbtx, err1 := api.kv.BeginRo(ctx)
 	if err1 != nil {
 		return fmt.Errorf("traceFilter cannot open tx: %w", err1)
@@ -437,7 +445,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			isPos = header.Difficulty.Cmp(common.Big0) == 0 || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
 		}
 		txs := block.Transactions()
-		t, tErr := api.callManyTransactions(ctx, dbtx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, types.MakeSigner(chainConfig, b), chainConfig)
+		t, tErr := api.callManyTransactions(ctx, dbtx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut, types.MakeSigner(chainConfig, b), chainConfig)
 		if tErr != nil {
 			if first {
 				first = false
@@ -449,13 +457,14 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.WriteObjectEnd()
 			continue
 		}
+		isIntersectionMode := req.Mode == TraceFilterModeIntersection
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
 		for i, trace := range t {
 			txPosition := uint64(i)
 			txHash := txs[i].Hash()
 			// Check if transaction concerns any of the addresses we wanted
 			for _, pt := range trace.Trace {
-				if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
+				if includeAll || filter_trace(pt, fromAddresses, toAddresses, isIntersectionMode) {
 					nSeen++
 					pt.BlockHash = &blockHash
 					pt.BlockNumber = &blockNumber
@@ -864,8 +873,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectEnd()
 			continue
 		}
+		isIntersectionMode := req.Mode == TraceFilterModeIntersection
 		for _, pt := range traceResult.Trace {
-			if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
+			if includeAll || filter_trace(pt, fromAddresses, toAddresses, isIntersectionMode) {
 				nSeen++
 				pt.BlockHash = &lastBlockHash
 				pt.BlockNumber = &blockNum
@@ -899,37 +909,30 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	return stream.Flush()
 }
 
-func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}) bool {
+func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}, isIntersectionMode bool) bool {
+	f, t := false, false
 	switch action := pt.Action.(type) {
 	case *CallTraceAction:
-		_, f := fromAddresses[action.From]
-		_, t := toAddresses[action.To]
-
-		if f || t {
-			return true
-		}
+		_, f = fromAddresses[action.From]
+		_, t = toAddresses[action.To]
 	case *CreateTraceAction:
-		_, f := fromAddresses[action.From]
-		if f {
-			return true
-		}
+		_, f = fromAddresses[action.From]
 
 		if res, ok := pt.Result.(*CreateTraceResult); ok {
 			if res.Address != nil {
-				if _, t := toAddresses[*res.Address]; t {
-					return true
-				}
+				_, t = toAddresses[*res.Address]
 			}
 		}
 	case *SuicideTraceAction:
-		_, f := fromAddresses[action.Address]
-		_, t := toAddresses[action.RefundAddress]
-		if f || t {
-			return true
-		}
+		_, f = fromAddresses[action.Address]
+		_, t = toAddresses[action.RefundAddress]
 	}
 
-	return false
+	if isIntersectionMode {
+		return f && t
+	} else {
+		return f || t
+	}
 }
 
 func (api *TraceAPIImpl) callManyTransactions(
@@ -938,6 +941,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	block *types.Block,
 	traceTypes []string,
 	txIndex int,
+	gasBailOut bool,
 	signer *types.Signer,
 	cfg *chain.Config,
 ) ([]*TraceCallResult, error) {
@@ -1003,7 +1007,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
-	}, header, false /* gasBailout */, txIndex)
+	}, header, gasBailOut /* gasBailout */, txIndex)
 
 	if cmErr != nil {
 		return nil, cmErr

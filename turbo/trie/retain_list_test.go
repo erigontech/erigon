@@ -27,16 +27,16 @@ func TestProofRetainerConstruction(t *testing.T) {
 	require.Len(t, rl.hexes, 4)
 
 	validKeys := [][]byte{
-		{},
-		pr.accHexKey[:15],
-		pr.accHexKey[:],
-		pr.storageHexKeys[0][:85],
-		pr.storageHexKeys[0][:],
-		pr.storageHexKeys[1][:90],
-		pr.storageHexKeys[1][:],
+		pr.storageHexKeys[2][:],
 		pr.storageHexKeys[2][:98],
 		pr.storageHexKeys[2][:95],
-		pr.storageHexKeys[2][:],
+		pr.storageHexKeys[1][:],
+		pr.storageHexKeys[1][:90],
+		pr.storageHexKeys[0][:],
+		pr.storageHexKeys[0][:85],
+		pr.accHexKey[:],
+		pr.accHexKey[:15],
+		{},
 	}
 
 	invalidKeys := [][]byte{
@@ -68,25 +68,25 @@ func TestProofRetainerConstruction(t *testing.T) {
 
 	require.Len(t, accProof.AccountProof, 3)
 	require.Equal(t, []byte(nil), []byte(accProof.AccountProof[0]))
-	require.Equal(t, validKeys[1], []byte(accProof.AccountProof[1]))
-	require.Equal(t, validKeys[2], []byte(accProof.AccountProof[2]))
+	require.Equal(t, validKeys[8], []byte(accProof.AccountProof[1]))
+	require.Equal(t, validKeys[7], []byte(accProof.AccountProof[2]))
 
 	require.Len(t, accProof.StorageProof, 3)
 	require.Equal(t, accProof.StorageProof[0].Key, libcommon.Hash{1})
 	require.Len(t, accProof.StorageProof[0].Proof, 2)
-	require.Equal(t, validKeys[3], []byte(accProof.StorageProof[0].Proof[0]))
-	require.Equal(t, validKeys[4], []byte(accProof.StorageProof[0].Proof[1]))
+	require.Equal(t, validKeys[6], []byte(accProof.StorageProof[0].Proof[0]))
+	require.Equal(t, validKeys[5], []byte(accProof.StorageProof[0].Proof[1]))
 
 	require.Equal(t, accProof.StorageProof[1].Key, libcommon.Hash{2})
 	require.Len(t, accProof.StorageProof[1].Proof, 2)
-	require.Equal(t, validKeys[5], []byte(accProof.StorageProof[1].Proof[0]))
-	require.Equal(t, validKeys[6], []byte(accProof.StorageProof[1].Proof[1]))
+	require.Equal(t, validKeys[4], []byte(accProof.StorageProof[1].Proof[0]))
+	require.Equal(t, validKeys[3], []byte(accProof.StorageProof[1].Proof[1]))
 
 	require.Equal(t, accProof.StorageProof[2].Key, libcommon.Hash{3})
 	require.Len(t, accProof.StorageProof[2].Proof, 3)
-	require.Equal(t, validKeys[7], []byte(accProof.StorageProof[2].Proof[0]))
-	require.Equal(t, validKeys[8], []byte(accProof.StorageProof[2].Proof[1]))
-	require.Equal(t, validKeys[9], []byte(accProof.StorageProof[2].Proof[2]))
+	require.Equal(t, validKeys[2], []byte(accProof.StorageProof[2].Proof[0]))
+	require.Equal(t, validKeys[1], []byte(accProof.StorageProof[2].Proof[1]))
+	require.Equal(t, validKeys[0], []byte(accProof.StorageProof[2].Proof[2]))
 
 	t.Run("missingStorageRoot", func(t *testing.T) {
 		oldStorageHash := pr.proofs[2].storageRoot

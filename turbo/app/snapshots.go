@@ -355,6 +355,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	agg.SetWorkers(estimate.CompressSnapshot.Workers())
+	agg.CleanDir()
 
 	if to == 0 {
 		var forwardProgress uint64
@@ -432,7 +433,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
 		return err
 	}
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
+	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteSnapshots(tx, snapshots.Files(), agg.Files())
 	}); err != nil {
 		return err
