@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"math"
 	"net"
 
 	"net/http"
@@ -36,6 +37,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 	"github.com/prometheus/client_golang/prometheus"
@@ -54,6 +56,10 @@ const (
 	gossipSubSeenTTL      = 550 // number of heartbeat intervals to retain message IDs
 	// heartbeat interval
 	gossipSubHeartbeatInterval = 700 * time.Millisecond // frequency of heartbeat, milliseconds
+
+	// decayToZero specifies the terminal value that we will use when decaying
+	// a value.
+	decayToZero = 0.01
 )
 
 type Sentinel struct {
@@ -176,7 +182,40 @@ func pubsubGossipParam() pubsub.GossipSubParams {
 	return gParams
 }
 
+// determines the decay rate from the provided time period till
+// the decayToZero value. Ex: ( 1 -> 0.01)
+func scoreDecay(totalDurationDecay, oneSlotDuration time.Duration) float64 {
+	numOfTimes := totalDurationDecay / oneSlotDuration
+	return math.Pow(decayToZero, 1/float64(numOfTimes))
+}
+
 func (s *Sentinel) pubsubOptions() []pubsub.Option {
+	oneSlotDuration := time.Duration(s.cfg.BeaconConfig.SecondsPerSlot) * time.Second
+	secondsPerEpoch := time.Duration(s.cfg.BeaconConfig.SecondsPerSlot*s.cfg.BeaconConfig.SlotsPerEpoch) * time.Second
+	thresholds := &pubsub.PeerScoreThresholds{
+		GossipThreshold:             -4000,
+		PublishThreshold:            -8000,
+		GraylistThreshold:           -16000,
+		AcceptPXThreshold:           100,
+		OpportunisticGraftThreshold: 5,
+	}
+	scoreParams := &pubsub.PeerScoreParams{
+		Topics:        make(map[string]*pubsub.TopicScoreParams),
+		TopicScoreCap: 32.72,
+		AppSpecificScore: func(p peer.ID) float64 {
+			return 0
+		},
+		AppSpecificWeight:           1,
+		IPColocationFactorWeight:    -35.11,
+		IPColocationFactorThreshold: 10,
+		IPColocationFactorWhitelist: nil,
+		BehaviourPenaltyWeight:      -15.92,
+		BehaviourPenaltyThreshold:   6,
+		BehaviourPenaltyDecay:       scoreDecay(10*secondsPerEpoch, oneSlotDuration), // 10 epochs
+		DecayInterval:               oneSlotDuration,
+		DecayToZero:                 decayToZero,
+		RetainScore:                 100 * secondsPerEpoch, // Retain for 100 epochs
+	}
 	pubsubQueueSize := 600
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
@@ -185,6 +224,7 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
 		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSizeBellatrix)),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
+		pubsub.WithPeerScore(scoreParams, thresholds),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
 	}
 	return psOpts
