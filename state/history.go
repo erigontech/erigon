@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -70,6 +69,8 @@ type History struct {
 	integrityFileExtensions []string
 	largeValues             bool // can't use DupSort optimization (aka. prefix-compression) if values size > 4kb
 
+	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
+
 	wal *historyWAL
 }
 
@@ -107,7 +108,7 @@ func (h *History) OpenList(fNames []string) error {
 }
 func (h *History) openList(fNames []string) error {
 	h.closeWhatNotInList(fNames)
-	_ = h.scanStateFiles(fNames)
+	h.garbageFiles = h.scanStateFiles(fNames)
 	if err := h.openFiles(); err != nil {
 		return fmt.Errorf("History.OpenList: %s, %w", h.filenameBase, err)
 	}
@@ -124,7 +125,7 @@ func (h *History) OpenFolder() error {
 
 // scanStateFiles
 // returns `uselessFiles` where file "is useless" means: it's subset of frozen file. such files can be safely deleted. subset of non-frozen file may be useful
-func (h *History) scanStateFiles(fNames []string) (uselessFiles []*filesItem) {
+func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^" + h.filenameBase + ".([0-9]+)-([0-9]+).v$")
 	var err error
 Loop:
@@ -151,17 +152,17 @@ Loop:
 		}
 
 		startTxNum, endTxNum := startStep*h.aggregationStep, endStep*h.aggregationStep
-		frozen := endStep-startStep == StepsInBiggestFile
+		var newFile = newFilesItem(startTxNum, endTxNum, h.aggregationStep)
 
 		for _, ext := range h.integrityFileExtensions {
 			requiredFile := fmt.Sprintf("%s.%d-%d.%s", h.filenameBase, startStep, endStep, ext)
 			if !dir.FileExist(filepath.Join(h.dir, requiredFile)) {
 				log.Debug(fmt.Sprintf("[snapshots] skip %s because %s doesn't exists", name, requiredFile))
+				garbageFiles = append(garbageFiles, newFile)
 				continue Loop
 			}
 		}
 
-		var newFile = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 		if _, has := h.files.Get(newFile); has {
 			continue
 		}
@@ -178,21 +179,18 @@ Loop:
 				if newFile.isSubsetOf(item) {
 					if item.frozen {
 						addNewFile = false
-						uselessFiles = append(uselessFiles, newFile)
+						garbageFiles = append(garbageFiles, newFile)
 					}
 					continue
 				}
 			}
 			return true
 		})
-		//for _, subSet := range subSets {
-		//	h.files.Delete(subSet)
-		//}
 		if addNewFile {
 			h.files.Set(newFile)
 		}
 	}
-	return uselessFiles
+	return garbageFiles
 }
 
 func (h *History) openFiles() error {
@@ -304,8 +302,8 @@ func (h *History) missedIdxFiles() (l []*filesItem) {
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (h *History) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	return h.localityIndex.BuildMissedIndices(ctx, h.InvertedIndex)
+func (hc *HistoryContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
+	return hc.h.localityIndex.BuildMissedIndices(ctx, hc.ic)
 }
 
 func (h *History) buildVi(ctx context.Context, item *filesItem, p *background.Progress) (err error) {
@@ -959,13 +957,12 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 		decomp: sf.efHistoryDecomp,
 		index:  sf.efHistoryIdx,
 	}, txNumFrom, txNumTo)
-	h.files.Set(&filesItem{
-		frozen:       (txNumTo-txNumFrom)/h.aggregationStep == StepsInBiggestFile,
-		startTxNum:   txNumFrom,
-		endTxNum:     txNumTo,
-		decompressor: sf.historyDecomp,
-		index:        sf.historyIdx,
-	})
+
+	fi := newFilesItem(txNumFrom, txNumTo, h.aggregationStep)
+	fi.decompressor = sf.historyDecomp
+	fi.index = sf.historyIdx
+	h.files.Set(fi)
+
 	h.reCalcRoFiles()
 }
 
@@ -2397,20 +2394,6 @@ func (hs *HistoryStep) Clone() *HistoryStep {
 			reader:     recsplit.NewIndexReader(hs.historyItem.index),
 		},
 	}
-}
-
-func (h *History) CleanupDir() {
-	files, _ := h.fileNamesOnDisk()
-	uselessFiles := h.scanStateFiles(files)
-	for _, f := range uselessFiles {
-		fName := fmt.Sprintf("%s.%d-%d.v", h.filenameBase, f.startTxNum/h.aggregationStep, f.endTxNum/h.aggregationStep)
-		err := os.Remove(filepath.Join(h.dir, fName))
-		log.Debug("[clean] remove", "file", fName, "err", err)
-		fIdxName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, f.startTxNum/h.aggregationStep, f.endTxNum/h.aggregationStep)
-		err = os.Remove(filepath.Join(h.dir, fIdxName))
-		log.Debug("[clean] remove", "file", fName, "err", err)
-	}
-	h.InvertedIndex.CleanupDir()
 }
 
 func (hc *HistoryContext) idxRangeRecent(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {

@@ -356,14 +356,24 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			var startTxNum, endTxNum uint64
 			maxEndTxNum := ii.endTxNumMinimax()
 			maxSpan := ii.aggregationStep * StepsInBiggestFile
-			for found, startTxNum, endTxNum = ii.findMergeRange(maxEndTxNum, maxSpan); found; found, startTxNum, endTxNum = ii.findMergeRange(maxEndTxNum, maxSpan) {
-				ic := ii.MakeContext()
-				outs, _ := ic.staticFilesInRange(startTxNum, endTxNum)
-				in, err := ii.mergeFiles(ctx, outs, startTxNum, endTxNum, 1, background.NewProgressSet())
-				require.NoError(tb, err)
-				ii.integrateMergedFiles(outs, in)
-				require.NoError(tb, err)
-				ic.Close()
+
+			for {
+				if stop := func() bool {
+					ic := ii.MakeContext()
+					defer ic.Close()
+					found, startTxNum, endTxNum = ii.findMergeRange(maxEndTxNum, maxSpan)
+					if !found {
+						return true
+					}
+					outs, _ := ic.staticFilesInRange(startTxNum, endTxNum)
+					in, err := ii.mergeFiles(ctx, outs, startTxNum, endTxNum, 1, background.NewProgressSet())
+					require.NoError(tb, err)
+					ii.integrateMergedFiles(outs, in)
+					require.NoError(tb, err)
+					return false
+				}(); stop {
+					break
+				}
 			}
 		}()
 	}
