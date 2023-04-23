@@ -592,7 +592,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					return ss.startSync(ctx, bestHash, peerID)
 				})
 				if err != nil {
-					if errors.Is(NetworkIdMissmatchErr, err) {
+					if errors.Is(err, NetworkIdMissmatchErr) {
 						log.Trace("[p2p] Handshake failure", "peer", printablePeerID, "err", err)
 					} else {
 						log.Debug("[p2p] Handshake failure", "peer", printablePeerID, "err", err)
