@@ -300,6 +300,7 @@ func New(
 	s.host = host
 	s.peers = peers.New(s.host)
 
+	pubsub.TimeCacheDuration = 550 * gossipSubHeartbeatInterval
 	s.pubsub, err = pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
 	if err != nil {
 		return nil, fmt.Errorf("[Sentinel] failed to subscribe to gossip err=%w", err)
