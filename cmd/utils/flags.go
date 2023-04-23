@@ -1161,8 +1161,8 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 		panic(fmt.Errorf("invalid --db.pageSize: %s=%d, see: %s", ctx.String(DbPageSizeFlag.Name), sz, DbPageSizeFlag.Usage))
 	}
 	szLimit := cfg.MdbxDBSizeLimit.Bytes()
-	if !isPowerOfTwo(szLimit) || szLimit < 256 {
-		panic(fmt.Errorf("invalid --db.size.limit: %s=%d, see: %s", ctx.String(DbSizeLimitFlag.Name), sz, DbSizeLimitFlag.Usage))
+	if szLimit%sz != 0 || szLimit < 256 {
+		panic(fmt.Errorf("invalid --db.size.limit: %s=%d, see: %s", ctx.String(DbSizeLimitFlag.Name), szLimit, DbSizeLimitFlag.Usage))
 	}
 }
 
