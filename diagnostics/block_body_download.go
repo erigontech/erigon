@@ -30,5 +30,5 @@ func writeBlockBodyDownload(w io.Writer, r *http.Request) {
 		}
 	}
 	fmt.Fprintf(w, "SUCCESS\n")
-	dataflow.BlockBodyDownloadStates.ChangesSince(tick, w)
+	dataflow.BlockBodyDownloadStates.ChangesSince(int(tick), w)
 }

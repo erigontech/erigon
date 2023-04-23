@@ -11,7 +11,7 @@ import (
 var BlockBodyDownloadStates *States = NewStates(64*1024)
 
 const (
-	BlockBodyCleared = iota
+	BlockBodyCleared byte = iota
 	BlockBodyExpired
 	BlockBodyRequested
 	BlockBodyReceived
@@ -31,11 +31,9 @@ type States struct {
 	lock         sync.Mutex
 	window       int
 	ids          []uint64
-	ticks        []int64
 	states       []byte
 	snapshot     *btree.BTreeG[SnapshotItem]
-	lastTick	 int64
-	snapshotTick int64
+	snapshotTick int
 	idx          int
 }
 
@@ -43,7 +41,6 @@ func NewStates(window int) *States {
 	s := &States{
 		window: window,
 		ids:    make([]uint64, window),
-		ticks: make([]int64, window),
 		states: make([]byte, window),
 		snapshot: btree.NewG[SnapshotItem](16, func(a, b SnapshotItem) bool {
 			return a.id < b.id
@@ -59,18 +56,16 @@ func (s *States) AddChange(id uint64, state byte) {
 	if s.idx >= s.window {
 		s.makeSnapshot()
 	}
-	s.lastTick++
 	i := s.idx
 	s.idx++
 	s.ids[i] = id
-	s.ticks[i] = s.lastTick
 	s.states[i] = state
 }
 
 func (s *States) makeSnapshot() {
 	newSnapshot := map[uint64]byte{}
 	// snapshotTime is now time of the latest change
-	s.snapshotTick = s.ticks[s.idx-1]
+	s.snapshotTick += s.idx
 	// Proceed backwards
 	for i := s.idx - 1; i >= 0; i-- {
 		if _, ok := newSnapshot[s.ids[i]]; !ok {
@@ -87,20 +82,25 @@ func (s *States) makeSnapshot() {
 	s.idx = 0
 }
 
-func (s *States) ChangesSince(tick int64, w io.Writer) {
-	fmt.Fprintf(w, "%d\n", s.snapshotTick)
-	if tick <= s.snapshotTick {
+func (s *States) ChangesSince(startTick int, w io.Writer) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	var startI int
+	var tick int
+	if startTick <= s.snapshotTick {
 		// Include snapshot
+		fmt.Fprintf(w, "snapshot %d\n", s.snapshotTick)
 		s.snapshot.Ascend(func(a SnapshotItem) bool {
 			fmt.Fprintf(w, "%d,%d\n", a.id, a.state)
 			return true
 		})
+		tick = s.snapshotTick + 1
+	} else {
+		startI = startTick - s.snapshotTick
+		tick = startTick
 	}
-	fmt.Fprintf(w, "\n")
-	for i := 0; i < s.idx; i++ {
-		if s.ticks[i] < tick {
-			continue
-		}
-		fmt.Fprintf(w, "%d,%d,%d\n", s.ids[i], s.states[i], s.ticks[i])
+	fmt.Fprintf(w, "changes %d\n", tick)
+	for i := startI; i < s.idx; i++ {
+		fmt.Fprintf(w, "%d,%d\n", s.ids[i], s.states[i])
 	}
 }
