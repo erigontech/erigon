@@ -296,8 +296,57 @@ func (s *EthBackendServer) checkWithdrawalsPresence(time uint64, withdrawals []*
 	return nil
 }
 
-func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, in *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
-	return nil, fmt.Errorf("EngineGetBlobsBundleV1: not implemented yet")
+func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
+	if !s.proposing {
+		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
+	}
+
+	if s.config.TerminalTotalDifficulty == nil {
+		return nil, fmt.Errorf("not a proof-of-stake chain")
+	}
+
+	log.Debug("[GetBlobsBundleV1] acquiring lock")
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	log.Debug("[GetBlobsBundleV1] lock acquired")
+
+	builder, ok := s.builders[req.PayloadId]
+	if !ok {
+		log.Warn("Payload not stored", "payloadId", req.PayloadId)
+		return nil, &UnknownPayloadErr
+	}
+
+	block, err := builder.Stop()
+	if err != nil {
+		log.Error("Failed to build PoS block", "err", err)
+		return nil, err
+	}
+
+	blobsBundle := &types2.BlobsBundleV1{
+		BlockHash: gointerfaces.ConvertHashToH256(block.Block.Header().Hash()),
+	}
+	for i, tx := range block.Block.Transactions() {
+		if tx.Type() != types.BlobTxType {
+			continue
+		}
+		blobtx, ok := tx.(*types.BlobTxWrapper)
+		if !ok {
+			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobtx)
+		}
+		versionedHashes, kzgs, blobs, proofs := blobtx.GetDataHashes(), blobtx.BlobKzgs, blobtx.Blobs, blobtx.Proofs
+		lenCheck := len(versionedHashes)
+		if lenCheck != len(kzgs) || lenCheck != len(blobs) || lenCheck != len(blobtx.Proofs) {
+			return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d) / proofs (%d)"+
+				" / versioned hashes (%d)", i, block.Block.Hash(), len(blobs), len(kzgs), len(proofs), lenCheck)
+		}
+		for _, blob := range blobs {
+			blobsBundle.Blobs = append(blobsBundle.Blobs, blob[:])
+		}
+		for _, kzg := range kzgs {
+			blobsBundle.Kzgs = append(blobsBundle.Kzgs, kzg[:])
+		}
+	}
+	return blobsBundle, nil
 }
 
 // EngineNewPayload validates and possibly executes payload

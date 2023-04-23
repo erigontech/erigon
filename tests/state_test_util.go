@@ -455,7 +455,9 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 		data,
 		accessList,
 		false, /* checkNonce */
-		false /* isFree */)
+		false, /* isFree */
+		uint256.NewInt(tipCap.Uint64()),
+	)
 
 	return msg, nil
 }
