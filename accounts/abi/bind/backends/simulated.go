@@ -805,6 +805,10 @@ func (m callMsg) Data() []byte                  { return m.CallMsg.Data }
 func (m callMsg) AccessList() types2.AccessList { return m.CallMsg.AccessList }
 func (m callMsg) IsFree() bool                  { return false }
 
+func (m callMsg) DataGas() uint64                { return params.DataGasPerBlob * uint64(len(m.CallMsg.DataHashes)) }
+func (m callMsg) MaxFeePerDataGas() *uint256.Int { return m.CallMsg.MaxFeePerDataGas }
+func (m callMsg) DataHashes() []libcommon.Hash   { return m.CallMsg.DataHashes }
+
 /*
 // filterBackend implements filters.Backend to support filtering for logs without
 // taking bloom-bits acceleration structures into account.
