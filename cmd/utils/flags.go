@@ -717,7 +717,7 @@ var (
 	DbSizeLimitFlag = cli.StringFlag{
 		Name:  "db.size.limit",
 		Usage: "runtime limit of chandata db size. you can change value of this flag at any time",
-		Value: (8 * datasize.TB).String(),
+		Value: (7 * datasize.TB).String(),
 	}
 
 	HealthCheckFlag = cli.BoolFlag{
