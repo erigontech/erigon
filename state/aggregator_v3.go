@@ -280,7 +280,7 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 			if errors.Is(err, context.Canceled) {
 				return
 			}
-			log.Warn("merge", "err", err)
+			log.Warn("[snapshots] merge", "err", err)
 		}
 	}()
 }
@@ -1469,28 +1469,28 @@ func (a *AggregatorV3) integrateMergedFiles(outs SelectedStaticFilesV3, in Merge
 	return frozen
 }
 func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
-	if in.accounts.frozen {
+	if in.accounts != nil && in.accounts.frozen {
 		a.accounts.cleanAfterFreeze(in.accounts.endTxNum)
 	}
-	if in.storage.frozen {
+	if in.storage != nil && in.storage.frozen {
 		a.storage.cleanAfterFreeze(in.storage.endTxNum)
 	}
-	if in.code.frozen {
+	if in.code != nil && in.code.frozen {
 		a.code.cleanAfterFreeze(in.code.endTxNum)
 	}
-	if in.commitment.frozen {
+	if in.commitment != nil && in.commitment.frozen {
 		a.commitment.cleanAfterFreeze(in.commitment.endTxNum)
 	}
-	if in.logAddrs.frozen {
+	if in.logAddrs != nil && in.logAddrs.frozen {
 		a.logAddrs.cleanAfterFreeze(in.logAddrs.endTxNum)
 	}
-	if in.logTopics.frozen {
+	if in.logTopics != nil && in.logTopics.frozen {
 		a.logTopics.cleanAfterFreeze(in.logTopics.endTxNum)
 	}
-	if in.tracesFrom.frozen {
+	if in.tracesFrom != nil && in.tracesFrom.frozen {
 		a.tracesFrom.cleanAfterFreeze(in.tracesFrom.endTxNum)
 	}
-	if in.tracesTo.frozen {
+	if in.tracesTo != nil && in.tracesTo.frozen {
 		a.tracesTo.cleanAfterFreeze(in.tracesTo.endTxNum)
 	}
 }
@@ -1568,7 +1568,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) {
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				log.Warn("buildFilesInBackground", "err", err)
+				log.Warn("[snapshots] buildFilesInBackground", "err", err)
 				break
 			}
 			step++
@@ -1585,7 +1585,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) {
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				log.Warn("merge", "err", err)
+				log.Warn("[snapshots] merge", "err", err)
 			}
 
 			a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
@@ -2027,7 +2027,7 @@ func lastIdInDB(db kv.RoDB, table string) (lstInDb uint64) {
 		}
 		return nil
 	}); err != nil {
-		log.Warn("lastIdInDB", "err", err)
+		log.Warn("[snapshots] lastIdInDB", "err", err)
 	}
 	return lstInDb
 }
