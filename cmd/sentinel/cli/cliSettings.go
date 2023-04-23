@@ -2,8 +2,8 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -75,10 +75,10 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg.BeaconDataCfg = rawdb.BeaconDataConfigurations[ctx.String(flags.BeaconDBModeFlag.Name)]
 	// Process bootnodes
 	if ctx.String(flags.BootnodesFlag.Name) != "" {
-		cfg.NetworkCfg.BootNodes = strings.Split(ctx.String(flags.BootnodesFlag.Name), ",")
+		cfg.NetworkCfg.BootNodes = utils.SplitAndTrim(ctx.String(flags.BootnodesFlag.Name))
 	}
 	if ctx.String(flags.SentinelStaticPeersFlag.Name) != "" {
-		cfg.NetworkCfg.StaticPeers = strings.Split(ctx.String(flags.SentinelStaticPeersFlag.Name), ",")
+		cfg.NetworkCfg.StaticPeers = utils.SplitAndTrim(ctx.String(flags.SentinelStaticPeersFlag.Name))
 	}
 	cfg.TransitionChain = ctx.Bool(flags.TransitionChainFlag.Name)
 	return cfg, nil
