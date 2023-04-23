@@ -133,7 +133,6 @@ func BodiesForward(
 	cr := ChainReader{Cfg: cfg.chanConfig, Db: tx}
 
 	loopBody := func() (bool, error) {
-		start := time.Now()
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
 		// having some time out so requesting again and cycling like that forever.  We'll cap it
 		// and break the loop so we can see if there are any records to actually process further down
@@ -160,7 +159,7 @@ func BodiesForward(
 			}
 		}
 
-		start = time.Now()
+		start := time.Now()
 		requestedLow, delivered, err := cfg.bd.GetDeliveries(tx)
 		if err != nil {
 			return false, err

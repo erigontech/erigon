@@ -8,7 +8,7 @@ import (
 	"github.com/google/btree"
 )
 
-var BlockBodyDownloadStates *States = NewStates(64*1024)
+var BlockBodyDownloadStates *States = NewStates(64 * 1024)
 
 const (
 	BlockBodyCleared byte = iota
@@ -17,7 +17,7 @@ const (
 	BlockBodyReceived
 	BlockBodyEvicted
 	BlockBodySkipped // Delivery requested but was skipped due to limitation on the size of the response
-	BlockBodyEmpty // Identified as empty and no need to be requested
+	BlockBodyEmpty   // Identified as empty and no need to be requested
 	BlockBodyPrefetched
 	BlockBodyInDb
 )
