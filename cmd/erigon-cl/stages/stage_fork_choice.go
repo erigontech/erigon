@@ -127,11 +127,14 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 		return highestSlotProcessed, libcommon.Hash{}, nil
 	})
 	maxBlockBehindBeforeDownload := int64(5)
+	overtimeMargin := uint64(2) // how much time has passed before trying download the next block in seconds
 	firstTime := true
 
 	for {
 		targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-		if targetSlot == cfg.forkChoice.HighestSeen() {
+		overtime := utils.GetCurrentSlotOverTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+		seenSlot := cfg.forkChoice.HighestSeen()
+		if targetSlot == seenSlot || (targetSlot == seenSlot+1 && overtime < overtimeMargin) {
 			time.Sleep(time.Second)
 			continue
 		}
@@ -143,7 +146,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 		// Wait small time
 		time.Sleep(100 * time.Millisecond)
 		firstTime = false
-		log.Debug("Caplin has missed some slots, started downloading chain")
+		log.Debug("Caplin may have missed some slots, started downloading chain")
 		// Process blocks until we reach our target
 		for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
 			currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
