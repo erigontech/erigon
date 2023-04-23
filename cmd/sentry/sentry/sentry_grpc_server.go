@@ -579,7 +579,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					log.Trace("[p2p] peer already has connection", "peerId", printablePeerID)
 					return nil
 				}
-				log.Debug("[p2p] start with peer", "peerId", printablePeerID)
+				log.Trace("[p2p] start with peer", "peerId", printablePeerID)
 
 				peerInfo := NewPeerInfo(peer, rw)
 				peerInfo.protocol = protocol
@@ -592,7 +592,11 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					return ss.startSync(ctx, bestHash, peerID)
 				})
 				if err != nil {
-					log.Debug("[p2p] Handshake failure", "peer", printablePeerID, "err", err)
+					if errors.Is(NetworkIdMissmatchErr, err) {
+						log.Trace("[p2p] Handshake failure", "peer", printablePeerID, "err", err)
+					} else {
+						log.Debug("[p2p] Handshake failure", "peer", printablePeerID, "err", err)
+					}
 					return fmt.Errorf("[p2p]handshake to peer %s: %w", printablePeerID, err)
 				}
 				log.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name())
