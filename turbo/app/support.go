@@ -33,12 +33,6 @@ var (
 		Name:  "insecure",
 		Usage: "Allows communication with diagnostics system using self-signed TLS certificates",
 	}
-	/*
-		insecureCertFlag = cli.StringSliceFlag{
-			Name:  "insecure.certs",
-			Usage: "Comma separated list of certificates required for insecure TLS communication",
-		}
-	*/
 )
 
 var supportCommand = cli.Command{
@@ -74,15 +68,6 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 	// Create a pool with the server certificate since it is not signed
 	// by a known CA
 	certPool := x509.NewCertPool()
-	/*
-		for _, certFile := range cliCtx.StringSlice(insecureCertFlag.Name) {
-			cert, err := ioutil.ReadFile(certFile)
-			if err != nil {
-				return fmt.Errorf("reading server certificate %s: %v", certFile, err)
-			}
-			certPool.AppendCertsFromPEM(cert)
-		}
-	*/
 
 	// Create TLS configuration with the certificate of the server
 	insecure := cliCtx.Bool(insecureFlag.Name)
