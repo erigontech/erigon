@@ -297,8 +297,8 @@ func (ac *AggregatorV3Context) BuildOptionalMissedIndices(ctx context.Context, w
 	if ac.code != nil {
 		g.Go(func() error { return ac.code.BuildOptionalMissedIndices(ctx) })
 	}
-	if a.commitment != nil {
-		g.Go(func() error { return a.commitment.BuildOptionalMissedIndices(ctx) })
+	if ac.commitment != nil {
+		g.Go(func() error { return ac.commitment.BuildOptionalMissedIndices(ctx) })
 	}
 	return g.Wait()
 }
@@ -1209,7 +1209,7 @@ func (ac *AggregatorV3Context) findMergeRange(maxEndTxNum, maxSpan uint64) Range
 	r.accounts = ac.a.accounts.findMergeRange(maxEndTxNum, maxSpan)
 	r.storage = ac.a.storage.findMergeRange(maxEndTxNum, maxSpan)
 	r.code = ac.a.code.findMergeRange(maxEndTxNum, maxSpan)
-	r.commitment = a.commitment.findMergeRange(maxEndTxNum, maxSpan)
+	r.commitment = ac.a.commitment.findMergeRange(maxEndTxNum, maxSpan)
 	r.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum = ac.a.logAddrs.findMergeRange(maxEndTxNum, maxSpan)
 	r.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum = ac.a.logTopics.findMergeRange(maxEndTxNum, maxSpan)
 	r.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum = ac.a.tracesFrom.findMergeRange(maxEndTxNum, maxSpan)
@@ -1382,7 +1382,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if r.accounts.any() {
 		predicates.Add(1)
 
-		log.Info(fmt.Sprintf("[snapshots] merge: %d-%d", r.accounts.historyStartTxNum/a.aggregationStep, r.accounts.historyEndTxNum/a.aggregationStep))
+		log.Info(fmt.Sprintf("[snapshots] merge: %d-%d", r.accounts.historyStartTxNum/ac.a.aggregationStep, r.accounts.historyEndTxNum/ac.a.aggregationStep))
 		g.Go(func() (err error) {
 			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, workers, ac.a.ps)
 			predicates.Done()
@@ -1392,7 +1392,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 
 	if r.storage.any() {
 		predicates.Add(1)
-		log.Info(fmt.Sprintf("[snapshots] merge storeage: %d-%d", r.accounts.historyStartTxNum/a.aggregationStep, r.accounts.historyEndTxNum/a.aggregationStep))
+		log.Info(fmt.Sprintf("[snapshots] merge storeage: %d-%d", r.accounts.historyStartTxNum/ac.a.aggregationStep, r.accounts.historyEndTxNum/ac.a.aggregationStep))
 		g.Go(func() (err error) {
 			mf.storage, mf.storageIdx, mf.storageHist, err = ac.a.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, workers, ac.a.ps)
 			predicates.Done()
@@ -1407,12 +1407,12 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	}
 	if r.commitment.any() {
 		predicates.Wait()
-		log.Info(fmt.Sprintf("[snapshots] merge commitment: %d-%d", r.accounts.historyStartTxNum/a.aggregationStep, r.accounts.historyEndTxNum/a.aggregationStep))
+		log.Info(fmt.Sprintf("[snapshots] merge commitment: %d-%d", r.accounts.historyStartTxNum/ac.a.aggregationStep, r.accounts.historyEndTxNum/ac.a.aggregationStep))
 		g.Go(func() (err error) {
 			var v4Files SelectedStaticFiles
 			var v4MergedF MergedFiles
 
-			mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = a.commitment.mergeFiles(ctx, v4Files.FillV3(&files), v4MergedF.FillV3(&mf), r.commitment, workers, a.ps)
+			mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.a.commitment.mergeFiles(ctx, v4Files.FillV3(&files), v4MergedF.FillV3(&mf), r.commitment, workers, ac.a.ps)
 			return err
 		})
 	}
@@ -1469,18 +1469,20 @@ func (a *AggregatorV3) integrateMergedFiles(outs SelectedStaticFilesV3, in Merge
 	return frozen
 }
 func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
-	if in.accountsHist.frozen {
-		a.accounts.cleanAfterFreeze(in.accountsHist.endTxNum)
+	if in.accounts.frozen {
+		a.accounts.cleanAfterFreeze(in.accounts.endTxNum)
 	}
-	if in.storageHist.frozen {
-		a.storage.cleanAfterFreeze(in.storageHist.endTxNum)
+	if in.storage.frozen {
+		a.storage.cleanAfterFreeze(in.storage.endTxNum)
 	}
-	if in.codeHist.frozen {
-		a.code.cleanAfterFreeze(in.codeHist.endTxNum)
+	if in.code.frozen {
+		a.code.cleanAfterFreeze(in.code.endTxNum)
+	}
+	if in.commitment.frozen {
+		a.commitment.cleanAfterFreeze(in.commitment.endTxNum)
 	}
 	if in.logAddrs.frozen {
-		a.commitment.cleanFrozenParts(in.commitmentHist)
-	a.logAddrs.cleanAfterFreeze(in.logAddrs.endTxNum)
+		a.logAddrs.cleanAfterFreeze(in.logAddrs.endTxNum)
 	}
 	if in.logTopics.frozen {
 		a.logTopics.cleanAfterFreeze(in.logTopics.endTxNum)

@@ -1151,6 +1151,10 @@ func (d *Domain) missedIdxFiles() (l []*filesItem) {
 	return l
 }
 
+func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
+	return dc.BuildOptionalMissedIndices(ctx)
+}
+
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) (err error) {
 	d.History.BuildMissedIndices(ctx, g, ps)
@@ -1801,11 +1805,11 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	copy(dc.keyBuf[:], key1)
 	copy(dc.keyBuf[len(key1):], key2)
 	var v []byte
-	if _, ok := lookup[fmt.Sprintf("%x", key1)]; ok {
-		defer func() {
-			log.Info("read", "d", dc.d.valsTable, "key", fmt.Sprintf("%x", key1), "v", fmt.Sprintf("%x", v))
-		}()
-	}
+	//if _, ok := lookup[fmt.Sprintf("%x", key1)]; ok {
+	//	defer func() {
+	//		log.Info("read", "d", dc.d.valsTable, "key", fmt.Sprintf("%x", key1), "v", fmt.Sprintf("%x", v))
+	//	}()
+	//}
 	v, b, err := dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
 	return v, b, err
 	//return dc.get((dc.keyBuf[:len(key1)+len(key2)]), dc.d.txNum, roTx)
