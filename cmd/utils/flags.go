@@ -717,7 +717,7 @@ var (
 	DbSizeLimitFlag = cli.StringFlag{
 		Name:  "db.size.limit",
 		Usage: "runtime limit of chandata db size. you can change value of this flag at any time",
-		Value: (8 * datasize.TB).String(),
+		Value: (7 * datasize.TB).String(),
 	}
 
 	HealthCheckFlag = cli.BoolFlag{
@@ -1222,10 +1222,10 @@ func setTxPool(ctx *cli.Context, cfg *ethconfig.DeprecatedTxPoolConfig) {
 		cfg.Disable = true
 	}
 	if ctx.IsSet(TxPoolLocalsFlag.Name) {
-		locals := strings.Split(ctx.String(TxPoolLocalsFlag.Name), ",")
+		locals := SplitAndTrim(ctx.String(TxPoolLocalsFlag.Name))
 		for _, account := range locals {
-			if trimmed := strings.TrimSpace(account); !libcommon.IsHexAddress(trimmed) {
-				Fatalf("Invalid account in --txpool.locals: %s", trimmed)
+			if !libcommon.IsHexAddress(account) {
+				Fatalf("Invalid account in --txpool.locals: %s", account)
 			} else {
 				cfg.Locals = append(cfg.Locals, libcommon.HexToAddress(account))
 			}
@@ -1367,7 +1367,7 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFileFlag.Name))
 	}
 	if ctx.IsSet(MinerNotifyFlag.Name) {
-		cfg.Notify = strings.Split(ctx.String(MinerNotifyFlag.Name), ",")
+		cfg.Notify = SplitAndTrim(ctx.String(MinerNotifyFlag.Name))
 	}
 	if ctx.IsSet(MinerExtraDataFlag.Name) {
 		cfg.ExtraData = []byte(ctx.String(MinerExtraDataFlag.Name))
@@ -1392,7 +1392,7 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 		return
 	}
 	cfg.Whitelist = make(map[uint64]libcommon.Hash)
-	for _, entry := range strings.Split(whitelist, ",") {
+	for _, entry := range SplitAndTrim(whitelist) {
 		parts := strings.Split(entry, "=")
 		if len(parts) != 2 {
 			Fatalf("Invalid whitelist entry: %s", entry)
@@ -1608,7 +1608,7 @@ func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis libcommon.Hash) {
 }
 
 func SplitTagsFlag(tagsFlag string) map[string]string {
-	tags := strings.Split(tagsFlag, ",")
+	tags := SplitAndTrim(tagsFlag)
 	tagsMap := map[string]string{}
 
 	for _, t := range tags {
@@ -1632,12 +1632,7 @@ func MakeConsolePreloads(ctx *cli.Context) []string {
 		return nil
 	}
 	// Otherwise resolve absolute paths and return them
-	files := strings.Split(ctx.String(PreloadJSFlag.Name), ",")
-	preloads := make([]string, 0, len(files))
-	for _, file := range files {
-		preloads = append(preloads, strings.TrimSpace(file))
-	}
-	return preloads
+	return SplitAndTrim(ctx.String(PreloadJSFlag.Name))
 }
 
 func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {

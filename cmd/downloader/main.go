@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -144,7 +143,7 @@ func Downloader(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
-	staticPeers := strings.Split(staticPeersStr, ",")
+	staticPeers := utils.SplitAndTrim(staticPeersStr)
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 	cfg, err := downloadercfg2.New(dirs.Snap, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers)
