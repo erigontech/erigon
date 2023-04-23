@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -23,8 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
-
-var blockBodyCacheEvicted = metrics.GetOrCreateCounter("blockBodyCacheEvicted")
 
 const requestLoopCutOff int = 1
 
@@ -187,7 +184,6 @@ func BodiesForward(
 			rawBody := cfg.bd.GetBodyFromCache(nextBlock, write /* delete */)
 			if rawBody == nil {
 				cfg.bd.NotDelivered(nextBlock)
-				blockBodyCacheEvicted.Add(1)
 				write = false
 			}
 			if !write {
