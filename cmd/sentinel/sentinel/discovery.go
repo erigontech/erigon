@@ -30,7 +30,7 @@ import (
 	"github.com/prysmaticlabs/go-bitfield"
 )
 
-func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo, skipHandshake bool) error {
+func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, skipHandshake bool) error {
 	if info.ID == s.host.ID() {
 		return nil
 	}
@@ -53,7 +53,7 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	}
 	for _, peerInfo := range addrInfos {
 		go func(peerInfo peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, peerInfo, true); err != nil {
+			if err := s.ConnectWithPeer(s.ctx, peerInfo, true); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
@@ -111,7 +111,7 @@ func (s *Sentinel) listenForPeers() {
 		}
 
 		go func(peerInfo *peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, *peerInfo, false); err != nil {
+			if err := s.ConnectWithPeer(s.ctx, *peerInfo, false); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)

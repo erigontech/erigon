@@ -380,3 +380,7 @@ func (s *Sentinel) Config() *SentinelConfig {
 func (s *Sentinel) DB() kv.RoDB {
 	return s.db
 }
+
+func (s *Sentinel) Status() *cltypes.Status {
+	return s.handshaker.Status()
+}

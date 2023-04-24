@@ -199,11 +199,13 @@ func (s *SentinelServer) startServerBackgroundLoop() {
 		case <-ticker.C:
 			s.mu.Lock()
 			s.sentinel.Stop()
+			status := s.sentinel.Status()
 			s.sentinel, err = createSentinel(s.sentinel.Config(), s.sentinel.DB())
 			if err != nil {
 				log.Warn("Could not coordinate sentinel", "err", err)
 				continue
 			}
+			s.sentinel.SetStatus(status)
 			s.mu.Unlock()
 		case <-s.ctx.Done():
 			return
