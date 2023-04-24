@@ -174,9 +174,9 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 
 	// forces negative numbers to fail (too large) but allows zero
 	startNum := uint64(startNumber.Int64())
-	if startNum > latestBlock {
-		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
-	}
+	//if startNum > latestBlock {
+	//	return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
+	//}
 
 	endNum := startNum + 1 // allows for single param calls
 	if endNumber != nil {
