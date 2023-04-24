@@ -151,7 +151,7 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 	}
 	newTx, errBegin := s.kv.BeginRo(ctx)
 	if errBegin != nil {
-		return err
+		return fmt.Errorf("kvserver: %w", err)
 	}
 	s.txs[id] = &threadSafeTx{Tx: newTx}
 	return nil
@@ -216,7 +216,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 		viewID = tx.ViewID()
 		return nil
 	}); err != nil {
-		return err
+		return fmt.Errorf("kvserver: %w", err)
 	}
 	if err := stream.Send(&remote.Pair{ViewId: viewID, TxId: id}); err != nil {
 		return fmt.Errorf("server-side error: %w", err)
@@ -250,7 +250,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			for _, c := range cursors { // save positions of cursor, will restore after Tx reopening
 				k, v, err := c.c.Current()
 				if err != nil {
-					return err
+					return fmt.Errorf("kvserver: %w", err)
 				}
 				c.k = bytesCopy(k)
 				c.v = bytesCopy(v)
@@ -309,14 +309,14 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 				}
 				return nil
 			}); err != nil {
-				return err
+				return fmt.Errorf("kvserver: %w", err)
 			}
 			cursors[CursorID] = &CursorInfo{
 				bucket: in.BucketName,
 				c:      c,
 			}
 			if err := stream.Send(&remote.Pair{CursorId: CursorID}); err != nil {
-				return fmt.Errorf("server-side error: %w", err)
+				return fmt.Errorf("kvserver: %w", err)
 			}
 			continue
 		case remote.Op_OPEN_DUP_SORT:
@@ -329,7 +329,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 				}
 				return nil
 			}); err != nil {
-				return err
+				return fmt.Errorf("kvserver: %w", err)
 			}
 			cursors[CursorID] = &CursorInfo{
 				bucket: in.BucketName,
