@@ -32,13 +32,13 @@ import (
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/kzg"
 	"github.com/ledgerwatch/erigon/rlp"
 	. "github.com/protolambda/ztyp/view"
 )
@@ -536,15 +536,15 @@ func TestTransactionCoding(t *testing.T) {
 					BlobVersionedHashes: VersionedHashesView(hashVersion),
 				},
 			}
-			cryptoCtx := kzg.CrpytoCtx()
+			kzgCtx := libkzg.Ctx()
 			blob := Blob{}
-			commitment, _ := cryptoCtx.BlobToKZGCommitment(gokzg4844.Blob(blob))
-			proof, _ := cryptoCtx.ComputeBlobKZGProof(gokzg4844.Blob(blob), commitment)
+			commitment, _ := kzgCtx.BlobToKZGCommitment(gokzg4844.Blob(blob))
+			proof, _ := kzgCtx.ComputeBlobKZGProof(gokzg4844.Blob(blob), commitment)
 			txdata = &BlobTxWrapper{
-				Tx:       inner,
-				BlobKzgs: BlobKzgs{KZGCommitment(commitment)},
-				Blobs:    Blobs{Blob(blob)},
-				Proofs:   KZGProofs{KZGProof(proof)},
+				Tx:          inner,
+				Commitments: BlobKzgs{KZGCommitment(commitment)},
+				Blobs:       Blobs{Blob(blob)},
+				Proofs:      KZGProofs{KZGProof(proof)},
 			}
 		}
 		tx, err := SignNewTx(key, *signer, txdata)
