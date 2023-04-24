@@ -167,10 +167,10 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	}
 	defer tx.Rollback()
 
-	latestBlock, err := stages.GetStageProgress(tx, stages.Finish)
-	if err != nil {
-		return nil, err
-	}
+	//latestBlock, err := stages.GetStageProgress(tx, stages.Finish)
+	//if err != nil {
+	//	return nil, err
+	//}
 
 	// forces negative numbers to fail (too large) but allows zero
 	startNum := uint64(startNumber.Int64())
