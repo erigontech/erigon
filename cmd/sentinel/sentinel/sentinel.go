@@ -184,14 +184,12 @@ func pubsubGossipParam() pubsub.GossipSubParams {
 
 // determines the decay rate from the provided time period till
 // the decayToZero value. Ex: ( 1 -> 0.01)
-func scoreDecay(totalDurationDecay, oneSlotDuration time.Duration) float64 {
-	numOfTimes := totalDurationDecay / oneSlotDuration
+func (s *Sentinel) scoreDecay(totalDurationDecay time.Duration) float64 {
+	numOfTimes := totalDurationDecay / s.oneSlotDuration()
 	return math.Pow(decayToZero, 1/float64(numOfTimes))
 }
 
 func (s *Sentinel) pubsubOptions() []pubsub.Option {
-	oneSlotDuration := time.Duration(s.cfg.BeaconConfig.SecondsPerSlot) * time.Second
-	secondsPerEpoch := time.Duration(s.cfg.BeaconConfig.SecondsPerSlot*s.cfg.BeaconConfig.SlotsPerEpoch) * time.Second
 	thresholds := &pubsub.PeerScoreThresholds{
 		GossipThreshold:             -4000,
 		PublishThreshold:            -8000,
@@ -211,10 +209,10 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 		IPColocationFactorWhitelist: nil,
 		BehaviourPenaltyWeight:      -15.92,
 		BehaviourPenaltyThreshold:   6,
-		BehaviourPenaltyDecay:       scoreDecay(10*secondsPerEpoch, oneSlotDuration), // 10 epochs
-		DecayInterval:               oneSlotDuration,
+		BehaviourPenaltyDecay:       s.scoreDecay(10 * s.oneEpochDuration()), // 10 epochs
+		DecayInterval:               s.oneSlotDuration(),
 		DecayToZero:                 decayToZero,
-		RetainScore:                 100 * secondsPerEpoch, // Retain for 100 epochs
+		RetainScore:                 100 * s.oneEpochDuration(), // Retain for 100 epochs
 	}
 	pubsubQueueSize := 600
 	psOpts := []pubsub.Option{
