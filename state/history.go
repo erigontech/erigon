@@ -1217,6 +1217,7 @@ type HistoryContext struct {
 }
 
 func (h *History) MakeContext() *HistoryContext {
+
 	var hc = HistoryContext{
 		h:     h,
 		ic:    h.InvertedIndex.MakeContext(),

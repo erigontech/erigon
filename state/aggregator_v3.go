@@ -23,6 +23,7 @@ import (
 	"fmt"
 	math2 "math"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
+	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -80,13 +82,32 @@ type AggregatorV3 struct {
 	walLock  sync.RWMutex
 
 	ps *background.ProgressSet
+
+	// next fields are set only if agg.doTraceCtx is true. can enable by env: TRACE_AGG=true
+	doTraceCtx   bool
+	traceCtxLock sync.Mutex
+	traceCtx     *btree2.Map[uint64, *AggregatorV3Context]
+	traceCtxID   atomic.Uint64
 }
 
 type OnFreezeFunc func(frozenFileNames []string)
 
 func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep uint64, db kv.RoDB) (*AggregatorV3, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
-	a := &AggregatorV3{ctx: ctx, ctxCancel: ctxCancel, ps: background.NewProgressSet(), onFreeze: func(frozenFileNames []string) {}, dir: dir, tmpdir: tmpdir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}, db: db, keepInDB: 2 * aggregationStep}
+	a := &AggregatorV3{
+		ctx:              ctx,
+		ctxCancel:        ctxCancel,
+		onFreeze:         func(frozenFileNames []string) {},
+		dir:              dir,
+		tmpdir:           tmpdir,
+		aggregationStep:  aggregationStep,
+		db:               db,
+		keepInDB:         2 * aggregationStep,
+		doTraceCtx:       dbg.TraceAgg(),
+		traceCtx:         btree2.NewMap[uint64, *AggregatorV3Context](128),
+		ps:               background.NewProgressSet(),
+		backgroundResult: &BackgroundResult{},
+	}
 	var err error
 	if a.accounts, err = NewHistory(dir, a.tmpdir, aggregationStep, "accounts", kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, false, nil, false); err != nil {
 		return nil, err
@@ -110,6 +131,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 		return nil, err
 	}
 	a.recalcMaxTxNum()
+
 	return a, nil
 }
 func (a *AggregatorV3) OnFreeze(f OnFreezeFunc) { a.onFreeze = f }
@@ -844,6 +866,36 @@ func (a *AggregatorV3) prune(ctx context.Context, txFrom, txTo, limit uint64) er
 	return nil
 }
 
+func (a *AggregatorV3) SlowContextsList() (res []string) {
+	if a.doTraceCtx {
+		a.traceCtxLock.Lock()
+		a.traceCtx.Scan(func(key uint64, value *AggregatorV3Context) bool {
+			if time.Since(value.startTime) > time.Minute {
+				res = append(res, strconv.Itoa(int(key))+": "+value.stack)
+			}
+			return true
+		})
+		a.traceCtxLock.Unlock()
+	}
+	return res
+}
+func (a *AggregatorV3) addTraceCtx(ac *AggregatorV3Context) {
+	if a.doTraceCtx {
+		ac.id = a.traceCtxID.Add(1)
+		ac.stack = dbg.Stack()
+		ac.startTime = time.Now()
+		a.traceCtxLock.Lock()
+		a.traceCtx.Set(ac.id, ac)
+		a.traceCtxLock.Unlock()
+	}
+}
+func (a *AggregatorV3) delTraceCtx(ac *AggregatorV3Context) {
+	if a.doTraceCtx {
+		a.traceCtxLock.Lock()
+		a.traceCtx.Delete(ac.id)
+		a.traceCtxLock.Unlock()
+	}
+}
 func (a *AggregatorV3) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) uint64) {
 	if a.minimaxTxNumInFiles.Load() == 0 {
 		return
@@ -1442,10 +1494,6 @@ func (a *AggregatorV3) Stats() FilesStats22 {
 	return fs
 }
 
-func (a *AggregatorV3) Code() *History     { return a.code }
-func (a *AggregatorV3) Accounts() *History { return a.accounts }
-func (a *AggregatorV3) Storage() *History  { return a.storage }
-
 type AggregatorV3Context struct {
 	a          *AggregatorV3
 	accounts   *HistoryContext
@@ -1456,10 +1504,15 @@ type AggregatorV3Context struct {
 	tracesFrom *InvertedIndexContext
 	tracesTo   *InvertedIndexContext
 	keyBuf     []byte
+
+	// next fields are set only if agg.doTraceCtx is true
+	id        uint64
+	stack     string
+	startTime time.Time
 }
 
 func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
-	return &AggregatorV3Context{
+	ac := &AggregatorV3Context{
 		a:          a,
 		accounts:   a.accounts.MakeContext(),
 		storage:    a.storage.MakeContext(),
@@ -1469,8 +1522,11 @@ func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
 		tracesFrom: a.tracesFrom.MakeContext(),
 		tracesTo:   a.tracesTo.MakeContext(),
 	}
+	a.addTraceCtx(ac)
+	return ac
 }
 func (ac *AggregatorV3Context) Close() {
+	ac.a.delTraceCtx(ac)
 	ac.accounts.Close()
 	ac.storage.Close()
 	ac.code.Close()
