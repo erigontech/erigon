@@ -41,9 +41,9 @@ type txJSON struct {
 	MaxFeePerDataGas    *hexutil.Big     `json:"maxFeePerDataGas,omitempty"`
 	BlobVersionedHashes []libcommon.Hash `json:"blobVersionedHashes,omitempty"`
 	// Blob wrapper fields:
-	Blobs    Blobs     `json:"blobs,omitempty"`
-	BlobKzgs BlobKzgs  `json:"blobKzgs,omitempty"`
-	Proofs   KZGProofs `json:"proofs,omitempty"`
+	Blobs       Blobs     `json:"blobs,omitempty"`
+	Commitments BlobKzgs  `json:commitments",omitempty"`
+	Proofs      KZGProofs `json:"proofs,omitempty"`
 
 	// Only used for encoding:
 	Hash libcommon.Hash `json:"hash"`
@@ -138,7 +138,7 @@ func (tx BlobTxWrapper) MarshalJSON() ([]byte, error) {
 	enc := toSignedBlobTxJSON(&tx.Tx)
 
 	enc.Blobs = tx.Blobs
-	enc.BlobKzgs = tx.BlobKzgs
+	enc.Commitments = tx.Commitments
 	enc.Proofs = tx.Proofs
 
 	return json.Marshal(enc)
@@ -531,10 +531,10 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	}
 
 	btx := BlobTxWrapper{
-		Tx:       tx,
-		BlobKzgs: dec.BlobKzgs,
-		Blobs:    dec.Blobs,
-		Proofs:   dec.Proofs,
+		Tx:          tx,
+		Commitments: dec.Commitments,
+		Blobs:       dec.Blobs,
+		Proofs:      dec.Proofs,
 	}
 	err := btx.ValidateBlobTransactionWrapper()
 	if err != nil {

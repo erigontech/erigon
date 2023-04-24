@@ -27,9 +27,7 @@ type BlobsSidecar struct {
 }
 
 const (
-	BlobTxType                = 5
-	PrecompileInputLength     = 192
-	BlobVersionedHashesOffset = 258 // position of blob_versioned_hashes offset in a serialized blob tx, see TxPeekBlobVersionedHashes
+	PrecompileInputLength = 192
 )
 
 var (
