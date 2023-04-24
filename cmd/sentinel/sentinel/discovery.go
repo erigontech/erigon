@@ -62,6 +62,7 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 }
 
 func (s *Sentinel) listenForPeers() {
+	s.listenForPeersDoneCh = make(chan struct{})
 	enodes := []*enode.Node{}
 	for _, node := range s.cfg.NetworkConfig.StaticPeers {
 		newNode, err := enode.Parse(enode.ValidSchemes, node)
@@ -101,6 +102,12 @@ func (s *Sentinel) listenForPeers() {
 		// Skip Peer if IP was private.
 		if node.IP().IsPrivate() {
 			continue
+		}
+
+		select {
+		case <-s.listenForPeersDoneCh:
+			return
+		default:
 		}
 
 		go func(peerInfo *peer.AddrInfo) {

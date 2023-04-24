@@ -74,10 +74,11 @@ type Sentinel struct {
 
 	db kv.RoDB
 
-	discoverConfig discover.Config
-	pubsub         *pubsub.PubSub
-	subManager     *GossipManager
-	metrics        bool
+	discoverConfig       discover.Config
+	pubsub               *pubsub.PubSub
+	subManager           *GossipManager
+	metrics              bool
+	listenForPeersDoneCh chan struct{}
 }
 
 func (s *Sentinel) createLocalNode(
@@ -335,6 +336,13 @@ func (s *Sentinel) Start() error {
 	return nil
 }
 
+func (s *Sentinel) Stop() {
+	s.listenForPeersDoneCh <- struct{}{}
+	s.listener.Close()
+	s.subManager.Close()
+	s.host.Close()
+}
+
 func (s *Sentinel) String() string {
 	return s.listener.Self().String()
 }
@@ -363,4 +371,12 @@ func (s *Sentinel) Peers() *peers.Peers {
 
 func (s *Sentinel) GossipManager() *GossipManager {
 	return s.subManager
+}
+
+func (s *Sentinel) Config() *SentinelConfig {
+	return s.cfg
+}
+
+func (s *Sentinel) DB() kv.RoDB {
+	return s.db
 }

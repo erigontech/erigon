@@ -215,3 +215,11 @@ func (s *Sentinel) defaultBlockTopicParams() *pubsub.TopicScoreParams {
 		InvalidMessageDeliveriesDecay:   s.scoreDecay(50 * s.oneEpochDuration()),
 	}
 }
+
+func (g *GossipManager) Close() {
+	for _, topic := range g.subscriptions {
+		if topic != nil {
+			topic.Close()
+		}
+	}
+}
