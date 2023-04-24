@@ -27,6 +27,7 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
@@ -109,7 +110,13 @@ func ExecV3(ctx context.Context,
 	parallel bool, logPrefix string,
 	maxBlockNum uint64,
 ) error {
-	batchSize, chainDb := cfg.batchSize, cfg.db
+	batchSize := cfg.batchSize
+	chainDb := cfg.db
+	//TODO: re-think - how it must work
+	if casted, ok := chainDb.(*temporal.DB); ok {
+		chainDb = casted.InternalDB()
+	}
+
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
