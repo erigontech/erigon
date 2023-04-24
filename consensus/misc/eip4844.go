@@ -78,3 +78,7 @@ func VerifyEip4844Header(config *chain.Config, parent, header *types.Header) err
 func GetDataGasPrice(excessDataGas *big.Int) *big.Int {
 	return FakeExponential(big.NewInt(params.MinDataGasPrice), excessDataGas, big.NewInt(params.DataGasPriceUpdateFraction))
 }
+
+func GetDataGasUsed(numBlobs int) uint64 {
+	return uint64(numBlobs) * params.DataGasPerBlob
+}

@@ -316,22 +316,22 @@ func toProofs(_proofs KZGProofs) []gokzg4844.KZGProof {
 // BlobTxWrapper is the "network representation" of a Blob transaction, that is it includes not
 // only the SignedBlobTx but also all the associated blob data.
 type BlobTxWrapper struct {
-	Tx                 SignedBlobTx
-	BlobKzgs           BlobKzgs
-	Blobs              Blobs
-	KzgAggregatedProof KZGProofs
+	Tx       SignedBlobTx
+	BlobKzgs BlobKzgs
+	Blobs    Blobs
+	Proofs   KZGProofs
 }
 
 func (txw *BlobTxWrapper) Deserialize(dr *codec.DecodingReader) error {
-	return dr.Container(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.KzgAggregatedProof)
+	return dr.Container(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.Proofs)
 }
 
 func (txw *BlobTxWrapper) Serialize(w *codec.EncodingWriter) error {
-	return w.Container(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.KzgAggregatedProof)
+	return w.Container(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.Proofs)
 }
 
 func (txw *BlobTxWrapper) ByteLength() uint64 {
-	return codec.ContainerLength(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.KzgAggregatedProof)
+	return codec.ContainerLength(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.Proofs)
 }
 
 func (txw *BlobTxWrapper) FixedLength() uint64 {
@@ -341,11 +341,15 @@ func (txw *BlobTxWrapper) FixedLength() uint64 {
 // validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
 func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	blobTx := txw.Tx.Message
-	l1 := len(txw.BlobKzgs)
-	l2 := len(blobTx.BlobVersionedHashes)
+	l1 := len(blobTx.BlobVersionedHashes)
+	if l1 == 0 {
+		return fmt.Errorf("a blob tx must contain at least one blob")
+	}
+	l2 := len(txw.BlobKzgs)
 	l3 := len(txw.Blobs)
-	if l1 != l2 || l2 != l3 {
-		return fmt.Errorf("lengths don't match %v %v %v", l1, l2, l3)
+	l4 := len(txw.Proofs)
+	if l1 != l2 || l2 != l3 || l1 != l4 {
+		return fmt.Errorf("lengths don't match %v %v %v %v", l1, l2, l3, l4)
 	}
 	// the following check isn't strictly necessary as it would be caught by data gas processing
 	// (and hence it is not explicitly in the spec for this function), but it doesn't hurt to fail
@@ -354,7 +358,7 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 		return fmt.Errorf("number of blobs exceeds max: %v", l1)
 	}
 	cryptoCtx := kzg.CrpytoCtx()
-	err := cryptoCtx.VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.BlobKzgs), toProofs(txw.KzgAggregatedProof))
+	err := cryptoCtx.VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.BlobKzgs), toProofs(txw.Proofs))
 	if err != nil {
 		return fmt.Errorf("error during proof verification: %v", err)
 	}
@@ -409,7 +413,7 @@ func (txw *BlobTxWrapper) IsContractDeploy() bool                     { return t
 func (txw *BlobTxWrapper) Unwrap() Transaction                        { return &txw.Tx }
 
 func (txw BlobTxWrapper) EncodingSize() int {
-	envelopeSize := int(codec.ContainerLength(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.KzgAggregatedProof))
+	envelopeSize := int(codec.ContainerLength(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.Proofs))
 	// Add type byte
 	envelopeSize++
 	return envelopeSize
