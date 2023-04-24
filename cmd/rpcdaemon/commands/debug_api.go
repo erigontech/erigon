@@ -167,16 +167,16 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	}
 	defer tx.Rollback()
 
-	//latestBlock, err := stages.GetStageProgress(tx, stages.Finish)
-	//if err != nil {
-	//	return nil, err
-	//}
+	latestBlock, err := stages.GetStageProgress(tx, stages.Finish)
+	if err != nil {
+		return nil, err
+	}
 
 	// forces negative numbers to fail (too large) but allows zero
 	startNum := uint64(startNumber.Int64())
-	//if startNum > latestBlock {
-	//	return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
-	//}
+	if startNum > latestBlock {
+		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
+	}
 
 	endNum := startNum + 1 // allows for single param calls
 	if endNumber != nil {
@@ -185,9 +185,9 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	}
 
 	// is endNum too big?
-	//if endNum > latestBlock {
-	//	return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
-	//}
+	if endNum > latestBlock {
+		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
+	}
 
 	if startNum > endNum {
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
