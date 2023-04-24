@@ -106,55 +106,55 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return f(tx)
 }
 
-func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
-	kvTx, err := db.RwDB.BeginRw(ctx) //nolint:gocritic
-	if err != nil {
-		return nil, err
-	}
-	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
+//func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
+//	kvTx, err := db.RwDB.BeginRw(ctx) //nolint:gocritic
+//	if err != nil {
+//		return nil, err
+//	}
+//	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
+//
+//	//tx.agg = db.agg.MakeContext()
+//	return tx, nil
+//}
+//func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
+//	return db.BeginTemporalRw(ctx)
+//}
+//func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
+//	tx, err := db.BeginTemporalRw(ctx)
+//	if err != nil {
+//		return err
+//	}
+//	defer tx.Rollback()
+//	if err = f(tx); err != nil {
+//		return err
+//	}
+//	return tx.Commit()
+//}
 
-	tx.agg = db.agg.MakeContext()
-	return tx, nil
-}
-func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
-	return db.BeginTemporalRw(ctx)
-}
-func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
-	tx, err := db.BeginTemporalRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err = f(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
-	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:gocritic
-	if err != nil {
-		return nil, err
-	}
-	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
-
-	tx.agg = db.agg.MakeContext()
-	return tx, nil
-}
-func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
-	return db.BeginTemporalRwNosync(ctx) //nolint:gocritic
-}
-func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
-	tx, err := db.BeginTemporalRwNosync(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err = f(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
+//func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
+//	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:gocritic
+//	if err != nil {
+//		return nil, err
+//	}
+//	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
+//
+//	//tx.agg = db.agg.MakeContext()
+//	return tx, nil
+//}
+//func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
+//	return db.BeginTemporalRwNosync(ctx) //nolint:gocritic
+//}
+//func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
+//	tx, err := db.BeginTemporalRwNosync(ctx)
+//	if err != nil {
+//		return err
+//	}
+//	defer tx.Rollback()
+//	if err = f(tx); err != nil {
+//		return err
+//	}
+//	return tx.Commit()
+//}
 
 type Tx struct {
 	*mdbx.MdbxTx
