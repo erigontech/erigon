@@ -518,7 +518,7 @@ func (api *OtterscanAPIImpl) delegateBlockFees(ctx context.Context, tx kv.Tx, bl
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
 		effectiveGasPrice := uint64(0)
-		if !chainConfig.IsLondon(block.NumberU64()) || block.BaseFee() == nil {
+		if !chainConfig.IsLondon(block.NumberU64()) {
 			effectiveGasPrice = txn.GetPrice().Uint64()
 		} else {
 			baseFee, _ := uint256.FromBig(block.BaseFee())
