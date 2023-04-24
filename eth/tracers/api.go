@@ -19,5 +19,6 @@ type TraceConfig struct {
 	NoRefunds             *bool // Turns off gas refunds when tracing
 	StateOverrides        *ethapi.StateOverrides
 	GasOverride           *hexutil.Big
+	IgnoreGas             *bool
 	CreationCodeOverrides map[libcommon.Address]hexutil.Bytes
 }

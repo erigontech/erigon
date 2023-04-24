@@ -182,6 +182,9 @@ func TraceTx(
 	}
 	if config != nil {
 		vmConfig.CreationCodeOverrides = config.CreationCodeOverrides
+		if config.IgnoreGas != nil {
+			vmConfig.IgnoreGas = *config.IgnoreGas
+		}
 	}
 	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 	var refunds = true
