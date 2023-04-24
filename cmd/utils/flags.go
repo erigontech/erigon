@@ -34,6 +34,7 @@ import (
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
@@ -67,17 +68,17 @@ import (
 
 var (
 	// General settings
-	DataDirFlag = DirectoryFlag{
+	DataDirFlag = flags.DirectoryFlag{
 		Name:  "datadir",
 		Usage: "Data directory for the databases",
-		Value: DirectoryString(paths.DefaultDataDir()),
+		Value: flags.DirectoryString(paths.DefaultDataDir()),
 	}
 
-	AncientFlag = DirectoryFlag{
+	AncientFlag = flags.DirectoryFlag{
 		Name:  "datadir.ancient",
 		Usage: "Data directory for ancient chain segments (default = inside chaindata)",
 	}
-	MinFreeDiskSpaceFlag = DirectoryFlag{
+	MinFreeDiskSpaceFlag = flags.DirectoryFlag{
 		Name:  "datadir.minfreedisk",
 		Usage: "Minimum free disk space in MB, once reached triggers auto shut down (default = --cache.gc converted to MB, 0 = disabled)",
 	}
@@ -103,7 +104,7 @@ var (
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
-	OverrideShanghaiTime = BigFlag{
+	OverrideShanghaiTime = flags.BigFlag{
 		Name:  "override.shanghaiTime",
 		Usage: "Manually specify Shanghai fork time, overriding the bundled setting",
 	}
@@ -117,10 +118,10 @@ var (
 		Name:  "ethash.cacheslockmmap",
 		Usage: "Lock memory maps of recent ethash caches",
 	}
-	EthashDatasetDirFlag = DirectoryFlag{
+	EthashDatasetDirFlag = flags.DirectoryFlag{
 		Name:  "ethash.dagdir",
 		Usage: "Directory to store the ethash mining DAGs",
-		Value: DirectoryString(ethconfig.Defaults.Ethash.DatasetDir),
+		Value: flags.DirectoryString(ethconfig.Defaults.Ethash.DatasetDir),
 	}
 	EthashDatasetsLockMmapFlag = cli.BoolFlag{
 		Name:  "ethash.dagslockmmap",
@@ -216,7 +217,7 @@ var (
 		Usage: "Target gas limit for mined blocks",
 		Value: ethconfig.Defaults.Miner.GasLimit,
 	}
-	MinerGasPriceFlag = BigFlag{
+	MinerGasPriceFlag = flags.BigFlag{
 		Name:  "miner.gasprice",
 		Usage: "Minimum gas price for mining a transaction",
 		Value: ethconfig.Defaults.Miner.GasPrice,
@@ -277,7 +278,7 @@ var (
 		Name:  "ipcdisable",
 		Usage: "Disable the IPC-RPC server",
 	}
-	IPCPathFlag = DirectoryFlag{
+	IPCPathFlag = flags.DirectoryFlag{
 		Name:  "ipcpath",
 		Usage: "Filename for IPC socket/pipe within the datadir (explicit paths escape it)",
 	}
@@ -636,7 +637,7 @@ var (
 		Usage: "number of recent block signatures to keep in memory",
 		Value: 16384,
 	}
-	CliqueDataDirFlag = DirectoryFlag{
+	CliqueDataDirFlag = flags.DirectoryFlag{
 		Name:  "clique.datadir",
 		Usage: "a path to clique db folder",
 		Value: "",
@@ -1376,7 +1377,7 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 		cfg.GasLimit = ctx.Uint64(MinerGasLimitFlag.Name)
 	}
 	if ctx.IsSet(MinerGasPriceFlag.Name) {
-		cfg.GasPrice = BigFlagValue(ctx, MinerGasPriceFlag.Name)
+		cfg.GasPrice = flags.GlobalBig(ctx, MinerGasPriceFlag.Name)
 	}
 	if ctx.IsSet(MinerRecommitIntervalFlag.Name) {
 		cfg.Recommit = ctx.Duration(MinerRecommitIntervalFlag.Name)
@@ -1581,7 +1582,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 
 	if ctx.IsSet(OverrideShanghaiTime.Name) {
-		cfg.OverrideShanghaiTime = BigFlagValue(ctx, OverrideShanghaiTime.Name)
+		cfg.OverrideShanghaiTime = flags.GlobalBig(ctx, OverrideShanghaiTime.Name)
 		cfg.TxPool.OverrideShanghaiTime = cfg.OverrideShanghaiTime
 	}
 
