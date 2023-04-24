@@ -193,8 +193,7 @@ func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 // Based on the lighthouse parameters.
 // https://gist.github.com/blacktemplar/5c1862cb3f0e32a1a7fb0b25e79e6e2c
 func (s *Sentinel) defaultBlockTopicParams() *pubsub.TopicScoreParams {
-	decayEpoch := time.Duration(5)
-	blocksPerEpoch := uint64(s.cfg.BeaconConfig.SlotsPerEpoch)
+	blocksPerEpoch := s.cfg.BeaconConfig.SlotsPerEpoch
 	meshWeight := float64(0)
 	return &pubsub.TopicScoreParams{
 		TopicWeight:                     beaconBlockWeight,
@@ -205,13 +204,13 @@ func (s *Sentinel) defaultBlockTopicParams() *pubsub.TopicScoreParams {
 		FirstMessageDeliveriesDecay:     s.scoreDecay(20 * s.oneEpochDuration()),
 		FirstMessageDeliveriesCap:       23,
 		MeshMessageDeliveriesWeight:     meshWeight,
-		MeshMessageDeliveriesDecay:      s.scoreDecay(decayEpoch * s.oneEpochDuration()),
-		MeshMessageDeliveriesCap:        float64(blocksPerEpoch * uint64(decayEpoch)),
-		MeshMessageDeliveriesThreshold:  float64(blocksPerEpoch*uint64(decayEpoch)) / 10,
+		MeshMessageDeliveriesDecay:      s.scoreDecay(5 * s.oneEpochDuration()),
+		MeshMessageDeliveriesCap:        float64(blocksPerEpoch * 5),
+		MeshMessageDeliveriesThreshold:  float64(blocksPerEpoch*5) / 10,
 		MeshMessageDeliveriesWindow:     2 * time.Second,
 		MeshMessageDeliveriesActivation: 4 * s.oneEpochDuration(),
 		MeshFailurePenaltyWeight:        meshWeight,
-		MeshFailurePenaltyDecay:         s.scoreDecay(decayEpoch * s.oneEpochDuration()),
+		MeshFailurePenaltyDecay:         s.scoreDecay(5 * s.oneEpochDuration()),
 		InvalidMessageDeliveriesWeight:  -140.4475,
 		InvalidMessageDeliveriesDecay:   s.scoreDecay(50 * s.oneEpochDuration()),
 	}

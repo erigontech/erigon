@@ -340,18 +340,17 @@ func (s *Sentinel) String() string {
 }
 
 func (s *Sentinel) HasTooManyPeers() bool {
-	nPeers, _ := s.GetPeersCount()
-	return nPeers >= peers.DefaultMaxPeers
+	return s.GetPeersCount() >= peers.DefaultMaxPeers
 }
 
-func (s *Sentinel) GetPeersCount() (int, int) {
+func (s *Sentinel) GetPeersCount() int {
 	sub := s.subManager.GetMatchingSubscription(string(BeaconBlockTopic))
 
 	if sub == nil {
-		return len(s.host.Network().Peers()), 0
+		return len(s.host.Network().Peers())
 	}
 
-	return len(s.host.Network().Peers()), len(sub.topic.ListPeers())
+	return len(sub.topic.ListPeers())
 }
 
 func (s *Sentinel) Host() host.Host {
