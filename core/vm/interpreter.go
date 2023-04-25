@@ -165,6 +165,17 @@ func NewEVMInterpreter(evm VMInterpreter, cfg Config) *EVMInterpreter {
 				return 0, nil
 			}
 		}
+		callOps := []OpCode{CALL, STATICCALL, CALLCODE, DELEGATECALL}
+		for _, opCode := range callOps {
+			jt[opCode].dynamicGas = func(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+				callGasTemp, err := callGas(false, contract.Gas, 0, stack.Back(0))
+				if err != nil {
+					return 0, err
+				}
+				evm.SetCallGasTemp(callGasTemp)
+				return callGasTemp, nil
+			}
+		}
 	}
 
 	return &EVMInterpreter{
