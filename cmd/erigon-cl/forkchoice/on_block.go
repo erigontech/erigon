@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, fullValidation bool) error {
+func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, fullValidation bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	blockRoot, err := block.Block.HashSSZ()
@@ -23,12 +23,6 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, fullValidati
 	}
 
 	config := f.forkGraph.Config()
-	if fullValidation && f.engine != nil {
-		if err := f.engine.NewPayload(block.Block.Body.ExecutionPayload); err != nil {
-			log.Warn("newPayload failed", "err", err)
-			return err
-		}
-	}
 	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if status != fork_graph.Success {
 		if status != fork_graph.PreValidated {
@@ -36,6 +30,12 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, fullValidati
 			return fmt.Errorf("could not replay block, err: %s, code: %d", err, status)
 		}
 		return nil
+	}
+	if newPayload && f.engine != nil {
+		if err := f.engine.NewPayload(block.Block.Body.ExecutionPayload); err != nil {
+			log.Warn("newPayload failed", "err", err)
+			return err
+		}
 	}
 	if block.Block.Body.ExecutionPayload != nil {
 		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
