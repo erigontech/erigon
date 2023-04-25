@@ -288,24 +288,16 @@ func (q *ResultsQueue) drainNoBlock(task *TxTask) (resultsQueueLen int) {
 
 func (q *ResultsQueue) Iter() *ResultsQueueIter {
 	q.Lock()
-	q.iter.needUnlock = true
-	return q.iter
-}
-func (q *ResultsQueue) IterLocked() *ResultsQueueIter {
-	q.iter.needUnlock = false
 	return q.iter
 }
 
 type ResultsQueueIter struct {
-	q          *ResultsQueue
-	results    *TxTaskQueue //pointer to `q.results` - just to reduce amount of dereferences
-	needUnlock bool
+	q       *ResultsQueue
+	results *TxTaskQueue //pointer to `q.results` - just to reduce amount of dereferences
 }
 
 func (q *ResultsQueueIter) Close() {
-	if q.needUnlock {
-		q.q.Unlock()
-	}
+	q.q.Unlock()
 }
 func (q *ResultsQueueIter) HasNext(outputTxNum uint64) bool {
 	return len(*q.results) > 0 && (*q.results)[0].TxNum == outputTxNum
