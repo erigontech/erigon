@@ -5,15 +5,24 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/stretchr/testify/require"
 )
+
+func FakePreimage(hash libcommon.Hash) libcommon.Hash {
+	result := hash
+	for i, b := range hash {
+		result[i] = b ^ 1
+	}
+	return result
+}
 
 // NewManualProofRetainer is a way to allow external tests in this package to
 // manually construct a ProofRetainer based on a set of keys.  This is
 // especially useful for tests which want to manually manipulate the hash
 // databases without worrying about generating and tracking pre-images.
-func NewManualProofRetainer(t *testing.T, rl *RetainList, keys [][]byte) *ProofRetainer {
+func NewManualProofRetainer(t *testing.T, acc *accounts.Account, rl *RetainList, keys [][]byte) *ProofRetainer {
 	var accHexKey []byte
 	var storageKeys []libcommon.Hash
 	var storageHexKeys [][]byte
@@ -26,7 +35,7 @@ func NewManualProofRetainer(t *testing.T, rl *RetainList, keys [][]byte) *ProofR
 			if accHexKey == nil {
 				accHexKey = rl.AddKey(key[:32])
 			}
-			storageKeys = append(storageKeys, libcommon.Hash{byte(len(storageKeys))})
+			storageKeys = append(storageKeys, FakePreimage(libcommon.BytesToHash(key[40:])))
 			storageHexKeys = append(storageHexKeys, rl.AddKey(key))
 			require.Equal(t, accHexKey, storageHexKeys[0][:64], "all storage keys must be for the same account")
 		default:
@@ -35,7 +44,7 @@ func NewManualProofRetainer(t *testing.T, rl *RetainList, keys [][]byte) *ProofR
 	}
 	return &ProofRetainer{
 		rl:             rl,
-		acc:            &accounts.Account{Incarnation: 1},
+		acc:            acc,
 		accHexKey:      accHexKey,
 		storageKeys:    storageKeys,
 		storageHexKeys: storageHexKeys,
@@ -85,8 +94,10 @@ func TestProofRetainerConstruction(t *testing.T) {
 		switch len(key) {
 		case 64: // Account leaf key
 			pe.storageRoot = libcommon.Hash{3}
+			pe.storageRootKey = key
 		case 144: // Storage leaf key
 			pe.storageValue = uint256.NewInt(5)
+			pe.storageKey = key[2*(32+8):]
 		}
 		pe.proof.Write(key)
 	}
@@ -133,7 +144,8 @@ func TestProofRetainerConstruction(t *testing.T) {
 		oldKey := pr.proofs[4].storageValue
 		pr.proofs[4].storageValue = nil
 		defer func() { pr.proofs[4].storageValue = oldKey }()
-		_, err := pr.ProofResult()
-		require.Error(t, err, "no storage value for storage key 0x%x", validKeys[4])
+		accProof, err := pr.ProofResult()
+		require.NoError(t, err)
+		require.Equal(t, &hexutil.Big{}, accProof.StorageProof[0].Value)
 	})
 }

@@ -229,7 +229,7 @@ func verifyProof(root libcommon.Hash, key []byte, proofs map[libcommon.Hash]node
 			}
 			node, key = nt.Children[key[0]], key[1:]
 			if node == nil {
-				return nil, fmt.Errorf("child %x of fullNode %x not found %v", key[0], key, nt.Children)
+				return nil, nil
 			}
 		case *shortNode:
 			shortHex := nt.Key
@@ -237,7 +237,7 @@ func verifyProof(root libcommon.Hash, key []byte, proofs map[libcommon.Hash]node
 				return nil, fmt.Errorf("len(shortHex)=%d must be leq len(key)=%d", len(shortHex), len(key))
 			}
 			if !bytes.Equal(shortHex, key[:len(shortHex)]) {
-				return nil, fmt.Errorf("shortHex=%x must be the prefix for key=%x", shortHex, key)
+				return nil, nil
 			}
 			node, key = nt.Val, key[len(shortHex):]
 		case hashNode:
@@ -288,6 +288,22 @@ func VerifyAccountProofByHash(stateRoot libcommon.Hash, accountKey libcommon.Has
 		return fmt.Errorf("could not verify proof: %w", err)
 	}
 
+	if value == nil {
+		// A nil value proves the account does not exist.
+		switch {
+		case proof.Nonce != 0:
+			return fmt.Errorf("account is not in state, but has non-zero nonce")
+		case proof.Balance.ToInt().Sign() != 0:
+			return fmt.Errorf("account is not in state, but has balance")
+		case proof.StorageHash != libcommon.Hash{}:
+			return fmt.Errorf("account is not in state, but has non-empty storage hash")
+		case proof.CodeHash != libcommon.Hash{}:
+			return fmt.Errorf("account is not in state, but has non-empty code hash")
+		default:
+			return nil
+		}
+	}
+
 	expected, err := rlp.EncodeToBytes([]any{
 		uint64(proof.Nonce),
 		proof.Balance.ToInt().Bytes(),
@@ -314,6 +330,22 @@ func VerifyStorageProof(storageRoot libcommon.Hash, proof accounts.StorProofResu
 // that the pre-image of the storage key hashes to the provided keyHash.
 // Consequently, the Key of the proof is ignored in the validation.
 func VerifyStorageProofByHash(storageRoot libcommon.Hash, keyHash libcommon.Hash, proof accounts.StorProofResult) error {
+	if storageRoot == EmptyRoot || storageRoot == (libcommon.Hash{}) {
+		if proof.Value.ToInt().Sign() != 0 {
+			return fmt.Errorf("empty storage root cannot have non-zero values")
+		}
+		// The spec here is a bit unclear.  The yellow paper makes it clear that the
+		// EmptyRoot hash is a special case where the trie is empty.  Since the trie
+		// is empty there are no proof elements to collect.  But, EIP-1186 also
+		// clearly states that the proof must be "starting with the
+		// storageHash-Node", which could imply an RLP encoded `[]byte(nil)` (the
+		// pre-image of the EmptyRoot) should be included.  This implementation
+		// chooses to require the proof be empty.
+		if len(proof.Proof) > 0 {
+			return fmt.Errorf("empty storage root should not have proof nodes")
+		}
+		return nil
+	}
 	pm, used, err := proofMap(proof.Proof)
 	if err != nil {
 		return fmt.Errorf("could not construct proofMap: %w", err)
@@ -323,9 +355,13 @@ func VerifyStorageProofByHash(storageRoot libcommon.Hash, keyHash libcommon.Hash
 		return fmt.Errorf("could not verify proof: %w", err)
 	}
 
-	expected, err := rlp.EncodeToBytes(proof.Value.ToInt().Bytes())
-	if err != nil {
-		return err
+	var expected []byte
+	if value != nil {
+		// A non-nil value proves the storage does exist.
+		expected, err = rlp.EncodeToBytes(proof.Value.ToInt().Bytes())
+		if err != nil {
+			return err
+		}
 	}
 
 	if !bytes.Equal(expected, value) {
