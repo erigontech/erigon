@@ -43,7 +43,7 @@ type GossipSubscription struct {
 
 func (sub *GossipSubscription) Listen() (err error) {
 	sub.setup.Do(func() {
-		sub.stopCh = make(chan struct{})
+		sub.stopCh = make(chan struct{}, 3)
 		sub.sub, err = sub.topic.Subscribe()
 		if err != nil {
 			err = fmt.Errorf("failed to begin topic %s subscription, err=%w", sub.topic.String(), err)

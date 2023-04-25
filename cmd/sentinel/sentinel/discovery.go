@@ -62,7 +62,7 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 }
 
 func (s *Sentinel) listenForPeers() {
-	s.listenForPeersDoneCh = make(chan struct{})
+	s.listenForPeersDoneCh = make(chan struct{}, 3)
 	enodes := []*enode.Node{}
 	for _, node := range s.cfg.NetworkConfig.StaticPeers {
 		newNode, err := enode.Parse(enode.ValidSchemes, node)
@@ -83,6 +83,11 @@ func (s *Sentinel) listenForPeers() {
 			log.Debug("Stopping Ethereum 2.0 peer discovery", "err", err)
 			break
 		}
+		select {
+		case <-s.listenForPeersDoneCh:
+			return
+		default:
+		}
 		if s.HasTooManyPeers() {
 			log.Trace("[Sentinel] Not looking for peers, at peer limit")
 			time.Sleep(100 * time.Millisecond)
@@ -102,12 +107,6 @@ func (s *Sentinel) listenForPeers() {
 		// Skip Peer if IP was private.
 		if node.IP().IsPrivate() {
 			continue
-		}
-
-		select {
-		case <-s.listenForPeersDoneCh:
-			return
-		default:
 		}
 
 		go func(peerInfo *peer.AddrInfo) {
