@@ -190,7 +190,7 @@ func (s *SentinelServer) ListenToGossip() {
 	}
 }
 
-var sentinelLoopInterval = 10 * time.Minute
+var sentinelLoopInterval = 4 * time.Hour
 
 func (s *SentinelServer) startServerBackgroundLoop() {
 	var err error
