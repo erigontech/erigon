@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"sync"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -236,6 +237,7 @@ type ResultsQueue struct {
 	closed bool
 
 	resultCh chan *TxTask
+	ticker   *time.Ticker
 	iter     *ResultsQueueIter
 
 	sync.Mutex
@@ -247,6 +249,7 @@ func NewResultsQueue(newTasksLimit, queueLimit int) *ResultsQueue {
 		results:  &TxTaskQueue{},
 		limit:    queueLimit,
 		resultCh: make(chan *TxTask, newTasksLimit),
+		ticker:   time.NewTicker(time.Second),
 	}
 	heap.Init(r.results)
 	r.iter = &ResultsQueueIter{q: r, results: r.results}
@@ -307,16 +310,6 @@ func (q *ResultsQueueIter) PopNext() *TxTask {
 }
 
 func (q *ResultsQueue) Drain(ctx context.Context) error {
-	// Corner case: workers processed all new tasks (no more q.resultCh events) when we are inside Drain() func
-	// it means - naive-wait for new q.resultCh events will not work here (will cause dead-lock)
-	//
-	// Drain everything but don't block
-	// if after drain - queue.Len() > 0 - then don't block
-	// otherwise wait for new result
-	if l := q.drainNoBlock(nil); l > 0 {
-		return nil
-	}
-
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -325,6 +318,18 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 			return nil
 		}
 		q.drainNoBlock(txTask)
+	case <-q.ticker.C:
+		// Corner case: workers processed all new tasks (no more q.resultCh events) when we are inside Drain() func
+		// it means - naive-wait for new q.resultCh events will not work here (will cause dead-lock)
+		//
+		// Drain everything but don't block
+		// if after drain - queue.Len() > 0 - then don't block
+		// otherwise wait for new result
+
+		if q.Len() > 0 {
+			return nil
+		}
+		return q.Drain(ctx)
 	}
 	return nil
 }
@@ -359,6 +364,7 @@ func (q *ResultsQueue) Close() {
 	}
 	q.closed = true
 	close(q.resultCh)
+	q.ticker.Stop()
 }
 func (q *ResultsQueue) ResultChLen() int { return len(q.resultCh) }
 func (q *ResultsQueue) ResultChCap() int { return cap(q.resultCh) }
