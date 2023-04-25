@@ -675,7 +675,7 @@ func (s *EthBackendServer) EngineGetPayloadWithBlobs(ctx context.Context, req *r
 			bb.Kzgs = append(bb.Kzgs, kzg[:])
 		}
 		for _, proof := range proofs {
-			bb.Proofs = append(bb.Kzgs, proof[:])
+			bb.Proofs = append(bb.Proofs, proof[:])
 		}
 	}
 	return pl, nil
