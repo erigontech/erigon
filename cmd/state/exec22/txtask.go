@@ -56,13 +56,6 @@ type TxTaskQueue []*TxTask
 func (h TxTaskQueue) Len() int {
 	return len(h)
 }
-func LenLocked(h *TxTaskQueue, lock *sync.Mutex) (l int) {
-	lock.Lock()
-	l = h.Len()
-	lock.Unlock()
-	return l
-}
-
 func (h TxTaskQueue) Less(i, j int) bool {
 	return h[i].TxNum < h[j].TxNum
 }
@@ -269,12 +262,13 @@ func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	}
 	return nil
 }
-func (q *ResultsQueue) drainNoBlock(task *TxTask) {
+func (q *ResultsQueue) drainNoBlock(task *TxTask) (resultsQueueLen int) {
 	q.Lock()
 	defer q.Unlock()
 	if task != nil {
 		heap.Push(q.results, task)
 	}
+	resultsQueueLen = q.results.Len()
 
 	for {
 		select {
@@ -284,9 +278,10 @@ func (q *ResultsQueue) drainNoBlock(task *TxTask) {
 			}
 			if txTask != nil {
 				heap.Push(q.results, txTask)
+				resultsQueueLen = q.results.Len()
 			}
 		default: // we are inside mutex section, can't block here
-			return
+			return resultsQueueLen
 		}
 	}
 }
@@ -320,6 +315,16 @@ func (q *ResultsQueueIter) PopNext() *TxTask {
 }
 
 func (q *ResultsQueue) Drain(ctx context.Context) error {
+	// Corner case: workers processed all new tasks (no more q.resultCh events) when we are inside Drain() func
+	// it means - naive-wait for new q.resultCh events will not work here (will cause dead-lock)
+	//
+	// Drain everything but don't block
+	// if after drain - queue.Len() > 0 - then don't block
+	// otherwise wait for new result
+	if l := q.drainNoBlock(nil); l > 0 {
+		return nil
+	}
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -331,22 +336,9 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 	}
 	return nil
 }
+
 func (q *ResultsQueue) DrainNonBlocking() { q.drainNoBlock(nil) }
 
-func (q *ResultsQueue) DrainLocked() {
-	var drained bool
-	for !drained {
-		select {
-		case txTask, ok := <-q.resultCh:
-			if !ok {
-				return
-			}
-			heap.Push(q.results, txTask)
-		default:
-			drained = true
-		}
-	}
-}
 func (q *ResultsQueue) DropResults(f func(t *TxTask)) {
 	q.Lock()
 	defer q.Unlock()

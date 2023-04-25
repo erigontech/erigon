@@ -684,6 +684,7 @@ Loop:
 	}
 
 	if parallel {
+		log.Warn("[dbg] all txs sent")
 		if err := rwLoopG.Wait(); err != nil {
 			return err
 		}
