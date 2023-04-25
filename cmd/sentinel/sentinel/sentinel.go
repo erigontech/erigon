@@ -384,3 +384,12 @@ func (s *Sentinel) DB() kv.RoDB {
 func (s *Sentinel) Status() *cltypes.Status {
 	return s.handshaker.Status()
 }
+
+func (s *Sentinel) PeersList() []peer.AddrInfo {
+	pids := s.host.Network().Peers()
+	infos := []peer.AddrInfo{}
+	for _, pid := range pids {
+		infos = append(infos, s.host.Network().Peerstore().PeerInfo(pid))
+	}
+	return infos
+}

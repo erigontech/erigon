@@ -190,14 +190,17 @@ func (s *SentinelServer) ListenToGossip() {
 	}
 }
 
+var sentinelLoopInterval = 3 * time.Hour
+
 func (s *SentinelServer) startServerBackgroundLoop() {
 	var err error
-	ticker := time.NewTicker(time.Hour)
+	ticker := time.NewTicker(sentinelLoopInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
 			s.mu.Lock()
+			peers := s.sentinel.PeersList()
 			s.sentinel.Stop()
 			status := s.sentinel.Status()
 			s.sentinel, err = createSentinel(s.sentinel.Config(), s.sentinel.DB())
@@ -206,6 +209,9 @@ func (s *SentinelServer) startServerBackgroundLoop() {
 				continue
 			}
 			s.sentinel.SetStatus(status)
+			for _, peer := range peers {
+				s.sentinel.ConnectWithPeer(s.ctx, peer, true)
+			}
 			s.mu.Unlock()
 		case <-s.ctx.Done():
 			return
