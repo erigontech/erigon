@@ -4,6 +4,11 @@ release:
   disable: false
   draft: true
   prerelease: auto
+  # By default .Version variable does strip 'v' prefix.
+  name_template: "{{.Tag}}"
+
+snapshot:
+  name_template: "{{.Branch}}"
 
 builds:
   - id: darwin-amd64
@@ -60,10 +65,6 @@ builds:
       - CXX=x86_64-w64-mingw32-g++
     tags: [ nosqlite, noboltdb, netgo ]
     ldflags: -s -w
-
-
-snapshot:
-  name_template: "{{ .Tag }}.next"
 
 dockers:
   - image_templates:
