@@ -47,7 +47,8 @@ var (
 // Deprecated
 // use package turbo/trie
 type Trie struct {
-	root node
+	root                 node
+	valueNodesRLPEncoded bool
 
 	newHasherFunc func() *hasher
 }
@@ -74,7 +75,8 @@ func New(root libcommon.Hash) *Trie {
 // it is usually used for testing purposes.
 func NewTestRLPTrie(root libcommon.Hash) *Trie {
 	trie := &Trie{
-		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ true) },
+		valueNodesRLPEncoded: true,
+		newHasherFunc:        func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ true) },
 	}
 	if (root != libcommon.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode{hash: root[:]}

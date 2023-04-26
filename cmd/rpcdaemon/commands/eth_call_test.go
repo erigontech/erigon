@@ -13,7 +13,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
@@ -25,10 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
@@ -99,173 +96,6 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	}, rpc.BlockNumberOrHashWithNumber(ethCallBlockNumber), nil); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-}
-
-type valueNode []byte
-type hashNode libcommon.Hash
-
-type shortNode struct {
-	Key trie.Keybytes
-	Val any
-}
-
-type fullNode struct {
-	Children [17]any
-}
-
-func decodeRef(t *testing.T, buf []byte) (any, []byte) {
-	t.Helper()
-	kind, val, rest, err := rlp.Split(buf)
-	require.NoError(t, err)
-	switch {
-	case kind == rlp.List:
-		require.Less(t, len(buf)-len(rest), length.Hash, "embedded nodes must be less than hash size")
-		return decodeNode(t, buf), rest
-	case kind == rlp.String && len(val) == 0:
-		return nil, rest
-	case kind == rlp.String && len(val) == 32:
-		return hashNode(libcommon.CastToHash(val)), rest
-	default:
-		t.Fatalf("invalid RLP string size %d (want 0 through 32)", len(val))
-		return nil, rest
-	}
-}
-
-func decodeFull(t *testing.T, elems []byte) fullNode {
-	t.Helper()
-	n := fullNode{}
-	for i := 0; i < 16; i++ {
-		n.Children[i], elems = decodeRef(t, elems)
-	}
-	val, _, err := rlp.SplitString(elems)
-	require.NoError(t, err)
-	if len(val) > 0 {
-		n.Children[16] = valueNode(val)
-	}
-	return n
-}
-
-func decodeShort(t *testing.T, elems []byte) shortNode {
-	t.Helper()
-	kbuf, rest, err := rlp.SplitString(elems)
-	require.NoError(t, err)
-	kb := trie.CompactToKeybytes(kbuf)
-	if kb.Terminating {
-		val, _, err := rlp.SplitString(rest)
-		require.NoError(t, err)
-		return shortNode{
-			Key: kb,
-			Val: valueNode(val),
-		}
-	}
-
-	val, _ := decodeRef(t, rest)
-	return shortNode{
-		Key: kb,
-		Val: val,
-	}
-}
-
-func decodeNode(t *testing.T, encoded []byte) any {
-	t.Helper()
-	require.NotEmpty(t, encoded)
-	elems, _, err := rlp.SplitList(encoded)
-	require.NoError(t, err)
-	switch c, _ := rlp.CountValues(elems); c {
-	case 2:
-		return decodeShort(t, elems)
-	case 17:
-		return decodeFull(t, elems)
-	default:
-		t.Fatalf("invalid number of list elements: %v", c)
-		return nil // unreachable
-	}
-}
-
-type rawProofElement struct {
-	index int
-	value []byte
-}
-
-// proofMap creates a map from hash to proof node
-func proofMap(t *testing.T, proof []hexutility.Bytes) (map[libcommon.Hash]any, map[libcommon.Hash]rawProofElement) {
-	res := map[libcommon.Hash]any{}
-	raw := map[libcommon.Hash]rawProofElement{}
-	for i, proofB := range proof {
-		hash := crypto.Keccak256Hash(proofB)
-		res[hash] = decodeNode(t, proofB)
-		raw[hash] = rawProofElement{
-			index: i,
-			value: proofB,
-		}
-	}
-	return res, raw
-}
-
-func verifyProof(t *testing.T, root libcommon.Hash, key []byte, proofs map[libcommon.Hash]any, used map[libcommon.Hash]rawProofElement) []byte {
-	t.Helper()
-	nextIndex := 0
-	key = (&trie.Keybytes{Data: key}).ToHex()
-	var node any = hashNode(root)
-	for {
-		switch nt := node.(type) {
-		case fullNode:
-			require.NotEmpty(t, key, "full nodes should not have values")
-			node, key = nt.Children[key[0]], key[1:]
-		case shortNode:
-			shortHex := nt.Key.ToHex()[:nt.Key.Nibbles()] // There is a trailing 0 on odd otherwise
-			require.LessOrEqual(t, len(shortHex), len(key))
-			require.Equal(t, shortHex, key[:len(shortHex)])
-			node, key = nt.Val, key[len(shortHex):]
-		case hashNode:
-			var ok bool
-			node, ok = proofs[libcommon.Hash(nt)]
-			require.True(t, ok, "missing hash %x", nt)
-			raw, ok := used[libcommon.Hash(nt)]
-			require.True(t, ok)
-			require.Equal(t, nextIndex, raw.index, "proof elements not in expected order")
-			nextIndex++
-			delete(used, libcommon.Hash(nt))
-		case valueNode:
-			require.Len(t, key, 0)
-			for hash, raw := range used {
-				require.Failf(t, "not all proof elements were used", "hash=%x index=%d value=%x decoded=%#v", hash, raw.index, raw.value, proofs[hash])
-			}
-			return nt
-		default:
-			t.Fatalf("unexpected type: %T", node)
-		}
-	}
-}
-
-func verifyAccountProof(t *testing.T, stateRoot libcommon.Hash, proof *accounts.AccProofResult) {
-	t.Helper()
-	accountKey := crypto.Keccak256(proof.Address[:])
-	pm, used := proofMap(t, proof.AccountProof)
-	value := verifyProof(t, stateRoot, accountKey, pm, used)
-
-	expected, err := rlp.EncodeToBytes([]any{
-		uint64(proof.Nonce),
-		proof.Balance.ToInt().Bytes(),
-		proof.StorageHash,
-		proof.CodeHash,
-	})
-	require.NoError(t, err)
-
-	require.Equal(t, expected, value)
-}
-
-func verifyStorageProof(t *testing.T, storageRoot libcommon.Hash, proof accounts.StorProofResult) {
-	t.Helper()
-
-	storageKey := crypto.Keccak256(proof.Key[:])
-	pm, used := proofMap(t, proof.Proof)
-	value := verifyProof(t, storageRoot, storageKey, pm, used)
-
-	expected, err := rlp.EncodeToBytes(proof.Value.ToInt().Bytes())
-	require.NoError(t, err)
-
-	require.Equal(t, expected, value)
 }
 
 func TestGetProof(t *testing.T) {
@@ -351,7 +181,8 @@ func TestGetProof(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Equal(t, tt.addr, proof.Address)
-			verifyAccountProof(t, header.Root, proof)
+			err = trie.VerifyAccountProof(header.Root, proof)
+			require.NoError(t, err)
 
 			require.Equal(t, len(tt.storageKeys), len(proof.StorageProof))
 			for _, storageKey := range tt.storageKeys {
@@ -362,7 +193,8 @@ func TestGetProof(t *testing.T) {
 					}
 					found = true
 					require.Equal(t, uint256.NewInt(tt.stateVal).ToBig(), (*big.Int)(storageProof.Value))
-					verifyStorageProof(t, proof.StorageHash, storageProof)
+					err = trie.VerifyStorageProof(proof.StorageHash, storageProof)
+					require.NoError(t, err)
 				}
 				require.True(t, found, "did not find storage proof for key=%x", storageKey)
 			}

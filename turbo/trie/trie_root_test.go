@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"math/big"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/stretchr/testify/require"
@@ -35,6 +39,95 @@ func initialFlatDBTrieBuild(t *testing.T, db kv.RwDB) libcommon.Hash {
 	return hash
 }
 
+// seedInitialAccounts uses the provided hashes to commit simpleAccountValBytes
+// at each corresponding key in the HashedAccounts table.
+func seedInitialAccounts(t *testing.T, db kv.RwDB, hashes []libcommon.Hash) {
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for _, hash := range hashes {
+		t.Logf("Seeding initial account with hash %s", hash)
+		err = tx.Put(kv.HashedAccounts, hash[:], simpleAccountValBytes)
+		require.NoError(t, err)
+
+	}
+	err = tx.Commit()
+	require.NoError(t, err)
+}
+
+// seedModifiedAccounts uses the provided hashes to commit
+// simpleModifiedAccountValBytes at each corresponding key in the HashedAccounts
+// table.  It returns a slice of keys to be used when constructing the retain
+// list for the FlatDBTrie computations.
+func seedModifiedAccounts(t *testing.T, db kv.RwDB, hashes []libcommon.Hash) [][]byte {
+	toRetain := make([][]byte, 0, len(hashes))
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for _, hash := range hashes {
+		t.Logf("Seeding modified account with hash %s", hash)
+		err = tx.Put(kv.HashedAccounts, hash[:], simpleModifiedAccountValBytes)
+		require.NoError(t, err)
+		toRetain = append(toRetain, append([]byte{}, hash[:]...))
+	}
+	err = tx.Commit()
+	require.NoError(t, err)
+	return toRetain
+}
+
+// seedInitialStorage creates a single account with hash storageAccountHash in
+// the HashedAccounts table, as well as a storage entry in HashedStorage for
+// this account with value storageInitialValue for each provided hash.  A slice
+// of the constructed storage keys is returned.
+func seedInitialStorage(t *testing.T, db kv.RwDB, hashes []libcommon.Hash) [][]byte {
+	// We seed a single account, and all storage keys belong to this account.
+	keys := make([][]byte, 0, len(hashes))
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	err = tx.Put(kv.HashedAccounts, storageAccountHash[:], simpleContractAccountValBytes)
+	require.NoError(t, err)
+	var storageKey [72]byte
+	binary.BigEndian.PutUint64(storageKey[32:40], 1)
+	for _, hash := range hashes {
+		copy(storageKey[:32], storageAccountHash[:])
+		copy(storageKey[40:], hash[:])
+		t.Logf("Seeding storage with key 0x%x", storageKey)
+		err = tx.Put(kv.HashedStorage, storageKey[:], storageInitialValue[:])
+		require.NoError(t, err)
+		keys = append(keys, append([]byte{}, storageKey[:]...))
+	}
+	err = tx.Commit()
+	require.NoError(t, err)
+	return keys
+}
+
+// seedModifedStorage writes a storage entry in HashedStorage for
+// storageAccountHash with value storageModifiedValue for each provided hash.  A
+// slice containing the modified keys is returned to help the caller construct
+// the retain list necessary for the FlatDBTrie computations.
+func seedModifiedStorage(t *testing.T, db kv.RwDB, hashes []libcommon.Hash) [][]byte {
+	// Modify this same account's storage entries.  For now, this test only
+	// validates modifying existing or adding new keys (no deletions).
+	toRetain := make([][]byte, 0, len(hashes))
+	var storageKey [72]byte
+	binary.BigEndian.PutUint64(storageKey[32:40], 1)
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for _, hash := range hashes {
+		copy(storageKey[:32], storageAccountHash[:])
+		copy(storageKey[40:], hash[:])
+		t.Logf("Seeding storage with modified hash 0x%x", storageKey)
+		err = tx.Put(kv.HashedStorage, storageKey[:], storageModifiedValue[:])
+		require.NoError(t, err)
+		toRetain = append(toRetain, append([]byte{}, storageKey[:]...))
+	}
+	err = tx.Commit()
+	require.NoError(t, err)
+	return toRetain
+}
+
 // rebuildFlatDBTrieHash will re-compute the root hash using the given retain
 // list.  Even without a retain list, this is not a no-op in the accounts case,
 // as the root of the trie is not actually stored and must be re-computed
@@ -52,6 +145,32 @@ func rebuildFlatDBTrieHash(t *testing.T, rl *trie.RetainList, db kv.RoDB) libcom
 	require.NoError(t, err)
 	t.Logf("Rebuilt hash is %s and took %v", hash, time.Since(startTime))
 	return hash
+}
+
+// proveFlatDB will generate an account proof result utilizing the FlatDBTrie
+// hashing mechanism.  The proofKeys not span more than one account (ie, an
+// account and its storage nodes is acceptable).  It returns the root hash for
+// the computation as well as the proof result.
+func proveFlatDB(t *testing.T, db kv.RoDB, retainKeys, proofKeys [][]byte) (libcommon.Hash, *accounts.AccProofResult) {
+	t.Helper()
+	startTime := time.Now()
+	rl := trie.NewRetainList(0)
+	for _, retainKey := range retainKeys {
+		rl.AddKeyWithMarker(retainKey, true)
+	}
+	loader := trie.NewFlatDBTrieLoader("test", rl, nil, nil, false)
+	pr := trie.NewManualProofRetainer(t, rl, proofKeys)
+	loader.SetProofRetainer(pr)
+	tx, err := db.BeginRo(context.Background())
+	defer tx.Rollback()
+	require.NoError(t, err)
+	hash, err := loader.CalcTrieRoot(tx, nil)
+	tx.Rollback()
+	require.NoError(t, err)
+	t.Logf("Proof root hash is %s and took %v", hash, time.Since(startTime))
+	res, err := pr.ProofResult()
+	require.NoError(t, err)
+	return hash, res
 }
 
 // logTrieTables simply writes the TrieOfAccounts and TrieOfStorage to the test
@@ -105,11 +224,17 @@ var (
 		accVal.EncodeForStorage(encodedAccVal)
 		return encodedAccVal
 	}()
+
+	storageAccountHash     = libcommon.Hash{1}
+	storageAccountCodeHash = libcommon.Hash{9}
+	storageInitialValue    = libcommon.Hash{2}
+	storageModifiedValue   = libcommon.Hash{3}
 )
 
-// naiveTrieHashFromDB constructs the naive trie implementation by simply adding
-// all of the accounts and storage keys linearly.
-func naiveTrieHashFromDB(t *testing.T, db kv.RoDB) libcommon.Hash {
+// naiveTriesAndHashFromDB constructs the naive trie implementation by simply adding
+// all of the accounts and storage keys linearly.  It also returns a map of
+// storage tries
+func naiveTriesAndHashFromDB(t *testing.T, db kv.RoDB) (*trie.Trie, *trie.Trie, libcommon.Hash) {
 	t.Helper()
 	startTime := time.Now()
 	testTrie := trie.NewTestRLPTrie(libcommon.Hash{})
@@ -120,6 +245,7 @@ func naiveTrieHashFromDB(t *testing.T, db kv.RoDB) libcommon.Hash {
 	require.NoError(t, err)
 	defer ac.Close()
 	var k, v []byte
+	var storageTrie *trie.Trie
 	for k, v, err = ac.First(); k != nil; k, v, err = ac.Next() {
 		accHash := k[:32]
 		var acc accounts.Account
@@ -130,7 +256,7 @@ func naiveTrieHashFromDB(t *testing.T, db kv.RoDB) libcommon.Hash {
 		defer sc.Close()
 		startStorageKey := dbutils.GenerateCompositeStorageKey(libcommon.BytesToHash(k), acc.Incarnation, libcommon.Hash{})
 		endStorageKey := dbutils.GenerateCompositeStorageKey(libcommon.BytesToHash(k), acc.Incarnation+1, libcommon.Hash{})
-		storageTrie := trie.NewTestRLPTrie(libcommon.Hash{})
+		storageTrie = trie.NewTestRLPTrie(libcommon.Hash{})
 		for k, v, err = sc.Seek(startStorageKey); k != nil; k, v, err = sc.Next() {
 			if bytes.Compare(k, endStorageKey) >= 0 {
 				break
@@ -151,7 +277,7 @@ func naiveTrieHashFromDB(t *testing.T, db kv.RoDB) libcommon.Hash {
 
 	naiveHash := testTrie.Hash()
 	t.Logf("Naive hash is %s and took %v", naiveHash, time.Since(startTime))
-	return naiveHash
+	return testTrie, storageTrie, naiveHash
 }
 
 // addFuzzTrieSeeds adds a common set of trie hashes which are problematic for
@@ -269,57 +395,28 @@ func FuzzTrieRootStorage(f *testing.F) {
 		db := memdb.NewTestDB(t)
 		defer db.Close()
 
-		// We seed a single account, and all storage keys belong to this account.
-		tx, err := db.BeginRw(context.Background())
-		require.NoError(t, err)
-		defer tx.Rollback()
-		accHash := libcommon.Hash{1}
-		err = tx.Put(kv.HashedAccounts, accHash[:], simpleContractAccountValBytes)
-		require.NoError(t, err)
-		var storageKey [72]byte
-		binary.BigEndian.PutUint64(storageKey[32:40], 1)
-		rl := trie.NewRetainList(0)
-		for i, hash := range initialKeys {
-			copy(storageKey[:32], accHash[:])
-			copy(storageKey[40:], hash[:])
-			t.Logf("Seeding with hash 0x%x", storageKey)
-			err = tx.Put(kv.HashedStorage, storageKey[:], storageKey[40:])
-			require.NoError(t, err)
-			if len(modifiedKeys) == 0 && i == 0 {
-				// If there are no modifications, we add the first storage key to the
-				// retain list, because the inputs are random, this is not necessarily
-				// the actual lexicographically first key, but without some retained key
-				// then the root hash is simply returned.
-				rl.AddKey(storageKey[:])
-			}
-		}
-		err = tx.Commit()
-		require.NoError(t, err)
-
+		storageKeys := seedInitialStorage(t, db, initialKeys)
 		initialHash := initialFlatDBTrieBuild(t, db)
 		logTrieTables(t, db)
+		retainKeys := seedModifiedStorage(t, db, modifiedKeys)
 
-		// Modify this same account's storage entries.  For now, this test only
-		// validates modifying existing or adding new keys (no deletions).
-		tx, err = db.BeginRw(context.Background())
-		require.NoError(t, err)
-		defer tx.Rollback()
-		for _, hash := range modifiedKeys {
-			copy(storageKey[:32], accHash[:])
-			copy(storageKey[40:], hash[:])
-			t.Logf("Seeding with modified hash 0x%x", storageKey)
-			err = tx.Put(kv.HashedStorage, storageKey[:], storageKey[39:])
-			require.NoError(t, err)
-			rl.AddKeyWithMarker(storageKey[:], true)
+		rl := trie.NewRetainList(0)
+		if len(retainKeys) == 0 {
+			// If there are no modifications, we add the first storage key to the
+			// retain list, because the inputs are random, this is not necessarily
+			// the actual lexicographically first key, but without some retained key
+			// then the root hash is simply returned.
+			rl.AddKey(storageKeys[0])
 		}
-		err = tx.Commit()
-		require.NoError(t, err)
+		for _, retainKey := range retainKeys {
+			rl.AddKeyWithMarker(retainKey, true)
+		}
 
 		reHash := rebuildFlatDBTrieHash(t, rl, db)
 		if len(modifiedKeys) == 0 {
 			require.Equal(t, initialHash, reHash)
 		}
-		naiveHash := naiveTrieHashFromDB(t, db)
+		_, _, naiveHash := naiveTriesAndHashFromDB(t, db)
 		require.Equal(t, reHash, naiveHash)
 	})
 }
@@ -341,41 +438,181 @@ func FuzzTrieRootAccounts(f *testing.F) {
 		db := memdb.NewTestDB(t)
 		defer db.Close()
 
-		// Seed the accounts into HashedAccounts table
-		tx, err := db.BeginRw(context.Background())
-		require.NoError(t, err)
-		defer tx.Rollback()
-		for _, hash := range initialKeys {
-			t.Logf("Seeding with hash %s", hash)
-			err = tx.Put(kv.HashedAccounts, hash[:], simpleAccountValBytes)
-			require.NoError(t, err)
-		}
-		err = tx.Commit()
-		require.NoError(t, err)
-
+		seedInitialAccounts(t, db, initialKeys)
 		initialHash := initialFlatDBTrieBuild(t, db)
 		logTrieTables(t, db)
+		retainKeys := seedModifiedAccounts(t, db, modifiedKeys)
 
-		// Modify the account hash table.  For now, this test only validates
-		// modifying existing or adding new keys (no deletions).
-		tx, err = db.BeginRw(context.Background())
-		require.NoError(t, err)
-		defer tx.Rollback()
 		rl := trie.NewRetainList(0)
-		for _, hash := range modifiedKeys {
-			t.Logf("Seeding with modified hash %s", hash)
-			err = tx.Put(kv.HashedAccounts, hash[:], simpleModifiedAccountValBytes)
-			require.NoError(t, err)
-			rl.AddKeyWithMarker(hash[:], true)
+		for _, retainKey := range retainKeys {
+			rl.AddKeyWithMarker(retainKey, true)
 		}
-		err = tx.Commit()
-		require.NoError(t, err)
-
 		reHash := rebuildFlatDBTrieHash(t, rl, db)
 		if len(modifiedKeys) == 0 {
 			require.Equal(t, initialHash, reHash)
 		}
-		naiveHash := naiveTrieHashFromDB(t, db)
+		_, _, naiveHash := naiveTriesAndHashFromDB(t, db)
 		require.Equal(t, reHash, naiveHash)
+	})
+}
+
+// FuzzTrieRootAccountProofs seeds the database with an initial set of accounts and
+// populates the trie tables. Then, it modifies the database of accounts but
+// does not update the trie tables.  Finally, for every seeded account (modified
+// and not), it computes a proof for that key and verifies that the proof
+// matches the one as computed by the naive trie implementation and that that
+// proof is valid.
+func FuzzTrieRootAccountProofs(f *testing.F) {
+	addFuzzTrieSeeds(f)
+
+	f.Fuzz(func(t *testing.T, initialCount, modifiedCount int, hashFragments []byte) {
+		initialKeys, modifiedKeys := validateFuzzInputs(t, initialCount, modifiedCount, hashFragments)
+
+		db := memdb.NewTestDB(t)
+		defer db.Close()
+
+		seedInitialAccounts(t, db, initialKeys)
+		initialFlatDBTrieBuild(t, db)
+		retainKeys := seedModifiedAccounts(t, db, modifiedKeys)
+
+		naiveTrie, _, naiveHash := naiveTriesAndHashFromDB(t, db)
+
+		allKeys := make([]libcommon.Hash, 0, initialCount+modifiedCount)
+		wasModified := map[libcommon.Hash]struct{}{}
+		for _, hash := range modifiedKeys {
+			allKeys = append(allKeys, hash)
+			wasModified[hash] = struct{}{}
+		}
+		for _, hash := range initialKeys {
+			if _, ok := wasModified[hash]; ok {
+				continue
+			}
+			allKeys = append(allKeys, hash)
+		}
+
+		for _, hash := range allKeys {
+			t.Logf("Processing account key %x", hash)
+			// First compute the naive proof and verify that the proof is correct.
+			naiveProofBytes, err := naiveTrie.Prove(hash[:], 0, false)
+			require.NoError(t, err)
+			naiveAccountProof := make([]hexutility.Bytes, len(naiveProofBytes))
+			for i, part := range naiveProofBytes {
+				naiveAccountProof[i] = hexutility.Bytes(part)
+			}
+			nonce := uint64(1)
+			if _, ok := wasModified[hash]; ok {
+				nonce++
+			}
+			naiveProof := &accounts.AccProofResult{
+				Nonce:        hexutil.Uint64(nonce),
+				AccountProof: naiveAccountProof,
+				StorageHash:  trie.EmptyRoot,
+				Balance:      (*hexutil.Big)(new(uint256.Int).ToBig()),
+				StorageProof: []accounts.StorProofResult{},
+				CodeHash:     trie.EmptyCodeHash,
+			}
+			err = trie.VerifyAccountProofByHash(naiveHash, hash, naiveProof)
+			require.NoError(t, err, "Invalid naive proof")
+
+			// Now do the same but with the 'real' flat implementation and verify
+			// that the result matches byte for byte.
+			flatHash, flatProof := proveFlatDB(t, db, retainKeys, [][]byte{hash[:]})
+			require.Equal(t, naiveHash, flatHash)
+			for i, proof := range naiveProof.AccountProof {
+				require.Equal(t, proof, flatProof.AccountProof[i], "mismatch at index %d", i)
+			}
+			flatProof.Nonce = hexutil.Uint64(nonce)
+			flatProof.CodeHash = trie.EmptyCodeHash
+			require.Equal(t, flatProof, naiveProof)
+		}
+	})
+}
+
+// FuzzTrieRootStorageProofs seeds the database with an initial account and set
+// of storage nodes for that account and populates the trie tables. Then, it
+// modifies the database of storage but does not update the trie tables.
+// Finally, for every seeded storage key (modified and not), it computes a proof for
+// that key and verifies that the proof matches the one as computed by the naive
+// trie implementation and that that proof is valid.
+func FuzzTrieRootStorageProofs(f *testing.F) {
+	addFuzzTrieSeeds(f)
+
+	f.Fuzz(func(t *testing.T, initialCount, modifiedCount int, hashFragments []byte) {
+		initialKeys, modifiedKeys := validateFuzzInputs(t, initialCount, modifiedCount, hashFragments)
+
+		db := memdb.NewTestDB(t)
+		defer db.Close()
+
+		initialStorageKeys := seedInitialStorage(t, db, initialKeys)
+		initialFlatDBTrieBuild(t, db)
+		retainKeys := seedModifiedStorage(t, db, modifiedKeys)
+
+		naiveTrie, naiveStorageTrie, naiveHash := naiveTriesAndHashFromDB(t, db)
+
+		allKeys := make([][]byte, 0, initialCount+modifiedCount)
+		wasModified := map[string]struct{}{}
+		for _, key := range retainKeys {
+			allKeys = append(allKeys, key)
+			wasModified[string(key)] = struct{}{}
+		}
+		for _, key := range initialStorageKeys {
+			if _, ok := wasModified[string(key)]; ok {
+				continue
+			}
+			allKeys = append(allKeys, key)
+		}
+
+		for _, storageKey := range allKeys {
+			t.Logf("Processing storage key %x", storageKey)
+			// First compute the naive proof and verify that the proof is correct.
+			naiveAccountProofBytes, err := naiveTrie.Prove(storageAccountHash[:], 0, false)
+			require.NoError(t, err)
+			naiveAccountProof := make([]hexutility.Bytes, len(naiveAccountProofBytes))
+			for i, part := range naiveAccountProofBytes {
+				naiveAccountProof[i] = hexutility.Bytes(part)
+			}
+			naiveStorageProofBytes, err := naiveStorageTrie.Prove(storageKey[40:], 0, true)
+			require.NoError(t, err)
+			naiveStorageProof := make([]hexutility.Bytes, len(naiveStorageProofBytes))
+			for i, part := range naiveStorageProofBytes {
+				naiveStorageProof[i] = hexutility.Bytes(part)
+			}
+			var storageKeyHash libcommon.Hash
+			copy(storageKeyHash[:], storageKey[40:])
+			var storageValue *big.Int
+			if _, ok := wasModified[string(storageKey)]; !ok {
+				storageValue = new(big.Int).SetBytes(storageInitialValue[:])
+			} else {
+				storageValue = new(big.Int).SetBytes(storageModifiedValue[:])
+			}
+			naiveProof := &accounts.AccProofResult{
+				Nonce:        1,
+				AccountProof: naiveAccountProof,
+				StorageHash:  crypto.Keccak256Hash(naiveStorageProof[0]),
+				Balance:      (*hexutil.Big)(new(uint256.Int).ToBig()),
+				StorageProof: []accounts.StorProofResult{
+					{
+						Value: (*hexutil.Big)(storageValue),
+						Proof: naiveStorageProof,
+					},
+				},
+				CodeHash: storageAccountCodeHash,
+			}
+			err = trie.VerifyAccountProofByHash(naiveHash, storageAccountHash, naiveProof)
+			require.NoError(t, err, "Invalid naive account proof")
+			err = trie.VerifyStorageProofByHash(naiveProof.StorageHash, storageKeyHash, naiveProof.StorageProof[0])
+			require.NoError(t, err, "Invalid naive storage proof")
+
+			// Now do the same but with the 'real' flat implementation and verify
+			// that the result matches byte for byte.
+			flatHash, flatProof := proveFlatDB(t, db, retainKeys, [][]byte{storageAccountHash[:], storageKey})
+			require.Equal(t, naiveHash, flatHash)
+			for i, proof := range naiveProof.AccountProof {
+				require.Equal(t, proof, flatProof.AccountProof[i], "mismatch at index %d", i)
+			}
+			flatProof.Nonce = 1
+			flatProof.CodeHash = storageAccountCodeHash
+			require.Equal(t, flatProof, naiveProof)
+		}
 	})
 }
