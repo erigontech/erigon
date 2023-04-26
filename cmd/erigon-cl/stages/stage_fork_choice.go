@@ -31,6 +31,8 @@ type StageForkChoiceCfg struct {
 	forkChoice      *forkchoice.ForkChoiceStore
 }
 
+const minPeersForDownload = 3
+
 func StageForkChoice(db kv.RwDB, downloader *network.ForwardBeaconDownloader, genesisCfg *clparams.GenesisConfig,
 	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, executionClient *execution_client.ExecutionClient, gossipManager *network.GossipManager, forkChoice *forkchoice.ForkChoiceStore) StageForkChoiceCfg {
 	return StageForkChoiceCfg{
@@ -92,7 +94,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 		for _, block := range newBlocks {
 			sendForckchoice :=
 				utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == block.Block.Slot
-			if err := cfg.forkChoice.OnBlock(block, true); err != nil {
+			if err := cfg.forkChoice.OnBlock(block, false, true); err != nil {
 				log.Warn("Could not download block", "reason", err)
 				return highestSlotProcessed, libcommon.Hash{}, nil
 			}
@@ -127,33 +129,50 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 		return highestSlotProcessed, libcommon.Hash{}, nil
 	})
 	maxBlockBehindBeforeDownload := int64(5)
-	firstTime := true
-
+	overtimeMargin := uint64(2) // how much time has passed before trying download the next block in seconds
+MainLoop:
 	for {
 		targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-		if targetSlot == cfg.forkChoice.HighestSeen() {
+		overtime := utils.GetCurrentSlotOverTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+		seenSlot := cfg.forkChoice.HighestSeen()
+		if targetSlot == seenSlot || (targetSlot == seenSlot+1 && overtime < overtimeMargin) {
 			time.Sleep(time.Second)
 			continue
 		}
-		// if not the first time then send back the downloader a little bit.
-		if !firstTime {
-			cfg.downloader.SetHighestProcessedRoot(libcommon.Hash{})
-			cfg.downloader.SetHighestProcessedSlot(cfg.forkChoice.HighestSeen() - uint64(maxBlockBehindBeforeDownload))
+		peersCount, err := cfg.downloader.Peers()
+		if err != nil {
+			continue
 		}
+		waitWhenNotEnoughPeers := 5 * time.Second
+		if peersCount < minPeersForDownload {
+			log.Debug("Cannot sync up caplin, not enough peers", "have", peersCount, "needed", minPeersForDownload, "retryIn", waitWhenNotEnoughPeers)
+			time.Sleep(waitWhenNotEnoughPeers)
+			continue
+		}
+
+		cfg.downloader.SetHighestProcessedRoot(libcommon.Hash{})
+		cfg.downloader.SetHighestProcessedSlot(
+			utils.Max64(cfg.forkChoice.HighestSeen()-uint64(maxBlockBehindBeforeDownload), cfg.forkChoice.AnchorSlot()))
+
 		// Wait small time
-		time.Sleep(100 * time.Millisecond)
-		firstTime = false
-		log.Debug("Caplin has missed some slots, started downloading chain")
+		log.Debug("Caplin may have missed some slots, started downloading chain")
 		// Process blocks until we reach our target
 		for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
-			currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-			// Send request every 50 Millisecond only if not on chain tip
-			if currentSlot != highestProcessed {
-				cfg.downloader.RequestMore()
+			if err := cfg.downloader.ProcessBlocks(); err != nil {
+				log.Warn("Could not download block in processing", "reason", err)
 			}
+			cfg.downloader.RequestMore()
 
 			if err := cfg.downloader.ProcessBlocks(); err != nil {
 				log.Warn("Could not download block in processing", "reason", err)
+			}
+			peersCount, err = cfg.downloader.Peers()
+			if err != nil {
+				break
+			}
+			if peersCount < minPeersForDownload {
+				log.Debug("lost too many peers, restarting sync...")
+				continue MainLoop
 			}
 		}
 		log.Debug("Finished catching up", "slot", cfg.downloader.GetHighestProcessedSlot())

@@ -37,11 +37,13 @@ type GossipSubscription struct {
 	cf context.CancelFunc
 	rf pubsub.RelayCancelFunc
 
-	setup sync.Once
+	setup  sync.Once
+	stopCh chan struct{}
 }
 
 func (sub *GossipSubscription) Listen() (err error) {
 	sub.setup.Do(func() {
+		sub.stopCh = make(chan struct{}, 3)
 		sub.sub, err = sub.topic.Subscribe()
 		if err != nil {
 			err = fmt.Errorf("failed to begin topic %s subscription, err=%w", sub.topic.String(), err)
@@ -56,6 +58,7 @@ func (sub *GossipSubscription) Listen() (err error) {
 
 // calls the cancel func for the subscriber and closes the topic and sub
 func (s *GossipSubscription) Close() {
+	s.stopCh <- struct{}{}
 	if s.cf != nil {
 		s.cf()
 	}
@@ -75,33 +78,31 @@ func (s *GossipSubscription) Close() {
 // this is a helper to begin running the gossip subscription.
 // function should not be used outside of the constructor for gossip subscription
 func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, topic string) {
-	for {
-		s.do(ctx, sub, topic)
-	}
-}
-
-func (s *GossipSubscription) do(ctx context.Context, sub *pubsub.Subscription, topic string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("[Sentinel Gossip] Message Handler Crashed", "err", r)
 		}
 	}()
-	select {
-	case <-ctx.Done():
-		return
-	default:
-		msg, err := sub.Next(ctx)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stopCh:
+			return
+		default:
+			msg, err := sub.Next(ctx)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topic", topic)
 				return
 			}
-			log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topic", topic)
-			return
+			if msg.GetFrom() == s.host {
+				continue
+			}
+			s.ch <- msg
 		}
-		if msg.GetFrom() == s.host {
-			return
-		}
-		s.ch <- msg
 	}
 }
 
