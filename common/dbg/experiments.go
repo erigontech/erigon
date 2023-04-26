@@ -261,3 +261,19 @@ func StopAfterReconst() bool {
 	})
 	return stopAfterReconst
 }
+
+var (
+	traceAgg     bool
+	traceAggOnce sync.Once
+)
+
+func TraceAgg() bool {
+	traceAggOnce.Do(func() {
+		v, _ := os.LookupEnv("TRACE_AGG")
+		if v == "true" {
+			traceAgg = true
+			log.Info("[Experiment]", "TRACE_AGG", traceAgg)
+		}
+	})
+	return traceAgg
+}
