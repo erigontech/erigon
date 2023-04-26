@@ -1,9 +1,7 @@
-name: Check
+name: Docker tags
 
 on:
   push:
-    branches:
-      - devel
     tags:
       - 'y*.*.*'
   workflow_dispatch:
