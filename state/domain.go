@@ -581,9 +581,9 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 	h.topLock.Lock()
 	switch {
 	case len(value) > 0:
-		h.topVals[hex.EncodeToString(fullkey[:kl])] = value
+		h.topVals[hex.EncodeToString(fullkey[:kl])] = common.Copy(value)
 	default:
-		delete(h.topVals, hex.EncodeToString(fullkey[:kl]))
+		h.topVals[hex.EncodeToString(fullkey[:kl])] = []byte{}
 	}
 	h.topLock.Unlock()
 

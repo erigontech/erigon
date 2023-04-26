@@ -213,20 +213,12 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 		return err
 	}
 
-	var e error
-	sd.Commitment.updates.UpdatePrefix(addr, nil, sd.Commitment.TouchStorage)
-	if err := sd.Storage.defaultDc.IteratePrefix(addr, func(k, v []byte) {
-		if !bytes.HasPrefix(k, addr) {
-			return
-		}
+	var err error
+	err = sd.aggCtx.storage.IteratePrefix(addr, func(k, v []byte) {
 		sd.Commitment.TouchPlainKey(k, nil, sd.Commitment.TouchStorage)
-		if e == nil {
-			e = sd.Storage.Delete(k, nil)
-		}
-	}); err != nil {
-		return err
-	}
-	return e
+		err = sd.Storage.DeleteWithPrev(k, nil, v)
+	})
+	return err
 }
 
 func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value, preVal []byte) error {
