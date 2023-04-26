@@ -20,6 +20,10 @@ type BeaconBlockHeader struct {
 	BodyRoot      libcommon.Hash
 }
 
+func (b *BeaconBlockHeader) Copy() *BeaconBlockHeader {
+	copied := *b
+	return &copied
+}
 func (b *BeaconBlockHeader) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	buf = append(buf, ssz.Uint64SSZ(b.Slot)...)

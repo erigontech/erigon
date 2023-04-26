@@ -14,10 +14,9 @@
 package utils
 
 import (
+	"crypto/sha256"
 	"hash"
 	"sync"
-
-	"github.com/minio/sha256-simd"
 )
 
 type HashFunc func(data []byte, extras ...[]byte) [32]byte

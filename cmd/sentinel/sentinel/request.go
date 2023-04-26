@@ -15,7 +15,6 @@ package sentinel
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -41,11 +40,9 @@ func (s *Sentinel) RandomPeer(topic string) (peer.ID, error) {
 		pid peer.ID
 		err error
 	)
-	if strings.Contains(topic, "light_client") && !strings.Contains(topic, "bootstrap") {
-		pid, err = connectToRandomPeer(s, string(LightClientFinalityUpdateTopic))
-	} else {
-		pid, err = connectToRandomPeer(s, string(BeaconBlockTopic))
-	}
+
+	pid, err = connectToRandomPeer(s, string(BeaconBlockTopic))
+
 	if err != nil {
 		return peer.ID(""), fmt.Errorf("failed to connect to a random peer err=%s", err)
 	}

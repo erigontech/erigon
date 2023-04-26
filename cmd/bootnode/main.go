@@ -51,7 +51,7 @@ func main() {
 	)
 	flag.Parse()
 
-	_ = logging.GetLogger("bootnode")
+	logging.SetupLogger("bootnode")
 
 	natm, err := nat.Parse(*natdesc)
 	if err != nil {

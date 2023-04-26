@@ -116,6 +116,8 @@ const (
 	ETHGetBlock RPCMethod = "eth_getBlock"
 	// ETHGetLogs represents the eth_getLogs method
 	ETHGetLogs RPCMethod = "eth_getLogs"
+	// ETHBlockNumber represents the eth_blockNumber method
+	ETHBlockNumber RPCMethod = "eth_blockNumber"
 	// AdminNodeInfo represents the admin_nodeInfo method
 	AdminNodeInfo RPCMethod = "admin_nodeInfo"
 	// TxpoolContent represents the txpool_content method

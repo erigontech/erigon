@@ -120,9 +120,9 @@ COMMANDS += state
 COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
-COMMANDS += lightclient
 COMMANDS += sentinel
-COMMANDS += erigon-el
+COMMANDS += erigon-el 
+COMMANDS += caplin-phase1
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -136,6 +136,7 @@ db-tools:
 
 	go mod vendor
 	cd vendor/github.com/torquem-ch/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
+	mkdir -p $(GOBIN)
 	cd vendor/github.com/torquem-ch/mdbx-go/mdbxdist && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
@@ -166,7 +167,7 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.52.1
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.52.2
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
@@ -214,7 +215,7 @@ git-submodules:
 	@git submodule update --quiet --init --recursive --force || true
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.19.5
+GOLANG_CROSS_VERSION  ?= v1.20.2
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules

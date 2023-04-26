@@ -62,7 +62,7 @@ func (n BlockNonce) Uint64() uint64 {
 
 // MarshalText encodes n as a hex string with 0x prefix.
 func (n BlockNonce) MarshalText() ([]byte, error) {
-	return hexutil.Bytes(n[:]).MarshalText()
+	return hexutility.Bytes(n[:]).MarshalText()
 }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
@@ -96,7 +96,8 @@ type Header struct {
 
 	BaseFee         *big.Int        `json:"baseFeePerGas"`   // EIP-1559
 	WithdrawalsHash *libcommon.Hash `json:"withdrawalsRoot"` // EIP-4895
-	ExcessDataGas   *big.Int        `json:"excessDataGas"`   // EIP-4844
+	// ExcessDataGas was added by EIP-4844 and is ignored in legacy headers.
+	ExcessDataGas *big.Int `json:"excessDataGas"`
 
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
@@ -505,7 +506,7 @@ type headerMarshaling struct {
 	GasLimit      hexutil.Uint64
 	GasUsed       hexutil.Uint64
 	Time          hexutil.Uint64
-	Extra         hexutil.Bytes
+	Extra         hexutility.Bytes
 	BaseFee       *hexutil.Big
 	ExcessDataGas *hexutil.Big
 	Hash          libcommon.Hash `json:"hash"` // adds call to Hash() in MarshalJSON

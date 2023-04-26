@@ -105,7 +105,7 @@ func TestGenerateChain(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainStateReader(tx))
+	st := state.New(m.NewStateReader(tx))
 	if big.NewInt(5).Cmp(current(m.DB).Number()) != 0 {
 		t.Errorf("wrong block number: %d", current(m.DB).Number())
 	}

@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -24,9 +23,9 @@ type ServerConfig struct {
 	Addr    string
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, rule handshake.RuleFunc) (sentinelrpc.SentinelClient, error) {
+func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
-	sent, err := sentinel.New(context.Background(), cfg, db, rule)
+	sent, err := sentinel.New(context.Background(), cfg, db)
 	if err != nil {
 		return nil, err
 	}
@@ -40,10 +39,13 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *Serv
 		//sentinel.VoluntaryExitSsz,
 		//sentinel.ProposerSlashingSsz,
 		//sentinel.AttesterSlashingSsz,
-		sentinel.LightClientFinalityUpdateSsz,
-		sentinel.LightClientOptimisticUpdateSsz,
 	}
+
 	for _, v := range gossip_topics {
+		if err := sent.Unsubscribe(v); err != nil {
+			log.Error("[Sentinel] failed to start sentinel", "err", err)
+			continue
+		}
 		// now lets separately connect to the gossip topics. this joins the room
 		subscriber, err := sent.SubscribeGossip(v)
 		if err != nil {
@@ -55,6 +57,7 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *Serv
 			log.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
 	}
+
 	log.Info("[Sentinel] Sentinel started", "enr", sent.String())
 	if initialStatus != nil {
 		sent.SetStatus(initialStatus)

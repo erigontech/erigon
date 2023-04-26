@@ -44,6 +44,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/crypto"
@@ -289,7 +290,7 @@ func createNode(ctx *cli.Context) error {
 		config.PrivateKey = privKey
 	}
 	if services := ctx.String("services"); services != "" {
-		config.Lifecycles = strings.Split(services, ",")
+		config.Lifecycles = utils.SplitAndTrim(services)
 	}
 	node, err := client.CreateNode(config)
 	if err != nil {

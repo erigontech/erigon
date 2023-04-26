@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -222,8 +223,8 @@ func runCmd(ctx *cli.Context) error {
 	if genesisConfig.GasLimit != 0 {
 		initialGas = genesisConfig.GasLimit
 	}
-	value, _ := uint256.FromBig(utils.BigFlagValue(ctx, ValueFlag.Name))
-	gasPrice, _ := uint256.FromBig(utils.BigFlagValue(ctx, PriceFlag.Name))
+	value, _ := uint256.FromBig(flags.GlobalBig(ctx, ValueFlag.Name))
+	gasPrice, _ := uint256.FromBig(flags.GlobalBig(ctx, PriceFlag.Name))
 	runtimeConfig := runtime.Config{
 		Origin:      sender,
 		State:       statedb,

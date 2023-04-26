@@ -297,7 +297,7 @@ func (b *Eth1Block) HashSSZ(version clparams.StateVersion) ([32]byte, error) {
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.
 func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 	// Reverse the order of the bytes in the BaseFeePerGas array and convert it to a big integer.
-	reversedBaseFeePerGas := b.BaseFeePerGas[:]
+	reversedBaseFeePerGas := libcommon.Copy(b.BaseFeePerGas[:])
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}

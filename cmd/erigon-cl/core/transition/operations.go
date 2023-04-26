@@ -15,46 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-func isSlashableAttestationData(d1, d2 *cltypes.AttestationData) bool {
-	return (!d1.Equal(d2) && d1.Target.Epoch == d2.Target.Epoch) ||
-		(d1.Source.Epoch < d2.Source.Epoch && d2.Target.Epoch < d1.Target.Epoch)
-}
-
-func isValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAttestation) (bool, error) {
-	inds := att.AttestingIndices
-	if len(inds) == 0 || !utils.IsSliceSortedSet(inds) {
-		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
-	}
-
-	pks := [][]byte{}
-	for _, v := range inds {
-		val, err := state.ValidatorForValidatorIndex(int(v))
-		if err != nil {
-			return false, err
-		}
-		pks = append(pks, val.PublicKey[:])
-	}
-
-	domain, err := state.GetDomain(state.BeaconConfig().DomainBeaconAttester, att.Data.Target.Epoch)
-	if err != nil {
-		return false, fmt.Errorf("unable to get the domain: %v", err)
-	}
-
-	signingRoot, err := fork.ComputeSigningRoot(att.Data, domain)
-	if err != nil {
-		return false, fmt.Errorf("unable to get signing root: %v", err)
-	}
-
-	valid, err := bls.VerifyAggregate(att.Signature[:], signingRoot[:], pks)
-	if err != nil {
-		return false, fmt.Errorf("error while validating signature: %v", err)
-	}
-	if !valid {
-		return false, fmt.Errorf("invalid aggregate signature")
-	}
-	return true, nil
-}
-
 func ProcessProposerSlashing(state *state.BeaconState, propSlashing *cltypes.ProposerSlashing) error {
 	h1 := propSlashing.Header1.Header
 	h2 := propSlashing.Header2.Header
@@ -114,11 +74,11 @@ func ProcessAttesterSlashing(state *state.BeaconState, attSlashing *cltypes.Atte
 	att1 := attSlashing.Attestation_1
 	att2 := attSlashing.Attestation_2
 
-	if !isSlashableAttestationData(att1.Data, att2.Data) {
+	if !cltypes.IsSlashableAttestationData(att1.Data, att2.Data) {
 		return fmt.Errorf("attestation data not slashable: %+v; %+v", att1.Data, att2.Data)
 	}
 
-	valid, err := isValidIndexedAttestation(state, att1)
+	valid, err := state.IsValidIndexedAttestation(att1)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 1 validity: %v", err)
 	}
@@ -126,7 +86,7 @@ func ProcessAttesterSlashing(state *state.BeaconState, attSlashing *cltypes.Atte
 		return fmt.Errorf("invalid indexed attestation 1")
 	}
 
-	valid, err = isValidIndexedAttestation(state, att2)
+	valid, err = state.IsValidIndexedAttestation(att2)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 2 validity: %v", err)
 	}

@@ -79,10 +79,23 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		return err
 	}
 
+	if config == nil {
+		config = &tracers.TraceConfig{}
+	}
+
 	if config.BorTraceEnabled == nil {
 		config.BorTraceEnabled = newBoolPtr(false)
 	}
 
+	var excessDataGas *big.Int
+	parentBlock, err := api.blockByHashWithSenders(tx, block.ParentHash())
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+	if parentBlock != nil {
+		excessDataGas = parentBlock.ExcessDataGas()
+	}
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		stream.WriteNil()
@@ -120,7 +133,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *chainConfig, ibs, block.Header(), engine, true /* constCall */)
+				return core.SysCallContract(contract, data, *chainConfig, ibs, block.Header(), engine, true /* constCall */, excessDataGas)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
@@ -229,7 +242,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		var borTx types.Transaction
 		borTx, _, _, _, err = rawdb.ReadBorTransaction(tx, hash)
 		if err != nil {
-			stream.WriteNil()
 			return err
 		}
 
@@ -322,6 +334,10 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		overrideBlockHash  map[uint64]common.Hash
 		baseFee            uint256.Int
 	)
+
+	if config == nil {
+		config = &tracers.TraceConfig{}
+	}
 
 	overrideBlockHash = make(map[uint64]common.Hash)
 	tx, err := api.db.BeginRo(ctx)

@@ -1,17 +1,16 @@
 package state
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 
-	"github.com/minio/sha256-simd"
-
-	lru2 "github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/beacon_changeset"
 )
 
 type HashFunc func([]byte) ([32]byte, error)
@@ -26,19 +25,19 @@ const (
 type BeaconState struct {
 	// State fields
 	genesisTime                uint64
-	genesisValidatorsRoot      libcommon.Hash
+	genesisValidatorsRoot      common.Hash
 	slot                       uint64
 	fork                       *cltypes.Fork
 	latestBlockHeader          *cltypes.BeaconBlockHeader
-	blockRoots                 [blockRootsLength]libcommon.Hash
-	stateRoots                 [stateRootsLength]libcommon.Hash
-	historicalRoots            []libcommon.Hash
+	blockRoots                 [blockRootsLength]common.Hash
+	stateRoots                 [stateRootsLength]common.Hash
+	historicalRoots            []common.Hash
 	eth1Data                   *cltypes.Eth1Data
 	eth1DataVotes              []*cltypes.Eth1Data
 	eth1DepositIndex           uint64
 	validators                 []*cltypes.Validator
 	balances                   []uint64
-	randaoMixes                [randoMixesLength]libcommon.Hash
+	randaoMixes                [randoMixesLength]common.Hash
 	slashings                  [slashingsLength]uint64
 	previousEpochParticipation cltypes.ParticipationFlagsList
 	currentEpochParticipation  cltypes.ParticipationFlagsList
@@ -65,17 +64,15 @@ type BeaconState struct {
 	touchedLeaves     map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
 	publicKeyIndicies map[[48]byte]uint64
 	// Caches
-	activeValidatorsCache       *lru2.Cache[uint64, []uint64]
-	committeeCache              *lru2.Cache[[16]byte, []uint64]
-	shuffledSetsCache           *lru2.Cache[libcommon.Hash, []uint64]
+	activeValidatorsCache       *lru.Cache[uint64, []uint64]
+	committeeCache              *lru.Cache[[16]byte, []uint64]
+	shuffledSetsCache           *lru.Cache[common.Hash, []uint64]
 	totalActiveBalanceCache     *uint64
 	totalActiveBalanceRootCache uint64
 	proposerIndex               *uint64
-	previousStateRoot           libcommon.Hash
+	previousStateRoot           common.Hash
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
-	// Changesets
-	reverseChangeset *beacon_changeset.ReverseBeaconStateChangeSet
 }
 
 func New(cfg *clparams.BeaconChainConfig) *BeaconState {
@@ -86,7 +83,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 	return state
 }
 
-func preparateRootsForHashing(roots []libcommon.Hash) [][32]byte {
+func preparateRootsForHashing(roots []common.Hash) [][32]byte {
 	ret := make([][32]byte, len(roots))
 	for i := range roots {
 		copy(ret[i][:], roots[i][:])
@@ -132,7 +129,7 @@ func (b *BeaconState) _updateProposerIndex() (err error) {
 
 	hash := sha256.New()
 	// Input for the seed hash.
-	input := b.GetSeed(epoch, clparams.MainnetBeaconConfig.DomainBeaconProposer)
+	input := b.GetSeed(epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, b.slot)
 
@@ -224,6 +221,20 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 	return nil
 }
 
+func (b *BeaconState) initCaches() error {
+	var err error
+	if b.activeValidatorsCache, err = lru.New[uint64, []uint64](5); err != nil {
+		return err
+	}
+	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64](5); err != nil {
+		return err
+	}
+	if b.committeeCache, err = lru.New[[16]byte, []uint64](256); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (b *BeaconState) initBeaconState() error {
 
 	if b.touchedLeaves == nil {
@@ -235,16 +246,7 @@ func (b *BeaconState) initBeaconState() error {
 	for i, validator := range b.validators {
 		b.publicKeyIndicies[validator.PublicKey] = uint64(i)
 	}
-	var err error
-	if b.activeValidatorsCache, err = lru2.New[uint64, []uint64](5); err != nil {
-		return err
-	}
-	if b.shuffledSetsCache, err = lru2.New[libcommon.Hash, []uint64](25); err != nil {
-		return err
-	}
-	if b.committeeCache, err = lru2.New[[16]byte, []uint64](256); err != nil {
-		return err
-	}
+	b.initCaches()
 	if err := b._updateProposerIndex(); err != nil {
 		return err
 	}
@@ -252,4 +254,101 @@ func (b *BeaconState) initBeaconState() error {
 		return b._initializeValidatorsPhase0()
 	}
 	return nil
+}
+
+func (b *BeaconState) Copy() (*BeaconState, error) {
+	copied := New(b.beaconConfig)
+	// Fill all the fields with copies
+	copied.genesisTime = b.genesisTime
+	copied.genesisValidatorsRoot = b.genesisValidatorsRoot
+	copied.slot = b.slot
+	copied.fork = b.fork.Copy()
+	copied.latestBlockHeader = b.latestBlockHeader.Copy()
+	copy(copied.blockRoots[:], b.blockRoots[:])
+	copy(copied.stateRoots[:], b.stateRoots[:])
+	copied.historicalRoots = make([]libcommon.Hash, len(b.historicalRoots))
+	copy(copied.historicalRoots, b.historicalRoots)
+	copied.eth1Data = b.eth1Data.Copy()
+	copied.eth1DataVotes = make([]*cltypes.Eth1Data, len(b.eth1DataVotes))
+	for i := range b.eth1DataVotes {
+		copied.eth1DataVotes[i] = b.eth1DataVotes[i].Copy()
+	}
+	copied.eth1DepositIndex = b.eth1DepositIndex
+	copied.validators = make([]*cltypes.Validator, len(b.validators))
+	for i := range b.validators {
+		copied.validators[i] = b.validators[i].Copy()
+	}
+	copied.balances = make([]uint64, len(b.balances))
+	copy(copied.balances, b.balances)
+	copy(copied.randaoMixes[:], b.randaoMixes[:])
+	copy(copied.slashings[:], b.slashings[:])
+	copied.previousEpochParticipation = b.previousEpochParticipation.Copy()
+	copied.currentEpochParticipation = b.currentEpochParticipation.Copy()
+	copied.finalizedCheckpoint = b.finalizedCheckpoint.Copy()
+	copied.currentJustifiedCheckpoint = b.currentJustifiedCheckpoint.Copy()
+	copied.previousJustifiedCheckpoint = b.previousJustifiedCheckpoint.Copy()
+	if b.version == clparams.Phase0Version {
+		return copied, copied.initBeaconState()
+	}
+	copied.currentSyncCommittee = b.currentSyncCommittee.Copy()
+	copied.nextSyncCommittee = b.nextSyncCommittee.Copy()
+	copied.inactivityScores = make([]uint64, len(b.inactivityScores))
+	copy(copied.inactivityScores, b.inactivityScores)
+	copied.justificationBits = b.justificationBits.Copy()
+
+	if b.version >= clparams.BellatrixVersion {
+		copied.latestExecutionPayloadHeader = b.latestExecutionPayloadHeader.Copy()
+	}
+	copied.nextWithdrawalIndex = b.nextWithdrawalIndex
+	copied.nextWithdrawalValidatorIndex = b.nextWithdrawalValidatorIndex
+	copied.historicalSummaries = make([]*cltypes.HistoricalSummary, len(b.historicalSummaries))
+	for i := range b.historicalSummaries {
+		copied.historicalSummaries[i] = &cltypes.HistoricalSummary{
+			BlockSummaryRoot: b.historicalSummaries[i].BlockSummaryRoot,
+			StateSummaryRoot: b.historicalSummaries[i].StateSummaryRoot,
+		}
+	}
+	copied.version = b.version
+	// Now sync internals
+	copy(copied.leaves[:], b.leaves[:])
+	copied.touchedLeaves = make(map[StateLeafIndex]bool)
+	for leafIndex, touchedVal := range b.touchedLeaves {
+		copied.touchedLeaves[leafIndex] = touchedVal
+	}
+	copied.publicKeyIndicies = make(map[[48]byte]uint64)
+	for pk, index := range b.publicKeyIndicies {
+		copied.publicKeyIndicies[pk] = index
+	}
+	// Sync caches
+	if err := copied.initCaches(); err != nil {
+		return nil, err
+	}
+	for _, epoch := range b.activeValidatorsCache.Keys() {
+		val, has := b.activeValidatorsCache.Get(epoch)
+		if !has {
+			continue
+		}
+		copied.activeValidatorsCache.Add(epoch, val)
+	}
+	for _, key := range b.shuffledSetsCache.Keys() {
+		val, has := b.shuffledSetsCache.Get(key)
+		if !has {
+			continue
+		}
+		copied.shuffledSetsCache.Add(key, val)
+	}
+	for _, key := range b.committeeCache.Keys() {
+		val, has := b.committeeCache.Get(key)
+		if !has {
+			continue
+		}
+		copied.committeeCache.Add(key, val)
+	}
+	if b.totalActiveBalanceCache != nil {
+		copied.totalActiveBalanceCache = new(uint64)
+		*copied.totalActiveBalanceCache = *b.totalActiveBalanceCache
+		copied.totalActiveBalanceRootCache = b.totalActiveBalanceRootCache
+	}
+
+	return copied, nil
 }

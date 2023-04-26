@@ -14,6 +14,11 @@ type Eth1Data struct {
 	DepositCount uint64
 }
 
+func (e *Eth1Data) Copy() *Eth1Data {
+	copied := *e
+	return &copied
+}
+
 func (e *Eth1Data) Equal(b *Eth1Data) bool {
 	return e.BlockHash == b.BlockHash && e.Root == b.Root && b.DepositCount == e.DepositCount
 }

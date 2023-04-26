@@ -84,11 +84,6 @@ func (b *BeaconState) SlashValidator(slashedInd uint64, whistleblowerInd *uint64
 	}
 	// Record changes in changeset
 	slashingsIndex := int(epoch % b.beaconConfig.EpochsPerSlashingsVector)
-	if b.reverseChangeset != nil {
-		b.reverseChangeset.SlashedChange.AddChange(int(slashedInd), b.validators[slashedInd].Slashed)
-		b.reverseChangeset.WithdrawalEpochChange.AddChange(int(slashedInd), b.validators[slashedInd].WithdrawableEpoch)
-		b.reverseChangeset.SlashingsChanges.AddChange(slashingsIndex, b.slashings[slashingsIndex])
-	}
 
 	// Change the validator to be slashed
 	b.validators[slashedInd].Slashed = true

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
@@ -216,7 +215,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		ctx.Uint64(PruneReceiptBeforeFlag.Name),
 		ctx.Uint64(PruneTxIndexBeforeFlag.Name),
 		ctx.Uint64(PruneCallTracesBeforeFlag.Name),
-		strings.Split(ctx.String(ExperimentsFlag.Name), ","),
+		utils.SplitAndTrim(ctx.String(ExperimentsFlag.Name)),
 	)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -371,10 +370,10 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		AuthRpcPort:              ctx.Int(utils.AuthRpcPort.Name),
 		JWTSecretPath:            jwtSecretPath,
 		TraceRequests:            ctx.Bool(utils.HTTPTraceFlag.Name),
-		HttpCORSDomain:           strings.Split(ctx.String(utils.HTTPCORSDomainFlag.Name), ","),
-		HttpVirtualHost:          strings.Split(ctx.String(utils.HTTPVirtualHostsFlag.Name), ","),
-		AuthRpcVirtualHost:       strings.Split(ctx.String(utils.AuthRpcVirtualHostsFlag.Name), ","),
-		API:                      strings.Split(apis, ","),
+		HttpCORSDomain:           utils.SplitAndTrim(ctx.String(utils.HTTPCORSDomainFlag.Name)),
+		HttpVirtualHost:          utils.SplitAndTrim(ctx.String(utils.HTTPVirtualHostsFlag.Name)),
+		AuthRpcVirtualHost:       utils.SplitAndTrim(ctx.String(utils.AuthRpcVirtualHostsFlag.Name)),
+		API:                      utils.SplitAndTrim(apis),
 		HTTPTimeouts: rpccfg.HTTPTimeouts{
 			ReadTimeout:  ctx.Duration(HTTPReadTimeoutFlag.Name),
 			WriteTimeout: ctx.Duration(HTTPWriteTimeoutFlag.Name),

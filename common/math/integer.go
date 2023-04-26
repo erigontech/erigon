@@ -96,3 +96,10 @@ func RandInt64() (int64, error) {
 	}
 	return n.Int64(), nil
 }
+
+func CeilDiv(x, y int) int {
+	if y == 0 {
+		return 0
+	}
+	return (x + y - 1) / y
+}

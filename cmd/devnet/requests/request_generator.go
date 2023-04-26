@@ -68,6 +68,11 @@ func (req *RequestGenerator) Erigon(method models.RPCMethod, body string, respon
 	return req.call(models.ErigonUrl, string(method), body, response)
 }
 
+func (req *RequestGenerator) BlockNumber() string {
+	const template = `{"jsonrpc":"2.0","method":%q,"id":%d}`
+	return fmt.Sprintf(template, models.ETHBlockNumber, req.reqID)
+}
+
 func (req *RequestGenerator) GetAdminNodeInfo() string {
 	const template = `{"jsonrpc":"2.0","method":%q,"id":%d}`
 	return fmt.Sprintf(template, models.AdminNodeInfo, req.reqID)

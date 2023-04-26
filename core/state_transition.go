@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -28,6 +29,7 @@ import (
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -86,12 +88,15 @@ type Message interface {
 	FeeCap() *uint256.Int
 	Tip() *uint256.Int
 	Gas() uint64
+	DataGas() uint64
+	MaxFeePerDataGas() *uint256.Int
 	Value() *uint256.Int
 
 	Nonce() uint64
 	CheckNonce() bool
 	Data() []byte
 	AccessList() types2.AccessList
+	DataHashes() []libcommon.Hash
 
 	IsFree() bool
 }
@@ -473,4 +478,8 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gas
+}
+
+func (st *StateTransition) dataGasUsed() uint64 {
+	return misc.GetDataGasUsed(len(st.msg.DataHashes()))
 }

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/btree"
-	"github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 
@@ -230,7 +230,7 @@ type HeaderDownload struct {
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash]*Anchor // Mapping from parentHash to collection of anchors
 	links                  map[common.Hash]*Link   // Links by header hash
-	engine                 consensus.Engine
+	Engine                 consensus.Engine
 	insertQueue            InsertQueue            // Priority queue of non-persisted links that need to be verified and can be inserted
 	seenAnnounces          *SeenAnnounces         // External announcement hashes, after header verification if hash is in this set - will broadcast it further
 	persistedLinkQueue     LinkQueue              // Priority queue of persisted links used to limit their number
@@ -251,7 +251,7 @@ type HeaderDownload struct {
 	trace                  bool
 	stats                  Stats
 
-	consensusHeaderReader consensus.ChainHeaderReader
+	ConsensusHeaderReader consensus.ChainHeaderReader
 	headerReader          services.HeaderReader
 
 	// Proof of Stake (PoS)
@@ -292,7 +292,7 @@ func NewHeaderDownload(
 		persistedLinkLimit: persistentLinkLimit,
 		linkLimit:          linkLimit - persistentLinkLimit,
 		anchorLimit:        anchorLimit,
-		engine:             engine,
+		Engine:             engine,
 		links:              make(map[common.Hash]*Link),
 		anchorTree:         btree.NewG[*Anchor](32, func(a, b *Anchor) bool { return a.blockHeight < b.blockHeight }),
 		seenAnnounces:      NewSeenAnnounces(),
