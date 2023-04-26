@@ -50,6 +50,7 @@ jobs:
       - name: Run GoReleaser
         run: |
           make release
+          docker images
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.prepare.outputs.tag_name }}
