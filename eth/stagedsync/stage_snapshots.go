@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -22,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -31,7 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type SnapshotsCfg struct {
@@ -164,6 +166,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if cfg.historyV3 {
+		cfg.agg.CleanDir()
+
 		indexWorkers := estimate.IndexSnapshot.Workers()
 		if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 			return err
@@ -534,7 +538,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		}
 
 		br.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlDebug)
-		cfg.agg.BuildFilesInBackground()
+		//cfg.agg.BuildFilesInBackground()
 	}
 
 	if !useExternalTx {

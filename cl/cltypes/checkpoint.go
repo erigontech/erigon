@@ -17,6 +17,12 @@ func (c *Checkpoint) DecodeSSZWithVersion(buf []byte, _ int) error {
 	return c.DecodeSSZ(buf)
 }
 
+func (c *Checkpoint) Copy() *Checkpoint {
+	copiedCheckpoint := new(Checkpoint)
+	*copiedCheckpoint = *c
+	return copiedCheckpoint
+}
+
 func (c *Checkpoint) Equal(other *Checkpoint) bool {
 	return c.Epoch == other.Epoch && c.Root == other.Root
 }

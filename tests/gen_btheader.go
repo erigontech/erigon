@@ -7,8 +7,8 @@ import (
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -29,7 +29,7 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 		StateRoot        libcommon.Hash
 		TransactionsTrie libcommon.Hash
 		UncleHash        libcommon.Hash
-		ExtraData        hexutil.Bytes
+		ExtraData        hexutility.Bytes
 		Difficulty       *math.HexOrDecimal256
 		GasLimit         math.HexOrDecimal64
 		GasUsed          math.HexOrDecimal64
@@ -71,7 +71,7 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		StateRoot        *libcommon.Hash
 		TransactionsTrie *libcommon.Hash
 		UncleHash        *libcommon.Hash
-		ExtraData        *hexutil.Bytes
+		ExtraData        *hexutility.Bytes
 		Difficulty       *math.HexOrDecimal256
 		GasLimit         *math.HexOrDecimal64
 		GasUsed          *math.HexOrDecimal64

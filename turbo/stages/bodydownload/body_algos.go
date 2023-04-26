@@ -16,6 +16,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -88,6 +89,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 				continue
 			}
 			bd.peerMap[req.peerID]++
+			dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyExpired)
 			delete(bd.requests, blockNum)
 		}
 
@@ -147,12 +149,14 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 					body.Withdrawals = make([]*types.Withdrawal, 0)
 				}
 				bd.addBodyToCache(blockNum, body)
+				dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyEmpty)
 				request = false
 			} else {
 				// Perhaps we already have this block
 				block := rawdb.ReadBlock(tx, hash, blockNum)
 				if block != nil {
 					bd.addBodyToCache(blockNum, block.RawBody())
+					dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyInDb)
 					request = false
 				}
 			}
@@ -192,6 +196,7 @@ func (bd *BodyDownload) checkPrefetchedBlock(hash libcommon.Hash, tx kv.RwTx, bl
 	bd.deliveriesH[blockNum] = header
 
 	// make sure we have the body in the bucket for later use
+	dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyPrefetched)
 	bd.addBodyToCache(blockNum, body)
 
 	// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
@@ -215,6 +220,7 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 	//}
 	for _, num := range bodyReq.BlockNums {
 		bd.requests[num] = bodyReq
+		dataflow.BlockBodyDownloadStates.AddChange(num, dataflow.BlockBodyRequested)
 	}
 	bodyReq.waitUntil = timeWithTimeout
 	bodyReq.peerID = peer
@@ -317,11 +323,16 @@ Loop:
 			bd.addBodyToCache(blockNum, &types.RawBody{Transactions: txs[i], Uncles: uncles[i], Withdrawals: withdrawals[i]})
 			bd.delivered.Add(blockNum)
 			delivered++
+			dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyReceived)
 		}
 		// Clean up the requests
 		//var clearedNums []uint64
 		for blockNum := range toClean {
 			delete(bd.requests, blockNum)
+			if !bd.delivered.Contains(blockNum) {
+				// Delivery was requested but was skipped due to the limitation on the size of the response
+				dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodySkipped)
+			}
 			//clearedNums = append(clearedNums, blockNum)
 		}
 		//sort.Slice(deliveredNums, func(i, j int) bool { return deliveredNums[i] < deliveredNums[j] })
@@ -417,6 +428,7 @@ func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 		item, _ := bd.bodyCache.DeleteMax()
 		bd.bodyCacheSize -= item.payloadSize
 		delete(bd.requests, item.blockNum)
+		dataflow.BlockBodyDownloadStates.AddChange(item.blockNum, dataflow.BlockBodyEvicted)
 	}
 }
 

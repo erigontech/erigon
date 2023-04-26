@@ -49,45 +49,6 @@ var testHeader = &cltypes.BeaconBlockHeader{
 	BodyRoot:      libcommon.HexToHash("ad"),
 }
 
-var testLcHeader = (&cltypes.LightClientHeader{
-	HeaderEth1: &cltypes.Eth1Header{},
-	HeaderEth2: testHeader,
-}).WithVersion(clparams.CapellaVersion)
-
-var testLcUpdate = (&cltypes.LightClientUpdate{
-	AttestedHeader: testLcHeader,
-	NextSyncCommitee: &cltypes.SyncCommittee{
-		PubKeys: make([][48]byte, 512),
-	},
-	NextSyncCommitteeBranch: make([]libcommon.Hash, 5),
-	FinalizedHeader:         testLcHeader,
-	FinalityBranch:          make([]libcommon.Hash, 6),
-	SyncAggregate:           &cltypes.SyncAggregate{},
-	SignatureSlot:           294,
-}).WithVersion(clparams.CapellaVersion)
-
-var testLcUpdateFinality = (&cltypes.LightClientFinalityUpdate{
-	AttestedHeader:  testLcHeader,
-	FinalizedHeader: testLcHeader,
-	FinalityBranch:  make([]libcommon.Hash, 6),
-	SyncAggregate:   &cltypes.SyncAggregate{},
-	SignatureSlot:   294,
-}).WithVersion(clparams.CapellaVersion)
-
-var testLcUpdateOptimistic = (&cltypes.LightClientOptimisticUpdate{
-	AttestedHeader: testLcHeader,
-	SyncAggregate:  &cltypes.SyncAggregate{},
-	SignatureSlot:  294,
-}).WithVersion(clparams.CapellaVersion)
-
-var testLcBootstrap = (&cltypes.LightClientBootstrap{
-	Header: testLcHeader,
-	CurrentSyncCommittee: &cltypes.SyncCommittee{
-		PubKeys: make([][48]byte, 512),
-	},
-	CurrentSyncCommitteeBranch: make([]libcommon.Hash, 5),
-}).WithVersion(clparams.CapellaVersion)
-
 func TestMarshalNetworkTypes(t *testing.T) {
 	cases := []ssz.EncodableSSZ{
 		testMetadata,
@@ -96,10 +57,6 @@ func TestMarshalNetworkTypes(t *testing.T) {
 		testLcRangeRequest,
 		testBlockRangeRequest,
 		testStatus,
-		testLcUpdate,
-		testLcUpdateFinality,
-		testLcUpdateOptimistic,
-		testLcBootstrap,
 	}
 
 	unmarshalDestinations := []ssz.EncodableSSZ{
@@ -109,10 +66,6 @@ func TestMarshalNetworkTypes(t *testing.T) {
 		&cltypes.LightClientUpdatesByRangeRequest{},
 		&cltypes.BeaconBlocksByRangeRequest{},
 		&cltypes.Status{},
-		&cltypes.LightClientUpdate{},
-		&cltypes.LightClientFinalityUpdate{},
-		&cltypes.LightClientOptimisticUpdate{},
-		&cltypes.LightClientBootstrap{},
 	}
 	for i, tc := range cases {
 		marshalledBytes, err := tc.EncodeSSZ(nil)

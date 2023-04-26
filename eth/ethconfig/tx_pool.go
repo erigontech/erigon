@@ -57,8 +57,6 @@ var DeprecatedDefaultTxPoolConfig = DeprecatedTxPoolConfig{
 	AccountQueue:       64,
 	GlobalQueue:        30_000,
 
-	CommitEvery: 15 * time.Second,
-
 	Lifetime: 3 * time.Hour,
 }
 
@@ -71,6 +69,7 @@ var DefaultTxPool2Config = func(pool1Cfg DeprecatedTxPoolConfig) txpoolcfg.Confi
 	cfg.MinFeeCap = pool1Cfg.PriceLimit
 	cfg.AccountSlots = pool1Cfg.AccountSlots
 	cfg.LogEvery = 1 * time.Minute
+	cfg.CommitEvery = 5 * time.Minute
 	cfg.TracedSenders = pool1Cfg.TracedSenders
 	cfg.CommitEvery = pool1Cfg.CommitEvery
 

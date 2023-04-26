@@ -113,18 +113,12 @@ func NewSimulatedBackendWithConfig(alloc types.GenesisAlloc, config *chain.Confi
 func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
 	b := NewSimulatedBackendWithConfig(alloc, params.TestChainConfig, gasLimit)
 	t.Cleanup(b.Close)
-	//if b.m.HistoryV3 {
-	//	t.Skip("TODO: Fixme")
-	//}
 	return b
 }
 
 func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
 	b := NewSimulatedBackendWithConfig(alloc, config, gasLimit)
 	t.Cleanup(b.Close)
-	//if b.m.HistoryV3 {
-	//	t.Skip("TODO: Fixme")
-	//}
 	return b
 }
 func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
@@ -179,20 +173,6 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingReceipts = chain.Receipts[0]
 	b.pendingHeader = chain.Headers[0]
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	if ethconfig.EnableHistoryV4InTest {
-		panic("implement domain state reader")
-		/*
-			agg := db.(*temporal.DB).GetAgg()
-			agg.SetTx(tx)
-
-			rs := state.NewStateV3("", agg.BufferedDomains())
-			stateWriter = state.NewStateWriterV3(rs)
-			r := state.NewStateReaderV3(rs)
-			r.SetTx(tx)
-			stateReader = r
-			defer agg.StartUnbufferedWrites().FinishWrites()
-		*/
-	}
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
 	}
@@ -201,18 +181,21 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 		panic(err)
 	}
 	b.pendingReaderTx = tx
-	b.pendingReader = state.NewPlainStateReader(b.pendingReaderTx)
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement me")
+		//b.pendingReader = state.NewReaderV4(b.pendingReaderTx.(kv.TemporalTx))
+	} else {
+		b.pendingReader = state.NewPlainStateReader(b.pendingReaderTx)
+	}
 	b.pendingState = state.New(b.pendingReader)
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
-		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()+1, nil))
-		//return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
+		return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
 	}
-	return state.New(state.NewPlainState(db, blockNumber.Uint64()+1, nil))
-	//return state.New(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
+	return state.New(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -705,7 +688,8 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 
 	txContext := core.NewEVMTxContext(msg)
 	header := block.Header()
-	evmContext := core.NewEVMBlockContext(header, core.GetHashFn(header, b.getHeader), b.m.Engine, nil, nil /*excessDataGas*/)
+	excessDataGas := header.ParentExcessDataGas(b.getHeader)
+	evmContext := core.NewEVMBlockContext(header, core.GetHashFn(header, b.getHeader), b.m.Engine, nil, excessDataGas)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
@@ -738,7 +722,8 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
-		&b.pendingHeader.GasUsed, vm.Config{}); err != nil {
+		&b.pendingHeader.GasUsed, vm.Config{},
+		b.pendingHeader.ParentExcessDataGas(b.getHeader)); err != nil {
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
@@ -819,6 +804,10 @@ func (m callMsg) Value() *uint256.Int           { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                  { return m.CallMsg.Data }
 func (m callMsg) AccessList() types2.AccessList { return m.CallMsg.AccessList }
 func (m callMsg) IsFree() bool                  { return false }
+
+func (m callMsg) DataGas() uint64                { return params.DataGasPerBlob * uint64(len(m.CallMsg.DataHashes)) }
+func (m callMsg) MaxFeePerDataGas() *uint256.Int { return m.CallMsg.MaxFeePerDataGas }
+func (m callMsg) DataHashes() []libcommon.Hash   { return m.CallMsg.DataHashes }
 
 /*
 // filterBackend implements filters.Backend to support filtering for logs without

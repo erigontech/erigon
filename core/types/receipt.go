@@ -24,6 +24,7 @@ import (
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -72,7 +73,7 @@ type Receipt struct {
 
 type receiptMarshaling struct {
 	Type              hexutil.Uint64
-	PostState         hexutil.Bytes
+	PostState         hexutility.Bytes
 	Status            hexutil.Uint64
 	CumulativeGasUsed hexutil.Uint64
 	GasUsed           hexutil.Uint64

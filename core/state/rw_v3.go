@@ -2,16 +2,15 @@ package state
 
 import (
 	"bytes"
-	"container/heap"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -30,6 +29,8 @@ import (
 const CodeSizeTable = "CodeSize"
 const StorageTable = "Storage"
 
+var ExecTxsDone = metrics.NewCounter(`exec_txs_done`)
+
 type StateV3 struct {
 	lock           sync.RWMutex
 	sizeEstimate   int
@@ -39,16 +40,9 @@ type StateV3 struct {
 	chIncs         map[string][]byte
 	chContractCode map[string][]byte
 
-	receiveWork  *sync.Cond
 	triggers     map[uint64]*exec22.TxTask
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.Mutex
-
-	queue     exec22.TxTaskQueue
-	queueLock sync.Mutex
-
-	txsDone  atomic.Uint64
-	finished atomic.Bool
 
 	tmpdir              string
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
@@ -69,7 +63,6 @@ func NewStateV3(tmpdir string) *StateV3 {
 		applyPrevAccountBuf: make([]byte, 256),
 		addrIncBuf:          make([]byte, 20+8),
 	}
-	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
 }
 
@@ -226,25 +219,32 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	return nil
 }
 
-func (rs *StateV3) QueueLen() int {
-	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
-	return rs.queue.Len()
+func (rs *StateV3) ReTry(txTask *exec22.TxTask, in *exec22.QueueWithRetry) {
+	rs.resetTxTask(txTask)
+	in.ReTry(txTask)
 }
+func (rs *StateV3) AddWork(ctx context.Context, txTask *exec22.TxTask, in *exec22.QueueWithRetry) {
+	rs.resetTxTask(txTask)
+	in.Add(ctx, txTask)
+}
+func (rs *StateV3) resetTxTask(txTask *exec22.TxTask) {
+	txTask.BalanceIncreaseSet = nil
+	returnReadList(txTask.ReadLists)
+	txTask.ReadLists = nil
+	returnWriteList(txTask.WriteLists)
+	txTask.WriteLists = nil
+	txTask.Logs = nil
+	txTask.TraceFroms = nil
+	txTask.TraceTos = nil
 
-func (rs *StateV3) Schedule() (*exec22.TxTask, bool) {
-	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
-	for !rs.finished.Load() && rs.queue.Len() == 0 {
-		rs.receiveWork.Wait()
-	}
-	if rs.finished.Load() {
-		return nil, false
-	}
-	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(*exec22.TxTask), true
-	}
-	return nil, false
+	/*
+		txTask.ReadLists = nil
+		txTask.WriteLists = nil
+		txTask.AccountPrevs = nil
+		txTask.AccountDels = nil
+		txTask.StoragePrevs = nil
+		txTask.CodePrevs = nil
+	*/
 }
 
 func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
@@ -269,15 +269,13 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 	return !deferral
 }
 
-func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
-	rs.txsDone.Add(1)
+func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *exec22.QueueWithRetry) (count int) {
+	ExecTxsDone.Inc()
 
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
-	count := uint64(0)
 	if triggered, ok := rs.triggers[txNum]; ok {
-		rs.queuePush(triggered)
-		rs.receiveWork.Signal()
+		in.ReTry(triggered)
 		count++
 		delete(rs.triggers, txNum)
 	}
@@ -288,43 +286,6 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 		}
 	}
 	return count
-}
-
-func (rs *StateV3) queuePush(t *exec22.TxTask) int {
-	rs.queueLock.Lock()
-	heap.Push(&rs.queue, t)
-	l := len(rs.queue)
-	rs.queueLock.Unlock()
-	return l
-}
-
-func (rs *StateV3) AddWork(txTask *exec22.TxTask) (queueLen int) {
-	txTask.BalanceIncreaseSet = nil
-	returnReadList(txTask.ReadLists)
-	txTask.ReadLists = nil
-	returnWriteList(txTask.WriteLists)
-	txTask.WriteLists = nil
-	txTask.ResultsSize = 0
-	txTask.Logs = nil
-	txTask.TraceFroms = nil
-	txTask.TraceTos = nil
-
-	/*
-		txTask.ReadLists = nil
-		txTask.WriteLists = nil
-		txTask.AccountPrevs = nil
-		txTask.AccountDels = nil
-		txTask.StoragePrevs = nil
-		txTask.CodePrevs = nil
-	*/
-	queueLen = rs.queuePush(txTask)
-	rs.receiveWork.Signal()
-	return queueLen
-}
-
-func (rs *StateV3) Finish() {
-	rs.finished.Store(true)
-	rs.receiveWork.Broadcast()
 }
 
 func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
@@ -640,13 +601,13 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	return nil
 }
 
-func (rs *StateV3) DoneCount() uint64 { return rs.txsDone.Load() }
+func (rs *StateV3) DoneCount() uint64 { return ExecTxsDone.Get() }
 
-func (rs *StateV3) SizeEstimate() uint64 {
+func (rs *StateV3) SizeEstimate() (r uint64) {
 	rs.lock.RLock()
-	r := rs.sizeEstimate
+	r = uint64(rs.sizeEstimate)
 	rs.lock.RUnlock()
-	return uint64(r) * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
+	return r * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
 }
 
 func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {

@@ -31,10 +31,12 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/protolambda/ztyp/codec"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -50,7 +52,7 @@ const (
 	LegacyTxType = iota
 	AccessListTxType
 	DynamicFeeTxType
-	BlobTxType = 5
+	BlobTxType
 )
 
 // Transaction is an Ethereum transaction.
@@ -455,21 +457,23 @@ func (t *TransactionsFixedOrder) Pop() {
 
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
-	to         *libcommon.Address
-	from       libcommon.Address
-	nonce      uint64
-	amount     uint256.Int
-	gasLimit   uint64
-	gasPrice   uint256.Int
-	feeCap     uint256.Int
-	tip        uint256.Int
-	data       []byte
-	accessList types2.AccessList
-	checkNonce bool
-	isFree     bool
+	to               *libcommon.Address
+	from             libcommon.Address
+	nonce            uint64
+	amount           uint256.Int
+	gasLimit         uint64
+	gasPrice         uint256.Int
+	feeCap           uint256.Int
+	tip              uint256.Int
+	maxFeePerDataGas uint256.Int
+	data             []byte
+	accessList       types2.AccessList
+	checkNonce       bool
+	isFree           bool
+	dataHashes       []libcommon.Hash
 }
 
-func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList types2.AccessList, checkNonce bool, isFree bool) Message {
+func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList types2.AccessList, checkNonce bool, isFree bool, maxFeePerDataGas *uint256.Int) Message {
 	m := Message{
 		from:       from,
 		to:         to,
@@ -489,6 +493,9 @@ func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amo
 	}
 	if feeCap != nil {
 		m.feeCap.Set(feeCap)
+	}
+	if maxFeePerDataGas != nil {
+		m.maxFeePerDataGas.Set(maxFeePerDataGas)
 	}
 	return m
 }
@@ -526,4 +533,29 @@ func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
 	}
 
 	m.gasLimit = gas
+}
+
+func (m Message) DataGas() uint64 { return params.DataGasPerBlob * uint64(len(m.dataHashes)) }
+func (m Message) MaxFeePerDataGas() *uint256.Int {
+	return &m.maxFeePerDataGas
+}
+
+func (m Message) DataHashes() []libcommon.Hash { return m.dataHashes }
+
+func DecodeSSZ(data []byte, dest codec.Deserializable) error {
+	err := dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))
+	return err
+}
+
+func EncodeSSZ(w io.Writer, obj codec.Serializable) error {
+	return obj.Serialize(codec.NewEncodingWriter(w))
+}
+
+// copyAddressPtr copies an address.
+func copyAddressPtr(a *libcommon.Address) *libcommon.Address {
+	if a == nil {
+		return nil
+	}
+	cpy := *a
+	return &cpy
 }

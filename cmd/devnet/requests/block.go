@@ -11,6 +11,21 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
+func BlockNumber(reqId int) (uint64, error) {
+	reqGen := initialiseRequestGenerator(reqId)
+	var b rpctest.EthBlockNumber
+
+	req := reqGen.BlockNumber()
+	res := reqGen.Erigon(models.ETHBlockNumber, req, &b)
+	number := uint64(b.Number)
+
+	if res.Err != nil {
+		return number, fmt.Errorf("error getting current block number: %v", res.Err)
+	}
+
+	return number, nil
+}
+
 func GetBlockByNumber(reqId int, blockNum uint64, withTxs bool) (rpctest.EthBlockByNumber, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthBlockByNumber

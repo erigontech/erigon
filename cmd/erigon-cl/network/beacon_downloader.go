@@ -2,12 +2,12 @@ package network
 
 import (
 	"sync"
+	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/net/context"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 )
 
@@ -25,11 +25,8 @@ type ForwardBeaconDownloader struct {
 	ctx                       context.Context
 	highestSlotProcessed      uint64
 	highestBlockRootProcessed libcommon.Hash
-	targetSlot                uint64
 	rpc                       *rpc.BeaconRpcP2P
 	process                   ProcessFn
-	isDownloading             bool // Should be set to true to set the blocks to download
-	limitSegmentsLength       int  // Limit how many blocks we store in the downloader without processing
 
 	segments []*cltypes.SignedBeaconBlock // Unprocessed downloaded segments
 	mu       sync.Mutex
@@ -37,40 +34,10 @@ type ForwardBeaconDownloader struct {
 
 func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *ForwardBeaconDownloader {
 	return &ForwardBeaconDownloader{
-		ctx:           ctx,
-		segments:      []*cltypes.SignedBeaconBlock{},
-		rpc:           rpc,
-		isDownloading: false,
+		ctx:      ctx,
+		segments: []*cltypes.SignedBeaconBlock{},
+		rpc:      rpc,
 	}
-}
-
-// Start begins the gossip listening process.
-func (f *ForwardBeaconDownloader) ReceiveGossip(obj ssz.Unmarshaler) {
-	signedBlock := obj.(*cltypes.SignedBeaconBlock)
-	if signedBlock.Block.ParentRoot == f.highestBlockRootProcessed {
-		f.addSegment(signedBlock)
-	}
-}
-
-// SetIsDownloading sets isDownloading
-func (f *ForwardBeaconDownloader) SetIsDownloading(isDownloading bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.isDownloading = isDownloading
-}
-
-// SetLimitSegmentsLength sets the segments limiter.
-func (f *ForwardBeaconDownloader) SetLimitSegmentsLength(limitSegmentsLength int) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.limitSegmentsLength = limitSegmentsLength
-}
-
-// SetTargetSlot sets the target slot.
-func (f *ForwardBeaconDownloader) SetTargetSlot(targetSlot uint64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.targetSlot = targetSlot
 }
 
 // SetProcessFunction sets the function used to process segments.
@@ -103,10 +70,6 @@ func (f *ForwardBeaconDownloader) HighestProcessedRoot() libcommon.Hash {
 
 // addSegment process new block segment.
 func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlock) {
-	// Skip if it is not downloading or limit was reached
-	if !f.isDownloading || len(f.segments) >= f.limitSegmentsLength {
-		return
-	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	// Skip if does continue the segment.
@@ -114,10 +77,12 @@ func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlock) {
 }
 
 func (f *ForwardBeaconDownloader) RequestMore() {
-	count := uint64(64)
+	count := uint64(4) // dont need many
 
 	responses, err := f.rpc.SendBeaconBlocksByRangeReq(f.highestSlotProcessed+1, count)
 	if err != nil {
+		// Wait a bit in this case (we do not need to be super performant here).
+		time.Sleep(time.Second)
 		return
 	}
 	for _, response := range responses {
@@ -151,4 +116,8 @@ func (f *ForwardBeaconDownloader) GetHighestProcessedSlot() uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.highestSlotProcessed
+}
+
+func (f *ForwardBeaconDownloader) Peers() (uint64, error) {
+	return f.rpc.Peers()
 }

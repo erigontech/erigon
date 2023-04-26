@@ -6,19 +6,25 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/eth/tracers"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
@@ -27,7 +33,7 @@ const AccountRangeMaxResults = 256
 
 // PrivateDebugAPI Exposed RPC endpoints for debugging use
 type PrivateDebugAPI interface {
-	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
+	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutility.Bytes, maxResult int) (StorageRangeResult, error)
 	TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error
 	TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error
 	TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *tracers.TraceConfig, stream *jsoniter.Stream) error
@@ -36,6 +42,8 @@ type PrivateDebugAPI interface {
 	GetModifiedAccountsByHash(_ context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
 	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error
 	AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
+	GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error)
+	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error)
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
@@ -55,7 +63,7 @@ func NewPrivateDebugAPI(base *BaseAPI, db kv.RoDB, gascap uint64) *PrivateDebugA
 }
 
 // storageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
-func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
+func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutility.Bytes, maxResult int) (StorageRangeResult, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return StorageRangeResult{}, err
@@ -112,6 +120,45 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 			blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
 			if err != nil {
 				return state.IteratorDump{}, fmt.Errorf("last block has not found: %w", err)
+			}
+		} else if number == rpc.FinalizedBlockNumber {
+			if posa, isPoSA := api.engine().(consensus.PoSA); isPoSA {
+				headerNumber, err := stages.GetStageProgress(tx, stages.Execution)
+				if err != nil {
+					return state.IteratorDump{}, err
+				}
+				headerHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
+				if err != nil {
+					return state.IteratorDump{}, err
+				}
+				if headerHash != (common.Hash{}) {
+					if header := rawdb.ReadHeader(tx, headerHash, headerNumber); header != nil {
+						if chainConfig, err := api.chainConfig(tx); err == nil {
+							blockNumber = posa.GetFinalizedHeader(stagedsync.NewChainReaderImpl(chainConfig, tx, nil), header).Number.Uint64()
+						}
+					}
+				}
+			}
+		} else if number == rpc.SafeBlockNumber {
+			if posa, isPoSA := api.engine().(consensus.PoSA); isPoSA {
+				headerNumber, err := stages.GetStageProgress(tx, stages.Execution)
+				if err != nil {
+					return state.IteratorDump{}, err
+				}
+				headerHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
+				if err != nil {
+					return state.IteratorDump{}, err
+				}
+				if headerHash != (common.Hash{}) {
+					if header := rawdb.ReadHeader(tx, headerHash, headerNumber); header != nil {
+						if chainConfig, err := api.chainConfig(tx); err == nil {
+							blockNumber, _, err = posa.GetJustifiedNumberAndHash(stagedsync.NewChainReaderImpl(chainConfig, tx, nil), header)
+							if err != nil {
+								return state.IteratorDump{}, err
+							}
+						}
+					}
+				}
 			}
 		} else {
 			blockNumber = uint64(number)
@@ -355,8 +402,48 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 }
 
 type AccountResult struct {
-	Balance  hexutil.Big    `json:"balance"`
-	Nonce    hexutil.Uint64 `json:"nonce"`
-	Code     hexutil.Bytes  `json:"code"`
-	CodeHash common.Hash    `json:"codeHash"`
+	Balance  hexutil.Big      `json:"balance"`
+	Nonce    hexutil.Uint64   `json:"nonce"`
+	Code     hexutility.Bytes `json:"code"`
+	CodeHash common.Hash      `json:"codeHash"`
+}
+
+func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	n, h, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	header, err := api._blockReader.Header(context.Background(), tx, h, n)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, fmt.Errorf("header not found")
+	}
+	return rlp.EncodeToBytes(header)
+}
+
+func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	n, h, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	block, err := api.blockWithSenders(tx, h, n)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, fmt.Errorf("block not found")
+	}
+	return rlp.EncodeToBytes(block)
 }

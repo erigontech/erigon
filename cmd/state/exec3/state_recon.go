@@ -7,13 +7,14 @@ import (
 	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
@@ -230,7 +231,6 @@ type ReconWorker struct {
 	chainConfig *chain.Config
 	logger      log.Logger
 	genesis     *types.Genesis
-	epoch       EpochReader
 	chain       ChainReader
 	isPoSA      bool
 	posa        consensus.PoSA
@@ -257,7 +257,6 @@ func NewReconWorker(lock sync.Locker, ctx context.Context, rs *state.ReconState,
 		engine:      engine,
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 	}
-	rw.epoch = NewEpochReader(chainTx)
 	rw.chain = NewChainReader(chainConfig, chainTx, blockReader)
 	rw.ibs = state.New(rw.stateReader)
 	rw.posa, rw.isPoSA = engine.(consensus.PoSA)
@@ -317,9 +316,9 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
+				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, txTask.Withdrawals, rw.epoch, rw.chain, syscall); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall); err != nil {
 				if _, readError := rw.stateReader.ReadError(); !readError {
 					return fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err)
 				}
@@ -331,10 +330,10 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, txTask.Header.Number, ibs)
 		}
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
 		}
 
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, ibs, txTask.Txs, txTask.Uncles, syscall)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, txTask.Header, ibs, txTask.Txs, txTask.Uncles, syscall)
 	} else {
 		if rw.isPoSA {
 			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {

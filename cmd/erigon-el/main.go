@@ -52,15 +52,15 @@ func runErigon(cliCtx *cli.Context) error {
 		}
 	}
 
-	logger := logging.GetLoggerCtx("erigon", cliCtx)
+	logging.SetupLoggerCtx("erigon", cliCtx)
 
 	// initializing the node and providing the current git commit there
-	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+	log.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
 	nodeCfg := node.NewNodConfigUrfave(cliCtx)
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg)
 
-	ethNode, err := backend.NewNode(nodeCfg, ethCfg, logger)
+	ethNode, err := backend.NewNode(nodeCfg, ethCfg, log.Root())
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err

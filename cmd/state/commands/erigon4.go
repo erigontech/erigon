@@ -81,8 +81,8 @@ var erigon4Cmd = &cobra.Command{
 	Use:   "erigon4",
 	Short: "Experimental command to re-execute blocks from beginning using erigon2 state representation and history/domain",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := logging.GetLoggerCmd("erigon4", cmd)
-		return Erigon4(genesis, chainConfig, logger)
+		logging.SetupLoggerCmd("erigon4", cmd)
+		return Erigon4(genesis, chainConfig, log.Root())
 	},
 }
 
@@ -411,14 +411,14 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *StateR
 	}
 
 	getHashFn := core.GetHashFn(header, getHeader)
-
+	excessDataGas := header.ParentExcessDataGas(getHeader)
 	for i, tx := range block.Transactions() {
 		if txNum >= startTxNum {
 			ibs := state.New(rw)
 			ibs.Prepare(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			vmConfig.Tracer = ct
-			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig)
+			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, excessDataGas)
 			if err != nil {
 				return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}
@@ -475,7 +475,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *StateR
 		}
 
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, _, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil); err != nil {
+		if _, _, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil); err != nil {
 			return 0, nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 
@@ -598,7 +598,6 @@ func (ww *StateWriterV4) CreateContract(address libcommon.Address) error {
 }
 
 func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots) (engine consensus.Engine) {
-	l := log.New()
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}
@@ -606,7 +605,6 @@ func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots)
 	if cc.Clique != nil {
 		consensusConfig = params.CliqueSnapshot
 	} else if cc.Aura != nil {
-		config.Aura.Etherbase = config.Miner.Etherbase
 		consensusConfig = &config.Aura
 	} else if cc.Parlia != nil {
 		consensusConfig = &config.Parlia
@@ -615,5 +613,5 @@ func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots)
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress, config.HeimdallURL, config.WithoutHeimdall, datadirCli, snapshots, true /* readonly */)
+	return ethconsensusconfig.CreateConsensusEngine(cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress, config.HeimdallURL, config.WithoutHeimdall, datadirCli, snapshots, true /* readonly */)
 }

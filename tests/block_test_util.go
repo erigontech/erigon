@@ -27,9 +27,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -94,7 +97,7 @@ type btHeader struct {
 }
 
 type btHeaderMarshaling struct {
-	ExtraData  hexutil.Bytes
+	ExtraData  hexutility.Bytes
 	Number     *math.HexOrDecimal256
 	Difficulty *math.HexOrDecimal256
 	GasLimit   math.HexOrDecimal64
