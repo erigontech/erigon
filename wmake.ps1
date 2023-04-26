@@ -413,7 +413,9 @@ $Erigon.Commit     = [string]@(git.exe rev-list -1 HEAD)
 $Erigon.Branch     = [string]@(git.exe rev-parse --abbrev-ref HEAD)
 $Erigon.Tag        = [string]@(git.exe describe --tags)
 
-$Erigon.BuildTags = "nosqlite,noboltdb,netgo"
+## https://github.com/golang/go/issues/57757 
+## windows cannot build with netgo tag until this issue is resolved
+$Erigon.BuildTags = "nosqlite,noboltdb"
 $Erigon.Package = "github.com/ledgerwatch/erigon"
 
 $Erigon.BuildFlags = "-trimpath -tags $($Erigon.BuildTags) -buildvcs=false -v"
