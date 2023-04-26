@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -65,14 +64,9 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 
 	diagnosticsUrl := cliCtx.String(diagnosticsURLFlag.Name)
 
-	// Create a pool with the server certificate since it is not signed
-	// by a known CA
-	certPool := x509.NewCertPool()
-
 	// Create TLS configuration with the certificate of the server
 	insecure := cliCtx.Bool(insecureFlag.Name)
 	tlsConfig := &tls.Config{
-		RootCAs:            certPool,
 		InsecureSkipVerify: insecure, //nolint:gosec
 	}
 
