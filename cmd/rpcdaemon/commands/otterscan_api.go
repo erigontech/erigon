@@ -588,7 +588,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 
 	var edg *big.Int
 	if n := b.Number().Uint64(); n > 0 {
-		if parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, n-1); err != nil {
+		if parentHeader, err := api._blockReader.Header(ctx, tx, b.ParentHash(), n-1); err != nil {
 			return nil, err
 		} else {
 			edg = parentHeader.ExcessDataGas

@@ -393,8 +393,8 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 	var edg *big.Int
-	if blockNum > 0 {
-		if parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum-1); err != nil {
+	if n := block.Number().Uint64(); n > 0 {
+		if parentHeader, err := api._blockReader.Header(ctx, tx, block.ParentHash(), n-1); err != nil {
 			return nil, err
 		} else {
 			edg = parentHeader.ExcessDataGas

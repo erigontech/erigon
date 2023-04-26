@@ -649,7 +649,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	var edg *big.Int
 	if n := block.Number().Uint64(); n > 0 {
-		if parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, n-1); err != nil {
+		if parentHeader, err := api._blockReader.Header(ctx, tx, block.ParentHash(), n-1); err != nil {
 			return nil, err
 		} else {
 			edg = parentHeader.ExcessDataGas
@@ -705,7 +705,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	result := make([]map[string]interface{}, 0, len(receipts))
 	var edg *big.Int
 	if n := block.Number().Uint64(); n > 0 {
-		if parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, n-1); err != nil {
+		if parentHeader, err := api._blockReader.Header(ctx, tx, block.ParentHash(), n-1); err != nil {
 			return nil, err
 		} else {
 			edg = parentHeader.ExcessDataGas
