@@ -96,9 +96,9 @@ func doBackup(cliCtx *cli.Context) error {
 		tables = utils.SplitAndTrim(cliCtx.String(BackupTablesFlag.Name))
 	}
 
-	readAheadThreads := uint64(backup.ReadAheadThreads)
+	readAheadThreads := backup.ReadAheadThreads
 	if cliCtx.IsSet(WarmupThreadsFlag.Name) {
-		readAheadThreads = cliCtx.Uint64(WarmupThreadsFlag.Name)
+		readAheadThreads = int(cliCtx.Uint64(WarmupThreadsFlag.Name))
 	}
 
 	//kv.SentryDB no much reason to backup
