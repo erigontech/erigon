@@ -25,6 +25,7 @@ import (
 func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 	app := cli2.NewApp(params.GitCommit, "erigon")
 	app.Name = name
+	app.UsageText = app.Name + ` [command] [flags]`
 	app.Action = func(context *cli.Context) error {
 		// handle case: unknown sub-command
 		if context.Args().Present() {
