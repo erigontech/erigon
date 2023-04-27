@@ -30,7 +30,7 @@ import (
 	"github.com/prysmaticlabs/go-bitfield"
 )
 
-func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo, skipHandshake bool) error {
+func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, skipHandshake bool) error {
 	if info.ID == s.host.ID() {
 		return nil
 	}
@@ -53,7 +53,7 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	}
 	for _, peerInfo := range addrInfos {
 		go func(peerInfo peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, peerInfo, true); err != nil {
+			if err := s.ConnectWithPeer(s.ctx, peerInfo, true); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
@@ -62,6 +62,7 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 }
 
 func (s *Sentinel) listenForPeers() {
+	s.listenForPeersDoneCh = make(chan struct{}, 3)
 	enodes := []*enode.Node{}
 	for _, node := range s.cfg.NetworkConfig.StaticPeers {
 		newNode, err := enode.Parse(enode.ValidSchemes, node)
@@ -81,6 +82,11 @@ func (s *Sentinel) listenForPeers() {
 		if err := s.ctx.Err(); err != nil {
 			log.Debug("Stopping Ethereum 2.0 peer discovery", "err", err)
 			break
+		}
+		select {
+		case <-s.listenForPeersDoneCh:
+			return
+		default:
 		}
 		if s.HasTooManyPeers() {
 			log.Trace("[Sentinel] Not looking for peers, at peer limit")
@@ -104,7 +110,7 @@ func (s *Sentinel) listenForPeers() {
 		}
 
 		go func(peerInfo *peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, *peerInfo, false); err != nil {
+			if err := s.ConnectWithPeer(s.ctx, *peerInfo, false); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)

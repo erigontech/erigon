@@ -18,10 +18,19 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+)
+
+var (
+	// maxInMeshScore describes the max score a peer can attain from being in the mesh.
+	maxInMeshScore = 10.
+	// beaconBlockWeight specifies the scoring weight that we apply to
+	// our beacon block topic.
+	beaconBlockWeight = 0.8
 )
 
 const SSZSnappyCodec = "ssz_snappy"
@@ -137,6 +146,10 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
 	}
+	topicScoreParams := s.topicScoreParams(string(topic.Name))
+	if topicScoreParams != nil {
+		sub.topic.SetScoreParams(topicScoreParams)
+	}
 	s.subManager.AddSubscription(path, sub)
 
 	return sub, nil
@@ -150,4 +163,63 @@ func (s *Sentinel) Unsubscribe(topic GossipTopic, opts ...pubsub.TopicOpt) (err 
 	s.subManager.unsubscribe(fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr))
 
 	return nil
+}
+
+func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
+	switch {
+	case strings.Contains(topic, string(BeaconBlockTopic)):
+		return s.defaultBlockTopicParams()
+	/*case strings.Contains(topic, GossipAggregateAndProofMessage):
+		return defaultAggregateTopicParams(activeValidators), nil
+	case strings.Contains(topic, GossipAttestationMessage):
+		return defaultAggregateSubnetTopicParams(activeValidators), nil
+	case strings.Contains(topic, GossipSyncCommitteeMessage):
+		return defaultSyncSubnetTopicParams(activeValidators), nil
+	case strings.Contains(topic, GossipContributionAndProofMessage):
+		return defaultSyncContributionTopicParams(), nil
+	case strings.Contains(topic, GossipExitMessage):
+		return defaultVoluntaryExitTopicParams(), nil
+	case strings.Contains(topic, GossipProposerSlashingMessage):
+		return defaultProposerSlashingTopicParams(), nil
+	case strings.Contains(topic, GossipAttesterSlashingMessage):
+		return defaultAttesterSlashingTopicParams(), nil
+	case strings.Contains(topic, GossipBlsToExecutionChangeMessage):
+		return defaultBlsToExecutionChangeTopicParams(), nil*/
+	default:
+		return nil
+	}
+}
+
+// Based on the lighthouse parameters.
+// https://gist.github.com/blacktemplar/5c1862cb3f0e32a1a7fb0b25e79e6e2c
+func (s *Sentinel) defaultBlockTopicParams() *pubsub.TopicScoreParams {
+	blocksPerEpoch := s.cfg.BeaconConfig.SlotsPerEpoch
+	meshWeight := float64(0)
+	return &pubsub.TopicScoreParams{
+		TopicWeight:                     beaconBlockWeight,
+		TimeInMeshWeight:                maxInMeshScore / s.inMeshCap(),
+		TimeInMeshQuantum:               s.oneSlotDuration(),
+		TimeInMeshCap:                   s.inMeshCap(),
+		FirstMessageDeliveriesWeight:    1,
+		FirstMessageDeliveriesDecay:     s.scoreDecay(20 * s.oneEpochDuration()),
+		FirstMessageDeliveriesCap:       23,
+		MeshMessageDeliveriesWeight:     meshWeight,
+		MeshMessageDeliveriesDecay:      s.scoreDecay(5 * s.oneEpochDuration()),
+		MeshMessageDeliveriesCap:        float64(blocksPerEpoch * 5),
+		MeshMessageDeliveriesThreshold:  float64(blocksPerEpoch*5) / 10,
+		MeshMessageDeliveriesWindow:     2 * time.Second,
+		MeshMessageDeliveriesActivation: 4 * s.oneEpochDuration(),
+		MeshFailurePenaltyWeight:        meshWeight,
+		MeshFailurePenaltyDecay:         s.scoreDecay(5 * s.oneEpochDuration()),
+		InvalidMessageDeliveriesWeight:  -140.4475,
+		InvalidMessageDeliveriesDecay:   s.scoreDecay(50 * s.oneEpochDuration()),
+	}
+}
+
+func (g *GossipManager) Close() {
+	for _, topic := range g.subscriptions {
+		if topic != nil {
+			topic.Close()
+		}
+	}
 }
