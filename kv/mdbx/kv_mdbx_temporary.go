@@ -70,8 +70,8 @@ func (t *TemporaryMdbx) BeginRo(ctx context.Context) (kv.Tx, error) {
 	return t.db.BeginRo(ctx)
 }
 
-func (t *TemporaryMdbx) AllBuckets() kv.TableCfg {
-	return t.db.AllBuckets()
+func (t *TemporaryMdbx) AllTables() kv.TableCfg {
+	return t.db.AllTables()
 }
 
 func (t *TemporaryMdbx) PageSize() uint64 {

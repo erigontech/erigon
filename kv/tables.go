@@ -17,6 +17,7 @@
 package kv
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -692,6 +693,20 @@ var ReconTablesCfg = TableCfg{
 	PlainContractD: {Flags: DupSort},
 }
 
+func TablesCfgByLabel(label Label) TableCfg {
+	switch label {
+	case ChainDB:
+		return ChaindataTablesCfg
+	case TxPoolDB:
+		return TxpoolTablesCfg
+	case SentryDB:
+		return SentryTablesCfg
+	case DownloaderDB:
+		return DownloaderTablesCfg
+	default:
+		panic(fmt.Sprintf("unexpected label"))
+	}
+}
 func sortBuckets() {
 	sort.SliceStable(ChaindataTables, func(i, j int) bool {
 		return strings.Compare(ChaindataTables[i], ChaindataTables[j]) < 0

@@ -19,6 +19,7 @@ package kv
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -158,6 +159,24 @@ func (l Label) String() string {
 		return "unknown"
 	}
 }
+func UnmarshalLabel(s string) Label {
+	switch s {
+	case "chaindata":
+		return ChainDB
+	case "txpool":
+		return TxPoolDB
+	case "sentry":
+		return SentryDB
+	case "consensus":
+		return ConsensusDB
+	case "downloader":
+		return DownloaderDB
+	case "inMem":
+		return InMem
+	default:
+		panic(fmt.Sprintf("unexpected label: %s", s))
+	}
+}
 
 type Has interface {
 	// Has indicates whether a key exists in the database.
@@ -219,7 +238,7 @@ type RoDB interface {
 	//	transaction and its cursors may not issue any other operations than
 	//	Commit and Rollback while it has active child transactions.
 	BeginRo(ctx context.Context) (Tx, error)
-	AllBuckets() TableCfg
+	AllTables() TableCfg
 	PageSize() uint64
 }
 
