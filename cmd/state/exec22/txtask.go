@@ -249,7 +249,7 @@ func NewResultsQueue(newTasksLimit, queueLimit int) *ResultsQueue {
 		results:  &TxTaskQueue{},
 		limit:    queueLimit,
 		resultCh: make(chan *TxTask, newTasksLimit),
-		ticker:   time.NewTicker(time.Second),
+		ticker:   time.NewTicker(2 * time.Second),
 	}
 	heap.Init(r.results)
 	r.iter = &ResultsQueueIter{q: r, results: r.results}
