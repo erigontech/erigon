@@ -96,6 +96,11 @@ func doBackup(cliCtx *cli.Context) error {
 		tables = utils.SplitAndTrim(cliCtx.String(BackupTablesFlag.Name))
 	}
 
+	readAheadThreads := uint64(backup.ReadAheadThreads)
+	if cliCtx.IsSet(WarmupThreadsFlag.Name) {
+		readAheadThreads = cliCtx.Uint64(WarmupThreadsFlag.Name)
+	}
+
 	//kv.SentryDB no much reason to backup
 	//TODO: add support of kv.ConsensusDB
 	for _, label := range lables {
@@ -125,7 +130,7 @@ func doBackup(cliCtx *cli.Context) error {
 		}
 		log.Info("[backup] start", "label", label)
 		fromDB, toDB := backup.OpenPair(from, to, label, targetPageSize)
-		if err := backup.Kv2kv(ctx, fromDB, toDB, nil, backup.ReadAheadThreads); err != nil {
+		if err := backup.Kv2kv(ctx, fromDB, toDB, nil, readAheadThreads); err != nil {
 			return err
 		}
 	}
