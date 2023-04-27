@@ -30,6 +30,7 @@ jobs:
       - uses: docker/setup-qemu-action@v2
 
       - run: echo ${GITHUB_REF##*/}
+      - run: echo ${GITHUB_REF#refs/tags/}
 
       - run: |
           make release-branch
@@ -39,6 +40,7 @@ jobs:
         #          docker image push --all-tags ghcr.io/ledgerwatch/erigon
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-#          VERSION: ${GITHUB_REF##*/}
+          #          VERSION: ${GITHUB_REF##*/}
+          VERSION: "v1.42.1-devel"
           DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
           DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
