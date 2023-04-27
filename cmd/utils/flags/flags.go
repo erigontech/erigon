@@ -20,12 +20,14 @@ import (
 	"encoding"
 	"errors"
 	"flag"
+	"fmt"
 	"math/big"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strings"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/urfave/cli/v2"
 )
@@ -341,4 +343,23 @@ func eachName(f cli.Flag, fn func(string)) {
 		name = strings.Trim(name, " ")
 		fn(name)
 	}
+}
+
+func DBPageSizeFlagUnmarshal(cliCtx *cli.Context, flagName, flagUsage string) datasize.ByteSize {
+	var pageSize datasize.ByteSize
+	if err := pageSize.UnmarshalText([]byte(cliCtx.String(flagName))); err != nil {
+		panic(err)
+	}
+	sz := pageSize.Bytes()
+	if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
+		panic(fmt.Errorf("invalid --%s: %d, see: %s", flagName, sz, flagUsage))
+	}
+	return pageSize
+}
+
+func isPowerOfTwo(n uint64) bool {
+	if n == 0 { //corner case: if n is zero it will also consider as power 2
+		return true
+	}
+	return n&(n-1) == 0
 }

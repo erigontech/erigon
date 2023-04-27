@@ -44,7 +44,7 @@ var supportCommand = cli.Command{
 		&diagnosticsURLFlag,
 		&insecureFlag,
 	},
-	Category: "SUPPORT COMMANDS",
+	//Category: "SUPPORT COMMANDS",
 	Description: `
 The support command connects a running Erigon instances to a diagnostics system specified
 by the URL.`,
