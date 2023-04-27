@@ -30,6 +30,8 @@ jobs:
 
       - uses: docker/setup-qemu-action@v2
 
+      - run: echo ${GITHUB_REF##*/}
+
       - run: |
           make release-branch
           docker images
