@@ -47,7 +47,7 @@ func (g *GossipManager) Start() {
 		data, err := subscription.Recv()
 		if err != nil {
 			log.Debug("[Beacon Gossip] Failure in receiving", "err", err)
-			continue
+			break
 		}
 
 		currentEpoch := utils.GetCurrentEpoch(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot, g.beaconConfig.SlotsPerEpoch)
@@ -82,7 +82,7 @@ func (g *GossipManager) Start() {
 
 			log.Debug("Received block via gossip", "slot", block.Block.Slot)
 
-			if err := g.forkChoice.OnBlock(block, true); err != nil {
+			if err := g.forkChoice.OnBlock(block, true, true); err != nil {
 				log.Debug("[Beacon Gossip] Failure in processing block", "err", err)
 				continue
 			}

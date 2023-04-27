@@ -21,7 +21,7 @@ const (
 	PreValidated   ChainSegmentInsertionResult = 5
 )
 
-const snapshotStateEverySlot = 64
+const snapshotStateEverySlot = 128
 
 /*
 * The state store process is related to graph theory in the sense that the Ethereum blockchain can be thought of as a directed graph,
@@ -57,6 +57,10 @@ type ForkGraph struct {
 	// configurations
 	beaconCfg   *clparams.BeaconChainConfig
 	genesisTime uint64
+}
+
+func (f *ForkGraph) AnchorSlot() uint64 {
+	return f.currentReferenceState.Slot()
 }
 
 // Initialize fork graph with a new state
@@ -109,7 +113,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 		return nil, LogisticError, err
 	}
 
-	if _, ok := f.blocks[blockRoot]; ok {
+	if _, ok := f.headers[blockRoot]; ok {
 		return nil, PreValidated, nil
 	}
 	// Blocks below anchors are invalid.

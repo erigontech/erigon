@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"math"
 	"net"
 
 	"net/http"
@@ -36,6 +37,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 	"github.com/prometheus/client_golang/prometheus"
@@ -54,6 +56,10 @@ const (
 	gossipSubSeenTTL      = 550 // number of heartbeat intervals to retain message IDs
 	// heartbeat interval
 	gossipSubHeartbeatInterval = 700 * time.Millisecond // frequency of heartbeat, milliseconds
+
+	// decayToZero specifies the terminal value that we will use when decaying
+	// a value.
+	decayToZero = 0.01
 )
 
 type Sentinel struct {
@@ -68,10 +74,11 @@ type Sentinel struct {
 
 	db kv.RoDB
 
-	discoverConfig discover.Config
-	pubsub         *pubsub.PubSub
-	subManager     *GossipManager
-	metrics        bool
+	discoverConfig       discover.Config
+	pubsub               *pubsub.PubSub
+	subManager           *GossipManager
+	metrics              bool
+	listenForPeersDoneCh chan struct{}
 }
 
 func (s *Sentinel) createLocalNode(
@@ -176,15 +183,47 @@ func pubsubGossipParam() pubsub.GossipSubParams {
 	return gParams
 }
 
+// determines the decay rate from the provided time period till
+// the decayToZero value. Ex: ( 1 -> 0.01)
+func (s *Sentinel) scoreDecay(totalDurationDecay time.Duration) float64 {
+	numOfTimes := totalDurationDecay / s.oneSlotDuration()
+	return math.Pow(decayToZero, 1/float64(numOfTimes))
+}
+
 func (s *Sentinel) pubsubOptions() []pubsub.Option {
+	thresholds := &pubsub.PeerScoreThresholds{
+		GossipThreshold:             -4000,
+		PublishThreshold:            -8000,
+		GraylistThreshold:           -16000,
+		AcceptPXThreshold:           100,
+		OpportunisticGraftThreshold: 5,
+	}
+	scoreParams := &pubsub.PeerScoreParams{
+		Topics:        make(map[string]*pubsub.TopicScoreParams),
+		TopicScoreCap: 32.72,
+		AppSpecificScore: func(p peer.ID) float64 {
+			return 0
+		},
+		AppSpecificWeight:           1,
+		IPColocationFactorWeight:    -35.11,
+		IPColocationFactorThreshold: 10,
+		IPColocationFactorWhitelist: nil,
+		BehaviourPenaltyWeight:      -15.92,
+		BehaviourPenaltyThreshold:   6,
+		BehaviourPenaltyDecay:       s.scoreDecay(10 * s.oneEpochDuration()), // 10 epochs
+		DecayInterval:               s.oneSlotDuration(),
+		DecayToZero:                 decayToZero,
+		RetainScore:                 100 * s.oneEpochDuration(), // Retain for 100 epochs
+	}
 	pubsubQueueSize := 600
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
 		pubsub.WithMessageIdFn(s.msgId),
 		pubsub.WithNoAuthor(),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
-		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSize)),
+		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSizeBellatrix)),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
+		pubsub.WithPeerScore(scoreParams, thresholds),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
 	}
 	return psOpts
@@ -260,6 +299,7 @@ func New(
 	s.host = host
 	s.peers = peers.New(s.host)
 
+	pubsub.TimeCacheDuration = 550 * gossipSubHeartbeatInterval
 	s.pubsub, err = pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
 	if err != nil {
 		return nil, fmt.Errorf("[Sentinel] failed to subscribe to gossip err=%w", err)
@@ -296,23 +336,23 @@ func (s *Sentinel) Start() error {
 	return nil
 }
 
+func (s *Sentinel) Stop() {
+	s.listenForPeersDoneCh <- struct{}{}
+	s.listener.Close()
+	s.subManager.Close()
+	s.host.Close()
+}
+
 func (s *Sentinel) String() string {
 	return s.listener.Self().String()
 }
 
 func (s *Sentinel) HasTooManyPeers() bool {
-	nPeers, _ := s.GetPeersCount()
-	return nPeers >= peers.DefaultMaxPeers
+	return s.GetPeersCount() >= peers.DefaultMaxPeers
 }
 
-func (s *Sentinel) GetPeersCount() (int, int) {
-	sub := s.subManager.GetMatchingSubscription(string(BeaconBlockTopic))
-
-	if sub == nil {
-		return len(s.host.Network().Peers()), 0
-	}
-
-	return len(s.host.Network().Peers()), len(sub.topic.ListPeers())
+func (s *Sentinel) GetPeersCount() int {
+	return len(s.host.Network().Peers())
 }
 
 func (s *Sentinel) Host() host.Host {
@@ -325,4 +365,25 @@ func (s *Sentinel) Peers() *peers.Peers {
 
 func (s *Sentinel) GossipManager() *GossipManager {
 	return s.subManager
+}
+
+func (s *Sentinel) Config() *SentinelConfig {
+	return s.cfg
+}
+
+func (s *Sentinel) DB() kv.RoDB {
+	return s.db
+}
+
+func (s *Sentinel) Status() *cltypes.Status {
+	return s.handshaker.Status()
+}
+
+func (s *Sentinel) PeersList() []peer.AddrInfo {
+	pids := s.host.Network().Peers()
+	infos := []peer.AddrInfo{}
+	for _, pid := range pids {
+		infos = append(infos, s.host.Network().Peerstore().PeerInfo(pid))
+	}
+	return infos
 }

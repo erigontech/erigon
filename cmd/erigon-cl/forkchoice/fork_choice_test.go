@@ -51,7 +51,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	// first steps
 	store.OnTick(0)
 	store.OnTick(12)
-	require.NoError(t, store.OnBlock(block0x3a, true))
+	require.NoError(t, store.OnBlock(block0x3a, false, true))
 	// Check if we get correct status (1)
 	require.Equal(t, store.Time(), uint64(12))
 	require.Equal(t, store.ProposerBoostRoot(), libcommon.HexToHash("0xc9bd7bcb6dfa49dc4e5a67ca75e89062c36b5c300bc25a1b31db4e1a89306071"))
@@ -63,7 +63,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.Equal(t, headSlot, uint64(1))
 	// process another tick and another block
 	store.OnTick(36)
-	require.NoError(t, store.OnBlock(block0xc2, true))
+	require.NoError(t, store.OnBlock(block0xc2, false, true))
 	// Check if we get correct status (2)
 	require.Equal(t, store.Time(), uint64(36))
 	require.Equal(t, store.ProposerBoostRoot(), libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
@@ -74,7 +74,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.Equal(t, headSlot, uint64(3))
 	require.Equal(t, headRoot, libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
 	// last block
-	require.NoError(t, store.OnBlock(block0xd4, true))
+	require.NoError(t, store.OnBlock(block0xd4, false, true))
 	require.Equal(t, store.Time(), uint64(36))
 	require.Equal(t, store.ProposerBoostRoot(), libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
 	require.Equal(t, store.JustifiedCheckpoint(), expectedCheckpoint)
