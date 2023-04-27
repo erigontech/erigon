@@ -11,8 +11,7 @@ jobs:
   release-branch:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
@@ -40,6 +39,6 @@ jobs:
         #          docker image push --all-tags ghcr.io/ledgerwatch/erigon
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${GITHUB_REF##*/}
+#          VERSION: ${GITHUB_REF##*/}
           DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
           DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
