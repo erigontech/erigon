@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  goreleaser:
+  release-tags:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
