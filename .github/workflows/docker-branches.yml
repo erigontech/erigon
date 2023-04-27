@@ -34,8 +34,8 @@ jobs:
           make release-branch
           docker images
 
-#          docker image push --all-tags thorax/erigon
-#          docker image push --all-tags ghcr.io/ledgerwatch/erigon
+        #          docker image push --all-tags thorax/erigon
+        #          docker image push --all-tags ghcr.io/ledgerwatch/erigon
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${GITHUB_REF##*/}
