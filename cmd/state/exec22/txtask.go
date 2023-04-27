@@ -237,8 +237,9 @@ type ResultsQueue struct {
 	closed bool
 
 	resultCh chan *TxTask
-	ticker   *time.Ticker
 	iter     *ResultsQueueIter
+	//tick
+	ticker *time.Ticker
 
 	sync.Mutex
 	results *TxTaskQueue
@@ -322,10 +323,7 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 		// Corner case: workers processed all new tasks (no more q.resultCh events) when we are inside Drain() func
 		// it means - naive-wait for new q.resultCh events will not work here (will cause dead-lock)
 		//
-		// Drain everything but don't block
-		// if after drain - queue.Len() > 0 - then don't block
-		// otherwise wait for new result
-
+		// "Drain everything but don't block" - solves the prbolem, but shows poor performance
 		if q.Len() > 0 {
 			return nil
 		}
