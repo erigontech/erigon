@@ -64,7 +64,7 @@ func StartNode(wg *sync.WaitGroup, args []string) {
 		os.Exit(1)
 	}()
 
-	app := erigonapp.MakeApp(runNode, erigoncli.DefaultFlags)
+	app := erigonapp.MakeApp("devnet", runNode, erigoncli.DefaultFlags)
 	nodeNumber++ // increment the number of nodes on the network
 	if err := app.Run(args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
