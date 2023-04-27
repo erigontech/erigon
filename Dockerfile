@@ -71,7 +71,6 @@ COPY --from=builder /app/build/bin/erigon-cl /usr/local/bin/erigon-cl
 COPY --from=builder /app/build/bin/evm /usr/local/bin/evm
 COPY --from=builder /app/build/bin/hack /usr/local/bin/hack
 COPY --from=builder /app/build/bin/integration /usr/local/bin/integration
-COPY --from=builder /app/build/bin/lightclient /usr/local/bin/lightclient
 COPY --from=builder /app/build/bin/observer /usr/local/bin/observer
 COPY --from=builder /app/build/bin/pics /usr/local/bin/pics
 COPY --from=builder /app/build/bin/rpcdaemon /usr/local/bin/rpcdaemon
