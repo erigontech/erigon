@@ -55,9 +55,6 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 		&supportCommand,
 		//&backupCommand,
 	}
-	app.CommandNotFound = func(c *cli.Context, command string) {
-
-	}
 	return app
 }
 
