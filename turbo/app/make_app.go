@@ -36,7 +36,7 @@ func MakeApp(action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 		&importCommand,
 		&snapshotCommand,
 		&supportCommand,
-		&backupCommand,
+		//&backupCommand,
 	}
 	return app
 }
