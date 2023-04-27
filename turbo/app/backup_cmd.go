@@ -18,6 +18,7 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+// nolint
 var backupCommand = cli.Command{
 	Name: "backup",
 	Description: `Backup all databases of Erigon. 
