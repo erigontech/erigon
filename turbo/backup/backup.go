@@ -74,8 +74,6 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readA
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	var total uint64
-
 	tablesMap := src.AllTables()
 	if len(tables) > 0 {
 		tablesMapCopy := maps.Clone(tablesMap)
@@ -85,83 +83,90 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readA
 		}
 	}
 
+	for name, b := range tablesMap {
+		if b.IsDeprecated {
+			continue
+		}
+		if err := backupTable(ctx, src, srcTx, dst, name, readAheadThreads, logEvery); err != nil {
+			return err
+		}
+	}
+	srcTx.Rollback()
+	log.Info("done")
+	return nil
+}
+
+func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, table string, readAheadThreads int, logEvery *time.Ticker) error {
+	var total uint64
 	wg := sync.WaitGroup{}
 	defer wg.Wait()
 	warmupCtx, warmupCancel := context.WithCancel(ctx)
 	defer warmupCancel()
 
-	for name, b := range tablesMap {
-		if b.IsDeprecated {
-			continue
-		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			WarmupTable(warmupCtx, src, name, log.LvlTrace, readAheadThreads)
-		}()
-		srcC, err := srcTx.Cursor(name)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		WarmupTable(warmupCtx, src, table, log.LvlTrace, readAheadThreads)
+	}()
+	srcC, err := srcTx.Cursor(table)
+	if err != nil {
+		return err
+	}
+	total, _ = srcC.Count()
+
+	dstTx, err1 := dst.BeginRw(ctx)
+	if err1 != nil {
+		return err1
+	}
+	defer dstTx.Rollback()
+	_ = dstTx.ClearBucket(table)
+
+	c, err := dstTx.RwCursor(table)
+	if err != nil {
+		return err
+	}
+	casted, isDupsort := c.(kv.RwCursorDupSort)
+	i := uint64(0)
+
+	for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 		if err != nil {
 			return err
 		}
-		total, _ = srcC.Count()
 
-		dstTx, err1 := dst.BeginRw(ctx)
-		if err1 != nil {
-			return err1
-		}
-		defer dstTx.Rollback()
-		_ = dstTx.ClearBucket(name)
-
-		c, err := dstTx.RwCursor(name)
-		if err != nil {
-			return err
-		}
-		casted, isDupsort := c.(kv.RwCursorDupSort)
-		i := uint64(0)
-
-		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
-			if err != nil {
-				return err
+		if isDupsort {
+			if err = casted.AppendDup(k, v); err != nil {
+				panic(err)
 			}
-
-			if isDupsort {
-				if err = casted.AppendDup(k, v); err != nil {
-					panic(err)
-				}
-			} else {
-				if err = c.Append(k, v); err != nil {
-					panic(err)
-				}
-			}
-
-			i++
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				var m runtime.MemStats
-				dbg.ReadMemStats(&m)
-				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", hex.EncodeToString(k),
-					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
-			default:
+		} else {
+			if err = c.Append(k, v); err != nil {
+				panic(err)
 			}
 		}
 
-		// migrate bucket sequences to native mdbx implementation
-		//currentID, err := srcTx.Sequence(name, 0)
-		//if err != nil {
-		//	return err
-		//}
-		//_, err = dstTx.Sequence(name, currentID)
-		//if err != nil {
-		//	return err
-		//}
-		if err2 := dstTx.Commit(); err2 != nil {
-			return err2
+		i++
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			log.Info("Progress", "table", table, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", hex.EncodeToString(k),
+				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+		default:
 		}
 	}
-	srcTx.Rollback()
-	log.Info("done")
+	// migrate bucket sequences to native mdbx implementation
+	//currentID, err := srcTx.Sequence(name, 0)
+	//if err != nil {
+	//	return err
+	//}
+	//_, err = dstTx.Sequence(name, currentID)
+	//if err != nil {
+	//	return err
+	//}
+	if err2 := dstTx.Commit(); err2 != nil {
+		return err2
+	}
 	return nil
 }
 
