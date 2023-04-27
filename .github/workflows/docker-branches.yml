@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - devel
+      - 'docker_*'
   workflow_dispatch:
 
 jobs:
@@ -30,9 +31,11 @@ jobs:
       - uses: docker/setup-qemu-action@v2
 
       - run: |
-          make release-dry-run 
-        #          docker image push --all-tags thorax/erigon
-        #          docker image push --all-tags ghcr.io/ledgerwatch/erigon
+          make release-branch
+          docker images
+
+#          docker image push --all-tags thorax/erigon
+#          docker image push --all-tags ghcr.io/ledgerwatch/erigon
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${GITHUB_REF##*/}
