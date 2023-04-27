@@ -158,7 +158,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	if !ok {
-		// stream.WriteNil()
+		stream.WriteNil()
 		return nil
 	}
 	// Private API returns 0 if transaction is not found.
@@ -169,7 +169,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			return err
 		}
 		if blockNumPtr == nil {
-			// stream.WriteNil()
+			stream.WriteNil()
 			return nil
 		}
 		blockNum = *blockNumPtr
@@ -180,7 +180,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	if block == nil {
-		// stream.WriteNil()
+		stream.WriteNil()
 		return nil
 	}
 	var txnIndex uint64
@@ -201,7 +201,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		}
 
 		if borTx != nil {
-			// stream.WriteNil()
+			stream.WriteNil()
 			return nil
 		}
 		// stream.WriteNil()
