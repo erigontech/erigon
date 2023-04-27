@@ -91,7 +91,6 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readA
 			return err
 		}
 	}
-	srcTx.Rollback()
 	log.Info("done")
 	return nil
 }
