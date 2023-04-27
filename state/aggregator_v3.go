@@ -35,6 +35,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -46,7 +48,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-	btree2 "github.com/tidwall/btree"
 )
 
 type AggregatorV3 struct {

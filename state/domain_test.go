@@ -17,10 +17,13 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"strings"
 	"testing"
@@ -30,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -876,3 +880,50 @@ func TestCollationBuildInMem(t *testing.T) {
 	}
 }
 
+func TestDomainContext_IteratePrefix(t *testing.T) {
+	_, db, d := testDbAndDomain(t)
+	defer db.Close()
+	defer d.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.SetTx(tx)
+
+	d.largeValues = true
+	d.StartWrites()
+	defer d.FinishWrites()
+
+	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	key := make([]byte, 20)
+	value := make([]byte, 32)
+	copy(key[:], []byte{0xff, 0xff})
+
+	dctx := d.MakeContext()
+	defer dctx.Close()
+
+	values := make(map[string][]byte)
+	for i := 0; i < 3000; i++ {
+		rnd.Read(key[2:])
+		rnd.Read(value)
+
+		values[hex.EncodeToString(key)] = common.Copy(value)
+
+		err := d.PutWithPrev(key, nil, value, nil)
+		require.NoError(t, err)
+	}
+
+	counter := 0
+	err = dctx.IteratePrefix(key[:2], func(kx, vx []byte) {
+		if !bytes.HasPrefix(kx, key[:2]) {
+			return
+		}
+		counter++
+		v, ok := values[hex.EncodeToString(kx)]
+		require.True(t, ok)
+		require.Equal(t, v, vx)
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, len(values), counter)
+}

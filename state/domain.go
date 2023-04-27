@@ -499,7 +499,7 @@ type domainWAL struct {
 	values      *etl.Collector
 	topLock     sync.RWMutex
 	topVals     map[string][]byte
-	key         []byte
+	aux         []byte
 	tmpdir      string
 	buffered    bool
 	discard     bool
@@ -511,10 +511,11 @@ func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 		tmpdir:      tmpdir,
 		buffered:    buffered,
 		discard:     discard,
-		key:         make([]byte, 0, 128),
+		aux:         make([]byte, 0, 128),
 		topVals:     make(map[string][]byte),
 		largeValues: d.largeValues,
 	}
+
 	if buffered {
 		w.values = etl.NewCollector(d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM))
 		w.values.LogLvl(log.LvlTrace)
@@ -562,7 +563,10 @@ func (h *domainWAL) topValue(key []byte) ([]byte, bool) {
 	h.topLock.RLock()
 	v, ok := h.topVals[hex.EncodeToString(key)]
 	h.topLock.RUnlock()
-	return v, ok
+	if ok {
+		return v, ok
+	}
+	return nil, false
 }
 
 func (h *domainWAL) addValue(key1, key2, value []byte) error {
@@ -571,7 +575,7 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 	}
 
 	kl := len(key1) + len(key2)
-	fullkey := h.key[:kl+8]
+	fullkey := h.aux[:kl+8]
 	copy(fullkey, key1)
 	copy(fullkey[len(key1):], key2)
 
@@ -1589,12 +1593,11 @@ func (dc *DomainContext) Close() {
 	dc.hc.Close()
 }
 
-func (h *domainWAL) apply(fn func(k, v []byte) error) error {
+func (h *domainWAL) apply(fn func(k, v []byte)) error {
 	h.topLock.RLock()
 	for k, v := range h.topVals {
-		if err := fn([]byte(k), v); err != nil {
-			return err
-		}
+		kx, _ := hex.DecodeString(k)
+		fn(kx, v)
 	}
 	h.topLock.RUnlock()
 	return nil
@@ -1608,13 +1611,7 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 	dc.d.stats.FilesQueries.Add(1)
 
 	if dc.d.wal != nil {
-		fn := func(k, v []byte) error {
-			if bytes.HasPrefix(k, prefix) {
-				it(k, v)
-			}
-			return nil
-		}
-		if err := dc.d.wal.apply(fn); err != nil {
+		if err := dc.d.wal.apply(it); err != nil {
 			return err
 		}
 	}

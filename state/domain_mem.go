@@ -17,6 +17,13 @@ type KVList struct {
 	Vals  [][]byte
 }
 
+func NewKVList() *KVList {
+	return &KVList{
+		TxNum: make([]uint64, 0, 16),
+		Vals:  make([][]byte, 0, 16),
+	}
+}
+
 func (l *KVList) Latest() (tx uint64, v []byte) {
 	sz := len(l.TxNum)
 	if sz == 0 {
@@ -32,7 +39,7 @@ func (l *KVList) Latest() (tx uint64, v []byte) {
 func (l *KVList) Put(tx uint64, v []byte) (prevTx uint64, prevV []byte) {
 	prevTx, prevV = l.Latest()
 	l.TxNum = append(l.TxNum, tx)
-	l.Vals = append(l.Vals, v)
+	l.Vals = append(l.Vals, common.Copy(v))
 	return
 }
 
@@ -193,7 +200,6 @@ func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, prevCode []byte) e
 	if len(code) == 0 {
 		return sd.Code.DeleteWithPrev(addr, nil, prevCode)
 	}
-
 	return sd.Code.PutWithPrev(addr, nil, code, prevCode)
 }
 
@@ -214,10 +220,19 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	}
 
 	var err error
+	type pair struct{ k, v []byte }
+	tombs := make([]pair, 0, 8)
 	err = sd.aggCtx.storage.IteratePrefix(addr, func(k, v []byte) {
-		sd.Commitment.TouchPlainKey(k, nil, sd.Commitment.TouchStorage)
-		err = sd.Storage.DeleteWithPrev(k, nil, v)
+		if !bytes.HasPrefix(k, addr) {
+			return
+		}
+		tombs = append(tombs, pair{k, v})
 	})
+
+	for _, tomb := range tombs {
+		sd.Commitment.TouchPlainKey(tomb.k, nil, sd.Commitment.TouchStorage)
+		err = sd.Storage.DeleteWithPrev(tomb.k, nil, tomb.v)
+	}
 	return err
 }
 
