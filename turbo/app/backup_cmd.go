@@ -22,6 +22,7 @@ import (
 var backupCommand = cli.Command{
 	Name: "backup",
 	Description: `Backup all databases of Erigon. 
+Can do backup without stopping Erigon.
 Limitations: 
 - no support of Consensus DB (copy it manually if you need). Possible to implement in future.
 - no support of datadir/snapshots folder. Possible to implement in future. Can copy it manually or rsync or symlink/mount.
@@ -38,6 +39,7 @@ Example: erigon backup --datadir=<your_datadir> --to.datadir=<backup_datadir>
 		&BackupToPageSizeFlag,
 		&BackupLabelsFlag,
 		&BackupTablesFlag,
+		&WarmupThreadsFlag,
 	}, debug.Flags, logging.Flags),
 }
 
@@ -58,6 +60,14 @@ var (
 	BackupToPageSizeFlag = cli.StringFlag{
 		Name:  "to.pagesize",
 		Usage: utils.DbPageSizeFlag.Usage,
+	}
+	WarmupThreadsFlag = cli.Uint64Flag{
+		Name: "warmup.threads",
+		Usage: `Erigon's db works as blocking-io: means it stops when read from disk. 
+It means backup speed depends on 'disk latency' (not throughput). 
+Can spawn many threads which will read-ahead the data and bring it to OS's PageCache. 
+CloudDrives (and ssd) have bad-latency and good-parallel-throughput - then having >1k of warmup threads will help.`,
+		Value: uint64(backup.ReadAheadThreads),
 	}
 )
 

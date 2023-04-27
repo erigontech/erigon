@@ -85,11 +85,20 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readA
 		}
 	}
 
+	wg := sync.WaitGroup{}
+	defer wg.Wait()
+	warmupCtx, warmupCancel := context.WithCancel(ctx)
+	defer warmupCancel()
+
 	for name, b := range tablesMap {
 		if b.IsDeprecated {
 			continue
 		}
-		go WarmupTable(ctx, src, name, log.LvlTrace, readAheadThreads)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			WarmupTable(warmupCtx, src, name, log.LvlTrace, readAheadThreads)
+		}()
 		srcC, err := srcTx.Cursor(name)
 		if err != nil {
 			return err
