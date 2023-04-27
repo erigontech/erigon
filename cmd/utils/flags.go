@@ -1156,7 +1156,7 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 		panic(err)
 	}
 	szLimit := cfg.MdbxDBSizeLimit.Bytes()
-	if szLimit%szLimit != 0 || szLimit < 256 {
+	if szLimit%256 != 0 || szLimit < 256 {
 		panic(fmt.Errorf("invalid --db.size.limit: %s=%d, see: %s", ctx.String(DbSizeLimitFlag.Name), szLimit, DbSizeLimitFlag.Usage))
 	}
 }
