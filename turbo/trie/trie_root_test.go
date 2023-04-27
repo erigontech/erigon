@@ -148,10 +148,10 @@ func rebuildFlatDBTrieHash(t *testing.T, rl *trie.RetainList, db kv.RoDB) libcom
 }
 
 // proveFlatDB will generate an account proof result utilizing the FlatDBTrie
-// hashing mechanism.  The proofKeys not span more than one account (ie, an
+// hashing mechanism.  The proofKeys cannot span more than one account (ie, an
 // account and its storage nodes is acceptable).  It returns the root hash for
 // the computation as well as the proof result.
-func proveFlatDB(t *testing.T, db kv.RoDB, retainKeys, proofKeys [][]byte) (libcommon.Hash, *accounts.AccProofResult) {
+func proveFlatDB(t *testing.T, db kv.RoDB, accountMissing bool, retainKeys, proofKeys [][]byte) (libcommon.Hash, *accounts.AccProofResult) {
 	t.Helper()
 	startTime := time.Now()
 	rl := trie.NewRetainList(0)
@@ -159,7 +159,12 @@ func proveFlatDB(t *testing.T, db kv.RoDB, retainKeys, proofKeys [][]byte) (libc
 		rl.AddKeyWithMarker(retainKey, true)
 	}
 	loader := trie.NewFlatDBTrieLoader("test", rl, nil, nil, false)
-	pr := trie.NewManualProofRetainer(t, rl, proofKeys)
+	acc := &accounts.Account{}
+	if !accountMissing {
+		acc.Incarnation = 1
+		acc.Initialised = true
+	}
+	pr := trie.NewManualProofRetainer(t, acc, rl, proofKeys)
 	loader.SetProofRetainer(pr)
 	tx, err := db.BeginRo(context.Background())
 	defer tx.Rollback()
@@ -229,6 +234,13 @@ var (
 	storageAccountCodeHash = libcommon.Hash{9}
 	storageInitialValue    = libcommon.Hash{2}
 	storageModifiedValue   = libcommon.Hash{3}
+
+	// missingHash is a constant value that is impossible for the fuzzers to
+	// generate (since the last 26 bytes of all fuzzing keys must be 0).  The
+	// tests know that when this value is encountered the expected result should
+	// be 'missing', ie in the storage proof the value should be 0, and in the
+	// account proof the nonce/codeHash/storageHash/balance should be empty.
+	missingHash = libcommon.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 )
 
 // naiveTriesAndHashFromDB constructs the naive trie implementation by simply adding
@@ -477,7 +489,8 @@ func FuzzTrieRootAccountProofs(f *testing.F) {
 
 		naiveTrie, _, naiveHash := naiveTriesAndHashFromDB(t, db)
 
-		allKeys := make([]libcommon.Hash, 0, initialCount+modifiedCount)
+		allKeys := make([]libcommon.Hash, 1, initialCount+modifiedCount+1)
+		allKeys[0] = missingHash
 		wasModified := map[libcommon.Hash]struct{}{}
 		for _, hash := range modifiedKeys {
 			allKeys = append(allKeys, hash)
@@ -499,31 +512,38 @@ func FuzzTrieRootAccountProofs(f *testing.F) {
 			for i, part := range naiveProofBytes {
 				naiveAccountProof[i] = hexutility.Bytes(part)
 			}
-			nonce := uint64(1)
-			if _, ok := wasModified[hash]; ok {
-				nonce++
+			var nonce uint64
+			var codeHash, storageHash libcommon.Hash
+			if hash != missingHash {
+				nonce = uint64(1)
+				if _, ok := wasModified[hash]; ok {
+					nonce++
+				}
+				storageHash = trie.EmptyRoot
+				codeHash = trie.EmptyCodeHash
 			}
 			naiveProof := &accounts.AccProofResult{
 				Nonce:        hexutil.Uint64(nonce),
 				AccountProof: naiveAccountProof,
-				StorageHash:  trie.EmptyRoot,
+				StorageHash:  storageHash,
 				Balance:      (*hexutil.Big)(new(uint256.Int).ToBig()),
 				StorageProof: []accounts.StorProofResult{},
-				CodeHash:     trie.EmptyCodeHash,
+				CodeHash:     codeHash,
 			}
 			err = trie.VerifyAccountProofByHash(naiveHash, hash, naiveProof)
 			require.NoError(t, err, "Invalid naive proof")
 
 			// Now do the same but with the 'real' flat implementation and verify
 			// that the result matches byte for byte.
-			flatHash, flatProof := proveFlatDB(t, db, retainKeys, [][]byte{hash[:]})
+			flatHash, flatProof := proveFlatDB(t, db, hash == missingHash, retainKeys, [][]byte{hash[:]})
 			require.Equal(t, naiveHash, flatHash)
+			require.Equal(t, len(naiveProof.AccountProof), len(flatProof.AccountProof))
 			for i, proof := range naiveProof.AccountProof {
 				require.Equal(t, proof, flatProof.AccountProof[i], "mismatch at index %d", i)
 			}
 			flatProof.Nonce = hexutil.Uint64(nonce)
-			flatProof.CodeHash = trie.EmptyCodeHash
-			require.Equal(t, flatProof, naiveProof)
+			flatProof.CodeHash = codeHash
+			require.Equal(t, flatProof, naiveProof, "for key %s", hash)
 		}
 	})
 }
@@ -549,7 +569,8 @@ func FuzzTrieRootStorageProofs(f *testing.F) {
 
 		naiveTrie, naiveStorageTrie, naiveHash := naiveTriesAndHashFromDB(t, db)
 
-		allKeys := make([][]byte, 0, initialCount+modifiedCount)
+		allKeys := make([][]byte, 1, initialCount+modifiedCount+1)
+		allKeys[0] = dbutils.GenerateCompositeStorageKey(storageAccountHash, 1, missingHash)
 		wasModified := map[string]struct{}{}
 		for _, key := range retainKeys {
 			allKeys = append(allKeys, key)
@@ -562,7 +583,12 @@ func FuzzTrieRootStorageProofs(f *testing.F) {
 			allKeys = append(allKeys, key)
 		}
 
-		for _, storageKey := range allKeys {
+		// omniProof constructs a proof for the account and all of the keys to be
+		// tested.  We later check that this composite proof matches the individual
+		// proofs on an element basis.
+		_, omniProof := proveFlatDB(t, db, false, retainKeys, allKeys)
+
+		for i, storageKey := range allKeys {
 			t.Logf("Processing storage key %x", storageKey)
 			// First compute the naive proof and verify that the proof is correct.
 			naiveAccountProofBytes, err := naiveTrie.Prove(storageAccountHash[:], 0, false)
@@ -579,11 +605,13 @@ func FuzzTrieRootStorageProofs(f *testing.F) {
 			}
 			var storageKeyHash libcommon.Hash
 			copy(storageKeyHash[:], storageKey[40:])
-			var storageValue *big.Int
-			if _, ok := wasModified[string(storageKey)]; !ok {
-				storageValue = new(big.Int).SetBytes(storageInitialValue[:])
-			} else {
-				storageValue = new(big.Int).SetBytes(storageModifiedValue[:])
+			var storageValue big.Int
+			if storageKeyHash != missingHash {
+				if _, ok := wasModified[string(storageKey)]; !ok {
+					storageValue.SetBytes(storageInitialValue[:])
+				} else {
+					storageValue.SetBytes(storageModifiedValue[:])
+				}
 			}
 			naiveProof := &accounts.AccProofResult{
 				Nonce:        1,
@@ -592,7 +620,8 @@ func FuzzTrieRootStorageProofs(f *testing.F) {
 				Balance:      (*hexutil.Big)(new(uint256.Int).ToBig()),
 				StorageProof: []accounts.StorProofResult{
 					{
-						Value: (*hexutil.Big)(storageValue),
+						Key:   trie.FakePreimage(storageKeyHash),
+						Value: (*hexutil.Big)(&storageValue),
 						Proof: naiveStorageProof,
 					},
 				},
@@ -605,14 +634,16 @@ func FuzzTrieRootStorageProofs(f *testing.F) {
 
 			// Now do the same but with the 'real' flat implementation and verify
 			// that the result matches byte for byte.
-			flatHash, flatProof := proveFlatDB(t, db, retainKeys, [][]byte{storageAccountHash[:], storageKey})
+			flatHash, flatProof := proveFlatDB(t, db, false, retainKeys, [][]byte{storageAccountHash[:], storageKey})
 			require.Equal(t, naiveHash, flatHash)
 			for i, proof := range naiveProof.AccountProof {
 				require.Equal(t, proof, flatProof.AccountProof[i], "mismatch at index %d", i)
 			}
 			flatProof.Nonce = 1
 			flatProof.CodeHash = storageAccountCodeHash
-			require.Equal(t, flatProof, naiveProof)
+			require.Equal(t, flatProof, naiveProof, "failed for hash %s", storageKeyHash)
+
+			require.Equal(t, flatProof.StorageProof[0], omniProof.StorageProof[i])
 		}
 	})
 }
