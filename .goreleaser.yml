@@ -8,7 +8,7 @@ release:
   name_template: "{{.Tag}}"
 
 snapshot:
-  name_template: "{{.Branch}}"
+  name_template: "{{.Version}}-devel"
 
 builds:
   - id: darwin-amd64
@@ -104,7 +104,7 @@ docker_manifests:
       - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-amd64
       - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-arm64
 
-  - name_template: thorax/{{ .ProjectName }}:latest
+  - name_template: thorax/{{ .ProjectName }}:{{ if .IsSnapshot }}devel{{ else }}latest{{ end }}
     skip_push: true
     image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
