@@ -763,24 +763,30 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 //
 // Cancun fork:
 // - Reset transient storage(1153)
-func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender libcommon.Address, dst *libcommon.Address, precompiles []libcommon.Address, list types2.AccessList) {
+func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
+	precompiles []libcommon.Address, list types2.AccessList,
+) {
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
-		sdb.accessList = newAccessList()
+		al := newAccessList()
+		sdb.accessList = al
 
-		sdb.AddAddressToAccessList(sender)
+		al.AddAddress(sender)
 		if dst != nil {
-			sdb.AddAddressToAccessList(*dst)
+			al.AddAddress(*dst)
 			// If it's a create-tx, the destination will be added inside evm.create
 		}
 		for _, addr := range precompiles {
-			sdb.AddAddressToAccessList(addr)
+			al.AddAddress(addr)
 		}
 		for _, el := range list {
-			sdb.AddAddressToAccessList(el.Address)
+			al.AddAddress(el.Address)
 			for _, key := range el.StorageKeys {
-				sdb.AddSlotToAccessList(el.Address, key)
+				al.AddSlot(el.Address, key)
 			}
+		}
+		if rules.IsShanghai { // EIP-3651: warm coinbase
+			al.AddAddress(coinbase)
 		}
 	}
 	// Reset transient storage at the beginning of transaction execution

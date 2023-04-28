@@ -92,7 +92,9 @@ type IntraBlockState interface {
 	// is defined according to EIP161 (balance = nonce = code = 0).
 	Empty(libcommon.Address) bool
 
-	Prepare(rules *chain.Rules, sender libcommon.Address, dest *libcommon.Address, precompiles []libcommon.Address, txAccesses types2.AccessList)
+	Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dest *libcommon.Address,
+		precompiles []libcommon.Address, txAccesses types2.AccessList)
+
 	AddressInAccessList(addr libcommon.Address) bool
 	SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressOk bool, slotOk bool)
 	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform
