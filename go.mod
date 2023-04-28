@@ -13,7 +13,7 @@ require (
 
 require (
 	github.com/99designs/gqlgen v0.17.30
-	github.com/Giulio2002/bls v0.0.0-20230217173148-c87a29266b6c
+	github.com/Giulio2002/bls v0.0.0-20230428210858-67fd06bbe237
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/fastcache v1.12.1
 	github.com/VictoriaMetrics/metrics v1.23.1
