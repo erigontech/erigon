@@ -25,11 +25,13 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
@@ -50,6 +52,14 @@ type twoOperandParams struct {
 
 var commonParams []*twoOperandParams
 var twoOpMethods map[string]executionFunc
+
+type contractRef struct {
+	addr libcommon.Address
+}
+
+func (c contractRef) Address() libcommon.Address {
+	return c.addr
+}
 
 func init() {
 
@@ -563,11 +573,16 @@ func BenchmarkOpMstore(bench *testing.B) {
 
 func TestOpTstore(t *testing.T) {
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
+		state          = state.New(nil)
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
 		evmInterpreter = NewEVMInterpreter(env, env.Config())
-		scopeContext   = ScopeContext{mem, stack, nil}
+		caller         = libcommon.Address{}
+		to             = libcommon.Address{1}
+		contractRef    = contractRef{caller}
+		contract       = NewContract(contractRef, AccountRef(to), u256.Num0, 0, false)
+		scopeContext   = ScopeContext{mem, stack, contract}
 		value          = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
 
