@@ -756,13 +756,16 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // This method must be invoked before state transition.
 //
 // Berlin fork:
-// - Add sender to access list (2929)
-// - Add destination to access list (2929)
-// - Add precompiles to access list (2929)
-// - Add the contents of the optional tx access list (2930)
+// - Add sender to access list (EIP-2929)
+// - Add destination to access list (EIP-2929)
+// - Add precompiles to access list (EIP-2929)
+// - Add the contents of the optional tx access list (EIP-2930)
+//
+// Shanghai fork:
+// - Add coinbase to access list (EIP-3651)
 //
 // Cancun fork:
-// - Reset transient storage(1153)
+// - Reset transient storage(EIP-1153)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
 	precompiles []libcommon.Address, list types2.AccessList,
 ) {
