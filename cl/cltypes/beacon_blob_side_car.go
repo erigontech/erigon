@@ -53,7 +53,7 @@ func (b *BlobSideCar) DecodeSSZ(buf []byte) error {
 	copy(b.BlockRoot[:], buf[pos:32])
 	pos += 32
 
-	b.Index = ssz.UnmarshalUint64SSZ(buf[pos:])
+	b.Index = ssz.UnmarshalUint64SSZ(buf[pos : pos+8])
 	pos += 8
 
 	b.Slot = Slot(ssz.UnmarshalUint64SSZ(buf[pos:]))
@@ -61,6 +61,9 @@ func (b *BlobSideCar) DecodeSSZ(buf []byte) error {
 
 	copy(b.BlockParentRoot[:], buf[pos:pos+32])
 	pos += 32
+
+	b.ProposerIndex = ssz.UnmarshalUint64SSZ(buf[pos : pos+8])
+	pos += 8
 
 	copy(b.Blob[:], buf[pos:pos+int(BYTES_PER_BLOB)])
 	pos += int(BYTES_PER_BLOB)
