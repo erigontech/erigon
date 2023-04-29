@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -111,7 +112,13 @@ func ExecV3(ctx context.Context,
 	parallel bool, logPrefix string,
 	maxBlockNum uint64,
 ) error {
-	batchSize, chainDb := cfg.batchSize, cfg.db
+	batchSize := cfg.batchSize
+	chainDb := cfg.db
+	//TODO: re-think - how it must work
+	if casted, ok := chainDb.(*temporal.DB); ok {
+		chainDb = casted.InternalDB()
+	}
+
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
@@ -316,6 +323,10 @@ func ExecV3(ctx context.Context,
 					return ctx.Err()
 
 				case <-logEvery.C:
+					if list := agg.SlowContextsList(); len(list) > 0 {
+						log.Info("[dbg] Active agg ctx", "list", list)
+					}
+
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
 					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
 					if agg.HasBackgroundFilesBuild() {
