@@ -435,7 +435,7 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	}
 	tx.Message.ChainID = Uint256View(*chainID)
 	if dec.To != nil {
-		address := AddressSSZ(libcommon.Address(*dec.To))
+		address := AddressSSZ(*dec.To)
 		tx.Message.To = AddressOptionalSSZ{Address: &address}
 	}
 	if dec.Nonce == nil {
