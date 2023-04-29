@@ -648,7 +648,7 @@ Loop:
 				return fmt.Errorf("StateV3.Apply: %w", err)
 			}
 			if !bytes.Equal(rh, header.Root.Bytes()) {
-				log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(header.Root.Bytes()), "bn", blockNum)
+				log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(header.Root.Bytes()), "bn", blockNum, "txn", inputTxNum)
 				return fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, header.Root.Bytes(), blockNum)
 			}
 
@@ -699,7 +699,8 @@ Loop:
 		}
 
 		if blockSnapshots.Cfg().Produce {
-			agg.BuildFilesInBackground(outputTxNum.Load())
+			//agg.BuildFilesInBackground(outputTxNum.Load())
+			agg.AggregateFilesInBackground()
 		}
 		select {
 		case <-ctx.Done():
@@ -734,7 +735,8 @@ Loop:
 	}
 
 	if blockSnapshots.Cfg().Produce {
-		agg.BuildFilesInBackground(outputTxNum.Load())
+		//agg.BuildFilesInBackground(outputTxNum.Load())
+		agg.AggregateFilesInBackground()
 	}
 
 	if !useExternalTx && applyTx != nil {
@@ -787,13 +789,13 @@ func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueueIter,
 		}
 
 		if txTask.Final {
-			rh, err := rs.ApplyState4(applyTx, txTask, agg)
+			rh, err := rs.ApplyState4(false, txTask, agg)
 			if err != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
 			}
 			if !bytes.Equal(rh, txTask.BlockRoot[:]) {
-				log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(txTask.BlockRoot[:]), "bn", txTask.BlockNum)
-				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, txTask.BlockRoot[:], txTask.BlockNum)
+				log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(txTask.BlockRoot[:]), "bn", txTask.BlockNum, "txn", txTask.TxNum)
+				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("block hash mismatch: %x != %x bn =%d, txn= %d", rh, txTask.BlockRoot[:], txTask.BlockNum, txTask.TxNum)
 			}
 		}
 

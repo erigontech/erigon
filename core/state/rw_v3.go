@@ -243,13 +243,6 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	rs.chIncs = map[string][]byte{}
 	rs.sizeEstimate = 0
 
-	//_, err := rs.sharedWriter.Commitment(true, false)
-	//if err != nil {
-	//	return err
-	//}
-	//if err := rs.shared.Flush(); err != nil {
-	//	return err
-	//}
 	return nil
 }
 
@@ -511,12 +504,10 @@ func (rs *StateV3) Commitment(txNum uint64, saveState bool) ([]byte, error) {
 	return rs.domains.Commit(saveState, false)
 }
 
-func (rs *StateV3) ApplyState4(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) ([]byte, error) {
+func (rs *StateV3) ApplyState4(savePatriciaState bool, txTask *exec22.TxTask, agg *libstate.AggregatorV3) ([]byte, error) {
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	rh, err := agg.ComputeCommitment(true, false)
-
-	//rh, err := rs.Commitment(txTask.TxNum, false)
+	rh, err := agg.ComputeCommitment(savePatriciaState, false)
 	if err != nil {
 		return nil, err
 	}
@@ -684,9 +675,11 @@ func (rs *StateV3) DoneCount() uint64 { return ExecTxsDone.Get() }
 
 func (rs *StateV3) SizeEstimate() (r uint64) {
 	rs.lock.RLock()
-	r = uint64(rs.sizeEstimate)
+	r = uint64(rs.sizeEstimate) * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
+	r += rs.domains.SizeEstimate()
 	rs.lock.RUnlock()
-	return r * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
+
+	return r
 }
 
 func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
@@ -754,7 +747,6 @@ func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.
 
 type StateWriterV3 struct {
 	rs           *StateV3
-	txNum        uint64
 	writeLists   map[string]*exec22.KvList
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
@@ -770,7 +762,7 @@ func NewStateWriterV3(rs *StateV3) *StateWriterV3 {
 }
 
 func (w *StateWriterV3) SetTxNum(txNum uint64) {
-	w.txNum = txNum
+	w.rs.domains.SetTxNum(txNum)
 }
 
 func (w *StateWriterV3) ResetWriteSet() {
