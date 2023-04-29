@@ -493,26 +493,13 @@ func (d *Domain) Delete(key1, key2 []byte) error {
 	return nil
 }
 
-type domainWAL struct {
-	d           *Domain
-	keys        *etl.Collector
-	values      *etl.Collector
-	topLock     sync.RWMutex
-	topVals     map[string][]byte
-	aux         []byte
-	tmpdir      string
-	buffered    bool
-	discard     bool
-	largeValues bool
-}
-
 func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 	w := &domainWAL{d: d,
 		tmpdir:      tmpdir,
 		buffered:    buffered,
 		discard:     discard,
 		aux:         make([]byte, 0, 128),
-		topVals:     make(map[string][]byte),
+		topVals:     make(map[string][]byte, 1<<14),
 		largeValues: d.largeValues,
 	}
 
@@ -525,16 +512,18 @@ func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 	return w
 }
 
-func (d *Domain) etlLoader() etl.LoadFunc {
-	return func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if value == nil {
-			// instead of tx.Delete just skip its insertion
-			return nil
-		}
-		//nk := common.Copy(k)
-		//binary.BigEndian.PutUint64(nk[:len(nk)-8], ^(binary.BigEndian.Uint64(k[len(k)-8:]) / d.aggregationStep))
-		return next(k, k, value)
-	}
+type domainWAL struct {
+	d           *Domain
+	keys        *etl.Collector
+	values      *etl.Collector
+	topLock     sync.RWMutex
+	topVals     map[string][]byte
+	topSize     atomic.Uint64
+	aux         []byte
+	tmpdir      string
+	buffered    bool
+	discard     bool
+	largeValues bool
 }
 
 func (h *domainWAL) close() {
@@ -590,6 +579,7 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 		h.topVals[hex.EncodeToString(fullkey[:kl])] = []byte{}
 	}
 	h.topLock.Unlock()
+	h.topSize.Add(uint64(len(value) + kl))
 
 	if h.largeValues {
 		if !h.buffered {
@@ -627,6 +617,20 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 	if err := h.values.Collect(fullkey, value); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (h *domainWAL) size() uint64 {
+	return h.topSize.Load()
+}
+
+func (h *domainWAL) apply(fn func(k, v []byte)) error {
+	h.topLock.RLock()
+	for k, v := range h.topVals {
+		kx, _ := hex.DecodeString(k)
+		fn(kx, v)
+	}
+	h.topLock.RUnlock()
 	return nil
 }
 
@@ -1156,7 +1160,8 @@ func (d *Domain) missedIdxFiles() (l []*filesItem) {
 }
 
 func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	return dc.BuildOptionalMissedIndices(ctx)
+	//return dc.d.BuildOptionalMissedIndices(ctx)
+	return nil
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
@@ -1458,6 +1463,18 @@ func (d *Domain) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) err
 	return d.History.warmup(ctx, txFrom, limit, tx)
 }
 
+func (d *Domain) Rotate() flusher {
+	hf := d.History.Rotate()
+
+	hf.d = d.wal
+	d.wal = d.newWriter(d.wal.tmpdir, d.wal.buffered, d.wal.discard)
+	for k, v := range hf.d.topVals {
+		d.wal.topVals[k] = common.Copy(v)
+	}
+	log.Warn("shallow copy WAL", "domain", d.filenameBase, "new", d.wal, "old", hf.d)
+	return hf
+}
+
 var COMPARE_INDEXES = false // if true, will compare values from Btree and INvertedIndex
 
 func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte, bool) {
@@ -1591,16 +1608,6 @@ func (dc *DomainContext) Close() {
 		}
 	}
 	dc.hc.Close()
-}
-
-func (h *domainWAL) apply(fn func(k, v []byte)) error {
-	h.topLock.RLock()
-	for k, v := range h.topVals {
-		kx, _ := hex.DecodeString(k)
-		fn(kx, v)
-	}
-	h.topLock.RUnlock()
-	return nil
 }
 
 // IteratePrefix iterates over key-value pairs of the domain that start with given prefix
@@ -1753,27 +1760,6 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 		return nil, false, err
 	}
 	return v, true, nil
-}
-
-func (d *Domain) Rotate() flusher {
-	hf := d.History.Rotate()
-
-	//d.topLockLockfullkey[kl:]
-	//for k, is := range d.topTx {
-	//	v, ok := d.topVals[k+is]
-	//	if !ok {
-	//		panic(fmt.Errorf("no value for key %x", k+is))
-	//	}
-	//	if err := d.wal.addValue([]byte(k), nil, v, []byte(is)); err != nil {
-	//		panic(err)
-	//	}
-	//	delete(d.topTx, k)
-	//	delete(d.topVals, k+is)
-	//}
-	//d.topLock.Unlock()
-	hf.d = d.wal
-	d.wal = d.newWriter(d.wal.tmpdir, d.wal.buffered, d.wal.discard)
-	return hf
 }
 
 func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {

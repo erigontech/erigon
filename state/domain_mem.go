@@ -101,6 +101,10 @@ func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 	return sd
 }
 
+func (sd *SharedDomains) SizeEstimate() uint64 {
+	return sd.Account.wal.size() + sd.Storage.wal.size() + sd.Code.wal.size() + sd.Commitment.wal.size()
+}
+
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, error) {
 	v, _, err := sd.aggCtx.CommitmentLatest(prefix, sd.roTx)
 	if err != nil {
@@ -312,23 +316,8 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 	return rootHash, nil
 }
 
-func (sd *SharedDomains) Flush() error {
-	//if err := sd.Account.Flush(); err != nil {
-	//	return err
-	//}
-	//if err := sd.Storage.Flush(); err != nil {
-	//	return err
-	//}
-	//if err := sd.Code.Flush(); err != nil {
-	//	return err
-	//}
-	//if err := sd.Commitment.Flush(); err != nil {
-	//	return err
-	//}
-	return nil
-}
-
 func (sd *SharedDomains) Close() {
+	sd.aggCtx.Close()
 	sd.Account.Close()
 	sd.Storage.Close()
 	sd.Code.Close()

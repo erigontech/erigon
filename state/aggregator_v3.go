@@ -1553,6 +1553,9 @@ func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
 func (a *AggregatorV3) KeepInDB(v uint64) { a.keepInDB = v }
 
 func (a *AggregatorV3) AggregateFilesInBackground() {
+	if a.domains != nil {
+		a.txNum.Store(a.domains.txNum.Load())
+	}
 	if (a.txNum.Load() + 1) <= a.minimaxTxNumInFiles.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
 		return
 	}
@@ -1579,7 +1582,12 @@ func (a *AggregatorV3) AggregateFilesInBackground() {
 		}
 		log.Warn("buildFilesInBackground", "err", err)
 	}
-	a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
+	if err := a.BuildMissedIndices(a.ctx, 1); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		log.Warn("BuildMissedIndices", "err", err)
+	}
 }
 
 func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) {
