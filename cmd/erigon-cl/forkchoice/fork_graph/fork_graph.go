@@ -21,7 +21,7 @@ const (
 	PreValidated   ChainSegmentInsertionResult = 5
 )
 
-const snapshotStateEverySlot = 128
+const snapshotStateEverySlot = 64
 
 /*
 * The state store process is related to graph theory in the sense that the Ethereum blockchain can be thought of as a directed graph,

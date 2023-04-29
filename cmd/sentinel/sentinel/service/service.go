@@ -109,7 +109,7 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 	defer s.mu.RUnlock()
 	retryReqInterval := time.NewTicker(200 * time.Millisecond)
 	defer retryReqInterval.Stop()
-	timeout := time.NewTimer(1 * time.Second)
+	timeout := time.NewTimer(2 * time.Second)
 	defer retryReqInterval.Stop()
 	doneCh := make(chan *sentinelrpc.ResponseData)
 	// Try finding the data to our peers
@@ -123,6 +123,10 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 			if err != nil {
 				// Wait a bit to not exhaust CPU and skip.
 				continue
+			}
+			pidText, err := pid.MarshalText()
+			if err != nil {
+				return nil, err
 			}
 			//log.Trace("[sentinel] Sent request", "pid", pid)
 			s.sentinel.Peers().PeerDoRequest(pid)
@@ -139,6 +143,9 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 				case doneCh <- &sentinelrpc.ResponseData{
 					Data:  data,
 					Error: isError,
+					Peer: &sentinelrpc.Peer{
+						Pid: string(pidText),
+					},
 				}:
 				default:
 				}
@@ -149,6 +156,9 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 			return &sentinelrpc.ResponseData{
 				Data:  []byte("sentinel timeout"),
 				Error: true,
+				Peer: &sentinelrpc.Peer{
+					Pid: "",
+				},
 			}, nil
 		}
 	}

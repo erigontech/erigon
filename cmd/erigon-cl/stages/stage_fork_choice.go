@@ -128,8 +128,8 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 		// Checks done, update all internals accordingly
 		return highestSlotProcessed, libcommon.Hash{}, nil
 	})
-	maxBlockBehindBeforeDownload := int64(5)
-	overtimeMargin := uint64(2) // how much time has passed before trying download the next block in seconds
+	maxBlockBehindBeforeDownload := int64(32)
+	overtimeMargin := uint64(6) // how much time has passed before trying download the next block in seconds
 MainLoop:
 	for {
 		targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
