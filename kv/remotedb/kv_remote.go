@@ -47,7 +47,6 @@ type remoteOpts struct {
 }
 
 var _ kv.TemporalTx = (*tx)(nil)
-var _ kv.TemporalRwDB = (*DB)(nil)
 
 type DB struct {
 	remoteKV     remote.KVClient
@@ -127,9 +126,9 @@ func NewRemote(v gointerfaces.Version, logger log.Logger, remoteKV remote.KVClie
 	return remoteOpts{bucketsCfg: mdbx.WithChaindataTables, version: v, log: logger, remoteKV: remoteKV}
 }
 
-func (db *DB) PageSize() uint64        { panic("not implemented") }
-func (db *DB) ReadOnly() bool          { return true }
-func (db *DB) AllBuckets() kv.TableCfg { return db.buckets }
+func (db *DB) PageSize() uint64       { panic("not implemented") }
+func (db *DB) ReadOnly() bool         { return true }
+func (db *DB) AllTables() kv.TableCfg { return db.buckets }
 
 func (db *DB) EnsureVersionCompatibility() bool {
 	versionReply, err := db.remoteKV.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))

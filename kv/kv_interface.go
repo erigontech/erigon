@@ -19,6 +19,7 @@ package kv
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -41,19 +42,29 @@ import (
 
 //Abstraction Layers:
 // LowLevel:
-//      1. DB/Tx - low-level key-value database
-//      2. Snapshots/Freeze - immutable files with historical data. May be downloaded at first App
-//              start or auto-generate by moving old data from DB to Snapshots.
+//    1. DB/Tx - low-level key-value database
+//    2. Snapshots/FreezenData - immutable files with historical data. May be downloaded at first App
+//         start or auto-generate by moving old data from DB to Snapshots.
+//         Most important difference between DB and Snapshots: creation of
+//         snapshot files (build/merge) doesn't mutate any existing files - only producing new one!
+//         It means we don't need concept of "RwTx" for Snapshots.
+//         Files can become useless/garbage (merged to bigger file) - last reader of this file will
+//         remove it from FileSystem on tx.Rollback().
+//         Invariant: existing readers can't see new files, new readers can't see garbage files
+//
 // MediumLevel:
-//      1. TemporalDB - abstracting DB+Snapshots. Target is:
-//              - provide 'time-travel' API for data: consistan snapshot of data as of given Timestamp.
-//              - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
-//              - using next entities:
-//                      - InvertedIndex: supports range-scans
-//                      - History: can return value of key K as of given TimeStamp. Doesn't know about latest/current
-//                          value of key K. Returns NIL if K not changed after TimeStamp.
-//                      - Domain: as History but also aware about latest/current value of key K. Can move
-//                          cold (updated long time ago) parts of state from db to snapshots.
+//    1. TemporalDB - abstracting DB+Snapshots. Target is:
+//         - provide 'time-travel' API for data: consistan snapshot of data as of given Timestamp.
+//         - auto-close iterators on Commit/Rollback
+//         - auto-open/close agg.MakeContext() on Begin/Commit/Rollback
+//         - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
+//         - And TemporalRoTx/TemporalRwTx actaully open Read-Only files view (MakeContext) - no concept of "Read-Write view of snapshot files".
+//         - using next entities:
+//               - InvertedIndex: supports range-scans
+//               - History: can return value of key K as of given TimeStamp. Doesn't know about latest/current
+//                   value of key K. Returns NIL if K not changed after TimeStamp.
+//               - Domain: as History but also aware about latest/current value of key K. Can move
+//                   cold (updated long time ago) parts of state from db to snapshots.
 
 // HighLevel:
 //      1. Application - rely on TemporalDB (Ex: ExecutionLayer) or just DB (Ex: TxPool, Sentry, Downloader).
@@ -158,6 +169,24 @@ func (l Label) String() string {
 		return "unknown"
 	}
 }
+func UnmarshalLabel(s string) Label {
+	switch s {
+	case "chaindata":
+		return ChainDB
+	case "txpool":
+		return TxPoolDB
+	case "sentry":
+		return SentryDB
+	case "consensus":
+		return ConsensusDB
+	case "downloader":
+		return DownloaderDB
+	case "inMem":
+		return InMem
+	default:
+		panic(fmt.Sprintf("unexpected label: %s", s))
+	}
+}
 
 type Has interface {
 	// Has indicates whether a key exists in the database.
@@ -219,7 +248,7 @@ type RoDB interface {
 	//	transaction and its cursors may not issue any other operations than
 	//	Commit and Rollback while it has active child transactions.
 	BeginRo(ctx context.Context) (Tx, error)
-	AllBuckets() TableCfg
+	AllTables() TableCfg
 	PageSize() uint64
 }
 
@@ -463,16 +492,13 @@ type RwCursorDupSort interface {
 }
 
 // ---- Temporal part
+
 type (
 	Domain      string
 	History     string
 	InvertedIdx string
 )
-type TemporalRoDB interface {
-	RoDB
-	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
-	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
-}
+
 type TemporalTx interface {
 	Tx
 	DomainGet(name Domain, k, k2 []byte) (v []byte, ok bool, err error)
@@ -489,9 +515,4 @@ type TemporalTx interface {
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error)
 	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
 	DomainRange(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error)
-}
-
-type TemporalRwDB interface {
-	RwDB
-	TemporalRoDB
 }
