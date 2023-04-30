@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build integration
-
 package state
 
 import (
@@ -162,7 +160,7 @@ func newTestAction(addr libcommon.Address, r *rand.Rand) testAction {
 		},
 	}
 	action := actions[r.Intn(len(actions))]
-	var nameargs []string
+	var nameargs []string //nolint:prealloc
 	if !action.noAddr {
 		nameargs = append(nameargs, addr.Hex())
 	}

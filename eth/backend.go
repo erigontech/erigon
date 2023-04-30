@@ -62,6 +62,8 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/caplin-phase1/caplin1"
 	clcore "github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
@@ -560,6 +562,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if err != nil {
 			return nil, err
 		}
+		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg, genesisCfg,
+			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
+		if err != nil {
+			return nil, err
+		}
+		forkDigest, err := fork.ComputeForkDigest(beaconCfg, genesisCfg)
+		if err != nil {
+			return nil, err
+		}
+
 		client, err := service.StartSentinelService(&sentinel.SentinelConfig{
 			IpAddr:        config.LightClientDiscoveryAddr,
 			Port:          int(config.LightClientDiscoveryPort),
@@ -568,13 +580,17 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			NetworkConfig: networkCfg,
 			BeaconConfig:  beaconCfg,
 			TmpDir:        tmpdir,
-		}, chainKv, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, nil)
+		}, chainKv, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, &cltypes.Status{
+			ForkDigest:     forkDigest,
+			FinalizedRoot:  state.FinalizedCheckpoint().Root,
+			FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
+			HeadSlot:       state.FinalizedCheckpoint().Epoch * beaconCfg.SlotsPerEpoch,
+			HeadRoot:       state.FinalizedCheckpoint().Root,
+		})
 		if err != nil {
 			return nil, err
 		}
 		engine := execution_client.NewExecutionEnginePhase1FromServer(ctx, ethBackendRPC)
-		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg, genesisCfg,
-			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
 
 		if err != nil {
 			return nil, err

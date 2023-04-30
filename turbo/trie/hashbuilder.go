@@ -82,11 +82,12 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializa
 	if length < 0 {
 		return fmt.Errorf("length %d", length)
 	}
-	key := keyHex[len(keyHex)-length:]
-	s := &shortNode{Key: common.CopyBytes(key), Val: valueNode(common.CopyBytes(val.RawBytes()))}
 	if hb.proofElement != nil {
+		hb.proofElement.storageKey = common.CopyBytes(keyHex[:len(keyHex)-1])
 		hb.proofElement.storageValue = new(uint256.Int).SetBytes(val.RawBytes())
 	}
+	key := keyHex[len(keyHex)-length:]
+	s := &shortNode{Key: common.CopyBytes(key), Val: valueNode(common.CopyBytes(val.RawBytes()))}
 	hb.nodeStack = append(hb.nodeStack, s)
 	if err := hb.leafHashWithKeyVal(key, val); err != nil {
 		return err
@@ -215,6 +216,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
+	fullKey := keyHex[:len(keyHex)-1]
 	key := keyHex[len(keyHex)-length:]
 	copy(hb.acc.Root[:], EmptyRoot[:])
 	copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
@@ -255,7 +257,10 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 
 	if hb.proofElement != nil {
 		// The storageRoot is not stored with the account info, therefore
-		// we capture it with the account proof element
+		// we capture it with the account proof element.  Note, we also store the
+		// full key as this root could be for a different account in the negative
+		// case.
+		hb.proofElement.storageRootKey = common.CopyBytes(fullKey)
 		hb.proofElement.storageRoot = hb.acc.Root
 	}
 	var accCopy accounts.Account

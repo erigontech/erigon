@@ -47,7 +47,7 @@ func (g *GossipManager) Start() {
 		data, err := subscription.Recv()
 		if err != nil {
 			log.Debug("[Beacon Gossip] Failure in receiving", "err", err)
-			continue
+			break
 		}
 
 		currentEpoch := utils.GetCurrentEpoch(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot, g.beaconConfig.SlotsPerEpoch)
@@ -82,7 +82,11 @@ func (g *GossipManager) Start() {
 
 			log.Debug("Received block via gossip", "slot", block.Block.Slot)
 
-			if err := g.forkChoice.OnBlock(block, true); err != nil {
+			if err := g.forkChoice.OnBlock(block, true, true); err != nil {
+				// if we are within a quarter of an epoch within chain tip we ban it
+				if currentSlotByTime < g.forkChoice.HighestSeen()+(g.beaconConfig.SlotsPerEpoch/4) {
+					g.sentinel.BanPeer(g.ctx, data.Peer)
+				}
 				log.Debug("[Beacon Gossip] Failure in processing block", "err", err)
 				continue
 			}

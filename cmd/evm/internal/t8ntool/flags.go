@@ -103,7 +103,7 @@ var (
 	}
 	VerbosityFlag = cli.IntFlag{
 		Name:  "verbosity",
-		Usage: "sets the verbosity level",
+		Usage: "Deprecated. Use --log.console.verbosity, --log.dir.verbosity, --torrent.verbosity, --database.verbosity",
 		Value: 3,
 	}
 )

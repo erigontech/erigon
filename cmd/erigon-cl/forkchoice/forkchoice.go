@@ -131,3 +131,10 @@ func (f *ForkChoiceStore) GetEth1Hash(eth2Root libcommon.Hash) libcommon.Hash {
 	ret, _ := f.eth2Roots.Get(eth2Root)
 	return ret
 }
+
+// FinalizedCheckpoint returns justified checkpoint
+func (f *ForkChoiceStore) AnchorSlot() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forkGraph.AnchorSlot()
+}

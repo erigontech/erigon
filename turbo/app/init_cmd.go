@@ -22,7 +22,7 @@ var initCommand = cli.Command{
 	Flags: []cli.Flag{
 		&utils.DataDirFlag,
 	},
-	Category: "BLOCKCHAIN COMMANDS",
+	//Category: "BLOCKCHAIN COMMANDS",
 	Description: `
 The init command initializes a new genesis block and definition for the network.
 This is a destructive action and changes the network in which you will be
