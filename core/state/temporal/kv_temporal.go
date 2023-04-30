@@ -348,13 +348,13 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 	if ethconfig.EnableHistoryV4InTest {
 		switch name {
 		case AccountsDomain:
-			v, err := tx.agg.ReadAccountData(key, ts, tx.MdbxTx)
+			v, err := tx.aggCtx.ReadAccountData(key, ts, tx.MdbxTx)
 			return v, v != nil, err
 		case StorageDomain:
-			v, err := tx.agg.ReadAccountStorage(key, ts, tx.MdbxTx)
+			v, err := tx.aggCtx.ReadAccountStorage(key, ts, tx.MdbxTx)
 			return v, v != nil, err
 		case CodeDomain:
-			v, err := tx.agg.ReadAccountCode(key, ts, tx.MdbxTx)
+			v, err := tx.aggCtx.ReadAccountCode(key, ts, tx.MdbxTx)
 			return v, v != nil, err
 		default:
 			panic(fmt.Sprintf("unexpected: %s", name))
