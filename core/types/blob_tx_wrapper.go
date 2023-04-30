@@ -316,22 +316,22 @@ func toProofs(_proofs KZGProofs) []gokzg4844.KZGProof {
 // BlobTxWrapper is the "network representation" of a Blob transaction, that is it includes not
 // only the SignedBlobTx but also all the associated blob data.
 type BlobTxWrapper struct {
-	Tx       SignedBlobTx
-	BlobKzgs BlobKzgs
-	Blobs    Blobs
-	Proofs   KZGProofs
+	Tx          SignedBlobTx
+	Commitments BlobKzgs
+	Blobs       Blobs
+	Proofs      KZGProofs
 }
 
 func (txw *BlobTxWrapper) Deserialize(dr *codec.DecodingReader) error {
-	return dr.Container(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.Proofs)
+	return dr.Container(&txw.Tx, &txw.Commitments, &txw.Blobs, &txw.Proofs)
 }
 
 func (txw *BlobTxWrapper) Serialize(w *codec.EncodingWriter) error {
-	return w.Container(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.Proofs)
+	return w.Container(&txw.Tx, &txw.Commitments, &txw.Blobs, &txw.Proofs)
 }
 
 func (txw *BlobTxWrapper) ByteLength() uint64 {
-	return codec.ContainerLength(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.Proofs)
+	return codec.ContainerLength(&txw.Tx, &txw.Commitments, &txw.Blobs, &txw.Proofs)
 }
 
 func (txw *BlobTxWrapper) FixedLength() uint64 {
@@ -345,7 +345,7 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	if l1 == 0 {
 		return fmt.Errorf("a blob tx must contain at least one blob")
 	}
-	l2 := len(txw.BlobKzgs)
+	l2 := len(txw.Commitments)
 	l3 := len(txw.Blobs)
 	l4 := len(txw.Proofs)
 	if l1 != l2 || l2 != l3 || l1 != l4 {
@@ -358,12 +358,12 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 		return fmt.Errorf("number of blobs exceeds max: %v", l1)
 	}
 	cryptoCtx := kzg.CrpytoCtx()
-	err := cryptoCtx.VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.BlobKzgs), toProofs(txw.Proofs))
+	err := cryptoCtx.VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.Commitments), toProofs(txw.Proofs))
 	if err != nil {
 		return fmt.Errorf("error during proof verification: %v", err)
 	}
 	for i, h := range blobTx.BlobVersionedHashes {
-		if computed := txw.BlobKzgs[i].ComputeVersionedHash(); computed != h {
+		if computed := txw.Commitments[i].ComputeVersionedHash(); computed != h {
 			return fmt.Errorf("versioned hash %d supposedly %s but does not match computed %s", i, h, computed)
 		}
 	}
@@ -413,7 +413,7 @@ func (txw *BlobTxWrapper) IsContractDeploy() bool                     { return t
 func (txw *BlobTxWrapper) Unwrap() Transaction                        { return &txw.Tx }
 
 func (txw BlobTxWrapper) EncodingSize() int {
-	envelopeSize := int(codec.ContainerLength(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.Proofs))
+	envelopeSize := int(codec.ContainerLength(&txw.Tx, &txw.Commitments, &txw.Blobs, &txw.Proofs))
 	// Add type byte
 	envelopeSize++
 	return envelopeSize
