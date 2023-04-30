@@ -38,7 +38,7 @@ var importCommand = cli.Command{
 		&utils.DataDirFlag,
 		&utils.ChainFlag,
 	},
-	Category: "BLOCKCHAIN COMMANDS",
+	//Category: "BLOCKCHAIN COMMANDS",
 	Description: `
 The import command imports blocks from an RLP-encoded form. The form can be one file
 with several RLP-encoded blocks, or several files can be used.

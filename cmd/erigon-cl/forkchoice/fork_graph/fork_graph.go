@@ -59,6 +59,10 @@ type ForkGraph struct {
 	genesisTime uint64
 }
 
+func (f *ForkGraph) AnchorSlot() uint64 {
+	return f.currentReferenceState.Slot()
+}
+
 // Initialize fork graph with a new state
 func New(anchorState *state.BeaconState, enabledPruning bool) *ForkGraph {
 	farthestExtendingPath := make(map[libcommon.Hash]bool)
@@ -109,7 +113,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 		return nil, LogisticError, err
 	}
 
-	if _, ok := f.blocks[blockRoot]; ok {
+	if _, ok := f.headers[blockRoot]; ok {
 		return nil, PreValidated, nil
 	}
 	// Blocks below anchors are invalid.

@@ -29,7 +29,7 @@ import (
 )
 
 func main() {
-	app := sentinelapp.MakeApp(runSentinelNode, flags.CLDefaultFlags)
+	app := sentinelapp.MakeApp("sentinel", runSentinelNode, flags.CLDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {

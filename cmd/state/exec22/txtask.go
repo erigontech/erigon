@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"sync"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -56,13 +57,6 @@ type TxTaskQueue []*TxTask
 func (h TxTaskQueue) Len() int {
 	return len(h)
 }
-func LenLocked(h *TxTaskQueue, lock *sync.Mutex) (l int) {
-	lock.Lock()
-	l = h.Len()
-	lock.Unlock()
-	return l
-}
-
 func (h TxTaskQueue) Less(i, j int) bool {
 	return h[i].TxNum < h[j].TxNum
 }
@@ -244,6 +238,8 @@ type ResultsQueue struct {
 
 	resultCh chan *TxTask
 	iter     *ResultsQueueIter
+	//tick
+	ticker *time.Ticker
 
 	sync.Mutex
 	results *TxTaskQueue
@@ -254,6 +250,7 @@ func NewResultsQueue(newTasksLimit, queueLimit int) *ResultsQueue {
 		results:  &TxTaskQueue{},
 		limit:    queueLimit,
 		resultCh: make(chan *TxTask, newTasksLimit),
+		ticker:   time.NewTicker(2 * time.Second),
 	}
 	heap.Init(r.results)
 	r.iter = &ResultsQueueIter{q: r, results: r.results}
@@ -269,12 +266,13 @@ func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	}
 	return nil
 }
-func (q *ResultsQueue) drainNoBlock(task *TxTask) {
+func (q *ResultsQueue) drainNoBlock(task *TxTask) (resultsQueueLen int) {
 	q.Lock()
 	defer q.Unlock()
 	if task != nil {
 		heap.Push(q.results, task)
 	}
+	resultsQueueLen = q.results.Len()
 
 	for {
 		select {
@@ -284,33 +282,26 @@ func (q *ResultsQueue) drainNoBlock(task *TxTask) {
 			}
 			if txTask != nil {
 				heap.Push(q.results, txTask)
+				resultsQueueLen = q.results.Len()
 			}
 		default: // we are inside mutex section, can't block here
-			return
+			return resultsQueueLen
 		}
 	}
 }
 
 func (q *ResultsQueue) Iter() *ResultsQueueIter {
 	q.Lock()
-	q.iter.needUnlock = true
-	return q.iter
-}
-func (q *ResultsQueue) IterLocked() *ResultsQueueIter {
-	q.iter.needUnlock = false
 	return q.iter
 }
 
 type ResultsQueueIter struct {
-	q          *ResultsQueue
-	results    *TxTaskQueue //pointer to `q.results` - just to reduce amount of dereferences
-	needUnlock bool
+	q       *ResultsQueue
+	results *TxTaskQueue //pointer to `q.results` - just to reduce amount of dereferences
 }
 
 func (q *ResultsQueueIter) Close() {
-	if q.needUnlock {
-		q.q.Unlock()
-	}
+	q.q.Unlock()
 }
 func (q *ResultsQueueIter) HasNext(outputTxNum uint64) bool {
 	return len(*q.results) > 0 && (*q.results)[0].TxNum == outputTxNum
@@ -328,25 +319,21 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 			return nil
 		}
 		q.drainNoBlock(txTask)
+	case <-q.ticker.C:
+		// Corner case: workers processed all new tasks (no more q.resultCh events) when we are inside Drain() func
+		// it means - naive-wait for new q.resultCh events will not work here (will cause dead-lock)
+		//
+		// "Drain everything but don't block" - solves the prbolem, but shows poor performance
+		if q.Len() > 0 {
+			return nil
+		}
+		return q.Drain(ctx)
 	}
 	return nil
 }
+
 func (q *ResultsQueue) DrainNonBlocking() { q.drainNoBlock(nil) }
 
-func (q *ResultsQueue) DrainLocked() {
-	var drained bool
-	for !drained {
-		select {
-		case txTask, ok := <-q.resultCh:
-			if !ok {
-				return
-			}
-			heap.Push(q.results, txTask)
-		default:
-			drained = true
-		}
-	}
-}
 func (q *ResultsQueue) DropResults(f func(t *TxTask)) {
 	q.Lock()
 	defer q.Unlock()
@@ -375,6 +362,7 @@ func (q *ResultsQueue) Close() {
 	}
 	q.closed = true
 	close(q.resultCh)
+	q.ticker.Stop()
 }
 func (q *ResultsQueue) ResultChLen() int { return len(q.resultCh) }
 func (q *ResultsQueue) ResultChCap() int { return cap(q.resultCh) }

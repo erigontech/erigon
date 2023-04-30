@@ -2,11 +2,7 @@ package rawdbreset
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
-	"sync"
-	"sync/atomic"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -14,16 +10,15 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) error {
@@ -99,7 +94,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 		ethtx = kv.EthTxV3
 	}
 
-	if err := clearTables(context.Background(), db, tx,
+	if err := backup.ClearTables(context.Background(), db, tx,
 		kv.NonCanonicalTxs,
 		ethtx,
 		kv.MaxTxNum,
@@ -126,7 +121,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 	return nil
 }
 func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
-	if err := clearTables(ctx, db, tx, kv.Senders); err != nil {
+	if err := backup.ClearTables(ctx, db, tx, kv.Senders); err != nil {
 		return nil
 	}
 	return clearStageProgress(tx, stages.Senders)
@@ -134,12 +129,12 @@ func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
 
 func WarmupExec(ctx context.Context, db kv.RwDB) (err error) {
 	for _, tbl := range stateBuckets {
-		WarmupTable(ctx, db, tbl, log.LvlInfo)
+		backup.WarmupTable(ctx, db, tbl, log.LvlInfo, backup.ReadAheadThreads)
 	}
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
 	if historyV3 { //hist v2 is too big, if you have so much ram, just use `cat mdbx.dat > /dev/null` to warmup
 		for _, tbl := range stateHistoryV3Buckets {
-			WarmupTable(ctx, db, tbl, log.LvlInfo)
+			backup.WarmupTable(ctx, db, tbl, log.LvlInfo, backup.ReadAheadThreads)
 		}
 	}
 	return
@@ -157,7 +152,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 			return err
 		}
 
-		if err := clearTables(ctx, db, tx, stateBuckets...); err != nil {
+		if err := backup.ClearTables(ctx, db, tx, stateBuckets...); err != nil {
 			return nil
 		}
 		for _, b := range stateBuckets {
@@ -166,7 +161,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 			}
 		}
 
-		if err := clearTables(ctx, db, tx, stateHistoryBuckets...); err != nil {
+		if err := backup.ClearTables(ctx, db, tx, stateHistoryBuckets...); err != nil {
 			return nil
 		}
 		if !historyV3 {
@@ -231,86 +226,13 @@ var stateHistoryV4Buckets = []string{
 	kv.CommitmentKeys, kv.CommitmentVals, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx,
 }
 
-func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
-	const ThreadsLimit = 128
-	var total uint64
-	db.View(ctx, func(tx kv.Tx) error {
-		c, _ := tx.Cursor(bucket)
-		total, _ = c.Count()
-		return nil
-	})
-	if total < 10_000 {
-		return
-	}
-	progress := atomic.Int64{}
-
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(ThreadsLimit)
-	for i := 0; i < 256; i++ {
-		for j := 0; j < 256; j++ {
-			i := i
-			j := j
-			g.Go(func() error {
-				return db.View(ctx, func(tx kv.Tx) error {
-					it, err := tx.Prefix(bucket, []byte{byte(i), byte(j)})
-					if err != nil {
-						return err
-					}
-					for it.HasNext() {
-						_, _, err = it.Next()
-						if err != nil {
-							return err
-						}
-						progress.Add(1)
-						select {
-						case <-ctx.Done():
-							return ctx.Err()
-						case <-logEvery.C:
-							log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
-						default:
-						}
-					}
-					return nil
-				})
-			})
+func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
+	for _, stage := range stagesList {
+		if err := stages.SaveStageProgress(tx, stage, 0); err != nil {
+			return err
 		}
-	}
-	for i := 0; i < 1_000; i++ {
-		i := i
-		g.Go(func() error {
-			return db.View(ctx, func(tx kv.Tx) error {
-				seek := make([]byte, 8)
-				binary.BigEndian.PutUint64(seek, uint64(i*100_000))
-				it, err := tx.Prefix(bucket, seek)
-				if err != nil {
-					return err
-				}
-				for it.HasNext() {
-					_, _, err = it.Next()
-					if err != nil {
-						return err
-					}
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case <-logEvery.C:
-						log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
-					default:
-					}
-				}
-				return nil
-			})
-		})
-	}
-	_ = g.Wait()
-}
-func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...stages.SyncStage) error {
-	for _, st := range stList {
-		for _, tbl := range Tables[st] {
-			WarmupTable(ctx, db, tbl, lvl)
+		if err := stages.SaveStagePruneProgress(tx, stage, 0); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -319,7 +241,7 @@ func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...stages.SyncS
 func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		for _, st := range stagesList {
-			if err := clearTables(ctx, db, tx, Tables[st]...); err != nil {
+			if err := backup.ClearTables(ctx, db, tx, Tables[st]...); err != nil {
 				return err
 			}
 			if err := clearStageProgress(tx, stagesList...); err != nil {
@@ -329,44 +251,10 @@ func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) erro
 		return nil
 	})
 }
-
-func warmup(ctx context.Context, db kv.RoDB, bucket string) func() {
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		WarmupTable(ctx, db, bucket, log.LvlInfo)
-	}()
-	return func() { wg.Wait() }
-}
-
-func clearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) error {
-	for _, tbl := range tables {
-		if err := clearTable(ctx, db, tx, tbl); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error {
-	ctx, cancel := context.WithCancel(ctx)
-	clean := warmup(ctx, db, table)
-	defer func() {
-		cancel()
-		clean()
-	}()
-	log.Info("Clear", "table", table)
-	return tx.ClearBucket(table)
-}
-
-func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
-	for _, stage := range stagesList {
-		if err := stages.SaveStageProgress(tx, stage, 0); err != nil {
-			return err
-		}
-		if err := stages.SaveStagePruneProgress(tx, stage, 0); err != nil {
-			return err
+func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...stages.SyncStage) error {
+	for _, st := range stList {
+		for _, tbl := range Tables[st] {
+			backup.WarmupTable(ctx, db, tbl, lvl, backup.ReadAheadThreads)
 		}
 	}
 	return nil
