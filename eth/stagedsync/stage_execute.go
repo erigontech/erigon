@@ -286,12 +286,13 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	defer func() {
 		if tx != nil {
 			fmt.Printf("after exec: %d->%d\n", s.BlockNumber, to)
-			tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-				if len(k) == 20 {
-					fmt.Printf("acc: %x, %x\n", k, v)
+			cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
+				vv, err := accounts.ConvertV3toV2(v)
+				if err != nil {
+					panic(err)
 				}
-				return nil
-			})
+				fmt.Printf("acc: %x, %x\n", k, vv)
+			}, tx)
 		}
 	}()
 
@@ -326,7 +327,6 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	defer func() {
 		if tx != nil {
 			fmt.Printf("after unwind exec: %d->%d\n", u.CurrentBlockNumber, u.UnwindPoint)
-			cfg.agg.SetTx(tx)
 			cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
 				vv, err := accounts.ConvertV3toV2(v)
 				if err != nil {
