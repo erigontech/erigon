@@ -19,13 +19,17 @@ import (
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize) (kv.RoDB, kv.RwDB) {
+	const ThreadsHardLimit = 9_000
 	src := mdbx2.NewMDBX(log.New()).Path(from).
 		Label(label).
+		RoTxsLimiter(semaphore.NewWeighted(ThreadsHardLimit)).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
-		Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
+		Flags(func(flags uint) uint { return flags | mdbx.Readonly | mdbx.Accede }).
+		MustOpen()
 	if targetPageSize <= 0 {
 		targetPageSize = datasize.ByteSize(src.PageSize())
 	}
@@ -37,29 +41,10 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize)
 		Label(label).
 		PageSize(targetPageSize.Bytes()).
 		MapSize(datasize.ByteSize(info.Geo.Upper)).
+		Flags(func(flags uint) uint { return flags | mdbx.NoMemInit | mdbx.WriteMap }).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
 		MustOpen()
 	return src, dst
-}
-func MdbxToMdbx(ctx context.Context, from, to string, label kv.Label, tables []string, targetPageSize datasize.ByteSize, readAheadThreads int) error {
-	src := mdbx2.NewMDBX(log.New()).Path(from).
-		Label(label).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
-		Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
-	if targetPageSize <= 0 {
-		targetPageSize = datasize.ByteSize(src.PageSize())
-	}
-	info, err := src.(*mdbx2.MdbxKV).Env().Info(nil)
-	if err != nil {
-		return err
-	}
-	dst := mdbx2.NewMDBX(log.New()).Path(to).
-		Label(label).
-		PageSize(targetPageSize.Bytes()).
-		MapSize(datasize.ByteSize(info.Geo.Upper)).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
-		MustOpen()
-	return Kv2kv(ctx, src, dst, tables, readAheadThreads)
 }
 
 func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readAheadThreads int) error {

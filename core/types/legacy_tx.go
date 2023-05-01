@@ -134,6 +134,10 @@ func (tx LegacyTx) Protected() bool {
 	return isProtectedV(&tx.V)
 }
 
+func (tx *LegacyTx) Unwrap() Transaction {
+	return tx
+}
+
 // NewTransaction creates an unsigned legacy transaction.
 // Deprecated: use NewTx instead.
 func NewTransaction(nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {

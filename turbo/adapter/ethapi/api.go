@@ -395,6 +395,8 @@ type RPCTransaction struct {
 	V                *hexutil.Big       `json:"v"`
 	R                *hexutil.Big       `json:"r"`
 	S                *hexutil.Big       `json:"s"`
+
+	BlobVersionedHashes []libcommon.Hash `json:"blobVersionedHashes,omitempty"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
@@ -443,14 +445,22 @@ func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumb
 		result.S = (*hexutil.Big)(t.S.ToBig())
 		result.Accesses = &t.AccessList
 		// if the transaction has been mined, compute the effective gas price
-		if baseFee != nil && blockHash != (libcommon.Hash{}) {
-			// price = min(tip, gasFeeCap - baseFee) + baseFee
-			price := math.BigMin(new(big.Int).Add(t.Tip.ToBig(), baseFee), t.FeeCap.ToBig())
-			result.GasPrice = (*hexutil.Big)(price)
-		} else {
-			result.GasPrice = nil
-		}
-		// case *types.SignedBlobTx: // TODO
+		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
+	case *types.SignedBlobTx:
+		chainId.Set(t.GetChainID())
+		result.ChainID = (*hexutil.Big)(chainId.ToBig())
+		result.Tip = (*hexutil.Big)(t.GetTip().ToBig())
+		result.FeeCap = (*hexutil.Big)(t.GetFeeCap().ToBig())
+		v, r, s := t.RawSignatureValues()
+		result.V = (*hexutil.Big)(v.ToBig())
+		result.R = (*hexutil.Big)(r.ToBig())
+		result.S = (*hexutil.Big)(s.ToBig())
+		al := t.GetAccessList()
+		result.Accesses = &al
+		// if the transaction has been mined, compute the effective gas price
+		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
+		result.MaxFeePerDataGas = (*hexutil.Big)(t.GetMaxFeePerDataGas().ToBig())
+		result.BlobVersionedHashes = t.GetDataHashes()
 	}
 	signer := types.LatestSignerForChainID(chainId.ToBig())
 	var err error
@@ -464,6 +474,15 @@ func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumb
 		result.TransactionIndex = (*hexutil.Uint64)(&index)
 	}
 	return result
+}
+
+func computeGasPrice(tx types.Transaction, blockHash libcommon.Hash, baseFee *big.Int) *hexutil.Big {
+	if baseFee != nil && blockHash != (libcommon.Hash{}) {
+		// price = min(tip + baseFee, gasFeeCap)
+		price := math.BigMin(new(big.Int).Add(tx.GetTip().ToBig(), baseFee), tx.GetFeeCap().ToBig())
+		return (*hexutil.Big)(price)
+	}
+	return nil
 }
 
 // newRPCBorTransaction returns a Bor transaction that will serialize to the RPC
