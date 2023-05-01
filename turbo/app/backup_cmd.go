@@ -20,7 +20,7 @@ import (
 
 // nolint
 var backupCommand = cli.Command{
-	Name: "backup",
+	Name: "experimental_backup",
 	Description: `Backup all databases of Erigon. 
 Can do backup without stopping Erigon.
 Limitations: 
