@@ -572,6 +572,13 @@ func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
 	}
 }
 
+func newStateReader(tx kv.Tx) StateReader {
+	if ethconfig.EnableHistoryV4InTest {
+		return NewReaderV4(tx.(kv.TemporalTx))
+	}
+	return NewPlainStateReader(tx)
+}
+
 func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, agg *libstate.AggregatorV3, accumulator *shards.Accumulator) error {
 	agg.SetTx(tx)
 	var currentInc uint64
@@ -584,23 +591,30 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 				}
 				currentInc = acc.Incarnation
 				// Fetch the code hash
-				recoverCodeHashPlain(&acc, tx, k)
+				if ethconfig.EnableHistoryV4InTest {
+					//Seems E3 and E4 do store correct codeHash in history already and don't need restore
+					//acc := tx.(kv.TemporalTx).(*temporal.Tx).AggCtx().ReadAccountData(k, txUnwindTo, tx)
+				} else {
+					recoverCodeHashPlain(&acc, tx, k)
+				}
 				var address common.Address
 				copy(address[:], k)
 
 				// cleanup contract code bucket
-				original, err := NewPlainStateReader(tx).ReadAccountData(address)
+				original, err := newStateReader(tx).ReadAccountData(address)
 				if err != nil {
 					return fmt.Errorf("read account for %x: %w", address, err)
 				}
 				if original != nil {
+					//TODO: E4 domain.Prune does it?
+
 					// clean up all the code incarnations original incarnation and the new one
-					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
-						err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
-						if err != nil {
-							return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
-						}
-					}
+					//for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+					//	err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
+					//	if err != nil {
+					//		return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
+					//	}
+					//}
 				}
 
 				newV := make([]byte, acc.EncodingLengthForStorage())
@@ -608,13 +622,10 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 				if accumulator != nil {
 					accumulator.ChangeAccount(address, acc.Incarnation, newV)
 				}
-				if err := next(k, k, newV); err != nil {
-					return err
-				}
 			} else {
 				var address common.Address
 				copy(address[:], k)
-				original, err := NewPlainStateReader(tx).ReadAccountData(address)
+				original, err := newStateReader(tx).ReadAccountData(address)
 				if err != nil {
 					return err
 				}
@@ -627,23 +638,8 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 				if accumulator != nil {
 					accumulator.DeleteAccount(address)
 				}
-				if err := next(k, k, nil); err != nil {
-					return err
-				}
 			}
 			return nil
-		}
-
-		var err error
-		if len(k) < length.Addr {
-			if len(v) == 0 {
-				err = next(k, k, nil)
-			} else {
-				err = next(k, k, v)
-			}
-			if err != nil {
-				return err
-			}
 		}
 
 		var address common.Address
@@ -652,17 +648,6 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 		copy(location[:], k[length.Addr:])
 		if accumulator != nil {
 			accumulator.ChangeStorage(address, currentInc, location, common.Copy(v))
-		}
-
-		newKeys := dbutils.PlainGenerateCompositeStorageKey(address[:], currentInc, location[:])
-		if len(v) > 0 {
-			if err := next(k, newKeys, v); err != nil {
-				return err
-			}
-		} else {
-			if err := next(k, newKeys, nil); err != nil {
-				return err
-			}
 		}
 		return nil
 	}); err != nil {
@@ -1075,4 +1060,3 @@ func returnReadList(v map[string]*exec22.KvList) {
 	}
 	readListPool.Put(v)
 }
-

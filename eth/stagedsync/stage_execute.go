@@ -657,6 +657,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
+	//TODO: why we don't call accumulator.ChangeCode???
 	if cfg.historyV3 {
 		return unwindExec3(u, s, tx, ctx, cfg, accumulator)
 	}
