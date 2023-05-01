@@ -299,11 +299,13 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*ExecutionResult, error) {
+	coinbase := st.evm.Context().Coinbase
+
 	var input1 *uint256.Int
 	var input2 *uint256.Int
 	if st.isBor {
 		input1 = st.state.GetBalance(st.msg.From()).Clone()
-		input2 = st.state.GetBalance(st.evm.Context().Coinbase).Clone()
+		input2 = st.state.GetBalance(coinbase).Clone()
 	}
 
 	// First check this message satisfies all consensus rules before
@@ -357,14 +359,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
 
-	// Set up the initial access list.
-	if rules.IsBerlin {
-		st.state.PrepareAccessList(msg.From(), msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
-		// EIP-3651 warm COINBASE
-		if rules.IsShanghai {
-			st.state.AddAddressToAccessList(st.evm.Context().Coinbase)
-		}
-	}
+	// Execute the preparatory steps for state transition which includes:
+	// - prepare accessList(post-berlin)
+	// - reset transient storage(eip 1153)
+	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
 
 	var (
 		ret   []byte
@@ -400,7 +398,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-	st.state.AddBalance(st.evm.Context().Coinbase, amount)
+	st.state.AddBalance(coinbase, amount)
 	if !msg.IsFree() && rules.IsLondon && rules.IsEip1559FeeCollector {
 		burntContractAddress := *st.evm.ChainConfig().Eip1559FeeCollector
 		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
@@ -415,7 +413,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 			st.state,
 
 			msg.From(),
-			st.evm.Context().Coinbase,
+			coinbase,
 
 			amount,
 			input1,

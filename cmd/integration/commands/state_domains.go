@@ -520,7 +520,7 @@ func (b *blockProcessor) applyBlock(
 	for i, tx := range block.Transactions() {
 		if b.txNum >= b.startTxNum {
 			ibs := state.New(b.reader)
-			ibs.Prepare(tx.Hash(), block.Hash(), i)
+			ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			b.vmConfig.Tracer = ct
 			receipt, _, err := core.ApplyTransaction(b.chainConfig, getHashFn, b.engine, nil, gp, ibs, b.writer, header, tx, usedGas, b.vmConfig, parentHeader.ExcessDataGas)

@@ -836,7 +836,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
-		ibs.Prepare(txHash, lastBlockHash, txIndex)
+		ibs.SetTxContext(txHash, lastBlockHash, txIndex)
 		var execResult *core.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {

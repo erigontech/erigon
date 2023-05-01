@@ -605,7 +605,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 		}
 	}
 	gasCap = hi
-	b.pendingState.Prepare(libcommon.Hash{}, libcommon.Hash{}, len(b.pendingBlock.Transactions()))
+	b.pendingState.SetTxContext(libcommon.Hash{}, libcommon.Hash{}, len(b.pendingBlock.Transactions()))
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
@@ -715,7 +715,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		return fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.GetNonce(), nonce)
 	}
 
-	b.pendingState.Prepare(tx.Hash(), libcommon.Hash{}, len(b.pendingBlock.Transactions()))
+	b.pendingState.SetTxContext(tx.Hash(), libcommon.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, _, err := core.ApplyTransaction(
 		b.m.ChainConfig, core.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
