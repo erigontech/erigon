@@ -1469,9 +1469,10 @@ func (d *Domain) Rotate() flusher {
 	hf.d = d.wal
 	d.wal = d.newWriter(d.wal.tmpdir, d.wal.buffered, d.wal.discard)
 	for k, v := range hf.d.topVals {
+		// stupid way to avoid cache miss while old wal is not loaded to db yet.
 		d.wal.topVals[k] = common.Copy(v)
 	}
-	log.Warn("shallow copy WAL", "domain", d.filenameBase, "new", d.wal, "old", hf.d)
+	log.Warn("WAL has been rotated", "domain", d.filenameBase)
 	return hf
 }
 
