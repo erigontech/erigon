@@ -262,4 +262,5 @@ require (
 )
 
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
-replace github.com/ledgerwatch/erigon-lib => /home/anshal/polygon/fork/erigon-lib
+
+replace github.com/ledgerwatch/erigon-lib => /Users/ashukla/polygon/fork/erigon-lib

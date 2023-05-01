@@ -25,7 +25,7 @@ type Service struct {
 }
 
 // This is not being used as we have directly passed in the config params
-func NewService(db kv.RwTx) *Service {
+func NewService(db kv.RwDB) *Service {
 	var checkpointDoExist = true
 	checkpointNumber, checkpointHash, err := rawdb.ReadFinality[*rawdb.Checkpoint](db)
 
