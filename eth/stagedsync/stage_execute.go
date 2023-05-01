@@ -369,11 +369,33 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	}()
 
 	if cfg.historyV3 {
+		defer func() {
+			if tx != nil {
+				cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
+					vv, err := accounts.ConvertV3toV2(v)
+					if err != nil {
+						panic(err)
+					}
+					fmt.Printf("acc: %x, %x\n", k, vv)
+				}, tx)
+			}
+		}()
+
 		if err = ExecBlockV3(s, u, tx, toBlock, ctx, cfg, initialCycle); err != nil {
 			return err
 		}
 		return nil
 	}
+	defer func() {
+		if tx != nil {
+			tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+				if len(k) == 20 {
+					fmt.Printf("acc: %x, %x\n", k, v)
+				}
+				return nil
+			})
+		}
+	}()
 	if ethconfig.EnableHistoryV4InTest {
 		panic("must use ExecBlockV3")
 	}
