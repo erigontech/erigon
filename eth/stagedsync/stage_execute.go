@@ -672,7 +672,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	if cfg.historyV3 {
 		defer func() {
 			if tx != nil {
-				fmt.Printf("after exec: %d->%d\n", u.CurrentBlockNumber, u.UnwindPoint)
+				fmt.Printf("after unwind exec: %d->%d\n", u.CurrentBlockNumber, u.UnwindPoint)
 				cfg.agg.SetTx(tx)
 				cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
 					vv, err := accounts.ConvertV3toV2(v)
