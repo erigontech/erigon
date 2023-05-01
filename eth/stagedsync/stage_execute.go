@@ -371,6 +371,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	if cfg.historyV3 {
 		defer func() {
 			if tx != nil {
+				fmt.Printf("after exec: %d->%d\n", s.BlockNumber, toBlock)
 				cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
 					vv, err := accounts.ConvertV3toV2(v)
 					if err != nil {
@@ -386,16 +387,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		}
 		return nil
 	}
-	defer func() {
-		if tx != nil {
-			tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-				if len(k) == 20 {
-					fmt.Printf("acc: %x, %x\n", k, v)
-				}
-				return nil
-			})
-		}
-	}()
 	if ethconfig.EnableHistoryV4InTest {
 		panic("must use ExecBlockV3")
 	}
@@ -681,6 +672,18 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 
 	//TODO: why we don't call accumulator.ChangeCode???
 	if cfg.historyV3 {
+		defer func() {
+			if tx != nil {
+				fmt.Printf("after exec: %d->%d\n", u.CurrentBlockNumber, u.UnwindPoint)
+				cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
+					vv, err := accounts.ConvertV3toV2(v)
+					if err != nil {
+						panic(err)
+					}
+					fmt.Printf("acc: %x, %x\n", k, vv)
+				}, tx)
+			}
+		}()
 		return unwindExec3(u, s, tx, ctx, cfg, accumulator)
 	}
 
