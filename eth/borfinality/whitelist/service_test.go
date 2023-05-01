@@ -1,7 +1,6 @@
 package whitelist
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -12,23 +11,21 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
 // NewMockService creates a new mock whitelist service
-func NewMockService(db kv.RwDB) *Service {
+func NewMockService(tx kv.RwTx) *Service {
 	return &Service{
 
 		&checkpoint{
 			finality[*rawdb.Checkpoint]{
 				doExist:  false,
 				interval: 256,
-				db:       db,
+				db:       tx,
 			},
 		},
 
@@ -36,7 +33,7 @@ func NewMockService(db kv.RwDB) *Service {
 			finality: finality[*rawdb.Milestone]{
 				doExist:  false,
 				interval: 256,
-				db:       db,
+				db:       tx,
 			},
 			LockedMilestoneIDs:   make(map[string]struct{}),
 			FutureMilestoneList:  make(map[uint64]libcommon.Hash),
@@ -46,132 +43,71 @@ func NewMockService(db kv.RwDB) *Service {
 	}
 }
 
-func TestRandom(t *testing.T) {
-	// t.Parallel()
-
-	// md := mdbx.NewMDBX(log.New())
-	// db, err := md.InMem("").Open()
-	// require.NoError(t, err)
-	// t.Cleanup(db.Close)
-
-	db, tx := memdb.NewTestTx(t)
-	// require.NoError(t, err)
-	t.Cleanup(db.Close)
-	t.Cleanup(tx.Rollback)
-
-	//Creating the service for the whitelisting the checkpoints
-	s := NewMockService(db)
-
-	cp := s.checkpointService.(*checkpoint)
-
-	require.Equal(t, cp.doExist, false, "expected false as no cp exist at this point")
-
-	_, _, err := rawdb.ReadFinality[*rawdb.Checkpoint](db)
-	require.NotNil(t, err, "Error should be nil while reading from the db")
-
-	//Adding the checkpoint
-
-	s.ProcessCheckpoint(11, libcommon.Hash{})
-
-	require.Equal(t, cp.doExist, true, "expected true as cp exist")
-
-	// //Removing the checkpoint
-	// s.PurgeWhitelistedCheckpoint()
-
-	// require.Equal(t, cp.doExist, false, "expected false as no cp exist at this point")
-
-	// //Adding the checkpoint
-	// s.ProcessCheckpoint(12, libcommon.Hash{1})
-
-	// // Receiving the stored checkpoint
-	// doExist, number, hash := s.GetWhitelistedCheckpoint()
-
-	// //Validating the values received
-	// require.Equal(t, doExist, true, "expected true ascheckpoint exist at this point")
-	// require.Equal(t, number, uint64(12), "expected number to be 11 but got", number)
-	// require.Equal(t, hash, libcommon.Hash{1}, "expected the 1 hash but got", hash)
-	// require.NotEqual(t, hash, libcommon.Hash{}, "expected the hash to be different from zero hash")
-
-}
-
 // TestWhitelistCheckpoint checks the checkpoint whitelist setter and getter functions.
 func TestWhitelistedCheckpoint(t *testing.T) {
 	t.Parallel()
 
-	db, err := mdbx.NewTemporaryMdbx()
-	require.NoError(t, err)
-	t.Cleanup(db.Close)
-
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
+	_, tx := memdb.NewTestTx(t)
 	t.Cleanup(tx.Rollback)
 
 	//Creating the service for the whitelisting the checkpoints
-	s := NewMockService(db)
+	s := NewMockService(tx)
 
 	cp := s.checkpointService.(*checkpoint)
 
 	require.Equal(t, cp.doExist, false, "expected false as no cp exist at this point")
 
-	_, _, err = rawdb.ReadFinality[*rawdb.Checkpoint](db)
+	_, _, err := rawdb.ReadFinality[*rawdb.Checkpoint](tx)
 	require.NotNil(t, err, "Error should be nil while reading from the db")
 
 	//Adding the checkpoint
-	// s.ProcessCheckpoint(11, libcommon.Hash{})
+	s.ProcessCheckpoint(11, libcommon.Hash{})
 
-	// require.Equal(t, cp.doExist, true, "expected true as cp exist")
+	require.Equal(t, cp.doExist, true, "expected true as cp exist")
 
 	//Removing the checkpoint
-	// s.PurgeWhitelistedCheckpoint()
+	s.PurgeWhitelistedCheckpoint()
 
-	// require.Equal(t, cp.doExist, false, "expected false as no cp exist at this point")
+	require.Equal(t, cp.doExist, false, "expected false as no cp exist at this point")
 
 	//Adding the checkpoint
-	// s.ProcessCheckpoint(12, libcommon.Hash{1})
+	s.ProcessCheckpoint(12, libcommon.Hash{1})
 
 	// //Receiving the stored checkpoint
-	// doExist, number, hash := s.GetWhitelistedCheckpoint()
+	doExist, number, hash := s.GetWhitelistedCheckpoint()
 
 	// //Validating the values received
-	// require.Equal(t, doExist, true, "expected true ascheckpoint exist at this point")
-	// require.Equal(t, number, uint64(12), "expected number to be 11 but got", number)
-	// require.Equal(t, hash, libcommon.Hash{1}, "expected the 1 hash but got", hash)
-	// require.NotEqual(t, hash, libcommon.Hash{}, "expected the hash to be different from zero hash")
+	require.Equal(t, doExist, true, "expected true ascheckpoint exist at this point")
+	require.Equal(t, number, uint64(12), "expected number to be 11 but got", number)
+	require.Equal(t, hash, libcommon.Hash{1}, "expected the 1 hash but got", hash)
+	require.NotEqual(t, hash, libcommon.Hash{}, "expected the hash to be different from zero hash")
 
-	// c1 := s.checkpointService.(*checkpoint)
-	// fmt.Println("!!!-0", c1.doExist)
-	// s.PurgeWhitelistedCheckpoint()
-	// fmt.Println("!!!-1", c1.doExist)
-	// doExist, number, hash = s.GetWhitelistedCheckpoint()
-	// fmt.Println("!!!-2", c1.doExist)
-	// //Validating the values received from the db, not memory
-	// require.Equal(t, doExist, true, "expected true ascheckpoint exist at this point")
-	// require.Equal(t, number, uint64(12), "expected number to be 11 but got", number)
-	// require.Equal(t, hash, libcommon.Hash{1}, "expected the 1 hash but got", hash)
-	// require.NotEqual(t, hash, libcommon.Hash{}, "expected the hash to be different from zero hash")
+	c1 := s.checkpointService.(*checkpoint)
+	fmt.Println("!!!-0", c1.doExist)
+	s.PurgeWhitelistedCheckpoint()
+	fmt.Println("!!!-1", c1.doExist)
+	doExist, number, hash = s.GetWhitelistedCheckpoint()
+	fmt.Println("!!!-2", c1.doExist)
+	//Validating the values received from the db, not memory
+	require.Equal(t, doExist, true, "expected true ascheckpoint exist at this point")
+	require.Equal(t, number, uint64(12), "expected number to be 11 but got", number)
+	require.Equal(t, hash, libcommon.Hash{1}, "expected the 1 hash but got", hash)
+	require.NotEqual(t, hash, libcommon.Hash{}, "expected the hash to be different from zero hash")
 
-	// checkpointNumber, checkpointHash, err := rawdb.ReadFinality[*rawdb.Checkpoint](db)
-	// require.Nil(t, err, "Error should be nil while reading from the db")
-	// require.Equal(t, checkpointHash, libcommon.Hash{1}, "expected the 1 hash but got", hash)
-	// require.Equal(t, checkpointNumber, uint64(12), "expected number to be 11 but got", number)
+	checkpointNumber, checkpointHash, err := rawdb.ReadFinality[*rawdb.Checkpoint](tx)
+	require.Nil(t, err, "Error should be nil while reading from the db")
+	require.Equal(t, checkpointHash, libcommon.Hash{1}, "expected the 1 hash but got", hash)
+	require.Equal(t, checkpointNumber, uint64(12), "expected number to be 11 but got", number)
 }
 
 // TestMilestone checks the milestone whitelist setter and getter functions
 func TestMilestone(t *testing.T) {
 	t.Parallel()
 
-	db, err := mdbx.NewTemporaryMdbx()
-	if err != nil {
-		log.Error("Error creating database", "err", err)
-	}
+	_, tx := memdb.NewTestTx(t)
+	t.Cleanup(tx.Rollback)
 
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer tx.Rollback()
-
-	s := NewMockService(db)
+	s := NewMockService(tx)
 
 	milestone := s.milestoneService.(*milestone)
 
@@ -180,7 +116,7 @@ func TestMilestone(t *testing.T) {
 	require.Equal(t, milestone.Locked, false, "expected false as it was not locked")
 	require.Equal(t, milestone.LockedMilestoneNumber, uint64(0), "expected 0 as it was not initialized")
 
-	_, _, err = rawdb.ReadFinality[*rawdb.Milestone](db)
+	_, _, err := rawdb.ReadFinality[*rawdb.Milestone](tx)
 	require.NotNil(t, err, "Error should be nil while reading from the db")
 
 	//Acquiring the mutex lock
@@ -234,7 +170,7 @@ func TestMilestone(t *testing.T) {
 	require.Equal(t, len(milestone.LockedMilestoneIDs), 1, "expected 1 as still last milestone of sprint number 15 exist")
 
 	//Reading from the Db
-	locked, lockedMilestoneNumber, lockedMilestoneHash, lockedMilestoneIDs, err := rawdb.ReadLockField(db)
+	locked, lockedMilestoneNumber, lockedMilestoneHash, lockedMilestoneIDs, err := rawdb.ReadLockField(tx)
 
 	require.Nil(t, err)
 	require.True(t, locked, "expected true as locked sprint is of number 15")
@@ -256,7 +192,7 @@ func TestMilestone(t *testing.T) {
 	require.Equal(t, len(milestone.LockedMilestoneIDs), 0, "expected 0 as all the milestones have been removed")
 
 	//Reading from the Db
-	locked, _, _, lockedMilestoneIDs, err = rawdb.ReadLockField(db)
+	locked, _, _, lockedMilestoneIDs, err = rawdb.ReadLockField(tx)
 
 	require.Nil(t, err)
 	require.False(t, locked, "expected true as locked sprint is of number 15")
@@ -285,12 +221,12 @@ func TestMilestone(t *testing.T) {
 	require.Equal(t, number, uint64(11), "expected number to be 11 but got", number)
 	require.Equal(t, hash, libcommon.Hash{1}, "expected the 1 hash but got", hash)
 
-	milestoneNumber, milestoneHash, err := rawdb.ReadFinality[*rawdb.Milestone](db)
+	milestoneNumber, milestoneHash, err := rawdb.ReadFinality[*rawdb.Milestone](tx)
 	require.Nil(t, err, "Error should be nil while reading from the db")
 	require.Equal(t, milestoneHash, libcommon.Hash{1}, "expected the 1 hash but got", hash)
 	require.Equal(t, milestoneNumber, uint64(11), "expected number to be 11 but got", number)
 
-	_, _, err = rawdb.ReadFutureMilestoneList(db)
+	_, _, err = rawdb.ReadFutureMilestoneList(tx)
 	require.NotNil(t, err, "Error should be not nil")
 
 	s.ProcessFutureMilestone(16, libcommon.Hash{16})
@@ -298,7 +234,7 @@ func TestMilestone(t *testing.T) {
 	require.Equal(t, milestone.FutureMilestoneOrder[0], uint64(16), "expected value is 16 but got", milestone.FutureMilestoneOrder[0])
 	require.Equal(t, milestone.FutureMilestoneList[16], libcommon.Hash{16}, "expected value is", libcommon.Hash{16}.String()[2:], "but got", milestone.FutureMilestoneList[16])
 
-	order, list, err := rawdb.ReadFutureMilestoneList(db)
+	order, list, err := rawdb.ReadFutureMilestoneList(tx)
 	require.Nil(t, err, "Error should be nil while reading from the db")
 	require.Equal(t, len(order), 1, "expected the 1 hash but got", len(order))
 	require.Equal(t, order[0], uint64(16), "expected number to be 16 but got", order[0])
@@ -318,12 +254,10 @@ func TestMilestone(t *testing.T) {
 func TestIsValidPeer(t *testing.T) {
 	t.Parallel()
 
-	db, err := mdbx.NewTemporaryMdbx()
-	if err != nil {
-		log.Error("Error creating database", "err", err)
-	}
+	_, tx := memdb.NewTestTx(t)
+	t.Cleanup(tx.Rollback)
 
-	s := NewMockService(db)
+	s := NewMockService(tx)
 
 	// case1: no checkpoint whitelist, should consider the chain as valid
 	res, err := s.IsValidPeer(nil)
@@ -506,12 +440,10 @@ func TestIsValidPeer(t *testing.T) {
 func TestIsValidChain(t *testing.T) {
 	t.Parallel()
 
-	db, err := mdbx.NewTemporaryMdbx()
-	if err != nil {
-		log.Error("Error creating database", "err", err)
-	}
+	_, tx := memdb.NewTestTx(t)
+	t.Cleanup(tx.Rollback)
 
-	s := NewMockService(db)
+	s := NewMockService(tx)
 	chainA := createMockChain(1, 20) // A1->A2...A19->A20
 
 	//Case1: no checkpoint whitelist and no milestone and no locking, should consider the chain as valid

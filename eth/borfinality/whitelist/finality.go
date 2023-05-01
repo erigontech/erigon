@@ -13,7 +13,7 @@ import (
 
 type finality[T rawdb.BlockFinality[T]] struct {
 	sync.RWMutex
-	db       kv.RwDB
+	db       kv.RwTx
 	Hash     common.Hash // Whitelisted Hash, populated by reaching out to heimdall
 	Number   uint64      // Number , populated by reaching out to heimdall
 	interval uint64      // Interval, until which we can allow importing

@@ -24,10 +24,9 @@ type Service struct {
 	milestoneService
 }
 
-// This is not being used as we have directly passed in the config params
-func NewService(db kv.RwDB) *Service {
+func NewService(tx kv.RwTx) *Service {
 	var checkpointDoExist = true
-	checkpointNumber, checkpointHash, err := rawdb.ReadFinality[*rawdb.Checkpoint](db)
+	checkpointNumber, checkpointHash, err := rawdb.ReadFinality[*rawdb.Checkpoint](tx)
 
 	if err != nil {
 		checkpointDoExist = false
@@ -35,18 +34,18 @@ func NewService(db kv.RwDB) *Service {
 
 	var milestoneDoExist = true
 
-	milestoneNumber, milestoneHash, err := rawdb.ReadFinality[*rawdb.Milestone](db)
+	milestoneNumber, milestoneHash, err := rawdb.ReadFinality[*rawdb.Milestone](tx)
 	if err != nil {
 		milestoneDoExist = false
 	}
 
-	locked, lockedMilestoneNumber, lockedMilestoneHash, lockedMilestoneIDs, err := rawdb.ReadLockField(db)
+	locked, lockedMilestoneNumber, lockedMilestoneHash, lockedMilestoneIDs, err := rawdb.ReadLockField(tx)
 	if err != nil || !locked {
 		locked = false
 		lockedMilestoneIDs = make(map[string]struct{})
 	}
 
-	order, list, err := rawdb.ReadFutureMilestoneList(db)
+	order, list, err := rawdb.ReadFutureMilestoneList(tx)
 	if err != nil {
 		order = make([]uint64, 0)
 		list = make(map[uint64]common.Hash)
@@ -59,7 +58,7 @@ func NewService(db kv.RwDB) *Service {
 				Number:   checkpointNumber,
 				Hash:     checkpointHash,
 				interval: 256,
-				db:       db,
+				db:       tx,
 			},
 		},
 
@@ -69,7 +68,7 @@ func NewService(db kv.RwDB) *Service {
 				Number:   milestoneNumber,
 				Hash:     milestoneHash,
 				interval: 256,
-				db:       db,
+				db:       tx,
 			},
 
 			Locked:                locked,
