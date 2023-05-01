@@ -907,6 +907,7 @@ func (a *AggregatorV3) NeedSaveFilesListInDB() bool {
 }
 
 func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad etl.LoadFunc) error {
+	//TODO: replace pruneF by some kind of history-walking
 	stateChanges := etl.NewCollector(a.logPrefix, a.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer stateChanges.Close()
 	if err := a.accounts.pruneF(txUnwindTo, math2.MaxUint64, func(_ uint64, k, v []byte) error {
@@ -919,18 +920,25 @@ func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 	}); err != nil {
 		return err
 	}
-	// TODO should code pruneF be here as well?
-	if err := a.commitment.pruneF(txUnwindTo, math2.MaxUint64, func(_ uint64, k, v []byte) error {
-		return stateChanges.Collect(k, v)
-	}); err != nil {
+	if err := stateChanges.Load(a.rwTx, "", stateLoad, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 
-	if err := stateChanges.Load(a.rwTx, kv.PlainState, stateLoad, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
+	step := txUnwindTo / a.aggregationStep
+	if err := a.accounts.prune(ctx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+		return err
+	}
+	if err := a.storage.prune(ctx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+		return err
+	}
+	if err := a.code.prune(ctx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+		return err
+	}
+	if err := a.commitment.prune(ctx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+		return err
+	}
 	if err := a.logAddrs.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
 		return err
 	}
