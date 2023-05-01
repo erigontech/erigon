@@ -1,6 +1,7 @@
 package cltypes_test
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -86,17 +87,36 @@ var testBeaconBlockVariation = &cltypes.SignedBeaconBlock{
 					},
 				},
 			},
+			BlobKzgCommitments: []cltypes.KZGCommitment{{'1', '2', '3'}},
 		},
 	},
 }
 
 var (
 	// Hashes
+	denebHash     = common.HexToHash("0xca16469835c290c736d196c54560d346317e9760011616b23216d59c6fde6f03")
 	capellaHash   = common.HexToHash("0xc4892f81461ed3a24db4b44f26a728219faf1f278d8a1c21d774e2efa73cf1a3")
 	bellatrixHash = common.HexToHash("9a5bc717ecaf6a8d6e879478003729b9ce4e71f5c4e9b4bd4dd166780894ee93")
 	altairHash    = common.HexToHash("36aa8fe956265d171b7ad740077ea9579e25ed3b2f7b2010016513e4ac4754cb")
 	phase0Hash    = common.HexToHash("83dd9e30bf61720822be889abf73760a26fb42dc9fb27fa872f845d68af92bc4")
 )
+
+func TestDenebBlock(t *testing.T) {
+	testBeaconBlockVariation.Block.Body.Version = clparams.DenebVersion
+	executionPayload := cltypes.NewEth1Block(clparams.DenebVersion)
+	executionPayload.ExcessDataGas = big.NewInt(69)
+	testBeaconBlockVariation.Block.Body.ExecutionPayload = executionPayload
+	require.Equal(t, testBeaconBlockVariation.Version(), clparams.DenebVersion)
+	// Simple unit test: unmarshal + marshal + hashtreeroot
+	hash, err := testBeaconBlockVariation.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(hash), denebHash)
+	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
+	require.NoError(t, err)
+	block2 := &cltypes.SignedBeaconBlock{}
+	err = block2.DecodeSSZWithVersion(encoded, int(clparams.DenebVersion))
+	require.NoError(t, err)
+}
 
 func TestCapellaBlock(t *testing.T) {
 	testBeaconBlockVariation.Block.Body.Version = clparams.CapellaVersion

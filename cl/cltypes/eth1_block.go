@@ -29,9 +29,10 @@ type Eth1Block struct {
 	Extra         []byte
 	BaseFeePerGas [32]byte
 	// Extra fields
-	BlockHash    libcommon.Hash
-	Transactions [][]byte
-	Withdrawals  types.Withdrawals
+	BlockHash     libcommon.Hash
+	Transactions  [][]byte
+	Withdrawals   types.Withdrawals
+	ExcessDataGas *big.Int
 	// internals
 	version clparams.StateVersion
 }
@@ -66,11 +67,15 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 		BlockHash:     header.Hash(),
 		Transactions:  body.Transactions,
 		Withdrawals:   body.Withdrawals,
+		ExcessDataGas: header.ExcessDataGas,
 	}
-	if header.WithdrawalsHash == nil {
-		block.version = clparams.BellatrixVersion
-	} else {
+
+	if block.ExcessDataGas != nil {
+		block.version = clparams.DenebVersion
+	} else if header.WithdrawalsHash != nil {
 		block.version = clparams.CapellaVersion
+	} else {
+		block.version = clparams.BellatrixVersion
 	}
 	return block
 }
@@ -124,6 +129,10 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 		size += len(b.Withdrawals)*44 + 4
 	}
 
+	if b.version >= clparams.DenebVersion {
+		size += 32 // ExcessDataGas
+	}
+
 	return
 }
 
@@ -136,6 +145,7 @@ func (b *Eth1Block) DecodeSSZ(buf []byte) error {
 func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 	b.version = clparams.StateVersion(version)
 	if len(buf) < b.EncodingSizeSSZ() {
+		fmt.Println("here!!")
 		return ssz.ErrLowBufferSize
 	}
 	// We can reuse code from eth1-header for partial decoding
@@ -257,7 +267,15 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	// Write withdrawals offset if exist
 	if b.version >= clparams.CapellaVersion {
 		buf = append(buf, ssz.OffsetSSZ(uint32(currentOffset))...)
+		for _, withdrawal := range b.Withdrawals {
+			currentOffset += withdrawal.EncodingSize()
+		}
 	}
+
+	if b.version >= clparams.DenebVersion {
+		buf = append(buf, ssz.OffsetSSZ(uint32(currentOffset))...)
+	}
+
 	// Sanity check for extra data then write it.
 	if len(b.Extra) > 32 {
 		return nil, fmt.Errorf("Encode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Extra))
@@ -277,6 +295,10 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	// Append all withdrawals SSZ
 	for _, withdrawal := range b.Withdrawals {
 		buf = append(buf, withdrawal.EncodeSSZ()...)
+	}
+
+	if b.version >= clparams.DenebVersion {
+		buf = append(buf, b.ExcessDataGas.Bytes()...)
 	}
 
 	return buf, nil
@@ -328,6 +350,7 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 		Nonce:           serenity.SerenityNonce,
 		BaseFee:         baseFee,
 		WithdrawalsHash: withdrawalsHash,
+		ExcessDataGas:   b.ExcessDataGas,
 	}
 
 	// If the header hash does not match the block hash, return an error.

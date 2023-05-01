@@ -27,6 +27,7 @@ type Eth1Header struct {
 	BlockHash        libcommon.Hash
 	TransactionsRoot libcommon.Hash
 	WithdrawalsRoot  libcommon.Hash
+	ExcessDataGas    [32]byte
 	// internals
 	version clparams.StateVersion
 }
@@ -94,6 +95,10 @@ func (h *Eth1Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 		buf = append(buf, h.WithdrawalsRoot[:]...)
 	}
 
+	if h.version >= clparams.DenebVersion {
+		buf = append(buf, h.ExcessDataGas[:]...)
+	}
+
 	buf = append(buf, h.Extra...)
 	return
 }
@@ -147,6 +152,11 @@ func (h *Eth1Header) DecodeSSZWithVersion(buf []byte, version int) error {
 		copy(h.WithdrawalsRoot[:], buf[pos:])
 		pos += len(h.WithdrawalsRoot)
 	}
+
+	if h.version >= clparams.DenebVersion {
+		copy(h.ExcessDataGas[:], buf[pos:pos+32])
+		pos += 32
+	}
 	h.Extra = common.CopyBytes(buf[pos:])
 	return nil
 }
@@ -156,6 +166,10 @@ func (h *Eth1Header) EncodingSizeSSZ() int {
 	size := 536
 
 	if h.version >= clparams.CapellaVersion {
+		size += 32
+	}
+
+	if h.version >= clparams.DenebVersion {
 		size += 32
 	}
 
@@ -212,5 +226,10 @@ func (h *Eth1Header) HashSSZ() ([32]byte, error) {
 	if h.version >= clparams.CapellaVersion {
 		leaves = append(leaves, h.WithdrawalsRoot)
 	}
+
+	if h.version >= clparams.DenebVersion {
+		leaves = append(leaves, h.ExcessDataGas)
+	}
+
 	return merkle_tree.ArraysRoot(leaves, 16)
 }
