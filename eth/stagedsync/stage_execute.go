@@ -323,6 +323,20 @@ func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint
 }
 
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) (err error) {
+	defer func() {
+		if tx != nil {
+			fmt.Printf("after unwind exec: %d->%d\n", u.CurrentBlockNumber, u.UnwindPoint)
+			cfg.agg.SetTx(tx)
+			cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
+				vv, err := accounts.ConvertV3toV2(v)
+				if err != nil {
+					panic(err)
+				}
+				fmt.Printf("acc: %x, %x\n", k, vv)
+			}, tx)
+		}
+	}()
+
 	cfg.agg.SetLogPrefix(s.LogPrefix())
 
 	rs := state.NewStateV3(cfg.dirs.Tmp, nil)
@@ -670,19 +684,6 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 
 	//TODO: why we don't call accumulator.ChangeCode???
 	if cfg.historyV3 {
-		defer func() {
-			if tx != nil {
-				fmt.Printf("after unwind exec: %d->%d\n", u.CurrentBlockNumber, u.UnwindPoint)
-				cfg.agg.SetTx(tx)
-				cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
-					vv, err := accounts.ConvertV3toV2(v)
-					if err != nil {
-						panic(err)
-					}
-					fmt.Printf("acc: %x, %x\n", k, vv)
-				}, tx)
-			}
-		}()
 		return unwindExec3(u, s, tx, ctx, cfg, accumulator)
 	}
 
