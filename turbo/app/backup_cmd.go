@@ -20,8 +20,8 @@ import (
 
 // nolint
 var backupCommand = cli.Command{
-	Name: "backup",
-	Description: `Backup all databases of Erigon. 
+	Name: "alpha_backup",
+	Description: `Alpha verison of command. Backup all databases of Erigon. 
 Can do backup without stopping Erigon.
 Limitations: 
 - no support of Consensus DB (copy it manually if you need). Possible to implement in future.
@@ -30,7 +30,12 @@ Limitations:
 - jwt tocken: copy it manually - if need. 
 - no support of SentryDB (datadir/nodes folder). Because seems no much reason to backup it.
 
-Example: erigon backup --datadir=<your_datadir> --to.datadir=<backup_datadir> 
+Example: erigon backup --datadir=<your_datadir> --to.datadir=<backup_datadir>
+
+TODO:
+- support of Consensus DB (copy it manually if you need). Possible to implement in future.
+- support 2 use-cases: create new node (then remove jwt tocken, and nodes folder) and backup exising one (then backup jwt tocken, and nodes folder)
+- support of datadir/snapshots folder. Possible to implement in future. Can copy it manually or rsync or symlink/mount.
 `,
 	Action: doBackup,
 	Flags: joinFlags([]cli.Flag{
