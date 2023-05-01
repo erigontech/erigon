@@ -28,15 +28,13 @@ type ForwardBeaconDownloader struct {
 	rpc                       *rpc.BeaconRpcP2P
 	process                   ProcessFn
 
-	segments []*cltypes.SignedBeaconBlock // Unprocessed downloaded segments
-	mu       sync.Mutex
+	mu sync.Mutex
 }
 
 func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *ForwardBeaconDownloader {
 	return &ForwardBeaconDownloader{
-		ctx:      ctx,
-		segments: []*cltypes.SignedBeaconBlock{},
-		rpc:      rpc,
+		ctx: ctx,
+		rpc: rpc,
 	}
 }
 
@@ -68,14 +66,6 @@ func (f *ForwardBeaconDownloader) HighestProcessedRoot() libcommon.Hash {
 	return f.highestBlockRootProcessed
 }
 
-// addSegment process new block segment.
-func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlock) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	// Skip if does continue the segment.
-	f.segments = append(f.segments, block)
-}
-
 func (f *ForwardBeaconDownloader) RequestMore() {
 	count := uint64(4) // dont need many
 	responses, pid, err := f.rpc.SendBeaconBlocksByRangeReq(f.highestSlotProcessed+1, count)
@@ -85,30 +75,17 @@ func (f *ForwardBeaconDownloader) RequestMore() {
 		time.Sleep(time.Second)
 		return
 	}
-	for _, response := range responses {
-		f.addSegment(response)
-	}
-
-}
-
-// ProcessBlocks processes blocks we accumulated.
-func (f *ForwardBeaconDownloader) ProcessBlocks() error {
-	if len(f.segments) == 0 {
-		return nil
-	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var err error
-	var highestSlotProcessed uint64
+
 	var highestBlockRootProcessed libcommon.Hash
-	if highestSlotProcessed, highestBlockRootProcessed, err = f.process(f.highestSlotProcessed, f.highestBlockRootProcessed, f.segments); err != nil {
-		return err
+	var highestSlotProcessed uint64
+	if highestSlotProcessed, highestBlockRootProcessed, err = f.process(f.highestSlotProcessed, f.highestBlockRootProcessed, responses); err != nil {
+		f.rpc.BanPeer(pid)
+		return
 	}
 	f.highestSlotProcessed = highestSlotProcessed
 	f.highestBlockRootProcessed = highestBlockRootProcessed
-	// clear segments
-	f.segments = f.segments[:0]
-	return nil
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.
