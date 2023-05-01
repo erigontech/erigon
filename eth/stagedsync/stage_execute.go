@@ -372,6 +372,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		defer func() {
 			if tx != nil {
 				fmt.Printf("after exec: %d->%d\n", s.BlockNumber, toBlock)
+				cfg.agg.SetTx(tx)
 				cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
 					vv, err := accounts.ConvertV3toV2(v)
 					if err != nil {
@@ -675,6 +676,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 		defer func() {
 			if tx != nil {
 				fmt.Printf("after exec: %d->%d\n", u.CurrentBlockNumber, u.UnwindPoint)
+				cfg.agg.SetTx(tx)
 				cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
 					vv, err := accounts.ConvertV3toV2(v)
 					if err != nil {
