@@ -1027,7 +1027,6 @@ type flusher interface {
 }
 
 func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
-	fmt.Printf("a.Flush: %d\n", a.blockNum.Load())
 	a.walLock.Lock()
 	flushers := []flusher{
 		a.accounts.Rotate(),
