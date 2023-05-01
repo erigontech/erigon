@@ -19,7 +19,7 @@ type BlobSideCar struct {
 	Slot            Slot
 	BlockParentRoot Root
 	ProposerIndex   uint64 // validator index
-	Blob            Blob
+	Blob            *Blob
 	KZGCommitment   KZGCommitment
 	KZGProof        KZGProof
 }
@@ -80,14 +80,14 @@ func (b *BlobSideCar) EncodingSizeSSZ() int {
 	return 131_256
 }
 
-func (b *BlobSideCar) HashSSZ() (libcommon.Hash, error) {
+func (b *BlobSideCar) HashSSZ() ([32]byte, error) {
 	KZGCommitmentLeave, err := merkle_tree.PublicKeyRoot(b.KZGCommitment)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return [32]byte{}, err
 	}
 	KZGProofLeave, err := merkle_tree.PublicKeyRoot(b.KZGProof)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return [32]byte{}, err
 	}
 
 	blobLeave := [][32]byte{}
@@ -99,7 +99,7 @@ func (b *BlobSideCar) HashSSZ() (libcommon.Hash, error) {
 
 	blobRoot, err := merkle_tree.ArraysRoot(blobLeave, 4096)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return [32]byte{}, err
 	}
 
 	return merkle_tree.ArraysRoot([][32]byte{
@@ -115,7 +115,7 @@ func (b *BlobSideCar) HashSSZ() (libcommon.Hash, error) {
 }
 
 type SignedBlobSideCar struct {
-	Message   BlobSideCar
+	Message   *BlobSideCar
 	Signature [96]byte
 }
 
@@ -148,15 +148,15 @@ func (b *SignedBlobSideCar) EncodingSizeSSZ() int {
 	return b.Message.EncodingSizeSSZ() + 96
 }
 
-func (b *SignedBlobSideCar) HashSSZ() (libcommon.Hash, error) {
+func (b *SignedBlobSideCar) HashSSZ() ([32]byte, error) {
 	messageLeave, err := b.Message.HashSSZ()
 	if err != nil {
-		return libcommon.Hash{}, err
+		return [32]byte{}, err
 	}
 
 	signatureLeave, err := merkle_tree.SignatureRoot(b.Signature)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return [32]byte{}, err
 	}
 
 	return merkle_tree.ArraysRoot([][32]byte{
@@ -192,7 +192,7 @@ func (b *BlobIdentifier) EncodingSizeSSZ() int {
 	return 40
 }
 
-func (b *BlobIdentifier) HashSSZ() (libcommon.Hash, error) {
+func (b *BlobIdentifier) HashSSZ() ([32]byte, error) {
 	return merkle_tree.ArraysRoot([][32]byte{
 		b.BlockRoot,
 		merkle_tree.Uint64Root(b.Index),

@@ -14,7 +14,7 @@ func TestBlobSideCar_EncodeDecodeSSZ(t *testing.T) {
 	slot := cltypes.Slot(456)
 	blockParentRoot := cltypes.Root{4, 5, 6}
 	proposerIndex := uint64(789)
-	blob := cltypes.Blob{}
+	blob := &cltypes.Blob{1, 2, 3, 4, 5, 6, 7, 8}
 	kzgCommitment := cltypes.KZGCommitment{7, 8, 9}
 	kzgProof := cltypes.KZGProof{10, 11, 12}
 
@@ -34,7 +34,7 @@ func TestBlobSideCar_EncodeDecodeSSZ(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	decoded := &cltypes.BlobSideCar{}
+	decoded := &cltypes.BlobSideCar{Blob: &cltypes.Blob{}}
 	err = decoded.DecodeSSZ(encoded)
 	if err != nil {
 		t.Fatal(err)
@@ -69,13 +69,13 @@ func TestBlobSideCar_EncodeDecodeSSZ(t *testing.T) {
 func TestSignedBlobSideCar(t *testing.T) {
 	// Create a BlobSideCar to use as the message for SignedBlobSideCar
 	blob := cltypes.Blob{1, 2, 3, 4, 5, 6, 7, 8}
-	blobSideCar := cltypes.BlobSideCar{
+	blobSideCar := &cltypes.BlobSideCar{
 		BlockRoot:       cltypes.Root{1},
 		Index:           2,
 		Slot:            3,
 		BlockParentRoot: cltypes.Root{4},
 		ProposerIndex:   5,
-		Blob:            blob,
+		Blob:            &blob,
 		KZGCommitment:   cltypes.KZGCommitment{6},
 		KZGProof:        cltypes.KZGProof{7},
 	}
@@ -92,7 +92,7 @@ func TestSignedBlobSideCar(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Decode the encoded SignedBlobSideCar
-	decoded := cltypes.SignedBlobSideCar{}
+	decoded := cltypes.SignedBlobSideCar{Message: &cltypes.BlobSideCar{Blob: &cltypes.Blob{}}}
 	err = decoded.DecodeSSZ(encoded)
 	assert.NoError(t, err)
 
