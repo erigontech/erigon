@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -41,8 +40,6 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel) *Sentin
 func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*sentinelrpc.EmptyMessage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	fmt.Println("entering ban")
-	defer fmt.Println("exiting ban")
 	var pid peer.ID
 	if err := pid.UnmarshalText([]byte(p.Pid)); err != nil {
 		return nil, err
@@ -54,8 +51,6 @@ func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*senti
 func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.GossipData) (*sentinelrpc.EmptyMessage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	fmt.Println("entering publish")
-	defer fmt.Println("exiting publish")
 	manager := s.sentinel.GossipManager()
 	// Snappify payload before sending it to gossip
 	compressedData := utils.CompressSnappy(msg.Data)
@@ -111,8 +106,6 @@ func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sen
 func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	fmt.Println("entering sending")
-	defer fmt.Println("exiting sending")
 	retryReqInterval := time.NewTicker(200 * time.Millisecond)
 	defer retryReqInterval.Stop()
 	timeout := time.NewTimer(2 * time.Second)
@@ -122,7 +115,7 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 	for {
 		select {
 		case <-s.ctx.Done():
-			return nil, fmt.Errorf("interrupted")
+			return nil, context.Canceled
 		case <-retryReqInterval.C:
 			// Spawn new thread for request
 			pid, err := s.sentinel.RandomPeer(req.Topic)
@@ -200,9 +193,7 @@ func (s *SentinelServer) ListenToGossip() {
 		s.mu.RLock()
 		select {
 		case pkt := <-s.sentinel.RecvGossip():
-			fmt.Println("entering recv")
 			s.handleGossipPacket(pkt)
-			fmt.Println("exiting recv")
 		case <-s.ctx.Done():
 			return
 		case <-refreshTicker.C:
