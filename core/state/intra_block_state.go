@@ -765,7 +765,7 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // - Add coinbase to access list (EIP-3651)
 //
 // Cancun fork:
-// - Reset transient storage(EIP-1153)
+// - Reset transient storage (EIP-1153)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
 	precompiles []libcommon.Address, list types2.AccessList,
 ) {

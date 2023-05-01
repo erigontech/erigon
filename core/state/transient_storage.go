@@ -46,12 +46,3 @@ func (t transientStorage) Get(addr libcommon.Address, key libcommon.Hash) uint25
 	}
 	return val[key]
 }
-
-// Copy does a deep copy of the transientStorage
-func (t transientStorage) Copy() transientStorage {
-	storage := make(transientStorage)
-	for key, value := range t {
-		storage[key] = value.Copy()
-	}
-	return storage
-}
