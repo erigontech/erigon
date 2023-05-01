@@ -601,21 +601,22 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 				copy(address[:], k)
 
 				// cleanup contract code bucket
-				original, err := newStateReader(tx).ReadAccountData(address)
-				if err != nil {
-					return fmt.Errorf("read account for %x: %w", address, err)
-				}
-				if original != nil {
-					//TODO: E4 domain.Prune does it?
-
-					// clean up all the code incarnations original incarnation and the new one
-					//for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
-					//	err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
-					//	if err != nil {
-					//		return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
-					//	}
-					//}
-				}
+				//TODO: E4 domain.Prune does it?
+				/*
+					original, err := newStateReader(tx).ReadAccountData(address)
+					if err != nil {
+						return fmt.Errorf("read account for %x: %w", address, err)
+					}
+					if original != nil {
+						// clean up all the code incarnations original incarnation and the new one
+						for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+							err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation))
+							if err != nil {
+								return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
+							}
+						}
+					}
+				*/
 
 				newV := make([]byte, acc.EncodingLengthForStorage())
 				acc.EncodeForStorage(newV)
@@ -625,15 +626,17 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 			} else {
 				var address common.Address
 				copy(address[:], k)
-				original, err := newStateReader(tx).ReadAccountData(address)
-				if err != nil {
-					return err
-				}
-				if original != nil {
-					currentInc = original.Incarnation
-				} else {
-					currentInc = 1
-				}
+				/*
+					original, err := newStateReader(tx).ReadAccountData(address)
+					if err != nil {
+						return err
+					}
+					if original != nil {
+						currentInc = original.Incarnation
+					} else {
+						currentInc = 1
+					}
+				*/
 
 				if accumulator != nil {
 					accumulator.DeleteAccount(address)
