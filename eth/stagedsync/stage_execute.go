@@ -283,6 +283,17 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
+	defer func() {
+		if tx != nil {
+			fmt.Printf("after exec: %d->%d\n", s.BlockNumber, to)
+			tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+				if len(k) == 20 {
+					fmt.Printf("acc: %x, %x\n", k, v)
+				}
+				return nil
+			})
+		}
+	}()
 
 	parallel := initialCycle && tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, logPrefix, to); err != nil {
@@ -369,20 +380,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	}()
 
 	if cfg.historyV3 {
-		defer func() {
-			if tx != nil {
-				fmt.Printf("after exec: %d->%d\n", s.BlockNumber, toBlock)
-				cfg.agg.SetTx(tx)
-				cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
-					vv, err := accounts.ConvertV3toV2(v)
-					if err != nil {
-						panic(err)
-					}
-					fmt.Printf("acc: %x, %x\n", k, vv)
-				}, tx)
-			}
-		}()
-
 		if err = ExecBlockV3(s, u, tx, toBlock, ctx, cfg, initialCycle); err != nil {
 			return err
 		}
