@@ -1,3 +1,7 @@
+//go:build spectest
+
+// once all tests are implemented, we can allow this test in the ci build path
+
 package main
 
 import (

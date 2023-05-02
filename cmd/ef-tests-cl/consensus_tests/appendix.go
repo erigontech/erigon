@@ -33,8 +33,10 @@ func init() {
 		With("participation_record_updates", participationFlagUpdatesTest)
 	TestFormats.Add("finality").
 		With("finality", FinalityFinality)
-	TestFormats.Add("fork-choice").
-		With("", spectest.UnimplementedHandler)
+	TestFormats.Add("fork_choice").
+		With("get_head", &ForkChoice{}).
+		With("on_block", &ForkChoice{}).
+		With("ex_ante", &ForkChoice{})
 	TestFormats.Add("forks").
 		With("fork", ForksFork)
 	TestFormats.Add("genesis").
