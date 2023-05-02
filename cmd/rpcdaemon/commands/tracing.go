@@ -449,7 +449,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
-	gp := new(core.GasPool).AddGas(math.MaxUint64)
+	gp := new(core.GasPool).AddGas(math.MaxUint64).AddDataGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
 		st.SetTxContext(txn.Hash(), block.Hash(), idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
