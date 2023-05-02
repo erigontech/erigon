@@ -7,7 +7,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 // GetHead fetches the current head.
@@ -27,7 +26,7 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 		return libcommon.Hash{}, 0, err
 	}
 	// Filter all validators deemed as bad
-	filteredIndicies := f.filterValidatorSetForAttestationScores(justificationState.Validators(), justificationState.Epoch())
+	filteredIndicies := f.filterValidatorSetForAttestationScores(justificationState.validators, justificationState.epoch)
 	for {
 		// Filter out current head children.
 		unfilteredChildren := f.forkGraph.GetChildren(head)
@@ -72,10 +71,10 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 }
 
 // filterValidatorSetForAttestationScores preliminarly filter the validator set obliging to consensus rules.
-func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(validatorSet []*cltypes.Validator, epoch uint64) []uint64 {
+func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(validatorSet []*checkpointValidator, epoch uint64) []uint64 {
 	filtered := make([]uint64, 0, len(validatorSet))
 	for validatorIndex, validator := range validatorSet {
-		if !validator.Active(epoch) || validator.Slashed {
+		if !validator.active(epoch) || validator.slashed {
 			continue
 		}
 		if _, hasLatestMessage := f.latestMessages[uint64(validatorIndex)]; !hasLatestMessage {
@@ -90,19 +89,19 @@ func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(validatorSet []
 }
 
 // getWeight computes weight in head decision of canonical chain.
-func (f *ForkChoiceStore) getWeight(root libcommon.Hash, indicies []uint64, state *state.BeaconState) uint64 {
+func (f *ForkChoiceStore) getWeight(root libcommon.Hash, indicies []uint64, state *checkpointState) uint64 {
 	header, has := f.forkGraph.GetHeader(root)
 	if !has {
 		return 0
 	}
-	validators := state.Validators()
+	validators := state.validators
 	// Compute attestation score
 	var attestationScore uint64
 	for _, validatorIndex := range indicies {
 		if f.Ancestor(f.latestMessages[validatorIndex].Root, header.Slot) != root {
 			continue
 		}
-		attestationScore += validators[validatorIndex].EffectiveBalance
+		attestationScore += validators[validatorIndex].balance
 	}
 	if f.proposerBoostRoot == (libcommon.Hash{}) {
 		return attestationScore
@@ -110,8 +109,8 @@ func (f *ForkChoiceStore) getWeight(root libcommon.Hash, indicies []uint64, stat
 
 	// Boost is applied if root is an ancestor of proposer_boost_root
 	if f.Ancestor(f.proposerBoostRoot, header.Slot) == root {
-		committeeWeight := state.GetTotalActiveBalance() / state.BeaconConfig().SlotsPerEpoch
-		attestationScore += (committeeWeight * state.BeaconConfig().ProposerScoreBoost) / 100
+		committeeWeight := state.activeBalance / state.beaconConfig.SlotsPerEpoch
+		attestationScore += (committeeWeight * state.beaconConfig.ProposerScoreBoost) / 100
 	}
 	return attestationScore
 }

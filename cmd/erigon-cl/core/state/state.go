@@ -129,7 +129,7 @@ func (b *BeaconState) _updateProposerIndex() (err error) {
 
 	hash := sha256.New()
 	// Input for the seed hash.
-	input := b.GetSeed(epoch, b.BeaconConfig().DomainBeaconProposer)
+	input := GetSeed(b.beaconConfig, b.randaoMixes[:], epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, b.slot)
 

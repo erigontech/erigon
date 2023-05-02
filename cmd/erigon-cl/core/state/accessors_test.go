@@ -230,7 +230,7 @@ func TestComputeCommittee(t *testing.T) {
 
 	epoch := state.Epoch()
 	indices := state.GetActiveValidatorsIndices(epoch)
-	seed := state.GetSeed(epoch, clparams.MainnetBeaconConfig.DomainBeaconAttester)
+	seed := GetSeed(clparams.MainnetBeaconConfig, state.RandaoMixes(), epoch, clparams.MainnetBeaconConfig.DomainBeaconAttester)
 	committees, err := state.ComputeCommittee(indices, seed, 0, 1, utils.Keccak256)
 	require.NoError(t, err, "Could not compute committee")
 
