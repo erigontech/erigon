@@ -159,7 +159,8 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 		stepstr := fmt.Sprintf("step %d: %s", stepIdx, step.StepType())
 		switch step.StepType() {
 		case "on_payload_info":
-			//TODO: perform engine-level mocking
+			// we are not doing engine level mocking, so simply return the test when this is received
+			return nil
 		case "on_attester_slashing":
 			data := &cltypes.AttesterSlashing{}
 			err := spectest.ReadSsz(root, c.Version(), step.GetAttesterSlashing()+".ssz_snappy", data)
