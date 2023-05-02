@@ -71,6 +71,9 @@ const (
 type BranchData []byte
 
 func (branchData BranchData) String() string {
+	if len(branchData) == 0 {
+		return ""
+	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
 	pos := 4

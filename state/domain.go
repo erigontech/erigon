@@ -514,11 +514,13 @@ func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 
 type domainWAL struct {
 	d           *Domain
+	predecessor *domainWAL
 	keys        *etl.Collector
 	values      *etl.Collector
 	topLock     sync.RWMutex
 	topVals     map[string][]byte
 	topSize     atomic.Uint64
+	flushed     atomic.Bool
 	aux         []byte
 	tmpdir      string
 	buffered    bool
@@ -529,6 +531,9 @@ type domainWAL struct {
 func (h *domainWAL) close() {
 	if h == nil { // allow dobule-close
 		return
+	}
+	if h.keys != nil {
+		h.keys.Close()
 	}
 	if h.values != nil {
 		h.values.Close()
@@ -545,6 +550,7 @@ func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := h.values.Load(tx, h.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	h.flushed.Store(true)
 	return nil
 }
 
@@ -554,6 +560,15 @@ func (h *domainWAL) topValue(key []byte) ([]byte, bool) {
 	h.topLock.RUnlock()
 	if ok {
 		return v, ok
+	}
+	if h.predecessor != nil {
+		vp, vok := h.predecessor.topValue(key)
+		if h.predecessor.flushed.Load() {
+			// when wal is synced with db, use db for further reads
+			h.predecessor.close()
+			h.predecessor = nil
+		}
+		return vp, vok
 	}
 	return nil, false
 }
@@ -1618,12 +1633,6 @@ func (dc *DomainContext) Close() {
 func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
 	dc.d.stats.FilesQueries.Add(1)
 
-	if dc.d.wal != nil {
-		if err := dc.d.wal.apply(it); err != nil {
-			return err
-		}
-	}
-
 	var cp CursorHeap
 	heap.Init(&cp)
 	var k, v []byte
@@ -1647,6 +1656,17 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 		}
 		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
 	}
+	if dc.d.wal != nil {
+		iter := func(k, v []byte) {
+			if k != nil && bytes.HasPrefix(k, prefix) {
+				heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: dc.d.txNum, reverse: true})
+			}
+		}
+		if err := dc.d.wal.apply(iter); err != nil {
+			return err
+		}
+	}
+
 	for i, item := range dc.files {
 		bg := dc.statelessBtree(i)
 		if bg.Empty() {

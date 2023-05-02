@@ -67,7 +67,6 @@ type AggregatorV3 struct {
 	dir              string
 	tmpdir           string
 	txNum            atomic.Uint64
-	blockNum         atomic.Uint64
 	aggregationStep  uint64
 	keepInDB         uint64
 
@@ -255,9 +254,11 @@ func (a *AggregatorV3) CleanDir() {
 func (a *AggregatorV3) SharedDomains() *SharedDomains {
 	if a.domains == nil {
 		a.domains = NewSharedDomains(a.accounts, a.code, a.storage, a.commitment)
-		a.domains.aggCtx = a.MakeContext()
-		a.domains.roTx = a.rwTx
 	}
+	if a.domains.aggCtx == nil {
+		a.domains.aggCtx = a.MakeContext()
+	}
+	a.domains.roTx = a.rwTx
 	return a.domains
 }
 
@@ -907,6 +908,23 @@ func (a *AggregatorV3) NeedSaveFilesListInDB() bool {
 }
 
 func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad etl.LoadFunc) error {
+	//TODO: replace pruneF by some kind of history-walking
+	stateChanges := etl.NewCollector(a.logPrefix, a.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	defer stateChanges.Close()
+	if err := a.accounts.pruneF(txUnwindTo, math2.MaxUint64, func(_ uint64, k, v []byte) error {
+		return stateChanges.Collect(k, v)
+	}); err != nil {
+		return err
+	}
+	if err := a.storage.pruneF(txUnwindTo, math2.MaxUint64, func(_ uint64, k, v []byte) error {
+		return stateChanges.Collect(k, v)
+	}); err != nil {
+		return err
+	}
+	if err := stateChanges.Load(a.rwTx, "", stateLoad, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	step := txUnwindTo / a.aggregationStep
@@ -1730,7 +1748,11 @@ func (a *AggregatorV3) UpdateStorage(addr, loc []byte, value, preVal []byte) err
 
 func (a *AggregatorV3) ComputeCommitmentOnCtx(saveStateAfter, trace bool, aggCtx *AggregatorV3Context) (rootHash []byte, err error) {
 
-	a.commitment.ResetFns(aggCtx.branchFn, aggCtx.accountFn, aggCtx.storageFn)
+	if a.domains != nil {
+		a.commitment.ResetFns(a.domains.BranchFn, a.domains.AccountFn, a.domains.StorageFn)
+	} else {
+		a.commitment.ResetFns(aggCtx.branchFn, aggCtx.accountFn, aggCtx.storageFn)
+	}
 
 	mxCommitmentRunning.Inc()
 	rootHash, branchNodeUpdates, err := a.commitment.ComputeCommitment(trace)
@@ -1771,7 +1793,7 @@ func (a *AggregatorV3) ComputeCommitmentOnCtx(saveStateAfter, trace bool, aggCtx
 	}
 
 	if saveStateAfter {
-		if err := a.commitment.storeCommitmentState(a.blockNum.Load()); err != nil {
+		if err := a.commitment.storeCommitmentState(a.domains.blockNum.Load()); err != nil {
 			return nil, err
 		}
 	}
