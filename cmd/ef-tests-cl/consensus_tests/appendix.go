@@ -68,17 +68,63 @@ func init() {
 		With("", spectest.UnimplementedHandler)
 	TestFormats.Add("ssz_generic").
 		With("", spectest.UnimplementedHandler)
-	TestFormats.Add("ssz_static").
-		With("Validator", getSSZStaticConsensusTest(&cltypes.Validator{})).
-		With("BeaconState", getSSZStaticConsensusTest(state.New(&clparams.MainnetBeaconConfig))).
-		With("Checkpoint", getSSZStaticConsensusTest(&cltypes.Checkpoint{})).
-		With("Deposit", getSSZStaticConsensusTest(&cltypes.Deposit{})).
-		With("DepositData", getSSZStaticConsensusTest(&cltypes.DepositData{})).
-		With("SignedBeaconBlock", getSSZStaticConsensusTest(&cltypes.SignedBeaconBlock{})).
-		With("BeaconBlock", getSSZStaticConsensusTest(&cltypes.BeaconBlock{})).
-		With("BeaconBody", getSSZStaticConsensusTest(&cltypes.BeaconBody{}))
 	TestFormats.Add("sync").
 		With("", spectest.UnimplementedHandler)
 	TestFormats.Add("transition").
 		With("core", &TransitionCore{})
+
+	addSszTests()
+}
+
+func addSszTests() {
+	TestFormats.Add("ssz_static").
+		//	With("AggregateAndProof", getSSZStaticConsensusTest(&cltypes.AggregateAndProof{})).
+		With("Attestation", getSSZStaticConsensusTest(&cltypes.Attestation{})).
+		//		With("AttestationData", getSSZStaticConsensusTest(&cltypes.AttestationData{})).
+		With("AttesterSlashing", getSSZStaticConsensusTest(&cltypes.AttesterSlashing{})).
+		With("BeaconBlock", getSSZStaticConsensusTest(&cltypes.BeaconBlock{})).
+		//With("BeaconBlockBody", getSSZStaticConsensusTest(&cltypes.BeaconBlockBody{})).
+		//		With("BeaconBlockHeader", getSSZStaticConsensusTest(&cltypes.BeaconBlockHeader{})).
+		With("BeaconState", getSSZStaticConsensusTest(state.New(&clparams.MainnetBeaconConfig))).
+		//		With("BlobIdentifier", getSSZStaticConsensusTest(&cltypes.BlobIdentifier{})).
+		//		With("BlobSidecar", getSSZStaticConsensusTest(&cltypes.BlobSidecar{})).
+		//		With("BLSToExecutionChange", getSSZStaticConsensusTest(&cltypes.BLSToExecutionChange{})).
+		With("Checkpoint", getSSZStaticConsensusTest(&cltypes.Checkpoint{})).
+		//	With("ContributionAndProof", getSSZStaticConsensusTest(&cltypes.ContributionAndProof{})).
+		With("Deposit", getSSZStaticConsensusTest(&cltypes.Deposit{})).
+		With("DepositData", getSSZStaticConsensusTest(&cltypes.DepositData{})).
+		//	With("DepositMessage", getSSZStaticConsensusTest(&cltypes.DepositMessage{})).
+		//	With("Eth1Block", getSSZStaticConsensusTest(&cltypes.Eth1Block{})).
+		With("Eth1Data", getSSZStaticConsensusTest(&cltypes.Eth1Data{})).
+		//With("ExecutionPayload", getSSZStaticConsensusTest(&cltypes.ExecutionPayload{})).
+		//With("ExecutionPayloadHeader", getSSZStaticConsensusTest(&cltypes.ExecutionPayloadHeader{})).
+		//With("Fork", getSSZStaticConsensusTest(&cltypes.Fork{})).
+		//With("ForkData", getSSZStaticConsensusTest(&cltypes.ForkData{})).
+		//With("HistoricalBatch", getSSZStaticConsensusTest(&cltypes.HistoricalBatch{})).
+		With("HistoricalSummary", getSSZStaticConsensusTest(&cltypes.HistoricalSummary{})).
+		//	With("IndexedAttestation", getSSZStaticConsensusTest(&cltypes.IndexedAttestation{})).
+		//	With("LightClientBootstrap", getSSZStaticConsensusTest(&cltypes.LightClientBootstrap{})).
+		//	With("LightClientFinalityUpdate", getSSZStaticConsensusTest(&cltypes.LightClientFinalityUpdate{})).
+		//	With("LightClientHeader", getSSZStaticConsensusTest(&cltypes.LightClientHeader{})).
+		//	With("LightClientOptimisticUpdate", getSSZStaticConsensusTest(&cltypes.LightClientOptimisticUpdate{})).
+		//	With("LightClientUpdate", getSSZStaticConsensusTest(&cltypes.LightClientUpdate{})).
+		With("PendingAttestation", getSSZStaticConsensusTest(&cltypes.PendingAttestation{})).
+		//		With("PowBlock", getSSZStaticConsensusTest(&cltypes.PowBlock{})).
+		With("ProposerSlashing", getSSZStaticConsensusTest(&cltypes.ProposerSlashing{})).
+		//		With("SignedAggregateAndProof", getSSZStaticConsensusTest(&cltypes.SignedAggregateAndProof{})).
+		With("SignedBeaconBlock", getSSZStaticConsensusTest(&cltypes.SignedBeaconBlock{})).
+		//	With("SignedBeaconBlockHeader", getSSZStaticConsensusTest(&cltypes.SignedBeaconBlockHeader{})).
+		//	With("SignedBlobSidecar", getSSZStaticConsensusTest(&cltypes.SignedBlobSidecar{})).
+		With("SignedBLSToExecutionChange", getSSZStaticConsensusTest(&cltypes.SignedBLSToExecutionChange{})).
+		//		With("SignedContributionAndProof", getSSZStaticConsensusTest(&cltypes.SignedContributionAndProof{})).
+		//	With("SignedVoluntaryExit", getSSZStaticConsensusTest(&cltypes.SignedVoluntaryExit{})).
+		//	With("SigningData", getSSZStaticConsensusTest(&cltypes.SigningData{})).
+		//	With("SyncAggregate", getSSZStaticConsensusTest(&cltypes.SyncAggregate{})).
+		//	With("SyncAggregatorSelectionData", getSSZStaticConsensusTest(&cltypes.SyncAggregatorSelectionData{})).
+		//	With("SyncCommittee", getSSZStaticConsensusTest(&cltypes.SyncCommittee{})).
+		//	With("SyncCommitteeContribution", getSSZStaticConsensusTest(&cltypes.SyncCommitteeContribution{})).
+		//	With("SyncCommitteeMessage", getSSZStaticConsensusTest(&cltypes.SyncCommitteeMessage{})).
+		With("Validator", getSSZStaticConsensusTest(&cltypes.Validator{}))
+	//	With("VoluntaryExit", getSSZStaticConsensusTest(&cltypes.VoluntaryExit{})).
+	//	With("Withdrawal", getSSZStaticConsensusTest(&types.Withdrawal{}))
 }
