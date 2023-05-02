@@ -1,4 +1,4 @@
-.PHONY: build clean setup
+.PHONY: build clean setup example
 
 
 setup:
@@ -14,3 +14,6 @@ clean:
 build:
 	go build -o eftests ./
 
+example:
+	#go test -v -run=/mainnet/altair/transition
+	go test -v -run=/mainnet/altair/sanity

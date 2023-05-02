@@ -20,6 +20,11 @@ func (r *Format) With(name string, handler Handler) *Format {
 	return r
 }
 
+func (r *Format) WithFn(name string, handler HandlerFunc) *Format {
+	r.handlers[name] = handler
+	return r
+}
+
 func (r *Format) GetHandlers() []string {
 	o := make([]string, 0, len(r.handlers))
 	for k := range r.handlers {

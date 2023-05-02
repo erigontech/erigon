@@ -12,6 +12,7 @@ require (
 )
 
 require (
+	gfx.cafe/util/go/generic v0.0.0-20230428224322-25dfeb8ca206
 	github.com/99designs/gqlgen v0.17.30
 	github.com/Giulio2002/bls v0.0.0-20230428210858-67fd06bbe237
 	github.com/RoaringBitmap/roaring v1.2.3
@@ -95,6 +96,7 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v2 v2.4.0
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.22.0
 	pgregory.net/rapid v0.5.5
 )
@@ -254,7 +256,6 @@ require (
 	golang.org/x/tools v0.7.0 // indirect
 	google.golang.org/genproto v0.0.0-20230306155012-7f2fa6fef1f4 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.3.0 // indirect
 	lukechampine.com/blake3 v1.1.7 // indirect
 	lukechampine.com/uint128 v1.2.0 // indirect
