@@ -283,6 +283,18 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
+	//defer func() {
+	//	if tx != nil {
+	//		fmt.Printf("after exec: %d->%d\n", s.BlockNumber, to)
+	//		cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
+	//			vv, err := accounts.ConvertV3toV2(v)
+	//			if err != nil {
+	//				panic(err)
+	//			}
+	//			fmt.Printf("acc: %x, %x\n", k, vv)
+	//		}, tx)
+	//	}
+	//}()
 
 	parallel := initialCycle && tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, logPrefix, to); err != nil {
@@ -312,6 +324,19 @@ func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint
 }
 
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) (err error) {
+	//defer func() {
+	//	if tx != nil {
+	//		fmt.Printf("after unwind exec: %d->%d\n", u.CurrentBlockNumber, u.UnwindPoint)
+	//		cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
+	//			vv, err := accounts.ConvertV3toV2(v)
+	//			if err != nil {
+	//				panic(err)
+	//			}
+	//			fmt.Printf("acc: %x, %x\n", k, vv)
+	//		}, tx)
+	//	}
+	//}()
+
 	cfg.agg.SetLogPrefix(s.LogPrefix())
 
 	rs := state.NewStateV3(cfg.dirs.Tmp, nil)
