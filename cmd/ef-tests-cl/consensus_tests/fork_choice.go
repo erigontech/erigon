@@ -193,7 +193,11 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			err := spectest.ReadSsz(root, c.Version(), step.GetAttestation()+".ssz_snappy", att)
 			require.NoError(t, err)
 			err = forkStore.OnAttestation(att, false)
-			require.NoError(t, err)
+			if step.GetValid() {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
 		case "on_tick":
 			forkStore.OnTick(uint64(step.GetTick()))
 			//TODO: onTick needs to be able to return error
