@@ -15,7 +15,6 @@ example: tests
 	go test -tags=spectest -v -run=/mainnet/altair/sanity
 
 run: tests
-	#go test -v -run=/mainnet/altair/transition
 	go test -v
 
 
