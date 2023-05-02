@@ -76,6 +76,9 @@ var participationFlagUpdatesTest = NewEpochProcessing(func(s *state.BeaconState)
 	transition.ProcessParticipationFlagUpdates(s)
 	return nil
 })
+var participationRecordUpdatesTest = NewEpochProcessing(func(s *state.BeaconState) error {
+	return transition.ProcessParticipationRecordUpdates(s)
+})
 
 var randaoMixesTest = NewEpochProcessing(func(s *state.BeaconState) error {
 	transition.ProcessRandaoMixesReset(s)

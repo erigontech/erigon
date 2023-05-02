@@ -30,7 +30,7 @@ func init() {
 		With("rewards_and_penalties", rewardsAndPenaltiesTest).
 		With("slashings", slashingsTest).
 		With("slashings_reset", slashingsResetTest).
-		With("participation_record_updates", participationFlagUpdatesTest)
+		With("participation_record_updates", participationRecordUpdatesTest)
 	TestFormats.Add("finality").
 		With("finality", FinalityFinality)
 	TestFormats.Add("fork_choice").

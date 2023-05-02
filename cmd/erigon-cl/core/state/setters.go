@@ -156,7 +156,7 @@ func (b *BeaconState) ResetEpochParticipation() {
 	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
 	b.previousEpochParticipation = b.currentEpochParticipation
-	b.currentEpochParticipation = make(cltypes.ParticipationFlagsList, len(b.validators))
+	b.currentEpochParticipation = make(cltypes.ParticipationFlagsList, 0, len(b.validators))
 }
 
 func (b *BeaconState) SetJustificationBits(justificationBits cltypes.JustificationBits) {
