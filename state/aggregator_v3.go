@@ -908,23 +908,69 @@ func (a *AggregatorV3) NeedSaveFilesListInDB() bool {
 }
 
 func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad etl.LoadFunc) error {
-	//TODO: replace pruneF by some kind of history-walking
-	stateChanges := etl.NewCollector(a.logPrefix, a.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
-	defer stateChanges.Close()
-	if err := a.accounts.pruneF(txUnwindTo, math2.MaxUint64, func(_ uint64, k, v []byte) error {
-		return stateChanges.Collect(k, v)
-	}); err != nil {
-		return err
-	}
-	if err := a.storage.pruneF(txUnwindTo, math2.MaxUint64, func(_ uint64, k, v []byte) error {
-		return stateChanges.Collect(k, v)
-	}); err != nil {
-		return err
-	}
-	if err := stateChanges.Load(a.rwTx, "", stateLoad, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
+	//TODO: use ETL to avoid OOM (or specialized history-iterator instead of pruneF)
+	//stateChanges := etl.NewCollector(a.logPrefix, a.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	//defer stateChanges.Close()
+	{
+		exists := map[string]struct{}{}
+		if err := a.accounts.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
+			if _, ok := exists[string(k)]; ok {
+				return nil
+			}
+			exists[string(k)] = struct{}{}
 
+			a.accounts.SetTxNum(txNum)
+			return a.accounts.put(k, v)
+		}); err != nil {
+			return err
+		}
+	}
+	{
+		exists := map[string]struct{}{}
+		if err := a.storage.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
+			if _, ok := exists[string(k)]; ok {
+				return nil
+			}
+			exists[string(k)] = struct{}{}
+
+			a.storage.SetTxNum(txNum)
+			return a.storage.put(k, v)
+		}); err != nil {
+			return err
+		}
+	}
+	{
+		exists := map[string]struct{}{}
+		if err := a.code.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
+			if _, ok := exists[string(k)]; ok {
+				return nil
+			}
+			exists[string(k)] = struct{}{}
+
+			a.code.SetTxNum(txNum)
+			return a.code.put(k, v)
+		}); err != nil {
+			return err
+		}
+	}
+	//{
+	//	exists := map[string]struct{}{}
+	//	if err := a.commitment.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
+	//		if _, ok := exists[string(k)]; ok {
+	//			return nil
+	//		}
+	//		exists[string(k)] = struct{}{}
+	//
+	//		a.commitment.SetTxNum(txNum)
+	//		return a.commitment.put(k, v)
+	//	}); err != nil {
+	//		return err
+	//	}
+	//}
+
+	//if err := stateChanges.Load(a.rwTx, kv.PlainState, stateLoad, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	//	return err
+	//}
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	step := txUnwindTo / a.aggregationStep

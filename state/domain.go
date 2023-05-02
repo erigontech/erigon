@@ -432,13 +432,25 @@ func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	return d.wal.addValue(key1, key2, nil)
 }
 
-func (d *Domain) update(key, original []byte) error {
+func (d *Domain) update(key []byte) error {
 	var invertedStep [8]byte
 	binary.BigEndian.PutUint64(invertedStep[:], ^(d.txNum / d.aggregationStep))
 	if err := d.tx.Put(d.keysTable, key, invertedStep[:]); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (d *Domain) put(key, val []byte) error {
+	if err := d.update(key); err != nil {
+		return err
+	}
+	invertedStep := ^(d.txNum / d.aggregationStep)
+	keySuffix := make([]byte, len(key)+8)
+	copy(keySuffix, key)
+	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
+
+	return d.tx.Put(d.valsTable, keySuffix, val)
 }
 
 func (d *Domain) Put(key1, key2, val []byte) error {
@@ -454,15 +466,7 @@ func (d *Domain) Put(key1, key2, val []byte) error {
 	if err = d.History.AddPrevValue(key1, key2, original); err != nil {
 		return err
 	}
-	if err = d.update(key, original); err != nil {
-		return err
-	}
-	invertedStep := ^(d.txNum / d.aggregationStep)
-	keySuffix := make([]byte, len(key)+8)
-	copy(keySuffix, key)
-	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
-
-	return d.tx.Put(d.valsTable, keySuffix, val)
+	return d.put(key, val)
 }
 
 func (d *Domain) Delete(key1, key2 []byte) error {
@@ -480,7 +484,7 @@ func (d *Domain) Delete(key1, key2 []byte) error {
 	if err = d.History.AddPrevValue(key1, key2, original); err != nil {
 		return err
 	}
-	if err = d.update(key, original); err != nil {
+	if err = d.update(key); err != nil {
 		return err
 	}
 	invertedStep := ^(d.txNum / d.aggregationStep)
