@@ -36,6 +36,7 @@ func init() {
 	TestFormats.Add("fork_choice").
 		With("get_head", &ForkChoice{}).
 		With("on_block", &ForkChoice{}).
+		With("on_merge_block", &ForkChoice{}).
 		With("ex_ante", &ForkChoice{})
 	TestFormats.Add("forks").
 		With("fork", ForksFork)
