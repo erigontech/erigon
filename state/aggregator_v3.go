@@ -952,20 +952,20 @@ func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 			return err
 		}
 	}
-	{
-		exists := map[string]struct{}{}
-		if err := a.commitment.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
-			if _, ok := exists[string(k)]; ok {
-				return nil
-			}
-			exists[string(k)] = struct{}{}
-
-			a.commitment.SetTxNum(txNum)
-			return a.commitment.put(k, v)
-		}); err != nil {
-			return err
-		}
-	}
+	//{
+	//	exists := map[string]struct{}{}
+	//	if err := a.commitment.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
+	//		if _, ok := exists[string(k)]; ok {
+	//			return nil
+	//		}
+	//		exists[string(k)] = struct{}{}
+	//
+	//		a.commitment.SetTxNum(txNum)
+	//		return a.commitment.put(k, v)
+	//	}); err != nil {
+	//		return err
+	//	}
+	//}
 
 	//if err := stateChanges.Load(a.rwTx, kv.PlainState, stateLoad, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 	//	return err
