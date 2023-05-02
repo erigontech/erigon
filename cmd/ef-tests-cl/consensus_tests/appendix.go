@@ -58,14 +58,16 @@ func init() {
 		WithFn("withdrawals", operationWithdrawalHandler).
 		WithFn("bls_to_execution-change", operationSignedBlsChangeHandler)
 	TestFormats.Add("random").
-		With("", spectest.UnimplementedHandler)
+		With("random", SanityBlocks)
 	TestFormats.Add("rewards").
-		With("", spectest.UnimplementedHandler)
+		With("basic", &RewardsCore{}).
+		With("random", &RewardsCore{}).
+		With("leak", &RewardsCore{})
 	TestFormats.Add("sanity").
 		With("slots", SanitySlots).
 		With("blocks", SanityBlocks)
 	TestFormats.Add("shuffling").
-		With("", spectest.UnimplementedHandler)
+		With("core", &ShufflingCore{})
 	TestFormats.Add("ssz_generic").
 		With("", spectest.UnimplementedHandler)
 	TestFormats.Add("sync").
