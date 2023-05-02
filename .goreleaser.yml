@@ -14,7 +14,7 @@ builds:
     env:
       - CC=o64-clang
       - CXX=o64-clang++
-    tags: [ nosqlite, noboltdb, netgo ]
+    tags: [ nosqlite, noboltdb ]
     ldflags: -s -w
 
   - id: darwin-arm64
@@ -25,7 +25,7 @@ builds:
     env:
       - CC=oa64-clang
       - CXX=oa64-clang++
-    tags: [ nosqlite, noboltdb, netgo ]
+    tags: [ nosqlite, noboltdb ]
     ldflags: -s -w
 
   - id: linux-amd64
@@ -36,7 +36,7 @@ builds:
     env:
       - CC=x86_64-linux-gnu-gcc
       - CXX=x86_64-linux-gnu-g++
-    tags: [ nosqlite, noboltdb, netgo ]
+    tags: [ nosqlite, noboltdb ]
     ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
 
   - id: linux-arm64
@@ -47,7 +47,7 @@ builds:
     env:
       - CC=aarch64-linux-gnu-gcc
       - CXX=aarch64-linux-gnu-g++
-    tags: [ nosqlite, noboltdb, netgo ]
+    tags: [ nosqlite, noboltdb ]
     ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
 
   - id: windows-amd64
@@ -58,7 +58,7 @@ builds:
     env:
       - CC=x86_64-w64-mingw32-gcc
       - CXX=x86_64-w64-mingw32-g++
-    tags: [ nosqlite, noboltdb, netgo ]
+    tags: [ nosqlite, noboltdb ]
     ldflags: -s -w
 
 
