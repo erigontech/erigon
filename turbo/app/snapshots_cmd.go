@@ -52,7 +52,6 @@ var snapshotCommand = cli.Command{
 			Name:   "index",
 			Action: doIndicesCommand,
 			Usage:  "Create all indices for snapshots",
-			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
@@ -63,7 +62,6 @@ var snapshotCommand = cli.Command{
 			Name:   "retire",
 			Action: doRetireCommand,
 			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
-			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
@@ -75,25 +73,21 @@ var snapshotCommand = cli.Command{
 			Name:   "uncompress",
 			Action: doUncompress,
 			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
-			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags:  joinFlags([]cli.Flag{}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "compress",
 			Action: doCompress,
-			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "ram",
 			Action: doRam,
-			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
 		{
 			Name:   "decompress_speed",
 			Action: doDecompressSpeed,
-			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
 	},
@@ -134,6 +128,11 @@ func preloadFileAsync(name string) {
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
+	var logger log.Logger
+	var err error
+	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+		return err
+	}
 	args := cliCtx.Args()
 	if args.Len() != 1 {
 		return fmt.Errorf("expecting .seg file path")
@@ -156,7 +155,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
 		}
-		log.Info("decompress speed", "took", time.Since(t))
+		logger.Info("decompress speed", "took", time.Since(t))
 	}()
 	func() {
 		defer decompressor.EnableReadAhead().DisableReadAhead()
@@ -171,6 +170,11 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	return nil
 }
 func doRam(cliCtx *cli.Context) error {
+	var logger log.Logger
+	var err error
+	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+		return err
+	}
 	args := cliCtx.Args()
 	if args.Len() != 1 {
 		return fmt.Errorf("expecting .seg file path")
@@ -180,17 +184,22 @@ func doRam(cliCtx *cli.Context) error {
 	runtime.ReadMemStats(&m)
 	runtime.ReadMemStats(&m)
 	before := m.Alloc
-	log.Info("RAM before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	logger.Info("RAM before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	decompressor, err := compress.NewDecompressor(f)
 	if err != nil {
 		return err
 	}
 	defer decompressor.Close()
 	runtime.ReadMemStats(&m)
-	log.Info("RAM after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "diff", common.ByteCount(m.Alloc-before))
+	logger.Info("RAM after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys), "diff", common.ByteCount(m.Alloc-before))
 	return nil
 }
+
 func doIndicesCommand(cliCtx *cli.Context) error {
+	var err error
+	if _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+		return err
+	}
 	ctx := cliCtx.Context
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -235,6 +244,11 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 }
 
 func doUncompress(cliCtx *cli.Context) error {
+	var logger log.Logger
+	var err error
+	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+		return err
+	}
 	ctx := cliCtx.Context
 
 	args := cliCtx.Args()
@@ -275,7 +289,7 @@ func doUncompress(cliCtx *cli.Context) error {
 		case <-logEvery.C:
 			_, fileName := filepath.Split(decompressor.FilePath())
 			progress := 100 * float64(i) / float64(decompressor.Count())
-			log.Info("[uncompress] ", "progress", fmt.Sprintf("%.2f%%", progress), "file", fileName)
+			logger.Info("[uncompress] ", "progress", fmt.Sprintf("%.2f%%", progress), "file", fileName)
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
@@ -284,6 +298,10 @@ func doUncompress(cliCtx *cli.Context) error {
 	return nil
 }
 func doCompress(cliCtx *cli.Context) error {
+	var err error
+	if _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+		return err
+	}
 	ctx := cliCtx.Context
 
 	args := cliCtx.Args()
@@ -328,7 +346,12 @@ func doCompress(cliCtx *cli.Context) error {
 	return nil
 }
 func doRetireCommand(cliCtx *cli.Context) error {
-	defer log.Info("Retire Done")
+	var logger log.Logger
+	var err error
+	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+		return err
+	}
+	defer logger.Info("Retire Done")
 	ctx := cliCtx.Context
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -369,7 +392,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	log.Info("Params", "from", from, "to", to, "every", every)
+	logger.Info("Params", "from", from, "to", to, "every", every)
 	for i := from; i < to; i += every {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo); err != nil {
 			panic(err)
@@ -393,7 +416,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return nil
 	}
 
-	log.Info("Prune state history")
+	logger.Info("Prune state history")
 	for i := 0; i < 1024; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
@@ -406,7 +429,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	log.Info("Work on state history snapshots")
+	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 		return err
@@ -425,7 +448,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	log.Info("Build state history snapshots")
+	logger.Info("Build state history snapshots")
 	if err = agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
@@ -439,7 +462,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	log.Info("Prune state history")
+	logger.Info("Prune state history")
 	for i := 0; i < 1024; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)

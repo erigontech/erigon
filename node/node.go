@@ -42,7 +42,7 @@ import (
 // Node is a container on which services can be registered.
 type Node struct {
 	config        *nodecfg.Config
-	log           log.Logger
+	logger        log.Logger
 	dirLock       *flock.Flock  // prevents concurrent use of instance directory
 	stop          chan struct{} // Channel to wait for termination notifications
 	startStopLock sync.Mutex    // Start/Stop are protected by an additional lock
@@ -61,14 +61,11 @@ const (
 )
 
 // New creates a new P2P node, ready for protocol registration.
-func New(conf *nodecfg.Config) (*Node, error) {
+func New(conf *nodecfg.Config, logger log.Logger) (*Node, error) {
 	// Copy config and resolve the datadir so future changes to the current
 	// working directory don't affect the node.
 	confCopy := *conf
 	conf = &confCopy
-	if conf.Log == nil {
-		conf.Log = log.New()
-	}
 
 	// Ensure that the instance name doesn't cause weird conflicts with
 	// other files in the data directory.
@@ -81,7 +78,7 @@ func New(conf *nodecfg.Config) (*Node, error) {
 
 	node := &Node{
 		config:    conf,
-		log:       conf.Log,
+		logger:    logger,
 		stop:      make(chan struct{}),
 		databases: make([]kv.Closer, 0),
 	}
@@ -128,11 +125,11 @@ func (n *Node) Start() error {
 	if err != nil {
 		stopErr := n.stopServices(started)
 		if stopErr != nil {
-			n.log.Warn("Failed to doClose for this node", "err", stopErr)
+			n.logger.Warn("Failed to doClose for this node", "err", stopErr)
 		} //nolint:errcheck
 		closeErr := n.doClose(nil)
 		if closeErr != nil {
-			n.log.Warn("Failed to doClose for this node", "err", closeErr)
+			n.logger.Warn("Failed to doClose for this node", "err", closeErr)
 		}
 	}
 	return err
@@ -249,7 +246,7 @@ func (n *Node) closeDataDir() {
 	// Release instance directory lock.
 	if n.dirLock != nil {
 		if err := n.dirLock.Unlock(); err != nil {
-			n.log.Error("Can't release datadir lock", "err", err)
+			n.logger.Error("Can't release datadir lock", "err", err)
 		}
 		n.dirLock = nil
 	}
