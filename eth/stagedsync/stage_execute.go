@@ -243,7 +243,7 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		workersCount = 1
 	}
 	cfg.agg.SetWorkers(estimate.CompressSnapshot.WorkersQuarter())
-	defer cfg.agg.StartWrites().FinishWrites()
+	//defer cfg.agg.StartWrites().FinishWrites()
 
 	defer func() {
 		log.Warn("Exit ExecBlockV3", "err", err)

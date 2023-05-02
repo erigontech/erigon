@@ -482,6 +482,7 @@ func ExecV3(ctx context.Context,
 	}
 	if !parallel {
 		applyWorker.ResetTx(applyTx)
+		doms.SetTx(applyTx)
 	}
 
 	slowDownLimit := time.NewTicker(time.Second)
@@ -493,6 +494,7 @@ func ExecV3(ctx context.Context,
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		inputBlockNum.Store(blockNum)
+		doms.SetBlockNum(blockNum)
 
 		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
@@ -584,7 +586,7 @@ Loop:
 						return err
 					}
 					txTask.Sender = &sender
-					log.Warn("[Execution] expencive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
+					log.Warn("[Execution] expensive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
 				}
 			}
 
