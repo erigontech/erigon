@@ -89,3 +89,30 @@ func (*Deposit) Clone() clonable.Clonable {
 func (*BeaconBlock) Clone() clonable.Clonable {
 	return &BeaconBlock{}
 }
+
+func (*AggregateAndProof) Clone() clonable.Clonable {
+	return &AggregateAndProof{}
+}
+
+func (*AttestationData) Clone() clonable.Clonable {
+	return &AttestationData{}
+}
+
+func (*BeaconBlockHeader) Clone() clonable.Clonable {
+	return &BeaconBlockHeader{}
+}
+
+func (*BLSToExecutionChange) Clone() clonable.Clonable {
+	return &BLSToExecutionChange{}
+}
+
+func (*SignedBeaconBlockHeader) Clone() clonable.Clonable {
+	return &SignedBeaconBlockHeader{}
+}
+
+func (*SyncCommittee) Clone() clonable.Clonable {
+	return &SyncCommittee{}
+}
+func (*Fork) Clone() clonable.Clonable {
+	return &Fork{}
+}
