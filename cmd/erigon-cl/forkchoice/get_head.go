@@ -14,6 +14,10 @@ import (
 func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.getHead()
+}
+
+func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 	// Retrieve att
 	head := f.justifiedCheckpoint.Root
 	blocks := f.getFilteredBlockTree(head)
