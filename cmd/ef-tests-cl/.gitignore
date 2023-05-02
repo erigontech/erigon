@@ -1,2 +1,3 @@
 tests
-eftests
+./eftests
+./consensus-spec-tests
