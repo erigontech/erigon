@@ -517,7 +517,7 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 	txHash := txn.Hash()
 	e.ibs.Reset()
 	e.ibs.Prepare(txHash, e.blockHash, txIndex)
-	gp := new(core.GasPool).AddGas(txn.GetGas())
+	gp := new(core.GasPool).AddGas(txn.GetGas()).AddDataGas(txn.GetDataGas())
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {
 		return nil, nil, err

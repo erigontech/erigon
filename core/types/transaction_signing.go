@@ -23,12 +23,12 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/secp256k1"
+
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/secp256k1"
 )
 
 var ErrInvalidChainId = errors.New("invalid chain id for signer")
@@ -255,7 +255,6 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
 		V.Add(t.Signature.GetV(), u256.Num27)
 		R, S = t.Signature.GetR(), t.Signature.GetS()
-
 	default:
 		return libcommon.Address{}, ErrTxTypeNotSupported
 	}
