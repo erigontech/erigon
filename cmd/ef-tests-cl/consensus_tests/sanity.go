@@ -55,7 +55,6 @@ var SanityBlocks = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectes
 	expectedState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
 	if os.IsNotExist(err) {
 		expectedError = true
-		err = nil
 	}
 
 	blocks, err := spectest.ReadBlocks(root, c.Version())
