@@ -750,19 +750,31 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		newHeadCh, closeNewHeadCh := s.notifications.Events.AddHeaderSubscription()
 		defer closeNewHeadCh()
 
+		log.Info("Starting to mine", "etherbase", eb)
+
 		var works bool
 		var hasWork bool
 		errc := make(chan error, 1)
 
+		// create an empty channel to immediately start mining
+		first := make(chan struct{}, 1)
+		first <- struct{}{}
+
 		for {
 			mineEvery.Reset(cfg.Recommit)
 			select {
-			case <-s.notifyMiningAboutNewTxs:
-				log.Debug("Start mining new block based on txpool notif")
+			case <-first:
+				log.Debug("Start mining new block")
 				hasWork = true
 			case <-newHeadCh:
 				log.Debug("Start mining new block based on new head channel")
 				hasWork = true
+			case <-s.notifyMiningAboutNewTxs:
+				// Skip mining based on new tx notif for bor consensus
+				hasWork = s.chainConfig.Bor == nil
+				if hasWork {
+					log.Debug("Start mining new block based on txpool notif")
+				}
 			case <-mineEvery.C:
 				log.Debug("Start mining new block based on miner.recommit")
 				hasWork = true
