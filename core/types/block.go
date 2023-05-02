@@ -1218,14 +1218,6 @@ func CopyHeader(h *Header) *Header {
 		cpy.AuRaSeal = make([]byte, len(h.AuRaSeal))
 		copy(cpy.AuRaSeal, h.AuRaSeal)
 	}
-	if h.WithdrawalsHash != nil {
-		cpy.WithdrawalsHash = new(libcommon.Hash)
-		cpy.WithdrawalsHash.SetBytes(h.WithdrawalsHash.Bytes())
-	}
-	if h.ExcessDataGas != nil {
-		cpy.ExcessDataGas = new(big.Int)
-		cpy.ExcessDataGas.Set(h.ExcessDataGas)
-	}
 	return &cpy
 }
 

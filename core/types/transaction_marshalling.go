@@ -42,7 +42,7 @@ type txJSON struct {
 	BlobVersionedHashes []libcommon.Hash `json:"blobVersionedHashes,omitempty"`
 	// Blob wrapper fields:
 	Blobs       Blobs     `json:"blobs,omitempty"`
-	Commitments BlobKzgs  `json:commitments",omitempty"`
+	Commitments BlobKzgs  `json:"commitments,omitempty"`
 	Proofs      KZGProofs `json:"proofs,omitempty"`
 
 	// Only used for encoding:

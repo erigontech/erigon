@@ -382,7 +382,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *StateR
 
 	header := block.Header()
 	vmConfig.Debug = true
-	gp := new(core.GasPool).AddGas(block.GasLimit())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 	usedGas := new(uint64)
 	var receipts types.Receipts
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
