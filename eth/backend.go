@@ -877,6 +877,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		// create an empty channel to immediately start mining
 		first := make(chan struct{}, 1)
 		first <- struct{}{}
+		defer close(first)
 
 		for {
 			mineEvery.Reset(cfg.Recommit)
