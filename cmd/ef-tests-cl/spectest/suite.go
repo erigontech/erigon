@@ -24,14 +24,19 @@ func RunCases(t *testing.T, app Appendix, root fs.FS) {
 	// welcome to hell
 	cases.tree.Range0(func(s string, m *generic.Map5[K1, K2, K3, K4, K5, V]) bool {
 		t.Run(s, func(t *testing.T) {
+			t.Parallel()
 			m.Range0(func(s string, m *generic.Map4[K1, K2, K3, K4, V]) bool {
 				t.Run(s, func(t *testing.T) {
+					t.Parallel()
 					m.Range0(func(s string, m *generic.Map3[K1, K2, K3, V]) bool {
 						t.Run(s, func(t *testing.T) {
+							t.Parallel()
 							m.Range0(func(s string, m *generic.Map2[K1, K2, V]) bool {
 								t.Run(s, func(t *testing.T) {
+									t.Parallel()
 									m.Range0(func(s string, m *generic.Map1[K1, V]) bool {
 										t.Run(s, func(t *testing.T) {
+											t.Parallel()
 											m.Range0(func(key string, value TestCase) bool {
 												t.Run(key, func(t *testing.T) {
 													require.NotPanics(t, func() {
@@ -39,10 +44,12 @@ func RunCases(t *testing.T, app Appendix, root fs.FS) {
 														runner, ok := app[value.RunnerName]
 														if !ok {
 															t.Skipf("runner not found: %s", value.RunnerName)
+															return
 														}
 														handler, err := runner.GetHandler(value.HandlerName)
 														if err != nil {
 															t.Skipf("handler not found: %s", value.RunnerName)
+															return
 														}
 														subfs, err := fs.Sub(root, filepath.Join(
 															value.ConfigName,
