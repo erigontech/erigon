@@ -1,6 +1,7 @@
 package consensus_tests
 
 import (
+	"fmt"
 	"io/fs"
 	"testing"
 
@@ -44,7 +45,7 @@ type ForkChoiceStep struct {
 	Attestation      *string                  `yaml:"attestation,omitempty"`
 	Block            *string                  `yaml:"block,omitempty"`
 	PowBlock         *string                  `yaml:"pow_block,omitempty"`
-	AttesterSlashing *string                  `yaml:"attesterSlashing,omitempty"`
+	AttesterSlashing *string                  `yaml:"attester_slashing,omitempty"`
 	BlockHash        *string                  `yaml:"block_hash,omitempty"`
 	PayloadStatus    *ForkChoicePayloadStatus `yaml:"payload_status,omitempty"`
 	Checks           *ForkChoiceChecks        `yaml:"checks,omitempty"`
@@ -154,49 +155,50 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	err = spectest.ReadYml(root, "steps.yaml", &steps)
 	require.NoError(t, err)
 
-	for _, step := range steps {
+	for stepIdx, step := range steps {
+		stepstr := fmt.Sprintf("step %d: %s", stepIdx, step.StepType())
 		switch step.StepType() {
 		case "on_payload_info":
 			//TODO: perform engine-level mocking
 		case "on_attester_slashing":
 			data := &cltypes.AttesterSlashing{}
 			err := spectest.ReadSsz(root, c.Version(), step.GetAttesterSlashing()+".ssz_snappy", data)
-			require.NoError(t, err)
+			require.NoError(t, err, stepstr)
 			err = forkStore.OnAttesterSlashing(data)
 			if step.GetValid() {
-				require.NoError(t, err)
+				require.NoError(t, err, stepstr)
 			} else {
-				require.Error(t, err)
+				require.Error(t, err, stepstr)
 			}
 		case "on_merge_block":
 			blk := &cltypes.SignedBeaconBlock{}
 			err := spectest.ReadSsz(root, c.Version(), step.GetPowBlock()+".ssz_snappy", blk)
-			require.NoError(t, err)
+			require.NoError(t, err, stepstr)
 			err = forkStore.OnBlock(blk, true, true)
 			if step.GetValid() {
-				require.NoError(t, err)
+				require.NoError(t, err, stepstr)
 			} else {
-				require.Error(t, err)
+				require.Error(t, err, stepstr)
 			}
 		case "on_block":
 			blk := &cltypes.SignedBeaconBlock{}
 			err := spectest.ReadSsz(root, c.Version(), step.GetBlock()+".ssz_snappy", blk)
-			require.NoError(t, err)
+			require.NoError(t, err, stepstr)
 			err = forkStore.OnBlock(blk, true, true)
 			if step.GetValid() {
-				require.NoError(t, err)
+				require.NoError(t, err, stepstr)
 			} else {
-				require.Error(t, err)
+				require.Error(t, err, stepstr)
 			}
 		case "attestation":
 			att := &cltypes.Attestation{}
 			err := spectest.ReadSsz(root, c.Version(), step.GetAttestation()+".ssz_snappy", att)
-			require.NoError(t, err)
+			require.NoError(t, err, stepstr)
 			err = forkStore.OnAttestation(att, false)
 			if step.GetValid() {
-				require.NoError(t, err)
+				require.NoError(t, err, stepstr)
 			} else {
-				require.Error(t, err)
+				require.Error(t, err, stepstr)
 			}
 		case "on_tick":
 			forkStore.OnTick(uint64(step.GetTick()))
@@ -208,7 +210,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 		//	}
 		case "checks":
 			chk := step.GetChecks()
-			doCheck(t, forkStore, chk)
+			doCheck(t, stepstr, forkStore, chk)
 		default:
 		}
 	}
@@ -216,44 +218,44 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	return nil
 }
 
-func doCheck(t *testing.T, store *forkchoice.ForkChoiceStore, e *ForkChoiceChecks) {
+func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e *ForkChoiceChecks) {
 	if e.Head != nil {
 		root, v, err := store.GetHead()
-		require.NoError(t, err)
+		require.NoError(t, err, stepstr)
 		if e.Head.Root != nil {
-			assert.EqualValues(t, *e.Head.Root, root)
+			assert.EqualValues(t, *e.Head.Root, root, stepstr)
 		}
 		if e.Head.Slot != nil {
-			assert.EqualValues(t, *e.Head.Slot, int(v))
+			assert.EqualValues(t, *e.Head.Slot, int(v), stepstr)
 		}
 	}
 	if e.Time != nil {
-		assert.EqualValues(t, *e.Time, store.Time())
+		assert.EqualValues(t, *e.Time, store.Time(), stepstr)
 	}
 	if e.GenesisTime != nil {
 		// TODO:  what value to use here??
 		//assert.EqualValues(t, e.Time, store.GenesisTime())
 	}
 	if e.ProposerBoostRoot != nil {
-		assert.EqualValues(t, *e.ProposerBoostRoot, store.ProposerBoostRoot())
+		assert.EqualValues(t, *e.ProposerBoostRoot, store.ProposerBoostRoot(), stepstr)
 	}
 
 	if e.FinalizedCheckpoint != nil {
 		cp := store.FinalizedCheckpoint()
 		if e.FinalizedCheckpoint.Root != nil {
-			assert.EqualValues(t, *e.FinalizedCheckpoint.Root, cp.Root)
+			assert.EqualValues(t, *e.FinalizedCheckpoint.Root, cp.Root, stepstr)
 		}
 		if e.FinalizedCheckpoint.Epoch != nil {
-			assert.EqualValues(t, *e.FinalizedCheckpoint.Epoch, cp.Epoch)
+			assert.EqualValues(t, *e.FinalizedCheckpoint.Epoch, cp.Epoch, stepstr)
 		}
 	}
 	if e.JustifiedCheckpoint != nil {
 		cp := store.JustifiedCheckpoint()
 		if e.JustifiedCheckpoint.Root != nil {
-			assert.EqualValues(t, *e.JustifiedCheckpoint.Root, cp.Root)
+			assert.EqualValues(t, *e.JustifiedCheckpoint.Root, cp.Root, stepstr)
 		}
 		if e.JustifiedCheckpoint.Epoch != nil {
-			assert.EqualValues(t, *e.JustifiedCheckpoint.Epoch, cp.Epoch)
+			assert.EqualValues(t, *e.JustifiedCheckpoint.Epoch, cp.Epoch, stepstr)
 		}
 	}
 }
