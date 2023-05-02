@@ -16,6 +16,6 @@ example: tests
 
 run: tests
 	#go test -v -run=/mainnet/altair/transition
-	go test -v -run=/mainnet/altair/sanity
+	go test -v
 
 
