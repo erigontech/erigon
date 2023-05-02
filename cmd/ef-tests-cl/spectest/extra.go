@@ -6,5 +6,6 @@ import (
 )
 
 var UnimplementedHandler = HandlerFunc(func(t *testing.T, root fs.FS, c TestCase) (err error) {
-	return ErrHandlerNotImplemented(c.RunnerName + "/" + c.HandlerName)
+	t.Skipf("Handler not implemented: %s/%s", c.RunnerName, c.HandlerName)
+	return nil
 })

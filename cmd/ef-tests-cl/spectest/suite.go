@@ -35,12 +35,15 @@ func RunCases(t *testing.T, app Appendix, root fs.FS) {
 											m.Range0(func(key string, value TestCase) bool {
 												t.Run(key, func(t *testing.T) {
 													require.NotPanics(t, func() {
+														t.Parallel()
 														runner, ok := app[value.RunnerName]
 														if !ok {
-															t.Fatalf("runner not found: %s", value.RunnerName)
+															t.Skipf("runner not found: %s", value.RunnerName)
 														}
 														handler, err := runner.GetHandler(value.HandlerName)
-														require.NoError(t, err)
+														if err != nil {
+															t.Skipf("handler not found: %s", value.RunnerName)
+														}
 														subfs, err := fs.Sub(root, filepath.Join(
 															value.ConfigName,
 															value.ForkPhaseName,

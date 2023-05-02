@@ -38,7 +38,7 @@ func init() {
 		With("on_block", &ForkChoice{}).
 		With("on_merge_block", &ForkChoice{}).
 		With("ex_ante", &ForkChoice{})
-	TestFormats.Add("forks").
+	TestFormats.Add("fork").
 		With("fork", ForksFork)
 	TestFormats.Add("genesis").
 		With("validity", spectest.UnimplementedHandler).

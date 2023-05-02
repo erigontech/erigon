@@ -1,4 +1,4 @@
-.PHONY: clean setup example run
+.PHONY: clean setup example run clean
 
 
 tests:
@@ -9,12 +9,11 @@ tests:
 	rm -rf tests/minimal
 
 clean:
-	rm -rf tests
+	rm -rf junit.xml
+	rm -rf test_report.html
 
 example: tests
 	go test -tags=spectest -v -run=/mainnet/altair/sanity
 
 run: tests
 	go test -v
-
-
