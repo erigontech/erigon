@@ -2,7 +2,6 @@ package consensus_tests
 
 import (
 	"io/fs"
-	"os"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -30,7 +29,7 @@ const serializedFile = "serialized.ssz_snappy"
 
 func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.Handler {
 	return spectest.HandlerFunc(func(t *testing.T, fsroot fs.FS, c spectest.TestCase) (err error) {
-		rootBytes, err := os.ReadFile(rootsFile)
+		rootBytes, err := fs.ReadFile(fsroot, rootsFile)
 		require.NoError(t, err)
 		root := Root{}
 		err = yaml.Unmarshal(rootBytes, &root)
@@ -39,7 +38,7 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		object := ref.Clone().(unmarshalerMarshalerHashable)
 		_, isBeaconState := object.(*state.BeaconState)
 
-		snappyEncoded, err := os.ReadFile(serializedFile)
+		snappyEncoded, err := fs.ReadFile(fsroot, serializedFile)
 		require.NoError(t, err)
 		encoded, err := utils.DecompressSnappy(snappyEncoded)
 		require.NoError(t, err)
