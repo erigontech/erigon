@@ -1,6 +1,7 @@
 package consensus_tests
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"testing"
@@ -29,7 +30,7 @@ var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.T
 	case clparams.BellatrixVersion:
 		err = preState.UpgradeToCapella()
 	default:
-		panic("unsupported version")
+		err = spectest.ErrHandlerNotImplemented(fmt.Sprintf("block state %v", preState.Version()))
 	}
 	if expectedError {
 		assert.Error(t, err)

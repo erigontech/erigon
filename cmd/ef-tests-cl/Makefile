@@ -1,4 +1,4 @@
-.PHONY: build clean setup example
+.PHONY: build clean setup example run
 
 
 setup:
@@ -11,11 +11,12 @@ setup:
 clean:
 	rm -rf tests
 
-build:
-	go build -o eftests ./
-
 example:
 	#go test -v -run=/mainnet/altair/transition
 	go test -tags=spectest -v -run=/mainnet/altair/sanity
+
+run:
+	#go test -v -run=/mainnet/altair/transition
+	go test -v -run=/mainnet/altair/sanity
 
 
