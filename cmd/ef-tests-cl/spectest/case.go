@@ -19,7 +19,7 @@ type TestCase struct {
 }
 
 func (t *TestCase) Version() clparams.StateVersion {
-	return StringToClVersion(t.ForkPhaseName)
+	return clparams.StringToClVersion(t.ForkPhaseName)
 }
 
 type TestCases struct {
