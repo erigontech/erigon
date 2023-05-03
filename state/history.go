@@ -604,7 +604,7 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 		return nil
 	}
 	if len(original) > len(h.historyKey)-8-len(key1)-len(key2) {
-		log.Error("History value is too large while largeValues=false", "h", string(h.h.historyValsTable), "histo", string(h.historyKey[:len(key1)+len(key2)]), "len", len(original), "max", len(h.historyKey)-8-len(key1)-len(key2))
+		log.Error("History value is too large while largeValues=false", "h", h.h.historyValsTable, "histo", string(h.historyKey[:len(key1)+len(key2)]), "len", len(original), "max", len(h.historyKey)-8-len(key1)-len(key2))
 		panic("History value is too large while largeValues=false")
 	}
 
