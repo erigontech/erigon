@@ -319,6 +319,36 @@ func (b *BeaconState) Copy() (*BeaconState, error) {
 	for pk, index := range b.publicKeyIndicies {
 		copied.publicKeyIndicies[pk] = index
 	}
+	// Sync caches
+	if err := copied.initCaches(); err != nil {
+		return nil, err
+	}
+	for _, epoch := range b.activeValidatorsCache.Keys() {
+		val, has := b.activeValidatorsCache.Get(epoch)
+		if !has {
+			continue
+		}
+		copied.activeValidatorsCache.Add(epoch, val)
+	}
+	for _, key := range b.shuffledSetsCache.Keys() {
+		val, has := b.shuffledSetsCache.Get(key)
+		if !has {
+			continue
+		}
+		copied.shuffledSetsCache.Add(key, val)
+	}
+	for _, key := range b.committeeCache.Keys() {
+		val, has := b.committeeCache.Get(key)
+		if !has {
+			continue
+		}
+		copied.committeeCache.Add(key, val)
+	}
+	if b.totalActiveBalanceCache != nil {
+		copied.totalActiveBalanceCache = new(uint64)
+		*copied.totalActiveBalanceCache = *b.totalActiveBalanceCache
+		copied.totalActiveBalanceRootCache = b.totalActiveBalanceRootCache
+	}
 
-	return copied, copied.initBeaconState()
+	return copied, nil
 }
