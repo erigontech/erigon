@@ -18,7 +18,6 @@ package core
 
 import (
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -204,19 +203,18 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	}
 
 	// compute data fee for eip-4844 data blobs if any
-	dgBig := new(big.Int)
+	dgval := new(uint256.Int)
 	var dataGasUsed uint64
 	if st.evm.ChainRules().IsCancun {
 		dataGasUsed = st.dataGasUsed()
 		if st.evm.Context().ExcessDataGas == nil {
 			return fmt.Errorf("%w: sharding is active but ExcessDataGas is nil", ErrInternalFailure)
 		}
-		// TODO: Update the misc library to work with uint256 instead of math/big
-		dgBig.Mul(misc.GetDataGasPrice(st.evm.Context().ExcessDataGas), new(big.Int).SetUint64(dataGasUsed))
-	}
-	dgval, overflow := uint256.FromBig(dgBig)
-	if overflow {
-		return fmt.Errorf("%w: overflow converting datagas: %v", ErrInsufficientFunds, dgval)
+		dataGasPrice, err := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
+		if err != nil {
+			return err
+		}
+		dgval.Mul(dataGasPrice, new(uint256.Int).SetUint64(dataGasUsed))
 	}
 
 	balanceCheck := mgval
@@ -308,9 +306,12 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 	if st.dataGasUsed() > 0 && st.evm.ChainRules().IsCancun {
-		dataGasPrice := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
-		bigMaxFeePerDataGas := st.msg.MaxFeePerDataGas().ToBig()
-		if dataGasPrice.Cmp(bigMaxFeePerDataGas) > 0 {
+		dataGasPrice, err := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
+		if err != nil {
+			return err
+		}
+		maxFeePerDataGas := st.msg.MaxFeePerDataGas()
+		if dataGasPrice.Cmp(maxFeePerDataGas) > 0 {
 			return fmt.Errorf("%w: address %v, maxFeePerDataGas: %v dataGasPrice: %v, excessDataGas: %v",
 				ErrMaxFeePerDataGas,
 				st.msg.From().Hex(), st.msg.MaxFeePerDataGas(), dataGasPrice, st.evm.Context().ExcessDataGas)

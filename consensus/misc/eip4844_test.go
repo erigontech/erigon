@@ -20,6 +20,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -46,12 +47,15 @@ func TestFakeExponential(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		factor := big.NewInt(tt.factor)
+		factor := uint256.NewInt(uint64(tt.factor))
 		num := big.NewInt(tt.num)
-		denom := big.NewInt(tt.denom)
-		result := FakeExponential(factor, num, denom)
+		denom := uint256.NewInt(uint64(tt.denom))
+		result, err := FakeExponential(factor, denom, num)
+		if err != nil {
+			t.Error(err)
+		}
 		//t.Logf("%v*e^(%v/%v): %v", factor, num, denom, result)
-		if tt.want != result.Int64() {
+		if tt.want != result.ToBig().Int64() {
 			t.Errorf("got %v want %v", result, tt.want)
 		}
 	}

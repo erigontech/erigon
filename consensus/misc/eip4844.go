@@ -24,6 +24,8 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
+
+	"github.com/holiman/uint256"
 )
 
 // CalcExcessDataGas implements calc_excess_data_gas from EIP-4844
@@ -45,16 +47,20 @@ func CalcExcessDataGas(parentExcessDataGas *big.Int, newBlobs int) *big.Int {
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
 // as described in the EIP-4844 spec.
-func FakeExponential(factor, num, denom *big.Int) *big.Int {
-	output := new(big.Int)
-	numAccum := new(big.Int).Mul(factor, denom)
-	for i := 1; numAccum.Sign() > 0; i++ {
-		output.Add(output, numAccum)
-		numAccum.Mul(numAccum, num)
-		iBig := big.NewInt(int64(i))
-		numAccum.Div(numAccum, iBig.Mul(iBig, denom))
+func FakeExponential(factor, denom *uint256.Int, edg *big.Int) (*uint256.Int, error) {
+	numerator, overflow := uint256.FromBig(edg)
+	if overflow {
+		return nil, fmt.Errorf("FakeExponential: overflow converting excessDataGas: %v", edg)
 	}
-	return output.Div(output, denom)
+	output := uint256.NewInt(0)
+	numeratorAccum := new(uint256.Int).Mul(factor, denom)
+	for i := 1; numeratorAccum.Sign() > 0; i++ {
+		output.Add(output, numeratorAccum)
+		numeratorAccum.Mul(numeratorAccum, numerator)
+		i256 := uint256.NewInt(uint64(i))
+		numeratorAccum.Div(numeratorAccum, i256.Mul(i256, denom))
+	}
+	return output.Div(output, denom), nil
 }
 
 // CountBlobs returns the number of blob transactions in txs
@@ -75,8 +81,8 @@ func VerifyEip4844Header(config *chain.Config, parent, header *types.Header) err
 }
 
 // GetDataGasPrice implements get_data_gas_price from EIP-4844
-func GetDataGasPrice(excessDataGas *big.Int) *big.Int {
-	return FakeExponential(big.NewInt(params.MinDataGasPrice), excessDataGas, big.NewInt(params.DataGasPriceUpdateFraction))
+func GetDataGasPrice(excessDataGas *big.Int) (*uint256.Int, error) {
+	return FakeExponential(uint256.NewInt(params.MinDataGasPrice), uint256.NewInt(params.DataGasPriceUpdateFraction), excessDataGas)
 }
 
 func GetDataGasUsed(numBlobs int) uint64 {
