@@ -9,12 +9,15 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock) error {
+func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, fullValidation bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
+	}
+	if f.Slot() < block.Block.Slot {
+		return fmt.Errorf("block is too late compared to current_slot")
 	}
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
 	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Epoch)
@@ -23,15 +26,26 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock) error {
 	}
 
 	config := f.forkGraph.Config()
-
-	status, err := f.forkGraph.AddChainSegment(block)
+	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if status != fork_graph.Success {
 		if status != fork_graph.PreValidated {
 			log.Debug("Could not replay block", "slot", block.Block.Slot, "code", status, "reason", err)
+			return fmt.Errorf("could not replay block, err: %s, code: %d", err, status)
 		}
-		return err
+		return nil
 	}
-	lastProcessedState := f.forkGraph.LastState()
+	if newPayload && f.engine != nil {
+		if err := f.engine.NewPayload(block.Block.Body.ExecutionPayload); err != nil {
+			log.Warn("newPayload failed", "err", err)
+			return err
+		}
+	}
+	if block.Block.Body.ExecutionPayload != nil {
+		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
+	}
+	if block.Block.Slot > f.highestSeen {
+		f.highestSeen = block.Block.Slot
+	}
 	// Add proposer score boost if the block is timely
 	timeIntoSlot := (f.time - f.forkGraph.GenesisTime()) % lastProcessedState.BeaconConfig().SecondsPerSlot
 	isBeforeAttestingInterval := timeIntoSlot < config.SecondsPerSlot/config.IntervalsPerSlot
@@ -40,24 +54,28 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock) error {
 	}
 	// Update checkpoints
 	f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
+	// First thing save previous values of the checkpoints (avoid memory copy of all states and ensure easy revert)
+	var (
+		previousJustifiedCheckpoint = lastProcessedState.PreviousJustifiedCheckpoint().Copy()
+		currentJustifiedCheckpoint  = lastProcessedState.CurrentJustifiedCheckpoint().Copy()
+		finalizedCheckpoint         = lastProcessedState.FinalizedCheckpoint().Copy()
+		justificationBits           = lastProcessedState.JustificationBits().Copy()
+	)
 	// Eagerly compute unrealized justification and finality
-	lastProcessedState.StartCollectingReverseChangeSet()
 	if err := transition.ProcessJustificationBitsAndFinality(lastProcessedState); err != nil {
-		lastProcessedState.RevertWithChangeset(lastProcessedState.StopCollectingReverseChangeSet())
 		return err
 	}
-	// Add justied checkpoint
-	copiedCheckpoint := *lastProcessedState.CurrentJustifiedCheckpoint()
-	f.unrealizedJustifications.Add(blockRoot, &copiedCheckpoint)
-
 	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
+	// Set the changed value pre-simulation
+	lastProcessedState.SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint)
+	lastProcessedState.SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint)
+	lastProcessedState.SetFinalizedCheckpoint(finalizedCheckpoint)
+	lastProcessedState.SetJustificationBits(justificationBits)
 	// If the block is from a prior epoch, apply the realized values
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	if blockEpoch < currentEpoch {
 		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	}
-	// Lastly revert the changes to the state.
-	lastProcessedState.RevertWithChangeset(lastProcessedState.StopCollectingReverseChangeSet())
 	return nil
 }

@@ -67,7 +67,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 	excessDataGas := header.ParentExcessDataGas(getHeader)
 
 	for i, txn := range block.Transactions() {
-		ibs.Prepare(txn.Hash(), block.Hash(), i)
+		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{}, excessDataGas)
 		if err != nil {
 			return nil, err
@@ -486,6 +486,7 @@ func txnExecutor(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.E
 	stateReader.SetTx(tx)
 
 	ie := &intraBlockExec{
+		tx:          tx,
 		engine:      engine,
 		chainConfig: chainConfig,
 		br:          br,
@@ -516,7 +517,7 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 	e.stateReader.SetTxNum(txNum)
 	txHash := txn.Hash()
 	e.ibs.Reset()
-	e.ibs.Prepare(txHash, e.blockHash, txIndex)
+	e.ibs.SetTxContext(txHash, e.blockHash, txIndex)
 	gp := new(core.GasPool).AddGas(txn.GetGas()).AddDataGas(txn.GetDataGas())
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {
@@ -650,7 +651,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	var edg *big.Int
 	if n := block.Number().Uint64(); n > 0 {
-		if parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, n-1); err != nil {
+		if parentHeader, err := api._blockReader.Header(ctx, tx, block.ParentHash(), n-1); err != nil {
 			return nil, err
 		} else {
 			edg = parentHeader.ExcessDataGas
@@ -706,7 +707,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	result := make([]map[string]interface{}, 0, len(receipts))
 	var edg *big.Int
 	if n := block.Number().Uint64(); n > 0 {
-		if parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, n-1); err != nil {
+		if parentHeader, err := api._blockReader.Header(ctx, tx, block.ParentHash(), n-1); err != nil {
 			return nil, err
 		} else {
 			edg = parentHeader.ExcessDataGas
@@ -744,6 +745,8 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		chainId = t.ChainID.ToBig()
 	case *types.DynamicFeeTransaction:
 		chainId = t.ChainID.ToBig()
+		// case *types.SignedBlobTx: // TODO: needs eip-4844 signer
+		// 	chainId = t.GetChainID().ToBig()
 	}
 
 	var from common.Address

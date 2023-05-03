@@ -109,7 +109,8 @@ func ExecV3(ctx context.Context,
 	parallel bool, logPrefix string,
 	maxBlockNum uint64,
 ) error {
-	batchSize, chainDb := cfg.batchSize, cfg.db
+	batchSize := cfg.batchSize
+	chainDb := cfg.db
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
@@ -233,11 +234,7 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 
-			processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := func() (processedTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
-				it := rws.Iter()
-				defer it.Close()
-				return processResultQueue(in, it, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker, true, false)
-			}()
+			processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(in, rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker, true, false)
 			if err != nil {
 				return err
 			}
@@ -295,6 +292,10 @@ func ExecV3(ctx context.Context,
 					return ctx.Err()
 
 				case <-logEvery.C:
+					if list := agg.SlowContextsList(); len(list) > 0 {
+						log.Info("[dbg] Active agg ctx", "list", list)
+					}
+
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
 					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
 					if agg.HasBackgroundFilesBuild() {
@@ -326,12 +327,10 @@ func ExecV3(ctx context.Context,
 							rws.DrainNonBlocking()
 							applyWorker.ResetTx(tx)
 
-							resIt := rws.Iter()
-							processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(in, resIt, outputTxNum.Load(), rs, agg, tx, nil, applyWorker, false, true)
+							processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err := processResultQueue(in, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker, false, true)
 							if err != nil {
 								return err
 							}
-							resIt.Close() //TODO: in defer
 
 							ExecRepeats.Add(conflicts)
 							ExecTriggers.Add(triggers)
@@ -357,10 +356,10 @@ func ExecV3(ctx context.Context,
 							rs.ReTry(txTask, in)
 						})
 
-						lastTxNumInDb, _ := rawdbv3.TxNums.Max(tx, outputBlockNum.Get())
-						if lastTxNumInDb != outputTxNum.Load()-1 {
-							panic(fmt.Sprintf("assert: %d != %d", lastTxNumInDb, outputTxNum.Load()))
-						}
+						//lastTxNumInDb, _ := rawdbv3.TxNums.Max(tx, outputBlockNum.Get())
+						//if lastTxNumInDb != outputTxNum.Load()-1 {
+						//	panic(fmt.Sprintf("assert: %d != %d", lastTxNumInDb, outputTxNum.Load()))
+						//}
 
 						t1 = time.Since(commitStart)
 						tt := time.Now()
@@ -427,6 +426,7 @@ func ExecV3(ctx context.Context,
 		rwLoopG, rwLoopCtx = errgroup.WithContext(rwLoopCtx)
 		defer rwLoopG.Wait()
 		rwLoopG.Go(func() error {
+			defer rws.Close()
 			defer in.Close()
 			defer applyLoopWg.Wait()
 			return rwLoop(rwLoopCtx)
@@ -673,7 +673,7 @@ Loop:
 		}
 
 		if blockSnapshots.Cfg().Produce {
-			agg.BuildFilesInBackground()
+			agg.BuildFilesInBackground(outputTxNum.Load())
 		}
 		select {
 		case <-ctx.Done():
@@ -683,6 +683,7 @@ Loop:
 	}
 
 	if parallel {
+		log.Warn("[dbg] all txs sent")
 		if err := rwLoopG.Wait(); err != nil {
 			return err
 		}
@@ -700,7 +701,7 @@ Loop:
 	}
 
 	if blockSnapshots.Cfg().Produce {
-		agg.BuildFilesInBackground()
+		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
 	if !useExternalTx && applyTx != nil {
@@ -729,11 +730,14 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueueIter, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
+	rwsIt := rws.Iter()
+	defer rwsIt.Close()
+
 	var i int
 	outputTxNum = outputTxNumIn
-	for rws.HasNext(outputTxNum) {
-		txTask := rws.PopNext()
+	for rwsIt.HasNext(outputTxNum) {
+		txTask := rwsIt.PopNext()
 		if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
 			conflicts++
 

@@ -20,6 +20,7 @@ import (
 	"math/big"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
@@ -116,7 +117,8 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error
 		return peer.ID(""), fmt.Errorf("no peers")
 	}
 
-	validPeerList := sub.topic.ListPeers()
+	validPeerList := s.Host().Network().Peers()
+	//validPeerList := sub.topic.ListPeers()
 	if len(validPeerList) == 0 {
 		return peer.ID(""), fmt.Errorf("no peers")
 	}
@@ -138,26 +140,25 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error
 			index = n.Int64()
 		}
 
-		node := validPeerList[index]
-		if !isPeerWhitelisted(node, validPeerList) {
+		if !s.peers.IsPeerAvaiable(validPeerList[index]) {
 			continue
 		}
 
-		if !s.peers.IsPeerAvaiable(node) {
-			continue
-		}
-
-		return node, nil
+		return validPeerList[index], nil
 	}
 
 	return peer.ID(""), fmt.Errorf("failed to connect to peer")
-
 }
-func isPeerWhitelisted(peer peer.ID, whitelist []peer.ID) bool {
-	for _, currPeer := range whitelist {
-		if peer == currPeer {
-			return true
-		}
-	}
-	return false
+
+func (s *Sentinel) oneSlotDuration() time.Duration {
+	return time.Duration(s.cfg.BeaconConfig.SecondsPerSlot) * time.Second
+}
+
+func (s *Sentinel) oneEpochDuration() time.Duration {
+	return s.oneSlotDuration() * time.Duration(s.cfg.BeaconConfig.SlotsPerEpoch)
+}
+
+// the cap for `inMesh` time scoring.
+func (s *Sentinel) inMeshCap() float64 {
+	return float64((3600 * time.Second) / s.oneSlotDuration())
 }

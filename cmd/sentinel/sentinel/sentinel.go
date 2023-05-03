@@ -17,13 +17,14 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"math"
 	"net"
+
 	"net/http"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
@@ -34,13 +35,31 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+const (
+	// overlay parameters
+	gossipSubD   = 8  // topic stable mesh target count
+	gossipSubDlo = 6  // topic stable mesh low watermark
+	gossipSubDhi = 12 // topic stable mesh high watermark
+
+	// gossip parameters
+	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
+	gossipSubMcacheGossip = 3   // number of windows to gossip about
+	gossipSubSeenTTL      = 550 // number of heartbeat intervals to retain message IDs
+	// heartbeat interval
+	gossipSubHeartbeatInterval = 700 * time.Millisecond // frequency of heartbeat, milliseconds
+
+	// decayToZero specifies the terminal value that we will use when decaying
+	// a value.
+	decayToZero = 0.01
 )
 
 type Sentinel struct {
@@ -55,10 +74,11 @@ type Sentinel struct {
 
 	db kv.RoDB
 
-	discoverConfig discover.Config
-	pubsub         *pubsub.PubSub
-	subManager     *GossipManager
-	metrics        bool
+	discoverConfig       discover.Config
+	pubsub               *pubsub.PubSub
+	subManager           *GossipManager
+	metrics              bool
+	listenForPeersDoneCh chan struct{}
 }
 
 func (s *Sentinel) createLocalNode(
@@ -152,19 +172,59 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	return net, err
 }
 
+// creates a custom gossipsub parameter set.
+func pubsubGossipParam() pubsub.GossipSubParams {
+	gParams := pubsub.DefaultGossipSubParams()
+	gParams.Dlo = gossipSubDlo
+	gParams.D = gossipSubD
+	gParams.HeartbeatInterval = gossipSubHeartbeatInterval
+	gParams.HistoryLength = gossipSubMcacheLen
+	gParams.HistoryGossip = gossipSubMcacheGossip
+	return gParams
+}
+
+// determines the decay rate from the provided time period till
+// the decayToZero value. Ex: ( 1 -> 0.01)
+func (s *Sentinel) scoreDecay(totalDurationDecay time.Duration) float64 {
+	numOfTimes := totalDurationDecay / s.oneSlotDuration()
+	return math.Pow(decayToZero, 1/float64(numOfTimes))
+}
+
 func (s *Sentinel) pubsubOptions() []pubsub.Option {
+	thresholds := &pubsub.PeerScoreThresholds{
+		GossipThreshold:             -4000,
+		PublishThreshold:            -8000,
+		GraylistThreshold:           -16000,
+		AcceptPXThreshold:           100,
+		OpportunisticGraftThreshold: 5,
+	}
+	scoreParams := &pubsub.PeerScoreParams{
+		Topics:        make(map[string]*pubsub.TopicScoreParams),
+		TopicScoreCap: 32.72,
+		AppSpecificScore: func(p peer.ID) float64 {
+			return 0
+		},
+		AppSpecificWeight:           1,
+		IPColocationFactorWeight:    -35.11,
+		IPColocationFactorThreshold: 10,
+		IPColocationFactorWhitelist: nil,
+		BehaviourPenaltyWeight:      -15.92,
+		BehaviourPenaltyThreshold:   6,
+		BehaviourPenaltyDecay:       s.scoreDecay(10 * s.oneEpochDuration()), // 10 epochs
+		DecayInterval:               s.oneSlotDuration(),
+		DecayToZero:                 decayToZero,
+		RetainScore:                 100 * s.oneEpochDuration(), // Retain for 100 epochs
+	}
 	pubsubQueueSize := 600
-	gsp := pubsub.DefaultGossipSubParams()
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
-		pubsub.WithMessageIdFn(func(pmsg *pubsub_pb.Message) string {
-			return fork.MsgID(pmsg, s.cfg.NetworkConfig, s.cfg.BeaconConfig, s.cfg.GenesisConfig)
-		}), pubsub.WithNoAuthor(),
-		pubsub.WithSubscriptionFilter(nil),
+		pubsub.WithMessageIdFn(s.msgId),
+		pubsub.WithNoAuthor(),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
-		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSize)),
+		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSizeBellatrix)),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
-		pubsub.WithGossipSubParams(gsp),
+		pubsub.WithPeerScore(scoreParams, thresholds),
+		pubsub.WithGossipSubParams(pubsubGossipParam()),
 	}
 	return psOpts
 }
@@ -236,11 +296,10 @@ func New(
 
 	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host)
 
-	// removed IdDelta in recent version of libp2p
-	host.RemoveStreamHandler("/p2p/id/delta/1.0.0")
 	s.host = host
 	s.peers = peers.New(s.host)
 
+	pubsub.TimeCacheDuration = 550 * gossipSubHeartbeatInterval
 	s.pubsub, err = pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
 	if err != nil {
 		return nil, fmt.Errorf("[Sentinel] failed to subscribe to gossip err=%w", err)
@@ -277,6 +336,13 @@ func (s *Sentinel) Start() error {
 	return nil
 }
 
+func (s *Sentinel) Stop() {
+	s.listenForPeersDoneCh <- struct{}{}
+	s.listener.Close()
+	s.subManager.Close()
+	s.host.Close()
+}
+
 func (s *Sentinel) String() string {
 	return s.listener.Self().String()
 }
@@ -286,12 +352,7 @@ func (s *Sentinel) HasTooManyPeers() bool {
 }
 
 func (s *Sentinel) GetPeersCount() int {
-	sub := s.subManager.GetMatchingSubscription(string(LightClientOptimisticUpdateTopic))
-
-	if sub == nil {
-		return len(s.host.Network().Peers())
-	}
-	return len(sub.topic.ListPeers())
+	return len(s.host.Network().Peers())
 }
 
 func (s *Sentinel) Host() host.Host {
@@ -304,4 +365,25 @@ func (s *Sentinel) Peers() *peers.Peers {
 
 func (s *Sentinel) GossipManager() *GossipManager {
 	return s.subManager
+}
+
+func (s *Sentinel) Config() *SentinelConfig {
+	return s.cfg
+}
+
+func (s *Sentinel) DB() kv.RoDB {
+	return s.db
+}
+
+func (s *Sentinel) Status() *cltypes.Status {
+	return s.handshaker.Status()
+}
+
+func (s *Sentinel) PeersList() []peer.AddrInfo {
+	pids := s.host.Network().Peers()
+	infos := []peer.AddrInfo{}
+	for _, pid := range pids {
+		infos = append(infos, s.host.Network().Peerstore().PeerInfo(pid))
+	}
+	return infos
 }

@@ -34,6 +34,7 @@ import (
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
@@ -67,17 +68,17 @@ import (
 
 var (
 	// General settings
-	DataDirFlag = DirectoryFlag{
+	DataDirFlag = flags.DirectoryFlag{
 		Name:  "datadir",
 		Usage: "Data directory for the databases",
-		Value: DirectoryString(paths.DefaultDataDir()),
+		Value: flags.DirectoryString(paths.DefaultDataDir()),
 	}
 
-	AncientFlag = DirectoryFlag{
+	AncientFlag = flags.DirectoryFlag{
 		Name:  "datadir.ancient",
 		Usage: "Data directory for ancient chain segments (default = inside chaindata)",
 	}
-	MinFreeDiskSpaceFlag = DirectoryFlag{
+	MinFreeDiskSpaceFlag = flags.DirectoryFlag{
 		Name:  "datadir.minfreedisk",
 		Usage: "Minimum free disk space in MB, once reached triggers auto shut down (default = --cache.gc converted to MB, 0 = disabled)",
 	}
@@ -103,7 +104,7 @@ var (
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
-	OverrideShanghaiTime = BigFlag{
+	OverrideShanghaiTime = flags.BigFlag{
 		Name:  "override.shanghaiTime",
 		Usage: "Manually specify Shanghai fork time, overriding the bundled setting",
 	}
@@ -117,10 +118,10 @@ var (
 		Name:  "ethash.cacheslockmmap",
 		Usage: "Lock memory maps of recent ethash caches",
 	}
-	EthashDatasetDirFlag = DirectoryFlag{
+	EthashDatasetDirFlag = flags.DirectoryFlag{
 		Name:  "ethash.dagdir",
 		Usage: "Directory to store the ethash mining DAGs",
-		Value: DirectoryString(ethconfig.Defaults.Ethash.DatasetDir),
+		Value: flags.DirectoryString(ethconfig.Defaults.Ethash.DatasetDir),
 	}
 	EthashDatasetsLockMmapFlag = cli.BoolFlag{
 		Name:  "ethash.dagslockmmap",
@@ -131,8 +132,8 @@ var (
 		Usage: `Default: use snapshots "true" for Mainnet, Goerli, Gnosis Chain and Chiado. use snapshots "false" in all other cases`,
 		Value: true,
 	}
-	ExternalConsensusFlag = cli.BoolFlag{
-		Name:  "externalcl",
+	InternalConsensusFlag = cli.BoolFlag{
+		Name:  "internalcl",
 		Usage: "enables external consensus",
 	}
 	// Transaction pool settings
@@ -216,7 +217,7 @@ var (
 		Usage: "Target gas limit for mined blocks",
 		Value: ethconfig.Defaults.Miner.GasLimit,
 	}
-	MinerGasPriceFlag = BigFlag{
+	MinerGasPriceFlag = flags.BigFlag{
 		Name:  "miner.gasprice",
 		Usage: "Minimum gas price for mining a transaction",
 		Value: ethconfig.Defaults.Miner.GasPrice,
@@ -277,7 +278,7 @@ var (
 		Name:  "ipcdisable",
 		Usage: "Disable the IPC-RPC server",
 	}
-	IPCPathFlag = DirectoryFlag{
+	IPCPathFlag = flags.DirectoryFlag{
 		Name:  "ipcpath",
 		Usage: "Filename for IPC socket/pipe within the datadir (explicit paths escape it)",
 	}
@@ -636,7 +637,7 @@ var (
 		Usage: "number of recent block signatures to keep in memory",
 		Value: 16384,
 	}
-	CliqueDataDirFlag = DirectoryFlag{
+	CliqueDataDirFlag = flags.DirectoryFlag{
 		Name:  "clique.datadir",
 		Usage: "a path to clique db folder",
 		Value: "",
@@ -711,8 +712,13 @@ var (
 	}
 	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
-		Usage: "set mdbx pagesize on db creation: must be power of 2 and '256b <= pagesize <= 64kb'. default: equal to OperationSystem's pageSize",
+		Usage: "DB is splitted to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintainance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
 		Value: datasize.ByteSize(kv.DefaultPageSize()).String(),
+	}
+	DbSizeLimitFlag = cli.StringFlag{
+		Name:  "db.size.limit",
+		Usage: "runtime limit of chandata db size. you can change value of this flag at any time",
+		Value: (7 * datasize.TB).String(),
 	}
 
 	HealthCheckFlag = cli.BoolFlag{
@@ -1145,20 +1151,14 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	}
 	cfg.Dirs = datadir.New(cfg.Dirs.DataDir)
 
-	if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.String(DbPageSizeFlag.Name))); err != nil {
+	cfg.MdbxPageSize = flags.DBPageSizeFlagUnmarshal(ctx, DbPageSizeFlag.Name, DbPageSizeFlag.Usage)
+	if err := cfg.MdbxDBSizeLimit.UnmarshalText([]byte(ctx.String(DbSizeLimitFlag.Name))); err != nil {
 		panic(err)
 	}
-	sz := cfg.MdbxPageSize.Bytes()
-	if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
-		panic(fmt.Errorf("invalid --db.pagesize: %s=%d, see: %s", ctx.String(DbPageSizeFlag.Name), sz, DbPageSizeFlag.Usage))
+	szLimit := cfg.MdbxDBSizeLimit.Bytes()
+	if szLimit%256 != 0 || szLimit < 256 {
+		panic(fmt.Errorf("invalid --db.size.limit: %s=%d, see: %s", ctx.String(DbSizeLimitFlag.Name), szLimit, DbSizeLimitFlag.Usage))
 	}
-}
-
-func isPowerOfTwo(n uint64) bool {
-	if n == 0 { //corner case: if n is zero it will also consider as power 2
-		return true
-	}
-	return n&(n-1) == 0
 }
 
 func setDataDirCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
@@ -1210,10 +1210,10 @@ func setTxPool(ctx *cli.Context, cfg *ethconfig.DeprecatedTxPoolConfig) {
 		cfg.Disable = true
 	}
 	if ctx.IsSet(TxPoolLocalsFlag.Name) {
-		locals := strings.Split(ctx.String(TxPoolLocalsFlag.Name), ",")
+		locals := SplitAndTrim(ctx.String(TxPoolLocalsFlag.Name))
 		for _, account := range locals {
-			if trimmed := strings.TrimSpace(account); !libcommon.IsHexAddress(trimmed) {
-				Fatalf("Invalid account in --txpool.locals: %s", trimmed)
+			if !libcommon.IsHexAddress(account) {
+				Fatalf("Invalid account in --txpool.locals: %s", account)
 			} else {
 				cfg.Locals = append(cfg.Locals, libcommon.HexToAddress(account))
 			}
@@ -1355,7 +1355,7 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFileFlag.Name))
 	}
 	if ctx.IsSet(MinerNotifyFlag.Name) {
-		cfg.Notify = strings.Split(ctx.String(MinerNotifyFlag.Name), ",")
+		cfg.Notify = SplitAndTrim(ctx.String(MinerNotifyFlag.Name))
 	}
 	if ctx.IsSet(MinerExtraDataFlag.Name) {
 		cfg.ExtraData = []byte(ctx.String(MinerExtraDataFlag.Name))
@@ -1364,7 +1364,7 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 		cfg.GasLimit = ctx.Uint64(MinerGasLimitFlag.Name)
 	}
 	if ctx.IsSet(MinerGasPriceFlag.Name) {
-		cfg.GasPrice = BigFlagValue(ctx, MinerGasPriceFlag.Name)
+		cfg.GasPrice = flags.GlobalBig(ctx, MinerGasPriceFlag.Name)
 	}
 	if ctx.IsSet(MinerRecommitIntervalFlag.Name) {
 		cfg.Recommit = ctx.Duration(MinerRecommitIntervalFlag.Name)
@@ -1380,7 +1380,7 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 		return
 	}
 	cfg.Whitelist = make(map[uint64]libcommon.Hash)
-	for _, entry := range strings.Split(whitelist, ",") {
+	for _, entry := range SplitAndTrim(whitelist) {
 		parts := strings.Split(entry, "=")
 		if len(parts) != 2 {
 			Fatalf("Invalid whitelist entry: %s", entry)
@@ -1569,17 +1569,14 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 
 	if ctx.IsSet(OverrideShanghaiTime.Name) {
-		cfg.OverrideShanghaiTime = BigFlagValue(ctx, OverrideShanghaiTime.Name)
+		cfg.OverrideShanghaiTime = flags.GlobalBig(ctx, OverrideShanghaiTime.Name)
 		cfg.TxPool.OverrideShanghaiTime = cfg.OverrideShanghaiTime
 	}
 
-	if ctx.IsSet(ExternalConsensusFlag.Name) {
-		cfg.ExternalCL = ctx.Bool(ExternalConsensusFlag.Name)
-	} else {
-		cfg.ExternalCL = !clparams.EmbeddedEnabledByDefault(cfg.NetworkID)
+	if ctx.IsSet(InternalConsensusFlag.Name) && clparams.EmbeddedEnabledByDefault(cfg.NetworkID) {
+		cfg.InternalCL = ctx.Bool(InternalConsensusFlag.Name)
 	}
-
-	nodeConfig.Http.InternalCL = !cfg.ExternalCL
+	nodeConfig.Http.InternalCL = cfg.InternalCL
 
 	if ctx.IsSet(SentryDropUselessPeers.Name) {
 		cfg.DropUselessPeers = ctx.Bool(SentryDropUselessPeers.Name)
@@ -1599,7 +1596,7 @@ func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis libcommon.Hash) {
 }
 
 func SplitTagsFlag(tagsFlag string) map[string]string {
-	tags := strings.Split(tagsFlag, ",")
+	tags := SplitAndTrim(tagsFlag)
 	tagsMap := map[string]string{}
 
 	for _, t := range tags {
@@ -1623,12 +1620,7 @@ func MakeConsolePreloads(ctx *cli.Context) []string {
 		return nil
 	}
 	// Otherwise resolve absolute paths and return them
-	files := strings.Split(ctx.String(PreloadJSFlag.Name), ",")
-	preloads := make([]string, 0, len(files))
-	for _, file := range files {
-		preloads = append(preloads, strings.TrimSpace(file))
-	}
-	return preloads
+	return SplitAndTrim(ctx.String(PreloadJSFlag.Name))
 }
 
 func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {

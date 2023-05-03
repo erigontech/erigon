@@ -81,7 +81,7 @@ func init() {
 
 var rootCmd = &cobra.Command{
 	Use:   "txpool",
-	Short: "Launch externa Transaction Pool instance - same as built-into Erigon, but as independent Service",
+	Short: "Launch external Transaction Pool instance - same as built-into Erigon, but as independent Process",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return debug.SetupCobra(cmd)
 	},

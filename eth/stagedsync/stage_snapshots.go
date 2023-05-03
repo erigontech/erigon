@@ -165,6 +165,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if cfg.historyV3 {
+		cfg.agg.CleanDir()
+
 		indexWorkers := estimate.IndexSnapshot.Workers()
 		if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 			return err
@@ -520,7 +522,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		}
 
 		br.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlDebug)
-		cfg.agg.BuildFilesInBackground()
+		//cfg.agg.BuildFilesInBackground()
 	}
 
 	if !useExternalTx {

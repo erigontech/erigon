@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 )
 
-const Version = 1
+const Version = 2
 
 func SetupVersionAccess() {
 	http.HandleFunc("/debug/metrics/version", func(w http.ResponseWriter, r *http.Request) {

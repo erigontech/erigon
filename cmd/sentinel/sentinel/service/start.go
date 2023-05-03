@@ -23,8 +23,7 @@ type ServerConfig struct {
 	Addr    string
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status) (sentinelrpc.SentinelClient, error) {
-	ctx := context.Background()
+func createSentinel(cfg *sentinel.SentinelConfig, db kv.RoDB) (*sentinel.Sentinel, error) {
 	sent, err := sentinel.New(context.Background(), cfg, db)
 	if err != nil {
 		return nil, err
@@ -39,10 +38,13 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *Serv
 		//sentinel.VoluntaryExitSsz,
 		//sentinel.ProposerSlashingSsz,
 		//sentinel.AttesterSlashingSsz,
-		sentinel.LightClientFinalityUpdateSsz,
-		sentinel.LightClientOptimisticUpdateSsz,
 	}
+
 	for _, v := range gossip_topics {
+		if err := sent.Unsubscribe(v); err != nil {
+			log.Error("[Sentinel] failed to start sentinel", "err", err)
+			continue
+		}
 		// now lets separately connect to the gossip topics. this joins the room
 		subscriber, err := sent.SubscribeGossip(v)
 		if err != nil {
@@ -53,6 +55,16 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *Serv
 		if err != nil {
 			log.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
+	}
+	return sent, nil
+}
+
+func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status) (sentinelrpc.SentinelClient, error) {
+	ctx := context.Background()
+
+	sent, err := createSentinel(cfg, db)
+	if err != nil {
+		return nil, err
 	}
 	log.Info("[Sentinel] Sentinel started", "enr", sent.String())
 	if initialStatus != nil {
@@ -93,6 +105,7 @@ func StartServe(server *SentinelServer, srvCfg *ServerConfig, creds credentials.
 	// Create a gRPC server
 	gRPCserver := grpc.NewServer(grpc.Creds(creds))
 	go server.ListenToGossip()
+	go server.startServerBackgroundLoop()
 	// Regiser our server as a gRPC server
 	sentinelrpc.RegisterSentinelServer(gRPCserver, server)
 	if err := gRPCserver.Serve(lis); err != nil {

@@ -1,112 +1,108 @@
-package consensustests
+package consensus_tests
 
 import (
-	"errors"
-	"fmt"
+	"io/fs"
 	"os"
+	"testing"
 
+	"github.com/ledgerwatch/erigon/cmd/ef-tests-cl/spectest"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func getTestEpochProcessing(f func(s *state.BeaconState) error) testFunc {
-	return func(context testContext) (err error) {
-		defer func() {
-			// recover from panic if one occured. Set err to nil otherwise.
-			if recovered := recover(); recovered != nil {
-				err = fmt.Errorf("panic: %s", recovered)
-			}
-		}()
-		if err != nil {
-			return err
-		}
-		// Read post and
-		testState, err := decodeStateFromFile(context, "pre.ssz_snappy")
-		if err != nil {
-			return err
-		}
-		var isErrExpected bool
-		expectedState, err := decodeStateFromFile(context, "post.ssz_snappy")
-		if os.IsNotExist(err) {
-			isErrExpected = true
-		} else if err != nil {
-			return err
-		}
-		// Make up state transistor
-		if err := f(testState); err != nil {
-			if isErrExpected {
-				return nil
-			}
-			return err
-		}
-		if isErrExpected && err == nil {
-			return fmt.Errorf("expected an error got none")
-		}
-		haveRoot, err := testState.HashSSZ()
-		if err != nil {
-			return err
-		}
-		expectedRoot, err := expectedState.HashSSZ()
-		if err != nil {
-			return err
-		}
-		if expectedRoot != haveRoot {
-			return errors.New("mismatching roots")
-		}
-		return nil
+type EpochProcessing struct {
+	Fn func(s *state.BeaconState) error
+}
+
+func NewEpochProcessing(fn func(s *state.BeaconState) error) *EpochProcessing {
+	return &EpochProcessing{
+		Fn: fn,
 	}
 }
 
-var effectiveBalancesUpdateTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+func (b *EpochProcessing) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
+	testState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PreSsz)
+	require.NoError(t, err)
+
+	var expectedError bool
+	expectedState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
+	if os.IsNotExist(err) {
+		expectedError = true
+		err = nil
+	}
+	require.NoError(t, err)
+	if err := b.Fn(testState); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+
+	haveRoot, err := testState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := expectedState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+var effectiveBalancesUpdateTest = NewEpochProcessing(func(s *state.BeaconState) error {
 	return transition.ProcessEffectiveBalanceUpdates(s)
 })
 
-var eth1DataResetTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+var eth1DataResetTest = NewEpochProcessing(func(s *state.BeaconState) error {
 	transition.ProcessEth1DataReset(s)
 	return nil
 })
 
-var historicalRootsUpdateTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+var historicalRootsUpdateTest = NewEpochProcessing(func(s *state.BeaconState) error {
 	transition.ProcessHistoricalRootsUpdate(s)
 	return nil
 })
 
-var inactivityUpdateTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+var inactivityUpdateTest = NewEpochProcessing(func(s *state.BeaconState) error {
 	return transition.ProcessInactivityScores(s)
 })
 
-var justificationFinalizationTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+var justificationFinalizationTest = NewEpochProcessing(func(s *state.BeaconState) error {
 	return transition.ProcessJustificationBitsAndFinality(s)
 })
 
-var participationFlagUpdatesTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+var participationFlagUpdatesTest = NewEpochProcessing(func(s *state.BeaconState) error {
 	transition.ProcessParticipationFlagUpdates(s)
 	return nil
 })
+var participationRecordUpdatesTest = NewEpochProcessing(func(s *state.BeaconState) error {
+	return transition.ProcessParticipationRecordUpdates(s)
+})
 
-var randaoMixesTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+var randaoMixesTest = NewEpochProcessing(func(s *state.BeaconState) error {
 	transition.ProcessRandaoMixesReset(s)
 	return nil
 })
 
-var registryUpdatesTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+var registryUpdatesTest = NewEpochProcessing(func(s *state.BeaconState) error {
 	return transition.ProcessRegistryUpdates(s)
 })
 
-var rewardsAndPenaltiesTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+var rewardsAndPenaltiesTest = NewEpochProcessing(func(s *state.BeaconState) error {
 	return transition.ProcessRewardsAndPenalties(s)
 })
 
-var slashingsTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+var slashingsTest = NewEpochProcessing(func(s *state.BeaconState) error {
 	return transition.ProcessSlashings(s)
 })
 
-var slashingsResetTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+var slashingsResetTest = NewEpochProcessing(func(s *state.BeaconState) error {
 	transition.ProcessSlashingsReset(s)
 	return nil
 })
 
-var recordsResetTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+var recordsResetTest = NewEpochProcessing(func(s *state.BeaconState) error {
 	transition.ProcessParticipationRecordUpdates(s)
 	return nil
 })

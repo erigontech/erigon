@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -129,39 +130,14 @@ func BodiesForward(
 	prevProgress := bodyProgress
 	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
+	cr := ChainReader{Cfg: cfg.chanConfig, Db: tx}
 
 	loopBody := func() (bool, error) {
-		// always check if a new request is needed at the start of the loop
-		// this will check for timed out old requests and attempt to send them again
-		start := time.Now()
-		currentTime := uint64(time.Now().Unix())
-		req, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, currentTime, cfg.blockPropagator)
-		if err != nil {
-			return false, fmt.Errorf("request more bodies: %w", err)
-		}
-		d1 += time.Since(start)
-
-		peer = [64]byte{}
-		sentToPeer = false
-
-		if req != nil {
-			start := time.Now()
-			peer, sentToPeer = cfg.bodyReqSend(ctx, req)
-			d2 += time.Since(start)
-		}
-		if req != nil && sentToPeer {
-			start := time.Now()
-			currentTime := uint64(time.Now().Unix())
-			cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
-			d3 += time.Since(start)
-		}
-
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
 		// having some time out so requesting again and cycling like that forever.  We'll cap it
 		// and break the loop so we can see if there are any records to actually process further down
 		// then come back here again in the next cycle
-		loopCount := 0
-		for req != nil && sentToPeer {
+		for loopCount := 0; loopCount == 0 || (req != nil && sentToPeer && loopCount < requestLoopCutOff); loopCount++ {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
 			req, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, currentTime, cfg.blockPropagator)
@@ -181,14 +157,9 @@ func BodiesForward(
 				cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 				d3 += time.Since(start)
 			}
-
-			loopCount++
-			if loopCount >= requestLoopCutOff {
-				break
-			}
 		}
 
-		start = time.Now()
+		start := time.Now()
 		requestedLow, delivered, err := cfg.bd.GetDeliveries(tx)
 		if err != nil {
 			return false, err
@@ -196,7 +167,6 @@ func BodiesForward(
 		totalDelivered += delivered
 		d4 += time.Since(start)
 		start = time.Now()
-		cr := ChainReader{Cfg: cfg.chanConfig, Db: tx}
 
 		toProcess := cfg.bd.NextProcessingCount()
 
@@ -245,6 +215,9 @@ func BodiesForward(
 				if err := rawdbv3.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
 					return false, err
 				}
+			}
+			if ok {
+				dataflow.BlockBodyDownloadStates.AddChange(blockHeight, dataflow.BlockBodyCleared)
 			}
 
 			if blockHeight > bodyProgress {
@@ -296,13 +269,10 @@ func BodiesForward(
 	}
 
 	// kick off the loop and check for any reason to stop and break early
-	for !stopped {
-		shouldBreak, err := loopBody()
-		if err != nil {
+	var shouldBreak bool
+	for !stopped && !shouldBreak {
+		if shouldBreak, err = loopBody(); err != nil {
 			return err
-		}
-		if shouldBreak {
-			break
 		}
 	}
 

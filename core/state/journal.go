@@ -140,6 +140,7 @@ type (
 	touchChange struct {
 		account *libcommon.Address
 	}
+
 	// Changes to the access list
 	accessListAddAccountChange struct {
 		address *libcommon.Address
@@ -147,6 +148,12 @@ type (
 	accessListAddSlotChange struct {
 		address *libcommon.Address
 		slot    *libcommon.Hash
+	}
+
+	transientStorageChange struct {
+		account  *libcommon.Address
+		key      libcommon.Hash
+		prevalue uint256.Int
 	}
 )
 
@@ -247,6 +254,14 @@ func (ch fakeStorageChange) revert(s *IntraBlockState) {
 
 func (ch fakeStorageChange) dirtied() *libcommon.Address {
 	return ch.account
+}
+
+func (ch transientStorageChange) revert(s *IntraBlockState) {
+	s.setTransientState(*ch.account, ch.key, ch.prevalue)
+}
+
+func (ch transientStorageChange) dirtied() *libcommon.Address {
+	return nil
 }
 
 func (ch refundChange) revert(s *IntraBlockState) {

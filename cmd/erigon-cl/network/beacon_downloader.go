@@ -2,12 +2,12 @@ package network
 
 import (
 	"sync"
+	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/net/context"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 )
 
@@ -25,52 +25,17 @@ type ForwardBeaconDownloader struct {
 	ctx                       context.Context
 	highestSlotProcessed      uint64
 	highestBlockRootProcessed libcommon.Hash
-	targetSlot                uint64
 	rpc                       *rpc.BeaconRpcP2P
 	process                   ProcessFn
-	isDownloading             bool // Should be set to true to set the blocks to download
-	limitSegmentsLength       int  // Limit how many blocks we store in the downloader without processing
 
-	segments []*cltypes.SignedBeaconBlock // Unprocessed downloaded segments
-	mu       sync.Mutex
+	mu sync.Mutex
 }
 
 func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *ForwardBeaconDownloader {
 	return &ForwardBeaconDownloader{
-		ctx:           ctx,
-		segments:      []*cltypes.SignedBeaconBlock{},
-		rpc:           rpc,
-		isDownloading: false,
+		ctx: ctx,
+		rpc: rpc,
 	}
-}
-
-// Start begins the gossip listening process.
-func (f *ForwardBeaconDownloader) ReceiveGossip(obj ssz.Unmarshaler) {
-	signedBlock := obj.(*cltypes.SignedBeaconBlock)
-	if signedBlock.Block.ParentRoot == f.highestBlockRootProcessed {
-		f.addSegment(signedBlock)
-	}
-}
-
-// SetIsDownloading sets isDownloading
-func (f *ForwardBeaconDownloader) SetIsDownloading(isDownloading bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.isDownloading = isDownloading
-}
-
-// SetLimitSegmentsLength sets the segments limiter.
-func (f *ForwardBeaconDownloader) SetLimitSegmentsLength(limitSegmentsLength int) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.limitSegmentsLength = limitSegmentsLength
-}
-
-// SetTargetSlot sets the target slot.
-func (f *ForwardBeaconDownloader) SetTargetSlot(targetSlot uint64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.targetSlot = targetSlot
 }
 
 // SetProcessFunction sets the function used to process segments.
@@ -101,49 +66,26 @@ func (f *ForwardBeaconDownloader) HighestProcessedRoot() libcommon.Hash {
 	return f.highestBlockRootProcessed
 }
 
-// addSegment process new block segment.
-func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlock) {
-	// Skip if it is not downloading or limit was reached
-	if !f.isDownloading || len(f.segments) >= f.limitSegmentsLength {
-		return
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	// Skip if does continue the segment.
-	f.segments = append(f.segments, block)
-}
-
 func (f *ForwardBeaconDownloader) RequestMore() {
-	count := uint64(64)
-
-	responses, err := f.rpc.SendBeaconBlocksByRangeReq(f.highestSlotProcessed+1, count)
+	count := uint64(4) // dont need many
+	responses, pid, err := f.rpc.SendBeaconBlocksByRangeReq(f.highestSlotProcessed+1, count)
 	if err != nil {
+		f.rpc.BanPeer(pid)
+		// Wait a bit in this case (we do not need to be super performant here).
+		time.Sleep(time.Second)
 		return
-	}
-	for _, response := range responses {
-		f.addSegment(response)
-	}
-
-}
-
-// ProcessBlocks processes blocks we accumulated.
-func (f *ForwardBeaconDownloader) ProcessBlocks() error {
-	if len(f.segments) == 0 {
-		return nil
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var err error
-	var highestSlotProcessed uint64
+
 	var highestBlockRootProcessed libcommon.Hash
-	if highestSlotProcessed, highestBlockRootProcessed, err = f.process(f.highestSlotProcessed, f.highestBlockRootProcessed, f.segments); err != nil {
-		return err
+	var highestSlotProcessed uint64
+	if highestSlotProcessed, highestBlockRootProcessed, err = f.process(f.highestSlotProcessed, f.highestBlockRootProcessed, responses); err != nil {
+		f.rpc.BanPeer(pid)
+		return
 	}
 	f.highestSlotProcessed = highestSlotProcessed
 	f.highestBlockRootProcessed = highestBlockRootProcessed
-	// clear segments
-	f.segments = f.segments[:0]
-	return nil
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.
@@ -151,4 +93,8 @@ func (f *ForwardBeaconDownloader) GetHighestProcessedSlot() uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.highestSlotProcessed
+}
+
+func (f *ForwardBeaconDownloader) Peers() (uint64, error) {
+	return f.rpc.Peers()
 }

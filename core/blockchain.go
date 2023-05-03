@@ -116,7 +116,7 @@ func ExecuteBlockEphemerally(
 	noop := state.NewNoopWriter()
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, tx.Hash())
@@ -227,7 +227,7 @@ func ExecuteBlockEphemerallyBor(
 	noop := state.NewNoopWriter()
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, tx.Hash())
@@ -335,6 +335,7 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig chain.
 		nil, nil, nil,
 		data, nil, false,
 		true, // isFree
+		nil,  // maxFeePerDataGas
 	)
 	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall}
 	// Create a new context to be used in the EVM environment
@@ -378,6 +379,7 @@ func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config
 		nil, nil, nil,
 		data, nil, false,
 		true, // isFree
+		nil,  // maxFeePerDataGas
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment

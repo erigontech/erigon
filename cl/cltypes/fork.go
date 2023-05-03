@@ -39,6 +39,10 @@ func (f *Fork) DecodeSSZ(buf []byte) error {
 	return nil
 }
 
+func (f *Fork) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return f.DecodeSSZ(buf)
+}
+
 func (f *Fork) EncodingSizeSSZ() int {
 	return clparams.VersionLength*2 + 8
 }

@@ -74,14 +74,6 @@ func (*AttesterSlashing) Clone() clonable.Clonable {
 	return &AttesterSlashing{}
 }
 
-func (*LightClientFinalityUpdate) Clone() clonable.Clonable {
-	return &LightClientFinalityUpdate{}
-}
-
-func (*LightClientOptimisticUpdate) Clone() clonable.Clonable {
-	return &LightClientOptimisticUpdate{}
-}
-
 func (*Metadata) Clone() clonable.Clonable {
 	return &Metadata{}
 }
@@ -94,14 +86,33 @@ func (*Deposit) Clone() clonable.Clonable {
 	return &Deposit{}
 }
 
-func (*LightClientBootstrap) Clone() clonable.Clonable {
-	return &LightClientBootstrap{}
-}
-
 func (*BeaconBlock) Clone() clonable.Clonable {
 	return &BeaconBlock{}
 }
 
-func (*LightClientUpdate) Clone() clonable.Clonable {
-	return &LightClientUpdate{}
+func (*AggregateAndProof) Clone() clonable.Clonable {
+	return &AggregateAndProof{}
+}
+
+func (*AttestationData) Clone() clonable.Clonable {
+	return &AttestationData{}
+}
+
+func (*BeaconBlockHeader) Clone() clonable.Clonable {
+	return &BeaconBlockHeader{}
+}
+
+func (*BLSToExecutionChange) Clone() clonable.Clonable {
+	return &BLSToExecutionChange{}
+}
+
+func (*SignedBeaconBlockHeader) Clone() clonable.Clonable {
+	return &SignedBeaconBlockHeader{}
+}
+
+func (*SyncCommittee) Clone() clonable.Clonable {
+	return &SyncCommittee{}
+}
+func (*Fork) Clone() clonable.Clonable {
+	return &Fork{}
 }

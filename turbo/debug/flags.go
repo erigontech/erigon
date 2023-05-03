@@ -192,7 +192,9 @@ func Setup(ctx *cli.Context) error {
 		diagnostics.SetupLogsAccess(ctx)
 		diagnostics.SetupDbAccess(ctx)
 		diagnostics.SetupCmdLineAccess()
+		diagnostics.SetupFlagsAccess(ctx)
 		diagnostics.SetupVersionAccess()
+		diagnostics.SetupBlockBodyDownload()
 	}
 
 	// pprof server

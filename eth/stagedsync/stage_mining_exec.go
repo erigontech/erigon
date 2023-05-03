@@ -377,7 +377,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	parentHeader := getHeader(header.ParentHash, header.Number.Uint64()-1)
 
 	var miningCommitTx = func(txn types.Transaction, coinbase libcommon.Address, vmConfig *vm.Config, chainConfig chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
-		ibs.Prepare(txn.Hash(), libcommon.Hash{}, tcount)
+		ibs.SetTxContext(txn.Hash(), libcommon.Hash{}, tcount)
 		gasSnap := gasPool.Gas()
 		dataGasSnap := gasPool.DataGas()
 		snap := ibs.Snapshot()

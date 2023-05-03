@@ -85,7 +85,7 @@ func (b *BackwardBeaconDownloader) RequestMore() {
 	if start > b.slotToDownload {
 		start = 0
 	}
-	responses, err := b.rpc.SendBeaconBlocksByRangeReq(start, count)
+	responses, _, err := b.rpc.SendBeaconBlocksByRangeReq(start, count)
 	if err != nil {
 		return
 	}
