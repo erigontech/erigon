@@ -198,9 +198,9 @@ func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []b
 	return sd.Account.PutWithPrev(addr, nil, account, prevAccount)
 }
 
-func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, prevCode []byte) error {
+func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, _ []byte) error {
 	sd.Commitment.TouchPlainKey(addr, code, sd.Commitment.TouchCode)
-	prevCode, _ = sd.Code.wal.topValue(addr)
+	prevCode, _ := sd.Code.wal.topValue(addr)
 	if len(code) == 0 {
 		return sd.Code.DeleteWithPrev(addr, nil, prevCode)
 	}
