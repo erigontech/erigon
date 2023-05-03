@@ -1,4 +1,4 @@
-package state
+package raw
 
 import (
 	"fmt"
@@ -10,6 +10,21 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
 )
+
+// BlockRoot computes the block root for the state.
+func (b *BeaconState) BlockRoot() ([32]byte, error) {
+	stateRoot, err := b.HashSSZ()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return (&cltypes.BeaconBlockHeader{
+		Slot:          b.latestBlockHeader.Slot,
+		ProposerIndex: b.latestBlockHeader.ProposerIndex,
+		BodyRoot:      b.latestBlockHeader.BodyRoot,
+		ParentRoot:    b.latestBlockHeader.ParentRoot,
+		Root:          stateRoot,
+	}).HashSSZ()
+}
 
 func (b *BeaconState) baseOffsetSSZ() uint32 {
 	switch b.version {
@@ -378,7 +393,7 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 		if b.currentEpochAttestations, err = ssz.DecodeDynamicList[*cltypes.PendingAttestation](buf, currentEpochParticipationOffset, uint32(len(buf)), maxAttestations); err != nil {
 			return err
 		}
-		return b.initBeaconState()
+		return b.init()
 	} else {
 		var previousEpochParticipation, currentEpochParticipation []byte
 		if previousEpochParticipation, err = ssz.DecodeString(buf, uint64(previousEpochParticipationOffset), uint64(currentEpochParticipationOffset), state_encoding.ValidatorRegistryLimit); err != nil {
@@ -399,7 +414,7 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 		return err
 	}
 	if b.version == clparams.AltairVersion {
-		return b.initBeaconState()
+		return b.init()
 	}
 	endOffset = uint32(len(buf))
 	if historicalSummariesOffset != 0 {
@@ -414,13 +429,13 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 		return err
 	}
 	if b.version == clparams.BellatrixVersion {
-		return b.initBeaconState()
+		return b.init()
 	}
 	if b.historicalSummaries, err = ssz.DecodeStaticList[*cltypes.HistoricalSummary](buf, historicalSummariesOffset, uint32(len(buf)), 64, state_encoding.HistoricalRootsLength); err != nil {
 		return err
 	}
 	// Capella
-	return b.initBeaconState()
+	return b.init()
 }
 
 // SSZ size of the Beacon State
