@@ -109,12 +109,8 @@ func (t *UpdateTree) TouchAccountKey(c *CommitmentItem, val []byte) {
 		return
 	}
 	c.update.DecodeForStorage(val)
-	c.update.Flags = commitment.BalanceUpdate | commitment.NonceUpdate
 	item, found := t.tree.Get(&CommitmentItem{hashedKey: c.hashedKey})
-	if !found {
-		return
-	}
-	if item.update.Flags&commitment.CodeUpdate != 0 {
+	if found && item.update.Flags&commitment.CodeUpdate != 0 {
 		c.update.Flags |= commitment.CodeUpdate
 		copy(c.update.CodeHashOrStorage[:], item.update.CodeHashOrStorage[:])
 	}
@@ -679,6 +675,7 @@ func (d *DomainCommitted) Close() {
 	d.Domain.Close()
 	d.updates.tree.Clear(true)
 }
+
 var keyCommitmentState = []byte("state")
 
 // SeekCommitment searches for last encoded state from DomainCommitted

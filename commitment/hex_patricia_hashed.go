@@ -1861,28 +1861,37 @@ type Update struct {
 	ValLength         int
 }
 
-func (u *Update) DecodeForStorage(enc []byte) {
-	u.Nonce = 0
+func (u *Update) Reset() {
+	u.Flags = 0
 	u.Balance.Clear()
+	u.Nonce = 0
+	u.ValLength = 0
 	copy(u.CodeHashOrStorage[:], EmptyCodeHash)
+}
+
+func (u *Update) DecodeForStorage(enc []byte) {
+	u.Reset()
 
 	pos := 0
 	nonceBytes := int(enc[pos])
 	pos++
 	if nonceBytes > 0 {
 		u.Nonce = bytesToUint64(enc[pos : pos+nonceBytes])
+		u.Flags |= NonceUpdate
 		pos += nonceBytes
 	}
 	balanceBytes := int(enc[pos])
 	pos++
 	if balanceBytes > 0 {
 		u.Balance.SetBytes(enc[pos : pos+balanceBytes])
+		u.Flags |= BalanceUpdate
 		pos += balanceBytes
 	}
 	codeHashBytes := int(enc[pos])
 	pos++
 	if codeHashBytes > 0 {
 		copy(u.CodeHashOrStorage[:], enc[pos:pos+codeHashBytes])
+		u.Flags |= CodeUpdate
 	}
 }
 
