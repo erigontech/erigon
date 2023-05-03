@@ -16,12 +16,6 @@ const (
 	allowedCachedStates = 4
 )
 
-// We cache partial data of each validator instead of storing all checkpoint states
-type partialValidator struct {
-	index            uint32
-	effectiveBalance uint64
-}
-
 type ForkChoiceStore struct {
 	time                          uint64
 	highestSeen                   uint64
@@ -34,7 +28,7 @@ type ForkChoiceStore struct {
 	equivocatingIndicies map[uint64]struct{}
 	forkGraph            *fork_graph.ForkGraph
 	// I use the cache due to the convenient auto-cleanup feauture.
-	checkpointStates *lru.Cache[cltypes.Checkpoint, *state.BeaconState] // We keep ssz snappy of it as the full beacon state is full of rendundant data.
+	checkpointStates *lru.Cache[cltypes.Checkpoint, *checkpointState] // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	latestMessages   map[uint64]*LatestMessage
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
@@ -58,7 +52,7 @@ func NewForkChoiceStore(anchorState *state.BeaconState, engine execution_client.
 		Epoch: anchorState.Epoch(),
 		Root:  anchorRoot,
 	}
-	checkpointStates, err := lru.New[cltypes.Checkpoint, *state.BeaconState](allowedCachedStates)
+	checkpointStates, err := lru.New[cltypes.Checkpoint, *checkpointState](allowedCachedStates)
 	if err != nil {
 		return nil, err
 	}

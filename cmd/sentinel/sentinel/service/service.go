@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -116,7 +115,7 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 	for {
 		select {
 		case <-s.ctx.Done():
-			return nil, fmt.Errorf("interrupted")
+			return nil, context.Canceled
 		case <-retryReqInterval.C:
 			// Spawn new thread for request
 			pid, err := s.sentinel.RandomPeer(req.Topic)
@@ -188,6 +187,8 @@ func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyMessage
 }
 
 func (s *SentinelServer) ListenToGossip() {
+	refreshTicker := time.NewTicker(100 * time.Millisecond)
+	defer refreshTicker.Stop()
 	for {
 		s.mu.RLock()
 		select {
@@ -195,6 +196,7 @@ func (s *SentinelServer) ListenToGossip() {
 			s.handleGossipPacket(pkt)
 		case <-s.ctx.Done():
 			return
+		case <-refreshTicker.C:
 		}
 		s.mu.RUnlock()
 	}

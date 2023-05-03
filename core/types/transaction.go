@@ -67,6 +67,7 @@ type Transaction interface {
 	Cost() *uint256.Int
 	GetDataHashes() []libcommon.Hash
 	GetGas() uint64
+	GetDataGas() uint64
 	GetValue() *uint256.Int
 	Time() time.Time
 	GetTo() *libcommon.Address

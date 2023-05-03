@@ -96,7 +96,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 				utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == block.Block.Slot
 			if err := cfg.forkChoice.OnBlock(block, false, true); err != nil {
 				log.Warn("Could not download block", "reason", err)
-				return highestSlotProcessed, libcommon.Hash{}, nil
+				return highestSlotProcessed, libcommon.Hash{}, err
 			}
 			if sendForckchoice {
 				// Import the head
@@ -158,14 +158,7 @@ MainLoop:
 		log.Debug("Caplin may have missed some slots, started downloading chain")
 		// Process blocks until we reach our target
 		for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
-			if err := cfg.downloader.ProcessBlocks(); err != nil {
-				log.Warn("Could not download block in processing", "reason", err)
-			}
 			cfg.downloader.RequestMore()
-
-			if err := cfg.downloader.ProcessBlocks(); err != nil {
-				log.Warn("Could not download block in processing", "reason", err)
-			}
 			peersCount, err = cfg.downloader.Peers()
 			if err != nil {
 				break

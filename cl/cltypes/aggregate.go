@@ -43,8 +43,25 @@ func (a *AggregateAndProof) DecodeSSZ(buf []byte) error {
 	return nil
 }
 
+func (a *AggregateAndProof) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return a.DecodeSSZ(buf)
+}
+
 func (a *AggregateAndProof) EncodingSizeSSZ() int {
 	return 108 + a.Aggregate.EncodingSizeSSZ()
+}
+
+func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
+	indexRoot := merkle_tree.Uint64Root(a.AggregatorIndex)
+	aggregateRoot, err := a.Aggregate.HashSSZ()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	selectionProof, err := merkle_tree.SignatureRoot(a.SelectionProof)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ArraysRoot([][32]byte{indexRoot, aggregateRoot, selectionProof}, 4)
 }
 
 type SignedAggregateAndProof struct {
@@ -109,8 +126,8 @@ func (agg *SyncAggregate) Sum() int {
 	return ret
 }
 
-func (agg *SyncAggregate) EncodeSSZ(buf []byte) []byte {
-	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...)
+func (agg *SyncAggregate) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...), nil
 }
 
 func (agg *SyncAggregate) DecodeSSZ(buf []byte) error {

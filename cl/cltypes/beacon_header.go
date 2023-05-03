@@ -43,6 +43,10 @@ func (b *BeaconBlockHeader) DecodeSSZ(buf []byte) error {
 	return nil
 }
 
+func (b *BeaconBlockHeader) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return b.DecodeSSZ(buf)
+}
+
 func (b *BeaconBlockHeader) HashSSZ() ([32]byte, error) {
 	return merkle_tree.ArraysRoot([][32]byte{
 		merkle_tree.Uint64Root(b.Slot),
@@ -83,6 +87,10 @@ func (b *SignedBeaconBlockHeader) DecodeSSZ(buf []byte) error {
 	}
 	copy(b.Signature[:], buf[b.Header.EncodingSizeSSZ():])
 	return nil
+}
+
+func (b *SignedBeaconBlockHeader) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return b.DecodeSSZ(buf)
 }
 
 func (b *SignedBeaconBlockHeader) HashSSZ() ([32]byte, error) {

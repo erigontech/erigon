@@ -116,7 +116,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uin
 	if b.gasPool == nil {
 		b.SetCoinbase(libcommon.Address{})
 	}
-	b.ibs.Prepare(tx.Hash(), libcommon.Hash{}, len(b.txs))
+	b.ibs.SetTxContext(tx.Hash(), libcommon.Hash{}, len(b.txs))
 	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, b.parent.ExcessDataGas())
 	if err != nil {
 		panic(err)
@@ -129,7 +129,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash libcommon.Hash, numb
 	if b.gasPool == nil {
 		b.SetCoinbase(libcommon.Address{})
 	}
-	b.ibs.Prepare(tx.Hash(), libcommon.Hash{}, len(b.txs))
+	b.ibs.SetTxContext(tx.Hash(), libcommon.Hash{}, len(b.txs))
 	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, b.parent.ExcessDataGas())
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, tx)

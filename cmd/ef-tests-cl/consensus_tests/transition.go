@@ -1,87 +1,70 @@
-package consensustests
+package consensus_tests
 
 import (
 	"fmt"
-	"os"
+	"io/fs"
+	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/ef-tests-cl/spectest"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
-	"gopkg.in/yaml.v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-type transitionMeta struct {
-	ForkEpoch uint64 `yaml:"fork_epoch"`
+type TransitionCore struct {
 }
 
-func transitionTestFunction(context testContext) error {
-	metaBytes, err := os.ReadFile("meta.yaml")
-	if err != nil {
-		return err
-	}
-	meta := transitionMeta{}
-	if err := yaml.Unmarshal(metaBytes, &meta); err != nil {
-		return err
-	}
-	contextPrev := context
-	contextPrev.version--
-	testState, err := decodeStateFromFile(contextPrev, "pre.ssz_snappy")
-	if err != nil {
-		return err
-	}
+func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
+	var meta struct {
+		PostFork   string `yaml:"post_fork"`
+		ForkEpoch  uint64 `yaml:"fork_epoch"`
+		BlockCount uint64 `yaml:"blocks_count"`
 
-	expectedState, err := decodeStateFromFile(context, "post.ssz_snappy")
-	if err != nil {
+		ForkBlock *uint64 `yaml:"fork_block,omitempty"`
+	}
+	if err := spectest.ReadMeta(root, "meta.yaml", &meta); err != nil {
 		return err
 	}
-	switch context.version {
+	startState, err := spectest.ReadBeaconState(root, c.Version()-1, spectest.PreSsz)
+	require.NoError(t, err)
+	stopState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
+	require.NoError(t, err)
+	switch c.Version() {
 	case clparams.AltairVersion:
-		testState.BeaconConfig().AltairForkEpoch = meta.ForkEpoch
+		startState.BeaconConfig().AltairForkEpoch = meta.ForkEpoch
 	case clparams.BellatrixVersion:
-		testState.BeaconConfig().BellatrixForkEpoch = meta.ForkEpoch
+		startState.BeaconConfig().BellatrixForkEpoch = meta.ForkEpoch
 	case clparams.CapellaVersion:
-		testState.BeaconConfig().CapellaForkEpoch = meta.ForkEpoch
+		startState.BeaconConfig().CapellaForkEpoch = meta.ForkEpoch
 	}
-	startSlot := testState.Slot()
+	startSlot := startState.Slot()
 	blockIndex := 0
 	for {
-		testSlot, err := testBlockSlot(blockIndex)
-		if err != nil {
-			return err
-		}
+		testSlot, err := spectest.ReadBlockSlot(root, blockIndex)
+		require.NoError(t, err)
 		var block *cltypes.SignedBeaconBlock
 		if testSlot/clparams.MainnetBeaconConfig.SlotsPerEpoch >= meta.ForkEpoch {
-			block, err = testBlock(context, blockIndex)
-			if err != nil {
-				return err
-			}
+			block, err = spectest.ReadBlock(root, c.Version(), blockIndex)
+			require.NoError(t, err)
 		} else {
-			block, err = testBlock(contextPrev, blockIndex)
-			if err != nil {
-				return err
-			}
+			block, err = spectest.ReadBlock(root, c.Version()-1, blockIndex)
+			require.NoError(t, err)
 		}
 
 		if block == nil {
 			break
 		}
-
 		blockIndex++
-
-		if err := transition.TransitionState(testState, block, true); err != nil {
+		if err := transition.TransitionState(startState, block, true); err != nil {
 			return fmt.Errorf("cannot transition state: %s. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
 		}
 	}
-	expectedRoot, err := expectedState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	haveRoot, err := testState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if haveRoot != expectedRoot {
-		return fmt.Errorf("mismatching state roots")
-	}
+	expectedRoot, err := stopState.HashSSZ()
+	assert.NoError(t, err)
+	haveRoot, err := startState.HashSSZ()
+	assert.NoError(t, err)
+	assert.EqualValues(t, haveRoot, expectedRoot, "state root")
 	return nil
 }

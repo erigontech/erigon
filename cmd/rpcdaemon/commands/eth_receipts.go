@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -49,7 +50,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 	}
 
 	usedGas := new(uint64)
-	gp := new(core.GasPool).AddGas(block.GasLimit())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
 	noopWriter := state.NewNoopWriter()
 
@@ -65,7 +66,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 	header := block.Header()
 	excessDataGas := header.ParentExcessDataGas(getHeader)
 	for i, txn := range block.Transactions() {
-		ibs.Prepare(txn.Hash(), block.Hash(), i)
+		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{}, excessDataGas)
 		if err != nil {
 			return nil, err
@@ -515,8 +516,8 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 	e.stateReader.SetTxNum(txNum)
 	txHash := txn.Hash()
 	e.ibs.Reset()
-	e.ibs.Prepare(txHash, e.blockHash, txIndex)
-	gp := new(core.GasPool).AddGas(txn.GetGas())
+	e.ibs.SetTxContext(txHash, e.blockHash, txIndex)
+	gp := new(core.GasPool).AddGas(txn.GetGas()).AddDataGas(txn.GetDataGas())
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {
 		return nil, nil, err

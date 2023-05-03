@@ -138,7 +138,6 @@ func (b *BeaconState) GetDomain(domainType [4]byte, epoch uint64) ([]byte, error
 		return fork.ComputeDomain(domainType[:], b.fork.PreviousVersion, b.genesisValidatorsRoot)
 	}
 	return fork.ComputeDomain(domainType[:], b.fork.CurrentVersion, b.genesisValidatorsRoot)
-
 }
 
 func (b *BeaconState) ComputeShuffledIndexPreInputs(seed [32]byte) [][32]byte {
@@ -186,21 +185,31 @@ func (b *BeaconState) ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte,
 	return ind, nil
 }
 
-func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, index, count uint64, hashFunc utils.HashFunc) ([]uint64, error) {
+func ComputeShuffledIndicies(beaconConfig *clparams.BeaconChainConfig, mixes []libcommon.Hash, indicies []uint64, slot uint64) []uint64 {
+	shuffledIndicies := make([]uint64, len(indicies))
+	copy(shuffledIndicies, indicies)
+	hashFunc := utils.OptimizedKeccak256()
+	epoch := slot / beaconConfig.SlotsPerEpoch
+	seed := GetSeed(beaconConfig, mixes, epoch, beaconConfig.DomainBeaconAttester)
+	eth2ShuffleHashFunc := func(data []byte) []byte {
+		hashed := hashFunc(data)
+		return hashed[:]
+	}
+	eth2_shuffle.UnshuffleList(eth2ShuffleHashFunc, shuffledIndicies, uint8(beaconConfig.ShuffleRoundCount), seed)
+	return shuffledIndicies
+}
+
+func (b *BeaconState) ComputeCommittee(indicies []uint64, slot uint64, index, count uint64) ([]uint64, error) {
 	lenIndicies := uint64(len(indicies))
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
 	var shuffledIndicies []uint64
+	epoch := b.GetEpochAtSlot(slot)
+	seed := GetSeed(b.beaconConfig, b.randaoMixes[:], epoch, b.beaconConfig.DomainBeaconAttester)
 	if shuffledIndicesInterface, ok := b.shuffledSetsCache.Get(seed); ok {
 		shuffledIndicies = shuffledIndicesInterface
 	} else {
-		shuffledIndicies = make([]uint64, lenIndicies)
-		copy(shuffledIndicies, indicies)
-		eth2ShuffleHashFunc := func(data []byte) []byte {
-			hashed := hashFunc(data)
-			return hashed[:]
-		}
-		eth2_shuffle.UnshuffleList(eth2ShuffleHashFunc, shuffledIndicies, uint8(b.beaconConfig.ShuffleRoundCount), seed)
+		shuffledIndicies = ComputeShuffledIndicies(b.beaconConfig, b.randaoMixes[:], indicies, slot)
 		b.shuffledSetsCache.Add(seed, shuffledIndicies)
 	}
 	return shuffledIndicies[start:end], nil
@@ -252,8 +261,8 @@ func (b *BeaconState) GetBeaconProposerIndex() (uint64, error) {
 	return *b.proposerIndex, nil
 }
 
-func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {
-	mix := b.GetRandaoMixes(epoch + b.beaconConfig.EpochsPerHistoricalVector - b.beaconConfig.MinSeedLookahead - 1)
+func GetSeed(beaconConfig *clparams.BeaconChainConfig, mixes []libcommon.Hash, epoch uint64, domain [4]byte) libcommon.Hash {
+	mix := mixes[(epoch+beaconConfig.EpochsPerHistoricalVector-beaconConfig.MinSeedLookahead-1)%beaconConfig.EpochsPerHistoricalVector]
 	epochByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(epochByteArray, epoch)
 	input := append(domain[:], epochByteArray...)
@@ -369,14 +378,11 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	}
 	epoch := b.GetEpochAtSlot(slot)
 	committeesPerSlot := b.CommitteeCount(epoch)
-	seed := b.GetSeed(epoch, b.beaconConfig.DomainBeaconAttester)
-	hashFunc := utils.OptimizedKeccak256()
 	committee, err := b.ComputeCommittee(
 		b.GetActiveValidatorsIndices(epoch),
-		seed,
+		slot,
 		(slot%b.beaconConfig.SlotsPerEpoch)*committeesPerSlot+committeeIndex,
 		committeesPerSlot*b.beaconConfig.SlotsPerEpoch,
-		hashFunc,
 	)
 	if err != nil {
 		return nil, err
@@ -385,7 +391,7 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	return committee, nil
 }
 
-func (b *BeaconState) GetIndexedAttestation(attestation *cltypes.Attestation, attestingIndicies []uint64) (*cltypes.IndexedAttestation, error) {
+func GetIndexedAttestation(attestation *cltypes.Attestation, attestingIndicies []uint64) *cltypes.IndexedAttestation {
 	// Sort the the attestation indicies.
 	sort.Slice(attestingIndicies, func(i, j int) bool {
 		return attestingIndicies[i] < attestingIndicies[j]
@@ -394,7 +400,7 @@ func (b *BeaconState) GetIndexedAttestation(attestation *cltypes.Attestation, at
 		AttestingIndices: attestingIndicies,
 		Data:             attestation.Data,
 		Signature:        attestation.Signature,
-	}, nil
+	}
 }
 
 // GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.
@@ -549,7 +555,7 @@ func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error)
 	//math.MaxUint8
 	activeValidatorIndicies := b.GetActiveValidatorsIndices(epoch)
 	activeValidatorCount := uint64(len(activeValidatorIndicies))
-	seed := b.GetSeed(epoch, beaconConfig.DomainSyncCommittee)
+	seed := GetSeed(b.beaconConfig, b.randaoMixes[:], epoch, beaconConfig.DomainSyncCommittee)
 	i := uint64(0)
 	syncCommitteePubKeys := make([][48]byte, 0, cltypes.SyncCommitteeSize)
 	preInputs := b.ComputeShuffledIndexPreInputs(seed)

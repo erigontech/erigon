@@ -1,33 +1,64 @@
-package consensustests
+package consensus_tests
 
 import (
-	"fmt"
+	"io/fs"
 	"os"
+	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/ef-tests-cl/spectest"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func testSanityFunction(context testContext) error {
-	testState, err := decodeStateFromFile(context, "pre.ssz_snappy")
-	if err != nil {
-		return err
+var SanitySlots = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
+	// TODO: this is unused, why?
+	var slots int
+	err = spectest.ReadMeta(root, "slots.yaml", &slots)
+	require.NoError(t, err)
+
+	testState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PreSsz)
+	require.NoError(t, err)
+
+	expectedState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
+	require.NoError(t, err)
+
+	err = transition.ProcessSlots(testState, expectedState.Slot())
+	require.NoError(t, err)
+
+	expectedRoot, err := expectedState.HashSSZ()
+	require.NoError(t, err)
+
+	haveRoot, err := testState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+})
+
+var SanityBlocks = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
+	var meta struct {
+		Description            string `yaml:"description"`
+		BlsSetting             int    `yaml:"bls_settings"`
+		RevealDeadlinesSetting int    `yaml:"reveal_deadlines_setting"`
+		BlocksCount            int    `yaml:"blocks_count"`
 	}
-	testState.HashSSZ()
+
+	err = spectest.ReadMeta(root, "meta.yaml", &meta)
+	require.NoError(t, err)
+
+	testState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PreSsz)
+	require.NoError(t, err)
+
 	var expectedError bool
-	expectedState, err := decodeStateFromFile(context, "post.ssz_snappy")
+	expectedState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
 	if os.IsNotExist(err) {
 		expectedError = true
-		err = nil
 	}
-	if err != nil {
-		return err
-	}
-	blocks, err := testBlocks(context)
-	if err != nil {
-		return err
-	}
-	startSlot := testState.Slot()
+
+	blocks, err := spectest.ReadBlocks(root, c.Version())
+	require.NoError(t, err)
 
 	var block *cltypes.SignedBeaconBlock
 	for _, block = range blocks {
@@ -36,55 +67,20 @@ func testSanityFunction(context testContext) error {
 			break
 		}
 	}
-
 	// Deal with transition error
-	if expectedError && err == nil {
-		return fmt.Errorf("expected error")
+	if expectedError {
+		require.Error(t, err)
+		return nil
+	} else {
+		require.NoError(t, err)
 	}
-	if err != nil {
-		if expectedError {
-			return nil
-		}
-		return fmt.Errorf("cannot transition state: %s. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
-	}
+
 	finalRoot, err := expectedState.HashSSZ()
-	if err != nil {
-		return err
-	}
+	require.NoError(t, err)
 	haveRoot, err := testState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if haveRoot != finalRoot {
-		return fmt.Errorf("mismatching state roots")
-	}
+	require.NoError(t, err)
+
+	assert.EqualValues(t, finalRoot, haveRoot)
+
 	return nil
-}
-
-func testSanityFunctionSlot(context testContext) error {
-	testState, err := decodeStateFromFile(context, "pre.ssz_snappy")
-	if err != nil {
-		return err
-	}
-	expectedState, err := decodeStateFromFile(context, "post.ssz_snappy")
-	if err != nil {
-		return err
-	}
-
-	if err := transition.ProcessSlots(testState, expectedState.Slot()); err != nil {
-		return err
-	}
-
-	expectedRoot, err := expectedState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	haveRoot, err := testState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if haveRoot != expectedRoot {
-		return fmt.Errorf("mismatching state roots")
-	}
-	return nil
-}
+})
