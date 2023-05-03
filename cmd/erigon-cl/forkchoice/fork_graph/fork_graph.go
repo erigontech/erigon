@@ -132,6 +132,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 		return nil, InvalidBlock, err
 	}
 	if newState == nil {
+		log.Debug("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
 		return nil, MissingSegment, nil
 	}
 	// We may just use the current beacon state
