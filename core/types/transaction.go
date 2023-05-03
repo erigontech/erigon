@@ -548,17 +548,13 @@ func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amo
 	return m
 }
 
-func (m Message) From() libcommon.Address { return m.from }
-func (m Message) To() *libcommon.Address  { return m.to }
-func (m Message) GasPrice() *uint256.Int  { return &m.gasPrice }
-func (m Message) FeeCap() *uint256.Int    { return &m.feeCap }
-func (m Message) Tip() *uint256.Int       { return &m.tip }
-func (m Message) Value() *uint256.Int     { return &m.amount }
-func (m Message) Gas() uint64             { return m.gasLimit }
-func (m Message) DataGas() uint64         { return params.DataGasPerBlob * uint64(len(m.dataHashes)) }
-func (m Message) MaxFeePerDataGas() *uint256.Int {
-	return &m.maxFeePerDataGas
-}
+func (m Message) From() libcommon.Address       { return m.from }
+func (m Message) To() *libcommon.Address        { return m.to }
+func (m Message) GasPrice() *uint256.Int        { return &m.gasPrice }
+func (m Message) FeeCap() *uint256.Int          { return &m.feeCap }
+func (m Message) Tip() *uint256.Int             { return &m.tip }
+func (m Message) Value() *uint256.Int           { return &m.amount }
+func (m Message) Gas() uint64                   { return m.gasLimit }
 func (m Message) Nonce() uint64                 { return m.nonce }
 func (m Message) Data() []byte                  { return m.data }
 func (m Message) AccessList() types2.AccessList { return m.accessList }

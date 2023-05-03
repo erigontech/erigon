@@ -332,7 +332,7 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig chain.
 		&contract,
 		0, u256.Num0,
 		math.MaxUint64, u256.Num0,
-		nil, nil, nil,
+		nil, nil,
 		data, nil, false,
 		true, // isFree
 		nil,  // maxFeePerDataGas
@@ -376,7 +376,7 @@ func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config
 		nil, // to
 		0, u256.Num0,
 		math.MaxUint64, u256.Num0,
-		nil, nil, nil,
+		nil, nil,
 		data, nil, false,
 		true, // isFree
 		nil,  // maxFeePerDataGas

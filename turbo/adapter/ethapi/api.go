@@ -395,7 +395,6 @@ type RPCTransaction struct {
 	V                *hexutil.Big       `json:"v"`
 	R                *hexutil.Big       `json:"r"`
 	S                *hexutil.Big       `json:"s"`
-	S                *hexutil.Big       `json:"s"`
 
 	BlobVersionedHashes []libcommon.Hash `json:"blobVersionedHashes,omitempty"`
 }
