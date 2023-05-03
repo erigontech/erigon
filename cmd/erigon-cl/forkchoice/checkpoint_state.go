@@ -36,7 +36,7 @@ type shuffledSet struct {
 // We only keep in memory a fraction of the beacon state
 type checkpointState struct {
 	beaconConfig      *clparams.BeaconChainConfig
-	randaoMixes       [randaoMixesLength]libcommon.Hash
+	randaoMixes       []libcommon.Hash
 	shuffledSetsCache map[uint64]*shuffledSet // Map each epoch to its shuffled index
 	// public keys list
 	validators []*checkpointValidator
@@ -46,12 +46,13 @@ type checkpointState struct {
 	activeBalance, epoch  uint64 // current active balance and epoch
 }
 
-func copyMixes(mixes [randaoMixesLength]libcommon.Hash) (ret [randaoMixesLength]libcommon.Hash) {
-	copy(ret[:], mixes[:])
+func copyMixes(mixes []libcommon.Hash) (ret []libcommon.Hash) {
+	ret = make([]libcommon.Hash, len(mixes))
+	copy(ret, mixes)
 	return
 }
 
-func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet []*cltypes.Validator, randaoMixes [65536]libcommon.Hash,
+func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet []*cltypes.Validator, randaoMixes []libcommon.Hash,
 	genesisValidatorsRoot libcommon.Hash, fork *cltypes.Fork, activeBalance, epoch uint64) *checkpointState {
 	validators := make([]*checkpointValidator, len(validatorSet))
 	for i := range validatorSet {
@@ -89,7 +90,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *cltypes.AttestationD
 	} else {
 		activeIndicies := c.getActiveIndicies(epoch)
 		lenIndicies = uint64(len(activeIndicies))
-		shuffledIndicies = state.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes[:], activeIndicies, slot)
+		shuffledIndicies = state.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes, activeIndicies, slot)
 		c.shuffledSetsCache[epoch] = &shuffledSet{set: shuffledIndicies, lenActive: uint64(len(activeIndicies))}
 	}
 	committeesPerSlot := c.committeeCount(epoch, lenIndicies)
@@ -113,8 +114,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *cltypes.AttestationD
 	return attestingIndices, nil
 }
 
-func (c *checkpointState) getActiveIndicies(epoch uint64) []uint64 {
-	var activeIndicies []uint64
+func (c *checkpointState) getActiveIndicies(epoch uint64) (activeIndicies []uint64) {
 	for i, validator := range c.validators {
 		if !validator.active(epoch) {
 			continue

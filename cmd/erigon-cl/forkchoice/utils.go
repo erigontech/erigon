@@ -87,8 +87,9 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint cltypes.Checkpoint) (*ch
 			return nil, err
 		}
 	}
+	mixes := baseState.RandaoMixes()
 	checkpointState := newCheckpointState(f.forkGraph.Config(), baseState.Validators(),
-		baseState.RandaoMixes(), baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), baseState.Epoch())
+		mixes[:], baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), baseState.Epoch())
 	// Cache in memory what we are left with.
 	f.checkpointStates.Add(checkpoint, checkpointState)
 	return checkpointState, nil
