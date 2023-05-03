@@ -33,7 +33,7 @@ type BeaconBlockForStorage struct {
 	VoluntaryExits     []*SignedVoluntaryExit
 	AddressChanges     []*SignedBLSToExecutionChange
 	SyncAggregate      *SyncAggregate
-	BlobKzgCommitments []KZGCommitment
+	BlobKzgCommitments []*BlobKZGCommitment
 	// Metadatas
 	Eth1Number    uint64
 	Eth1BlockHash libcommon.Hash
@@ -108,7 +108,7 @@ type BeaconBody struct {
 	ExecutionChanges []*SignedBLSToExecutionChange
 	// The commitments for beacon chain blobs
 	// With a max of 4 per block
-	BlobKzgCommitments []KZGCommitment
+	BlobKzgCommitments []*BlobKZGCommitment
 	// The version of the beacon chain
 	Version clparams.StateVersion
 }
@@ -235,8 +235,10 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 		if len(b.BlobKzgCommitments) > MaxBlobsPerBlock {
 			return nil, fmt.Errorf("Encode(SSZ): too many blob kzg commitments in the block")
 		}
-		for _, kzgCommitment := range b.BlobKzgCommitments {
-			buf = append(buf, kzgCommitment[:]...)
+		for _, commitment := range b.BlobKzgCommitments {
+			if buf, err = commitment.EncodeSSZ(buf); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -275,7 +277,9 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 	}
 
 	if b.Version >= clparams.DenebVersion {
-		size += len(b.BlobKzgCommitments) * 48 // a commitment is 48 bytes
+		for _, commitment := range b.BlobKzgCommitments {
+			size += commitment.EncodingSizeSSZ()
+		}
 	}
 
 	return
@@ -376,6 +380,7 @@ func (b *BeaconBody) DecodeSSZWithVersion(buf []byte, version int) error {
 	if b.Version >= clparams.BellatrixVersion {
 		b.ExecutionPayload = new(Eth1Block)
 		if offsetExecution > uint32(endOffset) || len(buf) < endOffset {
+			fmt.Println("Still")
 			return ssz.ErrBadOffset
 		}
 		if err := b.ExecutionPayload.DecodeSSZWithVersion(buf[offsetExecution:endOffset], int(b.Version)); err != nil {
@@ -387,19 +392,15 @@ func (b *BeaconBody) DecodeSSZWithVersion(buf []byte, version int) error {
 		endOffset = int(blobKzgCommitmentOffset)
 	}
 	if b.Version >= clparams.CapellaVersion {
-		if b.ExecutionChanges, err = ssz.DecodeStaticList[*SignedBLSToExecutionChange](buf, blsChangesOffset, uint32(len(buf)), 172, MaxExecutionChanges); err != nil {
+		if b.ExecutionChanges, err = ssz.DecodeStaticList[*SignedBLSToExecutionChange](buf, blsChangesOffset, uint32(endOffset), 172, MaxExecutionChanges); err != nil {
 			return err
 		}
 	}
 
 	if b.Version >= clparams.DenebVersion {
-		kzgCommitments := make([]KZGCommitment, len(buf[blobKzgCommitmentOffset:])/48)
-		previous_pos := int(blobKzgCommitmentOffset)
-		for pos := int(blobKzgCommitmentOffset) + 48; pos < len(buf[blobKzgCommitmentOffset:]); pos += 48 {
-			copy(kzgCommitments[pos/48][:], buf[previous_pos:pos])
-			previous_pos = pos
+		if b.BlobKzgCommitments, err = ssz.DecodeStaticList[*BlobKZGCommitment](buf, blobKzgCommitmentOffset, uint32(len(buf)), 48, MaxBlobsPerBlock); err != nil {
+			return err
 		}
-		b.BlobKzgCommitments = kzgCommitments
 	}
 
 	return nil
@@ -479,7 +480,7 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	if b.Version >= clparams.DenebVersion {
 		blobKzgCommitmentsRoot := make([][32]byte, len(b.BlobKzgCommitments))
 		for i, commitment := range b.BlobKzgCommitments {
-			pk, err := merkle_tree.PublicKeyRoot(commitment)
+			pk, err := commitment.HashSSZ()
 			if err != nil {
 				return [32]byte{}, err
 			}

@@ -116,3 +116,7 @@ func (*SyncCommittee) Clone() clonable.Clonable {
 func (*Fork) Clone() clonable.Clonable {
 	return &Fork{}
 }
+
+func (*BlobKZGCommitment) Clone() clonable.Clonable {
+	return &BlobKZGCommitment{}
+}

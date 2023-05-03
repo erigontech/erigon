@@ -94,6 +94,11 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 		}
 	}
 
+	excessDataGas := [32]byte{}
+	if b.version >= clparams.DenebVersion {
+		copy(excessDataGas[:], b.ExcessDataGas.Bytes())
+	}
+
 	return &Eth1Header{
 		ParentHash:       b.ParentHash,
 		FeeRecipient:     b.FeeRecipient,
@@ -110,6 +115,7 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 		BlockHash:        b.BlockHash,
 		TransactionsRoot: transactionsRoot,
 		WithdrawalsRoot:  withdrawalsRoot,
+		ExcessDataGas:    excessDataGas,
 		version:          b.version,
 	}, nil
 }
@@ -145,7 +151,6 @@ func (b *Eth1Block) DecodeSSZ(buf []byte) error {
 func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 	b.version = clparams.StateVersion(version)
 	if len(buf) < b.EncodingSizeSSZ() {
-		fmt.Println("here!!")
 		return ssz.ErrLowBufferSize
 	}
 	// We can reuse code from eth1-header for partial decoding
@@ -229,14 +234,24 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 		txIdx++
 		length--
 	}
+
+	withdrawalsEndPos := len(buf)
+	if version >= int(clparams.DenebVersion) {
+		withdrawalsEndPos = len(buf) - 32 // last 32 bytes are for ExcessDataGas
+	}
 	// If withdrawals are enabled, process them.
 	if withdrawalOffset != nil {
 		var err error
-		b.Withdrawals, err = ssz.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(len(buf)), 44, 16)
+		b.Withdrawals, err = ssz.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(withdrawalsEndPos), 44, 16)
 		if err != nil {
 			return err
 		}
 	}
+
+	if version >= int(clparams.DenebVersion) {
+		b.ExcessDataGas = (&big.Int{}).SetBytes(buf[withdrawalsEndPos:])
+	}
+
 	return nil
 }
 

@@ -94,7 +94,7 @@ var testBeaconBlockVariation = &cltypes.SignedBeaconBlock{
 
 var (
 	// Hashes
-	denebHash     = common.HexToHash("0xca16469835c290c736d196c54560d346317e9760011616b23216d59c6fde6f03")
+	denebHash     = common.HexToHash("0x7fcb0bdfb38542b72bc946fe8f310e0cbf7d42f050abf64607eb26e48cd0768e")
 	capellaHash   = common.HexToHash("0xc4892f81461ed3a24db4b44f26a728219faf1f278d8a1c21d774e2efa73cf1a3")
 	bellatrixHash = common.HexToHash("9a5bc717ecaf6a8d6e879478003729b9ce4e71f5c4e9b4bd4dd166780894ee93")
 	altairHash    = common.HexToHash("36aa8fe956265d171b7ad740077ea9579e25ed3b2f7b2010016513e4ac4754cb")
@@ -110,7 +110,7 @@ func TestDenebBlock(t *testing.T) {
 	// Simple unit test: unmarshal + marshal + hashtreeroot
 	hash, err := testBeaconBlockVariation.HashSSZ()
 	require.NoError(t, err)
-	require.Equal(t, common.Hash(hash), denebHash)
+	require.Equal(t, denebHash, common.Hash(hash))
 	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
 	require.NoError(t, err)
 	block2 := &cltypes.SignedBeaconBlock{}

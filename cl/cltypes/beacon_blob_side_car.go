@@ -198,3 +198,35 @@ func (b *BlobIdentifier) HashSSZ() ([32]byte, error) {
 		merkle_tree.Uint64Root(b.Index),
 	}, 2)
 }
+
+type BlobKZGCommitment struct {
+	Commitment KZGCommitment
+}
+
+func (b *BlobKZGCommitment) Copy() *BlobKZGCommitment {
+	copy := *b
+	return &copy
+}
+
+func (b *BlobKZGCommitment) EncodeSSZ(buf []byte) ([]byte, error) {
+	buf = append(buf, b.Commitment[:]...)
+	return buf, nil
+}
+
+func (b *BlobKZGCommitment) DecodeSSZ(buf []byte) error {
+	copy(b.Commitment[:], buf[:])
+
+	return nil
+}
+
+func (b *BlobKZGCommitment) DecodeSSZWithVersion(buf []byte, version int) error {
+	return b.DecodeSSZ(buf)
+}
+
+func (b *BlobKZGCommitment) EncodingSizeSSZ() int {
+	return 48
+}
+
+func (b *BlobKZGCommitment) HashSSZ() ([32]byte, error) {
+	return merkle_tree.PublicKeyRoot(b.Commitment)
+}
