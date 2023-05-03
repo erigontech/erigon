@@ -214,10 +214,11 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.
 		return nil, err
 	}
 	// try and find the point of recconection
-	for currentIteratorRoot != reconnectionRootLong || currentIteratorRoot != reconnectionRootShort {
+	for currentIteratorRoot != reconnectionRootLong && currentIteratorRoot != reconnectionRootShort {
 		block, isSegmentPresent := f.getBlock(currentIteratorRoot)
 		if !isSegmentPresent {
-			log.Debug("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
+			log.Debug("Could not retrieve state: Missing header", "missing", currentIteratorRoot,
+				"longRecconection", reconnectionRootLong, "shortRecconection", reconnectionRootShort)
 			return nil, nil
 		}
 		blocksInTheWay = append(blocksInTheWay, block)
@@ -292,5 +293,8 @@ func (f *ForkGraph) removeOldData() (err error) {
 	// Lastly snapshot the state
 	f.currentReferenceState = f.nextReferenceState
 	f.nextReferenceState, err = f.currentState.Copy()
+	if err != nil {
+		panic(err) // dead at this point
+	}
 	return
 }
