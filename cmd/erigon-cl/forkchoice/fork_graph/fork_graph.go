@@ -218,7 +218,7 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.
 		block, isSegmentPresent := f.getBlock(currentIteratorRoot)
 		if !isSegmentPresent {
 			log.Debug("Could not retrieve state: Missing header", "missing", currentIteratorRoot,
-				"longRecconection", reconnectionRootLong, "shortRecconection", reconnectionRootShort)
+				"longRecconection", libcommon.Hash(reconnectionRootLong), "shortRecconection", libcommon.Hash(reconnectionRootShort))
 			return nil, nil
 		}
 		blocksInTheWay = append(blocksInTheWay, block)
