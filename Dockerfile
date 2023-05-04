@@ -110,4 +110,3 @@ LABEL org.label-schema.build-date=$BUILD_DATE \
       org.label-schema.vendor="Torquem" \
       org.label-schema.version=$VERSION
 
-ENTRYPOINT ["erigon"]
