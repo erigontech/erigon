@@ -1,7 +1,6 @@
 package sentry
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"math"
@@ -72,7 +71,7 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 	txs := make([]types.Transaction, len(body.Transactions))
 	for i, tx := range body.Transactions {
 		var err error
-		if txs[i], err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(tx), 0)); err != nil {
+		if txs[i], err = types.DecodeTransaction(tx); err != nil {
 			log.Error("broadcastNewBlock", "err", err)
 			return
 		}

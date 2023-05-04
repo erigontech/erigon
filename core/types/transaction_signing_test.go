@@ -17,7 +17,6 @@
 package types
 
 import (
-	"bytes"
 	"math/big"
 	"testing"
 
@@ -26,7 +25,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
 )
 
 func TestEIP1559Signing(t *testing.T) {
@@ -118,7 +116,7 @@ func TestEIP155SigningVitalik(t *testing.T) {
 	} {
 		signer := LatestSignerForChainID(big.NewInt(1))
 
-		tx, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(common.Hex2Bytes(test.txRlp)), 0))
+		tx, err := DecodeTransaction(common.Hex2Bytes(test.txRlp))
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
 			continue

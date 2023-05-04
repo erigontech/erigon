@@ -526,8 +526,7 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 		if len(rlpTx) == 0 {
 			continue
 		}
-		s := rlp.NewStream(bytes.NewReader(rlpTx), uint64(len(rlpTx)))
-		txs[i], decodeErr = types.DecodeTransaction(s)
+		txs[i], decodeErr = types.DecodeWrappedTransaction(rlpTx)
 		if decodeErr != nil {
 			// ignoring what we can't unmarshal
 			log.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr, "data", hex.EncodeToString(rlpTx))
