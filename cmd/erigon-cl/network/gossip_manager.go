@@ -96,11 +96,18 @@ func (g *GossipManager) Start() {
 					continue
 				}
 			}
-
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
 			// Now check the head
 			headRoot, headSlot, err := g.forkChoice.GetHead()
 			if err != nil {
 				log.Debug("Could not fetch head data", "err", err)
+				log.Debug("New block imported",
+					"slot", block.Block.Slot,
+					"alloc", libcommon.ByteCount(m.Alloc),
+					"sys", libcommon.ByteCount(m.Sys),
+					"numGC", m.NumGC,
+				)
 				continue
 			}
 			// Do forkchoice if possible
@@ -115,8 +122,7 @@ func (g *GossipManager) Start() {
 					return
 				}
 			}
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
+
 			// Log final result
 			log.Debug("New block imported",
 				"slot", block.Block.Slot, "head", headSlot, "headRoot", headRoot,
