@@ -53,12 +53,22 @@ func FakeExponential(factor, denom *uint256.Int, edg *big.Int) (*uint256.Int, er
 		return nil, fmt.Errorf("FakeExponential: overflow converting excessDataGas: %v", edg)
 	}
 	output := uint256.NewInt(0)
-	numeratorAccum := new(uint256.Int).Mul(factor, denom)
+	numeratorAccum := new(uint256.Int)
+	_, overflow = numeratorAccum.MulOverflow(factor, denom)
+	if overflow {
+		return nil, fmt.Errorf("FakeExponential: overflow in MulOverflow(factor=%v, denom=%v)", factor, denom)
+	}
+	divisor := new(uint256.Int)
 	for i := 1; numeratorAccum.Sign() > 0; i++ {
 		output.Add(output, numeratorAccum)
-		numeratorAccum.Mul(numeratorAccum, numerator)
-		i256 := uint256.NewInt(uint64(i))
-		numeratorAccum.Div(numeratorAccum, i256.Mul(i256, denom))
+		_, overflow = divisor.MulOverflow(denom, uint256.NewInt(uint64(i)))
+		if overflow {
+			return nil, fmt.Errorf("FakeExponential: overflow in MulOverflow(denom=%v, i=%v)", denom, i)
+		}
+		_, overflow = numeratorAccum.MulDivOverflow(numeratorAccum, numerator, divisor)
+		if overflow {
+			return nil, fmt.Errorf("FakeExponential: overflow in MulDivOverflow(numeratorAccum=%v, numerator=%v, divisor=%v)", numeratorAccum, numerator, divisor)
+		}
 	}
 	return output.Div(output, denom), nil
 }
