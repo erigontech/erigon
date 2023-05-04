@@ -394,7 +394,7 @@ func (v *Validator) HashSSZ() ([32]byte, error) {
 	leaves := *leavesp
 	defer func() {
 		leaves = leaves[:8]
-		validatorLeavesPool.Put(&leaves)
+		validatorLeavesPool.Put(leavesp)
 	}()
 	var (
 		err error
