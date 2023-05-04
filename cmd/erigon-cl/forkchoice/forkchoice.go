@@ -49,7 +49,7 @@ func NewForkChoiceStore(anchorState *state.BeaconState, engine execution_client.
 		return nil, err
 	}
 	anchorCheckpoint := &cltypes.Checkpoint{
-		Epoch: anchorState.Epoch(),
+		Epoch: state.Epoch(anchorState.BeaconState),
 		Root:  anchorRoot,
 	}
 	checkpointStates, err := lru.New[cltypes.Checkpoint, *checkpointState](allowedCachedStates)

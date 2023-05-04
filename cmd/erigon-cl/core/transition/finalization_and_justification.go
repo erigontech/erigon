@@ -7,37 +7,37 @@ import (
 )
 
 // weighJustificationAndFinalization checks justification and finality of epochs and adds records to the state as needed.
-func weighJustificationAndFinalization(state *state.BeaconState, previousEpochTargetBalance, currentEpochTargetBalance uint64) error {
-	totalActiveBalance := state.GetTotalActiveBalance()
-	currentEpoch := state.Epoch()
-	previousEpoch := state.PreviousEpoch()
-	oldPreviousJustifiedCheckpoint := state.PreviousJustifiedCheckpoint()
-	oldCurrentJustifiedCheckpoint := state.CurrentJustifiedCheckpoint()
-	justificationBits := state.JustificationBits()
+func weighJustificationAndFinalization(s *state.BeaconState, previousEpochTargetBalance, currentEpochTargetBalance uint64) error {
+	totalActiveBalance := s.GetTotalActiveBalance()
+	currentEpoch := state.Epoch(s.BeaconState)
+	previousEpoch := state.PreviousEpoch(s.BeaconState)
+	oldPreviousJustifiedCheckpoint := s.PreviousJustifiedCheckpoint()
+	oldCurrentJustifiedCheckpoint := s.CurrentJustifiedCheckpoint()
+	justificationBits := s.JustificationBits()
 	// Process justification
-	state.SetPreviousJustifiedCheckpoint(oldCurrentJustifiedCheckpoint)
+	s.SetPreviousJustifiedCheckpoint(oldCurrentJustifiedCheckpoint)
 	// Discard oldest bit
 	copy(justificationBits[1:], justificationBits[:3])
 	// Turn off current justification bit
 	justificationBits[0] = false
 	// Update justified checkpoint if super majority is reached on previous epoch
 	if previousEpochTargetBalance*3 >= totalActiveBalance*2 {
-		checkPointRoot, err := state.GetBlockRoot(previousEpoch)
+		checkPointRoot, err := state.GetBlockRoot(s.BeaconState, previousEpoch)
 		if err != nil {
 			return err
 		}
-		state.SetCurrentJustifiedCheckpoint(&cltypes.Checkpoint{
+		s.SetCurrentJustifiedCheckpoint(&cltypes.Checkpoint{
 			Epoch: previousEpoch,
 			Root:  checkPointRoot,
 		})
 		justificationBits[1] = true
 	}
 	if currentEpochTargetBalance*3 >= totalActiveBalance*2 {
-		checkPointRoot, err := state.GetBlockRoot(currentEpoch)
+		checkPointRoot, err := state.GetBlockRoot(s.BeaconState, currentEpoch)
 		if err != nil {
 			return err
 		}
-		state.SetCurrentJustifiedCheckpoint(&cltypes.Checkpoint{
+		s.SetCurrentJustifiedCheckpoint(&cltypes.Checkpoint{
 			Epoch: currentEpoch,
 			Root:  checkPointRoot,
 		})
@@ -48,30 +48,30 @@ func weighJustificationAndFinalization(state *state.BeaconState, previousEpochTa
 	// The 2nd/3rd most recent epochs are justified, the 2nd using the 3rd as source
 	if (justificationBits.CheckRange(1, 4) && oldPreviousJustifiedCheckpoint.Epoch+3 == currentEpoch) ||
 		(justificationBits.CheckRange(1, 3) && oldPreviousJustifiedCheckpoint.Epoch+2 == currentEpoch) {
-		state.SetFinalizedCheckpoint(oldPreviousJustifiedCheckpoint)
+		s.SetFinalizedCheckpoint(oldPreviousJustifiedCheckpoint)
 	}
 	// The 1st/2nd/3rd most recent epochs are justified, the 1st using the 3rd as source
 	// The 1st/2nd most recent epochs are justified, the 1st using the 2nd as source
 	if (justificationBits.CheckRange(0, 3) && oldCurrentJustifiedCheckpoint.Epoch+2 == currentEpoch) ||
 		(justificationBits.CheckRange(0, 2) && oldCurrentJustifiedCheckpoint.Epoch+1 == currentEpoch) {
-		state.SetFinalizedCheckpoint(oldCurrentJustifiedCheckpoint)
+		s.SetFinalizedCheckpoint(oldCurrentJustifiedCheckpoint)
 	}
 	// Write justification bits
-	state.SetJustificationBits(justificationBits)
+	s.SetJustificationBits(justificationBits)
 	return nil
 }
 
-func ProcessJustificationBitsAndFinality(state *state.BeaconState) error {
-	currentEpoch := state.Epoch()
-	previousEpoch := state.PreviousEpoch()
-	beaconConfig := state.BeaconConfig()
+func ProcessJustificationBitsAndFinality(s *state.BeaconState) error {
+	currentEpoch := state.Epoch(s.BeaconState)
+	previousEpoch := state.PreviousEpoch(s.BeaconState)
+	beaconConfig := s.BeaconConfig()
 	// Skip for first 2 epochs
 	if currentEpoch <= beaconConfig.GenesisEpoch+1 {
 		return nil
 	}
 	var previousTargetBalance, currentTargetBalance uint64
-	if state.Version() == clparams.Phase0Version {
-		for _, validator := range state.Validators() {
+	if s.Version() == clparams.Phase0Version {
+		for _, validator := range s.Validators() {
 			if validator.Slashed {
 				continue
 			}
@@ -84,8 +84,8 @@ func ProcessJustificationBitsAndFinality(state *state.BeaconState) error {
 		}
 	} else {
 		// Use bitlists to determine finality.
-		previousParticipation, currentParticipation := state.EpochParticipation(false), state.EpochParticipation(true)
-		for i, validator := range state.Validators() {
+		previousParticipation, currentParticipation := s.EpochParticipation(false), s.EpochParticipation(true)
+		for i, validator := range s.Validators() {
 			if validator.Slashed {
 				continue
 			}
@@ -100,5 +100,5 @@ func ProcessJustificationBitsAndFinality(state *state.BeaconState) error {
 		}
 	}
 
-	return weighJustificationAndFinalization(state, previousTargetBalance, currentTargetBalance)
+	return weighJustificationAndFinalization(s, previousTargetBalance, currentTargetBalance)
 }

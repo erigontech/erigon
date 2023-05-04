@@ -78,7 +78,7 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, tx kv.RwTx, ctx context.Cont
 			}
 		}
 		// validate fully only in current epoch.
-		fullValidate := utils.GetCurrentEpoch(cfg.state.GenesisTime(), cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) == cfg.state.Epoch()
+		fullValidate := utils.GetCurrentEpoch(cfg.state.GenesisTime(), cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) == state.Epoch(cfg.state.BeaconState)
 		if err := transition.TransitionState(cfg.state, block, fullValidate); err != nil {
 			log.Info("Found epoch, so stopping now...", "count", slot-(fromSlot+1), "slot", slot)
 			return err

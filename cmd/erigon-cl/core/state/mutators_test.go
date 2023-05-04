@@ -37,12 +37,12 @@ func getTestStateValidators(t *testing.T, numVals int) *state.BeaconState {
 }
 
 func TestIncreaseBalance(t *testing.T) {
-	state := getTestStateBalances(t)
+	s := getTestStateBalances(t)
 	testInd := uint64(42)
 	amount := uint64(100)
-	beforeBalance := state.Balances()[testInd]
-	state.IncreaseBalance(testInd, amount)
-	afterBalance := state.Balances()[testInd]
+	beforeBalance := s.Balances()[testInd]
+	state.IncreaseBalance(s.BeaconState, testInd, amount)
+	afterBalance := s.Balances()[testInd]
 	require.Equal(t, afterBalance, beforeBalance+amount)
 }
 
@@ -75,9 +75,9 @@ func TestDecreaseBalance(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			state := getTestStateBalances(t)
-			require.NoError(t, state.DecreaseBalance(testInd, tc.delta))
-			afterBalance := state.Balances()[testInd]
+			s := getTestStateBalances(t)
+			require.NoError(t, state.DecreaseBalance(s.BeaconState, testInd, tc.delta))
+			afterBalance := s.Balances()[testInd]
 			require.Equal(t, afterBalance, tc.expectedBalance)
 		})
 	}

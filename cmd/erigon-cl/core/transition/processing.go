@@ -64,14 +64,14 @@ func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlock, fu
 	return nil
 }
 
-func ProcessRandao(state *state.BeaconState, randao [96]byte, proposerIndex uint64, fullValidation bool) error {
-	epoch := state.Epoch()
-	proposer, err := state.ValidatorForValidatorIndex(int(proposerIndex))
+func ProcessRandao(s *state.BeaconState, randao [96]byte, proposerIndex uint64, fullValidation bool) error {
+	epoch := state.Epoch(s.BeaconState)
+	proposer, err := s.ValidatorForValidatorIndex(int(proposerIndex))
 	if err != nil {
 		return err
 	}
 	if fullValidation {
-		domain, err := state.GetDomain(state.BeaconConfig().DomainRandao, epoch)
+		domain, err := s.GetDomain(s.BeaconConfig().DomainRandao, epoch)
 		if err != nil {
 			return fmt.Errorf("ProcessRandao: unable to get domain: %v", err)
 		}
@@ -88,13 +88,13 @@ func ProcessRandao(state *state.BeaconState, randao [96]byte, proposerIndex uint
 		}
 	}
 
-	randaoMixes := state.GetRandaoMixes(epoch)
+	randaoMixes := s.GetRandaoMixes(epoch)
 	randaoHash := utils.Keccak256(randao[:])
 	mix := [32]byte{}
 	for i := range mix {
 		mix[i] = randaoMixes[i] ^ randaoHash[i]
 	}
-	state.SetRandaoMixAt(int(epoch%state.BeaconConfig().EpochsPerHistoricalVector), mix)
+	s.SetRandaoMixAt(int(epoch%s.BeaconConfig().EpochsPerHistoricalVector), mix)
 	return nil
 }
 

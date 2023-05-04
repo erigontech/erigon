@@ -109,7 +109,10 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 				dbg.ReadMemStats(&m)
 				log.Debug("New block imported",
 					"slot", block.Block.Slot, "head", headSlot, "headRoot", headRoot,
-					"alloc", libcommon.ByteCount(m.Alloc))
+					"alloc", libcommon.ByteCount(m.Alloc),
+					"sys", libcommon.ByteCount(m.Sys),
+					"numGC", m.NumGC,
+				)
 
 				// Do forkchoice if possible
 				if cfg.forkChoice.Engine() != nil {
