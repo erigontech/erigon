@@ -82,7 +82,7 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 		return fmt.Errorf("unable to readPacket: %w", err)
 	}
 
-	err = val.DecodeSSZWithVersion(raw, int(version))
+	err = val.DecodeSSZ(raw, int(version))
 	if err != nil {
 		return fmt.Errorf("enable to unmarshall message: %v", err)
 	}
@@ -141,7 +141,7 @@ func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clpara
 		}
 		pos += uint64(n)
 
-		if err := list[i].DecodeSSZWithVersion(raw, int(version)); err != nil {
+		if err := list[i].DecodeSSZ(raw, int(version)); err != nil {
 			return fmt.Errorf("unmarshalling: %w", err)
 		}
 		r.Reset(data[pos:])

@@ -93,11 +93,7 @@ func (obj *Withdrawal) EncodeSSZ() []byte {
 	return buf
 }
 
-func (obj *Withdrawal) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return obj.DecodeSSZ(buf)
-}
-
-func (obj *Withdrawal) DecodeSSZ(buf []byte) error {
+func (obj *Withdrawal) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < obj.EncodingSizeSSZ() {
 		return ssz.ErrLowBufferSize
 	}

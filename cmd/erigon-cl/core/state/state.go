@@ -91,11 +91,6 @@ func preparateRootsForHashing(roots []common.Hash) [][32]byte {
 	return ret
 }
 
-// MarshallSSZTo retrieve the SSZ encoded length of the state.
-func (b *BeaconState) DecodeSSZ(buf []byte) error {
-	panic("not implemented")
-}
-
 // BlockRoot computes the block root for the state.
 func (b *BeaconState) BlockRoot() ([32]byte, error) {
 	stateRoot, err := b.HashSSZ()

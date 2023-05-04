@@ -24,7 +24,7 @@ func TestCheckpointMarshalUnmarmashal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, marshalled, expectedTestCheckpointMarshalled)
 	checkpoint := &cltypes.Checkpoint{}
-	require.NoError(t, checkpoint.DecodeSSZ(marshalled))
+	require.NoError(t, checkpoint.DecodeSSZ(marshalled, 0))
 	require.Equal(t, checkpoint, testCheckpoint)
 }
 
