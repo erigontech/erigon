@@ -1,20 +1,28 @@
-package state
+package raw
 
 import (
 	"errors"
+	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
 )
 
 var (
-	// Error for missing validator
-	ErrInvalidValidatorIndex = errors.New("invalid validator index")
+	ErrGetBlockRootAtSlotFuture = errors.New("GetBlockRootAtSlot: slot in the future")
 )
 
 // Just a bunch of simple getters.
+
+func (b *BeaconState) BeaconConfig() *clparams.BeaconChainConfig {
+	return b.beaconConfig
+}
+
+func (b *BeaconState) Version() clparams.StateVersion {
+	return b.version
+}
 
 func (b *BeaconState) GenesisTime() uint64 {
 	return b.genesisTime
@@ -71,6 +79,19 @@ func (b *BeaconState) Validators() []*cltypes.Validator {
 	return b.validators
 }
 
+func (b *BeaconState) ValidatorLength() int {
+	return len(b.validators)
+}
+
+func (b *BeaconState) ForEachValidator(fn func(v *cltypes.Validator, idx int, total int) bool) {
+	for idx, v := range b.validators {
+		ok := fn(v, idx, len(b.validators))
+		if !ok {
+			break
+		}
+	}
+}
+
 func (b *BeaconState) ValidatorForValidatorIndex(index int) (*cltypes.Validator, error) {
 	if index >= len(b.validators) {
 		return nil, ErrInvalidValidatorIndex
@@ -89,8 +110,56 @@ func (b *BeaconState) ValidatorBalance(index int) (uint64, error) {
 	return b.balances[index], nil
 }
 
+func (b *BeaconState) ValidatorExitEpoch(index int) (uint64, error) {
+	if index >= len(b.validators) {
+		return 0, ErrInvalidValidatorIndex
+	}
+	return b.validators[index].ExitEpoch, nil
+}
+
+func (b *BeaconState) ValidatorWithdrawableEpoch(index int) (uint64, error) {
+	if index >= len(b.validators) {
+		return 0, ErrInvalidValidatorIndex
+	}
+	return b.validators[index].WithdrawableEpoch, nil
+}
+
+func (b *BeaconState) ValidatorEffectiveBalance(index int) (uint64, error) {
+	if index >= len(b.validators) {
+		return 0, ErrInvalidValidatorIndex
+	}
+	return b.validators[index].EffectiveBalance, nil
+}
+
+func (b *BeaconState) ValidatorMinCurrentInclusionDelayAttestation(index int) (*cltypes.PendingAttestation, error) {
+	if index >= len(b.validators) {
+		return nil, ErrInvalidValidatorIndex
+	}
+	return b.validators[index].MinCurrentInclusionDelayAttestation, nil
+}
+
+func (b *BeaconState) ValidatorMinPreviousInclusionDelayAttestation(index int) (*cltypes.PendingAttestation, error) {
+	if index >= len(b.validators) {
+		return nil, ErrInvalidValidatorIndex
+	}
+	return b.validators[index].MinPreviousInclusionDelayAttestation, nil
+}
+
 func (b *BeaconState) RandaoMixes() [randoMixesLength]libcommon.Hash {
 	return b.randaoMixes
+}
+
+func (b *BeaconState) GetRandaoMixes(epoch uint64) [32]byte {
+	return b.randaoMixes[epoch%b.beaconConfig.EpochsPerHistoricalVector]
+}
+
+func (b *BeaconState) ForEachSlashingSegment(fn func(v uint64, idx int, total int) bool) {
+	for idx, v := range &b.slashings {
+		ok := fn(v, idx, len(b.slashings))
+		if !ok {
+			break
+		}
+	}
 }
 
 func (b *BeaconState) Slashings() [slashingsLength]uint64 {
@@ -161,6 +230,15 @@ func (b *BeaconState) NextWithdrawalIndex() uint64 {
 func (b *BeaconState) CurrentEpochAttestations() []*cltypes.PendingAttestation {
 	return b.currentEpochAttestations
 }
+func (b *BeaconState) CurrentEpochAttestationsLength() int {
+	return len(b.currentEpochAttestations)
+}
+func (b *BeaconState) PreviousEpochAttestations() []*cltypes.PendingAttestation {
+	return b.previousEpochAttestations
+}
+func (b *BeaconState) PreviousEpochAttestationsLength() int {
+	return len(b.previousEpochAttestations)
+}
 
 func (b *BeaconState) NextWithdrawalValidatorIndex() uint64 {
 	return b.nextWithdrawalValidatorIndex
@@ -170,22 +248,23 @@ func (b *BeaconState) HistoricalSummaries() []*cltypes.HistoricalSummary {
 	return b.historicalSummaries
 }
 
-func (b *BeaconState) Version() clparams.StateVersion {
-	return b.version
+// more compluicated ones
+
+// GetBlockRootAtSlot returns the block root at a given slot
+func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (libcommon.Hash, error) {
+	if slot >= b.Slot() {
+		return libcommon.Hash{}, ErrGetBlockRootAtSlotFuture
+	}
+	if b.Slot() > slot+b.BeaconConfig().SlotsPerHistoricalRoot {
+		return libcommon.Hash{}, fmt.Errorf("GetBlockRootAtSlot: slot too much far behind")
+	}
+	return b.blockRoots[slot%b.BeaconConfig().SlotsPerHistoricalRoot], nil
 }
 
-func (b *BeaconState) ValidatorIndexByPubkey(key [48]byte) (uint64, bool) {
-	val, ok := b.publicKeyIndicies[key]
-	return val, ok
-}
-
-func (b *BeaconState) BeaconConfig() *clparams.BeaconChainConfig {
-	return b.beaconConfig
-}
-
-// PreviousStateRoot gets the previously saved state root and then deletes it.
-func (b *BeaconState) PreviousStateRoot() libcommon.Hash {
-	ret := b.previousStateRoot
-	b.previousStateRoot = libcommon.Hash{}
-	return ret
+// GetBl
+func (b *BeaconState) GetDomain(domainType [4]byte, epoch uint64) ([]byte, error) {
+	if epoch < b.fork.Epoch {
+		return fork.ComputeDomain(domainType[:], b.fork.PreviousVersion, b.genesisValidatorsRoot)
+	}
+	return fork.ComputeDomain(domainType[:], b.fork.CurrentVersion, b.genesisValidatorsRoot)
 }
