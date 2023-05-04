@@ -5,7 +5,7 @@
       "balance": "0xde0b6b3a76586a0"
     },
     "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba": {
-      "balance": "0x1bc16d674ec8521f"
+      "balance": "0x521f"
     },
     "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
       "balance": "0xde0b6b3a7622741",
@@ -13,7 +13,7 @@
     }
   },
   "result": {
-    "stateRoot": "0x5aeefb3e8fe1d722455ff4b4ee76793af2c654f7f5120b79a8427d696ed01558",
+    "stateRoot": "0xb7341da3f9f762a6884eaa186c32942734c146b609efee11c4b0214c44857ea1",
     "txRoot": "0x75e61774a2ff58cbe32653420256c7f44bc715715a423b0b746d5c622979af6b",
     "receiptsRoot": "0xd0d26df80374a327c025d405ebadc752b1bbd089d864801ae78ab704bcad8086",
     "logsHash": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
@@ -28,8 +28,8 @@
         "transactionHash": "0x72fadbef39cd251a437eea619cfeda752271a5faaaa2147df012e112159ffb81",
         "contractAddress": "0x0000000000000000000000000000000000000000",
         "gasUsed": "0x521f",
+        "effectiveGasPrice": null,
         "blockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-        "blockNumber": "0x5",
         "transactionIndex": "0x0"
       }
     ],
