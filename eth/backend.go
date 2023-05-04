@@ -880,7 +880,10 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		defer close(first)
 
 		for {
-			mineEvery.Reset(cfg.Recommit)
+			// Only reset if some work was done previously
+			if hasWork {
+				mineEvery.Reset(cfg.Recommit)
+			}
 			select {
 			case <-first:
 				log.Debug("Start mining new block")
