@@ -10,7 +10,7 @@ import (
 
 var globalHasher *merkleHasher
 
-const initialBufferSize = 1_048_576 // 2 ^ 20 (on mainnet we have got 600k validators so this will suffice for now)
+const initialBufferSize = 0 // it is whatever
 
 // merkleHasher is used internally to provide shared buffer internally to the merkle_tree package.
 type merkleHasher struct {
