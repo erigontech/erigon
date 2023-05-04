@@ -23,7 +23,7 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -34,9 +34,9 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-func getBlock(transactions int, uncles int, dataSize int, tmpDir string) *types.Block {
-	db := memdb.New(tmpDir)
-	defer db.Close()
+func getBlock(t *testing.T, transactions int, uncles int, dataSize int, tmpDir string) *types.Block {
+	m := stages.Mock(t)
+	db := m.DB
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset
@@ -91,7 +91,7 @@ func TestRlpIterator(t *testing.T) {
 
 func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 	desc := fmt.Sprintf("%d txs [%d datasize] and %d uncles", txs, datasize, uncles)
-	bodyRlp, _ := rlp.EncodeToBytes(getBlock(txs, uncles, datasize, "").Body())
+	bodyRlp, _ := rlp.EncodeToBytes(getBlock(t, txs, uncles, datasize, "").Body())
 	it, err := rlp.NewListIterator(bodyRlp)
 	if err != nil {
 		t.Fatal(err)
