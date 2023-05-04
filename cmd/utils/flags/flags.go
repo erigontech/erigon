@@ -46,6 +46,10 @@ func (s *DirectoryString) Set(value string) error {
 	return nil
 }
 
+func (s *DirectoryString) Get() any {
+	return s.String()
+}
+
 var (
 	_ cli.Flag              = (*DirectoryFlag)(nil)
 	_ cli.RequiredFlag      = (*DirectoryFlag)(nil)

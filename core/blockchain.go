@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -87,7 +88,7 @@ func ExecuteBlockEphemerally(
 
 	usedGas := new(uint64)
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit())
+	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
 	incTxNum := func() {}
 	switch sw := stateWriter.(type) {
@@ -123,7 +124,7 @@ func ExecuteBlockEphemerally(
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
 		incTxNum()
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, tx.Hash())
@@ -210,7 +211,7 @@ func ExecuteBlockEphemerallyBor(
 
 	usedGas := new(uint64)
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit())
+	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
 	var (
 		rejectedTxs []*RejectedTx
@@ -235,7 +236,7 @@ func ExecuteBlockEphemerallyBor(
 	noop := state.NewNoopWriter()
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, tx.Hash())

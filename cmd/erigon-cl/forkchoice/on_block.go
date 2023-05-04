@@ -16,6 +16,9 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	if err != nil {
 		return err
 	}
+	if f.Slot() < block.Block.Slot {
+		return fmt.Errorf("block is too late compared to current_slot")
+	}
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
 	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Epoch)
 	if block.Block.Slot <= finalizedSlot {

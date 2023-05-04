@@ -38,12 +38,11 @@ const snapshotStateEverySlot = 64
 // each edge is the path described as (prevBlockRoot, currBlockRoot). if we want to go forward we use blocks.
 type ForkGraph struct {
 	// Alternate beacon states
-	currentReferenceState     *state.BeaconState
-	nextReferenceState        *state.BeaconState
-	currentReferenceStateRoot libcommon.Hash
-	blocks                    map[libcommon.Hash]*cltypes.SignedBeaconBlock // set of blocks
-	headers                   map[libcommon.Hash]*cltypes.BeaconBlockHeader // set of headers
-	badBlocks                 map[libcommon.Hash]struct{}                   // blocks that are invalid and that leads to automatic fail of extension.
+	currentReferenceState *state.BeaconState
+	nextReferenceState    *state.BeaconState
+	blocks                map[libcommon.Hash]*cltypes.SignedBeaconBlock // set of blocks
+	headers               map[libcommon.Hash]*cltypes.BeaconBlockHeader // set of headers
+	badBlocks             map[libcommon.Hash]struct{}                   // blocks that are invalid and that leads to automatic fail of extension.
 	// current state data
 	currentState          *state.BeaconState
 	currentStateBlockRoot libcommon.Hash
@@ -90,9 +89,8 @@ func New(anchorState *state.BeaconState, enabledPruning bool) *ForkGraph {
 		headers:   headers,
 		badBlocks: make(map[libcommon.Hash]struct{}),
 		// current state data
-		currentState:              anchorState,
-		currentStateBlockRoot:     anchorRoot,
-		currentReferenceStateRoot: anchorRoot,
+		currentState:          anchorState,
+		currentStateBlockRoot: anchorRoot,
 		// childrens
 		childrens: make(map[libcommon.Hash][]libcommon.Hash),
 		// checkpoints trackers
@@ -134,6 +132,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 		return nil, InvalidBlock, err
 	}
 	if newState == nil {
+		log.Debug("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
 		return nil, MissingSegment, nil
 	}
 	// We may just use the current beacon state
@@ -207,25 +206,39 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.
 	// Use the parent root as a reverse iterator.
 	currentIteratorRoot := blockRoot
 	// use the current reference state root as reconnectio
-	reconnectionRoot, err := f.currentReferenceState.BlockRoot()
+	reconnectionRootLong, err := f.currentReferenceState.BlockRoot()
+	if err != nil {
+		return nil, err
+	}
+	reconnectionRootShort, err := f.nextReferenceState.BlockRoot()
 	if err != nil {
 		return nil, err
 	}
 	// try and find the point of recconection
-	for currentIteratorRoot != reconnectionRoot {
+	for currentIteratorRoot != reconnectionRootLong && currentIteratorRoot != reconnectionRootShort {
 		block, isSegmentPresent := f.getBlock(currentIteratorRoot)
 		if !isSegmentPresent {
-			log.Debug("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
+			log.Debug("Could not retrieve state: Missing header", "missing", currentIteratorRoot,
+				"longRecconection", libcommon.Hash(reconnectionRootLong), "shortRecconection", libcommon.Hash(reconnectionRootShort))
 			return nil, nil
 		}
 		blocksInTheWay = append(blocksInTheWay, block)
 		currentIteratorRoot = block.Block.ParentRoot
 	}
+	var copyReferencedState *state.BeaconState
 	// Take a copy to the reference state.
-	copyReferencedState, err := f.currentReferenceState.Copy()
-	if err != nil {
-		return nil, err
+	if currentIteratorRoot == reconnectionRootLong {
+		copyReferencedState, err = f.currentReferenceState.Copy()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		copyReferencedState, err = f.nextReferenceState.Copy()
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	// Traverse the blocks from top to bottom.
 	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
 		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], false); err != nil {
@@ -280,9 +293,9 @@ func (f *ForkGraph) removeOldData() (err error) {
 	}
 	// Lastly snapshot the state
 	f.currentReferenceState = f.nextReferenceState
-	if f.currentReferenceStateRoot, err = f.currentReferenceState.HashSSZ(); err != nil {
-		return
-	}
 	f.nextReferenceState, err = f.currentState.Copy()
+	if err != nil {
+		panic(err) // dead at this point
+	}
 	return
 }

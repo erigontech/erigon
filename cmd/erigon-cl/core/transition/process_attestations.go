@@ -192,13 +192,9 @@ type verifyAttestationWorkersResult struct {
 	err     error
 }
 
-func verifyAttestationWorker(state *state.BeaconState, attestation *cltypes.Attestation, attestingIndicies []uint64, resultCh chan verifyAttestationWorkersResult) {
-	indexedAttestation, err := state.GetIndexedAttestation(attestation, attestingIndicies)
-	if err != nil {
-		resultCh <- verifyAttestationWorkersResult{err: err}
-		return
-	}
-	success, err := state.IsValidIndexedAttestation(indexedAttestation)
+func verifyAttestationWorker(beaconState *state.BeaconState, attestation *cltypes.Attestation, attestingIndicies []uint64, resultCh chan verifyAttestationWorkersResult) {
+	indexedAttestation := state.GetIndexedAttestation(attestation, attestingIndicies)
+	success, err := beaconState.IsValidIndexedAttestation(indexedAttestation)
 	resultCh <- verifyAttestationWorkersResult{success: success, err: err}
 }
 

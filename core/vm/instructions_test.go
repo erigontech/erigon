@@ -25,11 +25,13 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
@@ -50,6 +52,14 @@ type twoOperandParams struct {
 
 var commonParams []*twoOperandParams
 var twoOpMethods map[string]executionFunc
+
+type contractRef struct {
+	addr libcommon.Address
+}
+
+func (c contractRef) Address() libcommon.Address {
+	return c.addr
+}
 
 func init() {
 
@@ -558,6 +568,45 @@ func BenchmarkOpMstore(bench *testing.B) {
 	for i := 0; i < bench.N; i++ {
 		stack.PushN(*value, *memStart)
 		opMstore(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
+	}
+}
+
+func TestOpTstore(t *testing.T) {
+	var (
+		state          = state.New(nil)
+		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, params.TestChainConfig, Config{})
+		stack          = stack.New()
+		mem            = NewMemory()
+		evmInterpreter = NewEVMInterpreter(env, env.Config())
+		caller         = libcommon.Address{}
+		to             = libcommon.Address{1}
+		contractRef    = contractRef{caller}
+		contract       = NewContract(contractRef, AccountRef(to), u256.Num0, 0, false)
+		scopeContext   = ScopeContext{mem, stack, contract}
+		value          = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
+	)
+
+	env.interpreter = evmInterpreter
+	pc := uint64(0)
+	// push the value to the stack
+	stack.Push(new(uint256.Int).SetBytes(value))
+	// push the location to the stack
+	stack.Push(new(uint256.Int))
+	opTstore(&pc, evmInterpreter, &scopeContext)
+	// there should be no elements on the stack after TSTORE
+	if stack.Len() != 0 {
+		t.Fatal("stack wrong size")
+	}
+	// push the location to the stack
+	stack.Push(new(uint256.Int))
+	opTload(&pc, evmInterpreter, &scopeContext)
+	// there should be one element on the stack after TLOAD
+	if stack.Len() != 1 {
+		t.Fatal("stack wrong size")
+	}
+	val := stack.Peek()
+	if !bytes.Equal(val.Bytes(), value) {
+		t.Fatal("incorrect element read from transient storage")
 	}
 }
 

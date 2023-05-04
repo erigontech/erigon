@@ -165,9 +165,9 @@ type SignedVoluntaryExit struct {
 	Signature    [96]byte
 }
 
-func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) []byte {
+func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := e.VolunaryExit.EncodeSSZ(dst)
-	return append(buf, e.Signature[:]...)
+	return append(buf, e.Signature[:]...), nil
 }
 
 func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte) error {
@@ -246,6 +246,10 @@ func (s *SyncCommittee) DecodeSSZ(buf []byte) error {
 	copy(s.AggregatePublicKey[:], buf[24576:])
 
 	return nil
+}
+
+func (s *SyncCommittee) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return s.DecodeSSZ(buf)
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the SyncCommittee object

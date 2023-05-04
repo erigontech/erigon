@@ -153,7 +153,9 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	offset += uint32(len(b.VoluntaryExits)) * 112
 	// Encode Sync Aggregate
 	if b.Version >= clparams.AltairVersion {
-		buf = b.SyncAggregate.EncodeSSZ(buf)
+		if buf, err = b.SyncAggregate.EncodeSSZ(buf); err != nil {
+			return nil, err
+		}
 	}
 	if b.Version >= clparams.BellatrixVersion {
 		buf = append(buf, ssz.OffsetSSZ(offset)...)
@@ -202,7 +204,9 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 
 	for _, exit := range b.VoluntaryExits {
-		buf = exit.EncodeSSZ(buf)
+		if buf, err = exit.EncodeSSZ(buf); err != nil {
+			return nil, err
+		}
 	}
 
 	if b.Version >= clparams.BellatrixVersion {
