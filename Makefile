@@ -12,7 +12,6 @@ DOCKER_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell id -g)
 DOCKER_TAG ?= thorax/erigon:latest
 
-
 # Variables below for building on host OS, and are ignored for docker
 #
 # Pipe error below to /dev/null since Makefile structure kind of expects
