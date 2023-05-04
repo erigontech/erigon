@@ -12,7 +12,7 @@ import (
 
 const (
 	BlobCommitmentVersionKZG uint8 = 0x01
-	PrecompileInputLength          = 192
+	PrecompileInputLength    int   = 192
 )
 
 var (
