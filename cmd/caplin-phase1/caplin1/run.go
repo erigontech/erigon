@@ -3,7 +3,6 @@ package caplin1
 import (
 	"context"
 
-	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/rpc"
@@ -27,17 +26,5 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 		return err
 	}
 	gossipManager := network.NewGossipReceiver(ctx, sentinel, forkChoice, beaconConfig, genesisConfig)
-	// start the enabling of BLS caching
-	bls.EnableCaching()
-	// Load initial cache
-	for validatorIndex, validator := range state.Validators() {
-		if err := bls.LoadPublicKeyIntoCache(validator.PublicKey[:], false); err != nil {
-			log.Error("Could not load key", "validatorIndex", validatorIndex)
-			continue
-		}
-		if validatorIndex%20_000 == 0 {
-			log.Debug("Loading affines in cache", "currentValidatorIndex", validatorIndex, "target", len(state.Validators())-1)
-		}
-	}
 	return stages.SpawnStageForkChoice(stages.StageForkChoice(nil, downloader, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice), &stagedsync.StageState{ID: "Caplin"}, nil, ctx)
 }
