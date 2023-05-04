@@ -384,15 +384,17 @@ func (v *Validator) EncodingSizeSSZ() int {
 
 var validatorLeavesPool = sync.Pool{
 	New: func() any {
-		return make([][32]byte, 8)
+		o := make([][32]byte, 8)
+		return &o
 	},
 }
 
 func (v *Validator) HashSSZ() ([32]byte, error) {
-	leaves, _ := validatorLeavesPool.Get().([][32]byte)
+	leavesp, _ := validatorLeavesPool.Get().(*[][32]byte)
+	leaves := *leavesp
 	defer func() {
 		leaves = leaves[:8]
-		validatorLeavesPool.Put(leaves)
+		validatorLeavesPool.Put(leavesp)
 	}()
 	var (
 		err error
