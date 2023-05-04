@@ -34,8 +34,8 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-func getBlock(t *testing.T, transactions int, uncles int, dataSize int, tmpDir string) *types.Block {
-	m := stages.Mock(t)
+func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string) *types.Block {
+	m := stages.Mock(tb)
 	db := m.DB
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
@@ -150,7 +150,7 @@ func BenchmarkHashing(b *testing.B) {
 		blockRlp []byte
 	)
 	{
-		block := getBlock(200, 2, 50, "")
+		block := getBlock(b, 200, 2, 50, "")
 		bodyRlp, _ = rlp.EncodeToBytes(block.Body())
 		blockRlp, _ = rlp.EncodeToBytes(block)
 	}
