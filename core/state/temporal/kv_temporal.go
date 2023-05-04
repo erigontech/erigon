@@ -5,16 +5,24 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sort"
+	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/state/historyv2read"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
@@ -455,4 +463,42 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 		tx.resourcesToClose = append(tx.resourcesToClose, closer)
 	}
 	return it, err
+}
+
+// TODO: need remove `gspec` param (move SystemContractCodeLookup feature somewhere)
+func NewTestDB(tb testing.TB, ctx context.Context, dirs datadir.Dirs, gspec *types.Genesis) (histV3 bool, db kv.RwDB, agg *state.AggregatorV3) {
+	HistoryV3 := ethconfig.EnableHistoryV3InTest
+
+	if tb != nil {
+		db = memdb.NewTestDB(tb)
+	} else {
+		db = memdb.New(dirs.DataDir)
+	}
+	_ = db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+		_, _ = kvcfg.HistoryV3.WriteOnce(tx, HistoryV3)
+		return nil
+	})
+
+	if HistoryV3 {
+		var err error
+		dir.MustExist(dirs.SnapHistory)
+		agg, err = state.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
+		if err != nil {
+			panic(err)
+		}
+		if err := agg.OpenFolder(); err != nil {
+			panic(err)
+		}
+
+		var sc map[common.Address][]common.CodeRecord
+		if gspec != nil {
+			sc = systemcontracts.SystemContractCodeLookup[gspec.Config.ChainName]
+		}
+
+		db, err = New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, sc)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return HistoryV3, db, agg
 }

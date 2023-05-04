@@ -18,12 +18,14 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -35,8 +37,7 @@ import (
 )
 
 func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string) *types.Block {
-	m := stages.Mock(tb)
-	db := m.DB
+	_, db, _ := temporal.NewTestDB(tb, context.Background(), datadir.New(tmpDir), nil)
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset
