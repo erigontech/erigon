@@ -302,6 +302,8 @@ func (b *BeaconState) isLeafDirty(idx StateLeafIndex) bool {
 	return !isInitialized || touched // change only if the leaf was touched or root is non-initialized.
 }
 
-func (b *BeaconState) markLeaf(idx StateLeafIndex) {
-	b.touchedLeaves[idx] = true
+func (b *BeaconState) markLeaf(idxs ...StateLeafIndex) {
+	for _, idx := range idxs {
+		b.touchedLeaves[idx] = true
+	}
 }

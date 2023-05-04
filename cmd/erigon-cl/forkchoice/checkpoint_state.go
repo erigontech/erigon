@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/shuffling"
 )
 
 const randaoMixesLength = 65536
@@ -90,7 +90,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *cltypes.AttestationD
 	} else {
 		activeIndicies := c.getActiveIndicies(epoch)
 		lenIndicies = uint64(len(activeIndicies))
-		shuffledIndicies = state.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes, activeIndicies, slot)
+		shuffledIndicies = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes, activeIndicies, slot)
 		c.shuffledSetsCache[epoch] = &shuffledSet{set: shuffledIndicies, lenActive: uint64(len(activeIndicies))}
 	}
 	committeesPerSlot := c.committeeCount(epoch, lenIndicies)

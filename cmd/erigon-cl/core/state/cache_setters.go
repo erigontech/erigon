@@ -4,7 +4,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
-// Below are setters. Note that they also dirty the state.
+// Below are setters.
 
 func (b *BeaconState) SetSlot(slot uint64) {
 	b.BeaconState.SetSlot(slot)

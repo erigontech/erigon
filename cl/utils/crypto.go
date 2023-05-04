@@ -60,3 +60,19 @@ func OptimizedKeccak256() HashFunc {
 		return b
 	}
 }
+
+// Optimized Keccak256, avoid pool.put/pool.get, meant for intensive operations.
+// this version is not thread safe
+func OptimizedKeccak256NotThreadSafe() HashFunc {
+	h := sha256.New()
+	var b [32]byte
+	return func(data []byte, extras ...[]byte) [32]byte {
+		h.Reset()
+		h.Write(data)
+		for _, extra := range extras {
+			h.Write(extra)
+		}
+		h.Sum(b[:0])
+		return b
+	}
+}

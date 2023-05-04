@@ -1,13 +1,17 @@
 package raw
 
 import (
+	"errors"
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/utils"
+)
+
+var (
+	ErrGetBlockRootAtSlotFuture = errors.New("GetBlockRootAtSlot: slot in the future")
 )
 
 // Just a bunch of simple getters.
@@ -150,7 +154,7 @@ func (b *BeaconState) GetRandaoMixes(epoch uint64) [32]byte {
 }
 
 func (b *BeaconState) ForEachSlashingSegment(fn func(v uint64, idx int, total int) bool) {
-	for idx, v := range b.slashings {
+	for idx, v := range &b.slashings {
 		ok := fn(v, idx, len(b.slashings))
 		if !ok {
 			break
@@ -230,10 +234,10 @@ func (b *BeaconState) CurrentEpochAttestationsLength() int {
 	return len(b.currentEpochAttestations)
 }
 func (b *BeaconState) PreviousEpochAttestations() []*cltypes.PendingAttestation {
-	return b.currentEpochAttestations
+	return b.previousEpochAttestations
 }
 func (b *BeaconState) PreviousEpochAttestationsLength() int {
-	return len(b.currentEpochAttestations)
+	return len(b.previousEpochAttestations)
 }
 
 func (b *BeaconState) NextWithdrawalValidatorIndex() uint64 {
@@ -263,12 +267,4 @@ func (b *BeaconState) GetDomain(domainType [4]byte, epoch uint64) ([]byte, error
 		return fork.ComputeDomain(domainType[:], b.fork.PreviousVersion, b.genesisValidatorsRoot)
 	}
 	return fork.ComputeDomain(domainType[:], b.fork.CurrentVersion, b.genesisValidatorsRoot)
-}
-
-func (b *BeaconState) ComputeShuffledIndexPreInputs(seed [32]byte) [][32]byte {
-	ret := make([][32]byte, b.beaconConfig.ShuffleRoundCount)
-	for i := range ret {
-		ret[i] = utils.Keccak256(append(seed[:], byte(i)))
-	}
-	return ret
 }

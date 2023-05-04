@@ -6,63 +6,67 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
-func (b *BeaconState) Copy() (*BeaconState, error) {
-	copied := New(b.BeaconConfig())
-	copied.genesisTime = b.genesisTime
-	copied.genesisValidatorsRoot = b.genesisValidatorsRoot
-	copied.slot = b.slot
-	copied.fork = b.fork.Copy()
-	copied.latestBlockHeader = b.latestBlockHeader.Copy()
-	copy(copied.blockRoots[:], b.blockRoots[:])
-	copy(copied.stateRoots[:], b.stateRoots[:])
-	copied.historicalRoots = make([]libcommon.Hash, len(b.historicalRoots))
-	copy(copied.historicalRoots, b.historicalRoots)
-	copied.eth1Data = b.eth1Data.Copy()
-	copied.eth1DataVotes = make([]*cltypes.Eth1Data, len(b.eth1DataVotes))
+func (b *BeaconState) CopyInto(dst *BeaconState) error {
+	dst.genesisTime = b.genesisTime
+	dst.genesisValidatorsRoot = b.genesisValidatorsRoot
+	dst.slot = b.slot
+	dst.fork = b.fork.Copy()
+	dst.latestBlockHeader = b.latestBlockHeader.Copy()
+	copy(dst.blockRoots[:], b.blockRoots[:])
+	copy(dst.stateRoots[:], b.stateRoots[:])
+	dst.historicalRoots = make([]libcommon.Hash, len(b.historicalRoots))
+	copy(dst.historicalRoots, b.historicalRoots)
+	dst.eth1Data = b.eth1Data.Copy()
+	dst.eth1DataVotes = make([]*cltypes.Eth1Data, len(b.eth1DataVotes))
 	for i := range b.eth1DataVotes {
-		copied.eth1DataVotes[i] = b.eth1DataVotes[i].Copy()
+		dst.eth1DataVotes[i] = b.eth1DataVotes[i].Copy()
 	}
-	copied.eth1DepositIndex = b.eth1DepositIndex
-	copied.validators = make([]*cltypes.Validator, len(b.validators))
+	dst.eth1DepositIndex = b.eth1DepositIndex
+	dst.validators = make([]*cltypes.Validator, len(b.validators))
 	for i := range b.validators {
-		copied.validators[i] = b.validators[i].Copy()
+		dst.validators[i] = b.validators[i].Copy()
 	}
-	copied.balances = make([]uint64, len(b.balances))
-	copy(copied.balances, b.balances)
-	copy(copied.randaoMixes[:], b.randaoMixes[:])
-	copy(copied.slashings[:], b.slashings[:])
-	copied.previousEpochParticipation = b.previousEpochParticipation.Copy()
-	copied.currentEpochParticipation = b.currentEpochParticipation.Copy()
-	copied.finalizedCheckpoint = b.finalizedCheckpoint.Copy()
-	copied.currentJustifiedCheckpoint = b.currentJustifiedCheckpoint.Copy()
-	copied.previousJustifiedCheckpoint = b.previousJustifiedCheckpoint.Copy()
+	dst.balances = make([]uint64, len(b.balances))
+	copy(dst.balances, b.balances)
+	copy(dst.randaoMixes[:], b.randaoMixes[:])
+	copy(dst.slashings[:], b.slashings[:])
+	dst.previousEpochParticipation = b.previousEpochParticipation.Copy()
+	dst.currentEpochParticipation = b.currentEpochParticipation.Copy()
+	dst.finalizedCheckpoint = b.finalizedCheckpoint.Copy()
+	dst.currentJustifiedCheckpoint = b.currentJustifiedCheckpoint.Copy()
+	dst.previousJustifiedCheckpoint = b.previousJustifiedCheckpoint.Copy()
 	if b.version == clparams.Phase0Version {
-		return copied, copied.init()
+		return dst.init()
 	}
-	copied.currentSyncCommittee = b.currentSyncCommittee.Copy()
-	copied.nextSyncCommittee = b.nextSyncCommittee.Copy()
-	copied.inactivityScores = make([]uint64, len(b.inactivityScores))
-	copy(copied.inactivityScores, b.inactivityScores)
-	copied.justificationBits = b.justificationBits.Copy()
+	dst.currentSyncCommittee = b.currentSyncCommittee.Copy()
+	dst.nextSyncCommittee = b.nextSyncCommittee.Copy()
+	dst.inactivityScores = make([]uint64, len(b.inactivityScores))
+	copy(dst.inactivityScores, b.inactivityScores)
+	dst.justificationBits = b.justificationBits.Copy()
 
 	if b.version >= clparams.BellatrixVersion {
-		copied.latestExecutionPayloadHeader = b.latestExecutionPayloadHeader.Copy()
+		dst.latestExecutionPayloadHeader = b.latestExecutionPayloadHeader.Copy()
 	}
-	copied.nextWithdrawalIndex = b.nextWithdrawalIndex
-	copied.nextWithdrawalValidatorIndex = b.nextWithdrawalValidatorIndex
-	copied.historicalSummaries = make([]*cltypes.HistoricalSummary, len(b.historicalSummaries))
+	dst.nextWithdrawalIndex = b.nextWithdrawalIndex
+	dst.nextWithdrawalValidatorIndex = b.nextWithdrawalValidatorIndex
+	dst.historicalSummaries = make([]*cltypes.HistoricalSummary, len(b.historicalSummaries))
 	for i := range b.historicalSummaries {
-		copied.historicalSummaries[i] = &cltypes.HistoricalSummary{
+		dst.historicalSummaries[i] = &cltypes.HistoricalSummary{
 			BlockSummaryRoot: b.historicalSummaries[i].BlockSummaryRoot,
 			StateSummaryRoot: b.historicalSummaries[i].StateSummaryRoot,
 		}
 	}
-	copied.version = b.version
+	dst.version = b.version
 	// Now sync internals
-	copy(copied.leaves[:], b.leaves[:])
-	copied.touchedLeaves = make(map[StateLeafIndex]bool)
+	copy(dst.leaves[:], b.leaves[:])
+	dst.touchedLeaves = make(map[StateLeafIndex]bool)
 	for leafIndex, touchedVal := range b.touchedLeaves {
-		copied.touchedLeaves[leafIndex] = touchedVal
+		dst.touchedLeaves[leafIndex] = touchedVal
 	}
-	return copied, nil
+	return nil
+}
+
+func (b *BeaconState) Copy() (*BeaconState, error) {
+	copied := New(b.BeaconConfig())
+	return copied, b.CopyInto(copied)
 }

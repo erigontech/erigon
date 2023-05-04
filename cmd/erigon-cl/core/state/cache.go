@@ -7,16 +7,20 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/raw"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/shuffling"
 )
 
 type HashFunc func([]byte) ([32]byte, error)
 
+// BeaconState is a cached wrapper around a raw BeaconState provider
 type BeaconState struct {
+
+	// embedded BeaconState
+	// TODO: perhaps refactor and make a method BeaconState() which returns a pointer to raw.BeaconState
 	*raw.BeaconState
 
 	// Internals
@@ -58,12 +62,12 @@ func (b *BeaconState) DecodeSSZ(buf []byte) error {
 }
 
 func (b *BeaconState) _updateProposerIndex() (err error) {
-	epoch := b.Epoch()
+	epoch := Epoch(b.BeaconState)
 
 	hash := sha256.New()
 	// Input for the seed hash.
 	randao := b.RandaoMixes()
-	input := GetSeed(b.BeaconConfig(), randao[:], epoch, b.BeaconConfig().DomainBeaconProposer)
+	input := shuffling.GetSeed(b.BeaconConfig(), randao[:], epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
 
@@ -80,7 +84,7 @@ func (b *BeaconState) _updateProposerIndex() (err error) {
 	seedArray := [32]byte{}
 	copy(seedArray[:], seed)
 	b.proposerIndex = new(uint64)
-	*b.proposerIndex, err = b.ComputeProposerIndex(indices, seedArray)
+	*b.proposerIndex, err = shuffling.ComputeProposerIndex(b.BeaconState, indices, seedArray)
 	return
 }
 
@@ -90,10 +94,12 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 	if b.Slot() == 0 {
 		return nil
 	}
-	previousEpochRoot, err := b.GetBlockRoot(b.PreviousEpoch())
+
+	previousEpochRoot, err := GetBlockRoot(b.BeaconState, PreviousEpoch(b.BeaconState))
 	if err != nil {
 		return err
 	}
+
 	for _, attestation := range b.PreviousEpochAttestations() {
 		slotRoot, err := b.GetBlockRootAtSlot(attestation.Data.Slot)
 		if err != nil {
@@ -133,7 +139,7 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 	if b.CurrentEpochAttestationsLength() == 0 {
 		return nil
 	}
-	currentEpochRoot, err := b.GetBlockRoot(b.Epoch())
+	currentEpochRoot, err := GetBlockRoot(b.BeaconState, Epoch(b.BeaconState))
 	if err != nil {
 		return err
 	}
@@ -178,7 +184,7 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 }
 
 func (b *BeaconState) _refreshActiveBalances() {
-	epoch := b.Epoch()
+	epoch := Epoch(b.BeaconState)
 	b.totalActiveBalanceCache = new(uint64)
 	*b.totalActiveBalanceCache = 0
 	b.ForEachValidator(func(validator *cltypes.Validator, idx, total int) bool {
@@ -206,63 +212,23 @@ func (b *BeaconState) initCaches() error {
 }
 
 func (b *BeaconState) initBeaconState() error {
-	b.publicKeyIndicies = make(map[[48]byte]uint64)
 	b._refreshActiveBalances()
-	b.initCaches()
+
+	b.publicKeyIndicies = make(map[[48]byte]uint64)
+
 	b.ForEachValidator(func(validator *cltypes.Validator, i, total int) bool {
 		b.publicKeyIndicies[validator.PublicKey] = uint64(i)
 		return true
 	})
+
+	b.initCaches()
 	if err := b._updateProposerIndex(); err != nil {
 		return err
 	}
+
 	if b.Version() >= clparams.Phase0Version {
 		return b._initializeValidatorsPhase0()
 	}
 
 	return nil
-}
-
-func (b *BeaconState) Copy() (*BeaconState, error) {
-	copied := New(b.BeaconConfig())
-
-	copied.BeaconState = raw.New(b.BeaconConfig())
-	// Fill all the fields with copies
-
-	copied.publicKeyIndicies = make(map[[48]byte]uint64)
-	for pk, index := range b.publicKeyIndicies {
-		copied.publicKeyIndicies[pk] = index
-	}
-	// Sync caches
-	if err := copied.initCaches(); err != nil {
-		return nil, err
-	}
-	for _, epoch := range b.activeValidatorsCache.Keys() {
-		val, has := b.activeValidatorsCache.Get(epoch)
-		if !has {
-			continue
-		}
-		copied.activeValidatorsCache.Add(epoch, val)
-	}
-	for _, key := range b.shuffledSetsCache.Keys() {
-		val, has := b.shuffledSetsCache.Get(key)
-		if !has {
-			continue
-		}
-		copied.shuffledSetsCache.Add(key, val)
-	}
-	for _, key := range b.committeeCache.Keys() {
-		val, has := b.committeeCache.Get(key)
-		if !has {
-			continue
-		}
-		copied.committeeCache.Add(key, val)
-	}
-	if b.totalActiveBalanceCache != nil {
-		copied.totalActiveBalanceCache = new(uint64)
-		*copied.totalActiveBalanceCache = *b.totalActiveBalanceCache
-		copied.totalActiveBalanceRootCache = b.totalActiveBalanceRootCache
-	}
-
-	return copied, nil
 }

@@ -9,7 +9,7 @@ import (
 
 func (b *BeaconState) UpgradeToAltair() error {
 	b.previousStateRoot = libcommon.Hash{}
-	epoch := b.Epoch()
+	epoch := Epoch(b.BeaconState)
 	// update version
 	fork := b.Fork()
 	fork.Epoch = epoch
@@ -27,18 +27,15 @@ func (b *BeaconState) UpgradeToAltair() error {
 		if err != nil {
 			return err
 		}
-		indicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
+		indices, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
 		if err != nil {
 			return err
 		}
-
-		pep := b.EpochParticipation(false)
-		for _, index := range indicies {
+		for _, index := range indices {
 			for _, flagIndex := range flags {
-				pep[index].Add(int(flagIndex))
+				b.AddPreviousEpochParticipationAt(int(index), flagIndex)
 			}
 		}
-		b.SetPreviousEpochParticipationFlags(pep)
 	}
 	b.ResetPreviousEpochAttestations()
 	// Process sync committees
@@ -59,7 +56,7 @@ func (b *BeaconState) UpgradeToAltair() error {
 
 func (b *BeaconState) UpgradeToBellatrix() error {
 	b.previousStateRoot = libcommon.Hash{}
-	epoch := b.Epoch()
+	epoch := Epoch(b.BeaconState)
 	// update version
 	fork := b.Fork()
 	fork.Epoch = epoch
@@ -74,7 +71,7 @@ func (b *BeaconState) UpgradeToBellatrix() error {
 
 func (b *BeaconState) UpgradeToCapella() error {
 	b.previousStateRoot = libcommon.Hash{}
-	epoch := b.Epoch()
+	epoch := Epoch(b.BeaconState)
 	// update version
 	fork := b.Fork()
 	fork.Epoch = epoch
@@ -88,6 +85,7 @@ func (b *BeaconState) UpgradeToCapella() error {
 	// Set new fields
 	b.SetNextWithdrawalIndex(0)
 	b.SetNextWithdrawalValidatorIndex(0)
+	b.ResetHistoricalSummaries()
 	// Update the state root cache
 	b.SetVersion(clparams.CapellaVersion)
 	return nil

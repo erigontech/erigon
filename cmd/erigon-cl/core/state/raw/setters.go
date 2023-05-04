@@ -189,10 +189,11 @@ func (b *BeaconState) SetValidators(validators []*cltypes.Validator) error {
 }
 
 func (b *BeaconState) AddValidator(validator *cltypes.Validator, balance uint64) {
-	b.markLeaf(ValidatorsLeafIndex)
-	b.markLeaf(BalancesLeafIndex)
 	b.validators = append(b.validators, validator)
 	b.balances = append(b.balances, balance)
+
+	b.markLeaf(ValidatorsLeafIndex)
+	b.markLeaf(BalancesLeafIndex)
 }
 
 func (b *BeaconState) SetBalances(balances []uint64) {
@@ -243,12 +244,12 @@ func (b *BeaconState) SetJustificationBits(justificationBits cltypes.Justificati
 
 func (b *BeaconState) SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint *cltypes.Checkpoint) {
 	b.previousJustifiedCheckpoint = previousJustifiedCheckpoint
-	b.markLeaf(PreviousEpochParticipationLeafIndex)
+	b.markLeaf(PreviousJustifiedCheckpointLeafIndex)
 }
 
 func (b *BeaconState) SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint *cltypes.Checkpoint) {
 	b.currentJustifiedCheckpoint = currentJustifiedCheckpoint
-	b.markLeaf(CurrentEpochParticipationLeafIndex)
+	b.markLeaf(CurrentJustifiedCheckpointLeafIndex)
 }
 
 func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint *cltypes.Checkpoint) {
@@ -333,24 +334,33 @@ func (b *BeaconState) AddPreviousEpochParticipationFlags(flags cltypes.Participa
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochParticipation = append(b.previousEpochParticipation, flags)
 }
+func (b *BeaconState) AddPreviousEpochParticipationAt(index int, delta byte) {
+	b.markLeaf(PreviousEpochParticipationLeafIndex)
+	b.previousEpochParticipation[index] = b.previousEpochParticipation[index].Add(int(delta))
+}
 
 // phase0 fields
 func (b *BeaconState) AddCurrentEpochAtteastation(attestation *cltypes.PendingAttestation) {
+	b.markLeaf(CurrentEpochParticipationLeafIndex)
 	b.currentEpochAttestations = append(b.currentEpochAttestations, attestation)
 }
 
 func (b *BeaconState) AddPreviousEpochAttestation(attestation *cltypes.PendingAttestation) {
+	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochAttestations = append(b.previousEpochAttestations, attestation)
 }
 
 func (b *BeaconState) ResetCurrentEpochAttestations() {
+	b.markLeaf(CurrentEpochParticipationLeafIndex)
 	b.currentEpochAttestations = nil
 }
 
 func (b *BeaconState) SetPreviousEpochAttestations(attestations []*cltypes.PendingAttestation) {
+	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochAttestations = attestations
 }
 
 func (b *BeaconState) ResetPreviousEpochAttestations() {
-	b.currentEpochAttestations = nil
+	b.markLeaf(PreviousEpochParticipationLeafIndex)
+	b.previousEpochAttestations = nil
 }

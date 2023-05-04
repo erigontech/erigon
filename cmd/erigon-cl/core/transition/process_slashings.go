@@ -5,21 +5,21 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
-func processSlashings(state *state.BeaconState, slashingMultiplier uint64) error {
+func processSlashings(s *state.BeaconState, slashingMultiplier uint64) error {
 	// Get the current epoch
-	epoch := state.Epoch()
+	epoch := state.Epoch(s.BeaconState)
 	// Get the total active balance
-	totalBalance := state.GetTotalActiveBalance()
+	totalBalance := s.GetTotalActiveBalance()
 	// Calculate the total slashing amount
 	// by summing all slashings and multiplying by the provided multiplier
-	slashing := state.GetTotalSlashingAmount() * slashingMultiplier
+	slashing := state.GetTotalSlashingAmount(s.BeaconState) * slashingMultiplier
 	// Adjust the total slashing amount to be no greater than the total active balance
 	if totalBalance < slashing {
 		slashing = totalBalance
 	}
-	beaconConfig := state.BeaconConfig()
+	beaconConfig := s.BeaconConfig()
 	// Apply penalties to validators who have been slashed and reached the withdrawable epoch
-	for i, validator := range state.Validators() {
+	for i, validator := range s.Validators() {
 		if !validator.Slashed || epoch+beaconConfig.EpochsPerSlashingsVector/2 != validator.WithdrawableEpoch {
 			continue
 		}
@@ -30,7 +30,7 @@ func processSlashings(state *state.BeaconState, slashingMultiplier uint64) error
 		// Calculate the penalty by dividing the penalty numerator by the total balance and multiplying by the increment
 		penalty := penaltyNumerator / totalBalance * increment
 		// Decrease the validator's balance by the calculated penalty
-		if err := state.DecreaseBalance(uint64(i), penalty); err != nil {
+		if err := state.DecreaseBalance(s.BeaconState, uint64(i), penalty); err != nil {
 			return err
 		}
 	}
