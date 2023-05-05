@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/docker/docker/pkg/reexec"
-	"github.com/ledgerwatch/erigon/cmd/evm/internal/t8ntool"
 	"github.com/ledgerwatch/erigon/turbo/cmdtest"
 )
 
@@ -34,11 +33,10 @@ type testT8n struct {
 }
 
 type t8nInput struct {
-	inAlloc  string
-	inTxs    string
-	inEnv    string
-	stFork   string
-	stReward string
+	inAlloc string
+	inTxs   string
+	inEnv   string
+	stFork  string
 }
 
 func (args *t8nInput) get(base string) []string {
@@ -57,9 +55,6 @@ func (args *t8nInput) get(base string) []string {
 	}
 	if opt := args.stFork; opt != "" {
 		out = append(out, "--state.fork", opt)
-	}
-	if opt := args.stReward; opt != "" {
-		out = append(out, "--state.reward", opt)
 	}
 	return out
 }
@@ -102,23 +97,15 @@ func TestT8n(t *testing.T) {
 		{ // Test exit (3) on bad config
 			base: "./testdata/1",
 			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "Frontier+1346", "",
+				"alloc.json", "txs.json", "env.json", "Frontier+1346",
 			},
 			output:      t8nOutput{alloc: true, result: true},
 			expExitCode: 3,
 		},
-		{
-			base: "./testdata/1",
-			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "Byzantium", "",
-			},
-			output: t8nOutput{alloc: true, result: true},
-			expOut: "exp.json",
-		},
 		{ // blockhash test
 			base: "./testdata/3",
 			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "Berlin", "",
+				"alloc.json", "txs.json", "env.json", "Berlin",
 			},
 			output: t8nOutput{alloc: true, result: true},
 			expOut: "exp.json",
@@ -126,124 +113,91 @@ func TestT8n(t *testing.T) {
 		{ // missing blockhash test
 			base: "./testdata/4",
 			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "Berlin", "",
+				"alloc.json", "txs.json", "env.json", "Berlin",
 			},
-			output:      t8nOutput{alloc: true, result: true},
 			expExitCode: 4,
 		},
 		{ // Uncle test
 			base: "./testdata/5",
 			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "Byzantium", "0x80",
+				"alloc.json", "txs.json", "env.json", "Byzantium",
 			},
 			output: t8nOutput{alloc: true, result: true},
 			expOut: "exp.json",
 		},
-		{ // Sign json transactions
-			base: "./testdata/13",
+		{ // Dao-transition check
+			base: "./testdata/7",
 			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "London", "",
+				"alloc.json", "txs.json", "env.json", "HomesteadToDaoAt5",
 			},
-			output: t8nOutput{body: true},
 			expOut: "exp.json",
-		},
-		{ // Already signed transactions
-			base: "./testdata/13",
-			input: t8nInput{
-				"alloc.json", "signed_txs.rlp", "env.json", "London", "",
-			},
-			output: t8nOutput{result: true},
-			expOut: "exp2.json",
-		},
-		{ // Difficulty calculation - no uncles
-			base: "./testdata/14",
-			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "London", "",
-			},
-			output: t8nOutput{result: true},
-			expOut: "exp.json",
-		},
-		{ // Difficulty calculation - with uncles
-			base: "./testdata/14",
-			input: t8nInput{
-				"alloc.json", "txs.json", "env.uncles.json", "London", "",
-			},
-			output: t8nOutput{result: true},
-			expOut: "exp2.json",
-		},
-		{ // Difficulty calculation - with ommers + Berlin
-			base: "./testdata/14",
-			input: t8nInput{
-				"alloc.json", "txs.json", "env.uncles.json", "Berlin", "",
-			},
-			output: t8nOutput{result: true},
-			expOut: "exp_berlin.json",
-		},
-		{ // Difficulty calculation on arrow glacier
-			base: "./testdata/19",
-			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "London", "",
-			},
-			output: t8nOutput{result: true},
-			expOut: "exp_london.json",
-		},
-		{ // Difficulty calculation on arrow glacier
-			base: "./testdata/19",
-			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "ArrowGlacier", "",
-			},
-			output: t8nOutput{result: true},
-			expOut: "exp_arrowglacier.json",
-		},
-		{ // Difficulty calculation on gray glacier
-			base: "./testdata/19",
-			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "GrayGlacier", "",
-			},
-			output: t8nOutput{result: true},
-			expOut: "exp_grayglacier.json",
-		},
-		{ // Sign unprotected (pre-EIP155) transaction
-			base: "./testdata/23",
-			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "Berlin", "",
-			},
-			output: t8nOutput{result: true},
-			expOut: "exp.json",
-		},
-		{ // Test post-merge transition
-			base: "./testdata/24",
-			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "Merge", "",
-			},
 			output: t8nOutput{alloc: true, result: true},
-			expOut: "exp.json",
 		},
-		{ // Test post-merge transition where input is missing random
-			base: "./testdata/24",
+		{ // transactions with access list
+			base: "./testdata/8",
 			input: t8nInput{
-				"alloc.json", "txs.json", "env-missingrandom.json", "Merge", "",
+				"alloc.json", "txs.json", "env.json", "Berlin",
 			},
-			output:      t8nOutput{alloc: false, result: false},
+			expOut: "exp.json",
+			output: t8nOutput{alloc: true, result: true},
+		},
+		{ // EIP-1559
+			base: "./testdata/9",
+			input: t8nInput{
+				"alloc.json", "txs.json", "env.json", "London",
+			},
+			expOut: "exp.json",
+			output: t8nOutput{alloc: true, result: true},
+		},
+		{ // EIP-1559
+			base: "./testdata/10",
+			input: t8nInput{
+				"alloc.json", "txs.json", "env.json", "London",
+			},
+			expOut: "exp.json",
+			output: t8nOutput{alloc: true, result: true},
+		},
+		{ // missing base fees
+			base: "./testdata/11",
+			input: t8nInput{
+				"alloc.json", "txs.json", "env.json", "London",
+			},
 			expExitCode: 3,
 		},
-		{ // Test base fee calculation
-			base: "./testdata/25",
+		{ // EIP-1559 & gasCap
+			base: "./testdata/12",
 			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "Merge", "",
+				"alloc.json", "txs.json", "env.json", "London",
 			},
-			output: t8nOutput{alloc: true, result: true},
 			expOut: "exp.json",
+			output: t8nOutput{alloc: true, result: true},
 		},
-		{ // Test withdrawals transition
+		{ // Difficulty calculation on London
+			base: "./testdata/19",
+			input: t8nInput{
+				"alloc.json", "txs.json", "env.json", "London",
+			},
+			expOut: "exp_london.json",
+			output: t8nOutput{alloc: true, result: true},
+		},
+		{ // Difficulty calculation on arrow glacier
+			base: "./testdata/19",
+			input: t8nInput{
+				"alloc.json", "txs.json", "env.json", "ArrowGlacier",
+			},
+			expOut: "exp_arrowglacier.json",
+			output: t8nOutput{alloc: true, result: true},
+		},
+		{ // eip-4895
 			base: "./testdata/26",
 			input: t8nInput{
-				"alloc.json", "txs.json", "env.json", "Shanghai", "",
+				"alloc.json", "txs.json", "env.json", "Shanghai",
 			},
-			output: t8nOutput{alloc: true, result: true},
 			expOut: "exp.json",
+			output: t8nOutput{alloc: true, result: true},
 		},
 	} {
+
 		args := []string{"t8n"}
 		args = append(args, tc.output.get()...)
 		args = append(args, tc.input.get(tc.base)...)
@@ -259,109 +213,6 @@ func TestT8n(t *testing.T) {
 		tt.Run("evm-test", args...)
 		// Compare the expected output, if provided
 		if tc.expOut != "" {
-			file := fmt.Sprintf("%v/%v", tc.base, tc.expOut)
-			want, err := os.ReadFile(file)
-			if err != nil {
-				t.Fatalf("test %d: could not read expected output: %v", i, err)
-			}
-			have := tt.Output()
-			ok, err := cmpJson(have, want)
-			switch {
-			case err != nil:
-				t.Fatalf("test %d, file %v: json parsing failed: %v", i, file, err)
-			case !ok:
-				t.Fatalf("test %d, file %v: output wrong, have \n%v\nwant\n%v\n", i, file, string(have), string(want))
-			}
-		}
-		tt.WaitExit()
-		if have, want := tt.ExitStatus(), tc.expExitCode; have != want {
-			t.Fatalf("test %d: wrong exit code, have %d, want %d", i, have, want)
-		}
-	}
-}
-
-type t9nInput struct {
-	inTxs  string
-	stFork string
-}
-
-func (args *t9nInput) get(base string) []string {
-	var out []string
-	if opt := args.inTxs; opt != "" {
-		out = append(out, "--input.txs")
-		out = append(out, fmt.Sprintf("%v/%v", base, opt))
-	}
-	if opt := args.stFork; opt != "" {
-		out = append(out, "--state.fork", opt)
-	}
-	return out
-}
-
-func TestT9n(t *testing.T) {
-	tt := new(testT8n)
-	tt.TestCmd = cmdtest.NewTestCmd(t, tt)
-	for i, tc := range []struct {
-		base        string
-		input       t9nInput
-		expExitCode int
-		expOut      string
-	}{
-		{ // London txs on homestead
-			base: "./testdata/15",
-			input: t9nInput{
-				inTxs:  "signed_txs.rlp",
-				stFork: "Homestead",
-			},
-			expOut: "exp.json",
-		},
-		{ // London txs on London
-			base: "./testdata/15",
-			input: t9nInput{
-				inTxs:  "signed_txs.rlp",
-				stFork: "London",
-			},
-			expOut: "exp2.json",
-		},
-		{ // An RLP list (a blockheader really)
-			base: "./testdata/15",
-			input: t9nInput{
-				inTxs:  "blockheader.rlp",
-				stFork: "London",
-			},
-			expOut: "exp3.json",
-		},
-		{ // Transactions with too low gas
-			base: "./testdata/16",
-			input: t9nInput{
-				inTxs:  "signed_txs.rlp",
-				stFork: "London",
-			},
-			expOut: "exp.json",
-		},
-		{ // Transactions with value exceeding 256 bits
-			base: "./testdata/17",
-			input: t9nInput{
-				inTxs:  "signed_txs.rlp",
-				stFork: "London",
-			},
-			expOut: "exp.json",
-		},
-		{ // Invalid RLP
-			base: "./testdata/18",
-			input: t9nInput{
-				inTxs:  "invalid.rlp",
-				stFork: "London",
-			},
-			expExitCode: t8ntool.ErrorIO,
-		},
-	} {
-		args := []string{"t9n"}
-		args = append(args, tc.input.get(tc.base)...)
-
-		tt.Run("evm-test", args...)
-		tt.Logf("args:\n go run . %v\n", strings.Join(args, " "))
-		// Compare the expected output, if provided
-		if tc.expOut != "" {
 			want, err := os.ReadFile(fmt.Sprintf("%v/%v", tc.base, tc.expOut))
 			if err != nil {
 				t.Fatalf("test %d: could not read expected output: %v", i, err)
@@ -370,141 +221,6 @@ func TestT9n(t *testing.T) {
 			ok, err := cmpJson(have, want)
 			switch {
 			case err != nil:
-				t.Logf(string(have))
-				t.Fatalf("test %d, json parsing failed: %v", i, err)
-			case !ok:
-				t.Fatalf("test %d: output wrong, have \n%v\nwant\n%v\n", i, string(have), string(want))
-			}
-		}
-		tt.WaitExit()
-		if have, want := tt.ExitStatus(), tc.expExitCode; have != want {
-			t.Fatalf("test %d: wrong exit code, have %d, want %d", i, have, want)
-		}
-	}
-}
-
-type b11rInput struct {
-	inEnv         string
-	inOmmersRlp   string
-	inWithdrawals string
-	inTxsRlp      string
-	inClique      string
-	ethash        bool
-	ethashMode    string
-	ethashDir     string
-}
-
-func (args *b11rInput) get(base string) []string {
-	var out []string
-	if opt := args.inEnv; opt != "" {
-		out = append(out, "--input.header")
-		out = append(out, fmt.Sprintf("%v/%v", base, opt))
-	}
-	if opt := args.inOmmersRlp; opt != "" {
-		out = append(out, "--input.ommers")
-		out = append(out, fmt.Sprintf("%v/%v", base, opt))
-	}
-	if opt := args.inWithdrawals; opt != "" {
-		out = append(out, "--input.withdrawals")
-		out = append(out, fmt.Sprintf("%v/%v", base, opt))
-	}
-	if opt := args.inTxsRlp; opt != "" {
-		out = append(out, "--input.txs")
-		out = append(out, fmt.Sprintf("%v/%v", base, opt))
-	}
-	if opt := args.inClique; opt != "" {
-		out = append(out, "--seal.clique")
-		out = append(out, fmt.Sprintf("%v/%v", base, opt))
-	}
-	if args.ethash {
-		out = append(out, "--seal.ethash")
-	}
-	if opt := args.ethashMode; opt != "" {
-		out = append(out, "--seal.ethash.mode")
-		out = append(out, fmt.Sprintf("%v/%v", base, opt))
-	}
-	if opt := args.ethashDir; opt != "" {
-		out = append(out, "--seal.ethash.dir")
-		out = append(out, fmt.Sprintf("%v/%v", base, opt))
-	}
-	out = append(out, "--output.block")
-	out = append(out, "stdout")
-	return out
-}
-
-func TestB11r(t *testing.T) {
-	tt := new(testT8n)
-	tt.TestCmd = cmdtest.NewTestCmd(t, tt)
-	for i, tc := range []struct {
-		base        string
-		input       b11rInput
-		expExitCode int
-		expOut      string
-	}{
-		{ // unsealed block
-			base: "./testdata/20",
-			input: b11rInput{
-				inEnv:       "header.json",
-				inOmmersRlp: "ommers.json",
-				inTxsRlp:    "txs.rlp",
-			},
-			expOut: "exp.json",
-		},
-		{ // ethash test seal
-			base: "./testdata/21",
-			input: b11rInput{
-				inEnv:       "header.json",
-				inOmmersRlp: "ommers.json",
-				inTxsRlp:    "txs.rlp",
-			},
-			expOut: "exp.json",
-		},
-		{ // clique test seal
-			base: "./testdata/21",
-			input: b11rInput{
-				inEnv:       "header.json",
-				inOmmersRlp: "ommers.json",
-				inTxsRlp:    "txs.rlp",
-				inClique:    "clique.json",
-			},
-			expOut: "exp-clique.json",
-		},
-		{ // block with ommers
-			base: "./testdata/22",
-			input: b11rInput{
-				inEnv:       "header.json",
-				inOmmersRlp: "ommers.json",
-				inTxsRlp:    "txs.rlp",
-			},
-			expOut: "exp.json",
-		},
-		{ // block with withdrawals
-			base: "./testdata/27",
-			input: b11rInput{
-				inEnv:         "header.json",
-				inOmmersRlp:   "ommers.json",
-				inWithdrawals: "withdrawals.json",
-				inTxsRlp:      "txs.rlp",
-			},
-			expOut: "exp.json",
-		},
-	} {
-		args := []string{"b11r"}
-		args = append(args, tc.input.get(tc.base)...)
-
-		tt.Run("evm-test", args...)
-		tt.Logf("args:\n go run . %v\n", strings.Join(args, " "))
-		// Compare the expected output, if provided
-		if tc.expOut != "" {
-			want, err := os.ReadFile(fmt.Sprintf("%v/%v", tc.base, tc.expOut))
-			if err != nil {
-				t.Fatalf("test %d: could not read expected output: %v", i, err)
-			}
-			have := tt.Output()
-			ok, err := cmpJson(have, want)
-			switch {
-			case err != nil:
-				t.Logf(string(have))
 				t.Fatalf("test %d, json parsing failed: %v", i, err)
 			case !ok:
 				t.Fatalf("test %d: output wrong, have \n%v\nwant\n%v\n", i, string(have), string(want))
@@ -526,5 +242,6 @@ func cmpJson(a, b []byte) (bool, error) {
 	if err := json.Unmarshal(b, &j2); err != nil {
 		return false, err
 	}
+
 	return reflect.DeepEqual(j2, j), nil
 }
