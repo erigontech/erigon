@@ -556,7 +556,7 @@ func (n *handshakeTestNode) encodeWithChallenge(tb testing.TB, to handshakeTestN
 	if err != nil {
 		tb.Fatal(fmt.Errorf("(%s) %w", n.ln.ID().TerminalString(), err))
 	}
-	tb.Logf("(%s) -> (%s)   %s\n%s", n.ln.ID().TerminalString(), to.id().TerminalString(), p.Name(), hex.Dump(enc))
+	//tb.Logf("(%s) -> (%s)   %s\n%s", n.ln.ID().TerminalString(), to.id().TerminalString(), p.Name(), hex.Dump(enc))
 	return enc, nonce
 }
 
@@ -567,7 +567,7 @@ func (n *handshakeTestNode) expectDecode(t *testing.T, ptype byte, p []byte) Pac
 	if err != nil {
 		t.Fatal(fmt.Errorf("(%s) %w", n.ln.ID().TerminalString(), err))
 	}
-	t.Logf("(%s) %#v", n.ln.ID().TerminalString(), pp.NewFormatter(dec))
+	//t.Logf("(%s) %#v", n.ln.ID().TerminalString(), pp.NewFormatter(dec))
 	if dec.Kind() != ptype {
 		t.Fatalf("expected packet type %d, got %d", ptype, dec.Kind())
 	}

@@ -26,10 +26,7 @@ func (f *Deltas) EncodeSSZ(dst []byte) ([]byte, error) {
 	return nil, nil
 }
 
-func (d *Deltas) DecodeSSZWithVersion(buf []byte, version int) error {
-	return d.DecodeSSZ(buf)
-}
-func (d *Deltas) DecodeSSZ(buf []byte) error {
+func (d *Deltas) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < d.EncodingSizeSSZ() {
 		return ssz.ErrLowBufferSize
 	}

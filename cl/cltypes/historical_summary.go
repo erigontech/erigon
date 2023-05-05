@@ -16,17 +16,13 @@ func (h *HistoricalSummary) EncodeSSZ(buf []byte) ([]byte, error) {
 	return append(buf, append(h.BlockSummaryRoot[:], h.StateSummaryRoot[:]...)...), nil
 }
 
-func (h *HistoricalSummary) DecodeSSZ(buf []byte) error {
+func (h *HistoricalSummary) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < h.EncodingSizeSSZ() {
 		return ssz.ErrLowBufferSize
 	}
 	copy(h.BlockSummaryRoot[:], buf)
 	copy(h.StateSummaryRoot[:], buf[length.Hash:])
 	return nil
-}
-
-func (h *HistoricalSummary) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return h.DecodeSSZ(buf)
 }
 
 func (h *HistoricalSummary) HashSSZ() ([32]byte, error) {

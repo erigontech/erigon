@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestBlobSideCar_EncodeDecodeSSZ(t *testing.T) {
-	blockRoot := cltypes.Root{1, 2, 3}
+	blockRoot := libcommon.Hash{1, 2, 3}
 	index := uint64(123)
 	slot := cltypes.Slot(456)
-	blockParentRoot := cltypes.Root{4, 5, 6}
+	blockParentRoot := libcommon.Hash{4, 5, 6}
 	proposerIndex := uint64(789)
 	blob := cltypes.Blob{}
 	kzgCommitment := cltypes.KZGCommitment{7, 8, 9}
@@ -70,10 +71,10 @@ func TestSignedBlobSideCar(t *testing.T) {
 	// Create a BlobSideCar to use as the message for SignedBlobSideCar
 	blob := cltypes.Blob{1, 2, 3, 4, 5, 6, 7, 8}
 	blobSideCar := cltypes.BlobSideCar{
-		BlockRoot:       cltypes.Root{1},
+		BlockRoot:       libcommon.Hash{1},
 		Index:           2,
 		Slot:            3,
-		BlockParentRoot: cltypes.Root{4},
+		BlockParentRoot: libcommon.Hash{4},
 		ProposerIndex:   5,
 		Blob:            blob,
 		KZGCommitment:   cltypes.KZGCommitment{6},
@@ -109,7 +110,7 @@ func TestSignedBlobSideCar(t *testing.T) {
 }
 
 func TestBlobIdentifier_EncodeDecodeSSZ(t *testing.T) {
-	blockRoot := cltypes.Root{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
+	blockRoot := libcommon.Hash{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
 	index := uint64(123456)
 
 	blobID := &cltypes.BlobIdentifier{

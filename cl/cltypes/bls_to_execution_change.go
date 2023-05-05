@@ -33,7 +33,7 @@ func (b *BLSToExecutionChange) HashSSZ() ([32]byte, error) {
 	return merkle_tree.ArraysRoot(leaves, 4)
 }
 
-func (b *BLSToExecutionChange) DecodeSSZ(buf []byte) error {
+func (b *BLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
 		return ssz.ErrLowBufferSize
 	}
@@ -41,10 +41,6 @@ func (b *BLSToExecutionChange) DecodeSSZ(buf []byte) error {
 	copy(b.From[:], buf[8:])
 	copy(b.To[:], buf[56:])
 	return nil
-}
-
-func (b *BLSToExecutionChange) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return b.DecodeSSZ(buf)
 }
 
 func (*BLSToExecutionChange) EncodingSizeSSZ() int {
@@ -66,20 +62,16 @@ func (s *SignedBLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {
 	return dst, nil
 }
 
-func (s *SignedBLSToExecutionChange) DecodeSSZ(buf []byte) error {
+func (s *SignedBLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < s.EncodingSizeSSZ() {
 		return ssz.ErrLowBufferSize
 	}
 	s.Message = new(BLSToExecutionChange)
-	if err := s.Message.DecodeSSZ(buf); err != nil {
+	if err := s.Message.DecodeSSZ(buf, version); err != nil {
 		return err
 	}
 	copy(s.Signature[:], buf[s.Message.EncodingSizeSSZ():])
 	return nil
-}
-
-func (s *SignedBLSToExecutionChange) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return s.DecodeSSZ(buf)
 }
 
 func (s *SignedBLSToExecutionChange) HashSSZ() ([32]byte, error) {

@@ -133,8 +133,8 @@ func (h *Eth1Header) decodeHeaderMetadataForSSZ(buf []byte) (pos int, extraDataO
 	return
 }
 
-// DecodeSSZWithVersion decodes given SSZ slice.
-func (h *Eth1Header) DecodeSSZWithVersion(buf []byte, version int) error {
+// DecodeSSZ decodes given SSZ slice.
+func (h *Eth1Header) DecodeSSZ(buf []byte, version int) error {
 	h.version = clparams.StateVersion(version)
 	if len(buf) < h.EncodingSizeSSZ() {
 		return ssz.ErrLowBufferSize
