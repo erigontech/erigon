@@ -87,7 +87,10 @@ var Flags = []cli.Flag{
 	&cpuprofileFlag, &traceFlag,
 }
 
-func SetupCobra(cmd *cobra.Command) error {
+// SetupCobra sets up logging, profiling and tracing for cobra commands
+// if setupLogging is set to false, logging is not set up, this is
+// done in RPC daemon to avoid setting up logging twice
+func SetupCobra(cmd *cobra.Command, setupLogging bool) (log.Logger, error) {
 	// ensure we've read in config file details before setting up metrics etc.
 	if err := SetCobraFlagsFromConfigFile(cmd); err != nil {
 		log.Warn("failed setting config flags from yaml/toml file", "err", err)
@@ -95,54 +98,57 @@ func SetupCobra(cmd *cobra.Command) error {
 	RaiseFdLimit()
 	flags := cmd.Flags()
 
-	logging.SetupLoggerCmd("erigon", cmd)
+	var logger log.Logger
+	if setupLogging {
+		logger = logging.SetupLoggerCmd("erigon", cmd)
+	}
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	cpuFile, err := flags.GetString(cpuprofileFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 
 	// profiling, tracing
 	if traceFile != "" {
 		if err2 := Handler.StartGoTrace(traceFile); err2 != nil {
-			return err2
+			return logger, err2
 		}
 	}
 	if cpuFile != "" {
 		if err2 := Handler.StartCPUProfile(cpuFile); err2 != nil {
-			return err2
+			return logger, err2
 		}
 	}
 
 	go ListenSignals(nil)
 	pprof, err := flags.GetBool(pprofFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	pprofAddr, err := flags.GetString(pprofAddrFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	pprofPort, err := flags.GetInt(pprofPortFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 
 	metricsEnabled, err := flags.GetBool(metricsEnabledFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	metricsAddr, err := flags.GetString(metricsAddrFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	metricsPort, err := flags.GetInt(metricsPortFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 
 	if metricsEnabled && metricsAddr != "" {
@@ -155,7 +161,7 @@ func SetupCobra(cmd *cobra.Command) error {
 		// metrics and pprof server
 		StartPProf(fmt.Sprintf("%s:%d", pprofAddr, pprofPort), withMetrics)
 	}
-	return nil
+	return logger, nil
 }
 
 // Setup initializes profiling and logging based on the CLI flags.

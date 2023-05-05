@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
@@ -51,7 +52,12 @@ var history22Cmd = &cobra.Command{
 	Use:   "history22",
 	Short: "Exerimental command to re-execute historical transactions in erigon2 format",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := log.New()
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+			logger.Error("Setting up", "error", err)
+			return err
+		}
 		return History22(genesis, logger)
 	},
 }
@@ -159,7 +165,7 @@ func History22(genesis *types.Genesis, logger log.Logger) error {
 			speed := float64(blockNum-prevBlock) / (float64(interval) / float64(time.Second))
 			prevBlock = blockNum
 			prevTime = currentTime
-			log.Info("Progress", "block", blockNum, "blk/s", speed)
+			logger.Info("Progress", "block", blockNum, "blk/s", speed)
 		}
 		blockNum++
 		if blockNum > uint64(blockTo) {
@@ -174,7 +180,7 @@ func History22(genesis *types.Genesis, logger log.Logger) error {
 			return err
 		}
 		if b == nil {
-			log.Info("history: block is nil", "block", blockNum)
+			logger.Info("history: block is nil", "block", blockNum)
 			break
 		}
 		if blockNum <= block {
@@ -200,7 +206,7 @@ func History22(genesis *types.Genesis, logger log.Logger) error {
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
+			logger.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
 		default:
 		}
 		// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
@@ -211,7 +217,7 @@ func History22(genesis *types.Genesis, logger log.Logger) error {
 				return fmt.Errorf("retrieving spaceDirty: %w", err)
 			}
 			if spaceDirty >= dirtySpaceThreshold {
-				log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+				logger.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
 				commit = true
 			}
 		}

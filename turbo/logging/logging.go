@@ -57,10 +57,11 @@ func SetupLoggerCtx(filePrefix string, ctx *cli.Context, rootHandler bool) log.L
 }
 
 // SetupLoggerCmd perform the logging for a cobra command, and sets it to the root logger
-// This is the function which is NOT used by Erigon itself, but instead by some cobra-based commands
+// This is the function which is NOT used by Erigon itself, but instead by some cobra-based commands,
+// for example, rpcdaemon or integration.
 // Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
 // and it would make sense to choose one over another
-func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) {
+func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 
 	logJsonVal, ljerr := cmd.Flags().GetBool(LogJsonFlag.Name)
 	if ljerr != nil {
@@ -100,6 +101,7 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) {
 		}
 	}
 	initSeparatedLogging(log.Root(), filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
+	return log.Root()
 }
 
 // SetupLoggerCmd perform the logging using parametrs specifying by `flag` package, and sets it to the root logger
