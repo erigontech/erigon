@@ -44,9 +44,6 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 	app.Flags = append(cliFlags, debug.Flags...) // debug flags are required
 	app.Flags = append(app.Flags, utils.MetricFlags...)
 	app.Flags = append(app.Flags, logging.Flags...)
-	app.Before = func(ctx *cli.Context) error {
-		return debug.Setup(ctx)
-	}
 	app.After = func(ctx *cli.Context) error {
 		debug.Exit()
 		return nil
