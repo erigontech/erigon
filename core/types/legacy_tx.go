@@ -57,6 +57,10 @@ func (ct CommonTx) GetTo() *libcommon.Address {
 	return ct.To
 }
 
+func (ct CommonTx) GetDataGas() uint64 {
+	return 0
+}
+
 func (ct CommonTx) GetGas() uint64 {
 	return ct.Gas
 }
@@ -132,6 +136,10 @@ func (tx LegacyTx) GetAccessList() types2.AccessList {
 
 func (tx LegacyTx) Protected() bool {
 	return isProtectedV(&tx.V)
+}
+
+func (tx *LegacyTx) Unwrap() Transaction {
+	return tx
 }
 
 // NewTransaction creates an unsigned legacy transaction.

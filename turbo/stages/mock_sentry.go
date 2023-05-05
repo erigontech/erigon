@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -22,7 +21,6 @@ import (
 	ptypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -33,12 +31,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-
-	"github.com/ledgerwatch/erigon/core/state/historyv2read"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -46,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -228,43 +222,15 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	var err error
 
 	cfg := ethconfig.Defaults
-	cfg.HistoryV3 = ethconfig.EnableHistoryV3InTest
 	cfg.StateStream = true
 	cfg.BatchSize = 1 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
 	cfg.DeprecatedTxPool.Disable = !withTxPool
 	cfg.DeprecatedTxPool.StartOnInit = true
 
-	var db kv.RwDB
-	if tb != nil {
-		db = memdb.NewTestDB(tb)
-	} else {
-		db = memdb.New(tmpdir)
-	}
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	_ = db.Update(ctx, func(tx kv.RwTx) error {
-		_, _ = kvcfg.HistoryV3.WriteOnce(tx, cfg.HistoryV3)
-		return nil
-	})
-
-	var agg *libstate.AggregatorV3
-	if cfg.HistoryV3 {
-		dir.MustExist(dirs.SnapHistory)
-		agg, err = libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
-		if err != nil {
-			panic(err)
-		}
-		if err := agg.OpenFolder(); err != nil {
-			panic(err)
-		}
-	}
-
-	if cfg.HistoryV3 {
-		db, err = temporal.New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[gspec.Config.ChainName])
-		if err != nil {
-			panic(err)
-		}
-	}
+	histV3, db, agg := temporal.NewTestDB(tb, ctx, dirs, gspec)
+	cfg.HistoryV3 = histV3
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil)
 	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap)
@@ -766,14 +732,24 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.Tx) state.Sta
 }
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement me")
+	}
 	return state.NewPlainStateReader(tx)
 }
 
 func (ms *MockSentry) NewStateWriter(tx kv.RwTx, blockNum uint64) state.StateWriter {
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement me")
+	}
 	return state.NewPlainStateWriter(tx, tx, blockNum)
 }
 
 func (ms *MockSentry) CalcStateRoot(tx kv.Tx) libcommon.Hash {
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement me")
+	}
+
 	h, err := trie.CalcRoot("test", tx)
 	if err != nil {
 		panic(err)

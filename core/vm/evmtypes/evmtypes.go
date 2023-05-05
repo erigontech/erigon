@@ -4,6 +4,8 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
@@ -77,6 +79,9 @@ type IntraBlockState interface {
 	GetState(address libcommon.Address, slot *libcommon.Hash, outValue *uint256.Int)
 	SetState(libcommon.Address, *libcommon.Hash, uint256.Int)
 
+	GetTransientState(addr libcommon.Address, key libcommon.Hash) uint256.Int
+	SetTransientState(addr libcommon.Address, key libcommon.Hash, value uint256.Int)
+
 	Selfdestruct(libcommon.Address) bool
 	HasSelfdestructed(libcommon.Address) bool
 
@@ -87,7 +92,9 @@ type IntraBlockState interface {
 	// is defined according to EIP161 (balance = nonce = code = 0).
 	Empty(libcommon.Address) bool
 
-	PrepareAccessList(sender libcommon.Address, dest *libcommon.Address, precompiles []libcommon.Address, txAccesses types2.AccessList)
+	Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dest *libcommon.Address,
+		precompiles []libcommon.Address, txAccesses types2.AccessList)
+
 	AddressInAccessList(addr libcommon.Address) bool
 	SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressOk bool, slotOk bool)
 	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform

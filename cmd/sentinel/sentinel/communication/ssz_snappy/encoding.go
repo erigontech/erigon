@@ -19,6 +19,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
@@ -27,6 +28,12 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/fork"
 )
+
+var writerPool = sync.Pool{
+	New: func() any {
+		return snappy.NewBufferedWriter(nil)
+	},
+}
 
 func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	// create prefix for length of packet
@@ -39,8 +46,12 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	wr.Write(prefix)
 	wr.Write(lengthBuf[:vin])
 	// start using streamed snappy compression
-	sw := snappy.NewBufferedWriter(wr)
-	defer sw.Flush()
+	sw, _ := writerPool.Get().(*snappy.Writer)
+	sw.Reset(wr)
+	defer func() {
+		sw.Flush()
+		writerPool.Put(sw)
+	}()
 	// Marshall and snap it
 	enc := make([]byte, 0, val.EncodingSizeSSZ())
 	var err error

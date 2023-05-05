@@ -971,9 +971,9 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		evm.Cancel()
 	}()
 
-	gp := new(core.GasPool).AddGas(msg.Gas())
+	gp := new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas())
 	var execResult *core.ExecutionResult
-	ibs.Prepare(libcommon.Hash{}, libcommon.Hash{}, 0)
+	ibs.SetTxContext(libcommon.Hash{}, libcommon.Hash{}, 0)
 	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 	if err != nil {
 		return nil, err
@@ -1187,7 +1187,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
-		gp := new(core.GasPool).AddGas(msg.Gas())
+		gp := new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas())
 		var execResult *core.ExecutionResult
 		// Clone the state cache before applying the changes, clone is discarded
 		var cloneReader state.StateReader
@@ -1196,9 +1196,9 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
 		}
 		if args.txHash != nil {
-			ibs.Prepare(*args.txHash, header.Hash(), txIndex)
+			ibs.SetTxContext(*args.txHash, header.Hash(), txIndex)
 		} else {
-			ibs.Prepare(libcommon.Hash{}, header.Hash(), txIndex)
+			ibs.SetTxContext(libcommon.Hash{}, header.Hash(), txIndex)
 		}
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
 		if err != nil {

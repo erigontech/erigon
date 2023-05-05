@@ -378,7 +378,7 @@ func (e *EngineImpl) GetPayloadV2(ctx context.Context, payloadID hexutility.Byte
 }
 
 func (e *EngineImpl) GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*GetPayloadV3Response, error) {
-	if e.internalCL { // TODO: find out what is the way around it
+	if e.internalCL {
 		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
 		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
 	}
@@ -496,8 +496,10 @@ var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV2",
 	"engine_newPayloadV1",
 	"engine_newPayloadV2",
+	// "engine_newPayloadV3",
 	"engine_getPayloadV1",
 	"engine_getPayloadV2",
+	// "engine_getPayloadV3",
 	"engine_exchangeTransitionConfigurationV1",
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByRangeV1",

@@ -198,6 +198,7 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
 		diagnostics.SetupLogsAccess(ctx)
 		diagnostics.SetupDbAccess(ctx)
 		diagnostics.SetupCmdLineAccess()
+		diagnostics.SetupFlagsAccess(ctx)
 		diagnostics.SetupVersionAccess()
 		diagnostics.SetupBlockBodyDownload()
 	}

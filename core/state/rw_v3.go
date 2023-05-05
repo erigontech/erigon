@@ -528,7 +528,6 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 				}
 				currentInc = acc.Incarnation
 				// Fetch the code hash
-				recoverCodeHashPlain(&acc, tx, k)
 				var address common.Address
 				copy(address[:], k)
 

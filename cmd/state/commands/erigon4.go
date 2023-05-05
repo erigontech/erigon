@@ -387,7 +387,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *StateR
 
 	header := block.Header()
 	vmConfig.Debug = true
-	gp := new(core.GasPool).AddGas(block.GasLimit())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 	usedGas := new(uint64)
 	var receipts types.Receipts
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
@@ -420,7 +420,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *StateR
 	for i, tx := range block.Transactions() {
 		if txNum >= startTxNum {
 			ibs := state.New(rw)
-			ibs.Prepare(tx.Hash(), block.Hash(), i)
+			ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			vmConfig.Tracer = ct
 			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, excessDataGas)

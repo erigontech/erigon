@@ -96,7 +96,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 				utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == block.Block.Slot
 			if err := cfg.forkChoice.OnBlock(block, false, true); err != nil {
 				log.Warn("Could not download block", "reason", err)
-				return highestSlotProcessed, libcommon.Hash{}, nil
+				return highestSlotProcessed, libcommon.Hash{}, err
 			}
 			if sendForckchoice {
 				// Import the head
@@ -109,7 +109,10 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 				dbg.ReadMemStats(&m)
 				log.Debug("New block imported",
 					"slot", block.Block.Slot, "head", headSlot, "headRoot", headRoot,
-					"alloc", libcommon.ByteCount(m.Alloc))
+					"alloc", libcommon.ByteCount(m.Alloc),
+					"sys", libcommon.ByteCount(m.Sys),
+					"numGC", m.NumGC,
+				)
 
 				// Do forkchoice if possible
 				if cfg.forkChoice.Engine() != nil {
@@ -128,8 +131,8 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 		// Checks done, update all internals accordingly
 		return highestSlotProcessed, libcommon.Hash{}, nil
 	})
-	maxBlockBehindBeforeDownload := int64(5)
-	overtimeMargin := uint64(2) // how much time has passed before trying download the next block in seconds
+	maxBlockBehindBeforeDownload := int64(32)
+	overtimeMargin := uint64(6) // how much time has passed before trying download the next block in seconds
 MainLoop:
 	for {
 		targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
@@ -158,14 +161,7 @@ MainLoop:
 		log.Debug("Caplin may have missed some slots, started downloading chain")
 		// Process blocks until we reach our target
 		for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
-			if err := cfg.downloader.ProcessBlocks(); err != nil {
-				log.Warn("Could not download block in processing", "reason", err)
-			}
 			cfg.downloader.RequestMore()
-
-			if err := cfg.downloader.ProcessBlocks(); err != nil {
-				log.Warn("Could not download block in processing", "reason", err)
-			}
 			peersCount, err = cfg.downloader.Peers()
 			if err != nil {
 				break

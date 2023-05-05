@@ -158,6 +158,16 @@ func newTestAction(addr libcommon.Address, r *rand.Rand) testAction {
 			},
 			args: make([]int64, 1),
 		},
+		{
+			name: "SetTransientState",
+			fn: func(a testAction, s *IntraBlockState) {
+				var key libcommon.Hash
+				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
+				val := uint256.NewInt(uint64(a.args[1]))
+				s.SetTransientState(addr, key, *val)
+			},
+			args: make([]int64, 2),
+		},
 	}
 	action := actions[r.Intn(len(actions))]
 	var nameargs []string //nolint:prealloc
@@ -311,4 +321,28 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			state.GetLogs(libcommon.Hash{}), checkstate.GetLogs(libcommon.Hash{}))
 	}
 	return nil
+}
+
+func TestTransientStorage(t *testing.T) {
+	state := New(nil)
+
+	key := libcommon.Hash{0x01}
+	value := uint256.NewInt(2)
+	addr := libcommon.Address{}
+
+	state.SetTransientState(addr, key, *value)
+	if exp, got := 1, state.journal.length(); exp != got {
+		t.Fatalf("journal length mismatch: have %d, want %d", got, exp)
+	}
+	// the retrieved value should equal what was set
+	if got := state.GetTransientState(addr, key); got != *value {
+		t.Fatalf("transient storage mismatch: have %x, want %x", got, value)
+	}
+
+	// revert the transient state being set and then check that the
+	// value is now the empty hash
+	state.journal.revert(state, 0)
+	if got, exp := state.GetTransientState(addr, key), (*uint256.NewInt(0)); exp != got {
+		t.Fatalf("transient storage mismatch: have %x, want %x", got, exp)
+	}
 }

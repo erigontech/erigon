@@ -176,7 +176,7 @@ func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		}
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%c.snapshotConfig.CheckpointInterval == 0 {
-			if s, err := loadSnapshot(c.config, c.db, number, hash); err == nil {
+			if s, err := loadSnapshot(c.config, c.DB, number, hash); err == nil {
 				log.Trace("Loaded voting snapshot from disk", "number", number, "hash", hash)
 				snap = s
 				break
@@ -196,7 +196,7 @@ func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 					copy(signers[i][:], checkpoint.Extra[ExtraVanity+i*length.Addr:])
 				}
 				snap = newSnapshot(c.config, number, hash, signers)
-				if err := snap.store(c.db); err != nil {
+				if err := snap.store(c.DB); err != nil {
 					return nil, err
 				}
 				log.Info("[Clique] Stored checkpoint snapshot to disk", "number", number, "hash", hash)
@@ -234,7 +234,7 @@ func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 
 	// If we've generated a new checkpoint snapshot, save to disk
 	if snap.Number%c.snapshotConfig.CheckpointInterval == 0 && len(headers) > 0 {
-		if err = snap.store(c.db); err != nil {
+		if err = snap.store(c.DB); err != nil {
 			return nil, err
 		}
 		log.Trace("Stored voting snapshot to disk", "number", snap.Number, "hash", snap.Hash)
