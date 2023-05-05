@@ -60,7 +60,10 @@ func FakeExponential(factor, denom *uint256.Int, edg *big.Int) (*uint256.Int, er
 	}
 	divisor := new(uint256.Int)
 	for i := 1; numeratorAccum.Sign() > 0; i++ {
-		output.Add(output, numeratorAccum)
+		_, overflow = output.AddOverflow(output, numeratorAccum)
+		if overflow {
+			return nil, fmt.Errorf("FakeExponential: overflow in AddOverflow(output=%v, numeratorAccum=%v)", output, numeratorAccum)
+		}
 		_, overflow = divisor.MulOverflow(denom, uint256.NewInt(uint64(i)))
 		if overflow {
 			return nil, fmt.Errorf("FakeExponential: overflow in MulOverflow(denom=%v, i=%v)", denom, i)
