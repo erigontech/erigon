@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -42,6 +43,7 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 	}
 	app.Flags = append(cliFlags, debug.Flags...) // debug flags are required
 	app.Flags = append(app.Flags, utils.MetricFlags...)
+	app.Flags = append(app.Flags, logging.Flags...)
 	app.Before = func(ctx *cli.Context) error {
 		return debug.Setup(ctx)
 	}
