@@ -274,7 +274,10 @@ func (f *ForkGraph) GetFinalizedCheckpoint(blockRoot libcommon.Hash) (*cltypes.C
 }
 
 func (f *ForkGraph) removeOldData() (err error) {
-	pruneSlot := f.nextReferenceState.Slot()
+	if f.nextReferenceState.Slot() < f.beaconCfg.SlotsPerEpoch {
+		return nil
+	}
+	pruneSlot := f.nextReferenceState.Slot() - f.beaconCfg.SlotsPerEpoch
 	log.Debug("Pruning old blocks", "pruneSlot", pruneSlot)
 	oldRoots := make([]libcommon.Hash, 0, len(f.blocks))
 	for hash, signedBlock := range f.blocks {
