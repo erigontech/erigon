@@ -276,6 +276,12 @@ func ExecV3(ctx context.Context,
 	}
 	applyLoop := func(ctx context.Context, errCh chan error) {
 		defer applyLoopWg.Done()
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Warn("[dbg] apply loop panic", "rec", rec)
+			}
+			log.Warn("[dbg] apply loop exit")
+		}()
 		if err := applyLoopInner(ctx); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				errCh <- err
@@ -450,6 +456,9 @@ func ExecV3(ctx context.Context,
 			defer rws.Close()
 			defer in.Close()
 			defer applyLoopWg.Wait()
+			defer func() {
+				log.Warn("[dbg] rwloop exit")
+			}()
 			return rwLoop(rwLoopCtx)
 		})
 	}
