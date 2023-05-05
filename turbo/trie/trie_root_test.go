@@ -135,7 +135,7 @@ func seedModifiedStorage(t *testing.T, db kv.RwDB, hashes []libcommon.Hash) [][]
 // retain list or the root is simply returned.
 func rebuildFlatDBTrieHash(t *testing.T, rl *trie.RetainList, db kv.RoDB) libcommon.Hash {
 	t.Helper()
-	startTime := time.Now()
+	//startTime := time.Now()
 	loader := trie.NewFlatDBTrieLoader("test", rl, nil, nil, false)
 	tx, err := db.BeginRo(context.Background())
 	defer tx.Rollback()
@@ -153,7 +153,7 @@ func rebuildFlatDBTrieHash(t *testing.T, rl *trie.RetainList, db kv.RoDB) libcom
 // the computation as well as the proof result.
 func proveFlatDB(t *testing.T, db kv.RoDB, accountMissing bool, retainKeys, proofKeys [][]byte) (libcommon.Hash, *accounts.AccProofResult) {
 	t.Helper()
-	startTime := time.Now()
+	//startTime := time.Now()
 	rl := trie.NewRetainList(0)
 	for _, retainKey := range retainKeys {
 		rl.AddKeyWithMarker(retainKey, true)
