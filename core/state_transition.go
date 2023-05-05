@@ -214,7 +214,10 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		if err != nil {
 			return err
 		}
-		dgval.Mul(dataGasPrice, new(uint256.Int).SetUint64(dataGasUsed))
+		_, overflow = dgval.MulOverflow(dataGasPrice, new(uint256.Int).SetUint64(dataGasUsed))
+		if overflow {
+			return fmt.Errorf("%w: overflow converting datagas: %v", ErrInsufficientFunds, dgval)
+		}
 	}
 
 	balanceCheck := mgval
