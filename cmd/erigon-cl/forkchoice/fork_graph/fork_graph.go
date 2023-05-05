@@ -293,7 +293,7 @@ func (f *ForkGraph) removeOldData() (err error) {
 	}
 	// Lastly snapshot the state
 	f.currentReferenceState = f.nextReferenceState
-	f.nextReferenceState, err = f.currentState.Copy()
+	err = f.currentState.CopyInto(f.nextReferenceState)
 	if err != nil {
 		panic(err) // dead at this point
 	}

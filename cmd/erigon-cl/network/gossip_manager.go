@@ -120,7 +120,10 @@ func (g *GossipManager) Start() {
 			// Log final result
 			log.Debug("New block imported",
 				"slot", block.Block.Slot, "head", headSlot, "headRoot", headRoot,
-				"alloc", libcommon.ByteCount(m.Alloc))
+				"alloc", libcommon.ByteCount(m.Alloc),
+				"sys", libcommon.ByteCount(m.Sys),
+				"numGC", m.NumGC,
+			)
 		case sentinel.GossipType_VoluntaryExitGossipType:
 			object = &cltypes.SignedVoluntaryExit{}
 			if err := object.DecodeSSZWithVersion(data.Data, int(version)); err != nil {

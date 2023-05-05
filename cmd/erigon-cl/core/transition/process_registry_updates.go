@@ -13,24 +13,24 @@ func computeActivationExitEpoch(beaconConfig *clparams.BeaconChainConfig, epoch 
 }
 
 // ProcessRegistyUpdates updates every epoch the activation status of validators. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#registry-updates.
-func ProcessRegistryUpdates(state *state.BeaconState) error {
-	beaconConfig := state.BeaconConfig()
-	currentEpoch := state.Epoch()
+func ProcessRegistryUpdates(s *state.BeaconState) error {
+	beaconConfig := s.BeaconConfig()
+	currentEpoch := state.Epoch(s.BeaconState)
 	// start also initializing the activation queue.
 	activationQueue := make([]uint64, 0)
-	validators := state.Validators()
+	validators := s.Validators()
 	// Process activation eligibility and ejections.
 	for validatorIndex, validator := range validators {
-		if state.IsValidatorEligibleForActivationQueue(validator) {
-			state.SetActivationEligibilityEpochForValidatorAtIndex(validatorIndex, currentEpoch+1)
+		if state.IsValidatorEligibleForActivationQueue(s.BeaconState, validator) {
+			s.SetActivationEligibilityEpochForValidatorAtIndex(validatorIndex, currentEpoch+1)
 		}
 		if validator.Active(currentEpoch) && validator.EffectiveBalance <= beaconConfig.EjectionBalance {
-			if err := state.InitiateValidatorExit(uint64(validatorIndex)); err != nil {
+			if err := s.InitiateValidatorExit(uint64(validatorIndex)); err != nil {
 				return err
 			}
 		}
 		// Insert in the activation queue in case.
-		if state.IsValidatorEligibleForActivation(validator) {
+		if state.IsValidatorEligibleForActivation(s.BeaconState, validator) {
 			activationQueue = append(activationQueue, uint64(validatorIndex))
 		}
 	}
@@ -42,13 +42,13 @@ func ProcessRegistryUpdates(state *state.BeaconState) error {
 		}
 		return activationQueue[i] < activationQueue[j]
 	})
-	activationQueueLength := state.GetValidatorChurnLimit()
+	activationQueueLength := s.GetValidatorChurnLimit()
 	if len(activationQueue) > int(activationQueueLength) {
 		activationQueue = activationQueue[:activationQueueLength]
 	}
 	// Only process up to epoch limit.
 	for _, validatorIndex := range activationQueue {
-		state.SetActivationEpochForValidatorAtIndex(int(validatorIndex), computeActivationExitEpoch(beaconConfig, currentEpoch))
+		s.SetActivationEpochForValidatorAtIndex(int(validatorIndex), computeActivationExitEpoch(beaconConfig, currentEpoch))
 	}
 	return nil
 }

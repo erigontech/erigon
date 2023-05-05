@@ -18,14 +18,14 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func TransitionState(state *state.BeaconState, block *cltypes.SignedBeaconBlock, fullValidation bool) error {
+func TransitionState(s *state.BeaconState, block *cltypes.SignedBeaconBlock, fullValidation bool) error {
 	currentBlock := block.Block
-	if err := ProcessSlots(state, currentBlock.Slot); err != nil {
+	if err := ProcessSlots(s, currentBlock.Slot); err != nil {
 		return err
 	}
 
 	if fullValidation {
-		valid, err := verifyBlockSignature(state, block)
+		valid, err := verifyBlockSignature(s, block)
 		if err != nil {
 			return fmt.Errorf("error validating block signature: %v", err)
 		}
@@ -34,11 +34,11 @@ func TransitionState(state *state.BeaconState, block *cltypes.SignedBeaconBlock,
 		}
 	}
 	// Transition block
-	if err := processBlock(state, block, fullValidation); err != nil {
+	if err := processBlock(s, block, fullValidation); err != nil {
 		return err
 	}
 	if fullValidation {
-		expectedStateRoot, err := state.HashSSZ()
+		expectedStateRoot, err := s.HashSSZ()
 		if err != nil {
 			return fmt.Errorf("unable to generate state root: %v", err)
 		}
@@ -47,79 +47,79 @@ func TransitionState(state *state.BeaconState, block *cltypes.SignedBeaconBlock,
 		}
 	}
 
-	state.SetPreviousStateRoot(currentBlock.StateRoot)
+	s.SetPreviousStateRoot(currentBlock.StateRoot)
 	return nil
 }
 
 // transitionSlot is called each time there is a new slot to process
-func transitionSlot(state *state.BeaconState) error {
-	slot := state.Slot()
-	previousStateRoot := state.PreviousStateRoot()
+func transitionSlot(s *state.BeaconState) error {
+	slot := s.Slot()
+	previousStateRoot := s.PreviousStateRoot()
 	var err error
 	if previousStateRoot == (libcommon.Hash{}) {
-		previousStateRoot, err = state.HashSSZ()
+		previousStateRoot, err = s.HashSSZ()
 		if err != nil {
 			return err
 		}
 	}
 
-	beaconConfig := state.BeaconConfig()
+	beaconConfig := s.BeaconConfig()
 
-	state.SetStateRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousStateRoot)
+	s.SetStateRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousStateRoot)
 
-	latestBlockHeader := state.LatestBlockHeader()
+	latestBlockHeader := s.LatestBlockHeader()
 	if latestBlockHeader.Root == [32]byte{} {
 		latestBlockHeader.Root = previousStateRoot
-		state.SetLatestBlockHeader(&latestBlockHeader)
+		s.SetLatestBlockHeader(&latestBlockHeader)
 	}
-	blockHeader := state.LatestBlockHeader()
+	blockHeader := s.LatestBlockHeader()
 
 	previousBlockRoot, err := (&blockHeader).HashSSZ()
 	if err != nil {
 		return err
 	}
-	state.SetBlockRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousBlockRoot)
+	s.SetBlockRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousBlockRoot)
 	return nil
 }
 
-func ProcessSlots(state *state.BeaconState, slot uint64) error {
-	beaconConfig := state.BeaconConfig()
-	stateSlot := state.Slot()
-	if slot <= stateSlot {
-		return fmt.Errorf("new slot: %d not greater than state slot: %d", slot, stateSlot)
+func ProcessSlots(s *state.BeaconState, slot uint64) error {
+	beaconConfig := s.BeaconConfig()
+	sSlot := s.Slot()
+	if slot <= sSlot {
+		return fmt.Errorf("new slot: %d not greater than s slot: %d", slot, sSlot)
 	}
 	// Process each slot.
-	for i := stateSlot; i < slot; i++ {
-		err := transitionSlot(state)
+	for i := sSlot; i < slot; i++ {
+		err := transitionSlot(s)
 		if err != nil {
 			return fmt.Errorf("unable to process slot transition: %v", err)
 		}
 		// TODO(Someone): Add epoch transition.
-		if (stateSlot+1)%beaconConfig.SlotsPerEpoch == 0 {
+		if (sSlot+1)%beaconConfig.SlotsPerEpoch == 0 {
 			start := time.Now()
-			if err := ProcessEpoch(state); err != nil {
+			if err := ProcessEpoch(s); err != nil {
 				return err
 			}
-			log.Debug("Processed new epoch successfully", "epoch", state.Epoch(), "process_epoch_elpsed", time.Since(start))
+			log.Debug("Processed new epoch successfully", "epoch", state.Epoch(s.BeaconState), "process_epoch_elpsed", time.Since(start))
 		}
 		// TODO: add logic to process epoch updates.
-		stateSlot += 1
-		state.SetSlot(stateSlot)
-		if stateSlot%beaconConfig.SlotsPerEpoch != 0 {
+		sSlot += 1
+		s.SetSlot(sSlot)
+		if sSlot%beaconConfig.SlotsPerEpoch != 0 {
 			continue
 		}
-		if state.Epoch() == beaconConfig.AltairForkEpoch {
-			if err := state.UpgradeToAltair(); err != nil {
+		if state.Epoch(s.BeaconState) == beaconConfig.AltairForkEpoch {
+			if err := s.UpgradeToAltair(); err != nil {
 				return err
 			}
 		}
-		if state.Epoch() == beaconConfig.BellatrixForkEpoch {
-			if err := state.UpgradeToBellatrix(); err != nil {
+		if state.Epoch(s.BeaconState) == beaconConfig.BellatrixForkEpoch {
+			if err := s.UpgradeToBellatrix(); err != nil {
 				return err
 			}
 		}
-		if state.Epoch() == beaconConfig.CapellaForkEpoch {
-			if err := state.UpgradeToCapella(); err != nil {
+		if state.Epoch(s.BeaconState) == beaconConfig.CapellaForkEpoch {
+			if err := s.UpgradeToCapella(); err != nil {
 				return err
 			}
 		}
@@ -127,12 +127,12 @@ func ProcessSlots(state *state.BeaconState, slot uint64) error {
 	return nil
 }
 
-func verifyBlockSignature(state *state.BeaconState, block *cltypes.SignedBeaconBlock) (bool, error) {
-	proposer, err := state.ValidatorForValidatorIndex(int(block.Block.ProposerIndex))
+func verifyBlockSignature(s *state.BeaconState, block *cltypes.SignedBeaconBlock) (bool, error) {
+	proposer, err := s.ValidatorForValidatorIndex(int(block.Block.ProposerIndex))
 	if err != nil {
 		return false, err
 	}
-	domain, err := state.GetDomain(state.BeaconConfig().DomainBeaconProposer, state.Epoch())
+	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconProposer, state.Epoch(s.BeaconState))
 	if err != nil {
 		return false, err
 	}
@@ -144,11 +144,11 @@ func verifyBlockSignature(state *state.BeaconState, block *cltypes.SignedBeaconB
 }
 
 // ProcessHistoricalRootsUpdate updates the historical root data structure by computing a new historical root batch when it is time to do so.
-func ProcessHistoricalRootsUpdate(state *state.BeaconState) error {
-	nextEpoch := state.Epoch() + 1
-	beaconConfig := state.BeaconConfig()
-	blockRoots := state.BlockRoots()
-	stateRoots := state.StateRoots()
+func ProcessHistoricalRootsUpdate(s *state.BeaconState) error {
+	nextEpoch := state.Epoch(s.BeaconState) + 1
+	beaconConfig := s.BeaconConfig()
+	blockRoots := s.BlockRoots()
+	stateRoots := s.StateRoots()
 
 	// Check if it's time to compute the historical root batch.
 	if nextEpoch%(beaconConfig.SlotsPerHistoricalRoot/beaconConfig.SlotsPerEpoch) != 0 {
@@ -165,15 +165,15 @@ func ProcessHistoricalRootsUpdate(state *state.BeaconState) error {
 		return err
 	}
 
-	// Add the historical summary or root to the state.
-	if state.Version() >= clparams.CapellaVersion {
-		state.AddHistoricalSummary(&cltypes.HistoricalSummary{
+	// Add the historical summary or root to the s.
+	if s.Version() >= clparams.CapellaVersion {
+		s.AddHistoricalSummary(&cltypes.HistoricalSummary{
 			BlockSummaryRoot: blockRootsLeaf,
 			StateSummaryRoot: stateRootsLeaf,
 		})
 	} else {
 		historicalRoot := utils.Keccak256(blockRootsLeaf[:], stateRootsLeaf[:])
-		state.AddHistoricalRoot(historicalRoot)
+		s.AddHistoricalRoot(historicalRoot)
 	}
 
 	return nil

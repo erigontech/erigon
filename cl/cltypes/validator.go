@@ -3,6 +3,7 @@ package cltypes
 import (
 	"bytes"
 	"fmt"
+	"sync"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -381,12 +382,23 @@ func (v *Validator) EncodingSizeSSZ() int {
 	return 121
 }
 
-func (v *Validator) HashSSZ() ([32]byte, error) {
-	var (
-		leaves = make([][32]byte, 8)
-		err    error
-	)
+var validatorLeavesPool = sync.Pool{
+	New: func() any {
+		o := make([][32]byte, 8)
+		return &o
+	},
+}
 
+func (v *Validator) HashSSZ() ([32]byte, error) {
+	leavesp, _ := validatorLeavesPool.Get().(*[][32]byte)
+	leaves := *leavesp
+	defer func() {
+		leaves = leaves[:8]
+		validatorLeavesPool.Put(leavesp)
+	}()
+	var (
+		err error
+	)
 	leaves[0], err = merkle_tree.PublicKeyRoot(v.PublicKey)
 	if err != nil {
 		return [32]byte{}, err
@@ -398,7 +410,9 @@ func (v *Validator) HashSSZ() ([32]byte, error) {
 	leaves[5] = merkle_tree.Uint64Root(v.ActivationEpoch)
 	leaves[6] = merkle_tree.Uint64Root(v.ExitEpoch)
 	leaves[7] = merkle_tree.Uint64Root(v.WithdrawableEpoch)
-	return merkle_tree.ArraysRoot(leaves, 8)
+	leaves = leaves[:8]
+	output, err := merkle_tree.ArraysRoot(leaves, 8)
+	return output, err
 }
 
 // Active returns if validator is active for given epoch
