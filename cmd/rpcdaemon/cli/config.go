@@ -129,11 +129,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	}
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		// Logging is configured in the cmd/rpcdaemon/main.go, so we skip it here
-		// to prevent setting it up twice
-		if _, err := debug.SetupCobra(cmd, false /* setupLogging */); err != nil {
-			return err
-		}
 
 		err := cfg.StateCache.CacheSize.UnmarshalText([]byte(stateCacheStr))
 		if err != nil {

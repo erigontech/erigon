@@ -57,7 +57,7 @@ Examples:
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -99,7 +99,7 @@ var loopIhCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -128,7 +128,7 @@ var loopExecCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}

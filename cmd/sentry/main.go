@@ -95,7 +95,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		var logger log.Logger
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "sentry"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return err
 		}

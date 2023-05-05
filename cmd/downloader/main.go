@@ -104,19 +104,19 @@ var rootCmd = &cobra.Command{
 	Use:     "",
 	Short:   "snapshot downloader",
 	Example: "go run ./cmd/snapshots --datadir <your_datadir> --downloader.api.addr 127.0.0.1:9093",
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if _, err := debug.SetupCobra(cmd, false /* setupLogger */); err != nil {
-			panic(err)
-		}
-	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := logging.SetupLoggerCmd("downloader", cmd)
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "downloader"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return
+		}
 		if err := Downloader(cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}

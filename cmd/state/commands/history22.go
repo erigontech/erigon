@@ -55,7 +55,7 @@ var history22Cmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "history22"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return err
 		}

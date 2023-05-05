@@ -59,7 +59,7 @@ var cmdStageSnapshots = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -85,7 +85,7 @@ var cmdStageHeaders = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -111,7 +111,7 @@ var cmdStageBodies = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -137,7 +137,7 @@ var cmdStageSenders = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -163,7 +163,7 @@ var cmdStageExec = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -191,7 +191,7 @@ var cmdStageTrie = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -217,7 +217,7 @@ var cmdStageHashState = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -243,7 +243,7 @@ var cmdStageHistory = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -269,7 +269,7 @@ var cmdLogIndex = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -295,7 +295,7 @@ var cmdCallTraces = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -321,7 +321,7 @@ var cmdStageTxLookup = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -346,7 +346,7 @@ var cmdPrintStages = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -372,7 +372,7 @@ var cmdPrintMigrations = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -397,7 +397,7 @@ var cmdRemoveMigration = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -422,7 +422,7 @@ var cmdRunMigrations = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -442,7 +442,7 @@ var cmdSetPrune = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -467,7 +467,7 @@ var cmdSetSnap = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}
@@ -498,7 +498,7 @@ var cmdForceSetHistoryV3 = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var logger log.Logger
 		var err error
-		if logger, err = debug.SetupCobra(cmd, true /* setupLogger */); err != nil {
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
 			logger.Error("Setting up", "error", err)
 			return
 		}

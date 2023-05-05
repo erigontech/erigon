@@ -88,9 +88,7 @@ var Flags = []cli.Flag{
 }
 
 // SetupCobra sets up logging, profiling and tracing for cobra commands
-// if setupLogging is set to false, logging is not set up, this is
-// done in RPC daemon to avoid setting up logging twice
-func SetupCobra(cmd *cobra.Command, setupLogging bool) (log.Logger, error) {
+func SetupCobra(cmd *cobra.Command, filePrefix string) (log.Logger, error) {
 	// ensure we've read in config file details before setting up metrics etc.
 	if err := SetCobraFlagsFromConfigFile(cmd); err != nil {
 		log.Warn("failed setting config flags from yaml/toml file", "err", err)
@@ -98,10 +96,7 @@ func SetupCobra(cmd *cobra.Command, setupLogging bool) (log.Logger, error) {
 	RaiseFdLimit()
 	flags := cmd.Flags()
 
-	var logger log.Logger
-	if setupLogging {
-		logger = logging.SetupLoggerCmd("erigon", cmd)
-	}
+	logger := logging.SetupLoggerCmd(filePrefix, cmd)
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {

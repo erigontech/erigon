@@ -8,7 +8,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +18,14 @@ func main() {
 	rootCtx, rootCancel := common.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		logger := logging.SetupLoggerCmd("rpcdaemon", cmd)
+		// Logging is configured in the cmd/rpcdaemon/main.go, so we skip it here
+		// to prevent setting it up twice
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "rpcdaemon"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return err
+		}
 		db, borDb, backend, txPool, mining, stateCache, blockReader, ff, agg, err := cli.RemoteServices(ctx, *cfg, logger, rootCancel)
 		if err != nil {
 			logger.Error("Could not connect to DB", "err", err)
