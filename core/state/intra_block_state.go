@@ -75,13 +75,18 @@ type IntraBlockState struct {
 	logs         map[libcommon.Hash][]*types.Log
 	logSize      uint
 
+	// Per-transaction access list
+	accessList *accessList
+
+	// Transient storage
+	transientStorage transientStorage
+
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
 	journal        *journal
 	validRevisions []revision
 	nextRevisionID int
 	trace          bool
-	accessList     *accessList
 	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 }
 
@@ -95,6 +100,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		logs:              map[libcommon.Hash][]*types.Log{},
 		journal:           newJournal(),
 		accessList:        newAccessList(),
+		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
 	}
 }
@@ -414,6 +420,35 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) bool {
 	return true
 }
 
+// SetTransientState sets transient storage for a given account. It
+// adds the change to the journal so that it can be rolled back
+// to its previous value if there is a revert.
+func (sdb *IntraBlockState) SetTransientState(addr libcommon.Address, key libcommon.Hash, value uint256.Int) {
+	prev := sdb.GetTransientState(addr, key)
+	if prev == value {
+		return
+	}
+
+	sdb.journal.append(transientStorageChange{
+		account:  &addr,
+		key:      key,
+		prevalue: prev,
+	})
+
+	sdb.setTransientState(addr, key, value)
+}
+
+// setTransientState is a lower level setter for transient storage. It
+// is called during a revert to prevent modifications to the journal.
+func (sdb *IntraBlockState) setTransientState(addr libcommon.Address, key libcommon.Hash, value uint256.Int) {
+	sdb.transientStorage.Set(addr, key, value)
+}
+
+// GetTransientState gets transient storage for a given account.
+func (sdb *IntraBlockState) GetTransientState(addr libcommon.Address, key libcommon.Hash) uint256.Int {
+	return sdb.transientStorage.Get(addr, key)
+}
+
 func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject *stateObject) {
 	// Prefer 'live' objects.
 	if obj := sdb.stateObjects[addr]; obj != nil {
@@ -701,13 +736,13 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules) {
 	}
 }
 
-// Prepare sets the current transaction hash and index and block hash which is
-// used when the EVM emits new state logs.
-func (sdb *IntraBlockState) Prepare(thash, bhash libcommon.Hash, ti int) {
+// SetTxContext sets the current transaction hash and index and block hash which are
+// used when the EVM emits new state logs. It should be invoked before
+// transaction execution.
+func (sdb *IntraBlockState) SetTxContext(thash, bhash libcommon.Hash, ti int) {
 	sdb.thash = thash
 	sdb.bhash = bhash
 	sdb.txIndex = ti
-	sdb.accessList = newAccessList()
 }
 
 // no not lock
@@ -717,30 +752,48 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.refund = 0
 }
 
-// PrepareAccessList handles the preparatory steps for executing a state transition with
-// regards to both EIP-2929 and EIP-2930:
+// Prepare handles the preparatory steps for executing a state transition.
+// This method must be invoked before state transition.
 //
-// - Add sender to access list (2929)
-// - Add destination to access list (2929)
-// - Add precompiles to access list (2929)
-// - Add the contents of the optional tx access list (2930)
+// Berlin fork:
+// - Add sender to access list (EIP-2929)
+// - Add destination to access list (EIP-2929)
+// - Add precompiles to access list (EIP-2929)
+// - Add the contents of the optional tx access list (EIP-2930)
 //
-// This method should only be called if Yolov3/Berlin/2929+2930 is applicable at the current number.
-func (sdb *IntraBlockState) PrepareAccessList(sender libcommon.Address, dst *libcommon.Address, precompiles []libcommon.Address, list types2.AccessList) {
-	sdb.AddAddressToAccessList(sender)
-	if dst != nil {
-		sdb.AddAddressToAccessList(*dst)
-		// If it's a create-tx, the destination will be added inside evm.create
-	}
-	for _, addr := range precompiles {
-		sdb.AddAddressToAccessList(addr)
-	}
-	for _, el := range list {
-		sdb.AddAddressToAccessList(el.Address)
-		for _, key := range el.StorageKeys {
-			sdb.AddSlotToAccessList(el.Address, key)
+// Shanghai fork:
+// - Add coinbase to access list (EIP-3651)
+//
+// Cancun fork:
+// - Reset transient storage (EIP-1153)
+func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
+	precompiles []libcommon.Address, list types2.AccessList,
+) {
+	if rules.IsBerlin {
+		// Clear out any leftover from previous executions
+		al := newAccessList()
+		sdb.accessList = al
+
+		al.AddAddress(sender)
+		if dst != nil {
+			al.AddAddress(*dst)
+			// If it's a create-tx, the destination will be added inside evm.create
+		}
+		for _, addr := range precompiles {
+			al.AddAddress(addr)
+		}
+		for _, el := range list {
+			al.AddAddress(el.Address)
+			for _, key := range el.StorageKeys {
+				al.AddSlot(el.Address, key)
+			}
+		}
+		if rules.IsShanghai { // EIP-3651: warm coinbase
+			al.AddAddress(coinbase)
 		}
 	}
+	// Reset transient storage at the beginning of transaction execution
+	sdb.transientStorage = newTransientStorage()
 }
 
 // AddAddressToAccessList adds the given address to the access list

@@ -492,6 +492,10 @@ func (a *AttestationData) DecodeSSZ(buf []byte) error {
 	return err
 }
 
+func (a *AttestationData) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return a.DecodeSSZ(buf)
+}
+
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the AttestationData object
 func (a *AttestationData) EncodingSizeSSZ() int {
 	return 2*common.BlockNumberLength + length.Hash + 40 + 40

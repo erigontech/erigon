@@ -3,6 +3,7 @@ package cltypes
 import (
 	"bytes"
 	"fmt"
+	"sync"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -165,9 +166,9 @@ type SignedVoluntaryExit struct {
 	Signature    [96]byte
 }
 
-func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) []byte {
+func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := e.VolunaryExit.EncodeSSZ(dst)
-	return append(buf, e.Signature[:]...)
+	return append(buf, e.Signature[:]...), nil
 }
 
 func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte) error {
@@ -246,6 +247,10 @@ func (s *SyncCommittee) DecodeSSZ(buf []byte) error {
 	copy(s.AggregatePublicKey[:], buf[24576:])
 
 	return nil
+}
+
+func (s *SyncCommittee) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return s.DecodeSSZ(buf)
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the SyncCommittee object
@@ -377,12 +382,23 @@ func (v *Validator) EncodingSizeSSZ() int {
 	return 121
 }
 
-func (v *Validator) HashSSZ() ([32]byte, error) {
-	var (
-		leaves = make([][32]byte, 8)
-		err    error
-	)
+var validatorLeavesPool = sync.Pool{
+	New: func() any {
+		o := make([][32]byte, 8)
+		return &o
+	},
+}
 
+func (v *Validator) HashSSZ() ([32]byte, error) {
+	leavesp, _ := validatorLeavesPool.Get().(*[][32]byte)
+	leaves := *leavesp
+	defer func() {
+		leaves = leaves[:8]
+		validatorLeavesPool.Put(leavesp)
+	}()
+	var (
+		err error
+	)
 	leaves[0], err = merkle_tree.PublicKeyRoot(v.PublicKey)
 	if err != nil {
 		return [32]byte{}, err
@@ -394,7 +410,9 @@ func (v *Validator) HashSSZ() ([32]byte, error) {
 	leaves[5] = merkle_tree.Uint64Root(v.ActivationEpoch)
 	leaves[6] = merkle_tree.Uint64Root(v.ExitEpoch)
 	leaves[7] = merkle_tree.Uint64Root(v.WithdrawableEpoch)
-	return merkle_tree.ArraysRoot(leaves, 8)
+	leaves = leaves[:8]
+	output, err := merkle_tree.ArraysRoot(leaves, 8)
+	return output, err
 }
 
 // Active returns if validator is active for given epoch

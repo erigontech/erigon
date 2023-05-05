@@ -1,11 +1,16 @@
-package consensustests
+package consensus_tests
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
+	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/ef-tests-cl/spectest"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -20,18 +25,16 @@ const (
 	addressChangeFileName    = "address_change.ssz_snappy"
 )
 
-func operationAttestationHandler(context testContext) error {
-	preState, err := decodeStateFromFile(context, "pre.ssz_snappy")
-	if err != nil {
-		return err
-	}
-	postState, err := decodeStateFromFile(context, "post.ssz_snappy")
+func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
 		return err
 	}
 	att := &cltypes.Attestation{}
-	if err := decodeSSZObjectFromFile(att, context.version, attestationFileName); err != nil {
+	if err := spectest.ReadSszOld(root, att, c.Version(), attestationFileName); err != nil {
 		return err
 	}
 	if err := transition.ProcessAttestations(preState, []*cltypes.Attestation{att}, true); err != nil {
@@ -43,32 +46,25 @@ func operationAttestationHandler(context testContext) error {
 	if expectedError {
 		return fmt.Errorf("expected error")
 	}
-	root, err := preState.HashSSZ()
-	if err != nil {
-		return err
-	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
 	expectedRoot, err := postState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if root != expectedRoot {
-		return fmt.Errorf("mismatching state roots")
-	}
+	require.NoError(t, err)
+
+	assert.EqualValues(t, haveRoot, expectedRoot)
 	return nil
 }
 
-func operationAttesterSlashingHandler(context testContext) error {
-	preState, err := decodeStateFromFile(context, "pre.ssz_snappy")
-	if err != nil {
-		return err
-	}
-	postState, err := decodeStateFromFile(context, "post.ssz_snappy")
+func operationAttesterSlashingHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
 		return err
 	}
 	att := &cltypes.AttesterSlashing{}
-	if err := decodeSSZObjectFromFile(att, context.version, attesterSlashingFileName); err != nil {
+	if err := spectest.ReadSszOld(root, att, c.Version(), attesterSlashingFileName); err != nil {
 		return err
 	}
 	if err := transition.ProcessAttesterSlashing(preState, att); err != nil {
@@ -80,32 +76,25 @@ func operationAttesterSlashingHandler(context testContext) error {
 	if expectedError {
 		return fmt.Errorf("expected error")
 	}
-	root, err := preState.HashSSZ()
-	if err != nil {
-		return err
-	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
 	expectedRoot, err := postState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if root != expectedRoot {
-		return fmt.Errorf("mismatching state roots")
-	}
+	require.NoError(t, err)
+
+	assert.EqualValues(t, haveRoot, expectedRoot)
 	return nil
 }
 
-func operationProposerSlashingHandler(context testContext) error {
-	preState, err := decodeStateFromFile(context, "pre.ssz_snappy")
-	if err != nil {
-		return err
-	}
-	postState, err := decodeStateFromFile(context, "post.ssz_snappy")
+func operationProposerSlashingHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
 		return err
 	}
 	att := &cltypes.ProposerSlashing{}
-	if err := decodeSSZObjectFromFile(att, context.version, proposerSlashingFileName); err != nil {
+	if err := spectest.ReadSszOld(root, att, c.Version(), proposerSlashingFileName); err != nil {
 		return err
 	}
 	if err := transition.ProcessProposerSlashing(preState, att); err != nil {
@@ -117,32 +106,25 @@ func operationProposerSlashingHandler(context testContext) error {
 	if expectedError {
 		return fmt.Errorf("expected error")
 	}
-	root, err := preState.HashSSZ()
-	if err != nil {
-		return err
-	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
 	expectedRoot, err := postState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if root != expectedRoot {
-		return fmt.Errorf("mismatching state roots")
-	}
+	require.NoError(t, err)
+
+	assert.EqualValues(t, haveRoot, expectedRoot)
 	return nil
 }
 
-func operationBlockHeaderHandler(context testContext) error {
-	preState, err := decodeStateFromFile(context, "pre.ssz_snappy")
-	if err != nil {
-		return err
-	}
-	postState, err := decodeStateFromFile(context, "post.ssz_snappy")
+func operationBlockHeaderHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
 		return err
 	}
 	block := &cltypes.BeaconBlock{}
-	if err := decodeSSZObjectFromFile(block, context.version, blockFileName); err != nil {
+	if err := spectest.ReadSszOld(root, block, c.Version(), blockFileName); err != nil {
 		return err
 	}
 	if err := transition.ProcessBlockHeader(preState, block, true); err != nil {
@@ -154,32 +136,25 @@ func operationBlockHeaderHandler(context testContext) error {
 	if expectedError {
 		return fmt.Errorf("expected error")
 	}
-	root, err := preState.HashSSZ()
-	if err != nil {
-		return err
-	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
 	expectedRoot, err := postState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if root != expectedRoot {
-		return fmt.Errorf("mismatching state roots")
-	}
+	require.NoError(t, err)
+
+	assert.EqualValues(t, haveRoot, expectedRoot)
 	return nil
 }
 
-func operationDepositHandler(context testContext) error {
-	preState, err := decodeStateFromFile(context, "pre.ssz_snappy")
-	if err != nil {
-		return err
-	}
-	postState, err := decodeStateFromFile(context, "post.ssz_snappy")
+func operationDepositHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
 		return err
 	}
 	deposit := &cltypes.Deposit{}
-	if err := decodeSSZObjectFromFile(deposit, context.version, depositFileName); err != nil {
+	if err := spectest.ReadSszOld(root, deposit, c.Version(), depositFileName); err != nil {
 		return err
 	}
 	if err := transition.ProcessDeposit(preState, deposit, true); err != nil {
@@ -191,32 +166,25 @@ func operationDepositHandler(context testContext) error {
 	if expectedError {
 		return fmt.Errorf("expected error")
 	}
-	root, err := preState.HashSSZ()
-	if err != nil {
-		return err
-	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
 	expectedRoot, err := postState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if root != expectedRoot {
-		return fmt.Errorf("mismatching state roots")
-	}
+	require.NoError(t, err)
+
+	assert.EqualValues(t, haveRoot, expectedRoot)
 	return nil
 }
 
-func operationSyncAggregateHandler(context testContext) error {
-	preState, err := decodeStateFromFile(context, "pre.ssz_snappy")
-	if err != nil {
-		return err
-	}
-	postState, err := decodeStateFromFile(context, "post.ssz_snappy")
+func operationSyncAggregateHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
 		return err
 	}
 	agg := &cltypes.SyncAggregate{}
-	if err := decodeSSZObjectFromFile(agg, context.version, syncAggregateFileName); err != nil {
+	if err := spectest.ReadSszOld(root, agg, c.Version(), syncAggregateFileName); err != nil {
 		return err
 	}
 	if err := transition.ProcessSyncAggregate(preState, agg, true); err != nil {
@@ -228,32 +196,25 @@ func operationSyncAggregateHandler(context testContext) error {
 	if expectedError {
 		return fmt.Errorf("expected error")
 	}
-	root, err := preState.HashSSZ()
-	if err != nil {
-		return err
-	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
 	expectedRoot, err := postState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if root != expectedRoot {
-		return fmt.Errorf("mismatching state roots")
-	}
+	require.NoError(t, err)
+
+	assert.EqualValues(t, haveRoot, expectedRoot)
 	return nil
 }
 
-func operationVoluntaryExitHandler(context testContext) error {
-	preState, err := decodeStateFromFile(context, "pre.ssz_snappy")
-	if err != nil {
-		return err
-	}
-	postState, err := decodeStateFromFile(context, "post.ssz_snappy")
+func operationVoluntaryExitHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
 		return err
 	}
 	vo := &cltypes.SignedVoluntaryExit{}
-	if err := decodeSSZObjectFromFile(vo, context.version, voluntaryExitFileName); err != nil {
+	if err := spectest.ReadSszOld(root, vo, c.Version(), voluntaryExitFileName); err != nil {
 		return err
 	}
 	if err := transition.ProcessVoluntaryExit(preState, vo, true); err != nil {
@@ -265,32 +226,25 @@ func operationVoluntaryExitHandler(context testContext) error {
 	if expectedError {
 		return fmt.Errorf("expected error")
 	}
-	root, err := preState.HashSSZ()
-	if err != nil {
-		return err
-	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
 	expectedRoot, err := postState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if root != expectedRoot {
-		return fmt.Errorf("mismatching state roots")
-	}
+	require.NoError(t, err)
+
+	assert.EqualValues(t, haveRoot, expectedRoot)
 	return nil
 }
 
-func operationWithdrawalHandler(context testContext) error {
-	preState, err := decodeStateFromFile(context, "pre.ssz_snappy")
-	if err != nil {
-		return err
-	}
-	postState, err := decodeStateFromFile(context, "post.ssz_snappy")
+func operationWithdrawalHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
 		return err
 	}
 	executionPayload := &cltypes.Eth1Block{}
-	if err := decodeSSZObjectFromFile(executionPayload, context.version, executionPayloadFileName); err != nil {
+	if err := spectest.ReadSszOld(root, executionPayload, c.Version(), executionPayloadFileName); err != nil {
 		return err
 	}
 	if err := transition.ProcessWithdrawals(preState, executionPayload.Withdrawals, true); err != nil {
@@ -302,32 +256,25 @@ func operationWithdrawalHandler(context testContext) error {
 	if expectedError {
 		return fmt.Errorf("expected error")
 	}
-	root, err := preState.HashSSZ()
-	if err != nil {
-		return err
-	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
 	expectedRoot, err := postState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if root != expectedRoot {
-		return fmt.Errorf("mismatching state roots")
-	}
+	require.NoError(t, err)
+
+	assert.EqualValues(t, haveRoot, expectedRoot)
 	return nil
 }
 
-func operationSignedBlsChangeHandler(context testContext) error {
-	preState, err := decodeStateFromFile(context, "pre.ssz_snappy")
-	if err != nil {
-		return err
-	}
-	postState, err := decodeStateFromFile(context, "post.ssz_snappy")
+func operationSignedBlsChangeHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
 	expectedError := os.IsNotExist(err)
 	if err != nil && !expectedError {
 		return err
 	}
 	change := &cltypes.SignedBLSToExecutionChange{}
-	if err := decodeSSZObjectFromFile(change, context.version, addressChangeFileName); err != nil {
+	if err := spectest.ReadSszOld(root, change, c.Version(), addressChangeFileName); err != nil {
 		return err
 	}
 	if err := transition.ProcessBlsToExecutionChange(preState, change, true); err != nil {
@@ -339,16 +286,12 @@ func operationSignedBlsChangeHandler(context testContext) error {
 	if expectedError {
 		return fmt.Errorf("expected error")
 	}
-	root, err := preState.HashSSZ()
-	if err != nil {
-		return err
-	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
 	expectedRoot, err := postState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if root != expectedRoot {
-		return fmt.Errorf("mismatching state roots")
-	}
+	require.NoError(t, err)
+
+	assert.EqualValues(t, haveRoot, expectedRoot)
 	return nil
 }

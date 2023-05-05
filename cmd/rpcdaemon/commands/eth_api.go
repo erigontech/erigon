@@ -343,25 +343,27 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
-	BlockHash        *common.Hash       `json:"blockHash"`
-	BlockNumber      *hexutil.Big       `json:"blockNumber"`
-	From             common.Address     `json:"from"`
-	Gas              hexutil.Uint64     `json:"gas"`
-	GasPrice         *hexutil.Big       `json:"gasPrice,omitempty"`
-	Tip              *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
-	FeeCap           *hexutil.Big       `json:"maxFeePerGas,omitempty"`
-	Hash             common.Hash        `json:"hash"`
-	Input            hexutility.Bytes   `json:"input"`
-	Nonce            hexutil.Uint64     `json:"nonce"`
-	To               *common.Address    `json:"to"`
-	TransactionIndex *hexutil.Uint64    `json:"transactionIndex"`
-	Value            *hexutil.Big       `json:"value"`
-	Type             hexutil.Uint64     `json:"type"`
-	Accesses         *types2.AccessList `json:"accessList,omitempty"`
-	ChainID          *hexutil.Big       `json:"chainId,omitempty"`
-	V                *hexutil.Big       `json:"v"`
-	R                *hexutil.Big       `json:"r"`
-	S                *hexutil.Big       `json:"s"`
+	BlockHash           *common.Hash       `json:"blockHash"`
+	BlockNumber         *hexutil.Big       `json:"blockNumber"`
+	From                common.Address     `json:"from"`
+	Gas                 hexutil.Uint64     `json:"gas"`
+	GasPrice            *hexutil.Big       `json:"gasPrice,omitempty"`
+	Tip                 *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
+	FeeCap              *hexutil.Big       `json:"maxFeePerGas,omitempty"`
+	Hash                common.Hash        `json:"hash"`
+	Input               hexutility.Bytes   `json:"input"`
+	Nonce               hexutil.Uint64     `json:"nonce"`
+	To                  *common.Address    `json:"to"`
+	TransactionIndex    *hexutil.Uint64    `json:"transactionIndex"`
+	Value               *hexutil.Big       `json:"value"`
+	Type                hexutil.Uint64     `json:"type"`
+	Accesses            *types2.AccessList `json:"accessList,omitempty"`
+	ChainID             *hexutil.Big       `json:"chainId,omitempty"`
+	MaxFeePerDataGas    *hexutil.Big       `json:"maxFeePerDataGas,omitempty"`
+	BlobVersionedHashes []common.Hash      `json:"blobVersionedHashes,omitempty"`
+	V                   *hexutil.Big       `json:"v"`
+	R                   *hexutil.Big       `json:"r"`
+	S                   *hexutil.Big       `json:"s"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
@@ -409,14 +411,17 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.R = (*hexutil.Big)(t.R.ToBig())
 		result.S = (*hexutil.Big)(t.S.ToBig())
 		result.Accesses = &t.AccessList
-		baseFee, overflow := uint256.FromBig(baseFee)
-		if baseFee != nil && !overflow && blockHash != (common.Hash{}) {
-			// price = min(tip + baseFee, gasFeeCap)
-			price := math.Min256(new(uint256.Int).Add(tx.GetTip(), baseFee), tx.GetFeeCap())
-			result.GasPrice = (*hexutil.Big)(price.ToBig())
-		} else {
-			result.GasPrice = nil
-		}
+		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
+	case *types.SignedBlobTx:
+		result.Tip = (*hexutil.Big)(t.GetTip().ToBig())
+		result.FeeCap = (*hexutil.Big)(t.GetFeeCap().ToBig())
+		result.MaxFeePerDataGas = (*hexutil.Big)(t.GetMaxFeePerDataGas().ToBig())
+		result.V = (*hexutil.Big)(t.Signature.GetV().ToBig())
+		result.R = (*hexutil.Big)(t.Signature.GetR().ToBig())
+		result.S = (*hexutil.Big)(t.Signature.GetS().ToBig())
+		al := t.GetAccessList()
+		result.Accesses = &al
+		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
 	}
 	signer := types.LatestSignerForChainID(chainId.ToBig())
 	result.From, _ = tx.Sender(*signer)
@@ -426,6 +431,16 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.TransactionIndex = (*hexutil.Uint64)(&index)
 	}
 	return result
+}
+
+func computeGasPrice(tx types.Transaction, blockHash common.Hash, baseFee *big.Int) *hexutil.Big {
+	fee, overflow := uint256.FromBig(baseFee)
+	if fee != nil && !overflow && blockHash != (common.Hash{}) {
+		// price = min(tip + baseFee, gasFeeCap)
+		price := math.Min256(new(uint256.Int).Add(tx.GetTip(), fee), tx.GetFeeCap())
+		return (*hexutil.Big)(price.ToBig())
+	}
+	return nil
 }
 
 // newRPCBorTransaction returns a Bor transaction that will serialize to the RPC

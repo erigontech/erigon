@@ -63,7 +63,7 @@ builds:
     env:
       - CC=x86_64-w64-mingw32-gcc
       - CXX=x86_64-w64-mingw32-g++
-    tags: [ nosqlite, noboltdb, netgo ]
+    tags: [ nosqlite, noboltdb ] # about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
     ldflags: -s -w
 
 dockers:

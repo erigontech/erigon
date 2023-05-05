@@ -4,22 +4,22 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
-func ProcessEth1DataReset(state *state.BeaconState) {
-	nextEpoch := state.Epoch() + 1
-	if nextEpoch%state.BeaconConfig().EpochsPerEth1VotingPeriod == 0 {
-		state.ResetEth1DataVotes()
+func ProcessEth1DataReset(s *state.BeaconState) {
+	nextEpoch := state.Epoch(s.BeaconState) + 1
+	if nextEpoch%s.BeaconConfig().EpochsPerEth1VotingPeriod == 0 {
+		s.ResetEth1DataVotes()
 	}
 }
 
-func ProcessSlashingsReset(state *state.BeaconState) {
-	state.SetSlashingSegmentAt(int(state.Epoch()+1)%int(state.BeaconConfig().EpochsPerSlashingsVector), 0)
+func ProcessSlashingsReset(s *state.BeaconState) {
+	s.SetSlashingSegmentAt(int(state.Epoch(s.BeaconState)+1)%int(s.BeaconConfig().EpochsPerSlashingsVector), 0)
 
 }
 
-func ProcessRandaoMixesReset(state *state.BeaconState) {
-	currentEpoch := state.Epoch()
-	nextEpoch := state.Epoch() + 1
-	state.SetRandaoMixAt(int(nextEpoch%state.BeaconConfig().EpochsPerHistoricalVector), state.GetRandaoMixes(currentEpoch))
+func ProcessRandaoMixesReset(s *state.BeaconState) {
+	currentEpoch := state.Epoch(s.BeaconState)
+	nextEpoch := state.Epoch(s.BeaconState) + 1
+	s.SetRandaoMixAt(int(nextEpoch%s.BeaconConfig().EpochsPerHistoricalVector), s.GetRandaoMixes(currentEpoch))
 }
 
 func ProcessParticipationFlagUpdates(state *state.BeaconState) {

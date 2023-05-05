@@ -297,6 +297,7 @@ func (s *EthBackendServer) checkWithdrawalsPresence(time uint64, withdrawals []*
 }
 
 func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
+	// TODO: get the latest update on this function (it was replaced)
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
@@ -333,7 +334,7 @@ func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remo
 		if !ok {
 			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobtx)
 		}
-		versionedHashes, kzgs, blobs, proofs := blobtx.GetDataHashes(), blobtx.BlobKzgs, blobtx.Blobs, blobtx.Proofs
+		versionedHashes, kzgs, blobs, proofs := blobtx.GetDataHashes(), blobtx.Commitments, blobtx.Blobs, blobtx.Proofs
 		lenCheck := len(versionedHashes)
 		if lenCheck != len(kzgs) || lenCheck != len(blobs) || lenCheck != len(blobtx.Proofs) {
 			return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d) / proofs (%d)"+

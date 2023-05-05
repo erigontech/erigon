@@ -182,7 +182,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		rw.taskGasPool.Reset(txTask.Tx.GetGas())
 		rw.callTracer.Reset()
 		vmConfig := vm.Config{Debug: true, Tracer: rw.callTracer, SkipAnalysis: txTask.SkipAnalysis}
-		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
+		ibs.SetTxContext(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
 		blockContext := txTask.EvmBlockContext

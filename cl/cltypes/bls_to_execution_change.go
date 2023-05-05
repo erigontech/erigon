@@ -43,6 +43,10 @@ func (b *BLSToExecutionChange) DecodeSSZ(buf []byte) error {
 	return nil
 }
 
+func (b *BLSToExecutionChange) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return b.DecodeSSZ(buf)
+}
+
 func (*BLSToExecutionChange) EncodingSizeSSZ() int {
 	return 76
 }

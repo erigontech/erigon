@@ -428,9 +428,10 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		}
 	}
 	t.Run("descend", func(t *testing.T) {
-		tx, err := m.DB.(kv.TemporalRoDB).BeginTemporalRo(m.Ctx)
+		dbtx, err := m.DB.BeginRo(m.Ctx)
 		require.NoError(t, err)
-		defer tx.Rollback()
+		defer dbtx.Rollback()
+		tx := dbtx.(kv.TemporalTx)
 
 		txNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 1024, -1, order.Desc, kv.Unlim)
 		require.NoError(t, err)
@@ -440,9 +441,10 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		checkIter(t, expectTxNums, txNumsIter)
 	})
 	t.Run("ascend", func(t *testing.T) {
-		tx, err := m.DB.(kv.TemporalRoDB).BeginTemporalRo(m.Ctx)
+		dbtx, err := m.DB.BeginRo(m.Ctx)
 		require.NoError(t, err)
-		defer tx.Rollback()
+		defer dbtx.Rollback()
+		tx := dbtx.(kv.TemporalTx)
 
 		txNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, order.Asc, kv.Unlim)
 		require.NoError(t, err)
@@ -452,9 +454,10 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		checkIter(t, expectTxNums, txNumsIter)
 	})
 	t.Run("ascend limit", func(t *testing.T) {
-		tx, err := m.DB.(kv.TemporalRoDB).BeginTemporalRo(m.Ctx)
+		dbtx, err := m.DB.BeginRo(m.Ctx)
 		require.NoError(t, err)
-		defer tx.Rollback()
+		defer dbtx.Rollback()
+		tx := dbtx.(kv.TemporalTx)
 
 		txNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
 		require.NoError(t, err)

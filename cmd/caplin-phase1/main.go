@@ -36,7 +36,7 @@ import (
 )
 
 func main() {
-	app := lightclientapp.MakeApp(runCaplinNode, flags.LCDefaultFlags)
+	app := lightclientapp.MakeApp("caplin-phase1", runCaplinNode, flags.LCDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {

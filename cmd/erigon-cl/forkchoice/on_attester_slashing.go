@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing) error {
@@ -17,15 +18,15 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		return fmt.Errorf("attestation data is not slashable")
 	}
 	// Retrieve justified state
-	state, err := f.forkGraph.GetState(f.justifiedCheckpoint.Root, false)
+	s, err := f.forkGraph.GetState(f.justifiedCheckpoint.Root, false)
 	if err != nil {
 		return err
 	}
-	if state == nil {
+	if s == nil {
 		return fmt.Errorf("justified checkpoint state not accessible")
 	}
 	// Verify validity of slashings
-	valid, err := state.IsValidIndexedAttestation(attestation1)
+	valid, err := state.IsValidIndexedAttestation(s.BeaconState, attestation1)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 1 validity: %v", err)
 	}
@@ -33,7 +34,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		return fmt.Errorf("invalid indexed attestation 1")
 	}
 
-	valid, err = state.IsValidIndexedAttestation(attestation2)
+	valid, err = state.IsValidIndexedAttestation(s.BeaconState, attestation2)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 2 validity: %v", err)
 	}

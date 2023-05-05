@@ -1151,27 +1151,14 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	}
 	cfg.Dirs = datadir.New(cfg.Dirs.DataDir)
 
-	if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.String(DbPageSizeFlag.Name))); err != nil {
-		panic(err)
-	}
+	cfg.MdbxPageSize = flags.DBPageSizeFlagUnmarshal(ctx, DbPageSizeFlag.Name, DbPageSizeFlag.Usage)
 	if err := cfg.MdbxDBSizeLimit.UnmarshalText([]byte(ctx.String(DbSizeLimitFlag.Name))); err != nil {
 		panic(err)
 	}
-	sz := cfg.MdbxPageSize.Bytes()
-	if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
-		panic(fmt.Errorf("invalid --db.pageSize: %s=%d, see: %s", ctx.String(DbPageSizeFlag.Name), sz, DbPageSizeFlag.Usage))
-	}
 	szLimit := cfg.MdbxDBSizeLimit.Bytes()
-	if szLimit%sz != 0 || szLimit < 256 {
+	if szLimit%256 != 0 || szLimit < 256 {
 		panic(fmt.Errorf("invalid --db.size.limit: %s=%d, see: %s", ctx.String(DbSizeLimitFlag.Name), szLimit, DbSizeLimitFlag.Usage))
 	}
-}
-
-func isPowerOfTwo(n uint64) bool {
-	if n == 0 { //corner case: if n is zero it will also consider as power 2
-		return true
-	}
-	return n&(n-1) == 0
 }
 
 func setDataDirCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
