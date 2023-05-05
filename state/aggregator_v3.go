@@ -780,9 +780,10 @@ type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
-func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
+func (a *AggregatorV3) rotate() []flusher {
 	a.walLock.Lock()
-	flushers := []flusher{
+	defer a.walLock.Unlock()
+	return []flusher{
 		a.accounts.Rotate(),
 		a.storage.Rotate(),
 		a.code.Rotate(),
@@ -791,7 +792,9 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 		a.tracesFrom.Rotate(),
 		a.tracesTo.Rotate(),
 	}
-	a.walLock.Unlock()
+}
+func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
+	flushers := a.rotate()
 	defer func(t time.Time) { log.Debug("[snapshots] history flush", "took", time.Since(t)) }(time.Now())
 	for _, f := range flushers {
 		if err := f.Flush(ctx, tx); err != nil {
