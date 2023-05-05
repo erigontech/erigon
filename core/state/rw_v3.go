@@ -626,7 +626,9 @@ func (rs *StateV3) DoneCount() uint64 { return ExecTxsDone.Get() }
 func (rs *StateV3) SizeEstimate() (r uint64) {
 	rs.lock.RLock()
 	r = uint64(rs.sizeEstimate) * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
-	r += rs.domains.SizeEstimate()
+	if rs.domains != nil {
+		r += rs.domains.SizeEstimate()
+	}
 	rs.lock.RUnlock()
 
 	return r
