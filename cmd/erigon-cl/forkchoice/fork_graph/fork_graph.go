@@ -81,9 +81,13 @@ func New(anchorState *state.BeaconState, enabledPruning bool) *ForkGraph {
 	if err != nil {
 		panic(err)
 	}
+	nextStateReference, err := anchorState.Copy()
+	if err != nil {
+		panic(err)
+	}
 	return &ForkGraph{
 		currentReferenceState: currentStateReference,
-		nextReferenceState:    currentStateReference,
+		nextReferenceState:    nextStateReference,
 		// storage
 		blocks:    make(map[libcommon.Hash]*cltypes.SignedBeaconBlock),
 		headers:   headers,
@@ -278,7 +282,6 @@ func (f *ForkGraph) removeOldData() (err error) {
 		return nil
 	}
 	pruneSlot := f.nextReferenceState.Slot() - f.beaconCfg.SlotsPerEpoch
-	log.Debug("Pruning old blocks", "pruneSlot", pruneSlot)
 	oldRoots := make([]libcommon.Hash, 0, len(f.blocks))
 	for hash, signedBlock := range f.blocks {
 		if signedBlock.Block.Slot >= pruneSlot {
@@ -295,10 +298,23 @@ func (f *ForkGraph) removeOldData() (err error) {
 		delete(f.headers, root)
 	}
 	// Lastly snapshot the state
-	f.currentReferenceState = f.nextReferenceState
+	err = f.nextReferenceState.CopyInto(f.currentReferenceState)
+	if err != nil {
+		panic(err) // dead at this point
+	}
 	err = f.currentState.CopyInto(f.nextReferenceState)
 	if err != nil {
 		panic(err) // dead at this point
 	}
+	// use the current reference state root as reconnectio
+	reconnectionRootLong, err := f.currentReferenceState.BlockRoot()
+	if err != nil {
+		panic(err)
+	}
+	reconnectionRootShort, err := f.nextReferenceState.BlockRoot()
+	if err != nil {
+		panic(err)
+	}
+	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot, "longRecconection", libcommon.Hash(reconnectionRootLong), "shortRecconection", libcommon.Hash(reconnectionRootShort))
 	return
 }
