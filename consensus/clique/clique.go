@@ -176,10 +176,10 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libc
 // Clique is the proof-of-authority consensus engine proposed to support the
 // Ethereum testnet following the Ropsten attacks.
 type Clique struct {
-	chainConfig    *chain.Config
+	ChainConfig    *chain.Config
 	config         *chain.CliqueConfig             // Consensus engine configuration parameters
 	snapshotConfig *params.ConsensusSnapshotConfig // Consensus engine configuration parameters
-	db             kv.RwDB                         // Database to store and retrieve snapshot checkpoints
+	DB             kv.RwDB                         // Database to store and retrieve snapshot checkpoints
 
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
 	recents    *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
@@ -213,10 +213,10 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliq
 	exitCh := make(chan struct{})
 
 	c := &Clique{
-		chainConfig:    cfg,
+		ChainConfig:    cfg,
 		config:         &conf,
 		snapshotConfig: snapshotConfig,
-		db:             cliqueDB,
+		DB:             cliqueDB,
 		recents:        recents,
 		signatures:     signatures,
 		proposals:      make(map[libcommon.Address]bool),
@@ -536,6 +536,20 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}
 }
 
+func NewCliqueAPI(db kv.RoDB, engine consensus.EngineReader) rpc.API {
+	var c *Clique
+	if casted, ok := engine.(*Clique); ok {
+		c = casted
+	}
+
+	return rpc.API{
+		Namespace: "clique",
+		Version:   "1.0",
+		Service:   &API{db: db, clique: c},
+		Public:    false,
+	}
+}
+
 // SealHash returns the hash of a block prior to it being sealed.
 func SealHash(header *types.Header) (hash libcommon.Hash) {
 	hasher := cryptopool.NewLegacyKeccak256()
@@ -592,7 +606,7 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 
 	blockEncoded := dbutils.EncodeBlockNumber(latest)
 
-	tx, err := c.db.BeginRo(context.Background())
+	tx, err := c.DB.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
