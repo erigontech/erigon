@@ -614,7 +614,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	}
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
-	initialCycle := true
+	initialCycle := false
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
