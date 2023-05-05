@@ -7,17 +7,16 @@ import (
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
 
-type Root [32]byte
 type Slot uint64
 type Blob gokzg4844.Blob
 type KZGCommitment gokzg4844.KZGCommitment // [48]byte
 type KZGProof gokzg4844.KZGProof           // [48]byte
 
 type BlobSideCar struct {
-	BlockRoot       Root
+	BlockRoot       libcommon.Hash
 	Index           uint64 // index of blob in block
 	Slot            Slot
-	BlockParentRoot Root
+	BlockParentRoot libcommon.Hash
 	ProposerIndex   uint64 // validator index
 	Blob            Blob
 	KZGCommitment   KZGCommitment
@@ -166,7 +165,7 @@ func (b *SignedBlobSideCar) HashSSZ() (libcommon.Hash, error) {
 }
 
 type BlobIdentifier struct {
-	BlockRoot Root
+	BlockRoot libcommon.Hash
 	Index     uint64
 }
 

@@ -34,16 +34,12 @@ func (d *DepositData) EncodeSSZ(dst []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (d *DepositData) DecodeSSZ(buf []byte) error {
+func (d *DepositData) DecodeSSZ(buf []byte, _ int) error {
 	copy(d.PubKey[:], buf)
 	copy(d.WithdrawalCredentials[:], buf[48:])
 	d.Amount = ssz.UnmarshalUint64SSZ(buf[80:])
 	copy(d.Signature[:], buf[88:])
 	return nil
-}
-
-func (d *DepositData) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return d.DecodeSSZ(buf)
 }
 
 func (d *DepositData) EncodingSizeSSZ() int {
@@ -97,7 +93,7 @@ func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {
 	return d.Data.EncodeSSZ(buf)
 }
 
-func (d *Deposit) DecodeSSZ(buf []byte) error {
+func (d *Deposit) DecodeSSZ(buf []byte, version int) error {
 	d.Proof = make([]libcommon.Hash, DepositProofLength)
 	for i := range d.Proof {
 		copy(d.Proof[i][:], buf[i*32:i*32+32])
@@ -106,11 +102,7 @@ func (d *Deposit) DecodeSSZ(buf []byte) error {
 	if d.Data == nil {
 		d.Data = new(DepositData)
 	}
-	return d.Data.DecodeSSZ(buf[33*32:])
-}
-
-func (d *Deposit) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return d.DecodeSSZ(buf)
+	return d.Data.DecodeSSZ(buf[33*32:], version)
 }
 
 func (d *Deposit) EncodingSizeSSZ() int {
@@ -171,7 +163,7 @@ func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {
 	return append(buf, e.Signature[:]...), nil
 }
 
-func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte) error {
+func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte, _ int) error {
 	if e.VolunaryExit == nil {
 		e.VolunaryExit = new(VoluntaryExit)
 	}
@@ -181,10 +173,6 @@ func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte) error {
 	}
 	copy(e.Signature[:], buf[16:])
 	return nil
-}
-
-func (e *SignedVoluntaryExit) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return e.DecodeSSZ(buf)
 }
 
 func (e *SignedVoluntaryExit) HashSSZ() ([32]byte, error) {
@@ -234,8 +222,7 @@ func (s *SyncCommittee) EncodeSSZ(buf []byte) ([]byte, error) {
 	return dst, nil
 }
 
-// DecodeSSZ ssz unmarshals the SyncCommittee object
-func (s *SyncCommittee) DecodeSSZ(buf []byte) error {
+func (s *SyncCommittee) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < 24624 {
 		return ssz.ErrLowBufferSize
 	}
@@ -247,10 +234,6 @@ func (s *SyncCommittee) DecodeSSZ(buf []byte) error {
 	copy(s.AggregatePublicKey[:], buf[24576:])
 
 	return nil
-}
-
-func (s *SyncCommittee) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return s.DecodeSSZ(buf)
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the SyncCommittee object
@@ -359,11 +342,7 @@ func (v *Validator) EncodeSSZ(dst []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (v *Validator) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return v.DecodeSSZ(buf)
-}
-
-func (v *Validator) DecodeSSZ(buf []byte) error {
+func (v *Validator) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < v.EncodingSizeSSZ() {
 		return ssz.ErrLowBufferSize
 	}

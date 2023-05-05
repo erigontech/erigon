@@ -42,7 +42,7 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		require.NoError(t, err)
 		encoded, err := utils.DecompressSnappy(snappyEncoded)
 		require.NoError(t, err)
-		if err := object.DecodeSSZWithVersion(encoded, int(c.Version())); err != nil && !isBeaconState {
+		if err := object.DecodeSSZ(encoded, int(c.Version())); err != nil && !isBeaconState {
 			return err
 		}
 		haveRoot, err := object.HashSSZ()

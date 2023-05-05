@@ -71,6 +71,6 @@ func TestMarshalNetworkTypes(t *testing.T) {
 		marshalledBytes, err := tc.EncodeSSZ(nil)
 		require.NoError(t, err)
 		require.Equal(t, len(marshalledBytes), tc.EncodingSizeSSZ())
-		require.NoError(t, unmarshalDestinations[i].DecodeSSZWithVersion(marshalledBytes, int(clparams.CapellaVersion)))
+		require.NoError(t, unmarshalDestinations[i].DecodeSSZ(marshalledBytes, int(clparams.CapellaVersion)))
 	}
 }

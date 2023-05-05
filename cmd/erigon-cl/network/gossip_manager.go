@@ -61,7 +61,7 @@ func (g *GossipManager) Start() {
 		switch data.Type {
 		case sentinel.GossipType_BeaconBlockGossipType:
 			object = &cltypes.SignedBeaconBlock{}
-			if err := object.DecodeSSZWithVersion(common.CopyBytes(data.Data), int(version)); err != nil {
+			if err := object.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				log.Debug("[Beacon Gossip] Failure in decoding block", "err", err)
 				g.sentinel.BanPeer(g.ctx, data.Peer)
 				continue
@@ -96,11 +96,18 @@ func (g *GossipManager) Start() {
 					continue
 				}
 			}
-
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
 			// Now check the head
 			headRoot, headSlot, err := g.forkChoice.GetHead()
 			if err != nil {
 				log.Debug("Could not fetch head data", "err", err)
+				log.Debug("New block imported",
+					"slot", block.Block.Slot,
+					"alloc", libcommon.ByteCount(m.Alloc),
+					"sys", libcommon.ByteCount(m.Sys),
+					"numGC", m.NumGC,
+				)
 				continue
 			}
 			// Do forkchoice if possible
@@ -115,8 +122,7 @@ func (g *GossipManager) Start() {
 					return
 				}
 			}
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
+
 			// Log final result
 			log.Debug("New block imported",
 				"slot", block.Block.Slot, "head", headSlot, "headRoot", headRoot,
@@ -126,21 +132,21 @@ func (g *GossipManager) Start() {
 			)
 		case sentinel.GossipType_VoluntaryExitGossipType:
 			object = &cltypes.SignedVoluntaryExit{}
-			if err := object.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
+			if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
 				log.Debug("[Beacon Gossip] Failure in decoding exit", "err", err)
 				g.sentinel.BanPeer(g.ctx, data.Peer)
 				continue
 			}
 		case sentinel.GossipType_ProposerSlashingGossipType:
 			object = &cltypes.ProposerSlashing{}
-			if err := object.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
+			if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
 				log.Debug("[Beacon Gossip] Failure in decoding proposer slashing", "err", err)
 				g.sentinel.BanPeer(g.ctx, data.Peer)
 				continue
 			}
 		case sentinel.GossipType_AttesterSlashingGossipType:
 			object = &cltypes.AttesterSlashing{}
-			if err := object.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
+			if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
 				log.Debug("[Beacon Gossip] Failure in decoding attester slashing", "err", err)
 				g.sentinel.BanPeer(g.ctx, data.Peer)
 				continue
@@ -151,7 +157,7 @@ func (g *GossipManager) Start() {
 			}
 		case sentinel.GossipType_AggregateAndProofGossipType:
 			object = &cltypes.SignedAggregateAndProof{}
-			if err := object.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
+			if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
 				log.Debug("[Beacon Gossip] Failure in decoding proof", "err", err)
 				g.sentinel.BanPeer(g.ctx, data.Peer)
 				continue

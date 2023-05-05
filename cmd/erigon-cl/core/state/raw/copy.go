@@ -22,10 +22,21 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 		dst.eth1DataVotes[i] = b.eth1DataVotes[i].Copy()
 	}
 	dst.eth1DepositIndex = b.eth1DepositIndex
-	dst.validators = make([]*cltypes.Validator, len(b.validators))
-	for i := range b.validators {
-		dst.validators[i] = b.validators[i].Copy()
+	for i, validator := range b.validators {
+		if i >= len(dst.validators) {
+			dst.validators = append(dst.validators, validator.Copy())
+			continue
+		}
+		copy(dst.validators[i].WithdrawalCredentials[:], validator.WithdrawalCredentials[:])
+		copy(dst.validators[i].PublicKey[:], validator.PublicKey[:])
+		dst.validators[i].ActivationEligibilityEpoch = validator.ActivationEligibilityEpoch
+		dst.validators[i].ActivationEpoch = validator.ActivationEpoch
+		dst.validators[i].ExitEpoch = validator.ExitEpoch
+		dst.validators[i].EffectiveBalance = validator.EffectiveBalance
+		dst.validators[i].Slashed = validator.Slashed
+		dst.validators[i].WithdrawableEpoch = validator.WithdrawableEpoch
 	}
+	dst.validators = dst.validators[:len(b.validators)]
 	dst.balances = make([]uint64, len(b.balances))
 	copy(dst.balances, b.balances)
 	copy(dst.randaoMixes[:], b.randaoMixes[:])

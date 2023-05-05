@@ -251,7 +251,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 
 }
 
-func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
+func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	b.version = clparams.StateVersion(version)
 	if len(buf) < b.EncodingSizeSSZ() {
 		return ssz.ErrLowBufferSize
@@ -262,13 +262,13 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	b.slot = ssz.UnmarshalUint64SSZ(buf[40:])
 	// Fork data
 	b.fork = new(cltypes.Fork)
-	if err := b.fork.DecodeSSZ(buf[48:]); err != nil {
+	if err := b.fork.DecodeSSZ(buf[48:], version); err != nil {
 		return err
 	}
 	pos := 64
 	// Latest block header
 	b.latestBlockHeader = new(cltypes.BeaconBlockHeader)
-	if err := b.latestBlockHeader.DecodeSSZ(buf[64:]); err != nil {
+	if err := b.latestBlockHeader.DecodeSSZ(buf[64:], version); err != nil {
 		return err
 	}
 	pos += b.latestBlockHeader.EncodingSizeSSZ()
@@ -287,7 +287,7 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	pos += 4
 	// Decode eth1 data
 	b.eth1Data = new(cltypes.Eth1Data)
-	if err := b.eth1Data.DecodeSSZ(buf[pos:]); err != nil {
+	if err := b.eth1Data.DecodeSSZ(buf[pos:], version); err != nil {
 		return err
 	}
 	pos += b.eth1Data.EncodingSizeSSZ()
@@ -326,15 +326,15 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	b.previousJustifiedCheckpoint = new(cltypes.Checkpoint)
 	b.currentJustifiedCheckpoint = new(cltypes.Checkpoint)
 	b.finalizedCheckpoint = new(cltypes.Checkpoint)
-	if err := b.previousJustifiedCheckpoint.DecodeSSZ(buf[pos:]); err != nil {
+	if err := b.previousJustifiedCheckpoint.DecodeSSZ(buf[pos:], version); err != nil {
 		return err
 	}
 	pos += b.previousJustifiedCheckpoint.EncodingSizeSSZ()
-	if err := b.currentJustifiedCheckpoint.DecodeSSZ(buf[pos:]); err != nil {
+	if err := b.currentJustifiedCheckpoint.DecodeSSZ(buf[pos:], version); err != nil {
 		return err
 	}
 	pos += b.currentJustifiedCheckpoint.EncodingSizeSSZ()
-	if err := b.finalizedCheckpoint.DecodeSSZ(buf[pos:]); err != nil {
+	if err := b.finalizedCheckpoint.DecodeSSZ(buf[pos:], version); err != nil {
 		return err
 	}
 	pos += b.finalizedCheckpoint.EncodingSizeSSZ()
@@ -346,11 +346,11 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 		pos += 4
 		b.currentSyncCommittee = new(cltypes.SyncCommittee)
 		b.nextSyncCommittee = new(cltypes.SyncCommittee)
-		if err := b.currentSyncCommittee.DecodeSSZ(buf[pos:]); err != nil {
+		if err := b.currentSyncCommittee.DecodeSSZ(buf[pos:], version); err != nil {
 			return err
 		}
 		pos += b.currentSyncCommittee.EncodingSizeSSZ()
-		if err := b.nextSyncCommittee.DecodeSSZ(buf[pos:]); err != nil {
+		if err := b.nextSyncCommittee.DecodeSSZ(buf[pos:], version); err != nil {
 			return err
 		}
 		pos += b.nextSyncCommittee.EncodingSizeSSZ()
@@ -376,10 +376,10 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	if b.historicalRoots, err = ssz.DecodeHashList(buf, historicalRootsOffset, votesOffset, state_encoding.HistoricalRootsLength); err != nil {
 		return err
 	}
-	if b.eth1DataVotes, err = ssz.DecodeStaticList[*cltypes.Eth1Data](buf, votesOffset, validatorsOffset, 72, maxEth1Votes); err != nil {
+	if b.eth1DataVotes, err = ssz.DecodeStaticList[*cltypes.Eth1Data](buf, votesOffset, validatorsOffset, 72, maxEth1Votes, version); err != nil {
 		return err
 	}
-	if b.validators, err = ssz.DecodeStaticList[*cltypes.Validator](buf, validatorsOffset, balancesOffset, 121, state_encoding.ValidatorRegistryLimit); err != nil {
+	if b.validators, err = ssz.DecodeStaticList[*cltypes.Validator](buf, validatorsOffset, balancesOffset, 121, state_encoding.ValidatorRegistryLimit, version); err != nil {
 		return err
 	}
 	if b.balances, err = ssz.DecodeNumbersList(buf, balancesOffset, previousEpochParticipationOffset, state_encoding.ValidatorRegistryLimit); err != nil {
@@ -387,10 +387,10 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	}
 	if b.version == clparams.Phase0Version {
 		maxAttestations := b.beaconConfig.SlotsPerEpoch * b.beaconConfig.MaxAttestations
-		if b.previousEpochAttestations, err = ssz.DecodeDynamicList[*cltypes.PendingAttestation](buf, previousEpochParticipationOffset, currentEpochParticipationOffset, maxAttestations); err != nil {
+		if b.previousEpochAttestations, err = ssz.DecodeDynamicList[*cltypes.PendingAttestation](buf, previousEpochParticipationOffset, currentEpochParticipationOffset, maxAttestations, version); err != nil {
 			return err
 		}
-		if b.currentEpochAttestations, err = ssz.DecodeDynamicList[*cltypes.PendingAttestation](buf, currentEpochParticipationOffset, uint32(len(buf)), maxAttestations); err != nil {
+		if b.currentEpochAttestations, err = ssz.DecodeDynamicList[*cltypes.PendingAttestation](buf, currentEpochParticipationOffset, uint32(len(buf)), maxAttestations, version); err != nil {
 			return err
 		}
 		return b.init()
@@ -425,13 +425,13 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 		return ssz.ErrLowBufferSize
 	}
 	b.latestExecutionPayloadHeader = new(cltypes.Eth1Header)
-	if err := b.latestExecutionPayloadHeader.DecodeSSZWithVersion(buf[executionPayloadOffset:endOffset], int(b.version)); err != nil {
+	if err := b.latestExecutionPayloadHeader.DecodeSSZ(buf[executionPayloadOffset:endOffset], int(b.version)); err != nil {
 		return err
 	}
 	if b.version == clparams.BellatrixVersion {
 		return b.init()
 	}
-	if b.historicalSummaries, err = ssz.DecodeStaticList[*cltypes.HistoricalSummary](buf, historicalSummariesOffset, uint32(len(buf)), 64, state_encoding.HistoricalRootsLength); err != nil {
+	if b.historicalSummaries, err = ssz.DecodeStaticList[*cltypes.HistoricalSummary](buf, historicalSummariesOffset, uint32(len(buf)), 64, state_encoding.HistoricalRootsLength, version); err != nil {
 		return err
 	}
 	// Capella

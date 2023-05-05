@@ -56,11 +56,6 @@ func (b *BeaconState) SetPreviousStateRoot(root libcommon.Hash) {
 	b.previousStateRoot = root
 }
 
-// MarshallSSZTo retrieve the SSZ encoded length of the state.
-func (b *BeaconState) DecodeSSZ(buf []byte) error {
-	panic("not implemented")
-}
-
 func (b *BeaconState) _updateProposerIndex() (err error) {
 	epoch := Epoch(b.BeaconState)
 

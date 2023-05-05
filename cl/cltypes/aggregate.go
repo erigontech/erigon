@@ -30,21 +30,17 @@ func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (a *AggregateAndProof) DecodeSSZ(buf []byte) error {
+func (a *AggregateAndProof) DecodeSSZ(buf []byte, version int) error {
 	a.AggregatorIndex = ssz.UnmarshalUint64SSZ(buf)
 	if a.Aggregate == nil {
 		a.Aggregate = new(Attestation)
 	}
 
 	copy(a.SelectionProof[:], buf[12:])
-	if err := a.Aggregate.DecodeSSZ(buf[108:]); err != nil {
+	if err := a.Aggregate.DecodeSSZ(buf[108:], version); err != nil {
 		return err
 	}
 	return nil
-}
-
-func (a *AggregateAndProof) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return a.DecodeSSZ(buf)
 }
 
 func (a *AggregateAndProof) EncodingSizeSSZ() int {
@@ -83,21 +79,18 @@ func (a *SignedAggregateAndProof) EncodedSSZ(dst []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte) error {
+func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte, version int) error {
 	if a.Message == nil {
 		a.Message = new(AggregateAndProof)
 	}
 
 	copy(a.Signature[:], buf[4:])
 
-	if err := a.Message.DecodeSSZ(buf[100:]); err != nil {
+	if err := a.Message.DecodeSSZ(buf[100:], version); err != nil {
 		return err
 	}
 
 	return nil
-}
-func (a *SignedAggregateAndProof) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return a.DecodeSSZ(buf)
 }
 
 func (a *SignedAggregateAndProof) EncodingSizeSSZ() int {
@@ -130,14 +123,10 @@ func (agg *SyncAggregate) EncodeSSZ(buf []byte) ([]byte, error) {
 	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...), nil
 }
 
-func (agg *SyncAggregate) DecodeSSZ(buf []byte) error {
+func (agg *SyncAggregate) DecodeSSZ(buf []byte, _ int) error {
 	copy(agg.SyncCommiteeBits[:], buf)
 	copy(agg.SyncCommiteeSignature[:], buf[64:])
 	return nil
-}
-
-func (agg *SyncAggregate) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return agg.DecodeSSZ(buf)
 }
 
 func (agg *SyncAggregate) EncodingSizeSSZ() int {

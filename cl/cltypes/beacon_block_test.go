@@ -109,7 +109,7 @@ func TestCapellaBlock(t *testing.T) {
 	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
 	require.NoError(t, err)
 	block2 := &cltypes.SignedBeaconBlock{}
-	require.NoError(t, block2.DecodeSSZWithVersion(encoded, int(clparams.CapellaVersion)))
+	require.NoError(t, block2.DecodeSSZ(encoded, int(clparams.CapellaVersion)))
 }
 
 func TestBellatrixBlock(t *testing.T) {
@@ -123,7 +123,7 @@ func TestBellatrixBlock(t *testing.T) {
 	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
 	require.NoError(t, err)
 	block2 := &cltypes.SignedBeaconBlock{}
-	require.NoError(t, block2.DecodeSSZWithVersion(encoded, int(clparams.BellatrixVersion)))
+	require.NoError(t, block2.DecodeSSZ(encoded, int(clparams.BellatrixVersion)))
 }
 
 func TestAltairBlock(t *testing.T) {
@@ -136,7 +136,7 @@ func TestAltairBlock(t *testing.T) {
 	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
 	require.NoError(t, err)
 	block2 := &cltypes.SignedBeaconBlock{}
-	require.NoError(t, block2.DecodeSSZWithVersion(encoded, int(clparams.AltairVersion)))
+	require.NoError(t, block2.DecodeSSZ(encoded, int(clparams.AltairVersion)))
 	hash2, err := block2.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(hash2), altairHash)
@@ -157,7 +157,7 @@ func TestPhase0Block(t *testing.T) {
 	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
 	require.NoError(t, err)
 	block2 := &cltypes.SignedBeaconBlock{}
-	require.NoError(t, block2.DecodeSSZWithVersion(encoded, int(clparams.Phase0Version)))
+	require.NoError(t, block2.DecodeSSZ(encoded, int(clparams.Phase0Version)))
 	hash2, err := block2.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(hash2), phase0Hash)
