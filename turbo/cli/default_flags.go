@@ -4,7 +4,6 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 // DefaultFlags contains all flags that are used and supported by Erigon binary.
@@ -148,12 +147,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.OverrideShanghaiTime,
 
 	&utils.ConfigFlag,
-	&logging.LogConsoleVerbosityFlag,
-	&logging.LogDirVerbosityFlag,
-	&logging.LogDirPathFlag,
-	&logging.LogConsoleJsonFlag,
-	&logging.LogJsonFlag,
-	&logging.LogDirJsonFlag,
 
 	&utils.LightClientDiscoveryAddrFlag,
 	&utils.LightClientDiscoveryPortFlag,
