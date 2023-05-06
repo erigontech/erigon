@@ -98,8 +98,8 @@ func addSszTests() {
 		//	With("DepositMessage", getSSZStaticConsensusTest(&cltypes.DepositMessage{})).
 		// With("Eth1Block", getSSZStaticConsensusTest(&cltypes.Eth1Block{})).
 		With("Eth1Data", getSSZStaticConsensusTest(&cltypes.Eth1Data{})).
-		//With("ExecutionPayload", getSSZStaticConsensusTest(&cltypes.Eth1Block{})). TODO
-		//With("ExecutionPayloadHeader", getSSZStaticConsensusTest(&cltypes.Eth1Header{})). TODO
+		With("ExecutionPayload", getSSZStaticConsensusTest(&cltypes.Eth1Block{})).
+		With("ExecutionPayloadHeader", getSSZStaticConsensusTest(&cltypes.Eth1Header{})).
 		With("Fork", getSSZStaticConsensusTest(&cltypes.Fork{})).
 		//With("ForkData", getSSZStaticConsensusTest(&cltypes.ForkData{})).
 		//With("HistoricalBatch", getSSZStaticConsensusTest(&cltypes.HistoricalBatch{})).

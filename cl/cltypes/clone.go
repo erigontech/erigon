@@ -128,3 +128,7 @@ func (*BlobIdentifier) Clone() clonable.Clonable {
 func (*BlobKZGCommitment) Clone() clonable.Clonable {
 	return &BlobKZGCommitment{}
 }
+
+func (*Eth1Header) Clone() clonable.Clonable {
+	return &Eth1Header{}
+}

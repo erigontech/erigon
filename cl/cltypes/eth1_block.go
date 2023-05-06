@@ -51,12 +51,14 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 	var baseFee32 [32]byte
 	copy(baseFee32[:], baseFeeBytes)
 
-	excessDataGasBytes := header.ExcessDataGas.Bytes()
-	for i, j := 0, len(excessDataGasBytes)-1; i < j; i, j = i+1, j-1 {
-		excessDataGasBytes[i], excessDataGasBytes[j] = excessDataGasBytes[j], excessDataGasBytes[i]
-	}
 	var excessDataGas32 [32]byte
-	copy(excessDataGas32[:], excessDataGasBytes)
+	if header.ExcessDataGas != nil {
+		excessDataGasBytes := header.ExcessDataGas.Bytes()
+		for i, j := 0, len(excessDataGasBytes)-1; i < j; i, j = i+1, j-1 {
+			excessDataGasBytes[i], excessDataGasBytes[j] = excessDataGasBytes[j], excessDataGasBytes[i]
+		}
+		copy(excessDataGas32[:], excessDataGasBytes)
+	}
 
 	block := &Eth1Block{
 		ParentHash:    header.ParentHash,
@@ -77,7 +79,7 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 		ExcessDataGas: excessDataGas32,
 	}
 
-	if block.ExcessDataGas != [32]byte{} {
+	if header.ExcessDataGas != nil {
 		block.version = clparams.DenebVersion
 	} else if header.WithdrawalsHash != nil {
 		block.version = clparams.CapellaVersion
@@ -101,11 +103,6 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 		}
 	}
 
-	excessDataGas := [32]byte{}
-	if b.version >= clparams.DenebVersion {
-		copy(excessDataGas[:], b.ExcessDataGas[:])
-	}
-
 	return &Eth1Header{
 		ParentHash:       b.ParentHash,
 		FeeRecipient:     b.FeeRecipient,
@@ -122,7 +119,7 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 		BlockHash:        b.BlockHash,
 		TransactionsRoot: transactionsRoot,
 		WithdrawalsRoot:  withdrawalsRoot,
-		ExcessDataGas:    excessDataGas,
+		ExcessDataGas:    b.ExcessDataGas,
 		version:          b.version,
 	}, nil
 }
@@ -178,6 +175,10 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	if version >= int(clparams.CapellaVersion) {
 		withdrawalOffset = new(uint32)
 		*withdrawalOffset = ssz.DecodeOffset(buf[pos:])
+	}
+	pos += 4
+	if version >= int(clparams.DenebVersion) {
+		copy(b.ExcessDataGas[:], buf[pos:])
 	}
 	// Compute extra data.
 	b.Extra = common.CopyBytes(buf[extraDataOffset:transactionsOffset])
@@ -237,14 +238,10 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 		length--
 	}
 
-	withdrawalsEndPos := len(buf)
-	if version >= int(clparams.DenebVersion) {
-		withdrawalsEndPos = len(buf) - 32 // last 32 bytes are for ExcessDataGas
-	}
 	// If withdrawals are enabled, process them.
 	if withdrawalOffset != nil {
 		var err error
-		b.Withdrawals, err = ssz.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(withdrawalsEndPos), 44, 16, version)
+		b.Withdrawals, err = ssz.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(len(buf)), 44, 16, version)
 		if err != nil {
 			return fmt.Errorf("[Eth1Block] err: %s", err)
 		}
@@ -261,6 +258,9 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 
 	if b.version >= clparams.CapellaVersion {
 		currentOffset += 4
+	}
+	if b.version >= clparams.DenebVersion {
+		currentOffset += 32
 	}
 	payloadHeader, err := b.PayloadHeader()
 	if err != nil {
@@ -285,10 +285,15 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 		}
 	}
 
+	if b.version >= clparams.DenebVersion {
+		buf = append(buf, b.ExcessDataGas[:]...)
+	}
+
 	// Sanity check for extra data then write it.
 	if len(b.Extra) > 32 {
 		return nil, fmt.Errorf("Encode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Extra))
 	}
+
 	buf = append(buf, b.Extra...)
 	// Write all tx offsets
 	txOffset := len(b.Transactions) * 4
@@ -306,15 +311,11 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 		buf = append(buf, withdrawal.EncodeSSZ()...)
 	}
 
-	if b.version >= clparams.DenebVersion {
-		buf = append(buf, b.ExcessDataGas[:]...)
-	}
-
 	return buf, nil
 }
 
 // HashSSZ calculates the SSZ hash of the Eth1Block's payload header.
-func (b *Eth1Block) HashSSZ(version clparams.StateVersion) ([32]byte, error) {
+func (b *Eth1Block) HashSSZ() ([32]byte, error) {
 	// Get the payload header.
 	header, err := b.PayloadHeader()
 	if err != nil {

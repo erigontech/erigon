@@ -51,6 +51,12 @@ func (e *Eth1Header) Capella() {
 	e.WithdrawalsRoot = libcommon.Hash{}
 }
 
+// Capella converts the header to capella version.
+func (e *Eth1Header) Deneb() {
+	e.version = clparams.DenebVersion
+	e.ExcessDataGas = [32]byte{}
+}
+
 func (e *Eth1Header) IsZero() bool {
 	return e.ParentHash == libcommon.Hash{} && e.FeeRecipient == libcommon.Address{} && e.StateRoot == libcommon.Hash{} &&
 		e.ReceiptsRoot == libcommon.Hash{} && e.LogsBloom == types.Bloom{} && e.PrevRandao == libcommon.Hash{} && e.BlockNumber == 0 &&

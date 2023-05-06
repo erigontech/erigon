@@ -123,6 +123,11 @@ func ProcessSlots(s *state.BeaconState, slot uint64) error {
 				return err
 			}
 		}
+		if state.Epoch(s.BeaconState) == beaconConfig.DenebForkEpoch {
+			if err := s.UpgradeToDeneb(); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

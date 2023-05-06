@@ -286,7 +286,6 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 
 	if b.Version >= clparams.DenebVersion {
 		for _, commitment := range b.BlobKzgCommitments {
-			size += 4
 			size += commitment.EncodingSizeSSZ()
 		}
 	}
@@ -391,7 +390,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 			return fmt.Errorf("[BeaconBody] err: %s", err)
 		}
 	}
-
+	endOffset = len(buf)
 	if b.Version >= clparams.DenebVersion {
 		endOffset = int(blobKzgCommitmentOffset)
 	}
@@ -467,7 +466,7 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 		leaves = append(leaves, aggLeaf)
 	}
 	if b.Version >= clparams.BellatrixVersion {
-		payloadLeaf, err := b.ExecutionPayload.HashSSZ(b.Version)
+		payloadLeaf, err := b.ExecutionPayload.HashSSZ()
 		if err != nil {
 			return [32]byte{}, err
 		}
@@ -482,16 +481,7 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	}
 
 	if b.Version >= clparams.DenebVersion {
-		blobKzgCommitmentsRoot := make([][32]byte, len(b.BlobKzgCommitments))
-		for i, commitment := range b.BlobKzgCommitments {
-			pk, err := commitment.HashSSZ()
-			if err != nil {
-				return [32]byte{}, err
-			}
-
-			copy(blobKzgCommitmentsRoot[i][:], pk[:])
-		}
-		blobKzgCommitmentsLeaf, err := merkle_tree.MerkleizeVector(blobKzgCommitmentsRoot, MaxBlobsPerBlock)
+		blobKzgCommitmentsLeaf, err := merkle_tree.ListObjectSSZRoot(b.BlobKzgCommitments, MaxBlobsPerBlock)
 		if err != nil {
 			return [32]byte{}, err
 		}
