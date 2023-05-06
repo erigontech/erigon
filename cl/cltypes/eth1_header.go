@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
@@ -85,6 +87,10 @@ func (h *Eth1Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 		offset += 32
 	}
 
+	if h.version >= clparams.DenebVersion {
+		offset += 32
+	}
+
 	buf, err = h.encodeHeaderMetadataForSSZ(buf, offset)
 	if err != nil {
 		return nil, err
@@ -135,6 +141,7 @@ func (h *Eth1Header) decodeHeaderMetadataForSSZ(buf []byte) (pos int, extraDataO
 	pos += 32
 	copy(h.BlockHash[:], buf[pos:])
 	pos += 32
+
 	return
 }
 
@@ -142,7 +149,7 @@ func (h *Eth1Header) decodeHeaderMetadataForSSZ(buf []byte) (pos int, extraDataO
 func (h *Eth1Header) DecodeSSZ(buf []byte, version int) error {
 	h.version = clparams.StateVersion(version)
 	if len(buf) < h.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[Eth1Header] err: %s", ssz.ErrLowBufferSize)
 	}
 	pos, _ := h.decodeHeaderMetadataForSSZ(buf)
 	copy(h.TransactionsRoot[:], buf[pos:])

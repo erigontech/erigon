@@ -87,14 +87,14 @@ var testBeaconBlockVariation = &cltypes.SignedBeaconBlock{
 					},
 				},
 			},
-			BlobKzgCommitments: []*cltypes.BlobKZGCommitment{{}},
+			BlobKzgCommitments: []*cltypes.BlobKZGCommitment{&cltypes.BlobKZGCommitment{Commitment: cltypes.KZGCommitment{'1', '2', '3', '4'}}},
 		},
 	},
 }
 
 var (
 	// Hashes
-	denebHash     = common.HexToHash("0x3a2dc42780bb2bc5ea18e0a9ab1740060a8dcae74439a3bf97549922df06234b")
+	denebHash     = common.HexToHash("0x67d8749d52957982900a9fb108a20f35234bb61045568d6c9644a2bb80d13282")
 	capellaHash   = common.HexToHash("0xc4892f81461ed3a24db4b44f26a728219faf1f278d8a1c21d774e2efa73cf1a3")
 	bellatrixHash = common.HexToHash("9a5bc717ecaf6a8d6e879478003729b9ce4e71f5c4e9b4bd4dd166780894ee93")
 	altairHash    = common.HexToHash("36aa8fe956265d171b7ad740077ea9579e25ed3b2f7b2010016513e4ac4754cb")

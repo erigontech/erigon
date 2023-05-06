@@ -254,7 +254,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	b.version = clparams.StateVersion(version)
 	if len(buf) < b.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[BeaconState] err: %s", ssz.ErrLowBufferSize)
 	}
 	// Direct unmarshalling for first 3 fields
 	b.genesisTime = ssz.UnmarshalUint64SSZ(buf)
@@ -422,7 +422,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	}
 
 	if len(buf) < int(endOffset) || executionPayloadOffset > endOffset {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[BeaconState] err: %s", ssz.ErrLowBufferSize)
 	}
 	b.latestExecutionPayloadHeader = new(cltypes.Eth1Header)
 	if err := b.latestExecutionPayloadHeader.DecodeSSZ(buf[executionPayloadOffset:endOffset], int(b.version)); err != nil {

@@ -153,7 +153,7 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	b.version = clparams.StateVersion(version)
 	if len(buf) < b.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrLowBufferSize)
 	}
 	// We can reuse code from eth1-header for partial decoding
 	payloadHeader := Eth1Header{}
@@ -182,18 +182,18 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	// Compute extra data.
 	b.Extra = common.CopyBytes(buf[extraDataOffset:transactionsOffset])
 	if len(b.Extra) > 32 {
-		return fmt.Errorf("Decode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Extra))
+		return fmt.Errorf("[Eth1Block] err: Decode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Extra))
 	}
 	// Compute transactions
 	var transactionsBuffer []byte
 	if withdrawalOffset == nil {
 		if len(transactionsBuffer) > len(buf) {
-			return ssz.ErrLowBufferSize
+			return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrLowBufferSize)
 		}
 		transactionsBuffer = buf[transactionsOffset:]
 	} else {
 		if len(transactionsBuffer) > int(*withdrawalOffset) || int(*withdrawalOffset) > len(buf) {
-			return ssz.ErrBadOffset
+			return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrBadOffset)
 		}
 		transactionsBuffer = buf[transactionsOffset:*withdrawalOffset]
 	}
@@ -205,13 +205,13 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 		length = 0
 	} else {
 		if len(transactionsBuffer) < 4 {
-			return ssz.ErrLowBufferSize
+			return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrLowBufferSize)
 		}
 		txOffset = ssz.DecodeOffset(transactionsBuffer)
 		length = txOffset / 4
 		// Retrieve tx length
 		if txOffset%4 != 0 {
-			return ssz.ErrBadDynamicLength
+			return fmt.Errorf("Eth1Block] err: %s", ssz.ErrBadDynamicLength)
 		}
 	}
 
@@ -227,7 +227,7 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 		}
 		transactionsPosition += 4
 		if txOffset > txEndOffset {
-			return ssz.ErrBadOffset
+			return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrBadOffset)
 		}
 		b.Transactions[txIdx] = transactionsBuffer[txOffset:txEndOffset]
 		// Decode RLP and put it in the tx list.
@@ -246,12 +246,8 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 		var err error
 		b.Withdrawals, err = ssz.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(withdrawalsEndPos), 44, 16, version)
 		if err != nil {
-			return err
+			return fmt.Errorf("[Eth1Block] err: %s", err)
 		}
-	}
-
-	if version >= int(clparams.DenebVersion) {
-		copy(b.ExcessDataGas[:], buf[withdrawalsEndPos:])
 	}
 
 	return nil
@@ -287,10 +283,6 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 		for _, withdrawal := range b.Withdrawals {
 			currentOffset += withdrawal.EncodingSize()
 		}
-	}
-
-	if b.version >= clparams.DenebVersion {
-		buf = append(buf, ssz.OffsetSSZ(uint32(currentOffset))...)
 	}
 
 	// Sanity check for extra data then write it.

@@ -190,6 +190,9 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(b.ExecutionChanges) > MaxExecutionChanges {
 		return nil, fmt.Errorf("Encode(SSZ): too many changes")
 	}
+	if len(b.BlobKzgCommitments) > MaxBlobsPerBlock {
+		return nil, fmt.Errorf("Encode(SSZ): too many blob kzg commitments in the block")
+	}
 	// Write proposer slashings
 	for _, proposerSlashing := range b.ProposerSlashings {
 		if buf, err = proposerSlashing.EncodeSSZ(buf); err != nil {
@@ -232,13 +235,8 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 
 	if b.Version >= clparams.DenebVersion {
-		if len(b.BlobKzgCommitments) > MaxBlobsPerBlock {
-			return nil, fmt.Errorf("Encode(SSZ): too many blob kzg commitments in the block")
-		}
-		for _, commitment := range b.BlobKzgCommitments {
-			if buf, err = commitment.EncodeSSZ(buf); err != nil {
-				return nil, err
-			}
+		if buf, err = ssz.EncodeDynamicList(buf, b.BlobKzgCommitments); err != nil {
+			return nil, err
 		}
 	}
 
@@ -278,6 +276,7 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 
 	if b.Version >= clparams.DenebVersion {
 		for _, commitment := range b.BlobKzgCommitments {
+			size += 4
 			size += commitment.EncodingSizeSSZ()
 		}
 	}
@@ -290,7 +289,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	var err error
 
 	if len(buf) < b.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
 	}
 
 	// Start wildly decoding this thing
@@ -312,11 +311,11 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	// Decode sync aggregate if we are past altair.
 	if b.Version >= clparams.AltairVersion {
 		if len(buf) < 380 {
-			return ssz.ErrLowBufferSize
+			return fmt.Errorf("[BeaconBody] altair version err: %s", ssz.ErrLowBufferSize)
 		}
 		b.SyncAggregate = new(SyncAggregate)
 		if err := b.SyncAggregate.DecodeSSZ(buf[220:380], version); err != nil {
-			return err
+			return fmt.Errorf("[BeaconBody] err: %s", err)
 		}
 	}
 
@@ -376,11 +375,10 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	if b.Version >= clparams.BellatrixVersion {
 		b.ExecutionPayload = new(Eth1Block)
 		if offsetExecution > uint32(endOffset) || len(buf) < endOffset {
-			fmt.Println("Still")
-			return ssz.ErrBadOffset
+			return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrBadOffset)
 		}
 		if err := b.ExecutionPayload.DecodeSSZ(buf[offsetExecution:endOffset], int(b.Version)); err != nil {
-			return err
+			return fmt.Errorf("[BeaconBody] err: %s", err)
 		}
 	}
 
@@ -521,7 +519,7 @@ func (b *BeaconBlock) EncodingSizeSSZ() int {
 
 func (b *BeaconBlock) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[BeaconBlock] err: %s", ssz.ErrLowBufferSize)
 	}
 	b.Slot = ssz.UnmarshalUint64SSZ(buf)
 	b.ProposerIndex = ssz.UnmarshalUint64SSZ(buf[8:])
@@ -566,7 +564,7 @@ func (b *SignedBeaconBlock) EncodingSizeSSZ() int {
 
 func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[SignedBeaconBlock] err: %s", ssz.ErrLowBufferSize)
 	}
 	copy(b.Signature[:], buf[4:100])
 	return b.Block.DecodeSSZ(buf[100:], s)

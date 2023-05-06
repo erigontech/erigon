@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
@@ -35,7 +37,7 @@ func (b *BLSToExecutionChange) HashSSZ() ([32]byte, error) {
 
 func (b *BLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[BLSToExecutionChange] err: %s", ssz.ErrLowBufferSize)
 	}
 	b.ValidatorIndex = ssz.UnmarshalUint64SSZ(buf)
 	copy(b.From[:], buf[8:])
@@ -64,7 +66,7 @@ func (s *SignedBLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (s *SignedBLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < s.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[SignedBLSToExecutionChange] err: %s", ssz.ErrLowBufferSize)
 	}
 	s.Message = new(BLSToExecutionChange)
 	if err := s.Message.DecodeSSZ(buf, version); err != nil {

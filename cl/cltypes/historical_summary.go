@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
@@ -18,7 +20,7 @@ func (h *HistoricalSummary) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (h *HistoricalSummary) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < h.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[HistoricalSummary] err: %s", ssz.ErrLowBufferSize)
 	}
 	copy(h.BlockSummaryRoot[:], buf)
 	copy(h.StateSummaryRoot[:], buf[length.Hash:])

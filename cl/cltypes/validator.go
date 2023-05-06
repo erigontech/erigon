@@ -224,7 +224,7 @@ func (s *SyncCommittee) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (s *SyncCommittee) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < 24624 {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[SyncCommittee] err: %s", ssz.ErrLowBufferSize)
 	}
 
 	s.PubKeys = make([][48]byte, SyncCommitteeSize)
@@ -344,7 +344,7 @@ func (v *Validator) EncodeSSZ(dst []byte) ([]byte, error) {
 
 func (v *Validator) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < v.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[Validator] err: %s", ssz.ErrLowBufferSize)
 	}
 	copy(v.PublicKey[:], buf)
 	copy(v.WithdrawalCredentials[:], buf[48:])
