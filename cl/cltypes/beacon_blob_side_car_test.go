@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/stretchr/testify/assert"
 )
@@ -15,7 +16,7 @@ func TestBlobSideCar_EncodeDecodeSSZ(t *testing.T) {
 	slot := cltypes.Slot(456)
 	blockParentRoot := libcommon.Hash{4, 5, 6}
 	proposerIndex := uint64(789)
-	blob := cltypes.Blob{}
+	blob := &cltypes.Blob{1, 2, 3, 4, 5, 6, 7, 8}
 	kzgCommitment := cltypes.KZGCommitment{7, 8, 9}
 	kzgProof := cltypes.KZGProof{10, 11, 12}
 
@@ -35,8 +36,8 @@ func TestBlobSideCar_EncodeDecodeSSZ(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	decoded := &cltypes.BlobSideCar{}
-	err = decoded.DecodeSSZ(encoded)
+	decoded := &cltypes.BlobSideCar{Blob: &cltypes.Blob{}}
+	err = decoded.DecodeSSZ(encoded, int(clparams.DenebVersion))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,13 +71,13 @@ func TestBlobSideCar_EncodeDecodeSSZ(t *testing.T) {
 func TestSignedBlobSideCar(t *testing.T) {
 	// Create a BlobSideCar to use as the message for SignedBlobSideCar
 	blob := cltypes.Blob{1, 2, 3, 4, 5, 6, 7, 8}
-	blobSideCar := cltypes.BlobSideCar{
+	blobSideCar := &cltypes.BlobSideCar{
 		BlockRoot:       libcommon.Hash{1},
 		Index:           2,
 		Slot:            3,
 		BlockParentRoot: libcommon.Hash{4},
 		ProposerIndex:   5,
-		Blob:            blob,
+		Blob:            &blob,
 		KZGCommitment:   cltypes.KZGCommitment{6},
 		KZGProof:        cltypes.KZGProof{7},
 	}
@@ -93,8 +94,8 @@ func TestSignedBlobSideCar(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Decode the encoded SignedBlobSideCar
-	decoded := cltypes.SignedBlobSideCar{}
-	err = decoded.DecodeSSZ(encoded)
+	decoded := cltypes.SignedBlobSideCar{Message: &cltypes.BlobSideCar{Blob: &cltypes.Blob{}}}
+	err = decoded.DecodeSSZ(encoded, int(clparams.DenebVersion))
 	assert.NoError(t, err)
 
 	// Assert that the decoded SignedBlobSideCar is equal to the original SignedBlobSideCar
@@ -126,7 +127,7 @@ func TestBlobIdentifier_EncodeDecodeSSZ(t *testing.T) {
 
 	// decode from SSZ
 	decoded := &cltypes.BlobIdentifier{}
-	if err := decoded.DecodeSSZ(encoded); err != nil {
+	if err := decoded.DecodeSSZ(encoded, int(clparams.DenebVersion)); err != nil {
 		t.Fatalf("DecodeSSZ failed: %v", err)
 	}
 

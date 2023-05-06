@@ -114,7 +114,7 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 	if dec.ParentUncleHash != nil {
 		s.ParentUncleHash = *dec.ParentUncleHash
 	}
-    s.UncleHash = dec.UncleHash
+	s.UncleHash = dec.UncleHash
 	if dec.Withdrawals != nil {
 		s.Withdrawals = dec.Withdrawals
 	}
