@@ -28,7 +28,7 @@ func (f *Deltas) EncodeSSZ(dst []byte) ([]byte, error) {
 
 func (d *Deltas) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < d.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[Deltas] err; %s", ssz.ErrLowBufferSize)
 	}
 	o1, o2 := ssz.DecodeOffset(buf[0:4]), ssz.DecodeOffset(buf[4:8])
 

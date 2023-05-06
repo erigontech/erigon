@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
@@ -36,7 +38,7 @@ func (e *Eth1Data) DecodeSSZ(buf []byte, _ int) error {
 	var err error
 	size := uint64(len(buf))
 	if size < 72 {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[Eth1Data] err: %s", ssz.ErrLowBufferSize)
 	}
 
 	copy(e.Root[:], buf[0:32])
