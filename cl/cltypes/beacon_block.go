@@ -170,7 +170,15 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	if b.Version >= clparams.CapellaVersion {
 		buf = append(buf, ssz.OffsetSSZ(offset)...)
+		for _, changes := range b.ExecutionChanges {
+			offset += uint32(changes.EncodingSizeSSZ())
+		}
 	}
+
+	if b.Version >= clparams.DenebVersion {
+		buf = append(buf, ssz.OffsetSSZ(offset)...)
+	}
+
 	// Now start encoding the rest of the fields.
 	if len(b.AttesterSlashings) > MaxAttesterSlashings {
 		return nil, fmt.Errorf("Encode(SSZ): too many attester slashings")
@@ -235,8 +243,10 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 
 	if b.Version >= clparams.DenebVersion {
-		if buf, err = ssz.EncodeDynamicList(buf, b.BlobKzgCommitments); err != nil {
-			return nil, err
+		for _, commitment := range b.BlobKzgCommitments {
+			if buf, err = commitment.EncodeSSZ(buf); err != nil {
+				return nil, err
+			}
 		}
 	}
 
