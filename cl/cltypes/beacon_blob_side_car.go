@@ -213,7 +213,7 @@ func (b *BlobKZGCommitment) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (b *BlobKZGCommitment) DecodeSSZ(buf []byte, version int) error {
-	copy(b.Commitment[:], buf[:])
+	copy(b.Commitment[:], buf)
 
 	return nil
 }
