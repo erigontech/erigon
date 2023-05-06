@@ -199,7 +199,7 @@ func (b *BlobIdentifier) HashSSZ() ([32]byte, error) {
 	}, 2)
 }
 
-type BlobKZGCommitment [48]byte
+type BlobKZGCommitment KZGCommitment
 
 func (b *BlobKZGCommitment) Copy() *BlobKZGCommitment {
 	copy := *b
