@@ -47,24 +47,25 @@ func (b *BlobSideCar) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (b *BlobSideCar) DecodeSSZ(buf []byte, version int) error {
-	pos := 0 // current position at the buffer
+	if len(buf) < b.EncodingSizeSSZ() {
+		return ssz.ErrLowBufferSize
+	}
+	copy(b.BlockRoot[:], buf[:32])
+	pos := 32
 
-	copy(b.BlockRoot[:], buf[pos:32])
-	pos += 32
-
-	b.Index = ssz.UnmarshalUint64SSZ(buf[pos : pos+8])
+	b.Index = ssz.UnmarshalUint64SSZ(buf[pos:])
 	pos += 8
 
 	b.Slot = Slot(ssz.UnmarshalUint64SSZ(buf[pos:]))
 	pos += 8
 
-	copy(b.BlockParentRoot[:], buf[pos:pos+32])
+	copy(b.BlockParentRoot[:], buf[pos:])
 	pos += 32
 
-	b.ProposerIndex = ssz.UnmarshalUint64SSZ(buf[pos : pos+8])
+	b.ProposerIndex = ssz.UnmarshalUint64SSZ(buf[pos:])
 	pos += 8
 
-	copy(b.Blob[:], buf[pos:pos+int(BYTES_PER_BLOB)])
+	copy(b.Blob[:], buf[pos:])
 	pos += int(BYTES_PER_BLOB)
 
 	copy(b.KZGCommitment[:], buf[pos:pos+48])
@@ -198,9 +199,7 @@ func (b *BlobIdentifier) HashSSZ() ([32]byte, error) {
 	}, 2)
 }
 
-type BlobKZGCommitment struct {
-	Commitment KZGCommitment
-}
+type BlobKZGCommitment KZGCommitment
 
 func (b *BlobKZGCommitment) Copy() *BlobKZGCommitment {
 	copy := *b
@@ -208,12 +207,12 @@ func (b *BlobKZGCommitment) Copy() *BlobKZGCommitment {
 }
 
 func (b *BlobKZGCommitment) EncodeSSZ(buf []byte) ([]byte, error) {
-	buf = append(buf, b.Commitment[:]...)
+	buf = append(buf, b[:]...)
 	return buf, nil
 }
 
 func (b *BlobKZGCommitment) DecodeSSZ(buf []byte, version int) error {
-	copy(b.Commitment[:], buf)
+	copy(b[:], buf)
 
 	return nil
 }
@@ -223,5 +222,5 @@ func (b *BlobKZGCommitment) EncodingSizeSSZ() int {
 }
 
 func (b *BlobKZGCommitment) HashSSZ() ([32]byte, error) {
-	return merkle_tree.PublicKeyRoot(b.Commitment)
+	return merkle_tree.PublicKeyRoot(*b)
 }

@@ -36,6 +36,8 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 		return 2736633
 	case clparams.CapellaVersion:
 		return 2736653
+	case clparams.DenebVersion:
+		return 2736653
 	default:
 		// ?????
 		panic("tf is that")

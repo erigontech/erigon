@@ -90,3 +90,21 @@ func (b *BeaconState) UpgradeToCapella() error {
 	b.SetVersion(clparams.CapellaVersion)
 	return nil
 }
+
+func (b *BeaconState) UpgradeToDeneb() error {
+	b.previousStateRoot = libcommon.Hash{}
+	epoch := Epoch(b.BeaconState)
+	// update version
+	fork := b.Fork()
+	fork.Epoch = epoch
+	fork.PreviousVersion = fork.CurrentVersion
+	fork.CurrentVersion = utils.Uint32ToBytes4(b.BeaconConfig().DenebForkVersion)
+	b.SetFork(fork)
+	// Update the payload header.
+	header := b.LatestExecutionPayloadHeader()
+	header.Deneb()
+	b.SetLatestExecutionPayloadHeader(header)
+	// Update the state root cache
+	b.SetVersion(clparams.DenebVersion)
+	return nil
+}

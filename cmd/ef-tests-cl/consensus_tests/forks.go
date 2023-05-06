@@ -29,6 +29,8 @@ var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.T
 		err = preState.UpgradeToBellatrix()
 	case clparams.BellatrixVersion:
 		err = preState.UpgradeToCapella()
+	case clparams.CapellaVersion:
+		err = preState.UpgradeToDeneb()
 	default:
 		err = spectest.ErrHandlerNotImplemented(fmt.Sprintf("block state %v", preState.Version()))
 	}
@@ -41,7 +43,6 @@ var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.T
 
 	expectedRoot, err := postState.HashSSZ()
 	assert.NoError(t, err)
-
 	assert.EqualValues(t, haveRoot, expectedRoot, "state root")
 
 	return nil
