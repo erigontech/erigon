@@ -87,7 +87,7 @@ var testBeaconBlockVariation = &cltypes.SignedBeaconBlock{
 					},
 				},
 			},
-			BlobKzgCommitments: []*cltypes.BlobKZGCommitment{&cltypes.BlobKZGCommitment{Commitment: cltypes.KZGCommitment{'1', '2', '3', '4'}}},
+			BlobKzgCommitments: []*cltypes.BlobKZGCommitment{{Commitment: cltypes.KZGCommitment{'1', '2', '3', '4'}}},
 		},
 	},
 }
