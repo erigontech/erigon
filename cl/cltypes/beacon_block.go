@@ -487,7 +487,7 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 
 			copy(blobKzgCommitmentsRoot[i][:], pk[:])
 		}
-		blobKzgCommitmentsLeaf, err := merkle_tree.ArraysRoot(blobKzgCommitmentsRoot, MaxBlobsPerBlock)
+		blobKzgCommitmentsLeaf, err := merkle_tree.MerkleizeVector(blobKzgCommitmentsRoot, MaxBlobsPerBlock)
 		if err != nil {
 			return [32]byte{}, err
 		}

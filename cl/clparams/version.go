@@ -21,6 +21,8 @@ func StringToClVersion(s string) StateVersion {
 		return BellatrixVersion
 	case "capella":
 		return CapellaVersion
+	case "deneb":
+		return DenebVersion
 	default:
 		panic("unsupported fork version: " + s)
 	}

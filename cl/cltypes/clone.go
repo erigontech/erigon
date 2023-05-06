@@ -117,6 +117,14 @@ func (*Fork) Clone() clonable.Clonable {
 	return &Fork{}
 }
 
+func (*BlobSideCar) Clone() clonable.Clonable {
+	return &BlobSideCar{}
+}
+
+func (*BlobIdentifier) Clone() clonable.Clonable {
+	return &BlobIdentifier{}
+}
+
 func (*BlobKZGCommitment) Clone() clonable.Clonable {
 	return &BlobKZGCommitment{}
 }

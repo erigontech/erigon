@@ -32,7 +32,7 @@ type Eth1Block struct {
 	BlockHash     libcommon.Hash
 	Transactions  [][]byte
 	Withdrawals   types.Withdrawals
-	ExcessDataGas *big.Int
+	ExcessDataGas [32]byte
 	// internals
 	version clparams.StateVersion
 }
@@ -51,6 +51,13 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 	var baseFee32 [32]byte
 	copy(baseFee32[:], baseFeeBytes)
 
+	excessDataGasBytes := header.ExcessDataGas.Bytes()
+	for i, j := 0, len(excessDataGasBytes)-1; i < j; i, j = i+1, j-1 {
+		excessDataGasBytes[i], excessDataGasBytes[j] = excessDataGasBytes[j], excessDataGasBytes[i]
+	}
+	var excessDataGas32 [32]byte
+	copy(excessDataGas32[:], excessDataGasBytes)
+
 	block := &Eth1Block{
 		ParentHash:    header.ParentHash,
 		FeeRecipient:  header.Coinbase,
@@ -67,10 +74,10 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 		BlockHash:     header.Hash(),
 		Transactions:  body.Transactions,
 		Withdrawals:   body.Withdrawals,
-		ExcessDataGas: header.ExcessDataGas,
+		ExcessDataGas: excessDataGas32,
 	}
 
-	if block.ExcessDataGas != nil {
+	if block.ExcessDataGas != [32]byte{} {
 		block.version = clparams.DenebVersion
 	} else if header.WithdrawalsHash != nil {
 		block.version = clparams.CapellaVersion
@@ -96,7 +103,7 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 
 	excessDataGas := [32]byte{}
 	if b.version >= clparams.DenebVersion {
-		copy(excessDataGas[:], b.ExcessDataGas.Bytes())
+		copy(excessDataGas[:], b.ExcessDataGas[:])
 	}
 
 	return &Eth1Header{
@@ -249,7 +256,7 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 	}
 
 	if version >= int(clparams.DenebVersion) {
-		b.ExcessDataGas = (&big.Int{}).SetBytes(buf[withdrawalsEndPos:])
+		copy(b.ExcessDataGas[:], buf[withdrawalsEndPos:])
 	}
 
 	return nil
@@ -313,7 +320,7 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 
 	if b.version >= clparams.DenebVersion {
-		buf = append(buf, b.ExcessDataGas.Bytes()...)
+		buf = append(buf, b.ExcessDataGas[:]...)
 	}
 
 	return buf, nil
@@ -347,6 +354,15 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 		*withdrawalsHash = types.DeriveSha(b.Withdrawals)
 	}
 
+	var excessDataGas *big.Int
+	if b.version >= clparams.DenebVersion {
+		reversedExcessDataGas := libcommon.Copy(b.ExcessDataGas[:])
+		for i, j := 0, len(reversedExcessDataGas)-1; i < j; i, j = i+1, j-1 {
+			reversedExcessDataGas[i], reversedExcessDataGas[j] = reversedExcessDataGas[j], reversedExcessDataGas[i]
+		}
+		excessDataGas = new(big.Int).SetBytes(reversedExcessDataGas)
+	}
+
 	header := &types.Header{
 		ParentHash:      b.ParentHash,
 		UncleHash:       types.EmptyUncleHash,
@@ -365,7 +381,7 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 		Nonce:           serenity.SerenityNonce,
 		BaseFee:         baseFee,
 		WithdrawalsHash: withdrawalsHash,
-		ExcessDataGas:   b.ExcessDataGas,
+		ExcessDataGas:   excessDataGas,
 	}
 
 	// If the header hash does not match the block hash, return an error.

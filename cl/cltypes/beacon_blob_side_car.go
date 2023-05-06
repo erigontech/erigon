@@ -76,6 +76,10 @@ func (b *BlobSideCar) DecodeSSZ(buf []byte) error {
 	return nil
 }
 
+func (b *BlobSideCar) DecodeSSZWithVersion(buf []byte, version int) error {
+	return b.DecodeSSZ(buf)
+}
+
 func (b *BlobSideCar) EncodingSizeSSZ() int {
 	return 131_256
 }
@@ -186,6 +190,10 @@ func (b *BlobIdentifier) DecodeSSZ(buf []byte) error {
 	copy(b.BlockRoot[:], buf[:32])
 	b.Index = ssz.UnmarshalUint64SSZ(buf[32:])
 	return nil
+}
+
+func (b *BlobIdentifier) DecodeSSZWithVersion(buf []byte, version int) error {
+	return b.DecodeSSZ(buf)
 }
 
 func (b *BlobIdentifier) EncodingSizeSSZ() int {
