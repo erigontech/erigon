@@ -7,17 +7,16 @@ import (
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
 
-type Root [32]byte
 type Slot uint64
 type Blob gokzg4844.Blob
 type KZGCommitment gokzg4844.KZGCommitment // [48]byte
 type KZGProof gokzg4844.KZGProof           // [48]byte
 
 type BlobSideCar struct {
-	BlockRoot       Root
+	BlockRoot       libcommon.Hash
 	Index           uint64 // index of blob in block
 	Slot            Slot
-	BlockParentRoot Root
+	BlockParentRoot libcommon.Hash
 	ProposerIndex   uint64 // validator index
 	Blob            *Blob
 	KZGCommitment   KZGCommitment
@@ -47,7 +46,7 @@ func (b *BlobSideCar) EncodeSSZ(buf []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (b *BlobSideCar) DecodeSSZ(buf []byte) error {
+func (b *BlobSideCar) DecodeSSZ(buf []byte, version int) error {
 	pos := 0 // current position at the buffer
 
 	copy(b.BlockRoot[:], buf[pos:32])
@@ -74,10 +73,6 @@ func (b *BlobSideCar) DecodeSSZ(buf []byte) error {
 	copy(b.KZGProof[:], buf[pos:pos+48])
 
 	return nil
-}
-
-func (b *BlobSideCar) DecodeSSZWithVersion(buf []byte, version int) error {
-	return b.DecodeSSZ(buf)
 }
 
 func (b *BlobSideCar) EncodingSizeSSZ() int {
@@ -137,9 +132,9 @@ func (b *SignedBlobSideCar) EncodeSSZ(buf []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (b *SignedBlobSideCar) DecodeSSZ(buf []byte) error {
+func (b *SignedBlobSideCar) DecodeSSZ(buf []byte, version int) error {
 	pos := b.Message.EncodingSizeSSZ()
-	err := b.Message.DecodeSSZ(buf[:pos])
+	err := b.Message.DecodeSSZ(buf[:pos], version)
 	if err != nil {
 		return err
 	}
@@ -170,7 +165,7 @@ func (b *SignedBlobSideCar) HashSSZ() ([32]byte, error) {
 }
 
 type BlobIdentifier struct {
-	BlockRoot Root
+	BlockRoot libcommon.Hash
 	Index     uint64
 }
 
@@ -186,14 +181,10 @@ func (b *BlobIdentifier) EncodeSSZ(buf []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (b *BlobIdentifier) DecodeSSZ(buf []byte) error {
+func (b *BlobIdentifier) DecodeSSZ(buf []byte, version int) error {
 	copy(b.BlockRoot[:], buf[:32])
 	b.Index = ssz.UnmarshalUint64SSZ(buf[32:])
 	return nil
-}
-
-func (b *BlobIdentifier) DecodeSSZWithVersion(buf []byte, version int) error {
-	return b.DecodeSSZ(buf)
 }
 
 func (b *BlobIdentifier) EncodingSizeSSZ() int {
@@ -221,14 +212,10 @@ func (b *BlobKZGCommitment) EncodeSSZ(buf []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (b *BlobKZGCommitment) DecodeSSZ(buf []byte) error {
+func (b *BlobKZGCommitment) DecodeSSZ(buf []byte, version int) error {
 	copy(b.Commitment[:], buf[:])
 
 	return nil
-}
-
-func (b *BlobKZGCommitment) DecodeSSZWithVersion(buf []byte, version int) error {
-	return b.DecodeSSZ(buf)
 }
 
 func (b *BlobKZGCommitment) EncodingSizeSSZ() int {

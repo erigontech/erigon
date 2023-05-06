@@ -9,87 +9,84 @@ import (
 
 func (b *BeaconState) UpgradeToAltair() error {
 	b.previousStateRoot = libcommon.Hash{}
-	epoch := b.Epoch()
+	epoch := Epoch(b.BeaconState)
 	// update version
-	b.fork.Epoch = epoch
-	b.fork.CurrentVersion = utils.Uint32ToBytes4(b.beaconConfig.AltairForkVersion)
+	fork := b.Fork()
+	fork.Epoch = epoch
+	fork.CurrentVersion = utils.Uint32ToBytes4(b.BeaconConfig().AltairForkVersion)
+	b.SetFork(fork)
 	// Process new fields
-	b.previousEpochParticipation = make(cltypes.ParticipationFlagsList, len(b.validators))
-	b.currentEpochParticipation = make(cltypes.ParticipationFlagsList, len(b.validators))
-	b.inactivityScores = make([]uint64, len(b.validators))
+	b.SetPreviousEpochParticipationFlags(make(cltypes.ParticipationFlagsList, b.ValidatorLength()))
+	b.SetCurrentEpochParticipationFlags(make(cltypes.ParticipationFlagsList, b.ValidatorLength()))
+	b.SetInactivityScores(make([]uint64, b.ValidatorLength()))
 	// Change version
-	b.version = clparams.AltairVersion
+	b.SetVersion(clparams.AltairVersion)
 	// Fill in previous epoch participation from the pre state's pending attestations
-	for _, attestation := range b.previousEpochAttestations {
+	for _, attestation := range b.PreviousEpochAttestations() {
 		flags, err := b.GetAttestationParticipationFlagIndicies(attestation.Data, attestation.InclusionDelay)
 		if err != nil {
 			return err
 		}
-		indicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
+		indices, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
 		if err != nil {
 			return err
 		}
-
-		for _, index := range indicies {
+		for _, index := range indices {
 			for _, flagIndex := range flags {
-				b.previousEpochParticipation[index] = b.previousEpochParticipation[index].Add(int(flagIndex))
+				b.AddPreviousEpochParticipationAt(int(index), flagIndex)
 			}
 		}
 	}
-	b.previousEpochAttestations = nil
+	b.ResetPreviousEpochAttestations()
 	// Process sync committees
 	var err error
-	if b.currentSyncCommittee, err = b.ComputeNextSyncCommittee(); err != nil {
+	currentSyncCommittee, err := b.ComputeNextSyncCommittee()
+	if err != nil {
 		return err
 	}
-	if b.nextSyncCommittee, err = b.ComputeNextSyncCommittee(); err != nil {
+	b.SetCurrentSyncCommittee(currentSyncCommittee)
+	nextSyncCommittee, err := b.ComputeNextSyncCommittee()
+	if err != nil {
 		return err
 	}
-	// Update the state root cache
-	b.touchedLeaves[ForkLeafIndex] = true
-	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
-	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
-	b.touchedLeaves[InactivityScoresLeafIndex] = true
-	b.touchedLeaves[CurrentSyncCommitteeLeafIndex] = true
-	b.touchedLeaves[NextSyncCommitteeLeafIndex] = true
+	b.SetNextSyncCommittee(nextSyncCommittee)
 
 	return nil
 }
 
 func (b *BeaconState) UpgradeToBellatrix() error {
 	b.previousStateRoot = libcommon.Hash{}
-	epoch := b.Epoch()
+	epoch := Epoch(b.BeaconState)
 	// update version
-	b.fork.Epoch = epoch
-	b.fork.PreviousVersion = b.fork.CurrentVersion
-	b.fork.CurrentVersion = utils.Uint32ToBytes4(b.beaconConfig.BellatrixForkVersion)
-	b.latestExecutionPayloadHeader = cltypes.NewEth1Header(clparams.BellatrixVersion)
+	fork := b.Fork()
+	fork.Epoch = epoch
+	fork.PreviousVersion = fork.CurrentVersion
+	fork.CurrentVersion = utils.Uint32ToBytes4(b.BeaconConfig().BellatrixForkVersion)
+	b.SetFork(fork)
+	b.SetLatestExecutionPayloadHeader(cltypes.NewEth1Header(clparams.BellatrixVersion))
 	// Update the state root cache
-	b.touchedLeaves[ForkLeafIndex] = true
-	b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
-	b.version = clparams.BellatrixVersion
+	b.SetVersion(clparams.BellatrixVersion)
 	return nil
 }
 
 func (b *BeaconState) UpgradeToCapella() error {
 	b.previousStateRoot = libcommon.Hash{}
-	epoch := b.Epoch()
+	epoch := Epoch(b.BeaconState)
 	// update version
-	b.fork.Epoch = epoch
-	b.fork.PreviousVersion = b.fork.CurrentVersion
-	b.fork.CurrentVersion = utils.Uint32ToBytes4(b.beaconConfig.CapellaForkVersion)
+	fork := b.Fork()
+	fork.Epoch = epoch
+	fork.PreviousVersion = fork.CurrentVersion
+	fork.CurrentVersion = utils.Uint32ToBytes4(b.BeaconConfig().CapellaForkVersion)
+	b.SetFork(fork)
 	// Update the payload header.
-	b.latestExecutionPayloadHeader.Capella()
+	header := b.LatestExecutionPayloadHeader()
+	header.Capella()
+	b.SetLatestExecutionPayloadHeader(header)
 	// Set new fields
-	b.nextWithdrawalIndex = 0
-	b.nextWithdrawalValidatorIndex = 0
-	b.historicalSummaries = nil
+	b.SetNextWithdrawalIndex(0)
+	b.SetNextWithdrawalValidatorIndex(0)
+	b.ResetHistoricalSummaries()
 	// Update the state root cache
-	b.touchedLeaves[ForkLeafIndex] = true
-	b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
-	b.touchedLeaves[NextWithdrawalIndexLeafIndex] = true
-	b.touchedLeaves[NextWithdrawalValidatorIndexLeafIndex] = true
-	b.touchedLeaves[HistoricalSummariesLeafIndex] = true
-	b.version = clparams.CapellaVersion
+	b.SetVersion(clparams.CapellaVersion)
 	return nil
 }

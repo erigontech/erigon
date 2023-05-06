@@ -47,7 +47,7 @@ func (r *BeaconBlocksByRootRequest) EncodingSizeSSZ() int {
 
 // DecodeSSZ unmarshals the provided bytes buffer into the
 // block by roots request object.
-func (r *BeaconBlocksByRootRequest) DecodeSSZ(buf []byte) error {
+func (r *BeaconBlocksByRootRequest) DecodeSSZ(buf []byte, _ int) error {
 	bufLen := len(buf)
 	maxLength := maxRequestBlocks * rootLength
 	if bufLen > maxLength {
@@ -65,8 +65,4 @@ func (r *BeaconBlocksByRootRequest) DecodeSSZ(buf []byte) error {
 	}
 	*r = roots
 	return nil
-}
-
-func (r *BeaconBlocksByRootRequest) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return r.DecodeSSZ(buf)
 }

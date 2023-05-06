@@ -5,6 +5,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -89,7 +90,7 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint cltypes.Checkpoint) (*ch
 	}
 	mixes := baseState.RandaoMixes()
 	checkpointState := newCheckpointState(f.forkGraph.Config(), baseState.Validators(),
-		mixes[:], baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), baseState.Epoch())
+		mixes[:], baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), state.Epoch(baseState.BeaconState))
 	// Cache in memory what we are left with.
 	f.checkpointStates.Add(checkpoint, checkpointState)
 	return checkpointState, nil

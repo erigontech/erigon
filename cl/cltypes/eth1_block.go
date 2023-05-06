@@ -149,13 +149,8 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 	return
 }
 
-// Need a version
-func (b *Eth1Block) DecodeSSZ(buf []byte) error {
-	panic("stop")
-}
-
-// DecodeSSZWithVersion decodes the block in SSZ format.
-func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
+// DecodeSSZ decodes the block in SSZ format.
+func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	b.version = clparams.StateVersion(version)
 	if len(buf) < b.EncodingSizeSSZ() {
 		return ssz.ErrLowBufferSize
@@ -249,7 +244,7 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 	// If withdrawals are enabled, process them.
 	if withdrawalOffset != nil {
 		var err error
-		b.Withdrawals, err = ssz.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(withdrawalsEndPos), 44, 16)
+		b.Withdrawals, err = ssz.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(withdrawalsEndPos), 44, 16, version)
 		if err != nil {
 			return err
 		}

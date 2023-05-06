@@ -115,26 +115,26 @@ func maximumDeposits(state *state.BeaconState) (maxDeposits uint64) {
 }
 
 // ProcessExecutionPayload sets the latest payload header accordinly.
-func ProcessExecutionPayload(state *state.BeaconState, payload *cltypes.Eth1Block) error {
-	if state.IsMergeTransitionComplete() {
-		if payload.ParentHash != state.LatestExecutionPayloadHeader().BlockHash {
+func ProcessExecutionPayload(s *state.BeaconState, payload *cltypes.Eth1Block) error {
+	if state.IsMergeTransitionComplete(s.BeaconState) {
+		if payload.ParentHash != s.LatestExecutionPayloadHeader().BlockHash {
 			return fmt.Errorf("ProcessExecutionPayload: invalid eth1 chain. mismatching parent")
 		}
 	}
-	if payload.PrevRandao != state.GetRandaoMixes(state.Epoch()) {
+	if payload.PrevRandao != s.GetRandaoMixes(state.Epoch(s.BeaconState)) {
 		return fmt.Errorf("ProcessExecutionPayload: randao mix mismatches with mix digest")
 	}
-	if payload.Time != state.ComputeTimestampAtSlot(state.Slot()) {
+	if payload.Time != state.ComputeTimestampAtSlot(s.BeaconState, s.Slot()) {
 		return fmt.Errorf("ProcessExecutionPayload: invalid Eth1 timestamp")
 	}
 	payloadHeader, err := payload.PayloadHeader()
 	if err != nil {
 		return err
 	}
-	state.SetLatestExecutionPayloadHeader(payloadHeader)
+	s.SetLatestExecutionPayloadHeader(payloadHeader)
 	return nil
 }
 
-func executionEnabled(state *state.BeaconState, payload *cltypes.Eth1Block) bool {
-	return (!state.IsMergeTransitionComplete() && payload.BlockHash != libcommon.Hash{}) || state.IsMergeTransitionComplete()
+func executionEnabled(s *state.BeaconState, payload *cltypes.Eth1Block) bool {
+	return (!state.IsMergeTransitionComplete(s.BeaconState) && payload.BlockHash != libcommon.Hash{}) || state.IsMergeTransitionComplete(s.BeaconState)
 }

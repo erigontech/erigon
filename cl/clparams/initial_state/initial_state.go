@@ -24,15 +24,15 @@ func GetGenesisState(network clparams.NetworkType) (*state.BeaconState, error) {
 
 	switch network {
 	case clparams.MainnetNetwork:
-		if err := returnState.DecodeSSZWithVersion(mainnetStateSSZ, int(clparams.Phase0Version)); err != nil {
+		if err := returnState.DecodeSSZ(mainnetStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
 	case clparams.GoerliNetwork:
-		if err := returnState.DecodeSSZWithVersion(goerliStateSSZ, int(clparams.Phase0Version)); err != nil {
+		if err := returnState.DecodeSSZ(goerliStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
 	case clparams.SepoliaNetwork:
-		if err := returnState.DecodeSSZWithVersion(sepoliaStateSSZ, int(clparams.Phase0Version)); err != nil {
+		if err := returnState.DecodeSSZ(sepoliaStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
 	default:

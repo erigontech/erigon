@@ -13,10 +13,6 @@ type Checkpoint struct {
 	Root  libcommon.Hash
 }
 
-func (c *Checkpoint) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return c.DecodeSSZ(buf)
-}
-
 func (c *Checkpoint) Copy() *Checkpoint {
 	copiedCheckpoint := new(Checkpoint)
 	*copiedCheckpoint = *c
@@ -31,7 +27,7 @@ func (c *Checkpoint) EncodeSSZ(buf []byte) ([]byte, error) {
 	return append(buf, append(ssz.Uint64SSZ(c.Epoch), c.Root[:]...)...), nil
 }
 
-func (c *Checkpoint) DecodeSSZ(buf []byte) error {
+func (c *Checkpoint) DecodeSSZ(buf []byte, _ int) error {
 	var err error
 	size := uint64(len(buf))
 	if size < uint64(c.EncodingSizeSSZ()) {

@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-func ProcessProposerSlashing(state *state.BeaconState, propSlashing *cltypes.ProposerSlashing) error {
+func ProcessProposerSlashing(s *state.BeaconState, propSlashing *cltypes.ProposerSlashing) error {
 	h1 := propSlashing.Header1.Header
 	h2 := propSlashing.Header2.Header
 
@@ -39,16 +39,16 @@ func ProcessProposerSlashing(state *state.BeaconState, propSlashing *cltypes.Pro
 		return fmt.Errorf("propose slashing headers are the same: %v == %v", h1Root, h2Root)
 	}
 
-	proposer, err := state.ValidatorForValidatorIndex(int(h1.ProposerIndex))
+	proposer, err := s.ValidatorForValidatorIndex(int(h1.ProposerIndex))
 	if err != nil {
 		return err
 	}
-	if !proposer.IsSlashable(state.Epoch()) {
+	if !proposer.IsSlashable(state.Epoch(s.BeaconState)) {
 		return fmt.Errorf("proposer is not slashable: %v", proposer)
 	}
 
 	for _, signedHeader := range []*cltypes.SignedBeaconBlockHeader{propSlashing.Header1, propSlashing.Header2} {
-		domain, err := state.GetDomain(state.BeaconConfig().DomainBeaconProposer, state.GetEpochAtSlot(signedHeader.Header.Slot))
+		domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconProposer, state.GetEpochAtSlot(s.BeaconConfig(), signedHeader.Header.Slot))
 		if err != nil {
 			return fmt.Errorf("unable to get domain: %v", err)
 		}
@@ -66,11 +66,11 @@ func ProcessProposerSlashing(state *state.BeaconState, propSlashing *cltypes.Pro
 	}
 
 	// Set whistleblower index to 0 so current proposer gets reward.
-	state.SlashValidator(h1.ProposerIndex, nil)
+	s.SlashValidator(h1.ProposerIndex, nil)
 	return nil
 }
 
-func ProcessAttesterSlashing(state *state.BeaconState, attSlashing *cltypes.AttesterSlashing) error {
+func ProcessAttesterSlashing(s *state.BeaconState, attSlashing *cltypes.AttesterSlashing) error {
 	att1 := attSlashing.Attestation_1
 	att2 := attSlashing.Attestation_2
 
@@ -78,7 +78,7 @@ func ProcessAttesterSlashing(state *state.BeaconState, attSlashing *cltypes.Atte
 		return fmt.Errorf("attestation data not slashable: %+v; %+v", att1.Data, att2.Data)
 	}
 
-	valid, err := state.IsValidIndexedAttestation(att1)
+	valid, err := state.IsValidIndexedAttestation(s.BeaconState, att1)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 1 validity: %v", err)
 	}
@@ -86,7 +86,7 @@ func ProcessAttesterSlashing(state *state.BeaconState, attSlashing *cltypes.Atte
 		return fmt.Errorf("invalid indexed attestation 1")
 	}
 
-	valid, err = state.IsValidIndexedAttestation(att2)
+	valid, err = state.IsValidIndexedAttestation(s.BeaconState, att2)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 2 validity: %v", err)
 	}
@@ -95,14 +95,14 @@ func ProcessAttesterSlashing(state *state.BeaconState, attSlashing *cltypes.Atte
 	}
 
 	slashedAny := false
-	currentEpoch := state.GetEpochAtSlot(state.Slot())
+	currentEpoch := state.GetEpochAtSlot(s.BeaconConfig(), s.Slot())
 	for _, ind := range utils.IntersectionOfSortedSets(att1.AttestingIndices, att2.AttestingIndices) {
-		validator, err := state.ValidatorForValidatorIndex(int(ind))
+		validator, err := s.ValidatorForValidatorIndex(int(ind))
 		if err != nil {
 			return err
 		}
 		if validator.IsSlashable(currentEpoch) {
-			err := state.SlashValidator(ind, nil)
+			err := s.SlashValidator(ind, nil)
 			if err != nil {
 				return fmt.Errorf("unable to slash validator: %d", ind)
 			}
@@ -116,7 +116,7 @@ func ProcessAttesterSlashing(state *state.BeaconState, attSlashing *cltypes.Atte
 	return nil
 }
 
-func ProcessDeposit(state *state.BeaconState, deposit *cltypes.Deposit, fullValidation bool) error {
+func ProcessDeposit(s *state.BeaconState, deposit *cltypes.Deposit, fullValidation bool) error {
 	if deposit == nil {
 		return nil
 	}
@@ -124,13 +124,13 @@ func ProcessDeposit(state *state.BeaconState, deposit *cltypes.Deposit, fullVali
 	if err != nil {
 		return err
 	}
-	depositIndex := state.Eth1DepositIndex()
-	eth1Data := state.Eth1Data()
+	depositIndex := s.Eth1DepositIndex()
+	eth1Data := s.Eth1Data()
 	// Validate merkle proof for deposit leaf.
 	if fullValidation && !utils.IsValidMerkleBranch(
 		depositLeaf,
 		deposit.Proof,
-		state.BeaconConfig().DepositContractTreeDepth+1,
+		s.BeaconConfig().DepositContractTreeDepth+1,
 		depositIndex,
 		eth1Data.Root,
 	) {
@@ -138,14 +138,14 @@ func ProcessDeposit(state *state.BeaconState, deposit *cltypes.Deposit, fullVali
 	}
 
 	// Increment index
-	state.SetEth1DepositIndex(depositIndex + 1)
+	s.SetEth1DepositIndex(depositIndex + 1)
 	publicKey := deposit.Data.PubKey
 	amount := deposit.Data.Amount
 	// Check if pub key is in validator set
-	validatorIndex, has := state.ValidatorIndexByPubkey(publicKey)
+	validatorIndex, has := s.ValidatorIndexByPubkey(publicKey)
 	if !has {
 		// Agnostic domain.
-		domain, err := fork.ComputeDomain(state.BeaconConfig().DomainDeposit[:], utils.Uint32ToBytes4(state.BeaconConfig().GenesisForkVersion), [32]byte{})
+		domain, err := fork.ComputeDomain(s.BeaconConfig().DomainDeposit[:], utils.Uint32ToBytes4(s.BeaconConfig().GenesisForkVersion), [32]byte{})
 		if err != nil {
 			return err
 		}
@@ -162,44 +162,44 @@ func ProcessDeposit(state *state.BeaconState, deposit *cltypes.Deposit, fullVali
 			return nil
 		}
 		// Append validator
-		state.AddValidator(state.ValidatorFromDeposit(deposit), amount)
+		s.AddValidator(state.ValidatorFromDeposit(s.BeaconConfig(), deposit), amount)
 		// Altair forward
-		if state.Version() >= clparams.AltairVersion {
-			state.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
-			state.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
-			state.AddInactivityScore(0)
+		if s.Version() >= clparams.AltairVersion {
+			s.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
+			s.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
+			s.AddInactivityScore(0)
 		}
 		return nil
 	}
 	// Increase the balance if exists already
-	return state.IncreaseBalance(validatorIndex, amount)
+	return state.IncreaseBalance(s.BeaconState, validatorIndex, amount)
 }
 
 // ProcessVoluntaryExit takes a voluntary exit and applies state transition.
-func ProcessVoluntaryExit(state *state.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit, fullValidation bool) error {
+func ProcessVoluntaryExit(s *state.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit, fullValidation bool) error {
 	// Sanity checks so that we know it is good.
 	voluntaryExit := signedVoluntaryExit.VolunaryExit
-	currentEpoch := state.Epoch()
-	validator, err := state.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
+	currentEpoch := state.Epoch(s.BeaconState)
+	validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 	if err != nil {
 		return err
 	}
 	if !validator.Active(currentEpoch) {
 		return errors.New("ProcessVoluntaryExit: validator is not active")
 	}
-	if validator.ExitEpoch != state.BeaconConfig().FarFutureEpoch {
+	if validator.ExitEpoch != s.BeaconConfig().FarFutureEpoch {
 		return errors.New("ProcessVoluntaryExit: another exit for the same validator is already getting processed")
 	}
 	if currentEpoch < voluntaryExit.Epoch {
 		return errors.New("ProcessVoluntaryExit: exit is happening in the future")
 	}
-	if currentEpoch < validator.ActivationEpoch+state.BeaconConfig().ShardCommitteePeriod {
+	if currentEpoch < validator.ActivationEpoch+s.BeaconConfig().ShardCommitteePeriod {
 		return errors.New("ProcessVoluntaryExit: exit is happening too fast")
 	}
 
 	// We can skip it in some instances if we want to optimistically sync up.
 	if fullValidation {
-		domain, err := state.GetDomain(state.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
+		domain, err := s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
 		if err != nil {
 			return err
 		}
@@ -216,20 +216,20 @@ func ProcessVoluntaryExit(state *state.BeaconState, signedVoluntaryExit *cltypes
 		}
 	}
 	// Do the exit (same process in slashing).
-	return state.InitiateValidatorExit(voluntaryExit.ValidatorIndex)
+	return s.InitiateValidatorExit(voluntaryExit.ValidatorIndex)
 }
 
 // ProcessWithdrawals processes withdrawals by decreasing the balance of each validator
 // and updating the next withdrawal index and validator index.
-func ProcessWithdrawals(state *state.BeaconState, withdrawals types.Withdrawals, fullValidation bool) error {
+func ProcessWithdrawals(s *state.BeaconState, withdrawals types.Withdrawals, fullValidation bool) error {
 	// Get the list of withdrawals, the expected withdrawals (if performing full validation),
 	// and the beacon configuration.
-	beaconConfig := state.BeaconConfig()
-	numValidators := uint64(len(state.Validators()))
+	beaconConfig := s.BeaconConfig()
+	numValidators := uint64(len(s.Validators()))
 
 	// Check if full validation is required and verify expected withdrawals.
 	if fullValidation {
-		expectedWithdrawals := state.ExpectedWithdrawals()
+		expectedWithdrawals := state.ExpectedWithdrawals(s.BeaconState)
 		if len(expectedWithdrawals) != len(withdrawals) {
 			return fmt.Errorf("ProcessWithdrawals: expected %d withdrawals, but got %d", len(expectedWithdrawals), len(withdrawals))
 		}
@@ -242,7 +242,7 @@ func ProcessWithdrawals(state *state.BeaconState, withdrawals types.Withdrawals,
 
 	// Decrease the balance of each validator for the corresponding withdrawal.
 	for _, withdrawal := range withdrawals {
-		if err := state.DecreaseBalance(withdrawal.Validator, withdrawal.Amount); err != nil {
+		if err := state.DecreaseBalance(s.BeaconState, withdrawal.Validator, withdrawal.Amount); err != nil {
 			return err
 		}
 	}
@@ -250,16 +250,16 @@ func ProcessWithdrawals(state *state.BeaconState, withdrawals types.Withdrawals,
 	// Update next withdrawal index based on number of withdrawals.
 	if len(withdrawals) > 0 {
 		lastWithdrawalIndex := withdrawals[len(withdrawals)-1].Index
-		state.SetNextWithdrawalIndex(lastWithdrawalIndex + 1)
+		s.SetNextWithdrawalIndex(lastWithdrawalIndex + 1)
 	}
 
 	// Update next withdrawal validator index based on number of withdrawals.
 	if len(withdrawals) == int(beaconConfig.MaxWithdrawalsPerPayload) {
 		lastWithdrawalValidatorIndex := withdrawals[len(withdrawals)-1].Validator + 1
-		state.SetNextWithdrawalValidatorIndex(lastWithdrawalValidatorIndex % numValidators)
+		s.SetNextWithdrawalValidatorIndex(lastWithdrawalValidatorIndex % numValidators)
 	} else {
-		nextIndex := state.NextWithdrawalValidatorIndex() + beaconConfig.MaxValidatorsPerWithdrawalsSweep
-		state.SetNextWithdrawalValidatorIndex(nextIndex % numValidators)
+		nextIndex := s.NextWithdrawalValidatorIndex() + beaconConfig.MaxValidatorsPerWithdrawalsSweep
+		s.SetNextWithdrawalValidatorIndex(nextIndex % numValidators)
 	}
 
 	return nil
