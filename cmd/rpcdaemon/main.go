@@ -18,8 +18,6 @@ func main() {
 	rootCtx, rootCancel := common.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		// Logging is configured in the cmd/rpcdaemon/main.go, so we skip it here
-		// to prevent setting it up twice
 		var logger log.Logger
 		var err error
 		if logger, err = debug.SetupCobra(cmd, "rpcdaemon"); err != nil {
