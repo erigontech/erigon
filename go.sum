@@ -18,8 +18,8 @@ git.apache.org/thrift.git v0.0.0-20180902110319-2566ecd5d999/go.mod h1:fPE2ZNJGy
 github.com/99designs/gqlgen v0.17.30 h1:aRCHdy0mWZ41gdlHctJmR05bi3on3Alj4YNRMBZG5UA=
 github.com/99designs/gqlgen v0.17.30/go.mod h1:i4rEatMrzzu6RXaHydq1nmEPZkb3bKQsnxNRHS4DQB4=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/Giulio2002/bls v0.0.0-20230428210858-67fd06bbe237 h1:YSnR8buOFFDoIdGkkZ588jlaUXRHpBTrlauANv9wdD0=
-github.com/Giulio2002/bls v0.0.0-20230428210858-67fd06bbe237/go.mod h1:o6qWofeW8A1XImbo3eHbC/wXnw/dasu0YuHEtdrjYzw=
+github.com/Giulio2002/bls v0.0.0-20230507111335-fa36c339a11f h1:7H8fhLJwlYAzzVUE1bQsQZjJBg8Rw+x5IZyb3i7PfZw=
+github.com/Giulio2002/bls v0.0.0-20230507111335-fa36c339a11f/go.mod h1:o6qWofeW8A1XImbo3eHbC/wXnw/dasu0YuHEtdrjYzw=
 github.com/RoaringBitmap/roaring v0.4.7/go.mod h1:8khRDP4HmeXns4xIj9oGrKSz7XTQiJx2zgh7AcNke4w=
 github.com/RoaringBitmap/roaring v0.4.17/go.mod h1:D3qVegWTmfCaX4Bl5CrBE9hfrSrrXIr8KVNvRsDi1NI=
 github.com/RoaringBitmap/roaring v0.4.23/go.mod h1:D0gp8kJQgE1A4LQ5wFLggQEyvDi06Mq5mKs52e1TwOo=
