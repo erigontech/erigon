@@ -27,7 +27,7 @@ import (
 // into the TrieOfAccounts and TrieOfStorage tables
 func initialFlatDBTrieBuild(t *testing.T, db kv.RwDB) libcommon.Hash {
 	t.Helper()
-	startTime := time.Now()
+	//startTime := time.Now()
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -35,7 +35,7 @@ func initialFlatDBTrieBuild(t *testing.T, db kv.RwDB) libcommon.Hash {
 	hash, err := stagedsync.RegenerateIntermediateHashes("test", tx, stageTrieCfg, libcommon.Hash{}, context.Background())
 	require.NoError(t, err)
 	tx.Commit()
-	t.Logf("Initial hash is %s and took %v", hash, time.Since(startTime))
+	//t.Logf("Initial hash is %s and took %v", hash, time.Since(startTime))
 	return hash
 }
 
@@ -46,7 +46,7 @@ func seedInitialAccounts(t *testing.T, db kv.RwDB, hashes []libcommon.Hash) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	for _, hash := range hashes {
-		t.Logf("Seeding initial account with hash %s", hash)
+		//t.Logf("Seeding initial account with hash %s", hash)
 		err = tx.Put(kv.HashedAccounts, hash[:], simpleAccountValBytes)
 		require.NoError(t, err)
 
@@ -65,7 +65,7 @@ func seedModifiedAccounts(t *testing.T, db kv.RwDB, hashes []libcommon.Hash) [][
 	require.NoError(t, err)
 	defer tx.Rollback()
 	for _, hash := range hashes {
-		t.Logf("Seeding modified account with hash %s", hash)
+		//t.Logf("Seeding modified account with hash %s", hash)
 		err = tx.Put(kv.HashedAccounts, hash[:], simpleModifiedAccountValBytes)
 		require.NoError(t, err)
 		toRetain = append(toRetain, append([]byte{}, hash[:]...))
@@ -180,7 +180,7 @@ func proveFlatDB(t *testing.T, db kv.RoDB, accountMissing bool, retainKeys, proo
 
 // logTrieTables simply writes the TrieOfAccounts and TrieOfStorage to the test
 // output.  It can be very helpful when debugging failed fuzzing cases.
-func logTrieTables(t *testing.T, db kv.RoDB) {
+func logTrieTables(t *testing.T, db kv.RoDB) { //nolint
 	t.Helper()
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
@@ -589,7 +589,7 @@ func FuzzTrieRootStorageProofs(f *testing.F) {
 		_, omniProof := proveFlatDB(t, db, false, retainKeys, allKeys)
 
 		for i, storageKey := range allKeys {
-			t.Logf("Processing storage key %x", storageKey)
+			//t.Logf("Processing storage key %x", storageKey)
 			// First compute the naive proof and verify that the proof is correct.
 			naiveAccountProofBytes, err := naiveTrie.Prove(storageAccountHash[:], 0, false)
 			require.NoError(t, err)
