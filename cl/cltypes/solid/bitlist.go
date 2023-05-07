@@ -75,6 +75,6 @@ func (u *bitlist) HashSSZTo(xs []byte) error {
 
 func (u *bitlist) EncodeSSZ(dst []byte) []byte {
 	buf := dst
-	buf = append(buf, u.u[:]...)
+	buf = append(buf, u.u...)
 	return buf
 }

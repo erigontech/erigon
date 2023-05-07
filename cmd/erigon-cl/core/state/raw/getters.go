@@ -260,3 +260,7 @@ func (b *BeaconState) GetDomain(domainType [4]byte, epoch uint64) ([]byte, error
 	}
 	return fork.ComputeDomain(domainType[:], b.fork.CurrentVersion, b.genesisValidatorsRoot)
 }
+
+func (b *BeaconState) DebugPrint(prefix string) {
+	fmt.Printf("%s: %x\n", prefix, b.currentEpochParticipation)
+}

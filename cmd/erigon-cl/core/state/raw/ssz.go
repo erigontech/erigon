@@ -409,8 +409,14 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		if currentEpochParticipation, err = ssz.DecodeString(buf, uint64(currentEpochParticipationOffset), uint64(inactivityScoresOffset), state_encoding.ValidatorRegistryLimit); err != nil {
 			return err
 		}
-		b.previousEpochParticipation = solid.BitlistFromBytes(previousEpochParticipation, state_encoding.ValidatorRegistryLimit)
-		b.currentEpochParticipation = solid.BitlistFromBytes(currentEpochParticipation, state_encoding.ValidatorRegistryLimit)
+		previousEpochParticipationCopy := make([]byte, len(previousEpochParticipation))
+		copy(previousEpochParticipationCopy, previousEpochParticipation)
+
+		currentEpochParticipationCopy := make([]byte, len(currentEpochParticipation))
+		copy(currentEpochParticipationCopy, currentEpochParticipation)
+
+		b.previousEpochParticipation = solid.BitlistFromBytes(previousEpochParticipationCopy, state_encoding.ValidatorRegistryLimit)
+		b.currentEpochParticipation = solid.BitlistFromBytes(currentEpochParticipationCopy, state_encoding.ValidatorRegistryLimit)
 	}
 
 	endOffset := uint32(len(buf))
