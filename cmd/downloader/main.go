@@ -182,7 +182,12 @@ var printTorrentHashes = &cobra.Command{
 	Use:     "torrent_hashes",
 	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := logging.SetupLoggerCmd("downloader", cmd)
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "downloader"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return err
+		}
 		dirs := datadir.New(datadirCli)
 		ctx := cmd.Context()
 
