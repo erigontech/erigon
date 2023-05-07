@@ -83,7 +83,7 @@ func (u *bitlist) HashSSZTo(xs []byte) error {
 	if u.l == 0 {
 		copy(baseRoot[:], merkle_tree.ZeroHashes[depth][:])
 	} else {
-		err := u.getBaseHash(baseRoot[:])
+		err := u.getBaseHash(baseRoot[:], depth)
 		if err != nil {
 			return err
 		}
@@ -94,8 +94,7 @@ func (u *bitlist) HashSSZTo(xs []byte) error {
 	return nil
 }
 
-func (arr *bitlist) getBaseHash(xs []byte) error {
-	depth := getDepth((uint64(arr.c) + 31) / 32)
+func (arr *bitlist) getBaseHash(xs []byte, depth uint8) error {
 	offset := 32*(arr.l/32) + 32
 	if len(arr.u) <= offset {
 		arr.u = append(arr.u, make([]byte, offset-len(arr.u))...)
