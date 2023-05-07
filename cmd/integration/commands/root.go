@@ -27,9 +27,6 @@ var rootCmd = &cobra.Command{
 	Use:   "integration",
 	Short: "long and heavy integration tests for Erigon",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if err := debug.SetupCobra(cmd); err != nil {
-			panic(err)
-		}
 		if chaindata == "" {
 			chaindata = filepath.Join(datadirCli, "chaindata")
 		}
@@ -57,7 +54,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(opts kv2.MdbxOpts, applyMigrations bool) kv.RwDB {
+func openDB(opts kv2.MdbxOpts, applyMigrations bool) (kv.RwDB, error) {
 	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
 	// to read all options from DB, instead of overriding them
 	opts = opts.Flags(func(f uint) uint { return f | mdbx.Accede })
@@ -67,14 +64,14 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool) kv.RwDB {
 		migrator := migrations.NewMigrator(opts.GetLabel())
 		has, err := migrator.HasPendingMigrations(db)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		if has {
 			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
 			db = opts.Exclusive().MustOpen()
 			if err := migrator.Apply(db, datadirCli); err != nil {
-				panic(err)
+				return nil, err
 			}
 			db.Close()
 			db = opts.MustOpen()
@@ -91,17 +88,17 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool) kv.RwDB {
 			}
 			return nil
 		}); err != nil {
-			panic(err)
+			return nil, err
 		}
 		if h3 {
 			_, agg := allSnapshots(context.Background(), db)
 			tdb, err := temporal.New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chain])
 			if err != nil {
-				panic(err)
+				return nil, err
 			}
 			db = tdb
 		}
 	}
 
-	return db
+	return db, nil
 }

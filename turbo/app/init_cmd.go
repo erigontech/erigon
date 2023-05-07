@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -34,6 +35,11 @@ It expects the genesis file as argument.`,
 // initGenesis will initialise the given JSON format genesis file and writes it as
 // the zero'd block (i.e. genesis) or will fail hard if it can't succeed.
 func initGenesis(ctx *cli.Context) error {
+	var logger log.Logger
+	var err error
+	if logger, err = debug.Setup(ctx, true /* rootLogger */); err != nil {
+		return err
+	}
 	// Make sure we have a valid genesis JSON
 	genesisPath := ctx.Args().First()
 	if len(genesisPath) == 0 {
@@ -52,7 +58,7 @@ func initGenesis(ctx *cli.Context) error {
 	}
 
 	// Open and initialise both full and light databases
-	stack := MakeConfigNodeDefault(ctx)
+	stack := MakeConfigNodeDefault(ctx, logger)
 	defer stack.Close()
 
 	chaindb, err := node.OpenDatabase(stack.Config(), kv.ChainDB)
@@ -64,6 +70,6 @@ func initGenesis(ctx *cli.Context) error {
 		utils.Fatalf("Failed to write genesis block: %v", err)
 	}
 	chaindb.Close()
-	log.Info("Successfully wrote genesis state", "hash", hash.Hash())
+	logger.Info("Successfully wrote genesis state", "hash", hash.Hash())
 	return nil
 }
