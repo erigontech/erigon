@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -37,7 +38,12 @@ var stateRootCmd = &cobra.Command{
 	Use:   "stateroot",
 	Short: "Exerimental command to re-execute blocks from beginning and compute state root",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := log.New()
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "stateroot"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return err
+		}
 		return StateRoot(genesis, logger, block, datadirCli)
 	},
 }
@@ -156,7 +162,7 @@ func StateRoot(genesis *types.Genesis, logger log.Logger, blockNum uint64, datad
 			fmt.Printf("root for block %d=[%x]\n", block, root)
 		}
 		if block%1000 == 0 {
-			log.Info("Processed", "blocks", block)
+			logger.Info("Processed", "blocks", block)
 		}
 		// Check for interrupts
 		select {

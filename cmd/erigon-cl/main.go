@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 )
@@ -43,10 +44,15 @@ func main() {
 }
 
 func runConsensusLayerNode(cliCtx *cli.Context) error {
+	var logger log.Logger
+	var err error
+	if logger, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 	cfg, _ := lcCli.SetupConsensusClientCfg(cliCtx)
 	var db kv.RwDB
-	var err error
 	if cfg.Chaindata == "" {
 		db, err = mdbx.NewTemporaryMdbx()
 	} else {
@@ -105,7 +111,8 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 		return nil
 	}
 	gossipManager := network.NewGossipReceiver(ctx, s, forkChoice, beaconConfig, genesisCfg)
-	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, tmpdir, executionClient, cfg.BeaconDataCfg, gossipManager, forkChoice)
+	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState,
+		tmpdir, executionClient, cfg.BeaconDataCfg, gossipManager, forkChoice, logger)
 	if err != nil {
 		return err
 	}

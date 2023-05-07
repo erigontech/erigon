@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarly used to process side forks and memory execution.
@@ -72,6 +73,7 @@ func NewConsensusStagedSync(ctx context.Context,
 	beaconDBCfg *rawdb.BeaconDataConfig,
 	gossipManager *network.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
+	logger log.Logger,
 ) (*stagedsync.Sync, error) {
 	return stagedsync.New(
 		ConsensusStages(
@@ -82,5 +84,6 @@ func NewConsensusStagedSync(ctx context.Context,
 		),
 		ConsensusUnwindOrder,
 		ConsensusPruneOrder,
+		logger,
 	), nil
 }

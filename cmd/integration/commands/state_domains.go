@@ -41,6 +41,7 @@ import (
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -91,6 +92,12 @@ var readDomains = &cobra.Command{
 	ValidArgs: []string{"account", "storage", "code", "commitment"},
 	Args:      cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return
+		}
 		ctx, _ := libcommon.RootContext()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
@@ -106,21 +113,25 @@ var readDomains = &cobra.Command{
 				case "account", "storage", "code", "commitment":
 					readFromDomain = s
 				default:
-					log.Error("invalid domain to read from", "arg", args[i])
+					logger.Error("invalid domain to read from", "arg", args[i])
 					return
 				}
 				continue
 			}
 			addr, err := hex.DecodeString(strings.TrimPrefix(args[i], "0x"))
 			if err != nil {
-				log.Warn("invalid address passed", "str", args[i], "at position", i, "err", err)
+				logger.Warn("invalid address passed", "str", args[i], "at position", i, "err", err)
 				continue
 			}
 			addrs = append(addrs, addr)
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true)
+		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
 		defer chainDb.Close()
 
 		stateDb, err := kv2.NewMDBX(log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap().Open()
@@ -129,16 +140,16 @@ var readDomains = &cobra.Command{
 		}
 		defer stateDb.Close()
 
-		if err := requestDomains(chainDb, stateDb, ctx, readFromDomain, addrs); err != nil {
+		if err := requestDomains(chainDb, stateDb, ctx, readFromDomain, addrs, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
 	},
 }
 
-func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte) error {
+func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
 	trieVariant := commitment.ParseTrieVariant(commitmentTrie)
 	if trieVariant != commitment.VariantHexPatriciaTrie {
 		blockRootMismatchExpected = true
@@ -168,7 +179,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		return fmt.Errorf("latest available tx to start is  %d and its less than start tx %d", latestTx, startTxNum)
 	}
 	if latestTx > 0 {
-		log.Info("aggregator files opened", "txn", latestTx, "block", latestBlock)
+		logger.Info("aggregator files opened", "txn", latestTx, "block", latestBlock)
 	}
 	agg.SetTxNum(latestTx)
 
@@ -182,7 +193,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		for _, addr := range addrs {
 			acc, err := r.ReadAccountData(libcommon.BytesToAddress(addr))
 			if err != nil {
-				log.Error("failed to read account", "addr", addr, "err", err)
+				logger.Error("failed to read account", "addr", addr, "err", err)
 				continue
 			}
 			fmt.Printf("%x: nonce=%d balance=%d code=%x root=%x\n", addr, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash, acc.Root)
@@ -192,7 +203,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 			a, s := libcommon.BytesToAddress(addr[:length.Addr]), libcommon.BytesToHash(addr[length.Addr:])
 			st, err := r.ReadAccountStorage(a, 0, &s)
 			if err != nil {
-				log.Error("failed to read storage", "addr", a.String(), "key", s.String(), "err", err)
+				logger.Error("failed to read storage", "addr", a.String(), "key", s.String(), "err", err)
 				continue
 			}
 			fmt.Printf("%s %s -> %x\n", a.String(), s.String(), st)
@@ -201,7 +212,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		for _, addr := range addrs {
 			code, err := r.ReadAccountCode(libcommon.BytesToAddress(addr), 0, libcommon.Hash{})
 			if err != nil {
-				log.Error("failed to read code", "addr", addr, "err", err)
+				logger.Error("failed to read code", "addr", addr, "err", err)
 				continue
 			}
 			fmt.Printf("%s: %x\n", addr, code)
@@ -216,6 +227,12 @@ var stateDomains = &cobra.Command{
 	Short:   `Run block execution and commitment with Domains.`,
 	Example: "go run ./cmd/integration state_domains --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	Run: func(cmd *cobra.Command, args []string) {
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return
+		}
 		ctx, _ := libcommon.RootContext()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
@@ -224,7 +241,11 @@ var stateDomains = &cobra.Command{
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 
 		dirs := datadir.New(datadirCli)
-		chainDb := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true)
+		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
 		defer chainDb.Close()
 
 		//stateDB := kv.Label(6)
@@ -239,16 +260,16 @@ var stateDomains = &cobra.Command{
 		}
 		defer stateDb.Close()
 
-		if err := loopProcessDomains(chainDb, stateDb, ctx); err != nil {
+		if err := loopProcessDomains(chainDb, stateDb, ctx, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
 	},
 }
 
-func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
+func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context, logger log.Logger) error {
 	trieVariant := commitment.ParseTrieVariant(commitmentTrie)
 	if trieVariant != commitment.VariantHexPatriciaTrie {
 		blockRootMismatchExpected = true
@@ -277,7 +298,7 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 		return fmt.Errorf("latest available tx to start is  %d and its less than start tx %d", latestTx, startTxNum)
 	}
 	if latestTx > 0 {
-		log.Info("aggregator files opened", "txn", latestTx, "block", latestBlock)
+		logger.Info("aggregator files opened", "txn", latestTx, "block", latestBlock)
 	}
 
 	aggWriter, aggReader := WrapAggregator(agg, stateTx)
@@ -319,25 +340,25 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 		// Check for interrupts
 		select {
 		case <-ctx.Done():
-			log.Info(fmt.Sprintf("interrupted, please wait for commitment and cleanup, next time start with --tx %d", proc.txNum))
+			logger.Info(fmt.Sprintf("interrupted, please wait for commitment and cleanup, next time start with --tx %d", proc.txNum))
 			rh, err := proc.agg.ComputeCommitment(true, false)
 			if err != nil {
-				log.Error("failed to compute commitment", "err", err)
+				logger.Error("failed to compute commitment", "err", err)
 			}
-			log.Info("commitment: state root computed", "root", hex.EncodeToString(rh))
+			logger.Info("commitment: state root computed", "root", hex.EncodeToString(rh))
 			if err := agg.Flush(ctx); err != nil {
-				log.Error("failed to flush aggregator", "err", err)
+				logger.Error("failed to flush aggregator", "err", err)
 			}
 			os.Exit(0)
 		case <-mergedRoots: // notified with rootHash of latest aggregation
 			if err := proc.commit(ctx); err != nil {
-				log.Error("chainDb commit on merge", "err", err)
+				logger.Error("chainDb commit on merge", "err", err)
 			}
 		default:
 		}
 
 		if lastStep > 0 && proc.txNum/stepSize >= lastStep {
-			log.Info("last step reached")
+			logger.Info("last step reached")
 			// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
 			break
 		}

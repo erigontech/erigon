@@ -3,8 +3,10 @@ package caplin1
 import (
 	"context"
 
+	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
@@ -25,6 +27,13 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 		log.Error("Could not create forkchoice", "err", err)
 		return err
 	}
+	bls.SetEnabledCaching(true)
+	state.ForEachValidator(func(v *cltypes.Validator, idx, total int) bool {
+		if err := bls.LoadPublicKeyIntoCache(v.PublicKey[:], false); err != nil {
+			panic(err)
+		}
+		return true
+	})
 	gossipManager := network.NewGossipReceiver(ctx, sentinel, forkChoice, beaconConfig, genesisConfig)
 	return stages.SpawnStageForkChoice(stages.StageForkChoice(nil, downloader, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice), &stagedsync.StageState{ID: "Caplin"}, nil, ctx)
 }
