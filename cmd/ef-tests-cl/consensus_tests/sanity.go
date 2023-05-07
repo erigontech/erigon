@@ -2,6 +2,7 @@ package consensus_tests
 
 import (
 	"io/fs"
+	"log"
 	"os"
 	"testing"
 
@@ -62,6 +63,7 @@ var SanityBlocks = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectes
 
 	var block *cltypes.SignedBeaconBlock
 	for _, block = range blocks {
+		log.Println(block)
 		err = transition.TransitionState(testState, block, true)
 		if err != nil {
 			break

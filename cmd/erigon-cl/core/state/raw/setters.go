@@ -348,10 +348,11 @@ func (b *BeaconState) AddPreviousEpochParticipationFlags(flags cltypes.Participa
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochParticipation.Append(byte(flags))
 }
+
 func (b *BeaconState) AddPreviousEpochParticipationAt(index int, delta byte) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
-	tmp := b.previousEpochParticipation.Get(index) + delta
-	b.previousEpochParticipation.Set(index, tmp)
+	tmp := cltypes.ParticipationFlags(b.previousEpochParticipation.Get(index)).Add(int(delta))
+	b.previousEpochParticipation.Set(index, byte(tmp))
 }
 
 // phase0 fields
