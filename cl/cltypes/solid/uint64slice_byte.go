@@ -9,11 +9,12 @@ import (
 )
 
 type byteBasedUint64Slice struct {
-	u       []byte
-	hashBuf []byte
+	u []byte
 
 	l int // len
 	c int // cap
+
+	hashBuf
 }
 
 func NewUint64Slice(limit int) Uint64Slice {
@@ -70,14 +71,6 @@ func (arr *byteBasedUint64Slice) Pop() uint64 {
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], 0)
 	arr.l = arr.l - 1
 	return val
-}
-
-func (arr *byteBasedUint64Slice) makeBuf(size int) {
-	diff := size - len(arr.hashBuf)
-	if diff > 0 {
-		arr.hashBuf = append(arr.hashBuf, make([]byte, diff)...)
-	}
-	arr.hashBuf = arr.hashBuf[:size]
 }
 
 func (arr *byteBasedUint64Slice) Append(v uint64) {
@@ -142,10 +135,10 @@ func (arr *byteBasedUint64Slice) getBaseHash(xs []byte) error {
 		}
 		outputLen := len(elements) / 2
 		arr.makeBuf(outputLen)
-		if err := gohashtree.HashByteSlice(arr.hashBuf, elements); err != nil {
+		if err := gohashtree.HashByteSlice(arr.buf, elements); err != nil {
 			return err
 		}
-		elements = arr.hashBuf
+		elements = arr.buf
 	}
 	copy(xs, elements[:32])
 	return nil

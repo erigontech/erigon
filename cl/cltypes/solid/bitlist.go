@@ -2,28 +2,36 @@ package solid
 
 import (
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/prysmaticlabs/gohashtree"
 )
 
 type bitlist struct {
 	u []byte
 	c int
+	l int
+
+	hashBuf
 }
 
 func NewBitList(l int, c int) BitList {
 	return &bitlist{
-		u: make([]byte, l),
+		u: make([]byte, l+32),
+		l: l,
 		c: c,
 	}
 }
 func BitlistFromBytes(xs []byte, c int) BitList {
 	return &bitlist{
 		u: xs,
+		l: len(xs),
 		c: c,
 	}
 }
 
 func (u *bitlist) Clear() {
 	u.u = u.u[:0]
+	u.l = 0
 }
 
 func (u *bitlist) CopyTo(target BitList) {
@@ -41,11 +49,16 @@ func (u *bitlist) Range(fn func(index int, value byte, length int) bool) {
 
 func (u *bitlist) Pop() (x byte) {
 	x, u.u = u.u[0], u.u[1:]
+	u.l = u.l - 1
 	return x
 }
 
 func (u *bitlist) Append(v byte) {
-	u.u = append(u.u, v)
+	if len(u.u) <= u.l {
+		u.u = append(u.u, make([]byte, 32)...)
+	}
+	u.u[u.l] = v
+	u.l = u.l + 1
 }
 
 func (u *bitlist) Get(index int) byte {
@@ -57,7 +70,7 @@ func (u *bitlist) Set(index int, v byte) {
 }
 
 func (u *bitlist) Length() int {
-	return len(u.u)
+	return u.l
 }
 
 func (u *bitlist) Cap() int {
@@ -65,16 +78,48 @@ func (u *bitlist) Cap() int {
 }
 
 func (u *bitlist) HashSSZTo(xs []byte) error {
-	root, err := merkle_tree.BitlistRootWithLimitForState(u.u, uint64(u.c))
-	if err != nil {
-		return err
+	depth := getDepth((uint64(u.c) + 31) / 32)
+	baseRoot := [32]byte{}
+	if u.l == 0 {
+		copy(baseRoot[:], merkle_tree.ZeroHashes[depth][:])
+	} else {
+		err := u.getBaseHash(baseRoot[:])
+		if err != nil {
+			return err
+		}
 	}
-	copy(xs, root[:])
+	lengthRoot := merkle_tree.Uint64Root(uint64(u.l))
+	ans := utils.Keccak256(baseRoot[:], lengthRoot[:])
+	copy(xs, ans[:])
+	return nil
+}
+
+func (arr *bitlist) getBaseHash(xs []byte) error {
+	depth := getDepth((uint64(arr.c) + 31) / 32)
+	offset := 32*(arr.l/32) + 32
+	if len(arr.u) <= offset {
+		arr.u = append(arr.u, make([]byte, offset-len(arr.u))...)
+	}
+	elements := arr.u[:offset]
+	for i := uint8(0); i < depth; i++ {
+		// Sequential
+		layerLen := len(elements)
+		if layerLen%64 == 32 {
+			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
+		}
+		outputLen := len(elements) / 2
+		arr.makeBuf(outputLen)
+		if err := gohashtree.HashByteSlice(arr.buf, elements); err != nil {
+			return err
+		}
+		elements = arr.buf
+	}
+	copy(xs, elements[:32])
 	return nil
 }
 
 func (u *bitlist) EncodeSSZ(dst []byte) []byte {
 	buf := dst
-	buf = append(buf, u.u...)
+	buf = append(buf, u.u[:u.l]...)
 	return buf
 }

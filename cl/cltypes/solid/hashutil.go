@@ -8,35 +8,24 @@ import (
 	"github.com/prysmaticlabs/gohashtree"
 )
 
+type hashBuf struct {
+	buf []byte
+}
+
+func (arr *hashBuf) makeBuf(size int) {
+	diff := size - len(arr.buf)
+	if diff > 0 {
+		arr.buf = append(arr.buf, make([]byte, diff)...)
+	}
+	arr.buf = arr.buf[:size]
+}
+
 func TreeHashFlatSlice(input []byte, res []byte) (err error) {
 	err = merkle_tree.MerkleRootFromFlatLeaves(input, res)
 	if err != nil {
 		return err
 	}
 	return nil
-}
-
-// MerkleizeVector uses our optimized routine to hash a list of 32-byte
-// elements.
-func MerkleizeVector(elements [][32]byte, length uint64) ([32]byte, error) {
-	depth := getDepth(length)
-	// Return zerohash at depth
-	if len(elements) == 0 {
-		return merkle_tree.ZeroHashes[depth], nil
-	}
-	for i := uint8(0); i < depth; i++ {
-		// Sequential
-		layerLen := len(elements)
-		if layerLen%2 == 1 {
-			elements = append(elements, merkle_tree.ZeroHashes[i])
-		}
-		outputLen := len(elements) / 2
-		if err := gohashtree.Hash(elements, elements); err != nil {
-			return [32]byte{}, err
-		}
-		elements = elements[:outputLen]
-	}
-	return elements[0], nil
 }
 
 // MerkleizeVector uses our optimized routine to hash a list of 32-byte
