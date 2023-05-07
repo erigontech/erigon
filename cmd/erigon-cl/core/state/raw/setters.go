@@ -333,6 +333,7 @@ func (b *BeaconState) SetCurrentEpochParticipationFlags(flags []cltypes.Particip
 
 func (b *BeaconState) SetPreviousEpochParticipationFlags(flags []cltypes.ParticipationFlags) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
+	b.previousEpochParticipation.Clear()
 	for _, v := range flags {
 		b.previousEpochParticipation.Append(byte(v))
 	}
