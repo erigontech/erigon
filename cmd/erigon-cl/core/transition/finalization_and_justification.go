@@ -91,11 +91,11 @@ func ProcessJustificationBitsAndFinality(s *state.BeaconState) error {
 				return true
 			}
 			if validator.Active(previousEpoch) &&
-				previousParticipation[i].HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
+				cltypes.ParticipationFlags(previousParticipation.Get(i)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
 				previousTargetBalance += validator.EffectiveBalance()
 			}
 			if validator.Active(currentEpoch) &&
-				currentParticipation[i].HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
+				cltypes.ParticipationFlags(currentParticipation.Get(i)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
 				currentTargetBalance += validator.EffectiveBalance()
 			}
 			return true

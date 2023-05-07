@@ -22,6 +22,29 @@ const validatorSize = 48 + 32 + 8 + 1 + 8 + 8 + 8 + 8
 
 type Validator [validatorSize]byte
 
+func NewValidatorFromParameters(
+	PublicKey [48]byte,
+	WithdrawalCredentials [32]byte,
+	EffectiveBalance uint64,
+	Slashed bool,
+	ActivationEligibilityEpoch uint64,
+	ActivationEpoch uint64,
+	ExitEpoch uint64,
+	WithdrawableEpoch uint64,
+) *Validator {
+	v := &Validator{}
+	v.SetPublicKey(PublicKey)
+	v.SetWithdrawalCredentials(WithdrawalCredentials)
+	v.SetEffectiveBalance(EffectiveBalance)
+	v.SetSlashed(Slashed)
+	v.SetActivationEligibilityEpoch(ActivationEligibilityEpoch)
+	v.SetActivationEpoch(ActivationEpoch)
+	v.SetExitEpoch(ExitEpoch)
+	v.SetWithdrawableEpoch(WithdrawableEpoch)
+	return v
+
+}
+
 func (v *Validator) CopyTo(dst *Validator) {
 	copy(dst[:], v[:])
 }

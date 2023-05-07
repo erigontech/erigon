@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
 )
 
 const (
@@ -31,8 +32,8 @@ type BeaconState struct {
 	balances                   solid.Uint64Slice
 	randaoMixes                [randoMixesLength]common.Hash
 	slashings                  [slashingsLength]uint64
-	previousEpochParticipation cltypes.ParticipationFlagsList
-	currentEpochParticipation  cltypes.ParticipationFlagsList
+	previousEpochParticipation solid.BitList
+	currentEpochParticipation  solid.BitList
 	justificationBits          cltypes.JustificationBits
 	// Altair
 	previousJustifiedCheckpoint *cltypes.Checkpoint
@@ -64,8 +65,10 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 	state := &BeaconState{
 		beaconConfig: cfg,
 		//inactivityScores: solid.NewSimpleUint64Slice(int(cfg.ValidatorRegistryLimit)),
-		inactivityScores: solid.NewUint64Slice(int(cfg.ValidatorRegistryLimit)),
-		balances:         solid.NewUint64Slice(int(cfg.ValidatorRegistryLimit)),
+		inactivityScores:           solid.NewUint64Slice(int(cfg.ValidatorRegistryLimit)),
+		balances:                   solid.NewUint64Slice(int(cfg.ValidatorRegistryLimit)),
+		previousEpochParticipation: solid.NewBitList(0, int(state_encoding.ValidatorRegistryLimit)),
+		currentEpochParticipation:  solid.NewBitList(0, int(state_encoding.ValidatorRegistryLimit)),
 	}
 	state.init()
 	return state

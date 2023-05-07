@@ -4,6 +4,8 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
 )
 
 func (b *BeaconState) SetVersion(version clparams.StateVersion) {
@@ -221,11 +223,11 @@ func (b *BeaconState) IncrementSlashingSegmentAt(index int, delta uint64) {
 func (b *BeaconState) SetEpochParticipationForValidatorIndex(isCurrentEpoch bool, index int, flags cltypes.ParticipationFlags) {
 	if isCurrentEpoch {
 		b.markLeaf(CurrentEpochParticipationLeafIndex)
-		b.currentEpochParticipation[index] = flags
+		b.currentEpochParticipation.Set(index, byte(flags))
 		return
 	}
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
-	b.previousEpochParticipation[index] = flags
+	b.previousEpochParticipation.Set(index, byte(flags))
 }
 
 func (b *BeaconState) SetValidatorAtIndex(index int, validator *cltypes.Validator) {
@@ -235,7 +237,7 @@ func (b *BeaconState) SetValidatorAtIndex(index int, validator *cltypes.Validato
 
 func (b *BeaconState) ResetEpochParticipation() {
 	b.previousEpochParticipation = b.currentEpochParticipation
-	b.currentEpochParticipation = make(cltypes.ParticipationFlagsList, len(b.validators))
+	b.currentEpochParticipation = solid.NewBitList(len(b.validators), state_encoding.ValidatorRegistryLimit)
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 }
@@ -323,26 +325,32 @@ func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error
 
 func (b *BeaconState) SetCurrentEpochParticipationFlags(flags []cltypes.ParticipationFlags) {
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
-	b.currentEpochParticipation = flags
+	b.currentEpochParticipation.Clear()
+	for _, v := range flags {
+		b.currentEpochParticipation.Append(byte(v))
+	}
 }
 
 func (b *BeaconState) SetPreviousEpochParticipationFlags(flags []cltypes.ParticipationFlags) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
-	b.previousEpochParticipation = flags
+	for _, v := range flags {
+		b.previousEpochParticipation.Append(byte(v))
+	}
 }
 
 func (b *BeaconState) AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags) {
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
-	b.currentEpochParticipation = append(b.currentEpochParticipation, flags)
+	b.currentEpochParticipation.Append(byte(flags))
 }
 
 func (b *BeaconState) AddPreviousEpochParticipationFlags(flags cltypes.ParticipationFlags) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
-	b.previousEpochParticipation = append(b.previousEpochParticipation, flags)
+	b.previousEpochParticipation.Append(byte(flags))
 }
 func (b *BeaconState) AddPreviousEpochParticipationAt(index int, delta byte) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
-	b.previousEpochParticipation[index] = b.previousEpochParticipation[index].Add(int(delta))
+	tmp := b.previousEpochParticipation.Get(index) + delta
+	b.previousEpochParticipation.Set(index, tmp)
 }
 
 // phase0 fields

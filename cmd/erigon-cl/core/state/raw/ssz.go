@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
 )
@@ -71,7 +72,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	}
 
 	maxEpochAttestations := int(b.beaconConfig.SlotsPerEpoch * b.beaconConfig.MaxAttestations)
-	if b.version != clparams.Phase0Version && len(b.previousEpochParticipation) > state_encoding.ValidatorRegistryLimit || len(b.currentEpochParticipation) > state_encoding.ValidatorRegistryLimit {
+	if b.version != clparams.Phase0Version && b.previousEpochParticipation.Length() > state_encoding.ValidatorRegistryLimit || (b.currentEpochParticipation.Length()) > state_encoding.ValidatorRegistryLimit {
 		return nil, fmt.Errorf("too many participations")
 	}
 
@@ -142,7 +143,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 			offset += uint32(attestation.EncodingSizeSSZ()) + 4
 		}
 	} else {
-		offset += uint32(len(b.previousEpochParticipation))
+		offset += uint32(b.previousEpochParticipation.Length())
 	}
 	// current participation offset
 	dst = append(dst, ssz.OffsetSSZ(offset)...)
@@ -152,7 +153,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 			offset += uint32(attestation.EncodingSizeSSZ()) + 4
 		}
 	} else {
-		offset += uint32(len(b.currentEpochParticipation))
+		offset += uint32(b.currentEpochParticipation.Length())
 	}
 
 	dst = append(dst, b.justificationBits.Byte())
@@ -225,8 +226,8 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 			return nil, err
 		}
 	} else {
-		dst = append(dst, b.previousEpochParticipation.Bytes()...)
-		dst = append(dst, b.currentEpochParticipation.Bytes()...)
+		dst = b.previousEpochParticipation.EncodeSSZ(dst)
+		dst = b.currentEpochParticipation.EncodeSSZ(dst)
 	}
 	if b.version >= clparams.AltairVersion {
 		// write inactivity scores (offset 6)
@@ -408,8 +409,8 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		if currentEpochParticipation, err = ssz.DecodeString(buf, uint64(currentEpochParticipationOffset), uint64(inactivityScoresOffset), state_encoding.ValidatorRegistryLimit); err != nil {
 			return err
 		}
-		b.previousEpochParticipation, b.currentEpochParticipation = cltypes.ParticipationFlagsListFromBytes(previousEpochParticipation), cltypes.ParticipationFlagsListFromBytes(currentEpochParticipation)
-
+		b.previousEpochParticipation = solid.BitlistFromBytes(previousEpochParticipation, state_encoding.ValidatorRegistryLimit)
+		b.currentEpochParticipation = solid.BitlistFromBytes(currentEpochParticipation, state_encoding.ValidatorRegistryLimit)
 	}
 
 	endOffset := uint32(len(buf))
@@ -460,8 +461,8 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 			size += pendingAttestation.EncodingSizeSSZ()
 		}
 	} else {
-		size += len(b.previousEpochParticipation)
-		size += len(b.currentEpochParticipation)
+		size += b.previousEpochParticipation.Length()
+		size += b.currentEpochParticipation.Length()
 	}
 
 	size += b.inactivityScores.Length() * 8

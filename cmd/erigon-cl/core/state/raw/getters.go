@@ -7,6 +7,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
 )
 
@@ -165,7 +166,7 @@ func (b *BeaconState) SlashingSegmentAt(pos int) uint64 {
 	return b.slashings[pos]
 }
 
-func (b *BeaconState) EpochParticipation(currentEpoch bool) cltypes.ParticipationFlagsList {
+func (b *BeaconState) EpochParticipation(currentEpoch bool) solid.BitList {
 	if currentEpoch {
 		return b.currentEpochParticipation
 	}
@@ -178,9 +179,9 @@ func (b *BeaconState) JustificationBits() cltypes.JustificationBits {
 
 func (b *BeaconState) EpochParticipationForValidatorIndex(isCurrentEpoch bool, index int) cltypes.ParticipationFlags {
 	if isCurrentEpoch {
-		return b.currentEpochParticipation[index]
+		return cltypes.ParticipationFlags(b.currentEpochParticipation.Get(index))
 	}
-	return b.previousEpochParticipation[index]
+	return cltypes.ParticipationFlags(b.previousEpochParticipation.Get(index))
 }
 
 func (b *BeaconState) PreviousJustifiedCheckpoint() *cltypes.Checkpoint {

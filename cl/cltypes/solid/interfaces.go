@@ -12,3 +12,17 @@ type Uint64Slice interface {
 	Cap() int
 	HashSSZTo(xs []byte) error
 }
+
+type BitList interface {
+	Clear()
+	CopyTo(BitList)
+	Range(fn func(index int, value byte, length int) bool)
+	Pop() byte
+	Append(v byte)
+	Get(index int) byte
+	Set(index int, v byte)
+	Length() int
+	Cap() int
+	EncodeSSZ(dst []byte) []byte
+	HashSSZTo(xs []byte) error
+}

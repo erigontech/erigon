@@ -7,6 +7,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/raw"
@@ -86,7 +87,7 @@ func IsUnslashedParticipatingIndex(b *raw.BeaconState, epoch, index uint64, flag
 	if err != nil {
 		return false
 	}
-	return validator.Active(epoch) && b.EpochParticipation(false)[index].HasFlag(flagIdx) && !validator.Slashed()
+	return validator.Active(epoch) && cltypes.ParticipationFlags(b.EpochParticipation(false).Get(int(index))).HasFlag(flagIdx) && !validator.Slashed()
 }
 
 // EligibleValidatorsIndicies Implementation of get_eligible_validator_indices as defined in the eth 2.0 specs.
@@ -141,7 +142,7 @@ func IsValidIndexedAttestation(b *raw.BeaconState, att *cltypes.IndexedAttestati
 
 // getUnslashedParticipatingIndices returns set of currently unslashed participating indexes
 func GetUnslashedParticipatingIndices(b *raw.BeaconState, flagIndex int, epoch uint64) (validatorSet []uint64, err error) {
-	var participation cltypes.ParticipationFlagsList
+	var participation solid.BitList
 	// Must be either previous or current epoch
 	switch epoch {
 	case Epoch(b):
@@ -154,7 +155,7 @@ func GetUnslashedParticipatingIndices(b *raw.BeaconState, flagIndex int, epoch u
 	// Iterate over all validators and include the active ones that have flag_index enabled and are not slashed.
 	b.ForEachValidator(func(validator *cltypes.Validator, i, total int) bool {
 		if !validator.Active(epoch) ||
-			!participation[i].HasFlag(flagIndex) ||
+			!cltypes.ParticipationFlags(participation.Get(i)).HasFlag(flagIndex) ||
 			validator.Slashed() {
 			return true
 		}

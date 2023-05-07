@@ -1,7 +1,6 @@
 package solid_test
 
 import (
-	"log"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -28,7 +27,6 @@ func TestUint64SliceBasic(t *testing.T) {
 	nums := []uint64{3, 2, 1}
 	root, err := merkle_tree.Uint64ListRootWithLimit(nums, 2)
 	require.NoError(t, err)
-	log.Printf("merkl tree: %x", root)
-	log.Printf("ours tree: %x", out)
+	require.EqualValues(t, root, out)
 
 }
