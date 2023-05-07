@@ -75,12 +75,11 @@ func (b *BeaconState) Eth1DepositIndex() uint64 {
 	return b.eth1DepositIndex
 }
 
-func (b *BeaconState) Validators() []*cltypes.Validator {
-	return b.validators
-}
-
 func (b *BeaconState) ValidatorLength() int {
 	return len(b.validators)
+}
+func (b *BeaconState) AppendValidator(in *cltypes.Validator) {
+	b.validators = append(b.validators, in)
 }
 
 func (b *BeaconState) ForEachValidator(fn func(v *cltypes.Validator, idx int, total int) bool) {
@@ -99,36 +98,32 @@ func (b *BeaconState) ValidatorForValidatorIndex(index int) (*cltypes.Validator,
 	return b.validators[index], nil
 }
 
-func (b *BeaconState) Balances() []uint64 {
-	return b.balances
-}
-
 func (b *BeaconState) ValidatorBalance(index int) (uint64, error) {
-	if index >= len(b.balances) {
+	if index >= b.balances.Length() {
 		return 0, ErrInvalidValidatorIndex
 	}
-	return b.balances[index], nil
+	return b.balances.Get(index), nil
 }
 
 func (b *BeaconState) ValidatorExitEpoch(index int) (uint64, error) {
 	if index >= len(b.validators) {
 		return 0, ErrInvalidValidatorIndex
 	}
-	return b.validators[index].ExitEpoch, nil
+	return b.validators[index].ExitEpoch(), nil
 }
 
 func (b *BeaconState) ValidatorWithdrawableEpoch(index int) (uint64, error) {
 	if index >= len(b.validators) {
 		return 0, ErrInvalidValidatorIndex
 	}
-	return b.validators[index].WithdrawableEpoch, nil
+	return b.validators[index].WithdrawableEpoch(), nil
 }
 
 func (b *BeaconState) ValidatorEffectiveBalance(index int) (uint64, error) {
 	if index >= len(b.validators) {
 		return 0, ErrInvalidValidatorIndex
 	}
-	return b.validators[index].EffectiveBalance, nil
+	return b.validators[index].EffectiveBalance(), nil
 }
 
 func (b *BeaconState) ValidatorMinCurrentInclusionDelayAttestation(index int) (*cltypes.PendingAttestation, error) {
@@ -196,15 +191,11 @@ func (b *BeaconState) CurrentJustifiedCheckpoint() *cltypes.Checkpoint {
 	return b.currentJustifiedCheckpoint
 }
 
-func (b *BeaconState) InactivityScores() []uint64 {
-	return b.inactivityScores
-}
-
 func (b *BeaconState) ValidatorInactivityScore(index int) (uint64, error) {
-	if len(b.inactivityScores) <= index {
+	if b.inactivityScores.Length() <= index {
 		return 0, ErrInvalidValidatorIndex
 	}
-	return b.inactivityScores[index], nil
+	return b.inactivityScores.Get(index), nil
 }
 
 func (b *BeaconState) FinalizedCheckpoint() *cltypes.Checkpoint {
@@ -261,7 +252,7 @@ func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (libcommon.Hash, error) {
 	return b.blockRoots[slot%b.BeaconConfig().SlotsPerHistoricalRoot], nil
 }
 
-// GetBl
+// GetDomain
 func (b *BeaconState) GetDomain(domainType [4]byte, epoch uint64) ([]byte, error) {
 	if epoch < b.fork.Epoch {
 		return fork.ComputeDomain(domainType[:], b.fork.PreviousVersion, b.genesisValidatorsRoot)

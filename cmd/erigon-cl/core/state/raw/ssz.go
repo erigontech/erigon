@@ -66,7 +66,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		return nil, fmt.Errorf("too many validators")
 	}
 
-	if len(b.balances) > state_encoding.ValidatorRegistryLimit {
+	if b.balances.Length() > state_encoding.ValidatorRegistryLimit {
 		return nil, fmt.Errorf("too many balances")
 	}
 
@@ -79,7 +79,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		return nil, fmt.Errorf("too many participations")
 	}
 
-	if len(b.inactivityScores) > state_encoding.ValidatorRegistryLimit {
+	if b.inactivityScores.Length() > state_encoding.ValidatorRegistryLimit {
 		return nil, fmt.Errorf("too many inactivities scores")
 	}
 	// Start encoding
@@ -124,7 +124,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 
 	// balances offset
 	dst = append(dst, ssz.OffsetSSZ(offset)...)
-	offset += uint32(len(b.balances)) * 8
+	offset += uint32(b.balances.Length()) * 8
 
 	for _, mix := range &b.randaoMixes {
 		dst = append(dst, mix[:]...)
@@ -172,7 +172,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 
 		// Inactivity scores offset
 		dst = append(dst, ssz.OffsetSSZ(offset)...)
-		offset += uint32(len(b.inactivityScores)) * 8
+		offset += uint32(b.inactivityScores.Length()) * 8
 
 		// Sync commitees
 		if dst, err = b.currentSyncCommittee.EncodeSSZ(dst); err != nil {
@@ -211,9 +211,10 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		}
 	}
 	// Write balances (offset 4)
-	for _, balance := range b.balances {
-		dst = append(dst, ssz.Uint64SSZ(balance)...)
-	}
+	b.balances.Range(func(index int, value uint64, length int) bool {
+		dst = append(dst, ssz.Uint64SSZ(value)...)
+		return true
+	})
 
 	// Write participations (offset 4 & 5)
 	if b.version == clparams.Phase0Version {
@@ -229,9 +230,10 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	}
 	if b.version >= clparams.AltairVersion {
 		// write inactivity scores (offset 6)
-		for _, score := range b.inactivityScores {
-			dst = append(dst, ssz.Uint64SSZ(score)...)
-		}
+		b.inactivityScores.Range(func(index int, value uint64, length int) bool {
+			dst = append(dst, ssz.Uint64SSZ(value)...)
+			return true
+		})
 	}
 
 	// write execution header (offset 7)
@@ -384,9 +386,11 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if b.validators, err = ssz.DecodeStaticList[*cltypes.Validator](buf, validatorsOffset, balancesOffset, 121, state_encoding.ValidatorRegistryLimit, version); err != nil {
 		return err
 	}
-	if b.balances, err = ssz.DecodeNumbersList(buf, balancesOffset, previousEpochParticipationOffset, state_encoding.ValidatorRegistryLimit); err != nil {
+	rawBalances, err := ssz.DecodeNumbersList(buf, balancesOffset, previousEpochParticipationOffset, state_encoding.ValidatorRegistryLimit)
+	if err != nil {
 		return err
 	}
+	b.SetBalances(rawBalances)
 	if b.version == clparams.Phase0Version {
 		maxAttestations := b.beaconConfig.SlotsPerEpoch * b.beaconConfig.MaxAttestations
 		if b.previousEpochAttestations, err = ssz.DecodeDynamicList[*cltypes.PendingAttestation](buf, previousEpochParticipationOffset, currentEpochParticipationOffset, maxAttestations, version); err != nil {
@@ -412,9 +416,11 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if executionPayloadOffset != 0 {
 		endOffset = executionPayloadOffset
 	}
-	if b.inactivityScores, err = ssz.DecodeNumbersList(buf, inactivityScoresOffset, endOffset, state_encoding.ValidatorRegistryLimit); err != nil {
+	inactivityScores, err := ssz.DecodeNumbersList(buf, inactivityScoresOffset, endOffset, state_encoding.ValidatorRegistryLimit)
+	if err != nil {
 		return err
 	}
+	b.SetInactivityScores(inactivityScores)
 	if b.version == clparams.AltairVersion {
 		return b.init()
 	}
@@ -445,7 +451,7 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	size = int(b.baseOffsetSSZ()) + (len(b.historicalRoots) * 32)
 	size += len(b.eth1DataVotes) * 72
 	size += len(b.validators) * 121
-	size += len(b.balances) * 8
+	size += b.balances.Length() * 8
 	if b.version == clparams.Phase0Version {
 		for _, pendingAttestation := range b.previousEpochAttestations {
 			size += pendingAttestation.EncodingSizeSSZ()
@@ -458,7 +464,7 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 		size += len(b.currentEpochParticipation)
 	}
 
-	size += len(b.inactivityScores) * 8
+	size += b.inactivityScores.Length() * 8
 	size += len(b.historicalSummaries) * 64
 	return
 }

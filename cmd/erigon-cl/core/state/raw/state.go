@@ -4,6 +4,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
 const (
@@ -27,7 +28,7 @@ type BeaconState struct {
 	eth1DataVotes              []*cltypes.Eth1Data
 	eth1DepositIndex           uint64
 	validators                 []*cltypes.Validator
-	balances                   []uint64
+	balances                   solid.Uint64Slice
 	randaoMixes                [randoMixesLength]common.Hash
 	slashings                  [slashingsLength]uint64
 	previousEpochParticipation cltypes.ParticipationFlagsList
@@ -37,7 +38,7 @@ type BeaconState struct {
 	previousJustifiedCheckpoint *cltypes.Checkpoint
 	currentJustifiedCheckpoint  *cltypes.Checkpoint
 	finalizedCheckpoint         *cltypes.Checkpoint
-	inactivityScores            []uint64
+	inactivityScores            solid.Uint64Slice
 	currentSyncCommittee        *cltypes.SyncCommittee
 	nextSyncCommittee           *cltypes.SyncCommittee
 	// Bellatrix
@@ -62,6 +63,9 @@ type BeaconState struct {
 func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 	state := &BeaconState{
 		beaconConfig: cfg,
+		//inactivityScores: solid.NewSimpleUint64Slice(int(cfg.ValidatorRegistryLimit)),
+		inactivityScores: solid.NewUint64Slice(int(cfg.ValidatorRegistryLimit)),
+		balances:         solid.NewUint64Slice(int(cfg.ValidatorRegistryLimit)),
 	}
 	state.init()
 	return state
@@ -72,5 +76,4 @@ func (b *BeaconState) init() error {
 		b.touchedLeaves = make(map[StateLeafIndex]bool)
 	}
 	return nil
-
 }

@@ -86,7 +86,7 @@ func IsUnslashedParticipatingIndex(b *raw.BeaconState, epoch, index uint64, flag
 	if err != nil {
 		return false
 	}
-	return validator.Active(epoch) && b.EpochParticipation(false)[index].HasFlag(flagIdx) && !validator.Slashed
+	return validator.Active(epoch) && b.EpochParticipation(false)[index].HasFlag(flagIdx) && !validator.Slashed()
 }
 
 // EligibleValidatorsIndicies Implementation of get_eligible_validator_indices as defined in the eth 2.0 specs.
@@ -95,7 +95,7 @@ func EligibleValidatorsIndicies(b *raw.BeaconState) (eligibleValidators []uint64
 	previousEpoch := PreviousEpoch(b)
 
 	b.ForEachValidator(func(validator *cltypes.Validator, i, total int) bool {
-		if validator.Active(previousEpoch) || (validator.Slashed && previousEpoch+1 < validator.WithdrawableEpoch) {
+		if validator.Active(previousEpoch) || (validator.Slashed() && previousEpoch+1 < validator.WithdrawableEpoch()) {
 			eligibleValidators = append(eligibleValidators, uint64(i))
 		}
 		return true
@@ -115,7 +115,8 @@ func IsValidIndexedAttestation(b *raw.BeaconState, att *cltypes.IndexedAttestati
 		if err != nil {
 			return false, err
 		}
-		pks = append(pks, val.PublicKey[:])
+		pk := val.PublicKey()
+		pks = append(pks, pk[:])
 	}
 
 	domain, err := b.GetDomain(b.BeaconConfig().DomainBeaconAttester, att.Data.Target.Epoch)
@@ -154,7 +155,7 @@ func GetUnslashedParticipatingIndices(b *raw.BeaconState, flagIndex int, epoch u
 	b.ForEachValidator(func(validator *cltypes.Validator, i, total int) bool {
 		if !validator.Active(epoch) ||
 			!participation[i].HasFlag(flagIndex) ||
-			validator.Slashed {
+			validator.Slashed() {
 			return true
 		}
 		validatorSet = append(validatorSet, uint64(i))
@@ -165,14 +166,14 @@ func GetUnslashedParticipatingIndices(b *raw.BeaconState, flagIndex int, epoch u
 
 // Implementation of is_eligible_for_activation_queue. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation_queue
 func IsValidatorEligibleForActivationQueue(b *raw.BeaconState, validator *cltypes.Validator) bool {
-	return validator.ActivationEligibilityEpoch == b.BeaconConfig().FarFutureEpoch &&
-		validator.EffectiveBalance == b.BeaconConfig().MaxEffectiveBalance
+	return validator.ActivationEligibilityEpoch() == b.BeaconConfig().FarFutureEpoch &&
+		validator.EffectiveBalance() == b.BeaconConfig().MaxEffectiveBalance
 }
 
 // Implementation of is_eligible_for_activation. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation
 func IsValidatorEligibleForActivation(b *raw.BeaconState, validator *cltypes.Validator) bool {
-	return validator.ActivationEligibilityEpoch <= b.FinalizedCheckpoint().Epoch &&
-		validator.ActivationEpoch == b.BeaconConfig().FarFutureEpoch
+	return validator.ActivationEligibilityEpoch() <= b.FinalizedCheckpoint().Epoch &&
+		validator.ActivationEpoch() == b.BeaconConfig().FarFutureEpoch
 }
 
 // Check whether a merge transition is complete by verifying the presence of a valid execution payload header.
@@ -204,14 +205,14 @@ func ExpectedWithdrawals(b *raw.BeaconState) []*types.Withdrawal {
 		// supposedly this operation is safe because we checked the validator length about
 		currentValidator, _ := b.ValidatorForValidatorIndex(int(nextWithdrawalValidatorIndex))
 		currentBalance, _ := b.ValidatorBalance(int(nextWithdrawalValidatorIndex))
-
+		wd := currentValidator.WithdrawalCredentials()
 		// Check if the validator is fully withdrawable
 		if isFullyWithdrawableValidator(b.BeaconConfig(), currentValidator, currentBalance, currentEpoch) {
 			// Add a new withdrawal with the validator's withdrawal credentials and balance
 			newWithdrawal := &types.Withdrawal{
 				Index:     nextWithdrawalIndex,
 				Validator: nextWithdrawalValidatorIndex,
-				Address:   libcommon.BytesToAddress(currentValidator.WithdrawalCredentials[12:]),
+				Address:   libcommon.BytesToAddress(wd[12:]),
 				Amount:    currentBalance,
 			}
 			withdrawals = append(withdrawals, newWithdrawal)
@@ -221,7 +222,7 @@ func ExpectedWithdrawals(b *raw.BeaconState) []*types.Withdrawal {
 			newWithdrawal := &types.Withdrawal{
 				Index:     nextWithdrawalIndex,
 				Validator: nextWithdrawalValidatorIndex,
-				Address:   libcommon.BytesToAddress(currentValidator.WithdrawalCredentials[12:]),
+				Address:   libcommon.BytesToAddress(wd[12:]),
 				Amount:    currentBalance - b.BeaconConfig().MaxEffectiveBalance,
 			}
 			withdrawals = append(withdrawals, newWithdrawal)

@@ -130,10 +130,8 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(12): Balances
 	if b.isLeafDirty(BalancesLeafIndex) {
-		root, err := merkle_tree.Uint64ListRootWithLimit(b.balances, state_encoding.ValidatorLimitForBalancesChunks())
-		if err != nil {
-			return err
-		}
+		root := [32]byte{}
+		b.balances.HashSSZTo(root[:])
 		b.updateLeaf(BalancesLeafIndex, root)
 	}
 
@@ -226,10 +224,8 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 	// Field(21): Inactivity Scores
 	if b.isLeafDirty(InactivityScoresLeafIndex) {
-		root, err := merkle_tree.Uint64ListRootWithLimit(b.inactivityScores, state_encoding.ValidatorLimitForBalancesChunks())
-		if err != nil {
-			return err
-		}
+		root := [32]byte{}
+		b.inactivityScores.HashSSZTo(root[:])
 		b.updateLeaf(InactivityScoresLeafIndex, root)
 	}
 

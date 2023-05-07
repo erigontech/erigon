@@ -22,15 +22,16 @@ func ProcessBlsToExecutionChange(state *state.BeaconState, signedChange *cltypes
 	}
 
 	// Perform full validation if requested.
+	wc := validator.WithdrawalCredentials()
 	if fullValidation {
 		// Check the validator's withdrawal credentials prefix.
-		if validator.WithdrawalCredentials[0] != beaconConfig.BLSWithdrawalPrefixByte {
+		if wc[0] != beaconConfig.BLSWithdrawalPrefixByte {
 			return fmt.Errorf("invalid withdrawal credentials prefix")
 		}
 
 		// Check the validator's withdrawal credentials against the provided message.
 		hashedFrom := utils.Keccak256(change.From[:])
-		if !bytes.Equal(hashedFrom[1:], validator.WithdrawalCredentials[1:]) {
+		if !bytes.Equal(hashedFrom[1:], wc[1:]) {
 			return fmt.Errorf("invalid withdrawal credentials")
 		}
 
@@ -51,7 +52,7 @@ func ProcessBlsToExecutionChange(state *state.BeaconState, signedChange *cltypes
 			return fmt.Errorf("invalid signature")
 		}
 	}
-	credentials := validator.WithdrawalCredentials
+	credentials := wc
 	// Reset the validator's withdrawal credentials.
 	credentials[0] = beaconConfig.ETH1AddressWithdrawalPrefixByte
 	copy(credentials[1:], make([]byte, 11))

@@ -17,10 +17,10 @@ func getTestState(t *testing.T) *state.BeaconState {
 	numVals := 2048
 	validators := make([]*cltypes.Validator, numVals)
 	for i := 0; i < numVals; i++ {
-		validators[i] = &cltypes.Validator{
-			ActivationEpoch: 0,
-			ExitEpoch:       10000,
-		}
+		v := &cltypes.Validator{}
+		validators[i] = v
+		v.SetActivationEpoch(0)
+		v.SetExitEpoch(10000)
 	}
 	b := state.GetEmptyBeaconState()
 	b.SetValidators(validators)
@@ -50,10 +50,10 @@ func TestGetBeaconProposerIndex(t *testing.T) {
 	numVals := 2048
 	validators := make([]*cltypes.Validator, numVals)
 	for i := 0; i < numVals; i++ {
-		validators[i] = &cltypes.Validator{
-			ActivationEpoch: 0,
-			ExitEpoch:       10000,
-		}
+		v := &cltypes.Validator{}
+		validators[i] = v
+		v.SetActivationEpoch(0)
+		v.SetExitEpoch(10000)
 	}
 	testCases := []struct {
 		description string
@@ -137,7 +137,11 @@ func TestComputeShuffledIndex(t *testing.T) {
 func generateBeaconStateWithValidators(n int) *state.BeaconState {
 	b := state.GetEmptyBeaconState()
 	for i := 0; i < n; i++ {
-		b.AddValidator(&cltypes.Validator{EffectiveBalance: clparams.MainnetBeaconConfig.MaxEffectiveBalance}, clparams.MainnetBeaconConfig.MaxEffectiveBalance)
+		v := &cltypes.Validator{}
+		v.SetActivationEpoch(0)
+		v.SetExitEpoch(10000)
+		v.SetEffectiveBalance(clparams.MainnetBeaconConfig.MaxEffectiveBalance)
+		b.AddValidator(v, clparams.MainnetBeaconConfig.MaxEffectiveBalance)
 	}
 	return b
 }
@@ -204,7 +208,12 @@ func TestComputeProposerIndex(t *testing.T) {
 
 func TestSyncReward(t *testing.T) {
 	s := state.GetEmptyBeaconState()
-	s.AddValidator(&cltypes.Validator{EffectiveBalance: 3099999999909, ExitEpoch: 2}, 3099999999909)
+
+	v := &cltypes.Validator{}
+	v.SetActivationEpoch(0)
+	v.SetExitEpoch(2)
+	v.SetEffectiveBalance(3099999999909)
+	s.AddValidator(v, 3099999999909)
 	propReward, partRew, err := s.SyncRewards()
 	require.NoError(t, err)
 	require.Equal(t, propReward, uint64(30))
@@ -220,10 +229,10 @@ func TestComputeCommittee(t *testing.T) {
 	for i := 0; i < len(validators); i++ {
 		var k [48]byte
 		copy(k[:], strconv.Itoa(i))
-		validators[i] = &cltypes.Validator{
-			PublicKey: k,
-			ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch,
-		}
+		v := &cltypes.Validator{}
+		v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
+		v.SetPublicKey(k)
+		validators[i] = v
 	}
 	bState := state.GetEmptyBeaconState()
 	bState.SetValidators(validators)

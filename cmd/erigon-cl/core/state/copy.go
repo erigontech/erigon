@@ -24,17 +24,19 @@ func (b *BeaconState) copyCachesInto(bs *BeaconState) error {
 	if b.Version() == clparams.Phase0Version {
 		return bs.initBeaconState()
 	}
-	bs.publicKeyIndicies = make(map[[48]byte]uint64)
+	if bs.publicKeyIndicies == nil {
+		bs.publicKeyIndicies = make(map[[48]byte]uint64)
+	}
+	for k := range bs.publicKeyIndicies {
+		delete(bs.publicKeyIndicies, k)
+	}
 	for pk, index := range b.publicKeyIndicies {
 		bs.publicKeyIndicies[pk] = index
 	}
 	// Sync caches
-	if err := bs.initCaches(); err != nil {
-		return err
-	}
-	copyLRU(bs.activeValidatorsCache, b.activeValidatorsCache)
-	copyLRU(bs.shuffledSetsCache, b.shuffledSetsCache)
-	copyLRU(bs.committeeCache, b.committeeCache)
+	bs.activeValidatorsCache = copyLRU(bs.activeValidatorsCache, b.activeValidatorsCache)
+	bs.shuffledSetsCache = copyLRU(bs.shuffledSetsCache, b.shuffledSetsCache)
+	bs.committeeCache = copyLRU(bs.committeeCache, b.committeeCache)
 
 	if b.totalActiveBalanceCache != nil {
 		bs.totalActiveBalanceCache = new(uint64)

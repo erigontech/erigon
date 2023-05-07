@@ -15,6 +15,14 @@ func MerkleRootFromLeaves(leaves [][32]byte) ([32]byte, error) {
 	return globalHasher.merkleizeTrieLeaves(hashLayer)
 }
 
+func MerkleRootFromFlatLeaves(leaves []byte, out []byte) (err error) {
+	if len(leaves) <= 32 {
+		copy(out, leaves)
+		return
+	}
+	return globalHasher.merkleizeTrieLeavesFlat(leaves, out)
+}
+
 // getDepth returns the depth of a merkle tree with a given number of nodes.
 // The depth is defined as the number of levels in the tree, with the root
 // node at level 0 and each child node at a level one greater than its parent.

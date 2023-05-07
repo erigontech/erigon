@@ -1,6 +1,7 @@
 package transition
 
 import (
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
@@ -13,17 +14,23 @@ func ProcessEffectiveBalanceUpdates(state *state.BeaconState) error {
 	downwardThreshold := histeresisIncrement * beaconConfig.HysteresisDownwardMultiplier
 	upwardThreshold := histeresisIncrement * beaconConfig.HysteresisUpwardMultiplier
 	// Iterate over validator set and compute the diff of each validator.
-	for index, validator := range state.Validators() {
-		balance, err := state.ValidatorBalance(index)
+	var err error
+	var balance uint64
+	state.ForEachValidator(func(validator *cltypes.Validator, index, total int) bool {
+		balance, err = state.ValidatorBalance(index)
 		if err != nil {
-			return err
+			return false
 		}
-		if balance+downwardThreshold < validator.EffectiveBalance ||
-			validator.EffectiveBalance+upwardThreshold < balance {
+		eb := validator.EffectiveBalance()
+		if balance+downwardThreshold < eb || eb+upwardThreshold < balance {
 			// Set new effective balance
 			effectiveBalance := utils.Min64(balance-(balance%beaconConfig.EffectiveBalanceIncrement), beaconConfig.MaxEffectiveBalance)
 			state.SetEffectiveBalanceForValidatorAtIndex(index, effectiveBalance)
 		}
+		return true
+	})
+	if err != nil {
+		return err
 	}
 	return nil
 }
