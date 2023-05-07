@@ -20,6 +20,8 @@ github.com/99designs/gqlgen v0.17.30/go.mod h1:i4rEatMrzzu6RXaHydq1nmEPZkb3bKQsn
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/Giulio2002/bls v0.0.0-20230428210858-67fd06bbe237 h1:YSnR8buOFFDoIdGkkZ588jlaUXRHpBTrlauANv9wdD0=
 github.com/Giulio2002/bls v0.0.0-20230428210858-67fd06bbe237/go.mod h1:o6qWofeW8A1XImbo3eHbC/wXnw/dasu0YuHEtdrjYzw=
+github.com/Giulio2002/bls v0.0.0-20230506124236-f7b02834db57 h1:DVxkPKa/TsvE/iouZmaEHQmo7qwbVIcAHhFn0tAPz3s=
+github.com/Giulio2002/bls v0.0.0-20230506124236-f7b02834db57/go.mod h1:o6qWofeW8A1XImbo3eHbC/wXnw/dasu0YuHEtdrjYzw=
 github.com/RoaringBitmap/roaring v0.4.7/go.mod h1:8khRDP4HmeXns4xIj9oGrKSz7XTQiJx2zgh7AcNke4w=
 github.com/RoaringBitmap/roaring v0.4.17/go.mod h1:D3qVegWTmfCaX4Bl5CrBE9hfrSrrXIr8KVNvRsDi1NI=
 github.com/RoaringBitmap/roaring v0.4.23/go.mod h1:D0gp8kJQgE1A4LQ5wFLggQEyvDi06Mq5mKs52e1TwOo=
