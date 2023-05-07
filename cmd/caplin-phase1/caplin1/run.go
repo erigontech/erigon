@@ -29,7 +29,8 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	}
 	bls.SetEnabledCaching(true)
 	state.ForEachValidator(func(v *cltypes.Validator, idx, total int) bool {
-		if err := bls.LoadPublicKeyIntoCache(v.PublicKey[:], false); err != nil {
+		pk := v.PublicKey()
+		if err := bls.LoadPublicKeyIntoCache(pk[:], false); err != nil {
 			panic(err)
 		}
 		return true
