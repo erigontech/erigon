@@ -21,6 +21,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
+const insertAsInitialCycle = false
+
 func TestEmptyStageSync(t *testing.T) {
 	stages.Mock(t)
 }
@@ -56,7 +58,7 @@ func TestHeaderStep(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
-	initialCycle := true
+	initialCycle := insertAsInitialCycle
 	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +96,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		}
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-		initialCycle := true
+		initialCycle := insertAsInitialCycle
 		if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 			t.Fatal(err)
 		}
@@ -162,7 +164,7 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	initialCycle := true
+	initialCycle := insertAsInitialCycle
 	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +297,7 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	initialCycle = false
+	initialCycle = insertAsInitialCycle
 	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +393,7 @@ func TestAnchorReplace(t *testing.T) {
 
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	initialCycle := true
+	initialCycle := insertAsInitialCycle
 	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +497,8 @@ func TestAnchorReplace2(t *testing.T) {
 
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	initialCycle := true
+	initialCycle := insertAsInitialCycle
+
 	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 		t.Fatal(err)
 	}
