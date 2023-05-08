@@ -319,7 +319,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 		}
 
 		var a accounts.Account
-		if err := a.DecodeForStorage(v); err != nil {
+		if err := accounts.DeserialiseV3(&a, v); err != nil {
 			return nil, err
 		}
 		result := &AccountResult{}
