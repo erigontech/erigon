@@ -10,8 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
-// HistoryReaderV4 Implements StateReader and StateWriter
-type HistoryReaderV4 struct {
+// HistoryReaderWithReadIdxV4 Implements StateReader and StateWriter
+type HistoryReaderWithReadIdxV4 struct {
 	ac    *libstate.AggregatorContext
 	ri    *libstate.ReadIndices
 	txNum uint64
@@ -19,32 +19,32 @@ type HistoryReaderV4 struct {
 	tx    kv.Tx
 }
 
-func NewHistoryReaderV4(ac *libstate.AggregatorContext, ri *libstate.ReadIndices) *HistoryReaderV4 {
-	return &HistoryReaderV4{ac: ac, ri: ri}
+func NewHistoryReaderWithReadIdxV4(ac *libstate.AggregatorContext, ri *libstate.ReadIndices) *HistoryReaderWithReadIdxV4 {
+	return &HistoryReaderWithReadIdxV4{ac: ac, ri: ri}
 }
 
-func (hr *HistoryReaderV4) SetTx(tx kv.Tx) { hr.tx = tx }
+func (hr *HistoryReaderWithReadIdxV4) SetTx(tx kv.Tx) { hr.tx = tx }
 
-func (hr *HistoryReaderV4) SetRwTx(tx kv.RwTx) {
+func (hr *HistoryReaderWithReadIdxV4) SetRwTx(tx kv.RwTx) {
 	hr.ri.SetTx(tx)
 }
 
-func (hr *HistoryReaderV4) SetTxNum(txNum uint64) {
+func (hr *HistoryReaderWithReadIdxV4) SetTxNum(txNum uint64) {
 	hr.txNum = txNum
 	if hr.ri != nil {
 		hr.ri.SetTxNum(txNum)
 	}
 }
 
-func (hr *HistoryReaderV4) FinishTx() error {
+func (hr *HistoryReaderWithReadIdxV4) FinishTx() error {
 	return hr.ri.FinishTx()
 }
 
-func (hr *HistoryReaderV4) SetTrace(trace bool) {
+func (hr *HistoryReaderWithReadIdxV4) SetTrace(trace bool) {
 	hr.trace = trace
 }
 
-func (hr *HistoryReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
+func (hr *HistoryReaderWithReadIdxV4) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	addrBytes := address.Bytes()
 	if hr.ri != nil {
 		if err := hr.ri.ReadAccountData(addrBytes); err != nil {
@@ -72,7 +72,7 @@ func (hr *HistoryReaderV4) ReadAccountData(address libcommon.Address) (*accounts
 	return &a, nil
 }
 
-func (hr *HistoryReaderV4) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
+func (hr *HistoryReaderWithReadIdxV4) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	addrBytes, keyBytes := address.Bytes(), key.Bytes()
 	if hr.ri != nil {
 		if err := hr.ri.ReadAccountStorage(addrBytes, keyBytes); err != nil {
@@ -96,7 +96,7 @@ func (hr *HistoryReaderV4) ReadAccountStorage(address libcommon.Address, incarna
 	return enc, nil
 }
 
-func (hr *HistoryReaderV4) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
+func (hr *HistoryReaderWithReadIdxV4) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
 	addrBytes := address.Bytes()
 	if hr.ri != nil {
 		if err := hr.ri.ReadAccountCode(addrBytes); err != nil {
@@ -113,7 +113,7 @@ func (hr *HistoryReaderV4) ReadAccountCode(address libcommon.Address, incarnatio
 	return enc, nil
 }
 
-func (hr *HistoryReaderV4) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
+func (hr *HistoryReaderWithReadIdxV4) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
 	addrBytes := address.Bytes()
 	if hr.ri != nil {
 		if err := hr.ri.ReadAccountCodeSize(addrBytes); err != nil {
@@ -130,6 +130,6 @@ func (hr *HistoryReaderV4) ReadAccountCodeSize(address libcommon.Address, incarn
 	return size, nil
 }
 
-func (hr *HistoryReaderV4) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
+func (hr *HistoryReaderWithReadIdxV4) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	return 0, nil
 }
