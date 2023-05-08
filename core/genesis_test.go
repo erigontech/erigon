@@ -7,10 +7,12 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -21,7 +23,7 @@ import (
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
-	db := memdb.NewTestDB(t)
+	_, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil)
 	check := func(network string) {
 		genesis := core.GenesisBlockByChainName(network)
 		tx, err := db.BeginRw(context.Background())
@@ -69,9 +71,13 @@ func TestGenesisBlockRoots(t *testing.T) {
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil)
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
 	genesis := core.GenesisBlockByChainName(networkname.MainnetChainName)
-	_, _, err := core.WriteGenesisBlock(tx, genesis, nil, "")
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "")
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
@@ -86,6 +92,7 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 
 func TestAllocConstructor(t *testing.T) {
 	require := require.New(t)
+	assert := assert.New(t)
 
 	// This deployment code initially sets contract's 0th storage to 0x2a
 	// and its 1st storage to 0x01c9.
@@ -99,8 +106,8 @@ func TestAllocConstructor(t *testing.T) {
 			address: {Constructor: deploymentCode, Balance: funds},
 		},
 	}
-	db := memdb.NewTestDB(t)
-	defer db.Close()
+
+	historyV3, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil)
 	_, _, err := core.CommitGenesisBlock(db, genSpec, "")
 	require.NoError(err)
 
@@ -109,20 +116,20 @@ func TestAllocConstructor(t *testing.T) {
 	defer tx.Rollback()
 
 	//TODO: support historyV3
-	reader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, false, genSpec.Config.ChainName)
+	reader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, historyV3, genSpec.Config.ChainName)
 	require.NoError(err)
 	state := state.New(reader)
 	balance := state.GetBalance(address)
-	require.Equal(funds, balance.ToBig())
+	assert.Equal(funds, balance.ToBig())
 	code := state.GetCode(address)
-	require.Equal(common.FromHex("5f355f55"), code)
+	assert.Equal(common.FromHex("5f355f55"), code)
 
 	key0 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
 	storage0 := &uint256.Int{}
 	state.GetState(address, &key0, storage0)
-	require.Equal(uint256.NewInt(0x2a), storage0)
+	assert.Equal(uint256.NewInt(0x2a), storage0)
 	key1 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000001")
 	storage1 := &uint256.Int{}
 	state.GetState(address, &key1, storage1)
-	require.Equal(uint256.NewInt(0x01c9), storage1)
+	assert.Equal(uint256.NewInt(0x01c9), storage1)
 }
