@@ -26,8 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -786,10 +784,11 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		}
 		return nil
 	}
-	tx, err := db.(*temporal.DB).BeginRw(ctx)
+	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
 
 	err = stagedsync.SpawnExecuteBlocksStage(s, sync, tx, block, ctx, cfg, true /* initialCycle */, false /* quiet */)
 	if err != nil {
