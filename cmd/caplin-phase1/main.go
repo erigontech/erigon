@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 )
 
 func main() {
@@ -51,6 +52,10 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	cfg, err := lcCli.SetupConsensusClientCfg(cliCtx)
 	if err != nil {
 		log.Error("[Phase1] Could not initialize caplin", "err", err)
+	}
+
+	if _, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Phase1]", "chain", cliCtx.String(flags.Chain.Name))

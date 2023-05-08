@@ -187,32 +187,16 @@ func processAttestation(s *state.BeaconState, attestation *cltypes.Attestation, 
 	return processAttestationPostAltair(s, attestation, baseRewardPerIncrement)
 }
 
-type verifyAttestationWorkersResult struct {
-	success bool
-	err     error
-}
-
-func verifyAttestationWorker(s *state.BeaconState, attestation *cltypes.Attestation, attestingIndicies []uint64, resultCh chan verifyAttestationWorkersResult) {
-	indexedAttestation := state.GetIndexedAttestation(attestation, attestingIndicies)
-	success, err := state.IsValidIndexedAttestation(s.BeaconState, indexedAttestation)
-	resultCh <- verifyAttestationWorkersResult{success: success, err: err}
-}
-
-func verifyAttestations(state *state.BeaconState, attestations []*cltypes.Attestation, attestingIndicies [][]uint64) (bool, error) {
-	resultCh := make(chan verifyAttestationWorkersResult, len(attestations))
-
+func verifyAttestations(s *state.BeaconState, attestations []*cltypes.Attestation, attestingIndicies [][]uint64) (bool, error) {
 	for i, attestation := range attestations {
-		go verifyAttestationWorker(state, attestation, attestingIndicies[i], resultCh)
-	}
-	for i := 0; i < len(attestations); i++ {
-		result := <-resultCh
-		if result.err != nil {
-			return false, result.err
+		indexedAttestation := state.GetIndexedAttestation(attestation, attestingIndicies[i])
+		success, err := state.IsValidIndexedAttestation(s.BeaconState, indexedAttestation)
+		if err != nil {
+			return false, err
 		}
-		if !result.success {
+		if !success {
 			return false, nil
 		}
 	}
-	close(resultCh)
 	return true, nil
 }
