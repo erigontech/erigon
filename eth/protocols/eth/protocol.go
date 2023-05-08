@@ -25,6 +25,7 @@ import (
 	"math/bits"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -32,17 +33,10 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-// Constants to match up protocol versions and messages
-const (
-	ETH66 = 66
-	ETH67 = 67
-	ETH68 = 68
-)
-
 var ProtocolToString = map[uint]string{
-	ETH66: "eth66",
-	ETH67: "eth67",
-	ETH68: "eth68",
+	direct.ETH66: "eth66",
+	direct.ETH67: "eth67",
+	direct.ETH68: "eth68",
 }
 
 // ProtocolName is the official short name of the `eth` protocol used during
@@ -75,7 +69,7 @@ const (
 )
 
 var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
-	ETH66: {
+	direct.ETH66: {
 		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
 		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
 		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_66,
@@ -91,7 +85,7 @@ var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
 		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
 	},
-	ETH67: {
+	direct.ETH67: {
 		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
 		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
 		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_66,
@@ -105,7 +99,7 @@ var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
 		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
 	},
-	ETH68: {
+	direct.ETH68: {
 		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
 		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
 		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_66,
@@ -122,7 +116,7 @@ var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 }
 
 var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
-	ETH66: {
+	direct.ETH66: {
 		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
 		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
 		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
@@ -138,7 +132,7 @@ var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
 		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
 		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
 	},
-	ETH67: {
+	direct.ETH67: {
 		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
 		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
 		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
@@ -152,7 +146,7 @@ var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
 		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
 		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
 	},
-	ETH68: {
+	direct.ETH68: {
 		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
 		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
 		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
