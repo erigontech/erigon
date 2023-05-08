@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -87,7 +86,6 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 
 func TestAllocConstructor(t *testing.T) {
 	require := require.New(t)
-	assert := assert.New(t)
 
 	// This deployment code initially sets contract's 0th storage to 0x2a
 	// and its 1st storage to 0x01c9.
@@ -115,16 +113,16 @@ func TestAllocConstructor(t *testing.T) {
 	require.NoError(err)
 	state := state.New(reader)
 	balance := state.GetBalance(address)
-	assert.Equal(funds, balance.ToBig())
+	require.Equal(funds, balance.ToBig())
 	code := state.GetCode(address)
-	assert.Equal(common.FromHex("5f355f55"), code)
+	require.Equal(common.FromHex("5f355f55"), code)
 
 	key0 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
 	storage0 := &uint256.Int{}
 	state.GetState(address, &key0, storage0)
-	assert.Equal(uint256.NewInt(0x2a), storage0)
+	require.Equal(uint256.NewInt(0x2a), storage0)
 	key1 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000001")
 	storage1 := &uint256.Int{}
 	state.GetState(address, &key1, storage1)
-	assert.Equal(uint256.NewInt(0x01c9), storage1)
+	require.Equal(uint256.NewInt(0x01c9), storage1)
 }
