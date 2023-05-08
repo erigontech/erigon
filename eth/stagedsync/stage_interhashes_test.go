@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -79,7 +80,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	historyV3 := false
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(nil, false)
 	cfg := StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
-	_, err := RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx)
+	_, err := RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx, log.New())
 	assert.Nil(t, err)
 
 	// ----------------------------------------------------------------
@@ -149,7 +150,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 
 	var s StageState
 	s.BlockNumber = 0
-	_, err = incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, libcommon.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err = incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, libcommon.Hash{} /* expectedRootHash */, nil /* quit */, log.New())
 	assert.Nil(t, err)
 
 	accountTrieB := make(map[string][]byte)
@@ -200,7 +201,7 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash6[:], encoded))
 
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(nil, false)
-	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil), libcommon.Hash{} /* expectedRootHash */, ctx)
+	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil), libcommon.Hash{} /* expectedRootHash */, ctx, log.New())
 	assert.Nil(t, err)
 
 	accountTrie := make(map[string][]byte)
@@ -264,7 +265,7 @@ func TestStorageDeletion(t *testing.T) {
 	historyV3 := false
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(nil, false)
 	cfg := StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
-	_, err = RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx)
+	_, err = RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx, log.New())
 	assert.Nil(t, err)
 
 	// ----------------------------------------------------------------
@@ -299,7 +300,7 @@ func TestStorageDeletion(t *testing.T) {
 
 	var s StageState
 	s.BlockNumber = 0
-	_, err = incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, libcommon.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err = incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, libcommon.Hash{} /* expectedRootHash */, nil /* quit */, log.New())
 	assert.Nil(t, err)
 
 	storageTrieB := make(map[string][]byte)
@@ -383,7 +384,8 @@ func TestHiveTrieRoot(t *testing.T) {
 	historyV3 := false
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(nil, false)
 	cfg := StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
-	_, err := RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx)
+	logger := log.New()
+	_, err := RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx, logger)
 	require.Nil(t, err)
 
 	// Now add a new account
@@ -396,10 +398,10 @@ func TestHiveTrieRoot(t *testing.T) {
 
 	var s StageState
 	s.BlockNumber = 0
-	incrementalRoot, err := incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, libcommon.Hash{} /* expectedRootHash */, nil /* quit */)
+	incrementalRoot, err := incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, libcommon.Hash{} /* expectedRootHash */, nil /* quit */, logger)
 	require.Nil(t, err)
 
-	regeneratedRoot, err := RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx)
+	regeneratedRoot, err := RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx, logger)
 	require.Nil(t, err)
 
 	assert.Equal(t, regeneratedRoot, incrementalRoot)

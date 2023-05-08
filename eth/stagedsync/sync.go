@@ -211,7 +211,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, tx kv.RwTx) error {
 	}
 	return nil
 }
-func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
+func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
@@ -259,7 +259,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
 			continue
 		}
 
-		if err := s.runStage(stage, db, tx, firstCycle, badBlockUnwind, quiet); err != nil {
+		if err := s.runStage(stage, db, tx, firstCycle, badBlockUnwind); err != nil {
 			return err
 		}
 
@@ -350,14 +350,14 @@ func PrintTables(db kv.RoDB, tx kv.RwTx) []interface{} {
 	return bucketSizes
 }
 
-func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwind bool, quiet bool) (err error) {
+func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwind bool) (err error) {
 	start := time.Now()
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
 		return err
 	}
 
-	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, tx, quiet); err != nil {
+	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, tx, s.logger); err != nil {
 		wrappedError := fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 		s.logger.Debug("Error while executing stage", "err", wrappedError)
 		return wrappedError
@@ -393,7 +393,7 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx
 		return err
 	}
 
-	err = stage.Unwind(firstCycle, unwind, stageState, tx)
+	err = stage.Unwind(firstCycle, unwind, stageState, tx, s.logger)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}

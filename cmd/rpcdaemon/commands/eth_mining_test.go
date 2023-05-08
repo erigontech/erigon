@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,7 +28,7 @@ func TestPendingBlock(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	engine := ethash.NewFaker()
 	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3), nil, false, rpccfg.DefaultEvmCallTimeout, engine,
-		m.Dirs), nil, nil, nil, mining, 5000000, 100_000)
+		m.Dirs), nil, nil, nil, mining, 5000000, 100_000, log.New())
 	expect := uint64(12345)
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(int64(expect))}))
 	require.NoError(t, err)

@@ -382,12 +382,12 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
-		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient, dirs, notifications, allSnapshots, backend.agg, logger)
+		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient, dirs, notifications, allSnapshots, backend.agg, log.New() /* discard logging */)
 		if err != nil {
 			return err
 		}
 		// We start the mining step
-		if err := stages2.StateStep(ctx, batch, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain, true /* quiet */); err != nil {
+		if err := stages2.StateStep(ctx, batch, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
 			log.Warn("Could not validate block", "err", err)
 			return err
 		}
@@ -657,8 +657,8 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	if casted, ok := backend.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, backend.blockReader, backend.agg, httpRpcCfg, backend.engine)
-	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, backend.blockReader, backend.agg, httpRpcCfg, backend.engine)
+	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, backend.blockReader, backend.agg, httpRpcCfg, backend.engine, logger)
+	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, backend.blockReader, backend.agg, httpRpcCfg, backend.engine, logger)
 	go func() {
 		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList); err != nil {
 			log.Error(err.Error())
@@ -922,7 +922,7 @@ func (s *Ethereum) Start() error {
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 	// Execute one iteration
 	go func() {
-		if err := s.stagedSync.Run(s.chainDB, nil, true, false); err != nil {
+		if err := s.stagedSync.Run(s.chainDB, nil, true); err != nil {
 			panic(err)
 		}
 		lis, err := net.Listen("tcp", "127.0.0.1:8989")

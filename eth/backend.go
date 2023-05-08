@@ -412,12 +412,12 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		notifications *shards.Notifications) error {
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
-			dirs, notifications, allSnapshots, backend.agg, logger)
+			dirs, notifications, allSnapshots, backend.agg, log.New() /* logging will be discarded */)
 		if err != nil {
 			return err
 		}
 		// We start the mining step
-		if err := stages2.StateStep(ctx, batch, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain, true /* quiet */); err != nil {
+		if err := stages2.StateStep(ctx, batch, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
@@ -688,7 +688,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	return backend, nil
 }
-func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
+func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config, logger log.Logger) error {
 	ethBackendRPC, miningRPC, stateDiffClient := backend.ethBackendRPC, backend.miningRPC, backend.stateChangesClient
 	blockReader := backend.blockReader
 	ctx := backend.sentryCtx
@@ -738,8 +738,8 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 	if casted, ok := backend.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine)
-	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine)
+	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, logger)
+	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, logger)
 	go func() {
 		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList); err != nil {
 			log.Error(err.Error())
