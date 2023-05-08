@@ -9,8 +9,7 @@ import (
 
 type Slot uint64
 type Blob gokzg4844.Blob
-type KZGCommitment gokzg4844.KZGCommitment // [48]byte
-type KZGProof gokzg4844.KZGProof           // [48]byte
+type KZGProof gokzg4844.KZGProof // [48]byte
 
 type BlobSideCar struct {
 	BlockRoot       libcommon.Hash
@@ -199,28 +198,28 @@ func (b *BlobIdentifier) HashSSZ() ([32]byte, error) {
 	}, 2)
 }
 
-type BlobKZGCommitment KZGCommitment
+type KZGCommitment gokzg4844.KZGCommitment
 
-func (b *BlobKZGCommitment) Copy() *BlobKZGCommitment {
+func (b *KZGCommitment) Copy() *KZGCommitment {
 	copy := *b
 	return &copy
 }
 
-func (b *BlobKZGCommitment) EncodeSSZ(buf []byte) ([]byte, error) {
+func (b *KZGCommitment) EncodeSSZ(buf []byte) ([]byte, error) {
 	buf = append(buf, b[:]...)
 	return buf, nil
 }
 
-func (b *BlobKZGCommitment) DecodeSSZ(buf []byte, version int) error {
+func (b *KZGCommitment) DecodeSSZ(buf []byte, version int) error {
 	copy(b[:], buf)
 
 	return nil
 }
 
-func (b *BlobKZGCommitment) EncodingSizeSSZ() int {
+func (b *KZGCommitment) EncodingSizeSSZ() int {
 	return 48
 }
 
-func (b *BlobKZGCommitment) HashSSZ() ([32]byte, error) {
+func (b *KZGCommitment) HashSSZ() ([32]byte, error) {
 	return merkle_tree.PublicKeyRoot(*b)
 }
