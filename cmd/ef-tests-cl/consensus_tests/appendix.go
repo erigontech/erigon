@@ -88,8 +88,8 @@ func addSszTests() {
 		With("BeaconBlockBody", getSSZStaticConsensusTest(&cltypes.BeaconBody{})).
 		With("BeaconBlockHeader", getSSZStaticConsensusTest(&cltypes.BeaconBlockHeader{})).
 		With("BeaconState", getSSZStaticConsensusTest(state.New(&clparams.MainnetBeaconConfig))).
-		//		With("BlobIdentifier", getSSZStaticConsensusTest(&cltypes.BlobIdentifier{})). DENEB
-		//		With("BlobSidecar", getSSZStaticConsensusTest(&cltypes.BlobSidecar{})). DENEB
+		With("BlobIdentifier", getSSZStaticConsensusTest(&cltypes.BlobIdentifier{})).
+		With("BlobSidecar", getSSZStaticConsensusTest(&cltypes.BlobSideCar{})).
 		With("BLSToExecutionChange", getSSZStaticConsensusTest(&cltypes.BLSToExecutionChange{})).
 		With("Checkpoint", getSSZStaticConsensusTest(&cltypes.Checkpoint{})).
 		//	With("ContributionAndProof", getSSZStaticConsensusTest(&cltypes.ContributionAndProof{})).
@@ -98,8 +98,8 @@ func addSszTests() {
 		//	With("DepositMessage", getSSZStaticConsensusTest(&cltypes.DepositMessage{})).
 		// With("Eth1Block", getSSZStaticConsensusTest(&cltypes.Eth1Block{})).
 		With("Eth1Data", getSSZStaticConsensusTest(&cltypes.Eth1Data{})).
-		//With("ExecutionPayload", getSSZStaticConsensusTest(&cltypes.Eth1Block{})). TODO
-		//With("ExecutionPayloadHeader", getSSZStaticConsensusTest(&cltypes.Eth1Header{})). TODO
+		With("ExecutionPayload", getSSZStaticConsensusTest(&cltypes.Eth1Block{})).
+		With("ExecutionPayloadHeader", getSSZStaticConsensusTest(&cltypes.Eth1Header{})).
 		With("Fork", getSSZStaticConsensusTest(&cltypes.Fork{})).
 		//With("ForkData", getSSZStaticConsensusTest(&cltypes.ForkData{})).
 		//With("HistoricalBatch", getSSZStaticConsensusTest(&cltypes.HistoricalBatch{})).

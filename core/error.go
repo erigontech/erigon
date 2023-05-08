@@ -36,6 +36,10 @@ var (
 	// transaction with a tip higher than the total fee cap.
 	ErrTipAboveFeeCap = errors.New("tip higher than fee cap")
 
+	// ErrMaxFeePerDataGas is returned if the transaction specified a
+	// max_fee_per_data_gas that is below the current data gas price.
+	ErrMaxFeePerDataGas = errors.New("max fee per data gas too low")
+
 	// ErrTipVeryHigh is a sanity error to avoid extremely big numbers specified
 	// in the tip field.
 	ErrTipVeryHigh = errors.New("tip higher than 2^256-1")
@@ -43,6 +47,10 @@ var (
 	// ErrFeeCapVeryHigh is a sanity error to avoid extremely big numbers specified
 	// in the fee cap field.
 	ErrFeeCapVeryHigh = errors.New("fee cap higher than 2^256-1")
+
+	// ErrInternalFailure is returned when an unexpected internal error condition
+	// prevents execution.
+	ErrInternalFailure = errors.New("internal failure")
 )
 
 // List of evm-call-message pre-checking errors. All state transition messages will

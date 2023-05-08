@@ -29,25 +29,6 @@ func WriteBeaconState(tx kv.Putter, state *state.BeaconState) error {
 	return tx.Put(kv.BeaconState, EncodeNumber(state.Slot()), data)
 }
 
-// ReadBeaconState reads beacon state for specific block from database.
-func ReadBeaconState(tx kv.Getter, slot uint64) (*state.BeaconState, error) {
-	data, err := tx.GetOne(kv.BeaconState, EncodeNumber(slot))
-	if err != nil {
-		return nil, err
-	}
-	state := &state.BeaconState{}
-
-	if len(data) == 0 {
-		return nil, nil
-	}
-
-	if err := utils.DecodeSSZSnappy(state, data); err != nil {
-		return nil, err
-	}
-
-	return state, nil
-}
-
 // LengthBytes2 convert length to 2 bytes repressentation
 func LengthFromBytes2(buf []byte) int {
 	return int(buf[0])*0x100 + int(buf[1])

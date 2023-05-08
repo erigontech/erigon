@@ -87,7 +87,8 @@ var Flags = []cli.Flag{
 	&cpuprofileFlag, &traceFlag,
 }
 
-func SetupCobra(cmd *cobra.Command) error {
+// SetupCobra sets up logging, profiling and tracing for cobra commands
+func SetupCobra(cmd *cobra.Command, filePrefix string) (log.Logger, error) {
 	// ensure we've read in config file details before setting up metrics etc.
 	if err := SetCobraFlagsFromConfigFile(cmd); err != nil {
 		log.Warn("failed setting config flags from yaml/toml file", "err", err)
@@ -95,54 +96,54 @@ func SetupCobra(cmd *cobra.Command) error {
 	RaiseFdLimit()
 	flags := cmd.Flags()
 
-	logging.SetupLoggerCmd("erigon", cmd)
+	logger := logging.SetupLoggerCmd(filePrefix, cmd)
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	cpuFile, err := flags.GetString(cpuprofileFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 
 	// profiling, tracing
 	if traceFile != "" {
 		if err2 := Handler.StartGoTrace(traceFile); err2 != nil {
-			return err2
+			return logger, err2
 		}
 	}
 	if cpuFile != "" {
 		if err2 := Handler.StartCPUProfile(cpuFile); err2 != nil {
-			return err2
+			return logger, err2
 		}
 	}
 
 	go ListenSignals(nil)
 	pprof, err := flags.GetBool(pprofFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	pprofAddr, err := flags.GetString(pprofAddrFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	pprofPort, err := flags.GetInt(pprofPortFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 
 	metricsEnabled, err := flags.GetBool(metricsEnabledFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	metricsAddr, err := flags.GetString(metricsAddrFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	metricsPort, err := flags.GetInt(metricsPortFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 
 	if metricsEnabled && metricsAddr != "" {
@@ -155,12 +156,12 @@ func SetupCobra(cmd *cobra.Command) error {
 		// metrics and pprof server
 		StartPProf(fmt.Sprintf("%s:%d", pprofAddr, pprofPort), withMetrics)
 	}
-	return nil
+	return logger, nil
 }
 
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
-func Setup(ctx *cli.Context) error {
+func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
 	// ensure we've read in config file details before setting up metrics etc.
 	if err := SetFlagsFromConfigFile(ctx); err != nil {
 		log.Warn("failed setting config flags from yaml/toml file", "err", err)
@@ -168,17 +169,17 @@ func Setup(ctx *cli.Context) error {
 
 	RaiseFdLimit()
 
-	logging.SetupLoggerCtx("erigon", ctx)
+	logger := logging.SetupLoggerCtx("erigon", ctx, rootLogger)
 
 	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {
-			return err
+			return logger, err
 		}
 	}
 
 	if cpuFile := ctx.String(cpuprofileFlag.Name); cpuFile != "" {
 		if err := Handler.StartCPUProfile(cpuFile); err != nil {
-			return err
+			return logger, err
 		}
 	}
 	pprofEnabled := ctx.Bool(pprofFlag.Name)
@@ -207,7 +208,7 @@ func Setup(ctx *cli.Context) error {
 		withMetrics := metricsEnabled && metricsAddr == ""
 		StartPProf(address, withMetrics)
 	}
-	return nil
+	return logger, nil
 }
 
 func StartPProf(address string, withMetrics bool) {

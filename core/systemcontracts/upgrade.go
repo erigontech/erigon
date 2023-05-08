@@ -7,9 +7,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
@@ -26,7 +26,7 @@ type Upgrade struct {
 	Configs     []*UpgradeConfig
 }
 
-type upgradeHook func(blockNumber *big.Int, contractAddr libcommon.Address, statedb *state.IntraBlockState) error
+type upgradeHook func(blockNumber *big.Int, contractAddr libcommon.Address, statedb evmtypes.IntraBlockState) error
 
 var (
 	//upgrade config
@@ -73,7 +73,7 @@ func init() {
 	}
 }
 
-func UpgradeBuildInSystemContract(config *chain.Config, blockNumber *big.Int, statedb *state.IntraBlockState) {
+func UpgradeBuildInSystemContract(config *chain.Config, blockNumber *big.Int, statedb evmtypes.IntraBlockState) {
 	if config == nil || blockNumber == nil || statedb == nil {
 		return
 	}
@@ -89,7 +89,7 @@ func UpgradeBuildInSystemContract(config *chain.Config, blockNumber *big.Int, st
 	*/
 }
 
-func applySystemContractUpgrade(upgrade *Upgrade, blockNumber *big.Int, statedb *state.IntraBlockState, logger log.Logger) {
+func applySystemContractUpgrade(upgrade *Upgrade, blockNumber *big.Int, statedb evmtypes.IntraBlockState, logger log.Logger) {
 	if upgrade == nil {
 		logger.Info("Empty upgrade config", "height", blockNumber.String())
 		return

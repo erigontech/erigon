@@ -13,7 +13,15 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-func SetupLoggerCtx(filePrefix string, ctx *cli.Context) {
+// SetupLoggerCtx performs the logging setup according to the parameters
+// containted in the given urfave context. It returns either root logger,
+// if rootHandler argument is set to true, or a newly created logger.
+// This is to ensure gradual transition to the use of non-root logger thoughout
+// the erigon code without a huge change at once.
+// This function which is used in Erigon itself.
+// Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
+// and it would make sense to choose one over another
+func SetupLoggerCtx(filePrefix string, ctx *cli.Context, rootHandler bool) log.Logger {
 	var consoleJson = ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
 	var dirJson = ctx.Bool(LogDirJsonFlag.Name)
 
@@ -38,10 +46,22 @@ func SetupLoggerCtx(filePrefix string, ctx *cli.Context) {
 			dirPath = filepath.Join(datadir, "logs")
 		}
 	}
-	initSeparatedLogging(filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
+	var logger log.Logger
+	if rootHandler {
+		logger = log.Root()
+	} else {
+		logger = log.New()
+	}
+	initSeparatedLogging(logger, filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
+	return logger
 }
 
-func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) {
+// SetupLoggerCmd perform the logging for a cobra command, and sets it to the root logger
+// This is the function which is NOT used by Erigon itself, but instead by some cobra-based commands,
+// for example, rpcdaemon or integration.
+// Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
+// and it would make sense to choose one over another
+func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 
 	logJsonVal, ljerr := cmd.Flags().GetBool(LogJsonFlag.Name)
 	if ljerr != nil {
@@ -80,9 +100,12 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) {
 			dirPath = filepath.Join(datadir, "logs")
 		}
 	}
-	initSeparatedLogging(filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
+	initSeparatedLogging(log.Root(), filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
+	return log.Root()
 }
 
+// SetupLoggerCmd perform the logging using parametrs specifying by `flag` package, and sets it to the root logger
+// This is the function which is NOT used by Erigon itself, but instead by utility commans
 func SetupLogger(filePrefix string) {
 	var logConsoleVerbosity = flag.String(LogConsoleVerbosityFlag.Name, "", LogConsoleVerbosityFlag.Usage)
 	var logDirVerbosity = flag.String(LogDirVerbosityFlag.Name, "", LogDirVerbosityFlag.Usage)
@@ -110,10 +133,14 @@ func SetupLogger(filePrefix string) {
 		dirLevel = log.LvlInfo
 	}
 
-	initSeparatedLogging(filePrefix, *logDirPath, consoleLevel, dirLevel, consoleJson, *dirJson)
+	initSeparatedLogging(log.Root(), filePrefix, *logDirPath, consoleLevel, dirLevel, consoleJson, *dirJson)
 }
 
+// initSeparatedLogging construct a log handler accrosing to the configuration parameters passed to it
+// and sets the constructed handler to be the handler of the given logger. It then uses that logger
+// to report the status of this initialisation
 func initSeparatedLogging(
+	logger log.Logger,
 	filePrefix string,
 	dirPath string,
 	consoleLevel log.Lvl,
@@ -121,13 +148,14 @@ func initSeparatedLogging(
 	consoleJson bool,
 	dirJson bool) {
 
-	logger := log.Root()
+	var consoleHandler log.Handler
 
 	if consoleJson {
-		log.Root().SetHandler(log.LvlFilterHandler(consoleLevel, log.StreamHandler(os.Stderr, log.JsonFormat())))
+		consoleHandler = log.LvlFilterHandler(consoleLevel, log.StreamHandler(os.Stderr, log.JsonFormat()))
 	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(consoleLevel, log.StderrHandler))
+		consoleHandler = log.LvlFilterHandler(consoleLevel, log.StderrHandler)
 	}
+	logger.SetHandler(consoleHandler)
 
 	if len(dirPath) == 0 {
 		logger.Warn("no log dir set, console logging only")
@@ -153,9 +181,10 @@ func initSeparatedLogging(
 	}
 	userLog := log.StreamHandler(lumberjack, dirFormat)
 
-	mux := log.MultiHandler(logger.GetHandler(), log.LvlFilterHandler(dirLevel, userLog))
-	log.Root().SetHandler(mux)
+	mux := log.MultiHandler(consoleHandler, log.LvlFilterHandler(dirLevel, userLog))
+	logger.SetHandler(mux)
 	logger.Info("logging to file system", "log dir", dirPath, "file prefix", filePrefix, "log level", dirLevel, "json", dirJson)
+	return
 }
 
 func tryGetLogLevel(s string) (log.Lvl, error) {

@@ -189,9 +189,9 @@ func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
+func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(libcommon.Big0) <= 0 {
-		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
+		logger.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
 	}
 
@@ -236,7 +236,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	config.Snapshot.Enabled = config.Sync.UseSnapshots
 
-	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
+	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
 		if err = stagedsync.UpdateMetrics(tx); err != nil {
@@ -264,11 +264,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 		// if we are in the incorrect syncmode then we change it to the appropriate one
 		if !isCorrectSync {
-			log.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
+			logger.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
 			config.Sync.UseSnapshots = useSnapshots
 			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
 		}
-		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String(), "history.v3", config.HistoryV3)
+		logger.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String(), "history.v3", config.HistoryV3)
 
 		return nil
 	}); err != nil {
@@ -359,7 +359,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			for ; pi < len(refCfg.AllowedPorts) && !picked; pi++ {
 				pc := int(refCfg.AllowedPorts[pi])
 				if !checkPortIsFree(fmt.Sprintf("%s:%d", listenHost, pc)) {
-					log.Warn("bind protocol to port has failed: port is busy", "protocols", fmt.Sprintf("eth/%d", refCfg.ProtocolVersion), "port", pc)
+					logger.Warn("bind protocol to port has failed: port is busy", "protocols", fmt.Sprintf("eth/%d", refCfg.ProtocolVersion), "port", pc)
 					continue
 				}
 				if listenPort != pc {
@@ -375,7 +375,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
 
-			server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, protocol)
+			server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, protocol, logger)
 			backend.sentryServers = append(backend.sentryServers, server)
 			sentries = append(sentries, direct.NewSentryClientDirect(protocol, server))
 		}
@@ -402,7 +402,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 					for protocol, count := range peerCountMap {
 						logItems = append(logItems, eth.ProtocolToString[protocol], strconv.Itoa(count))
 					}
-					log.Info("[p2p] GoodPeers", logItems...)
+					logger.Info("[p2p] GoodPeers", logItems...)
 				}
 			}
 		}()
@@ -411,13 +411,14 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
-		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient, dirs, notifications, allSnapshots, backend.agg)
+		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
+			dirs, notifications, allSnapshots, backend.agg, logger)
 		if err != nil {
 			return err
 		}
 		// We start the mining step
 		if err := stages2.StateStep(ctx, batch, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain, true /* quiet */); err != nil {
-			log.Warn("Could not validate block", "err", err)
+			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
 		progress, err := stages.GetStageProgress(batch, stages.IntermediateHashes)
@@ -502,7 +503,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
-		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
+		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
+		logger)
 
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
@@ -520,7 +522,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
-			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
+			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
+			logger)
 		// We start the mining step
 		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir); err != nil {
 			return nil, err
@@ -644,7 +647,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				// in their respective cache in the download stage. If not found, it would cause a
 				// liveness issue for the chain.
 				if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
-					log.Error("add mined block to header downloader", "err", err)
+					logger.Error("add mined block to header downloader", "err", err)
 				}
 				backend.sentriesClient.Bd.AddToPrefetch(b.Header(), b.RawBody())
 
@@ -652,9 +655,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
 				//rpcdaemon
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastMinedBlock(b); err != nil {
-					log.Error("txpool rpc mined block broadcast", "err", err)
+					logger.Error("txpool rpc mined block broadcast", "err", err)
 				}
-				log.Trace("BroadcastMinedBlock successful", "number", b.Number(), "GasUsed", b.GasUsed(), "txn count", b.Transactions().Len())
+				logger.Trace("BroadcastMinedBlock successful", "number", b.Number(), "GasUsed", b.GasUsed(), "txn count", b.Transactions().Len())
 				backend.sentriesClient.PropagateNewBlockHashes(ctx, []headerdownload.Announce{
 					{
 						Number: b.NumberU64(),
@@ -664,7 +667,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 			case b := <-backend.pendingBlocks:
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastPendingBlock(b); err != nil {
-					log.Error("txpool rpc pending block broadcast", "err", err)
+					logger.Error("txpool rpc pending block broadcast", "err", err)
 				}
 			case <-backend.sentriesClient.Hd.QuitPoWMining:
 				return
@@ -681,6 +684,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
+	backend.stagedSync = stagedsync.New(backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger)
 
 	return backend, nil
 }
@@ -690,8 +694,6 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 	ctx := backend.sentryCtx
 	chainKv := backend.chainDB
 	var err error
-
-	backend.stagedSync = stagedsync.New(backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder)
 
 	backend.sentriesClient.Hd.StartPoSDownloader(backend.sentryCtx, backend.sentriesClient.SendHeaderRequest, backend.sentriesClient.Penalize)
 

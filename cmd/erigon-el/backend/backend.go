@@ -346,7 +346,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 
 			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
 
-			server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, protocol)
+			server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, protocol, logger)
 			backend.sentryServers = append(backend.sentryServers, server)
 			sentries = append(sentries, direct.NewSentryClientDirect(protocol, server))
 		}
@@ -382,7 +382,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
-		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient, dirs, notifications, allSnapshots, backend.agg)
+		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient, dirs, notifications, allSnapshots, backend.agg, logger)
 		if err != nil {
 			return err
 		}
@@ -477,7 +477,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, backend.blockReader, nil, config.HistoryV3, backend.agg),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
-		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
+		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder, logger)
 
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
@@ -495,7 +495,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, backend.blockReader, nil, config.HistoryV3, backend.agg),
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
-			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
+			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder, logger)
 		// We start the mining step
 		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir); err != nil {
 			return nil, err
@@ -608,7 +608,8 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		return nil, err
 	}
 
-	backend.stagedSync, err = stages3.NewStagedSync(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine, config.TransactionsV3)
+	backend.stagedSync, err = stages3.NewStagedSync(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config,
+		backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine, config.TransactionsV3, logger)
 	if err != nil {
 		return nil, err
 	}

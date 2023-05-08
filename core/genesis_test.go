@@ -7,9 +7,10 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,7 +23,7 @@ import (
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
-	db := memdb.NewTestDB(t)
+	_, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil)
 	check := func(network string) {
 		genesis := core.GenesisBlockByChainName(network)
 		tx, err := db.BeginRw(context.Background())
@@ -70,9 +71,13 @@ func TestGenesisBlockRoots(t *testing.T) {
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil)
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
 	genesis := core.GenesisBlockByChainName(networkname.MainnetChainName)
-	_, _, err := core.WriteGenesisBlock(tx, genesis, nil, "")
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "")
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
@@ -101,8 +106,8 @@ func TestAllocConstructor(t *testing.T) {
 			address: {Constructor: deploymentCode, Balance: funds},
 		},
 	}
-	db := memdb.NewTestDB(t)
-	defer db.Close()
+
+	historyV3, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil)
 	_, _, err := core.CommitGenesisBlock(db, genSpec, "")
 	require.NoError(err)
 
@@ -111,7 +116,7 @@ func TestAllocConstructor(t *testing.T) {
 	defer tx.Rollback()
 
 	//TODO: support historyV3
-	reader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, false, genSpec.Config.ChainName)
+	reader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, historyV3, genSpec.Config.ChainName)
 	require.NoError(err)
 	state := state.New(reader)
 	balance := state.GetBalance(address)

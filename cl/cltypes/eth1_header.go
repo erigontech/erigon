@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
@@ -27,6 +29,7 @@ type Eth1Header struct {
 	BlockHash        libcommon.Hash
 	TransactionsRoot libcommon.Hash
 	WithdrawalsRoot  libcommon.Hash
+	ExcessDataGas    [32]byte
 	// internals
 	version clparams.StateVersion
 }
@@ -46,6 +49,12 @@ func (e *Eth1Header) Copy() *Eth1Header {
 func (e *Eth1Header) Capella() {
 	e.version = clparams.CapellaVersion
 	e.WithdrawalsRoot = libcommon.Hash{}
+}
+
+// Capella converts the header to capella version.
+func (e *Eth1Header) Deneb() {
+	e.version = clparams.DenebVersion
+	e.ExcessDataGas = [32]byte{}
 }
 
 func (e *Eth1Header) IsZero() bool {
@@ -84,6 +93,10 @@ func (h *Eth1Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 		offset += 32
 	}
 
+	if h.version >= clparams.DenebVersion {
+		offset += 32
+	}
+
 	buf, err = h.encodeHeaderMetadataForSSZ(buf, offset)
 	if err != nil {
 		return nil, err
@@ -92,6 +105,10 @@ func (h *Eth1Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 
 	if h.version >= clparams.CapellaVersion {
 		buf = append(buf, h.WithdrawalsRoot[:]...)
+	}
+
+	if h.version >= clparams.DenebVersion {
+		buf = append(buf, h.ExcessDataGas[:]...)
 	}
 
 	buf = append(buf, h.Extra...)
@@ -130,14 +147,15 @@ func (h *Eth1Header) decodeHeaderMetadataForSSZ(buf []byte) (pos int, extraDataO
 	pos += 32
 	copy(h.BlockHash[:], buf[pos:])
 	pos += 32
+
 	return
 }
 
-// DecodeSSZWithVersion decodes given SSZ slice.
-func (h *Eth1Header) DecodeSSZWithVersion(buf []byte, version int) error {
+// DecodeSSZ decodes given SSZ slice.
+func (h *Eth1Header) DecodeSSZ(buf []byte, version int) error {
 	h.version = clparams.StateVersion(version)
 	if len(buf) < h.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[Eth1Header] err: %s", ssz.ErrLowBufferSize)
 	}
 	pos, _ := h.decodeHeaderMetadataForSSZ(buf)
 	copy(h.TransactionsRoot[:], buf[pos:])
@@ -146,6 +164,11 @@ func (h *Eth1Header) DecodeSSZWithVersion(buf []byte, version int) error {
 	if h.version >= clparams.CapellaVersion {
 		copy(h.WithdrawalsRoot[:], buf[pos:])
 		pos += len(h.WithdrawalsRoot)
+	}
+
+	if h.version >= clparams.DenebVersion {
+		copy(h.ExcessDataGas[:], buf[pos:pos+32])
+		pos += 32
 	}
 	h.Extra = common.CopyBytes(buf[pos:])
 	return nil
@@ -156,6 +179,10 @@ func (h *Eth1Header) EncodingSizeSSZ() int {
 	size := 536
 
 	if h.version >= clparams.CapellaVersion {
+		size += 32
+	}
+
+	if h.version >= clparams.DenebVersion {
 		size += 32
 	}
 
@@ -212,5 +239,10 @@ func (h *Eth1Header) HashSSZ() ([32]byte, error) {
 	if h.version >= clparams.CapellaVersion {
 		leaves = append(leaves, h.WithdrawalsRoot)
 	}
+
+	if h.version >= clparams.DenebVersion {
+		leaves = append(leaves, h.ExcessDataGas)
+	}
+
 	return merkle_tree.ArraysRoot(leaves, 16)
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	turboNode "github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
@@ -47,18 +48,24 @@ If only one file is used, import error will result in failure. If several files 
 processing will proceed even if an individual RLP-file import failure occurs.`,
 }
 
-func importChain(ctx *cli.Context) error {
-	if ctx.NArg() < 1 {
+func importChain(cliCtx *cli.Context) error {
+	if cliCtx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
 
-	nodeCfg := turboNode.NewNodConfigUrfave(ctx)
-	ethCfg := turboNode.NewEthConfigUrfave(ctx, nodeCfg)
+	var logger log.Logger
+	var err error
+	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+		return err
+	}
 
-	stack := makeConfigNode(nodeCfg)
+	nodeCfg := turboNode.NewNodConfigUrfave(cliCtx)
+	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg)
+
+	stack := makeConfigNode(nodeCfg, logger)
 	defer stack.Close()
 
-	ethereum, err := eth.New(stack, ethCfg)
+	ethereum, err := eth.New(stack, ethCfg, logger)
 	if err != nil {
 		return err
 	}
@@ -67,7 +74,7 @@ func importChain(ctx *cli.Context) error {
 		return err
 	}
 
-	if err := ImportChain(ethereum, ethereum.ChainDB(), ctx.Args().First()); err != nil {
+	if err := ImportChain(ethereum, ethereum.ChainDB(), cliCtx.Args().First()); err != nil {
 		return err
 	}
 

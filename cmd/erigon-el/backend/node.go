@@ -97,7 +97,7 @@ func NewNode(
 	logger log.Logger,
 ) (*ErigonNode, error) {
 	//prepareBuckets(optionalParams.CustomBuckets)
-	node, err := node.New(nodeConfig)
+	node, err := node.New(nodeConfig, logger)
 	if err != nil {
 		utils.Fatalf("Failed to create Erigon node: %v", err)
 	}
