@@ -24,3 +24,6 @@ import (
 func Stack() string {
 	return stack2.Trace().TrimBelow(stack2.Caller(1)).String()
 }
+func StackSkip(skip int) string {
+	return stack2.Trace().TrimBelow(stack2.Caller(skip)).String()
+}
