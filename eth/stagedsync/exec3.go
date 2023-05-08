@@ -114,7 +114,7 @@ Can understan if txn failed or OutOfGas - then revert all changes.
 Each parallel-worker hav own IntraBlockState.
 IntraBlockState does commit changes to lower-abstraction-level by method `ibs.MakeWriteSet()`
 
-- StateWriterForParallelExecV3 - txs which executed by parallel workers can conflict with each-other.
+- StateWriterBufferedV3 - txs which executed by parallel workers can conflict with each-other.
 This writer does accumulate updates and then send them to conflict-resolution.
 Until conflict-resolution succeed - none of execution updates must pass to lower-abstraction-level.
 Object TxTask it's just set of small buffers (readset + writeset) for each transaction.

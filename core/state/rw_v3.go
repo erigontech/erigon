@@ -672,8 +672,8 @@ func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.
 	return true
 }
 
-// StateWriterForParallelExecV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
-type StateWriterForParallelExecV3 struct {
+// StateWriterBufferedV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
+type StateWriterBufferedV3 struct {
 	rs           *StateV3
 	txNum        uint64
 	writeLists   map[string]*exec22.KvList
@@ -683,18 +683,18 @@ type StateWriterForParallelExecV3 struct {
 	codePrevs    map[string]uint64
 }
 
-func NewStateWriterForParallelExecV3(rs *StateV3) *StateWriterForParallelExecV3 {
-	return &StateWriterForParallelExecV3{
+func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
+	return &StateWriterBufferedV3{
 		rs:         rs,
 		writeLists: newWriteList(),
 	}
 }
 
-func (w *StateWriterForParallelExecV3) SetTxNum(txNum uint64) {
+func (w *StateWriterBufferedV3) SetTxNum(txNum uint64) {
 	w.txNum = txNum
 }
 
-func (w *StateWriterForParallelExecV3) ResetWriteSet() {
+func (w *StateWriterBufferedV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
 	w.accountPrevs = nil
 	w.accountDels = nil
@@ -702,15 +702,15 @@ func (w *StateWriterForParallelExecV3) ResetWriteSet() {
 	w.codePrevs = nil
 }
 
-func (w *StateWriterForParallelExecV3) WriteSet() map[string]*exec22.KvList {
+func (w *StateWriterBufferedV3) WriteSet() map[string]*exec22.KvList {
 	return w.writeLists
 }
 
-func (w *StateWriterForParallelExecV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
+func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
 
-func (w *StateWriterForParallelExecV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	addressBytes := address.Bytes()
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
@@ -728,7 +728,7 @@ func (w *StateWriterForParallelExecV3) UpdateAccountData(address common.Address,
 	return nil
 }
 
-func (w *StateWriterForParallelExecV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	addressBytes, codeHashBytes := address.Bytes(), codeHash.Bytes()
 	w.writeLists[kv.Code].Keys = append(w.writeLists[kv.Code].Keys, string(codeHashBytes))
 	w.writeLists[kv.Code].Vals = append(w.writeLists[kv.Code].Vals, code)
@@ -745,7 +745,7 @@ func (w *StateWriterForParallelExecV3) UpdateAccountCode(address common.Address,
 	return nil
 }
 
-func (w *StateWriterForParallelExecV3) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *accounts.Account) error {
 	addressBytes := address.Bytes()
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, string(addressBytes))
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, nil)
@@ -764,7 +764,7 @@ func (w *StateWriterForParallelExecV3) DeleteAccount(address common.Address, ori
 	return nil
 }
 
-func (w *StateWriterForParallelExecV3) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	if *original == *value {
 		return nil
 	}
@@ -780,7 +780,7 @@ func (w *StateWriterForParallelExecV3) WriteAccountStorage(address common.Addres
 	return nil
 }
 
-func (w *StateWriterForParallelExecV3) CreateContract(address common.Address) error {
+func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 	return nil
 }
 
