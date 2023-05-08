@@ -32,7 +32,7 @@ const (
 	DefaultWSPort      = 8546        // Default TCP port for the websocket RPC server
 	DefaultGRPCHost    = "localhost" // Default host interface for the GRPC server
 	DefaultGRPCPort    = 8547        // Default TCP port for the GRPC server
-	DefaultTCPHost     = "localhost" // default host interrface for TCP RPC server
+	DefaultTCPHost     = "localhost" // default host interface for TCP RPC server
 	DefaultTCPPort     = 8548        // default TCP port for TCP RPC server
 )
 
@@ -47,7 +47,7 @@ var DefaultConfig = Config{
 	WSModules:        []string{"net", "web3"},
 	P2P: p2p.Config{
 		ListenAddr:      ":30303",
-		ProtocolVersion: []uint{67, 68},
+		ProtocolVersion: []uint{68, 67, 66},
 		MaxPeers:        100,
 		MaxPendingPeers: 1000,
 		NAT:             nat.Any(),

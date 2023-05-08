@@ -239,11 +239,10 @@ func makeOurHelloMessage(myPrivateKey *ecdsa.PrivateKey) HelloMessage {
 	clientID := common.MakeName("observer", version)
 
 	caps := []p2p.Cap{
-		{Name: eth.ProtocolName, Version: 63},
-		{Name: eth.ProtocolName, Version: 64},
 		{Name: eth.ProtocolName, Version: 65},
 		{Name: eth.ProtocolName, Version: eth.ETH66},
 		{Name: eth.ProtocolName, Version: eth.ETH67},
+		{Name: eth.ProtocolName, Version: eth.ETH68},
 	}
 
 	return HelloMessage{
