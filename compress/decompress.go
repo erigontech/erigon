@@ -143,13 +143,12 @@ func SetDecompressionTableCondensity(fromBitSize int) {
 	condensePatternTableBitThreshold = fromBitSize
 }
 
-func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
+func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	_, fName := filepath.Split(compressedFilePath)
-	d := &Decompressor{
+	d = &Decompressor{
 		filePath: compressedFilePath,
 		fileName: fName,
 	}
-	var err error
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("decompressing file: %s, %+v, trace: %s", compressedFilePath, rec, dbg.Stack())
