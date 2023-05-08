@@ -219,6 +219,8 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 		}
 	}()
 	// Run the callback.
+	log.Info("fullargs before Call, %v, %v", len(fullargs), fullargs)
+	log.Info("stream before call %v", *stream)
 	results := c.fn.Call(fullargs)
 	if len(results) == 0 {
 		return nil, nil
