@@ -359,7 +359,7 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 			v, err := tx.aggCtx.ReadAccountData(key, ts, tx.MdbxTx)
 			return v, v != nil, err
 		case StorageDomain:
-			v, err := tx.aggCtx.ReadAccountStorage(key, ts, tx.MdbxTx)
+			v, err := tx.aggCtx.ReadAccountStorage(append(common.Copy(key), key2...), ts, tx.MdbxTx)
 			return v, v != nil, err
 		case CodeDomain:
 			v, err := tx.aggCtx.ReadAccountCode(key, ts, tx.MdbxTx)
