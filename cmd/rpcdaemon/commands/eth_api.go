@@ -321,7 +321,7 @@ type APIImpl struct {
 	db              kv.RoDB
 	GasCap          uint64
 	ReturnDataLimit int
-	logger 			log.Logger
+	logger          log.Logger
 }
 
 // NewEthAPI returns APIImpl instance
