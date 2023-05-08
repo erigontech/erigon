@@ -13,6 +13,13 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -23,12 +30,6 @@ import (
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -68,8 +69,8 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH66][eth.GetBlockBodiesMsg],
-		eth.ToProto[eth.ETH66][eth.GetReceiptsMsg],
+		eth.ToProto[direct.ETH66][eth.GetBlockBodiesMsg],
+		eth.ToProto[direct.ETH66][eth.GetReceiptsMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry direct.SentryClient) (sentryMessageStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -84,7 +85,7 @@ func (cs *MultiClient) RecvUploadHeadersMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH66][eth.GetBlockHeadersMsg],
+		eth.ToProto[direct.ETH66][eth.GetBlockHeadersMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry direct.SentryClient) (sentryMessageStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -99,10 +100,10 @@ func (cs *MultiClient) RecvMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH66][eth.BlockHeadersMsg],
-		eth.ToProto[eth.ETH66][eth.BlockBodiesMsg],
-		eth.ToProto[eth.ETH66][eth.NewBlockHashesMsg],
-		eth.ToProto[eth.ETH66][eth.NewBlockMsg],
+		eth.ToProto[direct.ETH66][eth.BlockHeadersMsg],
+		eth.ToProto[direct.ETH66][eth.BlockBodiesMsg],
+		eth.ToProto[direct.ETH66][eth.NewBlockHashesMsg],
+		eth.ToProto[direct.ETH66][eth.NewBlockMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry direct.SentryClient) (sentryMessageStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
