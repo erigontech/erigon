@@ -248,7 +248,7 @@ func enable4844(jt *JumpTable) {
 	jt[DATAHASH] = &operation{
 		execute:     opDataHash,
 		constantGas: GasFastestStep,
-		numPop:      0,
+		numPop:      1,
 		numPush:     1,
 	}
 }
