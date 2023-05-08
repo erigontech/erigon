@@ -34,10 +34,6 @@ var rootCmd = &cobra.Command{
 	Use:   "state",
 	Short: "state is a utility for Stateless ethereum clients",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if err := debug.SetupCobra(cmd); err != nil {
-			panic(err)
-		}
-
 		genesis, chainConfig = getChainGenesisAndConfig()
 		if genesisPath != "" {
 			genesis = genesisFromFile(genesisPath)

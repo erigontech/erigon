@@ -10,20 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-type gohashtreeWorkerIO struct {
-	elements [][32]byte // elements to go hash
-	index    int        // index
-}
-
-func gohashtreeWorker(g *gohashtreeWorkerIO, result chan *gohashtreeWorkerIO) {
-	outputLen := len(g.elements) / 2
-	if err := gohashtree.Hash(g.elements, g.elements); err != nil {
-		panic(err)
-	}
-	g.elements = g.elements[:outputLen]
-	result <- g
-}
-
 // MerkleizeVector uses our optimized routine to hash a list of 32-byte
 // elements.
 func MerkleizeVector(elements [][32]byte, length uint64) ([32]byte, error) {

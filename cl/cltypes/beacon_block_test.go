@@ -1,6 +1,7 @@
 package cltypes_test
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -92,11 +93,37 @@ var testBeaconBlockVariation = &cltypes.SignedBeaconBlock{
 
 var (
 	// Hashes
+	denebHash     = common.HexToHash("0xa339ac4e064338b379226b542a8968bf60b95e07b8cff4026e835db0b7e750f0")
 	capellaHash   = common.HexToHash("0xc4892f81461ed3a24db4b44f26a728219faf1f278d8a1c21d774e2efa73cf1a3")
 	bellatrixHash = common.HexToHash("9a5bc717ecaf6a8d6e879478003729b9ce4e71f5c4e9b4bd4dd166780894ee93")
 	altairHash    = common.HexToHash("36aa8fe956265d171b7ad740077ea9579e25ed3b2f7b2010016513e4ac4754cb")
 	phase0Hash    = common.HexToHash("83dd9e30bf61720822be889abf73760a26fb42dc9fb27fa872f845d68af92bc4")
 )
+
+func TestDenebBlock(t *testing.T) {
+	testBeaconBlockVariation.Block.Body.Version = clparams.DenebVersion
+	executionPayload := cltypes.NewEth1Block(clparams.DenebVersion)
+
+	excessDataGasInt := *big.NewInt(69)
+	excessDataGasBytes := excessDataGasInt.Bytes()
+	for i, j := 0, len(excessDataGasBytes)-1; i < j; i, j = i+1, j-1 {
+		excessDataGasBytes[i], excessDataGasBytes[j] = excessDataGasBytes[j], excessDataGasBytes[i]
+	}
+	var excessDataGas32 [32]byte
+	copy(excessDataGas32[:], excessDataGasBytes)
+	executionPayload.ExcessDataGas = excessDataGas32
+	testBeaconBlockVariation.Block.Body.ExecutionPayload = executionPayload
+	require.Equal(t, testBeaconBlockVariation.Version(), clparams.DenebVersion)
+	// Simple unit test: unmarshal + marshal + hashtreeroot
+	hash, err := testBeaconBlockVariation.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, denebHash, common.Hash(hash))
+	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
+	require.NoError(t, err)
+	block2 := &cltypes.SignedBeaconBlock{}
+	err = block2.DecodeSSZ(encoded, int(clparams.DenebVersion))
+	require.NoError(t, err)
+}
 
 func TestCapellaBlock(t *testing.T) {
 	testBeaconBlockVariation.Block.Body.Version = clparams.CapellaVersion
@@ -109,7 +136,7 @@ func TestCapellaBlock(t *testing.T) {
 	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
 	require.NoError(t, err)
 	block2 := &cltypes.SignedBeaconBlock{}
-	require.NoError(t, block2.DecodeSSZWithVersion(encoded, int(clparams.CapellaVersion)))
+	require.NoError(t, block2.DecodeSSZ(encoded, int(clparams.CapellaVersion)))
 }
 
 func TestBellatrixBlock(t *testing.T) {
@@ -123,7 +150,7 @@ func TestBellatrixBlock(t *testing.T) {
 	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
 	require.NoError(t, err)
 	block2 := &cltypes.SignedBeaconBlock{}
-	require.NoError(t, block2.DecodeSSZWithVersion(encoded, int(clparams.BellatrixVersion)))
+	require.NoError(t, block2.DecodeSSZ(encoded, int(clparams.BellatrixVersion)))
 }
 
 func TestAltairBlock(t *testing.T) {
@@ -136,7 +163,7 @@ func TestAltairBlock(t *testing.T) {
 	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
 	require.NoError(t, err)
 	block2 := &cltypes.SignedBeaconBlock{}
-	require.NoError(t, block2.DecodeSSZWithVersion(encoded, int(clparams.AltairVersion)))
+	require.NoError(t, block2.DecodeSSZ(encoded, int(clparams.AltairVersion)))
 	hash2, err := block2.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(hash2), altairHash)
@@ -157,7 +184,7 @@ func TestPhase0Block(t *testing.T) {
 	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
 	require.NoError(t, err)
 	block2 := &cltypes.SignedBeaconBlock{}
-	require.NoError(t, block2.DecodeSSZWithVersion(encoded, int(clparams.Phase0Version)))
+	require.NoError(t, block2.DecodeSSZ(encoded, int(clparams.Phase0Version)))
 	hash2, err := block2.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(hash2), phase0Hash)

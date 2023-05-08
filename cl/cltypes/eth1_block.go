@@ -29,9 +29,10 @@ type Eth1Block struct {
 	Extra         []byte
 	BaseFeePerGas [32]byte
 	// Extra fields
-	BlockHash    libcommon.Hash
-	Transactions [][]byte
-	Withdrawals  types.Withdrawals
+	BlockHash     libcommon.Hash
+	Transactions  [][]byte
+	Withdrawals   types.Withdrawals
+	ExcessDataGas [32]byte
 	// internals
 	version clparams.StateVersion
 }
@@ -50,6 +51,15 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 	var baseFee32 [32]byte
 	copy(baseFee32[:], baseFeeBytes)
 
+	var excessDataGas32 [32]byte
+	if header.ExcessDataGas != nil {
+		excessDataGasBytes := header.ExcessDataGas.Bytes()
+		for i, j := 0, len(excessDataGasBytes)-1; i < j; i, j = i+1, j-1 {
+			excessDataGasBytes[i], excessDataGasBytes[j] = excessDataGasBytes[j], excessDataGasBytes[i]
+		}
+		copy(excessDataGas32[:], excessDataGasBytes)
+	}
+
 	block := &Eth1Block{
 		ParentHash:    header.ParentHash,
 		FeeRecipient:  header.Coinbase,
@@ -66,11 +76,15 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 		BlockHash:     header.Hash(),
 		Transactions:  body.Transactions,
 		Withdrawals:   body.Withdrawals,
+		ExcessDataGas: excessDataGas32,
 	}
-	if header.WithdrawalsHash == nil {
-		block.version = clparams.BellatrixVersion
-	} else {
+
+	if header.ExcessDataGas != nil {
+		block.version = clparams.DenebVersion
+	} else if header.WithdrawalsHash != nil {
 		block.version = clparams.CapellaVersion
+	} else {
+		block.version = clparams.BellatrixVersion
 	}
 	return block
 }
@@ -105,6 +119,7 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 		BlockHash:        b.BlockHash,
 		TransactionsRoot: transactionsRoot,
 		WithdrawalsRoot:  withdrawalsRoot,
+		ExcessDataGas:    b.ExcessDataGas,
 		version:          b.version,
 	}, nil
 }
@@ -124,19 +139,18 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 		size += len(b.Withdrawals)*44 + 4
 	}
 
+	if b.version >= clparams.DenebVersion {
+		size += 32 // ExcessDataGas
+	}
+
 	return
 }
 
-// Need a version
-func (b *Eth1Block) DecodeSSZ(buf []byte) error {
-	panic("stop")
-}
-
-// DecodeSSZWithVersion decodes the block in SSZ format.
-func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
+// DecodeSSZ decodes the block in SSZ format.
+func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	b.version = clparams.StateVersion(version)
 	if len(buf) < b.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrLowBufferSize)
 	}
 	// We can reuse code from eth1-header for partial decoding
 	payloadHeader := Eth1Header{}
@@ -162,21 +176,25 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 		withdrawalOffset = new(uint32)
 		*withdrawalOffset = ssz.DecodeOffset(buf[pos:])
 	}
+	pos += 4
+	if version >= int(clparams.DenebVersion) {
+		copy(b.ExcessDataGas[:], buf[pos:])
+	}
 	// Compute extra data.
 	b.Extra = common.CopyBytes(buf[extraDataOffset:transactionsOffset])
 	if len(b.Extra) > 32 {
-		return fmt.Errorf("Decode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Extra))
+		return fmt.Errorf("[Eth1Block] err: Decode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Extra))
 	}
 	// Compute transactions
 	var transactionsBuffer []byte
 	if withdrawalOffset == nil {
 		if len(transactionsBuffer) > len(buf) {
-			return ssz.ErrLowBufferSize
+			return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrLowBufferSize)
 		}
 		transactionsBuffer = buf[transactionsOffset:]
 	} else {
 		if len(transactionsBuffer) > int(*withdrawalOffset) || int(*withdrawalOffset) > len(buf) {
-			return ssz.ErrBadOffset
+			return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrBadOffset)
 		}
 		transactionsBuffer = buf[transactionsOffset:*withdrawalOffset]
 	}
@@ -188,13 +206,13 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 		length = 0
 	} else {
 		if len(transactionsBuffer) < 4 {
-			return ssz.ErrLowBufferSize
+			return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrLowBufferSize)
 		}
 		txOffset = ssz.DecodeOffset(transactionsBuffer)
 		length = txOffset / 4
 		// Retrieve tx length
 		if txOffset%4 != 0 {
-			return ssz.ErrBadDynamicLength
+			return fmt.Errorf("Eth1Block] err: %s", ssz.ErrBadDynamicLength)
 		}
 	}
 
@@ -210,7 +228,7 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 		}
 		transactionsPosition += 4
 		if txOffset > txEndOffset {
-			return ssz.ErrBadOffset
+			return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrBadOffset)
 		}
 		b.Transactions[txIdx] = transactionsBuffer[txOffset:txEndOffset]
 		// Decode RLP and put it in the tx list.
@@ -219,14 +237,16 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 		txIdx++
 		length--
 	}
+
 	// If withdrawals are enabled, process them.
 	if withdrawalOffset != nil {
 		var err error
-		b.Withdrawals, err = ssz.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(len(buf)), 44, 16)
+		b.Withdrawals, err = ssz.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(len(buf)), 44, 16, version)
 		if err != nil {
-			return err
+			return fmt.Errorf("[Eth1Block] err: %s", err)
 		}
 	}
+
 	return nil
 }
 
@@ -238,6 +258,9 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 
 	if b.version >= clparams.CapellaVersion {
 		currentOffset += 4
+	}
+	if b.version >= clparams.DenebVersion {
+		currentOffset += 32
 	}
 	payloadHeader, err := b.PayloadHeader()
 	if err != nil {
@@ -257,11 +280,20 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	// Write withdrawals offset if exist
 	if b.version >= clparams.CapellaVersion {
 		buf = append(buf, ssz.OffsetSSZ(uint32(currentOffset))...)
+		for _, withdrawal := range b.Withdrawals {
+			currentOffset += withdrawal.EncodingSize()
+		}
 	}
+
+	if b.version >= clparams.DenebVersion {
+		buf = append(buf, b.ExcessDataGas[:]...)
+	}
+
 	// Sanity check for extra data then write it.
 	if len(b.Extra) > 32 {
 		return nil, fmt.Errorf("Encode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Extra))
 	}
+
 	buf = append(buf, b.Extra...)
 	// Write all tx offsets
 	txOffset := len(b.Transactions) * 4
@@ -283,7 +315,7 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 // HashSSZ calculates the SSZ hash of the Eth1Block's payload header.
-func (b *Eth1Block) HashSSZ(version clparams.StateVersion) ([32]byte, error) {
+func (b *Eth1Block) HashSSZ() ([32]byte, error) {
 	// Get the payload header.
 	header, err := b.PayloadHeader()
 	if err != nil {
@@ -310,6 +342,15 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 		*withdrawalsHash = types.DeriveSha(b.Withdrawals)
 	}
 
+	var excessDataGas *big.Int
+	if b.version >= clparams.DenebVersion {
+		reversedExcessDataGas := libcommon.Copy(b.ExcessDataGas[:])
+		for i, j := 0, len(reversedExcessDataGas)-1; i < j; i, j = i+1, j-1 {
+			reversedExcessDataGas[i], reversedExcessDataGas[j] = reversedExcessDataGas[j], reversedExcessDataGas[i]
+		}
+		excessDataGas = new(big.Int).SetBytes(reversedExcessDataGas)
+	}
+
 	header := &types.Header{
 		ParentHash:      b.ParentHash,
 		UncleHash:       types.EmptyUncleHash,
@@ -328,6 +369,7 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 		Nonce:           serenity.SerenityNonce,
 		BaseFee:         baseFee,
 		WithdrawalsHash: withdrawalsHash,
+		ExcessDataGas:   excessDataGas,
 	}
 
 	// If the header hash does not match the block hash, return an error.

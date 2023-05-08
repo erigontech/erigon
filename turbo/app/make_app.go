@@ -44,9 +44,6 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 	app.Flags = append(cliFlags, debug.Flags...) // debug flags are required
 	app.Flags = append(app.Flags, utils.MetricFlags...)
 	app.Flags = append(app.Flags, logging.Flags...)
-	app.Before = func(ctx *cli.Context) error {
-		return debug.Setup(ctx)
-	}
 	app.After = func(ctx *cli.Context) error {
 		debug.Exit()
 		return nil
@@ -134,12 +131,12 @@ func NewNodeConfig(ctx *cli.Context) *nodecfg.Config {
 	return &nodeConfig
 }
 
-func MakeConfigNodeDefault(ctx *cli.Context) *node.Node {
-	return makeConfigNode(NewNodeConfig(ctx))
+func MakeConfigNodeDefault(ctx *cli.Context, logger log.Logger) *node.Node {
+	return makeConfigNode(NewNodeConfig(ctx), logger)
 }
 
-func makeConfigNode(config *nodecfg.Config) *node.Node {
-	stack, err := node.New(config)
+func makeConfigNode(config *nodecfg.Config, logger log.Logger) *node.Node {
+	stack, err := node.New(config, logger)
 	if err != nil {
 		utils.Fatalf("Failed to create Erigon node: %v", err)
 	}

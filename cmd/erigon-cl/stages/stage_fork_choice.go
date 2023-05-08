@@ -98,15 +98,23 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 				log.Warn("Could not download block", "reason", err)
 				return highestSlotProcessed, libcommon.Hash{}, err
 			}
+			highestSlotProcessed = utils.Max64(block.Block.Slot, highestSlotProcessed)
 			if sendForckchoice {
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
 				// Import the head
 				headRoot, headSlot, err := cfg.forkChoice.GetHead()
 				if err != nil {
 					log.Debug("Could not fetch head data", "err", err)
+					log.Debug("New block imported",
+						"slot", block.Block.Slot,
+						"alloc", libcommon.ByteCount(m.Alloc),
+						"sys", libcommon.ByteCount(m.Sys),
+						"numGC", m.NumGC,
+					)
 					continue
 				}
-				var m runtime.MemStats
-				dbg.ReadMemStats(&m)
+
 				log.Debug("New block imported",
 					"slot", block.Block.Slot, "head", headSlot, "headRoot", headRoot,
 					"alloc", libcommon.ByteCount(m.Alloc),
@@ -126,7 +134,6 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 					}
 				}
 			}
-			highestSlotProcessed = utils.Max64(block.Block.Slot, highestSlotProcessed)
 		}
 		// Checks done, update all internals accordingly
 		return highestSlotProcessed, libcommon.Hash{}, nil
