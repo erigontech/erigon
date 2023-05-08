@@ -216,7 +216,7 @@ func getNextTransactions(
 		return nil, 0, err
 	}
 
-	var txs []types.Transaction //nolint:prealloc/*  */
+	var txs []types.Transaction //nolint:prealloc
 	for i := range txSlots.Txs {
 		transaction, err := types.DecodeWrappedTransaction(txSlots.Txs[i])
 		if err == io.EOF {
