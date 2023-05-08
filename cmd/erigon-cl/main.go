@@ -118,7 +118,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	}
 Loop:
 	for {
-		if err := stageloop.Run(db, nil, false, true); err != nil {
+		if err := stageloop.Run(db, nil, false); err != nil {
 			return err
 		}
 		select {

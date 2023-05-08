@@ -176,7 +176,7 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 		return nil, err
 	}
 	// Run the forkchoice
-	if err := e.executionPipeline.Run(e.db, tx, false, false); err != nil {
+	if err := e.executionPipeline.Run(e.db, tx, false); err != nil {
 		return nil, err
 	}
 	// if head hash was set then success otherwise no

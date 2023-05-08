@@ -69,7 +69,7 @@ func importChain(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	err = ethereum.Init(stack, ethCfg)
+	err = ethereum.Init(stack, ethCfg, logger)
 	if err != nil {
 		return err
 	}
