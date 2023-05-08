@@ -791,7 +791,11 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		if excessDataGas == nil {
 			log.Warn("excess data gas not set when trying to marshal blob tx")
 		} else {
-			fields["dataGasPrice"] = misc.GetDataGasPrice(excessDataGas)
+			dataGasPrice, err := misc.GetDataGasPrice(excessDataGas)
+			if err != nil {
+				log.Error(err.Error())
+			}
+			fields["dataGasPrice"] = dataGasPrice
 			fields["dataGasUsed"] = misc.GetDataGasUsed(numBlobs)
 		}
 	}
