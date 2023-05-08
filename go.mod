@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/ledgerwatch/erigon-lib v0.0.0-20230330024812-ae99e29d013b
-	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230306083105-1391330d62a3
+	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230404044759-5dec854ce336
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.1.0 // indirect
@@ -298,5 +298,6 @@ require (
 replace (
 	github.com/cometbft/cometbft => github.com/bnb-chain/greenfield-tendermint v0.0.0-20230417032003-4cda1f296fb2
 	github.com/ledgerwatch/erigon-lib => github.com/chainstack/erigon-lib v0.0.0-20230426134128-a2ae5fb02bbb
+	github.com/ledgerwatch/erigon-snapshot => github.com/14MR/erigon-snapshot v0.0.0-20230508114835-4cdbd5ae9a44
 	github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.15
 )
