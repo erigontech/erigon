@@ -131,7 +131,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3) (beforeBlock, afterBlock test
 	agg.StartWrites()
 
 	rs := state.NewStateV3("", agg.SharedDomains())
-	stateWriter := state.NewStateWriterV3(rs)
+	stateWriter := state.NewStateWriterBufferedV3(rs)
 	return func(n, from, numberOfBlocks uint64) {
 			stateWriter.SetTxNum(n)
 			stateWriter.ResetWriteSet()
