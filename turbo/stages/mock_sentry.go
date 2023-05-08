@@ -58,6 +58,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
+const MockInsertAsInitialCycle = false
+
 type MockSentry struct {
 	proto_sentry.UnimplementedSentryServer
 	Ctx            context.Context
@@ -617,7 +619,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
-	initialCycle := false
+	initialCycle := MockInsertAsInitialCycle
 	if _, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead); err != nil {
 		return err
 	}
