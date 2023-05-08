@@ -347,6 +347,12 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 			return v, true, nil
 		}
 		v, err = tx.GetOne(kv.PlainState, key)
+		if len(v) > 0 {
+			v, err = accounts.ConvertV2toV3(v)
+			if err != nil {
+				return nil, false, err
+			}
+		}
 		return v, v != nil, err
 	case StorageDomain:
 		v, ok, err = tx.HistoryGet(StorageHistory, append(key[:20], key2...), ts)

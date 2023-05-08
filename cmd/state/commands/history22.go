@@ -155,7 +155,7 @@ func History22(genesis *types.Genesis, logger log.Logger) error {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, ethconfig.Defaults.TransactionsV3)
-	readWrapper := state.NewHistoryReaderV4(h.MakeContext(), ri)
+	readWrapper := state.NewHistoryReaderWithReadIdxV4(h.MakeContext(), ri)
 
 	for !interrupt {
 		select {
@@ -237,7 +237,7 @@ func History22(genesis *types.Genesis, logger log.Logger) error {
 	return nil
 }
 
-func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryReaderV4, ww state.StateWriter, chainConfig *chain2.Config, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
+func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryReaderWithReadIdxV4, ww state.StateWriter, chainConfig *chain2.Config, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
 	header := block.Header()
 	excessDataGas := header.ParentExcessDataGas(getHeader)
 	vmConfig.TraceJumpDest = true
