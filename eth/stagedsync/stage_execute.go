@@ -476,7 +476,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	defer close(readAhead)
 	if initialCycle {
 		g, _ := errgroup.WithContext(ctx)
-		for i := 0; i < 8; i++ {
+		for i := 0; i < 4; i++ {
 			g.Go(func() error {
 				for bn := range readAhead {
 					if err := readAheadFunc(bn); err != nil {
