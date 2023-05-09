@@ -19,11 +19,10 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-// Constants for Serenity as specified into https://eips.ethereum.org/EIPS/eip-2982
+// Constants for The Merge as specified by EIP-3675: Upgrade consensus to Proof-of-Stake
 var (
 	SerenityDifficulty = libcommon.Big0     // Serenity block's difficulty is always 0.
 	SerenityNonce      = types.BlockNonce{} // Serenity chain's nonces are 0.
-	RewardSerenity     = big.NewInt(300000000000000000)
 )
 
 var (
