@@ -2,13 +2,45 @@ package merkle_tree
 
 import (
 	"errors"
+	"reflect"
+	"unsafe"
+
+	"github.com/prysmaticlabs/gohashtree"
 )
 
 func HashByteSlice(out, in []byte) error {
 	if len(in) == 0 {
 		return errors.New("zero leaves provided")
 	}
-	return globalHasher.hashByteSlice(out, in)
+
+	if len(out)%32 != 0 {
+		return errors.New("output must be multple of 32")
+	}
+	if len(in)%64 != 0 {
+		return errors.New("input must be multple of 64")
+	}
+	c_in := convertHeader(in)
+	c_out := convertHeader(out)
+	err := gohashtree.Hash(c_out, c_in)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func convertHeader(xs []byte) [][32]byte {
+	header := *(*reflect.SliceHeader)(unsafe.Pointer(&xs))
+	header.Len /= 32
+	header.Cap /= 32
+	chunkedChunks := *(*[][32]byte)(unsafe.Pointer(&header))
+	return chunkedChunks
+}
+func convertHeaderBack(xs [][32]byte) []byte {
+	header := *(*reflect.SliceHeader)(unsafe.Pointer(&xs))
+	header.Len *= 32
+	header.Cap *= 32
+	unchunkedChunks := *(*[]byte)(unsafe.Pointer(&header))
+	return unchunkedChunks
 }
 
 func MerkleRootFromLeaves(leaves [][32]byte) ([32]byte, error) {
