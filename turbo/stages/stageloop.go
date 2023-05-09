@@ -163,7 +163,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 		notifications.Accumulator.Reset(stateVersion)
 	}
 
-	err = sync.Run(db, tx, initialCycle, false /* quiet */)
+	err = sync.Run(db, tx, initialCycle)
 	if err != nil {
 		return headBlockHash, err
 	}
@@ -271,14 +271,14 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, tmpDir
 	miningBatch := memdb.NewMemoryBatch(tx, tmpDir)
 	defer miningBatch.Rollback()
 
-	if err = mining.Run(nil, miningBatch, false /* firstCycle */, false /* quiet */); err != nil {
+	if err = mining.Run(nil, miningBatch, false /* firstCycle */); err != nil {
 		return err
 	}
 	tx.Rollback()
 	return nil
 }
 
-func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, Bd *bodydownload.BodyDownload, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, quiet bool) (err error) {
+func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, Bd *bodydownload.BodyDownload, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -338,7 +338,7 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, B
 		Bd.AddToPrefetch(header, body)
 	}
 	// Run state sync
-	if err = stateSync.Run(nil, batch, false /* firstCycle */, quiet); err != nil {
+	if err = stateSync.Run(nil, batch, false /* firstCycle */); err != nil {
 		return err
 	}
 	return nil
