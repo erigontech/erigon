@@ -350,6 +350,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		false,
 		forkValidator,
 		cfg.DropUselessPeers,
+		logger,
 	)
 
 	mock.sentriesClient.IsMock = true
