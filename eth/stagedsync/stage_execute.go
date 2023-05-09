@@ -458,7 +458,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
 		var excessDataGas *big.Int
-		// TODO(eip-4844): understand why chainReader is sometimes nil (e.g. certain test cases)
 		ph, _ := cfg.blockReader.HeaderByHash(context.Background(), tx, block.ParentHash())
 		if ph != nil {
 			excessDataGas = ph.ExcessDataGas
