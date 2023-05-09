@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -419,11 +420,71 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		batch.Rollback()
 	}()
 
+	readAhead := make(chan uint64, 1024)
+	defer close(readAhead)
+	readAheadFunc := func(blockNum uint64) error {
+		tx, err := cfg.db.BeginRo(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		block, _, err := cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
+		if err != nil {
+			return err
+		}
+		var stateReader state.StateReader
+		var stateWriter state.WriterWithChangeSets
+		stateReader = state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
+		stateWriter = state.NewNoopWriter()
+
+		// where the magic happens
+		getHeader := func(hash common.Hash, number uint64) *types.Header {
+			h, _ := cfg.blockReader.Header(context.Background(), tx, hash, number)
+			return h
+		}
+		getTracer := func(txIndex int, txHash common.Hash) (vm.EVMLogger, error) { return nil, nil }
+		isBor := cfg.chainConfig.Bor != nil
+		getHashFn := core.GetHashFn(block.Header(), getHeader)
+
+		vmCfg := *cfg.vmConfig
+		vmCfg.NoReceipts = true
+		vmCfg.Debug = false
+		vmCfg.ReadOnly = true
+		if isBor {
+			_, err = core.ExecuteBlockEphemerallyBor(cfg.chainConfig, cfg.vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
+		} else {
+			_, err = core.ExecuteBlockEphemerally(cfg.chainConfig, cfg.vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
+		}
+		return err
+	}
+	if initialCycle {
+		g, _ := errgroup.WithContext(ctx)
+		for i := 0; i < 8; i++ {
+			g.Go(func() error {
+				for bn := range readAhead {
+					if err := readAheadFunc(bn); err != nil {
+						panic(err)
+					}
+				}
+				return nil
+			})
+		}
+		for blockNum := stageProgress + 1; blockNum < stageProgress+100; blockNum++ {
+			readAhead <- blockNum
+		}
+	}
+
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
 		}
+		readAhead <- blockNum + 100
 
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
