@@ -704,7 +704,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 	var clq *clique.Clique
 	if c, ok := s.engine.(*clique.Clique); ok {
 		clq = c
-	} else if cl, ok := s.engine.(*serenity.Serenity); ok {
+	} else if cl, ok := s.engine.(*serenity.Merge); ok {
 		if c, ok := cl.InnerEngine().(*clique.Clique); ok {
 			clq = c
 		}
@@ -723,7 +723,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 	var borcfg *bor.Bor
 	if b, ok := s.engine.(*bor.Bor); ok {
 		borcfg = b
-	} else if br, ok := s.engine.(*serenity.Serenity); ok {
+	} else if br, ok := s.engine.(*serenity.Merge); ok {
 		if b, ok := br.InnerEngine().(*bor.Bor); ok {
 			borcfg = b
 		}
