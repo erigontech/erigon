@@ -277,7 +277,7 @@ func (cp *ChainPack) Copy() *ChainPack {
 
 func (cp *ChainPack) NumberOfPoWBlocks() int {
 	for i, header := range cp.Headers {
-		if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
+		if header.Difficulty.Cmp(serenity.ProofOfStakeDifficulty) == 0 {
 			return i
 		}
 	}

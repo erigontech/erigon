@@ -282,7 +282,7 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.In
 	}
 
 	// BlockReward can be present at genesis
-	if block.Header().Difficulty.Cmp(serenity.SerenityDifficulty) != 0 {
+	if block.Header().Difficulty.Cmp(serenity.ProofOfStakeDifficulty) != 0 {
 		blockReward, _ := ethash.AccumulateRewards(g.Config, block.Header(), nil)
 		// Set BlockReward
 		genesisIssuance.Add(genesisIssuance, blockReward.ToBig())

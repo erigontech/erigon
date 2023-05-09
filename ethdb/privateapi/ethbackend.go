@@ -365,8 +365,8 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 		Time:        req.Timestamp,
 		MixDigest:   gointerfaces.ConvertH256ToHash(req.PrevRandao),
 		UncleHash:   types.EmptyUncleHash,
-		Difficulty:  serenity.SerenityDifficulty,
-		Nonce:       serenity.SerenityNonce,
+		Difficulty:  serenity.ProofOfStakeDifficulty,
+		Nonce:       serenity.ProofOfStakeNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
 		TxHash:      types.DeriveSha(types.BinaryTransactions(req.Transactions)),
 	}

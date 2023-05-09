@@ -50,7 +50,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	}
 
 	var prevRandDao *libcommon.Hash
-	if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
+	if header.Difficulty.Cmp(serenity.ProofOfStakeDifficulty) == 0 {
 		// EIP-4399. We use SerenityDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
 		prevRandDao = &header.MixDigest
 	}

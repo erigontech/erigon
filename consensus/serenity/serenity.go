@@ -7,6 +7,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -21,8 +22,8 @@ import (
 
 // Constants for The Merge as specified by EIP-3675: Upgrade consensus to Proof-of-Stake
 var (
-	SerenityDifficulty = libcommon.Big0     // Serenity block's difficulty is always 0.
-	SerenityNonce      = types.BlockNonce{} // Serenity chain's nonces are 0.
+	ProofOfStakeDifficulty = libcommon.Big0     // PoS block's difficulty is always 0
+	ProofOfStakeNonce      = types.BlockNonce{} // PoS block's have all-zero nonces
 )
 
 var (
@@ -117,8 +118,8 @@ func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 	if !reached {
 		return s.eth1Engine.Prepare(chain, header, state)
 	}
-	header.Difficulty = SerenityDifficulty
-	header.Nonce = SerenityNonce
+	header.Difficulty = ProofOfStakeDifficulty
+	header.Nonce = ProofOfStakeNonce
 	return nil
 }
 
@@ -197,7 +198,7 @@ func (s *Serenity) CalcDifficulty(chain consensus.ChainHeaderReader, time, paren
 	if !reached {
 		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentAuRaStep)
 	}
-	return SerenityDifficulty
+	return ProofOfStakeDifficulty
 }
 
 // verifyHeader checks whether a Proof-of-Stake header conforms to the consensus rules of the
@@ -212,11 +213,11 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 		return errOlderBlockTime
 	}
 
-	if header.Difficulty.Cmp(SerenityDifficulty) != 0 {
+	if header.Difficulty.Cmp(ProofOfStakeDifficulty) != 0 {
 		return errInvalidDifficulty
 	}
 
-	if !bytes.Equal(header.Nonce[:], SerenityNonce[:]) {
+	if !bytes.Equal(header.Nonce[:], ProofOfStakeNonce[:]) {
 		return errInvalidNonce
 	}
 
@@ -296,7 +297,7 @@ func IsPoSHeader(header *types.Header) bool {
 	if header.Difficulty == nil {
 		panic("IsPoSHeader called with invalid difficulty")
 	}
-	return header.Difficulty.Cmp(SerenityDifficulty) == 0
+	return header.Difficulty.Cmp(ProofOfStakeDifficulty) == 0
 }
 
 // IsTTDReached checks if the TotalTerminalDifficulty has been surpassed on the `parentHash` block.
