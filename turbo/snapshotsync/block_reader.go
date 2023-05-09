@@ -528,8 +528,6 @@ func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmoun
 	txnOffset := txsSeg.IdxTxnHash.OrdinalLookup(baseTxnID - txsSeg.IdxTxnHash.BaseDataID())
 	gg := txsSeg.Seg.MakeGetter()
 	gg.Reset(txnOffset)
-	reader := bytes.NewReader(buf)
-	stream := rlp.NewStream(reader, 0)
 	for i := uint32(0); i < txsAmount; i++ {
 		if !gg.HasNext() {
 			return nil, nil, nil
@@ -540,9 +538,7 @@ func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmoun
 		}
 		senders[i].SetBytes(buf[1 : 1+20])
 		txRlp := buf[1+20:]
-		reader.Reset(txRlp)
-		stream.Reset(reader, 0)
-		txs[i], err = types.DecodeTransaction(stream)
+		txs[i], err = types.DecodeTransaction(txRlp)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -562,7 +558,7 @@ func (back *BlockReaderWithSnapshots) txnByID(txnID uint64, sn *TxnSegment, buf 
 	buf, _ = gg.Next(buf[:0])
 	sender, txnRlp := buf[1:1+20], buf[1+20:]
 
-	txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(txnRlp), uint64(len(txnRlp))))
+	txn, err = types.DecodeTransaction(txnRlp)
 	if err != nil {
 		return
 	}
@@ -590,7 +586,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash libcommon.Hash, segments
 		senderByte, txnRlp := buf[1:1+20], buf[1+20:]
 		sender := *(*libcommon.Address)(senderByte)
 
-		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(txnRlp), uint64(len(txnRlp))))
+		txn, err = types.DecodeTransaction(txnRlp)
 		if err != nil {
 			return
 		}
