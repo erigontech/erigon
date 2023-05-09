@@ -41,7 +41,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -380,13 +379,6 @@ func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *sta
 ) (types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
-	if config.IsCancun(header.Time) {
-		if parent := chain.GetHeaderByHash(header.ParentHash); parent != nil {
-			header.SetExcessDataGas(misc.CalcExcessDataGas(parent.ExcessDataGas, misc.CountBlobs(txs)))
-		} else {
-			header.SetExcessDataGas(new(big.Int))
-		}
-	}
 	return txs, r, nil
 }
 
