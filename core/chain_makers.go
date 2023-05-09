@@ -24,15 +24,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -277,7 +276,7 @@ func (cp *ChainPack) Copy() *ChainPack {
 
 func (cp *ChainPack) NumberOfPoWBlocks() int {
 	for i, header := range cp.Headers {
-		if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
+		if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
 			return i
 		}
 	}

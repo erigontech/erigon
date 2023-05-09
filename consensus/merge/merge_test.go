@@ -1,4 +1,4 @@
-package serenity
+package merge
 
 import (
 	"math/big"
@@ -48,14 +48,14 @@ func TestVerifyHeaderDifficulty(t *testing.T) {
 	parent := &types.Header{}
 
 	var eth1Engine consensus.Engine
-	serenity := New(eth1Engine)
+	mergeEngine := New(eth1Engine)
 
-	err := serenity.verifyHeader(readerMock{}, header, parent)
+	err := mergeEngine.verifyHeader(readerMock{}, header, parent)
 	if err != errInvalidDifficulty {
 		if err != nil {
-			t.Fatalf("Serenity should not accept non-zero difficulty, got %s", err.Error())
+			t.Fatalf("Merge engine should not accept non-zero difficulty, got %s", err.Error())
 		} else {
-			t.Fatalf("Serenity should not accept non-zero difficulty")
+			t.Fatalf("Merge engine should not accept non-zero difficulty")
 		}
 	}
 }
@@ -70,14 +70,14 @@ func TestVerifyHeaderNonce(t *testing.T) {
 	parent := &types.Header{}
 
 	var eth1Engine consensus.Engine
-	serenity := New(eth1Engine)
+	mergeEngine := New(eth1Engine)
 
-	err := serenity.verifyHeader(readerMock{}, header, parent)
+	err := mergeEngine.verifyHeader(readerMock{}, header, parent)
 	if err != errInvalidNonce {
 		if err != nil {
-			t.Fatalf("Serenity should not accept non-zero difficulty, got %s", err.Error())
+			t.Fatalf("Merge engine should not accept non-zero difficulty, got %s", err.Error())
 		} else {
-			t.Fatalf("Serenity should not accept non-zero difficulty")
+			t.Fatalf("Merge engine should not accept non-zero difficulty")
 		}
 	}
 }

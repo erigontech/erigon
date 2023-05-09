@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
+	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -359,14 +359,14 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 		TxHash:          types.DeriveSha(types.BinaryTransactions(b.Transactions)),
 		ReceiptHash:     b.ReceiptsRoot,
 		Bloom:           b.LogsBloom,
-		Difficulty:      serenity.SerenityDifficulty,
+		Difficulty:      merge.ProofOfStakeDifficulty,
 		Number:          big.NewInt(int64(b.BlockNumber)),
 		GasLimit:        b.GasLimit,
 		GasUsed:         b.GasUsed,
 		Time:            b.Time,
 		Extra:           b.Extra,
 		MixDigest:       b.PrevRandao,
-		Nonce:           serenity.SerenityNonce,
+		Nonce:           merge.ProofOfStakeNonce,
 		BaseFee:         baseFee,
 		WithdrawalsHash: withdrawalsHash,
 		ExcessDataGas:   excessDataGas,

@@ -39,7 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
+	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -271,7 +271,7 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.In
 		return nil, nil, err
 	}
 
-	// We support ethash/serenity for issuance (for now)
+	// We support ethash/merge for issuance (for now)
 	if g.Config.Consensus != chain.EtHashConsensus {
 		return block, statedb, nil
 	}
@@ -282,9 +282,7 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.In
 	}
 
 	// BlockReward can be present at genesis
-	if block.Header().Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
-		genesisIssuance.Add(genesisIssuance, serenity.RewardSerenity)
-	} else {
+	if block.Header().Difficulty.Cmp(merge.ProofOfStakeDifficulty) != 0 {
 		blockReward, _ := ethash.AccumulateRewards(g.Config, block.Header(), nil)
 		// Set BlockReward
 		genesisIssuance.Add(genesisIssuance, blockReward.ToBig())

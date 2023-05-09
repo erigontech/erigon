@@ -21,11 +21,12 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
+	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 )
@@ -50,8 +51,8 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	}
 
 	var prevRandDao *libcommon.Hash
-	if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
-		// EIP-4399. We use SerenityDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
+	if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
+		// EIP-4399. We use ProofOfStakeDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
 		prevRandDao = &header.MixDigest
 	}
 
