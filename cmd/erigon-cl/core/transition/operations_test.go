@@ -188,36 +188,33 @@ func TestProcessProposerSlashing(t *testing.T) {
 
 func TestProcessAttesterSlashing(t *testing.T) {
 	unchangingState := getTestState(t)
-	unchangingState.SetValidatorAtIndex(0, &cltypes.Validator{
-		Slashed:           false,
-		ActivationEpoch:   0,
-		WithdrawableEpoch: 10000,
-		PublicKey:         testPublicKeySlashing,
-	})
-	unchangingState.SetValidatorAtIndex(1, &cltypes.Validator{
-		Slashed:           false,
-		ActivationEpoch:   0,
-		WithdrawableEpoch: 10000,
-		PublicKey:         testPublicKey2Slashing,
-	})
+	v1 := &cltypes.Validator{}
+	v1.SetSlashed(false)
+	v1.SetActivationEpoch(0)
+	v1.SetWithdrawableEpoch(10000)
+	v1.SetPublicKey(testPublicKeySlashing)
+	v1c := &cltypes.Validator{}
+	v1.CopyTo(v1c)
+
+	v2 := &cltypes.Validator{}
+	v2.SetSlashed(false)
+	v2.SetActivationEpoch(0)
+	v2.SetWithdrawableEpoch(10000)
+	v2.SetPublicKey(testPublicKey2Slashing)
+	v2c := &cltypes.Validator{}
+	v2.CopyTo(v2c)
+
+	unchangingState.SetValidatorAtIndex(0, v1)
+	unchangingState.SetValidatorAtIndex(1, v2)
 
 	successState := getTestState(t)
-	successState.SetValidatorAtIndex(0, &cltypes.Validator{
-		Slashed:           false,
-		ActivationEpoch:   0,
-		WithdrawableEpoch: 10000,
-		PublicKey:         testPublicKeySlashing,
-	})
-	successState.SetValidatorAtIndex(1, &cltypes.Validator{
-		Slashed:           false,
-		ActivationEpoch:   0,
-		WithdrawableEpoch: 10000,
-		PublicKey:         testPublicKey2Slashing,
-	})
+	successState.SetValidatorAtIndex(0, v1c)
+	successState.SetValidatorAtIndex(1, v2c)
 	successBalances := []uint64{}
-	for i := 0; i < len(successState.Validators()); i++ {
+	successState.ForEachValidator(func(v *cltypes.Validator, i, total int) bool {
 		successBalances = append(successBalances, uint64(i+1))
-	}
+		return true
+	})
 	successState.SetBalances(successBalances)
 
 	successSlashing := getSuccessfulAttesterSlashing()
@@ -352,5 +349,5 @@ func TestProcessVoluntaryExits(t *testing.T) {
 	require.NoError(t, ProcessVoluntaryExit(state, exit, false), "Could not process exits")
 	newRegistry, err := state.ValidatorForValidatorIndex(0)
 	require.NoError(t, err)
-	require.Equal(t, newRegistry.ExitEpoch, uint64(266))
+	require.Equal(t, newRegistry.ExitEpoch(), uint64(266))
 }

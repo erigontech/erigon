@@ -26,6 +26,8 @@ func GetEmptyBeaconState() *BeaconState {
 		beaconConfig:                 cfg,
 		inactivityScores:             solid.NewUint64Slice(int(cfg.ValidatorRegistryLimit)),
 		balances:                     solid.NewUint64Slice(int(cfg.ValidatorRegistryLimit)),
+		previousEpochParticipation:   solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
+		currentEpochParticipation:    solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
 	}
 	b.init()
 	return b

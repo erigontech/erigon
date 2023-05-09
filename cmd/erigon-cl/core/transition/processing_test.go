@@ -24,10 +24,10 @@ func getTestState(t *testing.T) *state.BeaconState {
 	numVals := 2048
 	validators := make([]*cltypes.Validator, numVals)
 	for i := 0; i < numVals; i++ {
-		validators[i] = &cltypes.Validator{
-			ActivationEpoch: 0,
-			ExitEpoch:       10000,
-		}
+		v := &cltypes.Validator{}
+		v.SetActivationEpoch(0)
+		v.SetExitEpoch(10000)
+		validators[i] = v
 	}
 	b := state.GetEmptyBeaconState()
 	b.SetValidators(validators)
@@ -85,7 +85,7 @@ func TestProcessBlockHeader(t *testing.T) {
 	badStateSlashed := getTestState(t)
 	validator, err := badStateSlashed.ValidatorForValidatorIndex(int(testBlock.ProposerIndex))
 	require.NoError(t, err)
-	validator.Slashed = true
+	validator.SetSlashed(true)
 	badStateSlashed.SetValidatorAtIndex(int(testBlock.ProposerIndex), validator)
 
 	testCases := []struct {
@@ -162,7 +162,7 @@ func TestProcessRandao(t *testing.T) {
 	}
 	validator, err := testStateSuccess.ValidatorForValidatorIndex(int(propInd))
 	require.NoError(t, err)
-	validator.PublicKey = testPublicKeyRandao
+	validator.SetPublicKey(testPublicKeyRandao)
 	testStateSuccess.SetValidatorAtIndex(int(propInd), validator)
 	testBlock := getTestBlock(t)
 	testBlock.Body.RandaoReveal = testSignatureRandao

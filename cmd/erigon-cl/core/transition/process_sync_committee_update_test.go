@@ -23,7 +23,11 @@ func TestProcessSyncCommittee(t *testing.T) {
 	for i := 0; i < validatorNum; i++ {
 		var pubKey [48]byte
 		binary.BigEndian.PutUint64(pubKey[:], uint64(i))
-		state.AddValidator(&cltypes.Validator{ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, PublicKey: pk, EffectiveBalance: 2000000000}, 2000000000)
+		v := &cltypes.Validator{}
+		v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
+		v.SetPublicKey(pk)
+		v.SetEffectiveBalance(2000000000)
+		state.AddValidator(v, 2000000000)
 		if len(currentCommittee.PubKeys) != cltypes.SyncCommitteeSize {
 			currentCommittee.PubKeys = append(currentCommittee.PubKeys, [48]byte{})
 		} else if len(nextCommittee.PubKeys) != cltypes.SyncCommitteeSize {

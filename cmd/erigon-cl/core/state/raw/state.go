@@ -5,7 +5,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
 )
 
 const (
@@ -67,8 +66,8 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		//inactivityScores: solid.NewSimpleUint64Slice(int(cfg.ValidatorRegistryLimit)),
 		inactivityScores:           solid.NewUint64Slice(int(cfg.ValidatorRegistryLimit)),
 		balances:                   solid.NewUint64Slice(int(cfg.ValidatorRegistryLimit)),
-		previousEpochParticipation: solid.NewBitList(0, int(state_encoding.ValidatorRegistryLimit)),
-		currentEpochParticipation:  solid.NewBitList(0, int(state_encoding.ValidatorRegistryLimit)),
+		previousEpochParticipation: solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
+		currentEpochParticipation:  solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
 	}
 	state.init()
 	return state
