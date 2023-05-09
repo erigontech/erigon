@@ -214,6 +214,27 @@ func (m *mapmutation) Delete(table string, k []byte) error {
 	return m.Put(table, k, nil)
 }
 
+func (m *mapmutation) DoCommitReadAhead(db kv.RwDB) {
+	const workers int = 2
+	for table, bucket := range m.puts {
+		for j := 0; j < workers; j++ {
+			go func(workerNum int, table string, bucket map[string][]byte) {
+				_ = db.View(context.Background(), func(tx kv.Tx) error {
+					i := 0
+					for k, _ := range bucket {
+						i++
+						if i%workers != workerNum {
+							continue
+						}
+						_, _ = tx.Has(table, []byte(k))
+					}
+					return nil
+				})
+			}(j, table, bucket)
+		}
+	}
+}
+
 func (m *mapmutation) doCommit(tx kv.RwTx) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()

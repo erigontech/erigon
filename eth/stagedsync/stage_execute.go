@@ -482,7 +482,10 @@ Loop:
 		}
 		if (blockNum+10)%readAheadBlocks == 0 {
 			for i := blockNum + 10; i < blockNum+10+readAheadBlocks; i++ {
-				readAhead <- i
+				select {
+				case readAhead <- i:
+				default:
+				}
 			}
 		}
 
