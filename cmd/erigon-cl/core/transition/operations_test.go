@@ -349,5 +349,5 @@ func TestProcessVoluntaryExits(t *testing.T) {
 	require.NoError(t, ProcessVoluntaryExit(state, exit, false), "Could not process exits")
 	newRegistry, err := state.ValidatorForValidatorIndex(0)
 	require.NoError(t, err)
-	require.Equal(t, newRegistry.ExitEpoch, uint64(266))
+	require.Equal(t, newRegistry.ExitEpoch(), uint64(266))
 }
