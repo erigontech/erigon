@@ -3,7 +3,6 @@ package cltypes
 import (
 	"bytes"
 	"fmt"
-	"sync"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -332,19 +331,21 @@ func (v *Validator) DecodeSSZ(buf []byte, _ int) error {
 	return v.Validator.DecodeSSZ(buf, 0)
 }
 
-var validatorLeavesPool = sync.Pool{
-	New: func() any {
-		p := make([]byte, 8*32)
-		return &p
-	},
-}
+//var validatorLeavesPool = sync.Pool{
+//	New: func() any {
+//		p := make([]byte, 8*32)
+//		return &p
+//	},
+//}
 
 func (v *Validator) HashSSZ() (o [32]byte, err error) {
-	leavesp, _ := validatorLeavesPool.Get().(*[]byte)
-	leaves := *leavesp
-	defer func() {
-		validatorLeavesPool.Put(leavesp)
-	}()
+	// leavesp, _ := validatorLeavesPool.Get().(*[]byte)
+	// leaves := *leavesp
+	//
+	//	defer func() {
+	//		validatorLeavesPool.Put(leavesp)
+	//	}()
+	leaves := make([]byte, 8*32)
 	v.CopyHashBufferTo(leaves)
 	leaves = leaves[:(8 * 32)]
 	err = solid.TreeHashFlatSlice(leaves, o[:])
