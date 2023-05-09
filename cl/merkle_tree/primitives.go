@@ -42,6 +42,5 @@ func InPlacePublicKeyRoot(key []byte) error {
 	if err != nil {
 		return err
 	}
-	key = key[:32]
 	return nil
 }
