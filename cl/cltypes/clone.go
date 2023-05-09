@@ -121,6 +121,10 @@ func (*BlobSideCar) Clone() clonable.Clonable {
 	return &BlobSideCar{}
 }
 
+func (*SignedBlobSideCar) Clone() clonable.Clonable {
+	return &SignedBlobSideCar{}
+}
+
 func (*BlobIdentifier) Clone() clonable.Clonable {
 	return &BlobIdentifier{}
 }
