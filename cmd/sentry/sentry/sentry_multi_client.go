@@ -271,7 +271,7 @@ type MultiClient struct {
 
 	historyV3        bool
 	dropUselessPeers bool
-	logger log.Logger
+	logger           log.Logger
 }
 
 func NewMultiClient(
@@ -319,7 +319,7 @@ func NewMultiClient(
 		historyV3:                         historyV3,
 		sendHeaderRequestsToMultiplePeers: chainConfig.TerminalTotalDifficultyPassed,
 		dropUselessPeers:                  dropUselessPeers,
-		logger: logger,
+		logger:                            logger,
 	}
 	cs.ChainConfig = chainConfig
 	cs.heightForks, cs.timeForks = forkid.GatherForks(cs.ChainConfig)
