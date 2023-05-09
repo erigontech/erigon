@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -1279,9 +1278,9 @@ func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash libcommon.Hash) []
 	return res
 }
 
-func calculateRewards(aura *AuRa, header *types.Header, syscall consensus.SystemCall) (beneficiaries []libcommon.Address, rewardKind []aurainterfaces.RewardKind, rewards []*uint256.Int, err error) {
+func calculateRewards(aura *AuRa, header *types.Header, syscall consensus.SystemCall) (beneficiaries []libcommon.Address, rewardKind []consensus.RewardKind, rewards []*uint256.Int, err error) {
 	beneficiaries = append(beneficiaries, header.Coinbase)
-	rewardKind = append(rewardKind, aurainterfaces.RewardAuthor)
+	rewardKind = append(rewardKind, consensus.RewardAuthor)
 
 	var rewardContractAddress BlockRewardContract
 	var foundContract bool
@@ -1294,9 +1293,9 @@ func calculateRewards(aura *AuRa, header *types.Header, syscall consensus.System
 	}
 	if foundContract {
 		beneficiaries, rewards = callBlockRewardAbi(rewardContractAddress.address, syscall, beneficiaries, rewardKind)
-		rewardKind = make([]aurainterfaces.RewardKind, len(beneficiaries))
+		rewardKind = make([]consensus.RewardKind, len(beneficiaries))
 		for i := 0; i < len(rewardKind); i++ {
-			rewardKind[i] = aurainterfaces.RewardExternal
+			rewardKind[i] = consensus.RewardExternal
 		}
 	} else {
 		// block_reward.iter.rev().find(|&(block, _)| *block <= number)
@@ -1325,7 +1324,7 @@ func calculateRewards(aura *AuRa, header *types.Header, syscall consensus.System
 	return
 }
 
-func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.SystemCall, beneficiaries []libcommon.Address, rewardKind []aurainterfaces.RewardKind) ([]libcommon.Address, []*uint256.Int) {
+func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.SystemCall, beneficiaries []libcommon.Address, rewardKind []consensus.RewardKind) ([]libcommon.Address, []*uint256.Int) {
 	castedKind := make([]uint16, len(rewardKind))
 	for i := range rewardKind {
 		castedKind[i] = uint16(rewardKind[i])
