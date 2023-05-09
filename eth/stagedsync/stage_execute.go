@@ -463,6 +463,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 			excessDataGas = ph.ExcessDataGas
 		}
 
+		//TODO: need core.InitializeBlockExecution()  ?
 		for i, txn := range block.Transactions() {
 			ibs.Reset()
 			ibs.SetTxContext(txn.Hash(), block.Hash(), i)
