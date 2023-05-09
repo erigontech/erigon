@@ -480,8 +480,8 @@ Loop:
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
 		}
-		if blockNum%readAheadBlocks == 0 {
-			for i := blockNum; i < blockNum+readAheadBlocks; i++ {
+		if (blockNum+10)%readAheadBlocks == 0 {
+			for i := blockNum + 10; i < blockNum+10+readAheadBlocks; i++ {
 				readAhead <- i
 			}
 		}
