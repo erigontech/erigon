@@ -420,8 +420,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		batch.Rollback()
 	}()
 
-	readAhead := make(chan uint64, 1024)
-	defer close(readAhead)
 	readAheadFunc := func(blockNum uint64) error {
 		tx, err := cfg.db.BeginRo(context.Background())
 		if err != nil {
@@ -461,6 +459,8 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		return err
 	}
 	const readAheadBlocks = 100
+	readAhead := make(chan uint64, 10*readAheadBlocks)
+	defer close(readAhead)
 	if initialCycle {
 		g, _ := errgroup.WithContext(ctx)
 		for i := 0; i < 8; i++ {
