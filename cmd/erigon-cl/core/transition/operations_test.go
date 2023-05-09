@@ -78,24 +78,25 @@ func getSuccessfulAttesterSlashing() *cltypes.AttesterSlashing {
 
 func TestProcessProposerSlashing(t *testing.T) {
 	unchangingState := getTestState(t)
-	unchangingState.SetValidatorAtIndex(propInd, &cltypes.Validator{
-		Slashed:           false,
-		ActivationEpoch:   0,
-		WithdrawableEpoch: 10000,
-		PublicKey:         testPublicKeySlashing,
-	})
+	v := &cltypes.Validator{}
+	v.SetSlashed(false)
+	v.SetActivationEpoch(0)
+	v.SetWithdrawableEpoch(10000)
+	v.SetPublicKey(testPublicKeySlashing)
 
+	vc := &cltypes.Validator{}
+	v.CopyTo(vc)
+	unchangingState.SetValidatorAtIndex(propInd, vc)
 	successState := getTestState(t)
-	successState.SetValidatorAtIndex(propInd, &cltypes.Validator{
-		Slashed:           false,
-		ActivationEpoch:   0,
-		WithdrawableEpoch: 10000,
-		PublicKey:         testPublicKeySlashing,
-	})
+
+	vc = &cltypes.Validator{}
+	v.CopyTo(vc)
+	successState.SetValidatorAtIndex(propInd, vc)
 	successBalances := []uint64{}
-	for i := 0; i < len(successState.Validators()); i++ {
+	successState.ForEachValidator(func(v *cltypes.Validator, i, total int) bool {
 		successBalances = append(successBalances, uint64(i+1))
-	}
+		return true
+	})
 	successState.SetBalances(successBalances)
 
 	successSlashing := getSuccessfulProposerSlashing()
@@ -323,13 +324,15 @@ func TestProcessDeposit(t *testing.T) {
 		},
 	}
 	testState := state.GetEmptyBeaconState()
-	testState.AddValidator(&cltypes.Validator{
-		PublicKey:             [48]byte{1},
-		WithdrawalCredentials: [32]byte{1, 2, 3},
-	}, 0)
+	v := &cltypes.Validator{}
+	v.SetPublicKey([48]byte{1})
+	v.SetWithdrawalCredentials([32]byte{1, 2, 3})
+	testState.AddValidator(v, 0)
 	testState.SetEth1Data(eth1Data)
 	require.NoError(t, ProcessDeposit(testState, deposit, false))
-	require.Equal(t, deposit.Data.Amount, testState.Balances()[1])
+	bal, err := testState.ValidatorBalance(1)
+	require.NoError(t, err)
+	require.Equal(t, deposit.Data.Amount, bal)
 }
 
 func TestProcessVoluntaryExits(t *testing.T) {
@@ -340,13 +343,14 @@ func TestProcessVoluntaryExits(t *testing.T) {
 			Epoch:          0,
 		},
 	}
-	state.AddValidator(&cltypes.Validator{
-		ExitEpoch:       clparams.MainnetBeaconConfig.FarFutureEpoch,
-		ActivationEpoch: 0,
-	}, 0)
+	v := &cltypes.Validator{}
+	v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
+	v.SetActivationEpoch(0)
+	state.AddValidator(v, 0)
 	state.SetSlot((clparams.MainnetBeaconConfig.SlotsPerEpoch * 5) + (clparams.MainnetBeaconConfig.SlotsPerEpoch * clparams.MainnetBeaconConfig.ShardCommitteePeriod))
 
 	require.NoError(t, ProcessVoluntaryExit(state, exit, false), "Could not process exits")
-	newRegistry := state.Validators()
-	require.Equal(t, newRegistry[0].ExitEpoch, uint64(266))
+	newRegistry, err := state.ValidatorForValidatorIndex(0)
+	require.NoError(t, err)
+	require.Equal(t, newRegistry.ExitEpoch, uint64(266))
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,7 +33,7 @@ func initialFlatDBTrieBuild(t *testing.T, db kv.RwDB) libcommon.Hash {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	stageTrieCfg := stagedsync.StageTrieCfg(db, false, false, false, t.TempDir(), nil, nil, false, nil)
-	hash, err := stagedsync.RegenerateIntermediateHashes("test", tx, stageTrieCfg, libcommon.Hash{}, context.Background())
+	hash, err := stagedsync.RegenerateIntermediateHashes("test", tx, stageTrieCfg, libcommon.Hash{}, context.Background(), log.New())
 	require.NoError(t, err)
 	tx.Commit()
 	//t.Logf("Initial hash is %s and took %v", hash, time.Since(startTime))

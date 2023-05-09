@@ -32,7 +32,7 @@ type Worker struct {
 	blockReader services.FullBlockReader
 	in          *exec22.QueueWithRetry
 	rs          *state.StateV3
-	stateWriter *state.StateWriterV3
+	stateWriter *state.StateWriterBufferedV3
 	stateReader *state.StateReaderV3
 	chainConfig *chain.Config
 	getHeader   func(hash libcommon.Hash, number uint64) *types.Header
@@ -58,7 +58,7 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		rs:          rs,
 		background:  background,
 		blockReader: blockReader,
-		stateWriter: state.NewStateWriterV3(rs),
+		stateWriter: state.NewStateWriterBufferedV3(rs),
 		stateReader: state.NewStateReaderV3(rs),
 		chainConfig: chainConfig,
 

@@ -99,6 +99,12 @@ func (b *BeaconState) ValidatorForValidatorIndex(index int) (*cltypes.Validator,
 	return b.validators[index], nil
 }
 
+func (b *BeaconState) ForEachBalance(fn func(v uint64, idx int, total int) bool) {
+	b.balances.Range(func(index int, value uint64, length int) bool {
+		return fn(value, index, length)
+	})
+}
+
 func (b *BeaconState) ValidatorBalance(index int) (uint64, error) {
 	if index >= b.balances.Length() {
 		return 0, ErrInvalidValidatorIndex
