@@ -437,10 +437,8 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		if err != nil {
 			return err
 		}
-		var stateReader state.StateReader
-		var stateWriter state.WriterWithChangeSets
-		stateReader = state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
-		stateWriter = state.NewNoopWriter()
+		stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
+		stateWriter := state.NewNoopWriter()
 
 		// where the magic happens
 		getHeader := func(hash common.Hash, number uint64) *types.Header {
@@ -462,6 +460,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		}
 		return err
 	}
+	const readAheadBlocks = 100
 	if initialCycle {
 		g, _ := errgroup.WithContext(ctx)
 		for i := 0; i < 8; i++ {
@@ -474,7 +473,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 				return nil
 			})
 		}
-		for blockNum := stageProgress + 1; blockNum < stageProgress+100; blockNum++ {
+		for blockNum := stageProgress + 1; blockNum < stageProgress+readAheadBlocks; blockNum++ {
 			readAhead <- blockNum
 		}
 	}
@@ -484,7 +483,7 @@ Loop:
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
 		}
-		readAhead <- blockNum + 100
+		readAhead <- blockNum + readAheadBlocks
 
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
