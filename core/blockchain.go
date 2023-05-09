@@ -323,7 +323,7 @@ func rlpHash(x interface{}) (h libcommon.Hash) {
 	return h
 }
 
-func SysCallContract(contract libcommon.Address, data []byte, chainConfig chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, excessDataGas *big.Int) (result []byte, err error) {
+func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool, excessDataGas *big.Int) (result []byte, err error) {
 	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
@@ -350,7 +350,7 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig chain.
 		txContext = NewEVMTxContext(msg)
 	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, excessDataGas)
-	evm := vm.NewEVM(blockContext, txContext, ibs, &chainConfig, vmConfig)
+	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.Call(
 		vm.AccountRef(msg.From()),
@@ -435,7 +435,7 @@ func FinalizeBlockExecution(
 	isMining bool, excessDataGas *big.Int,
 ) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, err error) {
 	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-		return SysCallContract(contract, data, *cc, ibs, header, engine, false /* constCall */, excessDataGas)
+		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, excessDataGas)
 	}
 	if isMining {
 		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, headerReader, syscall, nil)
@@ -458,7 +458,7 @@ func FinalizeBlockExecution(
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *chain.Config, ibs *state.IntraBlockState, excessDataGas *big.Int) error {
 	engine.Initialize(cc, chain, header, ibs, txs, uncles, func(contract libcommon.Address, data []byte) ([]byte, error) {
-		return SysCallContract(contract, data, *cc, ibs, header, engine, false /* constCall */, excessDataGas)
+		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, excessDataGas)
 	})
 	noop := state.NewNoopWriter()
 	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), noop)

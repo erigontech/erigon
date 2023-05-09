@@ -123,6 +123,15 @@ func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 	return nil
 }
 
+func (s *Serenity) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall,
+) ([]consensus.Reward, error) {
+	_, isAura := s.eth1Engine.(*aura.AuRa)
+	if !IsPoSHeader(header) || isAura {
+		return s.eth1Engine.CalculateRewards(config, header, uncles, syscall)
+	}
+	return []consensus.Reward{}, nil
+}
+
 func (s *Serenity) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
@@ -130,21 +139,28 @@ func (s *Serenity) Finalize(config *chain.Config, header *types.Header, state *s
 	if !IsPoSHeader(header) {
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, chain, syscall)
 	}
-	if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
-		if err := auraEngine.ApplyRewards(header, state, syscall); err != nil {
-			return nil, nil, err
-		}
-		if withdrawals != nil {
+
+	rewards, err := s.CalculateRewards(config, header, uncles, syscall)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, r := range rewards {
+		state.AddBalance(r.Beneficiary, &r.Amount)
+	}
+
+	if withdrawals != nil {
+		if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
 			if err := auraEngine.ExecuteSystemWithdrawals(withdrawals, syscall); err != nil {
 				return nil, nil, err
 			}
-		}
-	} else {
-		for _, w := range withdrawals {
-			amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(params.GWei))
-			state.AddBalance(w.Address, amountInWei)
+		} else {
+			for _, w := range withdrawals {
+				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(params.GWei))
+				state.AddBalance(w.Address, amountInWei)
+			}
 		}
 	}
+
 	if config.IsCancun(header.Time) {
 		parent := chain.GetHeaderByHash(header.ParentHash)
 		if parent == nil {
@@ -152,6 +168,7 @@ func (s *Serenity) Finalize(config *chain.Config, header *types.Header, state *s
 		}
 		header.SetExcessDataGas(misc.CalcExcessDataGas(parent.ExcessDataGas, misc.CountBlobs(txs)))
 	}
+
 	return txs, r, nil
 }
 

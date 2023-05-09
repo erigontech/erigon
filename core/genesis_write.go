@@ -27,11 +27,15 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -44,8 +48,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 // CommitGenesisBlock writes or updates the genesis block in db.
@@ -268,6 +270,7 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.In
 	if err := rawdb.WriteChainConfig(tx, block.Hash(), config); err != nil {
 		return nil, nil, err
 	}
+
 	// We support ethash/serenity for issuance (for now)
 	if g.Config.Consensus != chain.EtHashConsensus {
 		return block, statedb, nil
@@ -280,7 +283,6 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.In
 
 	// BlockReward can be present at genesis
 	if block.Header().Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
-		// Proof-of-stake is 0.3 ether per block (TODO: revisit)
 		genesisIssuance.Add(genesisIssuance, serenity.RewardSerenity)
 	} else {
 		blockReward, _ := ethash.AccumulateRewards(g.Config, block.Header(), nil)
