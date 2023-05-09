@@ -473,9 +473,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 				return nil
 			})
 		}
-		for blockNum := stageProgress + 1; blockNum < stageProgress+readAheadBlocks; blockNum++ {
-			readAhead <- blockNum
-		}
 	}
 
 Loop:
@@ -483,7 +480,11 @@ Loop:
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
 		}
-		readAhead <- blockNum + readAheadBlocks
+		if blockNum%readAheadBlocks == 0 {
+			for i := blockNum; i < blockNum+readAheadBlocks; i++ {
+				readAhead <- i
+			}
+		}
 
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
