@@ -629,6 +629,21 @@ func (ethash *Ethash) IsServiceTransaction(sender libcommon.Address, syscall con
 	return false
 }
 
+func (ethash *Ethash) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, _ consensus.SystemCall,
+) ([]consensus.Reward, error) {
+	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
+	rewards := make([]consensus.Reward, 1+len(uncles))
+	rewards[0].Beneficiary = header.Coinbase
+	rewards[0].Kind = consensus.RewardAuthor
+	rewards[0].Amount = minerReward
+	for i, uncle := range uncles {
+		rewards[i+1].Beneficiary = uncle.Coinbase
+		rewards[i+1].Kind = consensus.RewardUncle
+		rewards[i+1].Amount = uncleRewards[i]
+	}
+	return rewards, nil
+}
+
 // AccumulateRewards returns rewards for a given block. The mining reward consists
 // of the static blockReward plus a reward for each included uncle (if any). Individual
 // uncle rewards are also returned in an array.

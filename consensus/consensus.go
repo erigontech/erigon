@@ -20,6 +20,8 @@ package consensus
 import (
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -101,6 +103,12 @@ const (
 	RewardUncle RewardKind = 3
 )
 
+type Reward struct {
+	Beneficiary libcommon.Address
+	Kind        RewardKind
+	Amount      uint256.Int
+}
+
 // EngineReader are write methods of the consensus engine
 type EngineWriter interface {
 	// VerifyHeader checks whether a header conforms to the consensus rules of a
@@ -120,6 +128,9 @@ type EngineWriter interface {
 	Initialize(config *chain.Config, chain ChainHeaderReader, header *types.Header,
 		state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
 
+	CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall SystemCall,
+	) ([]Reward, error)
+
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
 	//
@@ -135,7 +146,10 @@ type EngineWriter interface {
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainHeaderReader, syscall SystemCall, call Call) (*types.Block, types.Transactions, types.Receipts, error)
+	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+		chain ChainHeaderReader, syscall SystemCall, call Call,
+	) (*types.Block, types.Transactions, types.Receipts, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
 	// the result into the given channel.
@@ -149,7 +163,8 @@ type EngineWriter interface {
 
 	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 	// that a new block should have.
-	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
+	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64,
+		parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
 
 	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
 
