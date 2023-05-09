@@ -465,6 +465,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		}
 
 		for i, txn := range block.Transactions() {
+			ibs.Reset()
 			ibs.SetTxContext(txn.Hash(), block.Hash(), i)
 			_, _, _ = core.ApplyTransaction(cfg.chainConfig, getHashFn, cfg.engine, nil, gp, ibs, noop, block.HeaderNoCopy(), txn, usedGas, vmCfg, excessDataGas)
 		}
