@@ -1,4 +1,4 @@
-package serenity
+package merge
 
 import (
 	"bytes"
@@ -49,7 +49,7 @@ type Merge struct {
 	eth1Engine consensus.Engine // Original consensus engine used in eth1, e.g. ethash or clique
 }
 
-// New creates a new instance of the Serenity Engine with the given embedded eth1 engine.
+// New creates a new instance of the Merge Engine with the given embedded eth1 engine.
 func New(eth1Engine consensus.Engine) *Merge {
 	if _, ok := eth1Engine.(*Merge); ok {
 		panic("nested consensus engine")
@@ -77,8 +77,6 @@ func (s *Merge) Author(header *types.Header) (libcommon.Address, error) {
 	return header.Coinbase, nil
 }
 
-// VerifyHeader checks whether a header conforms to the consensus rules of the
-// stock Ethereum serenity engine.
 func (s *Merge) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
 	reached, err := IsTTDReached(chain, header.ParentHash, header.Number.Uint64()-1)
 	if err != nil {

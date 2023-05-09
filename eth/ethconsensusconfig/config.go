@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
+	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -97,7 +97,7 @@ func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify
 	if chainConfig.TerminalTotalDifficulty == nil {
 		return eng
 	} else {
-		return serenity.New(eng) // the Merge
+		return merge.New(eng) // the Merge
 	}
 }
 
