@@ -5,7 +5,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/prysmaticlabs/gohashtree"
 )
 
 type hashBuf struct {
@@ -37,7 +36,7 @@ func MerkleizeFlatLeaves(elements []byte) ([]byte, error) {
 		if !utils.IsPowerOf2(uint64(len(elements))) {
 			return nil, fmt.Errorf("hash layer is a non power of 2: %d", len(elements))
 		}
-		if err := gohashtree.HashByteSlice(layer, elements); err != nil {
+		if err := merkle_tree.HashByteSlice(layer, elements); err != nil {
 			return nil, err
 		}
 		elements = layer[:len(elements)/2]

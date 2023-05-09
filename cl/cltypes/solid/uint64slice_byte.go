@@ -5,7 +5,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/prysmaticlabs/gohashtree"
 )
 
 type byteBasedUint64Slice struct {
@@ -135,7 +134,7 @@ func (arr *byteBasedUint64Slice) getBaseHash(xs []byte) error {
 		}
 		outputLen := len(elements) / 2
 		arr.makeBuf(outputLen)
-		if err := gohashtree.HashByteSlice(arr.buf, elements); err != nil {
+		if err := merkle_tree.HashByteSlice(arr.buf, elements); err != nil {
 			return err
 		}
 		elements = arr.buf

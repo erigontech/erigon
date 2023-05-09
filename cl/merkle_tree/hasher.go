@@ -49,15 +49,30 @@ func (m *merkleHasher) merkleizeTrieLeaves(leaves [][32]byte) ([32]byte, error) 
 func (m *merkleHasher) merkleizeTrieLeavesFlat(leaves []byte, out []byte) (err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	layer := m.getFlatBuffer(len(leaves) / 2)
-	for len(leaves) > 32 {
-		if err := gohashtree.HashByteSlice(layer, leaves); err != nil {
+	layer := m.getBufferFromFlat(leaves)
+	for len(layer) > 1 {
+		if err := gohashtree.Hash(layer, layer); err != nil {
 			return err
 		}
-		leaves = layer[:len(leaves)/2]
+		layer = layer[:len(layer)/2]
 	}
-	copy(out, leaves[:32])
+	copy(out, layer[0][:])
 	return
+}
+
+func (m *merkleHasher) hashByteSlice(out []byte, in []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	l := m.getBufferFromFlat(in)
+	o := make([][32]byte, len(l)/2)
+	err := gohashtree.Hash(o, l)
+	if err != nil {
+		return err
+	}
+	for i := range o {
+		copy(out[i*32:(i+1)*32], o[i][:])
+	}
+	return nil
 }
 
 // getBuffer provides buffer of given size.
@@ -66,6 +81,14 @@ func (m *merkleHasher) getBuffer(size int) [][32]byte {
 		m.internalBuffer = make([][32]byte, size*2)
 	}
 	return m.internalBuffer[:size]
+}
+
+func (m *merkleHasher) getBufferFromFlat(xs []byte) [][32]byte {
+	buf := m.getBuffer(len(xs) / 32)
+	for i := 0; i < len(xs)/32; i = i + 1 {
+		copy(buf[i][:], xs[i*32:(i+1)*32])
+	}
+	return buf
 }
 
 // getBuffer provides buffer of given size.

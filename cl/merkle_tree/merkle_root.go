@@ -4,6 +4,13 @@ import (
 	"errors"
 )
 
+func HashByteSlice(out, in []byte) error {
+	if len(in) == 0 {
+		return errors.New("zero leaves provided")
+	}
+	return globalHasher.hashByteSlice(out, in)
+}
+
 func MerkleRootFromLeaves(leaves [][32]byte) ([32]byte, error) {
 	if len(leaves) == 0 {
 		return [32]byte{}, errors.New("zero leaves provided")

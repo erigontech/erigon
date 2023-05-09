@@ -3,7 +3,6 @@ package solid
 import (
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/prysmaticlabs/gohashtree"
 )
 
 type bitlist struct {
@@ -108,7 +107,7 @@ func (arr *bitlist) getBaseHash(xs []byte, depth uint8) error {
 		}
 		outputLen := len(elements) / 2
 		arr.makeBuf(outputLen)
-		if err := gohashtree.HashByteSlice(arr.buf, elements); err != nil {
+		if err := merkle_tree.HashByteSlice(arr.buf, elements); err != nil {
 			return err
 		}
 		elements = arr.buf
