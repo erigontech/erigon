@@ -67,26 +67,6 @@ type ChainReader interface {
 type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)
 type Call func(contract libcommon.Address, data []byte) ([]byte, error)
 
-// Engine is an algorithm agnostic consensus engine.
-type Engine interface {
-	EngineReader
-	EngineWriter
-}
-
-// EngineReader are read-only methods of the consensus engine
-// All of these methods should have thread-safe implementations
-type EngineReader interface {
-	// Author retrieves the Ethereum address of the account that minted the given
-	// block, which may be different from the header's coinbase if a consensus
-	// engine is based on signatures.
-	Author(header *types.Header) (libcommon.Address, error)
-
-	// Service transactions are free and don't pay baseFee after EIP-1559
-	IsServiceTransaction(sender libcommon.Address, syscall SystemCall) bool
-
-	Type() chain.ConsensusName
-}
-
 // RewardKind - The kind of block reward.
 // Depending on the consensus engine the allocated block reward might have
 // different semantics which could lead e.g. to different reward values.
@@ -109,6 +89,29 @@ type Reward struct {
 	Amount      uint256.Int
 }
 
+// Engine is an algorithm agnostic consensus engine.
+type Engine interface {
+	EngineReader
+	EngineWriter
+}
+
+// EngineReader are read-only methods of the consensus engine
+// All of these methods should have thread-safe implementations
+type EngineReader interface {
+	// Author retrieves the Ethereum address of the account that minted the given
+	// block, which may be different from the header's coinbase if a consensus
+	// engine is based on signatures.
+	Author(header *types.Header) (libcommon.Address, error)
+
+	// Service transactions are free and don't pay baseFee after EIP-1559
+	IsServiceTransaction(sender libcommon.Address, syscall SystemCall) bool
+
+	Type() chain.ConsensusName
+
+	CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall SystemCall,
+	) ([]Reward, error)
+}
+
 // EngineReader are write methods of the consensus engine
 type EngineWriter interface {
 	// VerifyHeader checks whether a header conforms to the consensus rules of a
@@ -127,9 +130,6 @@ type EngineWriter interface {
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
 	Initialize(config *chain.Config, chain ChainHeaderReader, header *types.Header,
 		state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
-
-	CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall SystemCall,
-	) ([]Reward, error)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
