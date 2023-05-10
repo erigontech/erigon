@@ -311,7 +311,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		chainKv = backend.chainDB
 	}
 
-	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, agg)
+	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, agg, logger)
 	backend.notifications.StateChangesConsumer = kvRPC
 	backend.kvRPC = kvRPC
 
