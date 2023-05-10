@@ -8,21 +8,25 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/metrics/methelp"
 	"golang.org/x/exp/slices"
 )
 
 func ProcessAttestations(s *state.BeaconState, attestations []*cltypes.Attestation, fullValidation bool) error {
 	var err error
 	attestingIndiciesSet := make([][]uint64, len(attestations))
-
+	h := methelp.NewHistTimer("beacon_process_attestations")
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
 
+	c := h.Tag("attestation_step", "process")
 	for i, attestation := range attestations {
 		if attestingIndiciesSet[i], err = processAttestation(s, attestation, baseRewardPerIncrement); err != nil {
 			return err
 		}
 	}
+	c.PutSince()
 	if fullValidation {
+		c = h.Tag("attestation_step", "validate")
 		valid, err := verifyAttestations(s, attestations, attestingIndiciesSet)
 		if err != nil {
 			return err
@@ -30,6 +34,7 @@ func ProcessAttestations(s *state.BeaconState, attestations []*cltypes.Attestati
 		if !valid {
 			return errors.New("ProcessAttestation: wrong bls data")
 		}
+		c.PutSince()
 	}
 
 	return nil

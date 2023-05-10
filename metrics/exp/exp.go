@@ -9,7 +9,7 @@ import (
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/expfmt"
 )
 
 // Setup starts a dedicated metrics server at the given address.
@@ -17,13 +17,21 @@ import (
 func Setup(address string) {
 	http.HandleFunc("/debug/metrics/prometheus", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		metrics2.WritePrometheus(w, true)
+		metrics2.WritePrometheus(w, false)
+		contentType := expfmt.Negotiate(r.Header)
+		enc := expfmt.NewEncoder(w, contentType)
+		mf, err := prometheus.DefaultGatherer.Gather()
+		if err != nil {
+			return
+		}
+		for _, m := range mf {
+			enc.Encode(m)
+		}
 	})
 	//m.Handle("/debug/metrics", ExpHandler(metrics.DefaultRegistry))
-	http.Handle("/debug/metrics/prometheus2", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
+	//http.Handle("/debug/metrics/prometheus2", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
 	log.Info("Starting metrics server", "addr",
 		fmt.Sprintf("http://%s/debug/metrics/prometheus", address),
-		fmt.Sprintf("http://%s/debug/metrics/prometheus2", address),
 	)
 	go func() {
 		if err := http.ListenAndServe(address, nil); err != nil { // nolint:gosec

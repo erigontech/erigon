@@ -3,16 +3,13 @@ package state
 import (
 	"sort"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/lru"
 )
 
 func copyLRU[K comparable, V any](dst *lru.Cache[K, V], src *lru.Cache[K, V]) *lru.Cache[K, V] {
-	if dst == nil {
-		dst = new(lru.Cache[K, V])
-	}
 	dst.Purge()
 	for _, key := range src.Keys() {
 		val, has := src.Get(key)

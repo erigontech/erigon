@@ -4,12 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/lru"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/raw"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/shuffling"
 )
@@ -194,13 +194,13 @@ func (b *BeaconState) _refreshActiveBalances() {
 
 func (b *BeaconState) initCaches() error {
 	var err error
-	if b.activeValidatorsCache, err = lru.New[uint64, []uint64](5); err != nil {
+	if b.activeValidatorsCache, err = lru.New[uint64, []uint64]("beacon_active_validators_cache", 5); err != nil {
 		return err
 	}
-	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64](5); err != nil {
+	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64]("beacon_shuffled_sets_cache", 5); err != nil {
 		return err
 	}
-	if b.committeeCache, err = lru.New[[16]byte, []uint64](256); err != nil {
+	if b.committeeCache, err = lru.New[[16]byte, []uint64]("beacon_committee_cache", 256); err != nil {
 		return err
 	}
 	return nil
