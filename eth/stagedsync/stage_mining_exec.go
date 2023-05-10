@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -22,7 +21,6 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/rlp"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -219,13 +217,8 @@ func getNextTransactions(
 	}
 
 	var txs []types.Transaction //nolint:prealloc
-	reader := bytes.NewReader([]byte{})
-	stream := new(rlp.Stream)
 	for i := range txSlots.Txs {
-		reader.Reset(txSlots.Txs[i])
-		stream.Reset(reader, uint64(len(txSlots.Txs[i])))
-
-		transaction, err := types.DecodeTransaction(stream)
+		transaction, err := types.DecodeWrappedTransaction(txSlots.Txs[i])
 		if err == io.EOF {
 			continue
 		}

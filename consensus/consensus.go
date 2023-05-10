@@ -20,6 +20,8 @@ package consensus
 import (
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -65,6 +67,28 @@ type ChainReader interface {
 type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)
 type Call func(contract libcommon.Address, data []byte) ([]byte, error)
 
+// RewardKind - The kind of block reward.
+// Depending on the consensus engine the allocated block reward might have
+// different semantics which could lead e.g. to different reward values.
+type RewardKind uint16
+
+const (
+	// RewardAuthor - attributed to the block author.
+	RewardAuthor RewardKind = 0
+	// RewardEmptyStep - attributed to the author(s) of empty step(s) included in the block (AuthorityRound engine).
+	RewardEmptyStep RewardKind = 1
+	// RewardExternal - attributed by an external protocol (e.g. block reward contract).
+	RewardExternal RewardKind = 2
+	// RewardUncle - attributed to the block uncle(s) with given difference.
+	RewardUncle RewardKind = 3
+)
+
+type Reward struct {
+	Beneficiary libcommon.Address
+	Kind        RewardKind
+	Amount      uint256.Int
+}
+
 // Engine is an algorithm agnostic consensus engine.
 type Engine interface {
 	EngineReader
@@ -83,6 +107,9 @@ type EngineReader interface {
 	IsServiceTransaction(sender libcommon.Address, syscall SystemCall) bool
 
 	Type() chain.ConsensusName
+
+	CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall SystemCall,
+	) ([]Reward, error)
 }
 
 // EngineReader are write methods of the consensus engine
@@ -119,7 +146,10 @@ type EngineWriter interface {
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainHeaderReader, syscall SystemCall, call Call) (*types.Block, types.Transactions, types.Receipts, error)
+	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
+		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+		chain ChainHeaderReader, syscall SystemCall, call Call,
+	) (*types.Block, types.Transactions, types.Receipts, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
 	// the result into the given channel.
@@ -133,7 +163,8 @@ type EngineWriter interface {
 
 	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 	// that a new block should have.
-	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
+	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64,
+		parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
 
 	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
 

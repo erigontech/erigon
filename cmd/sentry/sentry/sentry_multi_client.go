@@ -76,7 +76,7 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 
-	sentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadMessage", streamFactory, makeInboundMessage, cs.HandleInboundMessage, wg)
+	sentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadMessage", streamFactory, makeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
 }
 
 func (cs *MultiClient) RecvUploadHeadersMessageLoop(
@@ -91,7 +91,7 @@ func (cs *MultiClient) RecvUploadHeadersMessageLoop(
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 
-	sentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadHeadersMessage", streamFactory, makeInboundMessage, cs.HandleInboundMessage, wg)
+	sentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadHeadersMessage", streamFactory, makeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
 }
 
 func (cs *MultiClient) RecvMessageLoop(
@@ -109,7 +109,7 @@ func (cs *MultiClient) RecvMessageLoop(
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 
-	sentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvMessage", streamFactory, makeInboundMessage, cs.HandleInboundMessage, wg)
+	sentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvMessage", streamFactory, makeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
 }
 
 func (cs *MultiClient) PeerEventsLoop(
@@ -124,7 +124,7 @@ func (cs *MultiClient) PeerEventsLoop(
 		return new(proto_sentry.PeerEvent)
 	}
 
-	sentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "PeerEvents", streamFactory, messageFactory, cs.HandlePeerEvent, wg)
+	sentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "PeerEvents", streamFactory, messageFactory, cs.HandlePeerEvent, wg, cs.logger)
 }
 
 func sentryReconnectAndPumpStreamLoop[TMessage interface{}](
@@ -136,6 +136,7 @@ func sentryReconnectAndPumpStreamLoop[TMessage interface{}](
 	messageFactory func() TMessage,
 	handleInboundMessage func(context.Context, TMessage, direct.SentryClient) error,
 	wg *sync.WaitGroup,
+	logger log.Logger,
 ) {
 	for ctx.Err() == nil {
 		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
@@ -146,7 +147,7 @@ func sentryReconnectAndPumpStreamLoop[TMessage interface{}](
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			log.Warn("HandShake error, sentry not ready yet", "stream", streamName, "err", err)
+			logger.Warn("HandShake error, sentry not ready yet", "stream", streamName, "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -159,12 +160,12 @@ func sentryReconnectAndPumpStreamLoop[TMessage interface{}](
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			log.Warn("Status error, sentry not ready yet", "stream", streamName, "err", err)
+			logger.Warn("Status error, sentry not ready yet", "stream", streamName, "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
 
-		if err := pumpStreamLoop(ctx, sentry, streamName, streamFactory, messageFactory, handleInboundMessage, wg); err != nil {
+		if err := pumpStreamLoop(ctx, sentry, streamName, streamFactory, messageFactory, handleInboundMessage, wg, logger); err != nil {
 			if errors.Is(err, context.Canceled) {
 				continue
 			}
@@ -175,7 +176,7 @@ func sentryReconnectAndPumpStreamLoop[TMessage interface{}](
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			log.Warn("pumpStreamLoop failure", "stream", streamName, "err", err)
+			logger.Warn("pumpStreamLoop failure", "stream", streamName, "err", err)
 			continue
 		}
 	}
@@ -193,6 +194,7 @@ func pumpStreamLoop[TMessage interface{}](
 	messageFactory func() TMessage,
 	handleInboundMessage func(context.Context, TMessage, direct.SentryClient) error,
 	wg *sync.WaitGroup,
+	logger log.Logger,
 ) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -213,7 +215,7 @@ func pumpStreamLoop[TMessage interface{}](
 	go func() {
 		for req := range reqs {
 			if err := handleInboundMessage(ctx, req, sentry); err != nil {
-				log.Debug("Handling incoming message", "stream", streamName, "err", err)
+				logger.Debug("Handling incoming message", "stream", streamName, "err", err)
 			}
 			if wg != nil {
 				wg.Done()
@@ -269,6 +271,7 @@ type MultiClient struct {
 
 	historyV3        bool
 	dropUselessPeers bool
+	logger           log.Logger
 }
 
 func NewMultiClient(
@@ -284,6 +287,7 @@ func NewMultiClient(
 	logPeerInfo bool,
 	forkValidator *engineapi.ForkValidator,
 	dropUselessPeers bool,
+	logger log.Logger,
 ) (*MultiClient, error) {
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
 
@@ -315,6 +319,7 @@ func NewMultiClient(
 		historyV3:                         historyV3,
 		sendHeaderRequestsToMultiplePeers: chainConfig.TerminalTotalDifficultyPassed,
 		dropUselessPeers:                  dropUselessPeers,
+		logger:                            logger,
 	}
 	cs.ChainConfig = chainConfig
 	cs.heightForks, cs.timeForks = forkid.GatherForks(cs.ChainConfig)
@@ -334,7 +339,7 @@ func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.I
 	if cs.Hd.InitialCycle() && !cs.Hd.FetchingNew() {
 		return nil
 	}
-	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", ConvertH256ToPeerID(req.PeerId)))
+	//cs.logger.Info(fmt.Sprintf("NewBlockHashes from [%s]", ConvertH256ToPeerID(req.PeerId)))
 	var request eth.NewBlockHashesPacket
 	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
 		return fmt.Errorf("decode NewBlockHashes66: %w", err)
@@ -344,7 +349,7 @@ func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.I
 		if cs.Hd.HasLink(announce.Hash) {
 			continue
 		}
-		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
+		//cs.logger.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
 		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
 			RequestId: rand.Uint64(), // nolint: gosec
 			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
@@ -403,7 +408,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		if _, err := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
 			return fmt.Errorf("sending peer useless request: %v", err)
 		}
-		log.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8])
+		cs.logger.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8])
 		// No point processing empty response
 		return nil
 	}
@@ -434,7 +439,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		//blockNums = append(blockNums, int(number))
 	}
 	//sort.Ints(blockNums)
-	//log.Debug("Delivered headers", "peer",  fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8], "blockNums", fmt.Sprintf("%d", blockNums))
+	//cs.logger.Debug("Delivered headers", "peer",  fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8], "blockNums", fmt.Sprintf("%d", blockNums))
 	if cs.Hd.POSSync() {
 		sort.Sort(headerdownload.HeadersReverseSort(csHeaders)) // Sorting by reverse order of block heights
 		tx, err := cs.db.BeginRo(ctx)
@@ -472,7 +477,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		MinBlock: highestBlock,
 	}
 	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-		log.Error("Could not send min block for peer", "err", err1)
+		cs.logger.Error("Could not send min block for peer", "err", err1)
 	}
 	return nil
 }
@@ -535,7 +540,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 					continue
 				}
 				if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-					log.Error("Could not send penalty", "err", err1)
+					cs.logger.Error("Could not send penalty", "err", err1)
 				}
 			}
 		}
@@ -548,9 +553,9 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 		MinBlock: request.Block.NumberU64(),
 	}
 	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-		log.Error("Could not send min block for peer", "err", err1)
+		cs.logger.Error("Could not send min block for peer", "err", err1)
 	}
-	log.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), ConvertH512ToPeerID(inreq.PeerId)))
+	cs.logger.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), ConvertH512ToPeerID(inreq.PeerId)))
 	return nil
 }
 
@@ -567,7 +572,7 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 		if _, err := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
 			return fmt.Errorf("sending peer useless request: %v", err)
 		}
-		log.Debug("Requested removal of peer for empty body response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(inreq.PeerId)))
+		cs.logger.Debug("Requested removal of peer for empty body response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(inreq.PeerId)))
 		// No point processing empty response
 		return nil
 	}
@@ -616,7 +621,7 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentr
 		}
 		return fmt.Errorf("send header response 66: %w", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", ConvertH512ToPeerID(inreq.PeerId), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
+	//cs.logger.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", ConvertH512ToPeerID(inreq.PeerId), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
 	return nil
 }
 
@@ -653,7 +658,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 		}
 		return fmt.Errorf("send bodies response: %w", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", ConvertH512ToPeerID(inreq.PeerId), len(b)))
+	//cs.logger.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", ConvertH512ToPeerID(inreq.PeerId), len(b)))
 	return nil
 }
 
@@ -697,7 +702,7 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 		}
 		return fmt.Errorf("send bodies response: %w", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", ConvertH512ToPeerID(inreq.PeerId), len(b)))
+	//cs.logger.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", ConvertH512ToPeerID(inreq.PeerId), len(b)))
 	return nil
 }
 
@@ -715,13 +720,13 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_
 	err = cs.handleInboundMessage(ctx, message, sentry)
 
 	if (err != nil) && rlp.IsInvalidRLPError(err) {
-		log.Debug("Kick peer for invalid RLP", "err", err)
+		cs.logger.Debug("Kick peer for invalid RLP", "err", err)
 		penalizeRequest := proto_sentry.PenalizePeerRequest{
 			PeerId:  message.PeerId,
 			Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 		}
 		if _, err1 := sentry.PenalizePeer(ctx, &penalizeRequest, &grpc.EmptyCallOption{}); err1 != nil {
-			log.Error("Could not send penalty", "err", err1)
+			cs.logger.Error("Could not send penalty", "err", err1)
 		}
 	}
 
@@ -759,7 +764,7 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 	peerIDStr := hex.EncodeToString(peerID[:])
 
 	if !cs.logPeerInfo {
-		log.Trace("[p2p] Sentry peer did", "eventID", eventID, "peer", peerIDStr)
+		cs.logger.Trace("[p2p] Sentry peer did", "eventID", eventID, "peer", peerIDStr)
 		return nil
 	}
 
@@ -769,7 +774,7 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 	if event.EventId == proto_sentry.PeerEvent_Connect {
 		reply, err := sentry.PeerById(ctx, &proto_sentry.PeerByIdRequest{PeerId: event.PeerId})
 		if err != nil {
-			log.Debug("sentry.PeerById failed", "err", err)
+			cs.logger.Debug("sentry.PeerById failed", "err", err)
 		}
 		if (reply != nil) && (reply.Peer != nil) {
 			nodeURL = reply.Peer.Enode
@@ -778,7 +783,7 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 		}
 	}
 
-	log.Trace("[p2p] Sentry peer did", "eventID", eventID, "peer", peerIDStr,
+	cs.logger.Trace("[p2p] Sentry peer did", "eventID", eventID, "peer", peerIDStr,
 		"nodeURL", nodeURL, "clientID", clientID, "capabilities", capabilities)
 	return nil
 }

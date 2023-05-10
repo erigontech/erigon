@@ -313,7 +313,12 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label) (kv.RwDB, error) {
 			opts = opts.Exclusive()
 		}
 		if label == kv.ChainDB {
-			opts = opts.PageSize(config.MdbxPageSize.Bytes()).MapSize(config.MdbxDBSizeLimit)
+			if config.MdbxPageSize.Bytes() > 0 {
+				opts = opts.PageSize(config.MdbxPageSize.Bytes())
+			}
+			if config.MdbxDBSizeLimit > 0 {
+				opts = opts.MapSize(config.MdbxDBSizeLimit)
+			}
 		} else {
 			opts = opts.GrowthStep(16 * datasize.MB)
 		}
