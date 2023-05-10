@@ -422,8 +422,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	var readAhead chan uint64
 	if initialCycle {
+		// snapshots are often stored on chaper drives. don't expect low-read-latency and read-ahead.
 		var clean func()
-		readAhead, clean = blocksReadAhead2(ctx, &cfg, 4)
+		readAhead, clean = blocksReadAhead(ctx, &cfg, 4)
 		defer clean()
 	}
 
@@ -530,7 +531,8 @@ Loop:
 	logger.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	return stoppedErr
 }
-func blocksReadAhead2(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (chan uint64, context.CancelFunc) {
+
+func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (chan uint64, context.CancelFunc) {
 	const readAheadBlocks = 100
 	readAhead := make(chan uint64, readAheadBlocks)
 	ctxForErrgroup, cancel := context.WithCancel(ctx)
@@ -544,7 +546,7 @@ func blocksReadAhead2(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (c
 				case <-gCtx.Done():
 					return gCtx.Err()
 				}
-				if err := blocksReadAhead(gCtx, cfg, bn+readAheadBlocks); err != nil {
+				if err := blocksReadAheadFunc(gCtx, cfg, bn+readAheadBlocks); err != nil {
 					return err
 				}
 			}
@@ -552,11 +554,11 @@ func blocksReadAhead2(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (c
 	}
 	return readAhead, func() {
 		cancel()
-		g.Wait()
+		_ = g.Wait()
 		close(readAhead)
 	}
 }
-func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, blockNum uint64) error {
+func blocksReadAheadFunc(ctx context.Context, cfg *ExecuteBlockCfg, blockNum uint64) error {
 	tx, err := cfg.db.BeginRo(context.Background())
 	if err != nil {
 		return err
@@ -574,6 +576,12 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, blockNum uint64)
 	stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
 	for _, sender := range senders {
 		_, _ = stateReader.ReadAccountData(sender)
+	}
+	for _, tx := range block.Transactions() {
+		to := tx.GetTo()
+		if to != nil {
+			_, _ = stateReader.ReadAccountData(*to)
+		}
 	}
 	_, _ = stateReader.ReadAccountData(block.Coinbase())
 	_, _ = block, senders
