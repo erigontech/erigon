@@ -34,7 +34,7 @@ var cmdResetState = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
