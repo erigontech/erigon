@@ -420,30 +420,11 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		batch.Rollback()
 	}()
 
-	const readAheadBlocks = 100
 	var readAhead chan uint64
 	if initialCycle {
-		readAhead = make(chan uint64, readAheadBlocks)
-		defer close(readAhead)
-		ctxForErrgroup, cancel := context.WithCancel(ctx)
-		defer cancel()
-		g, gCtx := errgroup.WithContext(ctxForErrgroup)
-		defer g.Wait()
-		for i := 0; i < 4; i++ {
-			g.Go(func() error {
-				for bn := range readAhead {
-					select {
-					case <-gCtx.Done():
-						return gCtx.Err()
-					default:
-					}
-					if err := blocksReadAhead(gCtx, &cfg, bn); err != nil {
-						return err
-					}
-				}
-				return nil
-			})
-		}
+		var clean func()
+		readAhead, clean = blocksReadAhead2(ctx, &cfg, 4)
+		defer clean()
 	}
 
 Loop:
@@ -451,12 +432,10 @@ Loop:
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
 		}
-		if (blockNum+10)%readAheadBlocks == 0 {
-			for i := blockNum + 10; i < blockNum+10+readAheadBlocks; i++ {
-				select {
-				case readAhead <- i:
-				default:
-				}
+		if initialCycle {
+			select {
+			case readAhead <- blockNum:
+			default:
 			}
 		}
 
@@ -550,6 +529,32 @@ Loop:
 
 	logger.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	return stoppedErr
+}
+func blocksReadAhead2(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (chan uint64, context.CancelFunc) {
+	const readAheadBlocks = 100
+	readAhead := make(chan uint64, readAheadBlocks)
+	ctxForErrgroup, cancel := context.WithCancel(ctx)
+	g, gCtx := errgroup.WithContext(ctxForErrgroup)
+	for i := 0; i < workers; i++ {
+		g.Go(func() error {
+			var bn uint64
+			for {
+				select {
+				case bn = <-readAhead:
+				case <-gCtx.Done():
+					return gCtx.Err()
+				}
+				if err := blocksReadAhead(gCtx, cfg, bn+readAheadBlocks); err != nil {
+					return err
+				}
+			}
+		})
+	}
+	return readAhead, func() {
+		cancel()
+		g.Wait()
+		close(readAhead)
+	}
 }
 func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, blockNum uint64) error {
 	tx, err := cfg.db.BeginRo(context.Background())
