@@ -8,9 +8,12 @@ import (
 )
 
 type byteBasedUint64Slice struct {
+	// the bytes that back the slice
 	u []byte
 
+	// length of slice
 	l int // len
+	// cap of slize
 	c int // cap
 
 	hashBuf
