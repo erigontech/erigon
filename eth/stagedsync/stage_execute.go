@@ -421,9 +421,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	}()
 
 	const readAheadBlocks = 100
-	readAhead := make(chan uint64, readAheadBlocks)
-	defer close(readAhead)
+	var readAhead chan uint64
 	if initialCycle {
+		readAhead = make(chan uint64, readAheadBlocks)
+		defer close(readAhead)
 		ctxForErrgroup, cancel := context.WithCancel(ctx)
 		defer cancel()
 		g, gCtx := errgroup.WithContext(ctxForErrgroup)
