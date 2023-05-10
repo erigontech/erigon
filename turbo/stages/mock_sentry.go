@@ -350,6 +350,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		false,
 		forkValidator,
 		cfg.DropUselessPeers,
+		logger,
 	)
 
 	mock.sentriesClient.IsMock = true
@@ -542,7 +543,7 @@ func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
 			address: {Balance: funds},
 		},
 	}
-	engine := ethconsensusconfig.CreateConsensusEngine(chainConfig, chainConfig.Aura, nil, true, "", "", true, "", nil, false /* readonly */, nil)
+	engine := ethconsensusconfig.CreateConsensusEngineBareBones(chainConfig)
 	return MockWithGenesisEngine(t, gspec, engine, withPosDownloader)
 }
 

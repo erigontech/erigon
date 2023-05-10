@@ -1458,7 +1458,7 @@ func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.
 	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}
-	//log.Info("Initialised chain configuration", "config", chainConfig)
+	//logger.Info("Initialised chain configuration", "config", chainConfig)
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -1493,7 +1493,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}
-	//log.Info("Initialised chain configuration", "config", chainConfig)
+	//logger.Info("Initialised chain configuration", "config", chainConfig)
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -1527,6 +1527,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		false,
 		nil,
 		ethconfig.Defaults.DropUselessPeers,
+		logger,
 	)
 	if err != nil {
 		panic(err)
@@ -1594,7 +1595,6 @@ func overrideStorageMode(db kv.RwDB) error {
 }
 
 func initConsensusEngine(cc *chain2.Config, datadir string, db kv.RwDB) (engine consensus.Engine) {
-	snapshots, _ := allSnapshots(context.Background(), db)
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}
@@ -1608,5 +1608,5 @@ func initConsensusEngine(cc *chain2.Config, datadir string, db kv.RwDB) (engine 
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallgRPCAddress, HeimdallURL, config.WithoutHeimdall, datadir, snapshots, db.ReadOnly(), db)
+	return ethconsensusconfig.CreateConsensusEngine(cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallgRPCAddress, HeimdallURL, config.WithoutHeimdall, datadir, db.ReadOnly())
 }

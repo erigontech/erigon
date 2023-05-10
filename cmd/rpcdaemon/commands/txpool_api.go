@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // NetAPI the interface for the net_ RPC commands
@@ -53,8 +51,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	baseFee := make(map[libcommon.Address][]types.Transaction, 8)
 	queued := make(map[libcommon.Address][]types.Transaction, 8)
 	for i := range reply.Txs {
-		stream := rlp.NewStream(bytes.NewReader(reply.Txs[i].RlpTx), 0)
-		txn, err := types.DecodeTransaction(stream)
+		txn, err := types.DecodeTransaction(reply.Txs[i].RlpTx)
 		if err != nil {
 			return nil, err
 		}

@@ -103,7 +103,7 @@ var (
 
 func TestDecodeEmptyInput(t *testing.T) {
 	input := []byte{}
-	_, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(input), 0))
+	_, err := DecodeTransaction(input)
 	if !errors.Is(err, io.EOF) {
 		t.Fatal("wrong error:", err)
 	}
@@ -111,7 +111,7 @@ func TestDecodeEmptyInput(t *testing.T) {
 
 func TestDecodeEmptyTypedTx(t *testing.T) {
 	input := []byte{0x80}
-	_, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(input), 0))
+	_, err := DecodeTransaction(input)
 	if !errors.Is(err, rlp.EOL) {
 		t.Fatal("wrong error:", err)
 	}
@@ -267,7 +267,7 @@ func TestEIP1559TransactionEncode(t *testing.T) {
 		if !bytes.Equal(have, want) {
 			t.Errorf("encoded RLP mismatch, got %x", have)
 		}
-		_, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(buf.Bytes()), 0))
+		_, err := DecodeTransaction(buf.Bytes())
 		if err != nil {
 			t.Fatalf("decode error: %v", err)
 		}
@@ -276,7 +276,7 @@ func TestEIP1559TransactionEncode(t *testing.T) {
 }
 
 func decodeTx(data []byte) (Transaction, error) {
-	return DecodeTransaction(rlp.NewStream(bytes.NewReader(data), 0))
+	return DecodeTransaction(data)
 }
 
 func defaultTestKey() (*ecdsa.PrivateKey, libcommon.Address) {
