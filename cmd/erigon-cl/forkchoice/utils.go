@@ -89,7 +89,13 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint cltypes.Checkpoint) (*ch
 		}
 	}
 	mixes := baseState.RandaoMixes()
-	checkpointState := newCheckpointState(f.forkGraph.Config(), baseState.Validators(),
+	// TODO: make this copy smarter when validators is a smarter struct
+	validators := make([]*cltypes.Validator, baseState.ValidatorLength())
+	baseState.ForEachValidator(func(v *cltypes.Validator, idx, total int) bool {
+		validators[idx] = v
+		return true
+	})
+	checkpointState := newCheckpointState(f.forkGraph.Config(), validators,
 		mixes[:], baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), state.Epoch(baseState.BeaconState))
 	// Cache in memory what we are left with.
 	f.checkpointStates.Add(checkpoint, checkpointState)

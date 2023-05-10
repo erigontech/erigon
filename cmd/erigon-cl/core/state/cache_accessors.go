@@ -190,7 +190,14 @@ func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error)
 	syncCommitteePubKeys := make([][48]byte, 0, cltypes.SyncCommitteeSize)
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)
 	for len(syncCommitteePubKeys) < cltypes.SyncCommitteeSize {
-		shuffledIndex, err := shuffling.ComputeShuffledIndex(b.BeaconConfig(), i%activeValidatorCount, activeValidatorCount, seed, preInputs, optimizedHashFunc)
+		shuffledIndex, err := shuffling.ComputeShuffledIndex(
+			b.BeaconConfig(),
+			i%activeValidatorCount,
+			activeValidatorCount,
+			seed,
+			preInputs,
+			optimizedHashFunc,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -205,8 +212,8 @@ func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error)
 		if err != nil {
 			return nil, err
 		}
-		if validator.EffectiveBalance*math.MaxUint8 >= beaconConfig.MaxEffectiveBalance*randomByte {
-			syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey)
+		if validator.EffectiveBalance()*math.MaxUint8 >= beaconConfig.MaxEffectiveBalance*randomByte {
+			syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey())
 		}
 		i++
 	}

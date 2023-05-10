@@ -3,10 +3,10 @@ package cltypes
 import (
 	"bytes"
 	"fmt"
-	"sync"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -285,14 +285,8 @@ func (s *SyncCommittee) Equal(s2 *SyncCommittee) bool {
 
 // Validator, contains if we were on bellatrix/alteir/phase0 and transition epoch.
 type Validator struct {
-	PublicKey                  [48]byte
-	WithdrawalCredentials      libcommon.Hash
-	EffectiveBalance           uint64
-	Slashed                    bool
-	ActivationEligibilityEpoch uint64
-	ActivationEpoch            uint64
-	ExitEpoch                  uint64
-	WithdrawableEpoch          uint64
+	solid.Validator
+
 	// This is all stuff used by phase0 state transition. It makes many operations faster.
 	// Source attesters
 	IsCurrentMatchingSourceAttester  bool
@@ -310,7 +304,7 @@ type Validator struct {
 
 // DutiesAttested returns how many of its duties the validator attested and missed
 func (v *Validator) DutiesAttested() (attested, missed uint64) {
-	if v.Slashed {
+	if v.Slashed() {
 		return 0, 3
 	}
 	if v.IsPreviousMatchingSourceAttester {
@@ -326,80 +320,43 @@ func (v *Validator) DutiesAttested() (attested, missed uint64) {
 	return
 }
 func (v *Validator) IsSlashable(epoch uint64) bool {
-	return !v.Slashed && (v.ActivationEpoch <= epoch) && (epoch < v.WithdrawableEpoch)
+	return !v.Slashed() && (v.ActivationEpoch() <= epoch) && (epoch < v.WithdrawableEpoch())
 }
 
 func (v *Validator) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	buf = append(buf, v.PublicKey[:]...)
-	buf = append(buf, v.WithdrawalCredentials[:]...)
-	buf = append(buf, ssz.Uint64SSZ(v.EffectiveBalance)...)
-	buf = append(buf, ssz.BoolSSZ(v.Slashed))
-	buf = append(buf, ssz.Uint64SSZ(v.ActivationEligibilityEpoch)...)
-	buf = append(buf, ssz.Uint64SSZ(v.ActivationEpoch)...)
-	buf = append(buf, ssz.Uint64SSZ(v.ExitEpoch)...)
-	buf = append(buf, ssz.Uint64SSZ(v.WithdrawableEpoch)...)
-	return buf, nil
+	return v.Validator.EncodeSSZ(dst), nil
 }
 
 func (v *Validator) DecodeSSZ(buf []byte, _ int) error {
-	if len(buf) < v.EncodingSizeSSZ() {
-		return fmt.Errorf("[Validator] err: %s", ssz.ErrLowBufferSize)
-	}
-	copy(v.PublicKey[:], buf)
-	copy(v.WithdrawalCredentials[:], buf[48:])
-	v.EffectiveBalance = ssz.UnmarshalUint64SSZ(buf[80:])
-	v.Slashed = buf[88] == 1
-	v.ActivationEligibilityEpoch = ssz.UnmarshalUint64SSZ(buf[89:])
-	v.ActivationEpoch = ssz.UnmarshalUint64SSZ(buf[97:])
-	v.ExitEpoch = ssz.UnmarshalUint64SSZ(buf[105:])
-	v.WithdrawableEpoch = ssz.UnmarshalUint64SSZ(buf[113:])
-	return nil
+	return v.Validator.DecodeSSZ(buf, 0)
 }
 
-func (v *Validator) EncodingSizeSSZ() int {
-	return 121
-}
+//var validatorLeavesPool = sync.Pool{
+//	New: func() any {
+//		p := make([]byte, 8*32)
+//		return &p
+//	},
+//}
 
-var validatorLeavesPool = sync.Pool{
-	New: func() any {
-		o := make([][32]byte, 8)
-		return &o
-	},
-}
-
-func (v *Validator) HashSSZ() ([32]byte, error) {
-	leavesp, _ := validatorLeavesPool.Get().(*[][32]byte)
-	leaves := *leavesp
-	defer func() {
-		leaves = leaves[:8]
-		validatorLeavesPool.Put(leavesp)
-	}()
-	var (
-		err error
-	)
-	leaves[0], err = merkle_tree.PublicKeyRoot(v.PublicKey)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	leaves[1] = v.WithdrawalCredentials
-	leaves[2] = merkle_tree.Uint64Root(v.EffectiveBalance)
-	leaves[3] = merkle_tree.BoolRoot(v.Slashed)
-	leaves[4] = merkle_tree.Uint64Root(v.ActivationEligibilityEpoch)
-	leaves[5] = merkle_tree.Uint64Root(v.ActivationEpoch)
-	leaves[6] = merkle_tree.Uint64Root(v.ExitEpoch)
-	leaves[7] = merkle_tree.Uint64Root(v.WithdrawableEpoch)
-	leaves = leaves[:8]
-	output, err := merkle_tree.ArraysRoot(leaves, 8)
-	return output, err
+func (v *Validator) HashSSZ() (o [32]byte, err error) {
+	// leavesp, _ := validatorLeavesPool.Get().(*[]byte)
+	// leaves := *leavesp
+	//
+	//	defer func() {
+	//		validatorLeavesPool.Put(leavesp)
+	//	}()
+	leaves := make([]byte, 8*32)
+	v.CopyHashBufferTo(leaves)
+	leaves = leaves[:(8 * 32)]
+	err = solid.TreeHashFlatSlice(leaves, o[:])
+	return
 }
 
 // Active returns if validator is active for given epoch
 func (v *Validator) Active(epoch uint64) bool {
-	return v.ActivationEpoch <= epoch && epoch < v.ExitEpoch
+	return v.ActivationEpoch() <= epoch && epoch < v.ExitEpoch()
 }
 
-func (v *Validator) Copy() *Validator {
-	copied := *v
-	return &copied
+func (v *Validator) CopyTo(target *Validator) {
+	v.Validator.CopyTo(&target.Validator)
 }

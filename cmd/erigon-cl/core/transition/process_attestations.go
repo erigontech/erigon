@@ -54,9 +54,13 @@ func processAttestationPostAltair(s *state.BeaconState, attestation *cltypes.Att
 
 	isCurrentEpoch := data.Target.Epoch == currentEpoch
 
-	validators := s.Validators()
 	for _, attesterIndex := range attestingIndicies {
-		baseReward := (validators[attesterIndex].EffectiveBalance / beaconConfig.EffectiveBalanceIncrement) * baseRewardPerIncrement
+		val, err := s.ValidatorEffectiveBalance(int(attesterIndex))
+		if err != nil {
+			return nil, err
+		}
+
+		baseReward := (val / beaconConfig.EffectiveBalanceIncrement) * baseRewardPerIncrement
 		for flagIndex, weight := range beaconConfig.ParticipationWeights() {
 			flagParticipation := s.EpochParticipationForValidatorIndex(isCurrentEpoch, int(attesterIndex))
 			if !slices.Contains(participationFlagsIndicies, uint8(flagIndex)) || flagParticipation.HasFlag(flagIndex) {

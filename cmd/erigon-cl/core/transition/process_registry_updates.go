@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
@@ -18,27 +19,33 @@ func ProcessRegistryUpdates(s *state.BeaconState) error {
 	currentEpoch := state.Epoch(s.BeaconState)
 	// start also initializing the activation queue.
 	activationQueue := make([]uint64, 0)
-	validators := s.Validators()
 	// Process activation eligibility and ejections.
-	for validatorIndex, validator := range validators {
+	var err error
+	s.ForEachValidator(func(validator *cltypes.Validator, validatorIndex, total int) bool {
 		if state.IsValidatorEligibleForActivationQueue(s.BeaconState, validator) {
 			s.SetActivationEligibilityEpochForValidatorAtIndex(validatorIndex, currentEpoch+1)
 		}
-		if validator.Active(currentEpoch) && validator.EffectiveBalance <= beaconConfig.EjectionBalance {
-			if err := s.InitiateValidatorExit(uint64(validatorIndex)); err != nil {
-				return err
+		if validator.Active(currentEpoch) && validator.EffectiveBalance() <= beaconConfig.EjectionBalance {
+			if err = s.InitiateValidatorExit(uint64(validatorIndex)); err != nil {
+				return false
 			}
 		}
 		// Insert in the activation queue in case.
 		if state.IsValidatorEligibleForActivation(s.BeaconState, validator) {
 			activationQueue = append(activationQueue, uint64(validatorIndex))
 		}
+		return true
+	})
+	if err != nil {
+		return err
 	}
 	// order the queue accordingly.
 	sort.Slice(activationQueue, func(i, j int) bool {
 		//  Order by the sequence of activation_eligibility_epoch setting and then index.
-		if validators[activationQueue[i]].ActivationEligibilityEpoch != validators[activationQueue[j]].ActivationEligibilityEpoch {
-			return validators[activationQueue[i]].ActivationEligibilityEpoch < validators[activationQueue[j]].ActivationEligibilityEpoch
+		validatori, _ := s.ValidatorForValidatorIndex(int(activationQueue[i]))
+		validatorj, _ := s.ValidatorForValidatorIndex(int(activationQueue[j]))
+		if validatori.ActivationEligibilityEpoch() != validatorj.ActivationEligibilityEpoch() {
+			return validatori.ActivationEligibilityEpoch() < validatorj.ActivationEligibilityEpoch()
 		}
 		return activationQueue[i] < activationQueue[j]
 	})

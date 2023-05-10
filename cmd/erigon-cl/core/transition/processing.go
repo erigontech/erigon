@@ -58,7 +58,7 @@ func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlock, fu
 	if err != nil {
 		return err
 	}
-	if proposer.Slashed {
+	if proposer.Slashed() {
 		return fmt.Errorf("proposer: %d is slashed", block.ProposerIndex)
 	}
 	return nil
@@ -79,12 +79,13 @@ func ProcessRandao(s *state.BeaconState, randao [96]byte, proposerIndex uint64, 
 		if err != nil {
 			return fmt.Errorf("ProcessRandao: unable to compute signing root: %v", err)
 		}
-		valid, err := bls.Verify(randao[:], signingRoot[:], proposer.PublicKey[:])
+		pk := proposer.PublicKey()
+		valid, err := bls.Verify(randao[:], signingRoot[:], pk[:])
 		if err != nil {
-			return fmt.Errorf("ProcessRandao: unable to verify public key: %x, with signing root: %x, and signature: %x, %v", proposer.PublicKey[:], signingRoot[:], randao[:], err)
+			return fmt.Errorf("ProcessRandao: unable to verify public key: %x, with signing root: %x, and signature: %x, %v", pk[:], signingRoot[:], randao[:], err)
 		}
 		if !valid {
-			return fmt.Errorf("ProcessRandao: invalid signature: public key: %x, signing root: %x, signature: %x", proposer.PublicKey[:], signingRoot[:], randao[:])
+			return fmt.Errorf("ProcessRandao: invalid signature: public key: %x, signing root: %x, signature: %x", pk[:], signingRoot[:], randao[:])
 		}
 	}
 
