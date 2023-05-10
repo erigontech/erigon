@@ -12,7 +12,7 @@ import (
 
 const (
 	BlobCommitmentVersionKZG uint8 = 0x01
-	PrecompileInputLength          = 192
+	PrecompileInputLength    int   = 192
 )
 
 var (
@@ -46,7 +46,7 @@ func PointEvaluationPrecompile(input []byte) ([]byte, error) {
 	// input kzg point: next 48 bytes
 	var dataKZG [48]byte
 	copy(dataKZG[:], input[96:144])
-	if libkzg.KZGToVersionedHash(gokzg4844.KZGCommitment(dataKZG)) != libkzg.VersionedHash(versionedHash) {
+	if libkzg.KZGToVersionedHash(dataKZG) != versionedHash {
 		return nil, errors.New("mismatched versioned hash")
 	}
 

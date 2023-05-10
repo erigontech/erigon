@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/ef-tests-cl/spectest"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/shuffling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,10 +27,10 @@ func (b *ShufflingCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err 
 	}
 
 	s := state.GetEmptyBeaconState()
-	keccakOptimized := utils.OptimizedKeccak256()
-	preInputs := s.ComputeShuffledIndexPreInputs(meta.Seed)
+	keccakOptimized := utils.OptimizedKeccak256NotThreadSafe()
+	preInputs := shuffling.ComputeShuffledIndexPreInputs(s.BeaconConfig(), meta.Seed)
 	for idx, v := range meta.Mapping {
-		shuffledIdx, err := s.ComputeShuffledIndex(uint64(idx), uint64(meta.Count), meta.Seed, preInputs, keccakOptimized)
+		shuffledIdx, err := shuffling.ComputeShuffledIndex(s.BeaconConfig(), uint64(idx), uint64(meta.Count), meta.Seed, preInputs, keccakOptimized)
 		require.NoError(t, err)
 		assert.EqualValues(t, v, shuffledIdx)
 	}

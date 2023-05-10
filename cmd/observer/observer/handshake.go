@@ -10,6 +10,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/direct"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -239,11 +240,10 @@ func makeOurHelloMessage(myPrivateKey *ecdsa.PrivateKey) HelloMessage {
 	clientID := common.MakeName("observer", version)
 
 	caps := []p2p.Cap{
-		{Name: eth.ProtocolName, Version: 63},
-		{Name: eth.ProtocolName, Version: 64},
-		{Name: eth.ProtocolName, Version: 65},
-		{Name: eth.ProtocolName, Version: eth.ETH66},
-		{Name: eth.ProtocolName, Version: eth.ETH67},
+		{Name: eth.ProtocolName, Version: direct.ETH65},
+		{Name: eth.ProtocolName, Version: direct.ETH66},
+		{Name: eth.ProtocolName, Version: direct.ETH67},
+		{Name: eth.ProtocolName, Version: direct.ETH68},
 	}
 
 	return HelloMessage{

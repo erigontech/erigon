@@ -121,7 +121,7 @@ COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += sentinel
-COMMANDS += erigon-el 
+COMMANDS += erigon-el
 COMMANDS += caplin-phase1
 
 # build each command using %.cmd rule
@@ -215,7 +215,7 @@ git-submodules:
 	@git submodule update --quiet --init --recursive --force || true
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.20.2
+GOLANG_CROSS_VERSION  ?= v1.20.4
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules

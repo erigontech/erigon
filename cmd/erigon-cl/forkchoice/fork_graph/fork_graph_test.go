@@ -24,10 +24,10 @@ var anchor []byte
 func TestForkGraph(t *testing.T) {
 	blockA, blockB, blockC := &cltypes.SignedBeaconBlock{}, &cltypes.SignedBeaconBlock{}, &cltypes.SignedBeaconBlock{}
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
-	require.NoError(t, utils.DecodeSSZSnappyWithVersion(blockA, block1, int(clparams.Phase0Version)))
-	require.NoError(t, utils.DecodeSSZSnappyWithVersion(blockB, block2, int(clparams.Phase0Version)))
-	require.NoError(t, utils.DecodeSSZSnappyWithVersion(blockC, block2, int(clparams.Phase0Version)))
-	require.NoError(t, utils.DecodeSSZSnappyWithVersion(anchorState, anchor, int(clparams.Phase0Version)))
+	require.NoError(t, utils.DecodeSSZSnappy(blockA, block1, int(clparams.Phase0Version)))
+	require.NoError(t, utils.DecodeSSZSnappy(blockB, block2, int(clparams.Phase0Version)))
+	require.NoError(t, utils.DecodeSSZSnappy(blockC, block2, int(clparams.Phase0Version)))
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
 	graph := fork_graph.New(anchorState, false)
 	_, status, err := graph.AddChainSegment(blockA, true)
 	require.NoError(t, err)

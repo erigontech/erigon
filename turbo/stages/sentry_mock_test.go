@@ -676,7 +676,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	assert.Equal(t, lastValidHash, lastValidHeader.Hash())
 }
 
-func TestPOSWrontTrieRootReorgs(t *testing.T) {
+func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	t.Skip("Need some fixes for memory mutation to support DupSort")
 	//defer log.Root().SetHandler(log.Root().GetHandler())
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))

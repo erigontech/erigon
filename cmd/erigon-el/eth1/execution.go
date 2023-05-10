@@ -176,7 +176,7 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 		return nil, err
 	}
 	// Run the forkchoice
-	if err := e.executionPipeline.Run(e.db, tx, false, false); err != nil {
+	if err := e.executionPipeline.Run(e.db, tx, false); err != nil {
 		return nil, err
 	}
 	// if head hash was set then success otherwise no
@@ -328,7 +328,7 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		GasUsed:     header.GasUsed,
 		Time:        header.Timestamp,
 		Extra:       header.ExtraData,
-		MixDigest:   gointerfaces.ConvertH256ToHash(header.MixDigest),
+		MixDigest:   gointerfaces.ConvertH256ToHash(header.PrevRandao),
 		Nonce:       blockNonce,
 	}
 	if header.BaseFeePerGas != nil {
@@ -366,7 +366,7 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 		TransactionHash: gointerfaces.ConvertHashToH256(header.TxHash),
 		LogsBloom:       gointerfaces.ConvertBytesToH2048(header.Bloom[:]),
 		ReceiptRoot:     gointerfaces.ConvertHashToH256(header.ReceiptHash),
-		MixDigest:       gointerfaces.ConvertHashToH256(header.MixDigest),
+		PrevRandao:      gointerfaces.ConvertHashToH256(header.MixDigest),
 		BlockNumber:     header.Number.Uint64(),
 		Nonce:           header.Nonce.Uint64(),
 		GasLimit:        header.GasLimit,

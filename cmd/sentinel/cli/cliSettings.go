@@ -9,6 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
+	"github.com/ledgerwatch/erigon/turbo/logging"
+
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -60,8 +62,9 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg.Port = uint(ctx.Int(flags.SentinelDiscoveryPort.Name))
 	cfg.Addr = ctx.String(flags.SentinelDiscoveryAddr.Name)
 
-	cfg.LogLvl = ctx.Uint(flags.Verbosity.Name)
-	if cfg.LogLvl == uint(log.LvlInfo) {
+	cfg.LogLvl = ctx.Uint(logging.LogVerbosityFlag.Name)
+	fmt.Println(cfg.LogLvl)
+	if cfg.LogLvl == uint(log.LvlInfo) || cfg.LogLvl == 0 {
 		cfg.LogLvl = uint(log.LvlDebug)
 	}
 	cfg.NoDiscovery = ctx.Bool(flags.NoDiscovery.Name)

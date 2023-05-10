@@ -20,12 +20,11 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-
-	"github.com/holiman/uint256"
 )
 
 // CalcExcessDataGas implements calc_excess_data_gas from EIP-4844

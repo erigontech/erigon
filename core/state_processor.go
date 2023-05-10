@@ -45,7 +45,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, *config, ibs, header, engine, true /* constCall */, excessDataGas)
+			return SysCallContract(contract, data, config, ibs, header, engine, true /* constCall */, excessDataGas)
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}

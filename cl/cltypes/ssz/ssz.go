@@ -29,8 +29,7 @@ type Marshaler interface {
 }
 
 type Unmarshaler interface {
-	DecodeSSZ(buf []byte) error
-	DecodeSSZWithVersion(buf []byte, version int) error
+	DecodeSSZ(buf []byte, version int) error
 	clonable.Clonable
 }
 
@@ -71,7 +70,7 @@ func UnmarshalUint64SSZ(x []byte) uint64 {
 	return binary.LittleEndian.Uint64(x)
 }
 
-func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, max uint64) ([]T, error) {
+func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, max uint64, version int) ([]T, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -99,7 +98,7 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, max uint6
 			return nil, ErrBadOffset
 		}
 		objs[i] = objs[i].Clone().(T)
-		if err := objs[i].DecodeSSZ(buf[currentOffset:endOffset]); err != nil {
+		if err := objs[i].DecodeSSZ(buf[currentOffset:endOffset], version); err != nil {
 			return nil, err
 		}
 		currentOffset = endOffset
@@ -107,7 +106,7 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, max uint6
 	return objs, nil
 }
 
-func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement uint32, max uint64) ([]T, error) {
+func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement uint32, max uint64, version int) ([]T, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -123,7 +122,7 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 	objs := make([]T, elementsNum)
 	for i := range objs {
 		objs[i] = objs[i].Clone().(T)
-		if err := objs[i].DecodeSSZ(buf[i*int(bytesPerElement):]); err != nil {
+		if err := objs[i].DecodeSSZ(buf[i*int(bytesPerElement):], version); err != nil {
 			return nil, err
 		}
 	}

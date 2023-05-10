@@ -251,7 +251,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	}
 	topicsMap := make(map[common.Hash]struct{})
 	for i := range crit.Topics {
-		for j := range crit.Topics {
+		for j := range crit.Topics[i] {
 			topicsMap[crit.Topics[i][j]] = struct{}{}
 		}
 	}

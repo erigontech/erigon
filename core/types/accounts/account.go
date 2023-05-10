@@ -618,6 +618,13 @@ func ConvertV3toV2(v []byte) ([]byte, error) {
 	a.EncodeForStorage(v)
 	return v, nil
 }
+func ConvertV2toV3(v []byte) ([]byte, error) {
+	var a Account
+	if err := a.DecodeForStorage(v); err != nil {
+		return nil, fmt.Errorf("ConvertV3toV2(%x): %w", v, err)
+	}
+	return SerialiseV3(&a), nil
+}
 
 // DeserialiseV3 - method to deserialize accounts in Erigon22 history
 func DeserialiseV3(a *Account, enc []byte) error {

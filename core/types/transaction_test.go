@@ -538,8 +538,8 @@ func TestTransactionCoding(t *testing.T) {
 			}
 			kzgCtx := libkzg.Ctx()
 			blob := Blob{}
-			commitment, _ := kzgCtx.BlobToKZGCommitment(gokzg4844.Blob(blob))
-			proof, _ := kzgCtx.ComputeBlobKZGProof(gokzg4844.Blob(blob), commitment)
+			commitment, _ := kzgCtx.BlobToKZGCommitment(gokzg4844.Blob(blob), 1 /*numGoRoutines*/)
+			proof, _ := kzgCtx.ComputeBlobKZGProof(gokzg4844.Blob(blob), commitment, 1 /*numGoRoutines*/)
 			txdata = &BlobTxWrapper{
 				Tx:          inner,
 				Commitments: BlobKzgs{KZGCommitment(commitment)},

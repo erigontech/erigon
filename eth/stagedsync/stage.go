@@ -3,6 +3,7 @@ package stagedsync
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
@@ -10,12 +11,12 @@ import (
 // ExecFunc is the execution function for the stage to move forward.
 // * state - is the current state of the stage and contains stage data.
 // * unwinder - if the stage needs to cause unwinding, `unwinder` methods can be used.
-type ExecFunc func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, tx kv.RwTx, quiet bool) error
+type ExecFunc func(firstCycle bool, badBlockUnwind bool, s *StageState, unwinder Unwinder, tx kv.RwTx, logger log.Logger) error
 
 // UnwindFunc is the unwinding logic of the stage.
 // * unwindState - contains information about the unwind itself.
 // * stageState - represents the state of this stage at the beginning of unwind.
-type UnwindFunc func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error
+type UnwindFunc func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error
 
 // PruneFunc is the execution function for the stage to prune old data.
 // * state - is the current state of the stage and contains stage data.

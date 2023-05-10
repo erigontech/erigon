@@ -18,7 +18,7 @@ func readDelta(root fs.FS, name string) (*cltypes.Deltas, error) {
 		return nil, err
 	}
 	testState := &cltypes.Deltas{}
-	if err := utils.DecodeSSZSnappyWithVersion(testState, sszSnappy, 0); err != nil {
+	if err := utils.DecodeSSZSnappy(testState, sszSnappy, 0); err != nil {
 		return nil, err
 	}
 	return testState, nil

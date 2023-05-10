@@ -104,6 +104,46 @@ func (p *Progress) Log(rs *state.StateV3, in *exec22.QueueWithRetry, rws *exec22
 	p.prevRepeatCount = repeatCount
 }
 
+/*
+ExecV3 - parallel execution. Has many layers of abstractions - each layer does accumulate
+state changes (updates) and can "atomically commit all changes to underlying layer of abstraction"
+
+Layers from top to bottom:
+- IntraBlockState - used to exec txs. It does store inside all updates of given txn.
+Can understan if txn failed or OutOfGas - then revert all changes.
+Each parallel-worker hav own IntraBlockState.
+IntraBlockState does commit changes to lower-abstraction-level by method `ibs.MakeWriteSet()`
+
+- StateWriterBufferedV3 - txs which executed by parallel workers can conflict with each-other.
+This writer does accumulate updates and then send them to conflict-resolution.
+Until conflict-resolution succeed - none of execution updates must pass to lower-abstraction-level.
+Object TxTask it's just set of small buffers (readset + writeset) for each transaction.
+Write to TxTask happends by code like `txTask.ReadLists = rw.stateReader.ReadSet()`.
+
+- TxTask - objects coming from parallel-workers to conflict-resolution goroutine (ApplyLoop and method ReadsValid).
+Flush of data to lower-level-of-abstraction is done by method `agg.ApplyState` (method agg.ApplyHistory exists
+only for performance - to reduce time of RwLock on state, but by meaning `ApplyState+ApplyHistory` it's 1 method to
+flush changes from TxTask to lower-level-of-abstraction).
+
+- StateV3 - it's all updates which are stored in RAM - all parallel workers can see this updates.
+Execution of txs always done on Valid version of state (no partial-updates of state).
+Flush of updates to lower-level-of-abstractions done by method `StateV3.Flush`.
+On this level-of-abstraction also exists StateReaderV3.
+IntraBlockState does call StateReaderV3, and StateReaderV3 call StateV3(in-mem-cache) or DB (RoTx).
+WAL - also on this level-of-abstraction - agg.ApplyHistory does write updates from TxTask to WAL.
+WAL it's like StateV3 just without reading api (can only write there). WAL flush to disk periodically (doesn't need much RAM).
+
+- RoTx - see everything what committed to DB. Commit is done by rwLoop goroutine.
+rwloop does:
+  - stop all Workers
+  - call StateV3.Flush()
+  - commit
+  - open new RoTx
+  - set new RoTx to all Workers
+  - start Workersстартует воркеры
+
+When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
+*/
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, applyTx kv.RwTx,
 	parallel bool, logPrefix string,
@@ -292,10 +332,6 @@ func ExecV3(ctx context.Context,
 					return ctx.Err()
 
 				case <-logEvery.C:
-					if list := agg.SlowContextsList(); len(list) > 0 {
-						log.Info("[dbg] Active agg ctx", "list", list)
-					}
-
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
 					progress.Log(rs, in, rws, rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
 					if agg.HasBackgroundFilesBuild() {

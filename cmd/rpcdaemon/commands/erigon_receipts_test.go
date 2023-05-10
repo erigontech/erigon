@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestGetLogs(t *testing.T) {
@@ -34,7 +35,7 @@ func TestGetLogs(t *testing.T) {
 	agg := m.HistoryV3Components()
 	baseApi := NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 	{
-		ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000)
+		ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 
 		logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
 		assert.NoError(err)

@@ -152,12 +152,16 @@ func DecodeRLPTransaction(s *rlp.Stream) (Transaction, error) {
 	return UnmarshalTransactionFromBinary(b)
 }
 
+// DecodeWrappedTransaction decodes network encoded transaction with or without
+// envelope. When transaction is not network encoded use DecodeTransaction.
 func DecodeWrappedTransaction(data []byte) (Transaction, error) {
 	if len(data) == 0 {
 		return nil, io.EOF
 	}
-	if data[0] < 0x80 {
-		// the encoding is canonical, not RLP
+	if data[0] < 0x80 { // the encoding is canonical, not RLP
+		// EIP-4844 tx differs from previous types of transactions in network
+		// encoding. It's SSZ encoded and includes blobs and kzgs.
+		// Previous types have no different encoding.
 		return UnmarshalWrappedTransactionFromBinary(data)
 	}
 	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
@@ -177,6 +181,7 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	return DecodeRLPTransaction(s)
 }
 
+// Parse transaction without envelope.
 func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 	if len(data) <= 1 {
 		return nil, fmt.Errorf("short input: %v", len(data))
@@ -211,6 +216,7 @@ func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 	}
 }
 
+// Parse network encoded transaction without envelope.
 func UnmarshalWrappedTransactionFromBinary(data []byte) (Transaction, error) {
 	if len(data) <= 1 {
 		return nil, fmt.Errorf("short input: %v", len(data))

@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestSenders(t *testing.T) {
@@ -111,7 +112,7 @@ func TestSenders(t *testing.T) {
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
 	cfg := StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil), nil)
-	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx, false /* quiet */)
+	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx, log.New())
 	assert.NoError(t, err)
 
 	{

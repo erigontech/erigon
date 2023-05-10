@@ -67,7 +67,7 @@ func (f *ForkChoiceStore) Ancestor(root libcommon.Hash, slot uint64) libcommon.H
 }
 
 // getCheckpointState computes and caches checkpoint states.
-func (f *ForkChoiceStore) getCheckpointState(checkpoint cltypes.Checkpoint) (*state.BeaconState, error) {
+func (f *ForkChoiceStore) getCheckpointState(checkpoint cltypes.Checkpoint) (*checkpointState, error) {
 	// check if it can be found in cache.
 	if state, ok := f.checkpointStates.Get(checkpoint); ok {
 		return state, nil
@@ -88,7 +88,10 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint cltypes.Checkpoint) (*st
 			return nil, err
 		}
 	}
+	mixes := baseState.RandaoMixes()
+	checkpointState := newCheckpointState(f.forkGraph.Config(), baseState.Validators(),
+		mixes[:], baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), state.Epoch(baseState.BeaconState))
 	// Cache in memory what we are left with.
-	f.checkpointStates.Add(checkpoint, baseState)
-	return baseState, nil
+	f.checkpointStates.Add(checkpoint, checkpointState)
+	return checkpointState, nil
 }

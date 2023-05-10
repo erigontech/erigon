@@ -15,9 +15,8 @@ import (
 )
 
 var NoRequestHandlers = map[string]bool{
-	MetadataProtocolV1:          true,
-	MetadataProtocolV2:          true,
-	LightClientFinalityUpdateV1: true,
+	MetadataProtocolV1: true,
+	MetadataProtocolV2: true,
 }
 
 func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topic string, peerId peer.ID) ([]byte, bool, error) {

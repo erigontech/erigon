@@ -82,16 +82,18 @@ func init() {
 var rootCmd = &cobra.Command{
 	Use:   "txpool",
 	Short: "Launch external Transaction Pool instance - same as built-into Erigon, but as independent Process",
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return debug.SetupCobra(cmd)
-	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		logging.SetupLoggerCmd("txpool", cmd)
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "txpool"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return
+		}
 
-		if err := doTxpool(cmd.Context()); err != nil {
+		if err := doTxpool(cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Error(err.Error())
 			}
@@ -100,7 +102,7 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func doTxpool(ctx context.Context) error {
+func doTxpool(ctx context.Context, logger log.Logger) error {
 	creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
 	if err != nil {
 		return fmt.Errorf("could not connect to remoteKv: %w", err)

@@ -5,17 +5,17 @@ import (
 )
 
 // ProcessSyncCommitteeUpdate implements processing for the sync committee update. unfortunately there is no easy way to test it.
-func ProcessSyncCommitteeUpdate(state *state.BeaconState) error {
-	if (state.Epoch()+1)%state.BeaconConfig().EpochsPerSyncCommitteePeriod != 0 {
+func ProcessSyncCommitteeUpdate(s *state.BeaconState) error {
+	if (state.Epoch(s.BeaconState)+1)%s.BeaconConfig().EpochsPerSyncCommitteePeriod != 0 {
 		return nil
 	}
 	// Set new current sync committee.
-	state.SetCurrentSyncCommittee(state.NextSyncCommittee())
+	s.SetCurrentSyncCommittee(s.NextSyncCommittee())
 	// Compute next new sync committee
-	committee, err := state.ComputeNextSyncCommittee()
+	committee, err := s.ComputeNextSyncCommittee()
 	if err != nil {
 		return err
 	}
-	state.SetNextSyncCommittee(committee)
+	s.SetNextSyncCommittee(committee)
 	return nil
 }

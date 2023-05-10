@@ -5,6 +5,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 // OnAttestation processes incoming attestations. TODO(Giulio2002): finish it with forward changesets.
@@ -24,18 +25,20 @@ func (f *ForkChoiceStore) OnAttestation(attestation *cltypes.Attestation, fromBl
 	if targetState == nil {
 		return fmt.Errorf("target state does not exist")
 	}
-	attestationIndicies, err := targetState.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
+	// Now we need to find the attesting indicies.
+
+	attestationIndicies, err := targetState.getAttestingIndicies(attestation.Data, attestation.AggregationBits)
 	if err != nil {
 		return err
 	}
 	if !fromBlock {
 
-		indexedAttestation, err := targetState.GetIndexedAttestation(attestation, attestationIndicies)
+		indexedAttestation := state.GetIndexedAttestation(attestation, attestationIndicies)
 		if err != nil {
 			return err
 		}
 
-		valid, err := targetState.IsValidIndexedAttestation(indexedAttestation)
+		valid, err := targetState.isValidIndexedAttestation(indexedAttestation)
 		if err != nil {
 			return err
 		}

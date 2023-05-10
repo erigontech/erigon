@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func ValidateTxLookups(chaindata string) error {
+func ValidateTxLookups(chaindata string, logger log.Logger) error {
 	db := mdbx.MustOpen(chaindata)
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
@@ -33,7 +33,7 @@ func ValidateTxLookups(chaindata string) error {
 	}()
 	t := time.Now()
 	defer func() {
-		log.Info("Validation ended", "it took", time.Since(t))
+		logger.Info("Validation ended", "it took", time.Since(t))
 	}()
 	var blockNum uint64
 	iterations := 0
@@ -51,7 +51,7 @@ func ValidateTxLookups(chaindata string) error {
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNum)
 
 		if body == nil {
-			log.Error("Empty body", "blocknum", blockNum)
+			logger.Error("Empty body", "blocknum", blockNum)
 			break
 		}
 		blockBytes.SetUint64(blockNum)
@@ -61,7 +61,7 @@ func ValidateTxLookups(chaindata string) error {
 			val, err := tx.GetOne(kv.TxLookup, txn.Hash().Bytes())
 			iterations++
 			if iterations%100000 == 0 {
-				log.Info("Validated", "entries", iterations, "number", blockNum)
+				logger.Info("Validated", "entries", iterations, "number", blockNum)
 
 			}
 			if !bytes.Equal(val, bn) {

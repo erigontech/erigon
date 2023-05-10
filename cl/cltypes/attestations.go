@@ -286,11 +286,11 @@ func (a *Attestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 }
 
 // DecodeSSZ ssz unmarshals the Attestation object
-func (a *Attestation) DecodeSSZ(buf []byte) error {
+func (a *Attestation) DecodeSSZ(buf []byte, version int) error {
 	var err error
 	size := uint64(len(buf))
 	if size < 228 {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[Attestation] err: %s", ssz.ErrLowBufferSize)
 	}
 
 	tail := buf
@@ -299,7 +299,7 @@ func (a *Attestation) DecodeSSZ(buf []byte) error {
 	if a.Data == nil {
 		a.Data = new(AttestationData)
 	}
-	if err = a.Data.DecodeSSZ(buf[4:132]); err != nil {
+	if err = a.Data.DecodeSSZ(buf[4:132], version); err != nil {
 		return err
 	}
 
@@ -316,10 +316,6 @@ func (a *Attestation) DecodeSSZ(buf []byte) error {
 	a.AggregationBits = append(a.AggregationBits, buf...)
 
 	return err
-}
-
-func (a *Attestation) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return a.DecodeSSZ(buf)
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the Attestation object
@@ -385,15 +381,15 @@ func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 }
 
 // DecodeSSZ ssz unmarshals the IndexedAttestation object
-func (i *IndexedAttestation) DecodeSSZ(buf []byte) error {
+func (i *IndexedAttestation) DecodeSSZ(buf []byte, version int) error {
 	var err error
 	size := uint64(len(buf))
 	if size < 228 {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[IndexedAttestation] err: %s", ssz.ErrLowBufferSize)
 	}
 
 	i.Data = new(AttestationData)
-	if err = i.Data.DecodeSSZ(buf[4:132]); err != nil {
+	if err = i.Data.DecodeSSZ(buf[4:132], version); err != nil {
 		return err
 	}
 
@@ -468,11 +464,11 @@ func (a *AttestationData) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 // DecodeSSZ ssz unmarshals the AttestationData object
-func (a *AttestationData) DecodeSSZ(buf []byte) error {
+func (a *AttestationData) DecodeSSZ(buf []byte, version int) error {
 	var err error
 	size := uint64(len(buf))
 	if size != uint64(a.EncodingSizeSSZ()) {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[AttestationData] err: %s", ssz.ErrLowBufferSize)
 	}
 
 	a.Slot = ssz.UnmarshalUint64SSZ(buf)
@@ -482,18 +478,14 @@ func (a *AttestationData) DecodeSSZ(buf []byte) error {
 	a.Source = new(Checkpoint)
 	a.Target = new(Checkpoint)
 
-	if err = a.Source.DecodeSSZ(buf[48:88]); err != nil {
+	if err = a.Source.DecodeSSZ(buf[48:88], version); err != nil {
 		return err
 	}
-	if err = a.Target.DecodeSSZ(buf[88:]); err != nil {
+	if err = a.Target.DecodeSSZ(buf[88:], version); err != nil {
 		return err
 	}
 
 	return err
-}
-
-func (a *AttestationData) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return a.DecodeSSZ(buf)
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the AttestationData object
@@ -547,10 +539,10 @@ func (a *PendingAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 }
 
 // DecodeSSZ ssz unmarshals the Attestation object
-func (a *PendingAttestation) DecodeSSZ(buf []byte) error {
+func (a *PendingAttestation) DecodeSSZ(buf []byte, version int) error {
 	var err error
 	if len(buf) < a.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[PendingAttestation] err: %s", ssz.ErrLowBufferSize)
 	}
 
 	tail := buf
@@ -559,7 +551,7 @@ func (a *PendingAttestation) DecodeSSZ(buf []byte) error {
 	if a.Data == nil {
 		a.Data = new(AttestationData)
 	}
-	if err = a.Data.DecodeSSZ(buf[4:132]); err != nil {
+	if err = a.Data.DecodeSSZ(buf[4:132], version); err != nil {
 		return err
 	}
 
@@ -574,10 +566,6 @@ func (a *PendingAttestation) DecodeSSZ(buf []byte) error {
 	a.AggregationBits = append(a.AggregationBits, buf...)
 
 	return err
-}
-
-func (a *PendingAttestation) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return a.DecodeSSZ(buf)
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the Attestation object

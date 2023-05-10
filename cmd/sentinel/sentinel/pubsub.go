@@ -38,13 +38,12 @@ const SSZSnappyCodec = "ssz_snappy"
 type TopicName string
 
 const (
-	BeaconBlockTopic                 TopicName = "beacon_block"
-	BeaconAggregateAndProofTopic     TopicName = "beacon_aggregate_and_proof"
-	VoluntaryExitTopic               TopicName = "voluntary_exit"
-	ProposerSlashingTopic            TopicName = "proposer_slashing"
-	AttesterSlashingTopic            TopicName = "attester_slashing"
-	LightClientFinalityUpdateTopic   TopicName = "light_client_finality_update"
-	LightClientOptimisticUpdateTopic TopicName = "light_client_optimistic_update"
+	BeaconBlockTopic             TopicName = "beacon_block"
+	BeaconAggregateAndProofTopic TopicName = "beacon_aggregate_and_proof"
+	VoluntaryExitTopic           TopicName = "voluntary_exit"
+	ProposerSlashingTopic        TopicName = "proposer_slashing"
+	AttesterSlashingTopic        TopicName = "attester_slashing"
+	BlobSidecarTopic             TopicName = "blob_sidecar_%d" // This topic needs an index
 )
 
 type GossipTopic struct {
@@ -72,14 +71,6 @@ var AttesterSlashingSsz = GossipTopic{
 	Name:     AttesterSlashingTopic,
 	CodecStr: SSZSnappyCodec,
 }
-var LightClientFinalityUpdateSsz = GossipTopic{
-	Name:     LightClientFinalityUpdateTopic,
-	CodecStr: SSZSnappyCodec,
-}
-var LightClientOptimisticUpdateSsz = GossipTopic{
-	Name:     LightClientOptimisticUpdateTopic,
-	CodecStr: SSZSnappyCodec,
-}
 
 type GossipManager struct {
 	ch            chan *pubsub.Message
@@ -96,6 +87,16 @@ func NewGossipManager(
 		subscriptions: map[string]*GossipSubscription{},
 	}
 	return g
+}
+
+func GossipSidecarTopics(maxBlobs uint64) (ret []GossipTopic) {
+	for i := uint64(0); i < maxBlobs; i++ {
+		ret = append(ret, GossipTopic{
+			Name:     TopicName(fmt.Sprintf(string(BlobSidecarTopic), i)),
+			CodecStr: SSZSnappyCodec,
+		})
+	}
+	return
 }
 
 func (s *GossipManager) Recv() <-chan *pubsub.Message {

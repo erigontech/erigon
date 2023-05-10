@@ -16,37 +16,47 @@
 
 package clique
 
-/*
 import (
+	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 )
+
 // API is a user facing RPC API to allow controlling the signer and voting
 // mechanisms of the proof-of-authority scheme.
 type API struct {
-	chain  consensus.ChainHeaderReader
+	// chain  consensus.ChainHeaderReader
+	db     kv.RoDB
 	clique *Clique
 }
 
 // GetSnapshot retrieves the state snapshot at a given block.
-func (api *API) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
+func (api *API) GetSnapshot(ctx context.Context, number *rpc.BlockNumber) (*Snapshot, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx}
+
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
 	if number == nil || *number == rpc.LatestBlockNumber {
-		header = api.chain.CurrentHeader()
+		header = chain.CurrentHeader()
 	} else {
-		header = api.chain.GetHeaderByNumber(uint64(number.Int64()))
+		header = chain.GetHeaderByNumber(uint64(number.Int64()))
 	}
 	// Ensure we have an actually valid block and return its snapshot
 	if header == nil {
 		return nil, errUnknownBlock
 	}
 
-	snap, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
+	snap, err := api.clique.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -55,13 +65,20 @@ func (api *API) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 }
 
 // GetSnapshotAtHash retrieves the state snapshot at a given block.
-func (api *API) GetSnapshotAtHash(hash libcommon.Hash) (*Snapshot, error) {
-	header := api.chain.GetHeaderByHash(hash)
+func (api *API) GetSnapshotAtHash(ctx context.Context, hash libcommon.Hash) (*Snapshot, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx}
+
+	header := chain.GetHeaderByHash(hash)
 	if header == nil {
 		return nil, errUnknownBlock
 	}
 
-	snap, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
+	snap, err := api.clique.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -70,37 +87,51 @@ func (api *API) GetSnapshotAtHash(hash libcommon.Hash) (*Snapshot, error) {
 }
 
 // GetSigners retrieves the list of authorized signers at the specified block.
-func (api *API) GetSigners(number *rpc.BlockNumber) ([]libcommon.Address, error) {
+func (api *API) GetSigners(ctx context.Context, number *rpc.BlockNumber) ([]libcommon.Address, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx}
+
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
 	if number == nil || *number == rpc.LatestBlockNumber {
-		header = api.chain.CurrentHeader()
+		header = chain.CurrentHeader()
 	} else {
-		header = api.chain.GetHeaderByNumber(uint64(number.Int64()))
+		header = chain.GetHeaderByNumber(uint64(number.Int64()))
 	}
 	// Ensure we have an actually valid block and return the signers from its snapshot
 	if header == nil {
 		return nil, errUnknownBlock
 	}
 
-	snap, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
+	snap, err := api.clique.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return nil, err
 	}
-	return snap.signers(), nil
+	return snap.GetSigners(), nil
 }
 
 // GetSignersAtHash retrieves the list of authorized signers at the specified block.
-func (api *API) GetSignersAtHash(hash libcommon.Hash) ([]libcommon.Address, error) {
-	header := api.chain.GetHeaderByHash(hash)
-	if header == nil {
-		return nil, errUnknownBlock
-	}
-	snap, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
+func (api *API) GetSignersAtHash(ctx context.Context, hash libcommon.Hash) ([]libcommon.Address, error) {
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return snap.signers(), nil
+	defer tx.Rollback()
+	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx}
+
+	header := chain.GetHeaderByHash(hash)
+	if header == nil {
+		return nil, errUnknownBlock
+	}
+	snap, err := api.clique.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
+	if err != nil {
+		return nil, err
+	}
+	return snap.GetSigners(), nil
 }
 
 // Proposals returns the current proposals the node tries to uphold and vote on.
@@ -134,28 +165,35 @@ func (api *API) Discard(address libcommon.Address) {
 }
 
 type status struct {
-	InturnPercent float64                `json:"inturnPercent"`
+	InturnPercent float64                   `json:"inturnPercent"`
 	SigningStatus map[libcommon.Address]int `json:"sealerActivity"`
-	NumBlocks     uint64                 `json:"numBlocks"`
+	NumBlocks     uint64                    `json:"numBlocks"`
 }
 
 // Status returns the status of the last N blocks,
 // - the number of active signers,
 // - the number of signers,
 // - the percentage of in-turn blocks
-func (api *API) Status() (*status, error) {
+func (api *API) Status(ctx context.Context) (*status, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	chain := consensus.ChainReaderImpl{Cfg: *api.clique.ChainConfig, Db: tx}
+
 	var (
 		numBlocks = uint64(64)
-		header    = api.chain.CurrentHeader()
+		header    = chain.CurrentHeader()
 		diff      = uint64(0)
 		optimals  = 0
 	)
-	snap, err := api.clique.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
+	snap, err := api.clique.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return nil, err
 	}
 	var (
-		signers = snap.signers()
+		signers = snap.GetSigners()
 		end     = header.Number.Uint64()
 		start   = end - numBlocks
 	)
@@ -168,11 +206,11 @@ func (api *API) Status() (*status, error) {
 		signStatus[s] = 0
 	}
 	for n := start; n < end; n++ {
-		h := api.chain.GetHeaderByNumber(n)
+		h := chain.GetHeaderByNumber(n)
 		if h == nil {
 			return nil, fmt.Errorf("missing block %d", n)
 		}
-		if h.Difficulty.Cmp(diffInTurn) == 0 {
+		if h.Difficulty.Cmp(DiffInTurn) == 0 {
 			optimals++
 		}
 		diff += h.Difficulty.Uint64()
@@ -188,4 +226,3 @@ func (api *API) Status() (*status, error) {
 		NumBlocks:     numBlocks,
 	}, nil
 }
-*/

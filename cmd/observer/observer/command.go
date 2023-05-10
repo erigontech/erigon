@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type CommandFlags struct {
@@ -219,16 +220,18 @@ func (command *Command) withErigonLogPath() {
 }
 
 func (command *Command) ExecuteContext(ctx context.Context, runFunc func(ctx context.Context, flags CommandFlags) error) error {
-	command.command.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		// apply debug flags
-		return debug.SetupCobra(cmd)
-	}
 	command.command.PersistentPostRun = func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	}
 	command.command.RunE = func(cmd *cobra.Command, args []string) error {
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "observer"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return err
+		}
 		defer debug.Exit()
-		err := runFunc(cmd.Context(), command.flags)
+		err = runFunc(cmd.Context(), command.flags)
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}

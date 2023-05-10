@@ -16,13 +16,14 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
+	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -190,8 +191,7 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 }
 
 func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.ProtocolVersionRequest) (*remote.ProtocolVersionReply, error) {
-	// Hardcoding to avoid import cycle
-	return &remote.ProtocolVersionReply{Id: 66}, nil
+	return &remote.ProtocolVersionReply{Id: direct.ETH66}, nil
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
@@ -311,8 +311,8 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 		Time:        req.Timestamp,
 		MixDigest:   gointerfaces.ConvertH256ToHash(req.PrevRandao),
 		UncleHash:   types.EmptyUncleHash,
-		Difficulty:  serenity.SerenityDifficulty,
-		Nonce:       serenity.SerenityNonce,
+		Difficulty:  merge.ProofOfStakeDifficulty,
+		Nonce:       merge.ProofOfStakeNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
 		TxHash:      types.DeriveSha(types.BinaryTransactions(req.Transactions)),
 	}

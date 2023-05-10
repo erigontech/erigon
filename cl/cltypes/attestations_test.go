@@ -61,7 +61,7 @@ func TestAttestationMarshalUnmarmashal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, common.Bytes2Hex(marshalled[:]), expectedAttestationMarshalled)
 	testData2 := &cltypes.Attestation{}
-	require.NoError(t, testData2.DecodeSSZ(marshalled))
+	require.NoError(t, testData2.DecodeSSZ(marshalled, 0))
 	require.Equal(t, testData2, attestations[0])
 }
 
@@ -73,7 +73,7 @@ func TestPendingAttestation(t *testing.T) {
 	encodedExpected, err := utils.DecompressSnappy(pendingAttestationTest)
 	require.NoError(t, err)
 
-	require.NoError(t, att.DecodeSSZ(encodedExpected))
+	require.NoError(t, att.DecodeSSZ(encodedExpected, 0))
 
 	root, err := att.HashSSZ()
 	require.NoError(t, err)

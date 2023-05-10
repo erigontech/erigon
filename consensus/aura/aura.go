@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"container/list"
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -39,7 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -806,21 +806,23 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 
 }
 
-func (c *AuRa) ApplyRewards(header *types.Header, state *state.IntraBlockState, syscall consensus.SystemCall) error {
-	beneficiaries, _, rewards, err := calculateRewards(c, header, syscall)
+func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, syscall consensus.SystemCall) error {
+	rewards, err := c.CalculateRewards(nil, header, nil, syscall)
 	if err != nil {
 		return err
 	}
-	for i := range beneficiaries {
-		//fmt.Printf("beneficiary: n=%d, %x,%d\n", header.Number.Uint64(), beneficiaries[i], rewards[i])
-		state.AddBalance(beneficiaries[i], rewards[i])
+	for _, r := range rewards {
+		state.AddBalance(r.Beneficiary, &r.Amount)
 	}
 	return nil
 }
 
 // word `signal epoch` == word `pending epoch`
-func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) (types.Transactions, types.Receipts, error) {
-	if err := c.ApplyRewards(header, state, syscall); err != nil {
+func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+) (types.Transactions, types.Receipts, error) {
+	if err := c.applyRewards(header, state, syscall); err != nil {
 		return nil, nil, err
 	}
 
@@ -1279,13 +1281,11 @@ func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash libcommon.Hash) []
 	return res
 }
 
-func calculateRewards(aura *AuRa, header *types.Header, syscall consensus.SystemCall) (beneficiaries []libcommon.Address, rewardKind []aurainterfaces.RewardKind, rewards []*uint256.Int, err error) {
-	beneficiaries = append(beneficiaries, header.Coinbase)
-	rewardKind = append(rewardKind, aurainterfaces.RewardAuthor)
-
+func (c *AuRa) CalculateRewards(_ *chain.Config, header *types.Header, _ []*types.Header, syscall consensus.SystemCall,
+) ([]consensus.Reward, error) {
 	var rewardContractAddress BlockRewardContract
 	var foundContract bool
-	for _, c := range aura.cfg.BlockRewardContractTransitions {
+	for _, c := range c.cfg.BlockRewardContractTransitions {
 		if c.blockNum > header.Number.Uint64() {
 			break
 		}
@@ -1293,39 +1293,38 @@ func calculateRewards(aura *AuRa, header *types.Header, syscall consensus.System
 		rewardContractAddress = c
 	}
 	if foundContract {
-		beneficiaries, rewards = callBlockRewardAbi(rewardContractAddress.address, syscall, beneficiaries, rewardKind)
-		rewardKind = make([]aurainterfaces.RewardKind, len(beneficiaries))
-		for i := 0; i < len(rewardKind); i++ {
-			rewardKind[i] = aurainterfaces.RewardExternal
+		beneficiaries := []libcommon.Address{header.Coinbase}
+		rewardKind := []consensus.RewardKind{consensus.RewardAuthor}
+		var amounts []*uint256.Int
+		beneficiaries, amounts = callBlockRewardAbi(rewardContractAddress.address, syscall, beneficiaries, rewardKind)
+		rewards := make([]consensus.Reward, len(amounts))
+		for i, amount := range amounts {
+			rewards[i].Beneficiary = beneficiaries[i]
+			rewards[i].Kind = consensus.RewardExternal
+			rewards[i].Amount = *amount
 		}
-	} else {
-		// block_reward.iter.rev().find(|&(block, _)| *block <= number)
-		var reward BlockReward
-		var found bool
-		for i := range aura.cfg.BlockReward {
-			if aura.cfg.BlockReward[i].blockNum > header.Number.Uint64() {
-				break
-			}
-			found = true
-			reward = aura.cfg.BlockReward[i]
-		}
-		if !found {
-			panic("Current block's reward is not found; this indicates a chain config error")
-		}
-
-		for range beneficiaries {
-			rewards = append(rewards, reward.amount)
-		}
+		return rewards, nil
 	}
 
-	//err = aura.cfg.Validators.onCloseBlock(header, aura.OurSigningAddress)
-	//if err != nil {
-	//	return
-	//}
-	return
+	// block_reward.iter.rev().find(|&(block, _)| *block <= number)
+	var reward BlockReward
+	var found bool
+	for i := range c.cfg.BlockReward {
+		if c.cfg.BlockReward[i].blockNum > header.Number.Uint64() {
+			break
+		}
+		found = true
+		reward = c.cfg.BlockReward[i]
+	}
+	if !found {
+		return nil, errors.New("Current block's reward is not found; this indicates a chain config error")
+	}
+
+	r := consensus.Reward{Beneficiary: header.Coinbase, Kind: consensus.RewardAuthor, Amount: *reward.amount}
+	return []consensus.Reward{r}, nil
 }
 
-func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.SystemCall, beneficiaries []libcommon.Address, rewardKind []aurainterfaces.RewardKind) ([]libcommon.Address, []*uint256.Int) {
+func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.SystemCall, beneficiaries []libcommon.Address, rewardKind []consensus.RewardKind) ([]libcommon.Address, []*uint256.Int) {
 	castedKind := make([]uint16, len(rewardKind))
 	for i := range rewardKind {
 		castedKind[i] = uint16(rewardKind[i])

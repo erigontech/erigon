@@ -21,17 +21,13 @@ func (p *ProposerSlashing) EncodeSSZ(dst []byte) (buf []byte, err error) {
 	return
 }
 
-func (p *ProposerSlashing) DecodeSSZ(buf []byte) error {
+func (p *ProposerSlashing) DecodeSSZ(buf []byte, version int) error {
 	p.Header1 = new(SignedBeaconBlockHeader)
 	p.Header2 = new(SignedBeaconBlockHeader)
-	if err := p.Header1.DecodeSSZ(buf); err != nil {
+	if err := p.Header1.DecodeSSZ(buf, version); err != nil {
 		return err
 	}
-	return p.Header2.DecodeSSZ(buf[p.Header1.EncodingSizeSSZ():])
-}
-
-func (p *ProposerSlashing) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return p.DecodeSSZ(buf)
+	return p.Header2.DecodeSSZ(buf[p.Header1.EncodingSizeSSZ():], version)
 }
 
 func (p *ProposerSlashing) EncodingSizeSSZ() int {
@@ -75,18 +71,14 @@ func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (a *AttesterSlashing) DecodeSSZ(buf []byte) error {
+func (a *AttesterSlashing) DecodeSSZ(buf []byte, version int) error {
 	a.Attestation_1 = new(IndexedAttestation)
 	a.Attestation_2 = new(IndexedAttestation)
 	attestation2Offset := ssz.DecodeOffset(buf[4:])
-	if err := a.Attestation_1.DecodeSSZ(buf[8:attestation2Offset]); err != nil {
+	if err := a.Attestation_1.DecodeSSZ(buf[8:attestation2Offset], version); err != nil {
 		return err
 	}
-	return a.Attestation_2.DecodeSSZ(buf[attestation2Offset:])
-}
-
-func (a *AttesterSlashing) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return a.DecodeSSZ(buf)
+	return a.Attestation_2.DecodeSSZ(buf[attestation2Offset:], version)
 }
 
 func (a *AttesterSlashing) EncodingSizeSSZ() int {

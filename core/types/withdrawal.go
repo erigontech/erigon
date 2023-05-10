@@ -93,13 +93,9 @@ func (obj *Withdrawal) EncodeSSZ() []byte {
 	return buf
 }
 
-func (obj *Withdrawal) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return obj.DecodeSSZ(buf)
-}
-
-func (obj *Withdrawal) DecodeSSZ(buf []byte) error {
+func (obj *Withdrawal) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < obj.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[Withdrawal] err: %s", ssz.ErrLowBufferSize)
 	}
 	obj.Index = ssz.UnmarshalUint64SSZ(buf)
 	obj.Validator = ssz.UnmarshalUint64SSZ(buf[8:])

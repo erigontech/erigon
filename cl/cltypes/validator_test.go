@@ -56,7 +56,7 @@ var testValidatorRoot2 = common.HexToHash("0bcf6f6b165f8ba4a0b59fad23195a83097cd
 func TestValidatorSlashed(t *testing.T) {
 	encoded, _ := testValidator1.EncodeSSZ([]byte{0x2})
 	decodedValidator := &cltypes.Validator{}
-	require.NoError(t, decodedValidator.DecodeSSZ(encoded[1:]))
+	require.NoError(t, decodedValidator.DecodeSSZ(encoded[1:], 0))
 	root, err := decodedValidator.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(root), testValidatorRoot1)
@@ -65,7 +65,7 @@ func TestValidatorSlashed(t *testing.T) {
 func TestValidatorNonSlashed(t *testing.T) {
 	encoded, _ := utils.DecompressSnappy(testValidator2Snappified)
 	decodedValidator := &cltypes.Validator{}
-	require.NoError(t, decodedValidator.DecodeSSZ(encoded))
+	require.NoError(t, decodedValidator.DecodeSSZ(encoded, 0))
 	encoded2, _ := decodedValidator.EncodeSSZ(nil)
 	require.Equal(t, encoded2, encoded)
 	require.Equal(t, decodedValidator, testValidator2)

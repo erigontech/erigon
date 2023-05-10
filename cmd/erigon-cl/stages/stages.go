@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarly used to process side forks and memory execution.
@@ -20,30 +21,30 @@ func ConsensusStages(ctx context.Context, historyReconstruction StageHistoryReco
 		{
 			ID:          stages.BeaconHistoryReconstruction,
 			Description: "Download beacon blocks backwards.",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				return SpawnStageHistoryReconstruction(historyReconstruction, s, tx, ctx)
 			},
-			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx) error {
+			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
 				return nil
 			},
 		},
 		{
 			ID:          stages.BeaconState,
 			Description: "Execute Consensus Layer transition",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				return SpawnStageBeaconState(beaconState, tx, ctx)
 			},
-			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx) error {
+			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
 				return nil
 			},
 		},
 		{
 			ID:          stages.BeaconBlocks,
 			Description: "Download beacon blocks forward.",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				return SpawnStageForkChoice(forkchoice, s, tx, ctx)
 			},
-			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx) error {
+			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
 				return nil
 			},
 		},
@@ -72,6 +73,7 @@ func NewConsensusStagedSync(ctx context.Context,
 	beaconDBCfg *rawdb.BeaconDataConfig,
 	gossipManager *network.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
+	logger log.Logger,
 ) (*stagedsync.Sync, error) {
 	return stagedsync.New(
 		ConsensusStages(
@@ -82,5 +84,6 @@ func NewConsensusStagedSync(ctx context.Context,
 		),
 		ConsensusUnwindOrder,
 		ConsensusPruneOrder,
+		logger,
 	), nil
 }

@@ -129,9 +129,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	}
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		if err := debug.SetupCobra(cmd); err != nil {
-			return err
-		}
 
 		err := cfg.StateCache.CacheSize.UnmarshalText([]byte(stateCacheStr))
 		if err != nil {

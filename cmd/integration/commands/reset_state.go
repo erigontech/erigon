@@ -20,6 +20,7 @@ import (
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
@@ -27,8 +28,18 @@ var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	Run: func(cmd *cobra.Command, args []string) {
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return
+		}
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
 		ctx, _ := common.RootContext()
-		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
 		sn, agg := allSnapshots(ctx, db)
 		defer sn.Close()
@@ -41,8 +52,7 @@ var cmdResetState = &cobra.Command{
 			return
 		}
 
-		err := reset2.ResetState(db, ctx, chain, "")
-		if err != nil {
+		if err = reset2.ResetState(db, ctx, chain, ""); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Error(err.Error())
 			}

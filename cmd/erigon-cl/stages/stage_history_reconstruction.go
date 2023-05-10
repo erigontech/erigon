@@ -197,7 +197,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	// Send in ordered manner EL blocks to Execution Layer
 	if err := executionPayloadsCollector.Load(tx, kv.BeaconBlocks, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		payload := &cltypes.Eth1Block{}
-		if err := payload.DecodeSSZWithVersion(v, int(clparams.BellatrixVersion)); err != nil {
+		if err := payload.DecodeSSZ(v, int(clparams.BellatrixVersion)); err != nil {
 			return err
 		}
 		if err := executionPayloadInsertionBatch.WriteExecutionPayload(payload); err != nil {

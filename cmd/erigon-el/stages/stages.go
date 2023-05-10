@@ -17,9 +17,10 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 )
 
-func nullStage(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
+func nullStage(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 	return nil
 }
 func ExecutionStages(ctx context.Context, sm prune.Mode, snapshots stagedsync.SnapshotsCfg, headers stagedsync.HeadersCfg, cumulativeIndex stagedsync.CumulativeIndexCfg, blockHashCfg stagedsync.BlockHashesCfg, bodies stagedsync.BodiesCfg, senders stagedsync.SendersCfg, exec stagedsync.ExecuteBlockCfg, hashState stagedsync.HashStateCfg, trieCfg stagedsync.TrieCfg, history stagedsync.HistoryCfg, logIndex stagedsync.LogIndexCfg, callTraces stagedsync.CallTracesCfg, txLookup stagedsync.TxLookupCfg, finish stagedsync.FinishCfg, test bool) []*stagedsync.Stage {
@@ -42,6 +43,7 @@ func NewStagedSync(ctx context.Context,
 	forkValidator *engineapi.ForkValidator,
 	engine consensus.Engine,
 	transactionsV3 bool,
+	logger log.Logger,
 ) (*stagedsync.Sync, error) {
 	dirs := cfg.Dirs
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots, transactionsV3)
@@ -127,5 +129,6 @@ func NewStagedSync(ctx context.Context,
 			runInTestMode),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
+		logger,
 	), nil
 }

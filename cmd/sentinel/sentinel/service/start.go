@@ -31,16 +31,16 @@ func createSentinel(cfg *sentinel.SentinelConfig, db kv.RoDB) (*sentinel.Sentine
 	if err := sent.Start(); err != nil {
 		return nil, err
 	}
-	gossip_topics := []sentinel.GossipTopic{
+	gossipTopics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
-		// Cause problem due to buggy msg id will uncomment in the future.
 		//sentinel.BeaconAggregateAndProofSsz,
 		//sentinel.VoluntaryExitSsz,
 		//sentinel.ProposerSlashingSsz,
 		//sentinel.AttesterSlashingSsz,
 	}
+	// gossipTopics = append(gossipTopics, sentinel.GossipSidecarTopics(params.MaxBlobsPerBlock)...)
 
-	for _, v := range gossip_topics {
+	for _, v := range gossipTopics {
 		if err := sent.Unsubscribe(v); err != nil {
 			log.Error("[Sentinel] failed to start sentinel", "err", err)
 			continue

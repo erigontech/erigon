@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
@@ -48,7 +49,12 @@ var checkChangeSetsCmd = &cobra.Command{
 	Use:   "checkChangeSets",
 	Short: "Re-executes historical transactions in read-only mode and checks that their outputs match the database ChangeSets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := log.New()
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "check_change_sets"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return err
+		}
 		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck, transactionsV3)
 	},
 }
@@ -257,7 +263,7 @@ func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64,
 
 		blockNum++
 		if blockNum%1000 == 0 {
-			log.Info("Checked", "blocks", blockNum)
+			logger.Info("Checked", "blocks", blockNum)
 		}
 
 		// Check for interrupts
@@ -267,6 +273,6 @@ func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64,
 		default:
 		}
 	}
-	log.Info("Checked", "blocks", blockNum, "next time specify --block", blockNum, "duration", time.Since(startTime))
+	logger.Info("Checked", "blocks", blockNum, "next time specify --block", blockNum, "duration", time.Since(startTime))
 	return nil
 }

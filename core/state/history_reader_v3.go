@@ -40,7 +40,7 @@ func (hr *HistoryReaderV3) ReadAccountData(address libcommon.Address) (*accounts
 		return nil, err
 	}
 	var a accounts.Account
-	if err := a.DecodeForStorage(enc); err != nil {
+	if err := accounts.DeserialiseV3(&a, enc); err != nil {
 		return nil, fmt.Errorf("ReadAccountData(%x): %w", address, err)
 	}
 	if hr.trace {

@@ -250,6 +250,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		}
 	}
 	st.gasRemaining += st.msg.Gas()
+
 	if err := st.gp.SubDataGas(dataGasUsed); err != nil {
 		return err
 	}

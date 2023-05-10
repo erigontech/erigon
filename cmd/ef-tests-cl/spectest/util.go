@@ -42,7 +42,7 @@ func ReadSsz(root fs.FS, version clparams.StateVersion, name string, obj ssz.Unm
 	if err != nil {
 		return fmt.Errorf("couldnt read meta: %w", err)
 	}
-	return utils.DecodeSSZSnappyWithVersion(obj, bts, int(version))
+	return utils.DecodeSSZSnappy(obj, bts, int(version))
 }
 
 func ReadSszOld(root fs.FS, obj ssz.Unmarshaler, version clparams.StateVersion, name string) error {
@@ -56,7 +56,7 @@ func ReadBeaconState(root fs.FS, version clparams.StateVersion, name string) (*s
 	}
 	config := clparams.MainnetBeaconConfig
 	testState := state.New(&config)
-	if err := utils.DecodeSSZSnappyWithVersion(testState, sszSnappy, int(version)); err != nil {
+	if err := utils.DecodeSSZSnappy(testState, sszSnappy, int(version)); err != nil {
 		return nil, err
 	}
 	return testState, nil
@@ -73,7 +73,7 @@ func ReadBlock(root fs.FS, version clparams.StateVersion, index int) (*cltypes.S
 		return nil, err
 	}
 	blk := &cltypes.SignedBeaconBlock{}
-	if err = utils.DecodeSSZSnappyWithVersion(blk, blockBytes, int(version)); err != nil {
+	if err = utils.DecodeSSZSnappy(blk, blockBytes, int(version)); err != nil {
 		return nil, err
 	}
 
@@ -90,7 +90,7 @@ func ReadAnchorBlock(root fs.FS, version clparams.StateVersion, name string) (*c
 		return nil, err
 	}
 	blk := &cltypes.BeaconBlock{}
-	if err = utils.DecodeSSZSnappyWithVersion(blk, blockBytes, int(version)); err != nil {
+	if err = utils.DecodeSSZSnappy(blk, blockBytes, int(version)); err != nil {
 		return nil, err
 	}
 
@@ -125,7 +125,7 @@ func ReadBlocks(root fs.FS, version clparams.StateVersion) ([]*cltypes.SignedBea
 			break
 		}
 		blk := &cltypes.SignedBeaconBlock{}
-		if err = utils.DecodeSSZSnappyWithVersion(blk, blockBytes, int(version)); err != nil {
+		if err = utils.DecodeSSZSnappy(blk, blockBytes, int(version)); err != nil {
 			return nil, err
 		}
 		blocks = append(blocks, blk)

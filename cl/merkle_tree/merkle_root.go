@@ -2,26 +2,7 @@ package merkle_tree
 
 import (
 	"errors"
-	"fmt"
-
-	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/prysmaticlabs/gohashtree"
 )
-
-// merkleizeTrieLeaves returns intermediate roots of given leaves.
-func merkleizeTrieLeaves(leaves [][32]byte) ([32]byte, error) {
-	layer := make([][32]byte, len(leaves)/2)
-	for len(leaves) > 1 {
-		if !utils.IsPowerOf2(uint64(len(leaves))) {
-			return [32]byte{}, fmt.Errorf("hash layer is a non power of 2: %d", len(leaves))
-		}
-		if err := gohashtree.Hash(layer, leaves); err != nil {
-			return [32]byte{}, err
-		}
-		leaves = layer[:len(leaves)/2]
-	}
-	return leaves[0], nil
-}
 
 func MerkleRootFromLeaves(leaves [][32]byte) ([32]byte, error) {
 	if len(leaves) == 0 {
@@ -31,7 +12,7 @@ func MerkleRootFromLeaves(leaves [][32]byte) ([32]byte, error) {
 		return leaves[0], nil
 	}
 	hashLayer := leaves
-	return merkleizeTrieLeaves(hashLayer)
+	return globalHasher.merkleizeTrieLeaves(hashLayer)
 }
 
 // getDepth returns the depth of a merkle tree with a given number of nodes.

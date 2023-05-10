@@ -15,9 +15,9 @@ type processFunc func(s *state.BeaconState) error
 
 func runEpochTransitionConsensusTest(t *testing.T, sszSnappyTest, sszSnappyExpected []byte, f processFunc) {
 	testState := state.New(&clparams.MainnetBeaconConfig)
-	require.NoError(t, utils.DecodeSSZSnappyWithVersion(testState, sszSnappyTest, int(clparams.BellatrixVersion)))
+	require.NoError(t, utils.DecodeSSZSnappy(testState, sszSnappyTest, int(clparams.BellatrixVersion)))
 	expectedState := state.New(&clparams.MainnetBeaconConfig)
-	require.NoError(t, utils.DecodeSSZSnappyWithVersion(expectedState, sszSnappyExpected, int(clparams.BellatrixVersion)))
+	require.NoError(t, utils.DecodeSSZSnappy(expectedState, sszSnappyExpected, int(clparams.BellatrixVersion)))
 	// Make up state transistor
 	require.NoError(t, f(testState))
 	haveRoot, err := testState.HashSSZ()

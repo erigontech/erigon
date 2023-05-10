@@ -48,7 +48,7 @@ func RunCases(t *testing.T, app Appendix, root fs.FS) {
 														}
 														handler, err := runner.GetHandler(value.HandlerName)
 														if err != nil {
-															t.Skipf("handler not found: %s", value.RunnerName)
+															t.Skipf("handler not found: %s/%s", value.RunnerName, value.HandlerName)
 															return
 														}
 														subfs, err := fs.Sub(root, filepath.Join(
