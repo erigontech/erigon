@@ -23,7 +23,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if err := b.BeaconState.DecodeSSZ(buf, version); err != nil {
 		return err
 	}
-	sz := metrics.NewHistogram("decode_ssz_beacon_state_size")
+	sz := methelp.NewHistTimer("decode_ssz_beacon_state_size")
 	sz.Update(float64(len(buf)))
 	h.PutSince()
 	return b.initBeaconState()

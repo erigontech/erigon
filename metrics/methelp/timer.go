@@ -1,6 +1,7 @@
 package methelp
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -17,7 +18,7 @@ type HistTimer struct {
 
 func NewHistTimer(name string) *HistTimer {
 	return &HistTimer{
-		Histogram: metrics.NewHistogram(name),
+		Histogram: metrics.GetOrCreateCompatibleHistogram(name),
 		start:     time.Now(),
 		name:      name,
 	}
@@ -25,6 +26,14 @@ func NewHistTimer(name string) *HistTimer {
 
 func (h *HistTimer) PutSince() {
 	h.Histogram.UpdateDuration(h.start)
+}
+
+func (h *HistTimer) Tag(tag string, value string) *HistTimer {
+	return &HistTimer{
+		Histogram: metrics.GetOrCreateCompatibleHistogram(fmt.Sprintf(`%s{%s="%s"}`, h.name, tag, value)),
+		start:     time.Now(),
+		name:      h.name,
+	}
 }
 
 func (h *HistTimer) Child(suffix string) *HistTimer {
