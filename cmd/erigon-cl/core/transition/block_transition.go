@@ -61,6 +61,16 @@ func processBlock(state *state.BeaconState, signedBlock *cltypes.SignedBeaconBlo
 		}
 	}
 
+	if version >= clparams.DenebVersion {
+		verified, err := VerifyKzgCommitmentsAgainstTransactions(block.Body.ExecutionPayload.Transactions, block.Body.BlobKzgCommitments)
+		if err != nil {
+			return fmt.Errorf("processBlock: failed to process blob kzg commitments: %w", err)
+		}
+		if !verified {
+			return fmt.Errorf("processBlock: failed to process blob kzg commitments: commitments are not equal")
+		}
+	}
+
 	return nil
 }
 
