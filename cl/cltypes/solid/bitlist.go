@@ -6,8 +6,11 @@ import (
 )
 
 type bitlist struct {
+	// the underlying bytes that store the data
 	u []byte
+	// cap, or max size of the bitlist
 	c int
+	// current length of the bitlist
 	l int
 
 	hashBuf
