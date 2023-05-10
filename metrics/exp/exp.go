@@ -8,6 +8,8 @@ import (
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Setup starts a dedicated metrics server at the given address.
@@ -18,10 +20,11 @@ func Setup(address string) {
 		metrics2.WritePrometheus(w, true)
 	})
 	//m.Handle("/debug/metrics", ExpHandler(metrics.DefaultRegistry))
-	//m.Handle("/debug/metrics/prometheus2", promhttp.HandlerFor(prometheus2.DefaultGatherer, promhttp.HandlerOpts{
-	//	EnableOpenMetrics: true,
-	//}))
-	log.Info("Starting metrics server", "addr", fmt.Sprintf("http://%s/debug/metrics/prometheus", address))
+	http.Handle("/debug/metrics/prometheus2", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
+	log.Info("Starting metrics server", "addr",
+		fmt.Sprintf("http://%s/debug/metrics/prometheus", address),
+		fmt.Sprintf("http://%s/debug/metrics/prometheus2", address),
+	)
 	go func() {
 		if err := http.ListenAndServe(address, nil); err != nil { // nolint:gosec
 			log.Error("Failure in running metrics server", "err", err)
