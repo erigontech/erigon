@@ -17,10 +17,11 @@ type HistTimer struct {
 }
 
 func NewHistTimer(name string) *HistTimer {
+	rawName := strings.Split(name, "{")
 	return &HistTimer{
 		Histogram: metrics.GetOrCreateCompatibleHistogram(name),
 		start:     time.Now(),
-		name:      name,
+		name:      rawName[0],
 	}
 }
 
