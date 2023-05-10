@@ -28,9 +28,20 @@ func (h *HistTimer) PutSince() {
 	h.Histogram.UpdateDuration(h.start)
 }
 
-func (h *HistTimer) Tag(tag string, value string) *HistTimer {
+func (h *HistTimer) Tag(pairs ...string) *HistTimer {
+	if len(pairs)%2 != 0 {
+		pairs = append(pairs, "UNEQUAL_KEY_VALUE_TAGS")
+	}
+	toJoin := []string{}
+	for i := 0; i < len(pairs); i = i + 2 {
+		toJoin = append(toJoin, fmt.Sprintf(`%s="%s"`, pairs[i], pairs[i+1]))
+	}
+	tags := ""
+	if len(toJoin) > 0 {
+		tags = "{" + strings.Join(toJoin, ",") + "}"
+	}
 	return &HistTimer{
-		Histogram: metrics.GetOrCreateCompatibleHistogram(fmt.Sprintf(`%s{%s="%s"}`, h.name, tag, value)),
+		Histogram: metrics.GetOrCreateCompatibleHistogram(h.name + tags),
 		start:     time.Now(),
 		name:      h.name,
 	}
