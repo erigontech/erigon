@@ -518,7 +518,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 	}
 	var res *core.ExecutionResult
 	if err := b.m.DB.View(context.Background(), func(tx kv.Tx) (err error) {
-		s := state.New(state.NewPlainStateReader(tx))
+		s := state.New(b.m.NewStateReader(tx))
 		res, err = b.callContract(ctx, call, b.pendingBlock, s)
 		if err != nil {
 			return err

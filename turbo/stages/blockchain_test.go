@@ -1010,7 +1010,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		st := state.New(state.NewDbStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		assert.NoError(t, err)
 		assert.False(t, st.Exist(theAddr), "Contract should've been removed")
 		return nil
@@ -1752,7 +1752,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		}
 		err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 
-			statedb := state.New(state.NewDbStateReader(tx))
+			statedb := state.New(m.NewStateReader(tx))
 			// If all is correct, then slot 1 and 2 are zero
 			key1 := libcommon.HexToHash("01")
 			var got uint256.Int
