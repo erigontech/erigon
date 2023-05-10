@@ -150,6 +150,7 @@ func NewFlatDBTrieLoader(logPrefix string, rd RetainDeciderWithMarker, hc HashCo
 			shc:   shc,
 			trace: trace,
 		},
+		trace:       trace,
 		ihSeek:      make([]byte, 0, 128),
 		accSeek:     make([]byte, 0, 128),
 		storageSeek: make([]byte, 0, 128),
@@ -245,6 +246,10 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcomm
 			if err = l.accountValue.DecodeForStorage(v); err != nil {
 				return EmptyRoot, fmt.Errorf("fail DecodeForStorage: %w", err)
 			}
+			if l.trace {
+				fmt.Printf("account %x nonce: %d balance %d ch %x\n", k, l.accountValue.Nonce, l.accountValue.Balance.Uint64(), l.accountValue.CodeHash)
+			}
+
 			if err = l.receiver.Receive(AccountStreamItem, kHex, nil, &l.accountValue, nil, nil, false, 0); err != nil {
 				return EmptyRoot, err
 			}
@@ -276,6 +281,10 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcomm
 					if keyIsBefore(ihKS, l.kHexS) { // read until next AccTrie
 						break
 					}
+					if l.trace {
+						fmt.Printf("storage: %x => %x\n", l.kHexS, vS)
+					}
+
 					if err = l.receiver.Receive(StorageStreamItem, accWithInc, l.kHexS, nil, vS[32:], nil, false, 0); err != nil {
 						return EmptyRoot, err
 					}

@@ -191,6 +191,12 @@ func executeBlock(
 		}
 	}
 
+	if cfg.changeSetHook != nil {
+		if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
+			cfg.changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
+		}
+	}
+
 	if writeCallTraces {
 		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
 	}
@@ -239,12 +245,6 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		workersCount = 1
 	}
 	cfg.agg.SetWorkers(estimate.CompressSnapshot.WorkersQuarter())
-	//defer cfg.agg.StartWrites().FinishWrites()
-
-	defer func() {
-		log.Warn("Exit ExecBlockV3", "err", err)
-		//debug.PrintStack()
-	}()
 
 	if initialCycle {
 		reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)
@@ -535,6 +535,9 @@ Loop:
 
 	if err = s.Update(tx, stageProgress); err != nil {
 		return err
+	}
+	if err = batch.Commit(); err != nil {
+		return fmt.Errorf("batch commit: %w", err)
 	}
 	_, err = rawdb.IncrementStateVersion(tx)
 	if err != nil {

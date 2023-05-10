@@ -121,6 +121,7 @@ func ExecuteBlockEphemerally(
 		misc.ApplyDAOHardFork(ibs)
 	}
 	incTxNum() // preblock tx
+	noop := state.NewNoopWriter()
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
 		incTxNum()
@@ -135,7 +136,7 @@ func ExecuteBlockEphemerally(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, stateWriter, header, tx, usedGas, *vmConfig, excessDataGas)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -174,7 +175,7 @@ func ExecuteBlockEphemerally(
 	}
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), state.NewNoopWriter(), chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, excessDataGas); err != nil {
+		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, excessDataGas); err != nil {
 			return nil, err
 		}
 	}

@@ -848,7 +848,6 @@ func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueue, out
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("block hash mismatch: %x != %x bn =%d, txn= %d", rh, txTask.BlockRoot[:], txTask.BlockNum, txTask.TxNum)
 			}
 		}
-
 		triggers += rs.CommitTxNum(txTask.Sender, txTask.TxNum, in)
 		outputTxNum++
 		if backPressure != nil {
