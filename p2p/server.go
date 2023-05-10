@@ -196,13 +196,13 @@ type Server struct {
 	peerFeed     event.Feed
 	log          log.Logger
 
-	nodedb           *enode.DB
-	localnode        *enode.LocalNode
-	localnodeAddress string
-	ntab             *discover.UDPv4
-	DiscV5           *discover.UDPv5
-	discmix          *enode.FairMix
-	dialsched        *dialScheduler
+	nodedb             *enode.DB
+	localnode          *enode.LocalNode
+	localnodeAddrCache atomic.Pointer[string]
+	ntab               *discover.UDPv4
+	DiscV5             *discover.UDPv5
+	discmix            *enode.FairMix
+	dialsched          *dialScheduler
 
 	// Channels into the run loop.
 	quitCtx                 context.Context
@@ -530,6 +530,11 @@ func (srv *Server) Start(ctx context.Context) error {
 	return nil
 }
 
+func (srv *Server) updateLocalNodeStaticAddrCache() {
+	localNodeAddr := srv.localnode.Node().URLv4()
+	srv.localnodeAddrCache.Store(&localNodeAddr)
+
+}
 func (srv *Server) setupLocalNode() error {
 	// Create the devp2p handshake.
 	pubkey := crypto.MarshalPubkey(&srv.PrivateKey.PublicKey)
@@ -546,7 +551,7 @@ func (srv *Server) setupLocalNode() error {
 	srv.nodedb = db
 	srv.localnode = enode.NewLocalNode(db, srv.PrivateKey)
 	srv.localnode.SetFallbackIP(net.IP{127, 0, 0, 1})
-	srv.localnodeAddress = srv.localnode.Node().URLv4()
+	srv.updateLocalNodeStaticAddrCache()
 	// TODO: check conflicts
 	for _, p := range srv.Protocols {
 		for _, e := range p.Attributes {
@@ -560,6 +565,7 @@ func (srv *Server) setupLocalNode() error {
 		// ExtIP doesn't block, set the IP right away.
 		ip, _ := srv.NAT.ExternalIP()
 		srv.localnode.SetStaticIP(ip)
+		srv.updateLocalNodeStaticAddrCache()
 	default:
 		// Ask the router about the IP. This takes a while and blocks startup,
 		// do it in the background.
@@ -569,6 +575,7 @@ func (srv *Server) setupLocalNode() error {
 			defer srv.loopWG.Done()
 			if ip, err := srv.NAT.ExternalIP(); err == nil {
 				srv.localnode.SetStaticIP(ip)
+				srv.updateLocalNodeStaticAddrCache()
 			}
 		}()
 	}
@@ -747,7 +754,7 @@ func (srv *Server) doPeerOp(fn peerOpFunc) {
 func (srv *Server) run() {
 	defer debug.LogPanic()
 	if len(srv.Config.Protocols) > 0 {
-		srv.log.Info("Started P2P networking", "version", srv.Config.Protocols[0].Version, "self", srv.localnodeAddress, "name", srv.Name)
+		srv.log.Info("Started P2P networking", "version", srv.Config.Protocols[0].Version, "self", *srv.localnodeAddrCache.Load(), "name", srv.Name)
 	}
 	defer srv.loopWG.Done()
 	defer srv.nodedb.Close()
