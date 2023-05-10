@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"fmt"
+
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
@@ -9,8 +11,7 @@ import (
 
 type Slot uint64
 type Blob gokzg4844.Blob
-type KZGCommitment gokzg4844.KZGCommitment // [48]byte
-type KZGProof gokzg4844.KZGProof           // [48]byte
+type KZGProof gokzg4844.KZGProof // [48]byte
 
 type BlobSideCar struct {
 	BlockRoot       libcommon.Hash
@@ -48,7 +49,7 @@ func (b *BlobSideCar) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (b *BlobSideCar) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[BlobSideCar] err: %w", ssz.ErrLowBufferSize)
 	}
 	copy(b.BlockRoot[:], buf[:32])
 	pos := 32
@@ -65,6 +66,7 @@ func (b *BlobSideCar) DecodeSSZ(buf []byte, version int) error {
 	b.ProposerIndex = ssz.UnmarshalUint64SSZ(buf[pos:])
 	pos += 8
 
+	b.Blob = &Blob{}
 	copy(b.Blob[:], buf[pos:])
 	pos += int(BYTES_PER_BLOB)
 
@@ -81,7 +83,7 @@ func (b *BlobSideCar) EncodingSizeSSZ() int {
 }
 
 func (b *BlobSideCar) HashSSZ() ([32]byte, error) {
-	KZGCommitmentLeave, err := merkle_tree.PublicKeyRoot(b.KZGCommitment)
+	KZGCommitmentLeave, err := b.KZGCommitment.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -92,17 +94,17 @@ func (b *BlobSideCar) HashSSZ() ([32]byte, error) {
 
 	blobLeave := [][32]byte{}
 	previous_pos := 0
-	for pos := 32; pos < int(BYTES_PER_BLOB)/32; pos += 32 {
+	for pos := 32; pos <= int(BYTES_PER_BLOB); pos += 32 {
 		blobLeave = append(blobLeave, libcommon.BytesToHash(b.Blob[previous_pos:pos]))
 		previous_pos = pos
 	}
 
-	blobRoot, err := merkle_tree.ArraysRoot(blobLeave, 4096)
+	blobRoot, err := merkle_tree.MerkleizeVector(blobLeave, 4096)
 	if err != nil {
 		return [32]byte{}, err
 	}
 
-	return merkle_tree.ArraysRoot([][32]byte{
+	return merkle_tree.MerkleizeVector([][32]byte{
 		b.BlockRoot,
 		merkle_tree.Uint64Root(b.Index),
 		merkle_tree.Uint64Root(uint64(b.Slot)),
@@ -125,7 +127,10 @@ func (b *SignedBlobSideCar) Copy() *SignedBlobSideCar {
 }
 
 func (b *SignedBlobSideCar) EncodeSSZ(buf []byte) ([]byte, error) {
-	encodedMessage, _ := b.Message.EncodeSSZ([]byte{})
+	encodedMessage, err := b.Message.EncodeSSZ(buf)
+	if err != nil {
+		return []byte{}, fmt.Errorf("[SignedBlobSideCar] err: %w", err)
+	}
 
 	buf = append(buf, encodedMessage...)
 	buf = append(buf, b.Signature[:]...)
@@ -134,6 +139,11 @@ func (b *SignedBlobSideCar) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (b *SignedBlobSideCar) DecodeSSZ(buf []byte, version int) error {
+	if len(buf) < b.EncodingSizeSSZ() {
+		return fmt.Errorf("[SignedBlobSideCar] err: %w", ssz.ErrLowBufferSize)
+	}
+
+	b.Message = &BlobSideCar{}
 	pos := b.Message.EncodingSizeSSZ()
 	err := b.Message.DecodeSSZ(buf[:pos], version)
 	if err != nil {
@@ -199,28 +209,31 @@ func (b *BlobIdentifier) HashSSZ() ([32]byte, error) {
 	}, 2)
 }
 
-type BlobKZGCommitment KZGCommitment
+type KZGCommitment gokzg4844.KZGCommitment
 
-func (b *BlobKZGCommitment) Copy() *BlobKZGCommitment {
+func (b *KZGCommitment) Copy() *KZGCommitment {
 	copy := *b
 	return &copy
 }
 
-func (b *BlobKZGCommitment) EncodeSSZ(buf []byte) ([]byte, error) {
+func (b *KZGCommitment) EncodeSSZ(buf []byte) ([]byte, error) {
 	buf = append(buf, b[:]...)
 	return buf, nil
 }
 
-func (b *BlobKZGCommitment) DecodeSSZ(buf []byte, version int) error {
+func (b *KZGCommitment) DecodeSSZ(buf []byte, version int) error {
+	if len(buf) < b.EncodingSizeSSZ() {
+		return fmt.Errorf("[KZGCommitment] err: %w", ssz.ErrLowBufferSize)
+	}
 	copy(b[:], buf)
 
 	return nil
 }
 
-func (b *BlobKZGCommitment) EncodingSizeSSZ() int {
+func (b *KZGCommitment) EncodingSizeSSZ() int {
 	return 48
 }
 
-func (b *BlobKZGCommitment) HashSSZ() ([32]byte, error) {
+func (b *KZGCommitment) HashSSZ() ([32]byte, error) {
 	return merkle_tree.PublicKeyRoot(*b)
 }
