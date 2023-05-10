@@ -435,11 +435,11 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		if err != nil {
 			return err
 		}
-		//stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
-		//for _, sender := range senders {
-		//	_, _ = stateReader.ReadAccountData(sender)
-		//}
-		//_, _ = stateReader.ReadAccountData(block.Coinbase())
+		stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
+		for _, sender := range senders {
+			_, _ = stateReader.ReadAccountData(sender)
+		}
+		_, _ = stateReader.ReadAccountData(block.Coinbase())
 		_, _ = block, senders
 		return nil
 	}
