@@ -577,15 +577,21 @@ func blocksReadAheadFunc(ctx context.Context, cfg *ExecuteBlockCfg, blockNum uin
 	for _, sender := range senders {
 		a, _ := stateReader.ReadAccountData(sender)
 		if a != nil && a.Incarnation > 0 {
-			_, _ = stateReader.ReadAccountCode(sender, a.Incarnation, a.CodeHash)
+			code, _ := stateReader.ReadAccountCode(sender, a.Incarnation, a.CodeHash)
+			if len(code) > 0 {
+				_, _ = code[0], code[len(code)-1]
+			}
 		}
 	}
-	for _, tx := range block.Transactions() {
-		to := tx.GetTo()
+	for _, txn := range block.Transactions() {
+		to := txn.GetTo()
 		if to != nil {
 			a, _ := stateReader.ReadAccountData(*to)
 			if a != nil && a.Incarnation > 0 {
-				_, _ = stateReader.ReadAccountCode(*to, a.Incarnation, a.CodeHash)
+				code, _ := stateReader.ReadAccountCode(*to, a.Incarnation, a.CodeHash)
+				if len(code) > 0 {
+					_, _ = code[0], code[len(code)-1]
+				}
 			}
 		}
 	}
