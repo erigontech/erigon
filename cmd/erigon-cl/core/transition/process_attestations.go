@@ -46,19 +46,27 @@ func processAttestationPostAltair(s *state.BeaconState, attestation *cltypes.Att
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
 
+	h := methelp.NewHistTimer("beacon_process_attestation_post_altair")
+
+	c := h.Tag("step", "get_participation_flag")
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(attestation.Data, stateSlot-data.Slot)
 	if err != nil {
 		return nil, err
 	}
+	c.PutSince()
 
+	c = h.Tag("step", "get_attesting_indices")
 	attestingIndicies, err := s.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, true)
 	if err != nil {
 		return nil, err
 	}
+	c.PutSince()
+
 	var proposerRewardNumerator uint64
 
 	isCurrentEpoch := data.Target.Epoch == currentEpoch
 
+	c = h.Tag("step", "update_attestation")
 	for _, attesterIndex := range attestingIndicies {
 		val, err := s.ValidatorEffectiveBalance(int(attesterIndex))
 		if err != nil {
@@ -75,11 +83,14 @@ func processAttestationPostAltair(s *state.BeaconState, attestation *cltypes.Att
 			proposerRewardNumerator += baseReward * weight
 		}
 	}
+	c.PutSince()
 	// Reward proposer
+	c = h.Tag("step", "get_proposer_index")
 	proposer, err := s.GetBeaconProposerIndex()
 	if err != nil {
 		return nil, err
 	}
+	c.PutSince()
 	proposerRewardDenominator := (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
 	return attestingIndicies, state.IncreaseBalance(s.BeaconState, proposer, reward)

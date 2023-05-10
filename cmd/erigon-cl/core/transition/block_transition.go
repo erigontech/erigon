@@ -106,7 +106,10 @@ func processOperations(state *state.BeaconState, blockBody *cltypes.BeaconBody, 
 	c.PutSince()
 
 	// Process each attestations
-	c = h.Tag("operation", "attestations")
+	c = h.Tag("operation", "attestations", "validation", "false")
+	if fullValidation {
+		c = h.Tag("operation", "attestations", "validation", "true")
+	}
 	if err := ProcessAttestations(state, blockBody.Attestations, fullValidation); err != nil {
 		return fmt.Errorf("ProcessAttestation: %s", err)
 	}
