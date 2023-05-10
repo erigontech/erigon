@@ -49,7 +49,7 @@ func (b *BlobSideCar) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (b *BlobSideCar) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
-		return fmt.Errorf("[BlobSideCar] err: %v", ssz.ErrLowBufferSize)
+		return fmt.Errorf("[BlobSideCar] err: %w", ssz.ErrLowBufferSize)
 	}
 	copy(b.BlockRoot[:], buf[:32])
 	pos := 32
@@ -129,7 +129,7 @@ func (b *SignedBlobSideCar) Copy() *SignedBlobSideCar {
 func (b *SignedBlobSideCar) EncodeSSZ(buf []byte) ([]byte, error) {
 	encodedMessage, err := b.Message.EncodeSSZ(buf)
 	if err != nil {
-		return []byte{}, fmt.Errorf("[SignedBlobSideCar] err: %v", err)
+		return []byte{}, fmt.Errorf("[SignedBlobSideCar] err: %w", err)
 	}
 
 	buf = append(buf, encodedMessage...)
@@ -140,7 +140,7 @@ func (b *SignedBlobSideCar) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (b *SignedBlobSideCar) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
-		return fmt.Errorf("[SignedBlobSideCar] err: %v", ssz.ErrLowBufferSize)
+		return fmt.Errorf("[SignedBlobSideCar] err: %w", ssz.ErrLowBufferSize)
 	}
 
 	b.Message = &BlobSideCar{}
@@ -223,7 +223,7 @@ func (b *KZGCommitment) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (b *KZGCommitment) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
-		return fmt.Errorf("[KZGCommitment] err: %v", ssz.ErrLowBufferSize)
+		return fmt.Errorf("[KZGCommitment] err: %w", ssz.ErrLowBufferSize)
 	}
 	copy(b[:], buf)
 
