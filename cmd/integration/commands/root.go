@@ -54,7 +54,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(opts kv2.MdbxOpts, applyMigrations bool) (kv.RwDB, error) {
+func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
 	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
 	// to read all options from DB, instead of overriding them
 	opts = opts.Flags(func(f uint) uint { return f | mdbx.Accede })
@@ -67,10 +67,10 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool) (kv.RwDB, error) {
 			return nil, err
 		}
 		if has {
-			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
+			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
 			db = opts.Exclusive().MustOpen()
-			if err := migrator.Apply(db, datadirCli); err != nil {
+			if err := migrator.Apply(db, datadirCli, logger); err != nil {
 				return nil, err
 			}
 			db.Close()

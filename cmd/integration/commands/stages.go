@@ -63,7 +63,7 @@ var cmdStageSnapshots = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -89,7 +89,7 @@ var cmdStageHeaders = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -115,7 +115,7 @@ var cmdStageBodies = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -141,7 +141,7 @@ var cmdStageSenders = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -167,7 +167,7 @@ var cmdStageExec = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -195,7 +195,7 @@ var cmdStageTrie = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -221,7 +221,7 @@ var cmdStageHashState = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -247,7 +247,7 @@ var cmdStageHistory = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -273,7 +273,7 @@ var cmdLogIndex = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -299,7 +299,7 @@ var cmdCallTraces = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -325,7 +325,7 @@ var cmdStageTxLookup = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -350,7 +350,7 @@ var cmdPrintStages = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata).Readonly(), false)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata).Readonly(), false, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -376,7 +376,7 @@ var cmdPrintMigrations = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -401,7 +401,7 @@ var cmdRemoveMigration = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), false, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -426,7 +426,7 @@ var cmdRunMigrations = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -446,7 +446,7 @@ var cmdSetPrune = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -471,7 +471,7 @@ var cmdSetSnap = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -502,7 +502,7 @@ var cmdForceSetHistoryV3 = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return

@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -60,7 +61,8 @@ func TestTxsBeginEnd(t *testing.T) {
 
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = []Migration{txsBeginEnd}
-	err = migrator.Apply(db, tmpDir)
+	logger := log.New()
+	err = migrator.Apply(db, tmpDir, logger)
 	require.NoError(err)
 
 	err = db.View(context.Background(), func(tx kv.Tx) error {

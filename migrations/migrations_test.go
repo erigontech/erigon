@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,7 +50,8 @@ func TestApplyWithInit(t *testing.T) {
 
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
-	err := migrator.Apply(db, "")
+	logger := log.New()
+	err := migrator.Apply(db, "", logger)
 	require.NoError(err)
 	var applied map[string][]byte
 	err = db.View(context.Background(), func(tx kv.Tx) error {
@@ -65,7 +67,7 @@ func TestApplyWithInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", logger)
 	require.NoError(err)
 	err = db.View(context.Background(), func(tx kv.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -109,7 +111,8 @@ func TestApplyWithoutInit(t *testing.T) {
 
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
-	err = migrator.Apply(db, "")
+	logger := log.New()
+	err = migrator.Apply(db, "", logger)
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -127,7 +130,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", logger)
 	require.NoError(err)
 
 	err = db.View(context.Background(), func(tx kv.Tx) error {
@@ -173,7 +176,8 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
-	err = migrator.Apply(db, "")
+	logger := log.New()
+	err = migrator.Apply(db, "", logger)
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -191,7 +195,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", logger)
 	require.NoError(err)
 	err = db.View(context.Background(), func(tx kv.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -257,7 +261,8 @@ func TestValidation(t *testing.T) {
 	}
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
-	err := migrator.Apply(db, "")
+	logger := log.New()
+	err := migrator.Apply(db, "", logger)
 	require.True(errors.Is(err, ErrMigrationNonUniqueName))
 
 	var applied map[string][]byte
@@ -283,7 +288,8 @@ func TestCommitCallRequired(t *testing.T) {
 	}
 	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
-	err := migrator.Apply(db, "")
+	logger := log.New()
+	err := migrator.Apply(db, "", logger)
 	require.True(errors.Is(err, ErrMigrationCommitNotCalled))
 
 	var applied map[string][]byte
