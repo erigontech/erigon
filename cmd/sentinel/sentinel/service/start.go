@@ -89,7 +89,11 @@ WaitingLoop:
 		}
 	}
 
-	conn, err := grpc.DialContext(ctx, srvCfg.Addr, grpc.WithTransportCredentials(creds), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMessageSize)))
+	conn, err := grpc.DialContext(ctx,
+		srvCfg.Addr,
+		grpc.WithTransportCredentials(creds),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMessageSize)),
+	)
 	if err != nil {
 		return nil, err
 	}
