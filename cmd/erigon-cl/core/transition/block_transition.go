@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/metrics/methelp"
 )
 
 // processBlock takes a block and transitions the state to the next slot, using the provided execution payload if enabled.
@@ -19,48 +20,65 @@ func processBlock(state *state.BeaconState, signedBlock *cltypes.SignedBeaconBlo
 		return fmt.Errorf("processBlock: wrong state version for block at slot %d", block.Slot)
 	}
 
+	h := methelp.NewHistTimer("beacon_process_block")
+
+	c := h.Child("block_header_dur")
 	// Process the block header.
 	if err := ProcessBlockHeader(state, block, fullValidation); err != nil {
 		return fmt.Errorf("processBlock: failed to process block header: %v", err)
 	}
+	c.PutSince()
 
 	// Process execution payload if enabled.
 	if version >= clparams.BellatrixVersion && executionEnabled(state, block.Body.ExecutionPayload) {
 		if state.Version() >= clparams.CapellaVersion {
 			// Process withdrawals in the execution payload.
+			c = h.Child("withdrawals")
 			if err := ProcessWithdrawals(state, block.Body.ExecutionPayload.Withdrawals, fullValidation); err != nil {
 				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 			}
+			c.PutSince()
 		}
 
 		// Process the execution payload.
+		c = h.Child("execution_payload")
 		if err := ProcessExecutionPayload(state, block.Body.ExecutionPayload); err != nil {
 			return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
 		}
+		c.PutSince()
 	}
 
 	// Process RANDAO reveal.
+	c = h.Child("randao_reveal")
 	if err := ProcessRandao(state, block.Body.RandaoReveal, block.ProposerIndex, fullValidation); err != nil {
 		return fmt.Errorf("processBlock: failed to process RANDAO reveal: %v", err)
 	}
+	c.PutSince()
 
 	// Process Eth1 data.
+	c = h.Child("eth1_data")
 	if err := ProcessEth1Data(state, block.Body.Eth1Data); err != nil {
 		return fmt.Errorf("processBlock: failed to process Eth1 data: %v", err)
 	}
+	c.PutSince()
 
 	// Process block body operations.
+	c = h.Child("operations")
 	if err := processOperations(state, block.Body, fullValidation); err != nil {
 		return fmt.Errorf("processBlock: failed to process block body operations: %v", err)
 	}
+	c.PutSince()
 
 	// Process sync aggregate in case of Altair version.
 	if version >= clparams.AltairVersion {
+		c = h.Child("sync_aggregate")
 		if err := ProcessSyncAggregate(state, block.Body.SyncAggregate, fullValidation); err != nil {
 			return fmt.Errorf("processBlock: failed to process sync aggregate: %v", err)
 		}
+		c.PutSince()
 	}
 
+	h.PutSince()
 	return nil
 }
 
