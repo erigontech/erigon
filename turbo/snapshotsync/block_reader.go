@@ -364,7 +364,6 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 				return block, senders, nil
 			}
 			var txs []types.Transaction
-			var senders []libcommon.Address
 			ok, err = back.sn.ViewTxs(blockHeight, func(seg *TxnSegment) error {
 				txs, senders, err = back.txsFromSnapshot(baseTxnId, txsAmount, seg, buf)
 				if err != nil {

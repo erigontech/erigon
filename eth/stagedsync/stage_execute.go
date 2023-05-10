@@ -420,39 +420,24 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		batch.Rollback()
 	}()
 
-	readAheadFunc := func(blockNum uint64) error {
-		tx, err := cfg.db.BeginRo(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-
-		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-		if err != nil {
-			return err
-		}
-		block, senders, err := cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
-		if err != nil {
-			return err
-		}
-		stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
-		for _, sender := range senders {
-			_, _ = stateReader.ReadAccountData(sender)
-		}
-		_, _ = stateReader.ReadAccountData(block.Coinbase())
-		_, _ = block, senders
-		return nil
-	}
 	const readAheadBlocks = 100
-	readAhead := make(chan uint64, 10*readAheadBlocks)
+	readAhead := make(chan uint64, readAheadBlocks)
 	defer close(readAhead)
 	if initialCycle {
-		g, _ := errgroup.WithContext(ctx)
+		ctxForErrgroup, cancel := context.WithCancel(ctx)
+		defer cancel()
+		g, gCtx := errgroup.WithContext(ctxForErrgroup)
+		defer g.Wait()
 		for i := 0; i < 4; i++ {
 			g.Go(func() error {
 				for bn := range readAhead {
-					if err := readAheadFunc(bn); err != nil {
-						panic(err)
+					select {
+					case <-gCtx.Done():
+						return gCtx.Err()
+					default:
+					}
+					if err := blocksReadAhead(gCtx, &cfg, bn); err != nil {
+						return err
 					}
 				}
 				return nil
@@ -564,6 +549,29 @@ Loop:
 
 	logger.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	return stoppedErr
+}
+func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, blockNum uint64) error {
+	tx, err := cfg.db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+	if err != nil {
+		return err
+	}
+	block, senders, err := cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
+	if err != nil {
+		return err
+	}
+	stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
+	for _, sender := range senders {
+		_, _ = stateReader.ReadAccountData(sender)
+	}
+	_, _ = stateReader.ReadAccountData(block.Coinbase())
+	_, _ = block, senders
+	return nil
 }
 
 func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64,
