@@ -447,10 +447,18 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	readAhead := make(chan uint64, 10*readAheadBlocks)
 	defer close(readAhead)
 	if initialCycle {
-		g, _ := errgroup.WithContext(ctx)
+		ctxForErrgroup, cancel := context.WithCancel(ctx)
+		defer cancel()
+		g, gCtx := errgroup.WithContext(ctxForErrgroup)
+		defer g.Wait()
 		for i := 0; i < 4; i++ {
 			g.Go(func() error {
 				for bn := range readAhead {
+					select {
+					case <-gCtx.Done():
+						return gCtx.Err()
+					default:
+					}
 					if err := readAheadFunc(bn); err != nil {
 						panic(err)
 					}
