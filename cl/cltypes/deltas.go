@@ -3,8 +3,8 @@ package cltypes
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 )
 
 // Deltas data, for https://github.com/ethereum/consensus-specs/tree/master/tests/formats/rewards
