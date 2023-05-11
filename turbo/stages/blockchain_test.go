@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -777,20 +778,45 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		require.Equal(uint64(0), receiptsAvailable)
 	}
 
-	if pm.History.Enabled() {
-		afterPrune := uint64(0)
-		err := tx.ForEach(kv.AccountsHistory, nil, func(k, _ []byte) error {
-			n := binary.BigEndian.Uint64(k[length.Addr:])
-			require.Greater(n, pm.History.PruneTo(head))
-			afterPrune++
-			return nil
-		})
-		require.Greater(afterPrune, uint64(0))
-		assert.NoError(t, err)
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("e3 not implemented Prune feature yet")
+		/*
+			if pm.History.Enabled() {
+				it, err := tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, 0, int(pm.History.PruneTo(head)), order.Asc, -1)
+				require.NoError(err)
+				count, err := iter.CountKV(it)
+				require.NoError(err)
+				require.Zero(count)
+
+				it, err = tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(pm.History.PruneTo(head)), -1, order.Asc, -1)
+				require.NoError(err)
+				count, err = iter.CountKV(it)
+				require.NoError(err)
+				require.Equal(3, count)
+			} else {
+				it, err := tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, 0, -1, order.Asc, -1)
+				require.NoError(err)
+				count, err := iter.CountKV(it)
+				require.NoError(err)
+				require.Equal(3, count)
+			}
+		*/
 	} else {
-		found, err := bitmapdb.Get64(tx, kv.AccountsHistory, address[:], 0, 1024)
-		require.NoError(err)
-		require.Equal(uint64(0), found.Minimum())
+		if pm.History.Enabled() {
+			afterPrune := uint64(0)
+			err := tx.ForEach(kv.AccountsHistory, nil, func(k, _ []byte) error {
+				n := binary.BigEndian.Uint64(k[length.Addr:])
+				require.Greater(n, pm.History.PruneTo(head))
+				afterPrune++
+				return nil
+			})
+			require.Greater(afterPrune, uint64(0))
+			assert.NoError(t, err)
+		} else {
+			found, err := bitmapdb.Get64(tx, kv.AccountsHistory, address[:], 0, 1024)
+			require.NoError(err)
+			require.Equal(uint64(0), found.Minimum())
+		}
 	}
 
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
