@@ -297,9 +297,10 @@ type TxPool struct {
 	blockGasLimit           atomic.Uint64
 	shanghaiTime            *big.Int
 	isPostShanghai          atomic.Bool
+	logger                  log.Logger
 }
 
-func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int) (*TxPool, error) {
+func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int, logger log.Logger) (*TxPool, error) {
 	var err error
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
@@ -338,6 +339,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		unprocessedRemoteTxs:    &types.TxSlots{},
 		unprocessedRemoteByHash: map[string]int{},
 		shanghaiTime:            shanghaiTime,
+		logger:                  logger,
 	}, nil
 }
 
@@ -369,7 +371,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	}
 	if assert.Enable {
 		if _, err := kvcache.AssertCheckValues(ctx, coreTx, cache); err != nil {
-			log.Error("AssertCheckValues", "err", err, "stack", stack.Trace().String())
+			p.logger.Error("AssertCheckValues", "err", err, "stack", stack.Trace().String())
 		}
 	}
 
@@ -390,7 +392,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	}
 
 	p.blockGasLimit.Store(stateChanges.BlockGasLimit)
-	if err := p.senders.onNewBlock(stateChanges, unwindTxs, minedTxs); err != nil {
+	if err := p.senders.onNewBlock(stateChanges, unwindTxs, minedTxs, p.logger); err != nil {
 		return err
 	}
 	_, unwindTxs, err = p.validateTxs(&unwindTxs, cacheView)
@@ -411,28 +413,28 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		}
 	}
 
-	if err := removeMined(p.all, minedTxs.Txs, p.pending, p.baseFee, p.queued, p.discardLocked); err != nil {
+	if err := removeMined(p.all, minedTxs.Txs, p.pending, p.baseFee, p.queued, p.discardLocked, p.logger); err != nil {
 		return err
 	}
 
-	//log.Debug("[txpool] new block", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "baseFee", baseFee, "blockHeight", blockHeight)
+	//p.logger.Debug("[txpool] new block", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "baseFee", baseFee, "blockHeight", blockHeight)
 
 	announcements, err := addTxsOnNewBlock(p.lastSeenBlock.Load(), cacheView, stateChanges, p.senders, unwindTxs,
 		pendingBaseFee, stateChanges.BlockGasLimit,
-		p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked)
+		p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked, p.logger)
 	if err != nil {
 		return err
 	}
 	p.pending.EnforceWorstInvariants()
 	p.baseFee.EnforceInvariants()
 	p.queued.EnforceInvariants()
-	promote(p.pending, p.baseFee, p.queued, pendingBaseFee, p.discardLocked, &announcements)
+	promote(p.pending, p.baseFee, p.queued, pendingBaseFee, p.discardLocked, &announcements, p.logger)
 	p.pending.EnforceBestInvariants()
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
 
 	if p.started.CompareAndSwap(false, true) {
-		log.Info("[txpool] Started")
+		p.logger.Info("[txpool] Started")
 	}
 
 	if p.promoted.Len() > 0 {
@@ -442,7 +444,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		}
 	}
 
-	//log.Info("[txpool] new block", "number", p.lastSeenBlock.Load(), "pendngBaseFee", pendingBaseFee, "in", time.Since(t))
+	//p.logger.Info("[txpool] new block", "number", p.lastSeenBlock.Load(), "pendngBaseFee", pendingBaseFee, "in", time.Since(t))
 	return nil
 }
 
@@ -472,7 +474,7 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 		return nil
 	}
 
-	err = p.senders.registerNewSenders(p.unprocessedRemoteTxs)
+	err = p.senders.registerNewSenders(p.unprocessedRemoteTxs, p.logger)
 	if err != nil {
 		return err
 	}
@@ -483,7 +485,7 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 	}
 
 	announcements, _, err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs,
-		p.pendingBaseFee.Load(), p.blockGasLimit.Load(), p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked, true)
+		p.pendingBaseFee.Load(), p.blockGasLimit.Load(), p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked, true, p.logger)
 	if err != nil {
 		return err
 	}
@@ -502,7 +504,7 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 	p.unprocessedRemoteTxs.Resize(0)
 	p.unprocessedRemoteByHash = map[string]int{}
 
-	//log.Info("[txpool] on new txs", "amount", len(newPendingTxs.txs), "in", time.Since(t))
+	//p.logger.Info("[txpool] on new txs", "amount", len(newPendingTxs.txs), "in", time.Since(t))
 	return nil
 }
 func (p *TxPool) getRlpLocked(tx kv.Tx, hash []byte) (rlpTxn []byte, sender common.Address, isLocal bool, err error) {
@@ -704,23 +706,23 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !isLocal && uint256.NewInt(p.cfg.MinFeeCap).Cmp(&txn.FeeCap) == 1 {
 		if txn.Traced {
-			log.Info(fmt.Sprintf("TX TRACING: validateTx underpriced idHash=%x local=%t, feeCap=%d, cfg.MinFeeCap=%d", txn.IDHash, isLocal, txn.FeeCap, p.cfg.MinFeeCap))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx underpriced idHash=%x local=%t, feeCap=%d, cfg.MinFeeCap=%d", txn.IDHash, isLocal, txn.FeeCap, p.cfg.MinFeeCap))
 		}
 		return UnderPriced
 	}
 	gas, reason := CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), nil, txn.Creation, true, true, isShanghai)
 	if txn.Traced {
-		log.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
+		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
 	if reason != Success {
 		if txn.Traced {
-			log.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed idHash=%x reason=%s", txn.IDHash, reason))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed idHash=%x reason=%s", txn.IDHash, reason))
 		}
 		return reason
 	}
 	if gas > txn.Gas {
 		if txn.Traced {
-			log.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, gas, txn.Gas))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, gas, txn.Gas))
 		}
 		return IntrinsicGas
 	}
@@ -735,7 +737,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 	senderNonce, senderBalance, _ := p.senders.info(stateCache, txn.SenderID)
 	if senderNonce > txn.Nonce {
 		if txn.Traced {
-			log.Info(fmt.Sprintf("TX TRACING: validateTx nonce too low idHash=%x nonce in state=%d, txn.nonce=%d", txn.IDHash, senderNonce, txn.Nonce))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx nonce too low idHash=%x nonce in state=%d, txn.nonce=%d", txn.IDHash, senderNonce, txn.Nonce))
 		}
 		return NonceTooLow
 	}
@@ -745,7 +747,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 	total.Add(total, &txn.Value)
 	if senderBalance.Cmp(total) < 0 {
 		if txn.Traced {
-			log.Info(fmt.Sprintf("TX TRACING: validateTx insufficient funds idHash=%x balance in state=%d, txn.gas*txn.tip=%d", txn.IDHash, senderBalance, total))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx insufficient funds idHash=%x balance in state=%d, txn.gas*txn.tip=%d", txn.IDHash, senderBalance, total))
 		}
 		return InsufficientFunds
 	}
@@ -884,11 +886,11 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots,
 			return nil, fmt.Errorf("loading txs from DB: %w", err)
 		}
 		if p.started.CompareAndSwap(false, true) {
-			log.Info("[txpool] Started")
+			p.logger.Info("[txpool] Started")
 		}
 	}
 
-	if err = p.senders.registerNewSenders(&newTransactions); err != nil {
+	if err = p.senders.registerNewSenders(&newTransactions, p.logger); err != nil {
 		return nil, err
 	}
 
@@ -898,7 +900,7 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots,
 	}
 
 	announcements, addReasons, err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs,
-		p.pendingBaseFee.Load(), p.blockGasLimit.Load(), p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked, true)
+		p.pendingBaseFee.Load(), p.blockGasLimit.Load(), p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked, true, p.logger)
 	if err == nil {
 		for i, reason := range addReasons {
 			if reason != NotSet {
@@ -916,7 +918,7 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots,
 		if reason == Success {
 			txn := newTxs.Txs[i]
 			if txn.Traced {
-				log.Info(fmt.Sprintf("TX TRACING: AddLocalTxs promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
+				p.logger.Info(fmt.Sprintf("TX TRACING: AddLocalTxs promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
 			}
 			p.promoted.Append(txn.Type, txn.Size, txn.IDHash[:])
 		}
@@ -945,7 +947,8 @@ func (p *TxPool) cache() kvcache.Cache {
 func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	newTxs types.TxSlots, pendingBaseFee, blockGasLimit uint64,
 	pending *PendingPool, baseFee, queued *SubPool,
-	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx, *types.Announcements) DiscardReason, discard func(*metaTx, DiscardReason), collect bool) (types.Announcements, []DiscardReason, error) {
+	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx, *types.Announcements) DiscardReason, discard func(*metaTx, DiscardReason), collect bool,
+	logger log.Logger) (types.Announcements, []DiscardReason, error) {
 	protocolBaseFee := calcProtocolBaseFee(pendingBaseFee)
 	if assert.Enable {
 		for _, txn := range newTxs.Txs {
@@ -982,7 +985,7 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 		}
 		discardReasons[i] = NotSet
 		if txn.Traced {
-			log.Info(fmt.Sprintf("TX TRACING: schedule sendersWithChangedState idHash=%x senderId=%d", txn.IDHash, mt.Tx.SenderID))
+			logger.Info(fmt.Sprintf("TX TRACING: schedule sendersWithChangedState idHash=%x senderId=%d", txn.IDHash, mt.Tx.SenderID))
 		}
 		sendersWithChangedState[mt.Tx.SenderID] = struct{}{}
 	}
@@ -993,10 +996,10 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 			return announcements, discardReasons, err
 		}
 		onSenderStateChange(senderID, nonce, balance, byNonce,
-			protocolBaseFee, blockGasLimit, pending, baseFee, queued, discard)
+			protocolBaseFee, blockGasLimit, pending, baseFee, queued, discard, logger)
 	}
 
-	promote(pending, baseFee, queued, pendingBaseFee, discard, &announcements)
+	promote(pending, baseFee, queued, pendingBaseFee, discard, &announcements, logger)
 	pending.EnforceBestInvariants()
 
 	return announcements, discardReasons, nil
@@ -1004,7 +1007,8 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remote.StateChangeBatch,
 	senders *sendersBatch, newTxs types.TxSlots, pendingBaseFee uint64, blockGasLimit uint64,
 	pending *PendingPool, baseFee, queued *SubPool,
-	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx, *types.Announcements) DiscardReason, discard func(*metaTx, DiscardReason)) (types.Announcements, error) {
+	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx, *types.Announcements) DiscardReason, discard func(*metaTx, DiscardReason),
+	logger log.Logger) (types.Announcements, error) {
 	protocolBaseFee := calcProtocolBaseFee(pendingBaseFee)
 	if assert.Enable {
 		for _, txn := range newTxs.Txs {
@@ -1059,7 +1063,7 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 			return announcements, err
 		}
 		onSenderStateChange(senderID, nonce, balance, byNonce,
-			protocolBaseFee, blockGasLimit, pending, baseFee, queued, discard)
+			protocolBaseFee, blockGasLimit, pending, baseFee, queued, discard, logger)
 	}
 
 	return announcements, nil
@@ -1122,7 +1126,7 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) Disca
 		p.isLocalLRU.Add(string(mt.Tx.IDHash[:]), struct{}{})
 	}
 	// All transactions are first added to the queued pool and then immediately promoted from there if required
-	p.queued.Add(mt)
+	p.queued.Add(mt, p.logger)
 	return NotSet
 }
 
@@ -1152,7 +1156,7 @@ func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) {
 // modify state_balance and state_nonce, potentially remove some elements (if transaction with some nonce is
 // included into a block), and finally, walk over the transaction records and update SubPool fields depending on
 // the actual presence of nonce gaps and what the balance is.
-func removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot, pending *PendingPool, baseFee, queued *SubPool, discard func(*metaTx, DiscardReason)) error {
+func removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot, pending *PendingPool, baseFee, queued *SubPool, discard func(*metaTx, DiscardReason), logger log.Logger) error {
 	noncesToRemove := map[uint64]uint64{}
 	for _, txn := range minedTxs {
 		nonce, ok := noncesToRemove[txn.SenderID]
@@ -1164,16 +1168,16 @@ func removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot, pending *P
 	var toDel []*metaTx // can't delete items while iterate them
 	for senderID, nonce := range noncesToRemove {
 		//if sender.all.Len() > 0 {
-		//log.Debug("[txpool] removing mined", "senderID", tx.senderID, "sender.all.len()", sender.all.Len())
+		//logger.Debug("[txpool] removing mined", "senderID", tx.senderID, "sender.all.len()", sender.all.Len())
 		//}
 		// delete mined transactions from everywhere
 		byNonce.ascend(senderID, func(mt *metaTx) bool {
-			//log.Debug("[txpool] removing mined, cmp nonces", "tx.nonce", it.metaTx.Tx.nonce, "sender.nonce", sender.nonce)
+			//logger.Debug("[txpool] removing mined, cmp nonces", "tx.nonce", it.metaTx.Tx.nonce, "sender.nonce", sender.nonce)
 			if mt.Tx.Nonce > nonce {
 				return false
 			}
 			if mt.Tx.Traced {
-				log.Info(fmt.Sprintf("TX TRACING: removeMined idHash=%x senderId=%d, currentSubPool=%s", mt.Tx.IDHash, mt.Tx.SenderID, mt.currentSubPool))
+				logger.Info(fmt.Sprintf("TX TRACING: removeMined idHash=%x senderId=%d, currentSubPool=%s", mt.Tx.IDHash, mt.Tx.SenderID, mt.currentSubPool))
 			}
 			toDel = append(toDel, mt)
 			// del from sub-pool
@@ -1203,7 +1207,7 @@ func removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot, pending *P
 // nonces, and also affect other transactions from the same sender with higher nonce, it loops through all transactions
 // for a given senderID
 func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, byNonce *BySenderAndNonce,
-	protocolBaseFee, blockGasLimit uint64, pending *PendingPool, baseFee, queued *SubPool, discard func(*metaTx, DiscardReason)) {
+	protocolBaseFee, blockGasLimit uint64, pending *PendingPool, baseFee, queued *SubPool, discard func(*metaTx, DiscardReason), logger log.Logger) {
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
@@ -1211,11 +1215,11 @@ func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint
 	var toDel []*metaTx // can't delete items while iterate them
 	byNonce.ascend(senderID, func(mt *metaTx) bool {
 		if mt.Tx.Traced {
-			log.Info(fmt.Sprintf("TX TRACING: onSenderStateChange loop iteration idHash=%x senderID=%d, senderNonce=%d, txn.nonce=%d, currentSubPool=%s", mt.Tx.IDHash, senderID, senderNonce, mt.Tx.Nonce, mt.currentSubPool))
+			logger.Info(fmt.Sprintf("TX TRACING: onSenderStateChange loop iteration idHash=%x senderID=%d, senderNonce=%d, txn.nonce=%d, currentSubPool=%s", mt.Tx.IDHash, senderID, senderNonce, mt.Tx.Nonce, mt.currentSubPool))
 		}
 		if senderNonce > mt.Tx.Nonce {
 			if mt.Tx.Traced {
-				log.Info(fmt.Sprintf("TX TRACING: removing due to low nonce for idHash=%x senderID=%d, senderNonce=%d, txn.nonce=%d, currentSubPool=%s", mt.Tx.IDHash, senderID, senderNonce, mt.Tx.Nonce, mt.currentSubPool))
+				logger.Info(fmt.Sprintf("TX TRACING: removing due to low nonce for idHash=%x senderID=%d, senderNonce=%d, txn.nonce=%d, currentSubPool=%s", mt.Tx.IDHash, senderID, senderNonce, mt.Tx.Nonce, mt.currentSubPool))
 			}
 			// del from sub-pool
 			switch mt.currentSubPool {
@@ -1294,7 +1298,7 @@ func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint
 		}
 
 		if mt.Tx.Traced {
-			log.Info(fmt.Sprintf("TX TRACING: onSenderStateChange loop iteration idHash=%x senderId=%d subPool=%b", mt.Tx.IDHash, mt.Tx.SenderID, mt.subPool))
+			logger.Info(fmt.Sprintf("TX TRACING: onSenderStateChange loop iteration idHash=%x senderId=%d subPool=%b", mt.Tx.IDHash, mt.Tx.SenderID, mt.subPool))
 		}
 
 		// Some fields of mt might have changed, need to fix the invariants in the subpool best and worst queues
@@ -1315,15 +1319,16 @@ func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint
 
 // promote reasserts invariants of the subpool and returns the list of transactions that ended up
 // being promoted to the pending or basefee pool, for re-broadcasting
-func promote(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint64, discard func(*metaTx, DiscardReason), announcements *types.Announcements) {
+func promote(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint64, discard func(*metaTx, DiscardReason), announcements *types.Announcements,
+	logger log.Logger) {
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
 	for worst := pending.Worst(); pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || worst.minFeeCap.Cmp(uint256.NewInt(pendingBaseFee)) < 0); worst = pending.Worst() {
 		if worst.subPool >= BaseFeePoolBits {
 			tx := pending.PopWorst()
 			announcements.Append(tx.Tx.Type, tx.Tx.Size, tx.Tx.IDHash[:])
-			baseFee.Add(tx)
+			baseFee.Add(tx, logger)
 		} else if worst.subPool >= QueuedPoolBits {
-			queued.Add(pending.PopWorst())
+			queued.Add(pending.PopWorst(), logger)
 		} else {
 			discard(pending.PopWorst(), FeeTooLow)
 		}
@@ -1333,13 +1338,13 @@ func promote(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint
 	for best := baseFee.Best(); baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.Cmp(uint256.NewInt(pendingBaseFee)) >= 0; best = baseFee.Best() {
 		tx := baseFee.PopBest()
 		announcements.Append(tx.Tx.Type, tx.Tx.Size, tx.Tx.IDHash[:])
-		pending.Add(tx)
+		pending.Add(tx, logger)
 	}
 
 	// Demote worst transactions that do not qualify for base fee pool anymore, to queued sub pool, or discard
 	for worst := baseFee.Worst(); baseFee.Len() > 0 && worst.subPool < BaseFeePoolBits; worst = baseFee.Worst() {
 		if worst.subPool >= QueuedPoolBits {
-			queued.Add(baseFee.PopWorst())
+			queued.Add(baseFee.PopWorst(), logger)
 		} else {
 			discard(baseFee.PopWorst(), FeeTooLow)
 		}
@@ -1350,9 +1355,9 @@ func promote(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint
 		if best.minFeeCap.Cmp(uint256.NewInt(pendingBaseFee)) >= 0 {
 			tx := queued.PopBest()
 			announcements.Append(tx.Tx.Type, tx.Tx.Size, tx.Tx.IDHash[:])
-			pending.Add(tx)
+			pending.Add(tx, logger)
 		} else {
-			baseFee.Add(queued.PopBest())
+			baseFee.Add(queued.PopBest(), logger)
 		}
 	}
 
@@ -1413,18 +1418,18 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 					continue
 				}
 
-				log.Error("[txpool] process batch remote txs", "err", err)
+				p.logger.Error("[txpool] process batch remote txs", "err", err)
 			}
 		case <-commitEvery.C:
 			if db != nil && p.Started() {
 				t := time.Now()
 				written, err := p.flush(ctx, db)
 				if err != nil {
-					log.Error("[txpool] flush is local history", "err", err)
+					p.logger.Error("[txpool] flush is local history", "err", err)
 					continue
 				}
 				writeToDBBytesCounter.Set(written)
-				log.Debug("[txpool] Commit", "written_kb", written/1024, "in", time.Since(t))
+				p.logger.Debug("[txpool] Commit", "written_kb", written/1024, "in", time.Since(t))
 			}
 		case announcements := <-newTxs:
 			go func() {
@@ -1483,11 +1488,11 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 					}
 					return nil
 				}); err != nil {
-					log.Error("[txpool] collect info to propagate", "err", err)
+					p.logger.Error("[txpool] collect info to propagate", "err", err)
 					return
 				}
 				if newSlotsStreams != nil {
-					newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp})
+					newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp}, p.logger)
 				}
 
 				// first broadcast all local txs to all peers, then non-local to random sqrt(peersAmount) peers
@@ -1495,7 +1500,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				hashSentTo := send.AnnouncePooledTxs(localTxTypes, localTxSizes, localTxHashes)
 				for i := 0; i < localTxHashes.Len(); i++ {
 					hash := localTxHashes.At(i)
-					log.Info("local tx propagated", "tx_hash", hex.EncodeToString(hash), "announced to peers", hashSentTo[i], "broadcast to peers", txSentTo[i], "baseFee", p.pendingBaseFee.Load())
+					p.logger.Info("local tx propagated", "tx_hash", hex.EncodeToString(hash), "announced to peers", hashSentTo[i], "broadcast to peers", txSentTo[i], "baseFee", p.pendingBaseFee.Load())
 				}
 				send.BroadcastPooledTxs(remoteTxRlps)
 				send.AnnouncePooledTxs(remoteTxTypes, remoteTxSizes, remoteTxHashes)
@@ -1581,7 +1586,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 
 		addr, ok := p.senders.senderID2Addr[metaTx.Tx.SenderID]
 		if !ok {
-			log.Warn("[txpool] flush: sender address not found by ID", "senderID", metaTx.Tx.SenderID)
+			p.logger.Warn("[txpool] flush: sender address not found by ID", "senderID", metaTx.Tx.SenderID)
 			continue
 		}
 
@@ -1660,12 +1665,12 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		_, err = parseCtx.ParseTransaction(txRlp, 0, txn, nil, false /* hasEnvelope */, nil)
 		if err != nil {
 			err = fmt.Errorf("err: %w, rlp: %x", err, txRlp)
-			log.Warn("[txpool] fromDB: parseTransaction", "err", err)
+			p.logger.Warn("[txpool] fromDB: parseTransaction", "err", err)
 			continue
 		}
 		txn.Rlp = nil // means that we don't need store it in db anymore
 
-		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr)
+		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr, p.logger)
 		binary.BigEndian.Uint64(v)
 
 		isLocalTx := p.isLocalLRU.Contains(string(k))
@@ -1690,12 +1695,12 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 			pendingBaseFee = binary.BigEndian.Uint64(v)
 		}
 	}
-	err = p.senders.registerNewSenders(&txs)
+	err = p.senders.registerNewSenders(&txs, p.logger)
 	if err != nil {
 		return err
 	}
 	if _, _, err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, txs,
-		pendingBaseFee, math.MaxUint64 /* blockGasLimit */, p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked, false); err != nil {
+		pendingBaseFee, math.MaxUint64 /* blockGasLimit */, p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked, false, p.logger); err != nil {
 		return err
 	}
 	p.pendingBaseFee.Store(pendingBaseFee)
@@ -1765,7 +1770,7 @@ func (p *TxPool) printDebug(prefix string) {
 }
 func (p *TxPool) logStats() {
 	if !p.started.Load() {
-		//log.Info("[txpool] Not started yet, waiting for new blocks...")
+		//p.logger.Info("[txpool] Not started yet, waiting for new blocks...")
 		return
 	}
 
@@ -1785,7 +1790,7 @@ func (p *TxPool) logStats() {
 		ctx = append(ctx, "cache_keys", cacheKeys)
 	}
 	ctx = append(ctx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	log.Info("[txpool] stat", ctx...)
+	p.logger.Info("[txpool] stat", ctx...)
 	pendingSubCounter.Set(uint64(p.pending.Len()))
 	basefeeSubCounter.Set(uint64(p.baseFee.Len()))
 	queuedSubCounter.Set(uint64(p.queued.Len()))
@@ -1801,11 +1806,11 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 		if slot.Rlp == nil {
 			v, err := tx.GetOne(kv.PoolTransaction, slot.IDHash[:])
 			if err != nil {
-				log.Warn("[txpool] foreach: get tx from db", "err", err)
+				p.logger.Warn("[txpool] foreach: get tx from db", "err", err)
 				return true
 			}
 			if v == nil {
-				log.Warn("[txpool] foreach: tx not found in db")
+				p.logger.Warn("[txpool] foreach: tx not found in db")
 				return true
 			}
 			slotRlp = v[20:]
@@ -1951,7 +1956,7 @@ func (sc *sendersBatch) getID(addr common.Address) (uint64, bool) {
 	id, ok := sc.senderIDs[addr]
 	return id, ok
 }
-func (sc *sendersBatch) getOrCreateID(addr common.Address) (uint64, bool) {
+func (sc *sendersBatch) getOrCreateID(addr common.Address, logger log.Logger) (uint64, bool) {
 	_, traced := sc.tracedSenders[addr]
 	id, ok := sc.senderIDs[addr]
 	if !ok {
@@ -1960,7 +1965,7 @@ func (sc *sendersBatch) getOrCreateID(addr common.Address) (uint64, bool) {
 		sc.senderIDs[addr] = id
 		sc.senderID2Addr[id] = addr
 		if traced {
-			log.Info(fmt.Sprintf("TX TRACING: allocated senderID %d to sender %x", id, addr))
+			logger.Info(fmt.Sprintf("TX TRACING: allocated senderID %d to sender %x", id, addr))
 		}
 	}
 	return id, traced
@@ -1984,25 +1989,25 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint
 	return nonce, balance, nil
 }
 
-func (sc *sendersBatch) registerNewSenders(newTxs *types.TxSlots) (err error) {
+func (sc *sendersBatch) registerNewSenders(newTxs *types.TxSlots, logger log.Logger) (err error) {
 	for i, txn := range newTxs.Txs {
-		txn.SenderID, txn.Traced = sc.getOrCreateID(newTxs.Senders.AddressAt(i))
+		txn.SenderID, txn.Traced = sc.getOrCreateID(newTxs.Senders.AddressAt(i), logger)
 	}
 	return nil
 }
-func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots) error {
+func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, logger log.Logger) error {
 	for _, diff := range stateChanges.ChangeBatch {
 		for _, change := range diff.Changes { // merge state changes
 			addrB := gointerfaces.ConvertH160toAddress(change.Address)
-			sc.getOrCreateID(addrB)
+			sc.getOrCreateID(addrB, logger)
 		}
 
 		for i, txn := range unwindTxs.Txs {
-			txn.SenderID, txn.Traced = sc.getOrCreateID(unwindTxs.Senders.AddressAt(i))
+			txn.SenderID, txn.Traced = sc.getOrCreateID(unwindTxs.Senders.AddressAt(i), logger)
 		}
 
 		for i, txn := range minedTxs.Txs {
-			txn.SenderID, txn.Traced = sc.getOrCreateID(minedTxs.Senders.AddressAt(i))
+			txn.SenderID, txn.Traced = sc.getOrCreateID(minedTxs.Senders.AddressAt(i), logger)
 		}
 	}
 	return nil
@@ -2188,9 +2193,9 @@ func (p *PendingPool) Remove(i *metaTx) {
 	i.currentSubPool = 0
 }
 
-func (p *PendingPool) Add(i *metaTx) {
+func (p *PendingPool) Add(i *metaTx, logger log.Logger) {
 	if i.Tx.Traced {
-		log.Info(fmt.Sprintf("TX TRACING: moved to subpool %s, IdHash=%x, sender=%d", p.t, i.Tx.IDHash, i.Tx.SenderID))
+		logger.Info(fmt.Sprintf("TX TRACING: moved to subpool %s, IdHash=%x, sender=%d", p.t, i.Tx.IDHash, i.Tx.SenderID))
 	}
 	i.currentSubPool = p.t
 	heap.Push(p.worst, i)
@@ -2243,9 +2248,9 @@ func (p *SubPool) PopWorst() *metaTx { //nolint
 	return i
 }
 func (p *SubPool) Len() int { return p.best.Len() }
-func (p *SubPool) Add(i *metaTx) {
+func (p *SubPool) Add(i *metaTx, logger log.Logger) {
 	if i.Tx.Traced {
-		log.Info(fmt.Sprintf("TX TRACING: moved to subpool %s, IdHash=%x, sender=%d", p.t, i.Tx.IDHash, i.Tx.SenderID))
+		logger.Info(fmt.Sprintf("TX TRACING: moved to subpool %s, IdHash=%x, sender=%d", p.t, i.Tx.IDHash, i.Tx.SenderID))
 	}
 	i.currentSubPool = p.t
 	heap.Push(p.best, i)

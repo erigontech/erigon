@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	types3 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -45,7 +46,7 @@ func TestFetch(t *testing.T) {
 	sentryClient := direct.NewSentryClientDirect(direct.ETH66, m)
 	pool := &PoolMock{}
 
-	fetch := NewFetch(ctx, []direct.SentryClient{sentryClient}, pool, &remote.KVClientMock{}, nil, nil, *u256.N1)
+	fetch := NewFetch(ctx, []direct.SentryClient{sentryClient}, pool, &remote.KVClientMock{}, nil, nil, *u256.N1, log.New())
 	var wg sync.WaitGroup
 	fetch.SetWaitGroup(&wg)
 	m.StreamWg.Add(2)
@@ -72,7 +73,7 @@ func TestSendTxPropagate(t *testing.T) {
 	defer cancelFn()
 	t.Run("few remote byHash", func(t *testing.T) {
 		m := NewMockSentry(ctx)
-		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil)
+		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
 		send.BroadcastPooledTxs(testRlps(2))
 		send.AnnouncePooledTxs([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42))
 
@@ -89,7 +90,7 @@ func TestSendTxPropagate(t *testing.T) {
 	})
 	t.Run("much remote byHash", func(t *testing.T) {
 		m := NewMockSentry(ctx)
-		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil)
+		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
 		list := make(types3.Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
 			b := []byte(fmt.Sprintf("%x", i))
@@ -115,7 +116,7 @@ func TestSendTxPropagate(t *testing.T) {
 		m.SendMessageToAllFunc = func(contextMoqParam context.Context, outboundMessageData *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
 			return &sentry.SentPeers{Peers: make([]*types.H512, 5)}, nil
 		}
-		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil)
+		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
 		send.BroadcastPooledTxs(testRlps(2))
 		send.AnnouncePooledTxs([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42))
 
@@ -131,7 +132,7 @@ func TestSendTxPropagate(t *testing.T) {
 		m.SendMessageToAllFunc = func(contextMoqParam context.Context, outboundMessageData *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
 			return &sentry.SentPeers{Peers: make([]*types.H512, 5)}, nil
 		}
-		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil)
+		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
 		expectPeers := toPeerIDs(1, 2, 42)
 		send.PropagatePooledTxsToPeersList(expectPeers, []byte{0, 1}, []uint32{10, 15}, toHashes(1, 42))
 
@@ -179,7 +180,7 @@ func TestOnNewBlock(t *testing.T) {
 		},
 	}
 	pool := &PoolMock{}
-	fetch := NewFetch(ctx, nil, pool, stateChanges, coreDB, db, *u256.N1)
+	fetch := NewFetch(ctx, nil, pool, stateChanges, coreDB, db, *u256.N1, log.New())
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
 	assert.Equal(t, 1, len(pool.OnNewBlockCalls()))
