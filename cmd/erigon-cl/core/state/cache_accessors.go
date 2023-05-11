@@ -159,6 +159,7 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	var cacheKey [16]byte
 	binary.BigEndian.PutUint64(cacheKey[:], slot)
 	binary.BigEndian.PutUint64(cacheKey[8:], committeeIndex)
+
 	if cachedCommittee, ok := b.committeeCache.Get(cacheKey); ok {
 		return cachedCommittee, nil
 	}

@@ -52,7 +52,6 @@ func (m *merkleHasher) merkleizeTrieLeaves(leaves [][32]byte) ([32]byte, error) 
 func (m *merkleHasher) merkleizeTrieLeavesFlat(leaves []byte, out []byte) (err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	layer := m.getBufferFromFlat(leaves)
 	for len(layer) > 1 {
 		if err := gohashtree.Hash(layer, layer); err != nil {
