@@ -158,7 +158,7 @@ func executeBlock(
 		return logger.NewStructLogger(&logger.LogConfig{}), nil
 	}
 
-	callTracer := calltracer.NewCallTracer()
+	callTracer := calltracer.New1InchCallTracer()
 	vmConfig.Debug = true
 	vmConfig.Tracer = callTracer
 
