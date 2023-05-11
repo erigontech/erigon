@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -778,8 +777,8 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		require.Equal(uint64(0), receiptsAvailable)
 	}
 
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("e3 not implemented Prune feature yet")
+	if m.HistoryV3 {
+		//TODO: e3 not implemented Prune feature yet
 		/*
 			if pm.History.Enabled() {
 				it, err := tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, 0, int(pm.History.PruneTo(head)), order.Asc, -1)
