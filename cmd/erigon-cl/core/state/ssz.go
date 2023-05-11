@@ -1,7 +1,6 @@
 package state
 
 import (
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/metrics/methelp"
 
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
@@ -14,7 +13,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		return nil, err
 	}
 	h.PutSince()
-	sz := metrics.NewHistogram("encode_ssz_beacon_state_size")
+	sz := methelp.NewHistTimer("encode_ssz_beacon_state_size")
 	sz.Update(float64(len(bts)))
 	return bts, err
 }
