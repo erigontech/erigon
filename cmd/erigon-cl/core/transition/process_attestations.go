@@ -56,10 +56,12 @@ func processAttestationPostAltair(s *state.BeaconState, attestation *cltypes.Att
 	c.PutSince()
 
 	c = h.Tag("step", "get_attesting_indices")
+
 	attestingIndicies, err := s.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, true)
 	if err != nil {
 		return nil, err
 	}
+
 	c.PutSince()
 
 	var proposerRewardNumerator uint64
