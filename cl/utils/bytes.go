@@ -17,8 +17,9 @@ import (
 	"encoding/binary"
 	"math/bits"
 
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
+
 	"github.com/golang/snappy"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 )
 
 func Uint32ToBytes4(n uint32) (ret [4]byte) {

@@ -5,7 +5,8 @@ import (
 
 	"github.com/prysmaticlabs/gohashtree"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
+
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
