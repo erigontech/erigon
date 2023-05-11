@@ -1,9 +1,13 @@
 package state
 
 import (
+<<<<<<< HEAD
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
 	"github.com/ledgerwatch/erigon/metrics/methelp"
+=======
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
+>>>>>>> devel
 )
 
 func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {

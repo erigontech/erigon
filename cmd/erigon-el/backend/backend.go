@@ -171,7 +171,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	}
 
 	// Assemble the Ethereum object
-	chainKv, err := node.OpenDatabase(stack.Config(), kv.ChainDB)
+	chainKv, err := node.OpenDatabase(stack.Config(), kv.ChainDB, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +281,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		chainKv = backend.chainDB
 	}
 
-	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, agg)
+	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, agg, logger)
 	backend.notifications.StateChangesConsumer = kvRPC
 
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
