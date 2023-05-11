@@ -27,7 +27,6 @@ type BeaconState struct {
 	publicKeyIndicies map[[48]byte]uint64
 	// Caches
 	activeValidatorsCache       *lru.Cache[uint64, []uint64]
-	committeeCache              *lru.Cache[[16]byte, []uint64]
 	shuffledSetsCache           *lru.Cache[common.Hash, []uint64]
 	totalActiveBalanceCache     *uint64
 	totalActiveBalanceRootCache uint64
@@ -198,9 +197,6 @@ func (b *BeaconState) initCaches() error {
 		return err
 	}
 	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64]("beacon_shuffled_sets_cache", 5); err != nil {
-		return err
-	}
-	if b.committeeCache, err = lru.New[[16]byte, []uint64]("beacon_committee_cache", 256); err != nil {
 		return err
 	}
 	return nil

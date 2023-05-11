@@ -36,7 +36,6 @@ func (b *BeaconState) copyCachesInto(bs *BeaconState) error {
 	// Sync caches
 	bs.activeValidatorsCache = copyLRU(bs.activeValidatorsCache, b.activeValidatorsCache)
 	bs.shuffledSetsCache = copyLRU(bs.shuffledSetsCache, b.shuffledSetsCache)
-	bs.committeeCache = copyLRU(bs.committeeCache, b.committeeCache)
 
 	if b.totalActiveBalanceCache != nil {
 		bs.totalActiveBalanceCache = new(uint64)

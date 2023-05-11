@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/cache"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/shuffling"
 )
 
@@ -160,9 +161,6 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	binary.BigEndian.PutUint64(cacheKey[:], slot)
 	binary.BigEndian.PutUint64(cacheKey[8:], committeeIndex)
 
-	if cachedCommittee, ok := b.committeeCache.Get(cacheKey); ok {
-		return cachedCommittee, nil
-	}
 	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
 	committeesPerSlot := b.CommitteeCount(epoch)
 	committee, err := b.ComputeCommittee(
@@ -174,7 +172,6 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	if err != nil {
 		return nil, err
 	}
-	b.committeeCache.Add(cacheKey, committee)
 	return committee, nil
 }
 
@@ -238,6 +235,9 @@ func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error)
 // GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.
 // thus, it is a flag now.
 func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData, aggregationBits []byte, checkBitsLength bool) ([]uint64, error) {
+	if cached, ok := cache.LoadAttestatingIndicies(attestation); ok {
+		return cached, nil
+	}
 	committee, err := b.GetBeaconCommitee(attestation.Slot, attestation.Index)
 	if err != nil {
 		return nil, err
@@ -246,6 +246,7 @@ func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData,
 	if checkBitsLength && utils.GetBitlistLength(aggregationBits) != len(committee) {
 		return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits. agg bits size: %d, expect: %d", aggregationBitsLen, len(committee))
 	}
+
 	attestingIndices := []uint64{}
 	for i, member := range committee {
 		bitIndex := i % 8
@@ -257,6 +258,7 @@ func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData,
 			attestingIndices = append(attestingIndices, member)
 		}
 	}
+	cache.StoreAttestation(attestation, attestingIndices)
 	return attestingIndices, nil
 }
 
