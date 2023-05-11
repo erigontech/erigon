@@ -1014,7 +1014,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 		srv.log.Trace("Failed RLPx handshake", "addr", c.fd.RemoteAddr(), "conn", c.flags, "err", err)
 		return err
 	}
-	copy(c.pubkey[:], crypto.MarshalPubkey(remotePubkey)[1:])
+	copy(c.pubkey[:], crypto.MarshalPubkey(remotePubkey))
 	if dialDest != nil {
 		c.node = dialDest
 	} else {
