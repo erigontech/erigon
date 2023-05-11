@@ -39,7 +39,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -263,7 +262,6 @@ func New(
 		return nil, err
 	}
 	if s.metrics {
-		rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
 
 		str, err := rcmgrObs.NewStatsTraceReporter()
 		if err != nil {
