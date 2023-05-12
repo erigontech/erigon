@@ -541,6 +541,7 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (ch
 	for workerNum := 0; workerNum < workers; workerNum++ {
 		g.Go(func() (err error) {
 			var bn uint64
+			var ok bool
 			var tx kv.Tx
 			defer func() {
 				if tx != nil {
@@ -550,7 +551,10 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (ch
 
 			for i := 0; ; i++ {
 				select {
-				case bn = <-readAhead:
+				case bn, ok = <-readAhead:
+					if !ok {
+						return
+					}
 				case <-gCtx.Done():
 					return gCtx.Err()
 				}
