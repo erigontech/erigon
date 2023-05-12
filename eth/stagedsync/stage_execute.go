@@ -538,16 +538,33 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (ch
 	const readAheadBlocks = 100
 	readAhead := make(chan uint64, readAheadBlocks)
 	g, gCtx := errgroup.WithContext(ctx)
-	for i := 0; i < workers; i++ {
+	for workerNum := 0; workerNum < workers; workerNum++ {
 		g.Go(func() error {
 			var bn uint64
-			for {
+			tx, err := cfg.db.BeginRo(ctx)
+			if err != nil {
+				return err
+			}
+			defer func() { tx.Rollback() }()
+
+			for i := 0; ; i++ {
 				select {
 				case bn = <-readAhead:
 				case <-gCtx.Done():
 					return gCtx.Err()
 				}
-				if err := blocksReadAheadFunc(gCtx, cfg, bn+readAheadBlocks); err != nil {
+
+				if i%100 == 0 {
+					if tx != nil {
+						tx.Rollback()
+					}
+					tx, err = cfg.db.BeginRo(ctx)
+					if err != nil {
+						return err
+					}
+				}
+
+				if err := blocksReadAheadFunc(gCtx, tx, cfg, bn+readAheadBlocks); err != nil {
 					return err
 				}
 			}
@@ -558,13 +575,7 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (ch
 		_ = g.Wait()
 	}
 }
-func blocksReadAheadFunc(ctx context.Context, cfg *ExecuteBlockCfg, blockNum uint64) error {
-	tx, err := cfg.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
+func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, blockNum uint64) error {
 	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
 		return err
