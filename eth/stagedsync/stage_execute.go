@@ -539,13 +539,14 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (ch
 	readAhead := make(chan uint64, readAheadBlocks)
 	g, gCtx := errgroup.WithContext(ctx)
 	for workerNum := 0; workerNum < workers; workerNum++ {
-		g.Go(func() error {
+		g.Go(func() (err error) {
 			var bn uint64
-			tx, err := cfg.db.BeginRo(ctx)
-			if err != nil {
-				return err
-			}
-			defer func() { tx.Rollback() }()
+			var tx kv.Tx
+			defer func() {
+				if tx != nil {
+					tx.Rollback()
+				}
+			}()
 
 			for i := 0; ; i++ {
 				select {
