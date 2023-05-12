@@ -571,6 +571,9 @@ func blocksReadAheadFunc(ctx context.Context, cfg *ExecuteBlockCfg, blockNum uin
 	if err != nil {
 		return err
 	}
+	if block == nil {
+		return nil
+	}
 	stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
 	for _, sender := range senders {
 		a, _ := stateReader.ReadAccountData(sender)
