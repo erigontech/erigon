@@ -125,15 +125,16 @@ type BaseAPI struct {
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.AggregatorV3, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader,
 	bitmapDB2 *bitmapdb2.DB) *BaseAPI {
-	blocksLRUSize := 128 // ~32Mb
+	/*blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
 	}
 	blocksLRU, err := lru.New(blocksLRUSize)
 	if err != nil {
 		panic(err)
-	}
-
+	}*/
+	var blocksLRU *lru.Cache
+	// Cache is disabled as it causes wrong results during/after re-org.
 	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader, _agg: agg, evmCallTimeout: evmCallTimeout, _engine: engine, _bitmapDB2: bitmapDB2}
 }
 
