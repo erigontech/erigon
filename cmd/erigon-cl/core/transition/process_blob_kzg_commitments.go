@@ -6,17 +6,15 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-const VERSIONED_HASH_VERSION_KZG byte = '1'
+const VERSIONED_HASH_VERSION_KZG byte = byte(1)
 
 func kzgCommitmentToVersionedHash(kzgCommitment *cltypes.KZGCommitment) (libcommon.Hash, error) {
 	versionedHash := [32]byte{}
-	kzgCommitmentHash, err := kzgCommitment.HashSSZ()
-	if err != nil {
-		return libcommon.Hash{}, err
-	}
+	kzgCommitmentHash := utils.Keccak256(kzgCommitment[:])
 
 	buf := append([]byte{}, VERSIONED_HASH_VERSION_KZG)
 	buf = append(buf, kzgCommitmentHash[1:]...)
@@ -51,8 +49,7 @@ func txPeekBlobVersionedHashes(txBytes []byte) []libcommon.Hash {
 
 	versionedHashes := make([]libcommon.Hash, len(txBytes[blobVersionedHashes:])/32)
 	for pos, i := blobVersionedHashes, 0; int(pos) < len(txBytes) && i < len(versionedHashes); pos += 32 {
-		var versionedHash libcommon.Hash
-		copy(versionedHash[:], txBytes[pos:])
+		versionedHash := libcommon.BytesToHash(txBytes[pos : pos+32])
 		versionedHashes[i] = versionedHash
 		i++
 	}
