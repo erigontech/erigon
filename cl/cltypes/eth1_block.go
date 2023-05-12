@@ -5,9 +5,9 @@ import (
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/merge"

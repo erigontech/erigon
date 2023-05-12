@@ -57,11 +57,11 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet [
 	validators := make([]*checkpointValidator, len(validatorSet))
 	for i := range validatorSet {
 		validators[i] = &checkpointValidator{
-			publicKey:       validatorSet[i].PublicKey,
-			activationEpoch: validatorSet[i].ActivationEpoch,
-			exitEpoch:       validatorSet[i].ExitEpoch,
-			balance:         validatorSet[i].EffectiveBalance,
-			slashed:         validatorSet[i].Slashed,
+			publicKey:       validatorSet[i].PublicKey(),
+			activationEpoch: validatorSet[i].ActivationEpoch(),
+			exitEpoch:       validatorSet[i].ExitEpoch(),
+			balance:         validatorSet[i].EffectiveBalance(),
+			slashed:         validatorSet[i].Slashed(),
 		}
 	}
 	return &checkpointState{

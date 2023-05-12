@@ -80,15 +80,15 @@ func (b *BeaconState) InitiateValidatorExit(index uint64) error {
 	currentEpoch := Epoch(b.BeaconState)
 	exitQueueEpoch := ComputeActivationExitEpoch(b.BeaconConfig(), currentEpoch)
 	b.ForEachValidator(func(v *cltypes.Validator, idx, total int) bool {
-		if v.ExitEpoch != b.BeaconConfig().FarFutureEpoch && v.ExitEpoch > exitQueueEpoch {
-			exitQueueEpoch = v.ExitEpoch
+		if v.ExitEpoch() != b.BeaconConfig().FarFutureEpoch && v.ExitEpoch() > exitQueueEpoch {
+			exitQueueEpoch = v.ExitEpoch()
 		}
 		return true
 	})
 
 	exitQueueChurn := 0
 	b.ForEachValidator(func(v *cltypes.Validator, idx, total int) bool {
-		if v.ExitEpoch == exitQueueEpoch {
+		if v.ExitEpoch() == exitQueueEpoch {
 			exitQueueChurn += 1
 		}
 		return true

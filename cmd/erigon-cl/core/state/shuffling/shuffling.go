@@ -33,7 +33,7 @@ func ComputeProposerIndex(b *raw.BeaconState, indices []uint64, seed [32]byte) (
 		if err != nil {
 			return 0, err
 		}
-		if validator.EffectiveBalance*maxRandomByte >= b.BeaconConfig().MaxEffectiveBalance*randomByte {
+		if validator.EffectiveBalance()*maxRandomByte >= b.BeaconConfig().MaxEffectiveBalance*randomByte {
 			return candidateIndex, nil
 		}
 		i += 1

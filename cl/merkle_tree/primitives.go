@@ -36,3 +36,11 @@ func PublicKeyRoot(key [48]byte) (libcommon.Hash, error) {
 		lastByte,
 	}, 2)
 }
+
+func InPlacePublicKeyRoot(key []byte) error {
+	err := MerkleRootFromFlatLeaves(key, key)
+	if err != nil {
+		return err
+	}
+	return nil
+}

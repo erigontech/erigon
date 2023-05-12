@@ -24,35 +24,29 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 	dst.eth1DepositIndex = b.eth1DepositIndex
 	for i, validator := range b.validators {
 		if i >= len(dst.validators) {
-			dst.validators = append(dst.validators, validator.Copy())
+			nv := &cltypes.Validator{}
+			validator.CopyTo(nv)
+			dst.validators = append(dst.validators, nv)
 			continue
 		}
-		copy(dst.validators[i].WithdrawalCredentials[:], validator.WithdrawalCredentials[:])
-		copy(dst.validators[i].PublicKey[:], validator.PublicKey[:])
-		dst.validators[i].ActivationEligibilityEpoch = validator.ActivationEligibilityEpoch
-		dst.validators[i].ActivationEpoch = validator.ActivationEpoch
-		dst.validators[i].ExitEpoch = validator.ExitEpoch
-		dst.validators[i].EffectiveBalance = validator.EffectiveBalance
-		dst.validators[i].Slashed = validator.Slashed
-		dst.validators[i].WithdrawableEpoch = validator.WithdrawableEpoch
+		validator.CopyTo(dst.validators[i])
 	}
 	dst.validators = dst.validators[:len(b.validators)]
-	dst.balances = make([]uint64, len(b.balances))
-	copy(dst.balances, b.balances)
+	b.balances.CopyTo(dst.balances)
 	copy(dst.randaoMixes[:], b.randaoMixes[:])
 	copy(dst.slashings[:], b.slashings[:])
-	dst.previousEpochParticipation = b.previousEpochParticipation.Copy()
-	dst.currentEpochParticipation = b.currentEpochParticipation.Copy()
+	b.previousEpochParticipation.CopyTo(dst.previousEpochParticipation)
+	b.currentEpochParticipation.CopyTo(dst.currentEpochParticipation)
 	dst.finalizedCheckpoint = b.finalizedCheckpoint.Copy()
 	dst.currentJustifiedCheckpoint = b.currentJustifiedCheckpoint.Copy()
 	dst.previousJustifiedCheckpoint = b.previousJustifiedCheckpoint.Copy()
 	if b.version == clparams.Phase0Version {
-		return dst.init()
+		dst.init()
+		return nil
 	}
 	dst.currentSyncCommittee = b.currentSyncCommittee.Copy()
 	dst.nextSyncCommittee = b.nextSyncCommittee.Copy()
-	dst.inactivityScores = make([]uint64, len(b.inactivityScores))
-	copy(dst.inactivityScores, b.inactivityScores)
+	b.inactivityScores.CopyTo(dst.inactivityScores)
 	dst.justificationBits = b.justificationBits.Copy()
 
 	if b.version >= clparams.BellatrixVersion {

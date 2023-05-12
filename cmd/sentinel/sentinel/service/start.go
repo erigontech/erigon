@@ -11,6 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/log/v3"
+	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -61,11 +63,11 @@ func createSentinel(cfg *sentinel.SentinelConfig, db kv.RoDB) (*sentinel.Sentine
 
 func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
-
 	sent, err := createSentinel(cfg, db)
 	if err != nil {
 		return nil, err
 	}
+	rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
 	log.Info("[Sentinel] Sentinel started", "enr", sent.String())
 	if initialStatus != nil {
 		sent.SetStatus(initialStatus)
@@ -89,7 +91,11 @@ WaitingLoop:
 		}
 	}
 
-	conn, err := grpc.DialContext(ctx, srvCfg.Addr, grpc.WithTransportCredentials(creds), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMessageSize)))
+	conn, err := grpc.DialContext(ctx,
+		srvCfg.Addr,
+		grpc.WithTransportCredentials(creds),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMessageSize)),
+	)
 	if err != nil {
 		return nil, err
 	}

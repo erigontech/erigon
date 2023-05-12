@@ -5,8 +5,9 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
+
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/ef-tests-cl/spectest"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"

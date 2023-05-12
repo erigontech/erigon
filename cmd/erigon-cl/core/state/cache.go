@@ -4,12 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/lru"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/raw"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/shuffling"
 )
@@ -27,7 +27,6 @@ type BeaconState struct {
 	publicKeyIndicies map[[48]byte]uint64
 	// Caches
 	activeValidatorsCache       *lru.Cache[uint64, []uint64]
-	committeeCache              *lru.Cache[[16]byte, []uint64]
 	shuffledSetsCache           *lru.Cache[common.Hash, []uint64]
 	totalActiveBalanceCache     *uint64
 	totalActiveBalanceRootCache uint64
@@ -184,7 +183,7 @@ func (b *BeaconState) _refreshActiveBalances() {
 	*b.totalActiveBalanceCache = 0
 	b.ForEachValidator(func(validator *cltypes.Validator, idx, total int) bool {
 		if validator.Active(epoch) {
-			*b.totalActiveBalanceCache += validator.EffectiveBalance
+			*b.totalActiveBalanceCache += validator.EffectiveBalance()
 		}
 		return true
 	})
@@ -194,13 +193,10 @@ func (b *BeaconState) _refreshActiveBalances() {
 
 func (b *BeaconState) initCaches() error {
 	var err error
-	if b.activeValidatorsCache, err = lru.New[uint64, []uint64](5); err != nil {
+	if b.activeValidatorsCache, err = lru.New[uint64, []uint64]("beacon_active_validators_cache", 5); err != nil {
 		return err
 	}
-	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64](5); err != nil {
-		return err
-	}
-	if b.committeeCache, err = lru.New[[16]byte, []uint64](256); err != nil {
+	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64]("beacon_shuffled_sets_cache", 5); err != nil {
 		return err
 	}
 	return nil
@@ -212,7 +208,7 @@ func (b *BeaconState) initBeaconState() error {
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
 
 	b.ForEachValidator(func(validator *cltypes.Validator, i, total int) bool {
-		b.publicKeyIndicies[validator.PublicKey] = uint64(i)
+		b.publicKeyIndicies[validator.PublicKey()] = uint64(i)
 		return true
 	})
 

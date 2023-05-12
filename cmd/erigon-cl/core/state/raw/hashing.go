@@ -130,10 +130,8 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(12): Balances
 	if b.isLeafDirty(BalancesLeafIndex) {
-		root, err := merkle_tree.Uint64ListRootWithLimit(b.balances, state_encoding.ValidatorLimitForBalancesChunks())
-		if err != nil {
-			return err
-		}
+		root := [32]byte{}
+		b.balances.HashSSZTo(root[:])
 		b.updateLeaf(BalancesLeafIndex, root)
 	}
 
@@ -164,7 +162,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		if b.version == clparams.Phase0Version {
 			root, err = merkle_tree.ListObjectSSZRoot(b.previousEpochAttestations, b.beaconConfig.SlotsPerEpoch*b.beaconConfig.MaxAttestations)
 		} else {
-			root, err = merkle_tree.BitlistRootWithLimitForState(b.previousEpochParticipation.Bytes(), state_encoding.ValidatorRegistryLimit)
+			err = b.previousEpochParticipation.HashSSZTo(root[:])
 		}
 		if err != nil {
 			return err
@@ -180,7 +178,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		if b.version == clparams.Phase0Version {
 			root, err = merkle_tree.ListObjectSSZRoot(b.currentEpochAttestations, b.beaconConfig.SlotsPerEpoch*b.beaconConfig.MaxAttestations)
 		} else {
-			root, err = merkle_tree.BitlistRootWithLimitForState(b.currentEpochParticipation.Bytes(), state_encoding.ValidatorRegistryLimit)
+			err = b.currentEpochParticipation.HashSSZTo(root[:])
 		}
 		if err != nil {
 			return err
@@ -226,10 +224,8 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 	// Field(21): Inactivity Scores
 	if b.isLeafDirty(InactivityScoresLeafIndex) {
-		root, err := merkle_tree.Uint64ListRootWithLimit(b.inactivityScores, state_encoding.ValidatorLimitForBalancesChunks())
-		if err != nil {
-			return err
-		}
+		root := [32]byte{}
+		b.inactivityScores.HashSSZTo(root[:])
 		b.updateLeaf(InactivityScoresLeafIndex, root)
 	}
 

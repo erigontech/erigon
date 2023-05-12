@@ -71,33 +71,35 @@ func ProcessJustificationBitsAndFinality(s *state.BeaconState) error {
 	}
 	var previousTargetBalance, currentTargetBalance uint64
 	if s.Version() == clparams.Phase0Version {
-		for _, validator := range s.Validators() {
-			if validator.Slashed {
-				continue
+		s.ForEachValidator(func(validator *cltypes.Validator, idx, total int) bool {
+			if validator.Slashed() {
+				return true
 			}
 			if validator.IsCurrentMatchingTargetAttester {
-				currentTargetBalance += validator.EffectiveBalance
+				currentTargetBalance += validator.EffectiveBalance()
 			}
 			if validator.IsPreviousMatchingTargetAttester {
-				previousTargetBalance += validator.EffectiveBalance
+				previousTargetBalance += validator.EffectiveBalance()
 			}
-		}
+			return true
+		})
 	} else {
 		// Use bitlists to determine finality.
 		previousParticipation, currentParticipation := s.EpochParticipation(false), s.EpochParticipation(true)
-		for i, validator := range s.Validators() {
-			if validator.Slashed {
-				continue
+		s.ForEachValidator(func(validator *cltypes.Validator, i, total int) bool {
+			if validator.Slashed() {
+				return true
 			}
 			if validator.Active(previousEpoch) &&
-				previousParticipation[i].HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
-				previousTargetBalance += validator.EffectiveBalance
+				cltypes.ParticipationFlags(previousParticipation.Get(i)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
+				previousTargetBalance += validator.EffectiveBalance()
 			}
 			if validator.Active(currentEpoch) &&
-				currentParticipation[i].HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
-				currentTargetBalance += validator.EffectiveBalance
+				cltypes.ParticipationFlags(currentParticipation.Get(i)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
+				currentTargetBalance += validator.EffectiveBalance()
 			}
-		}
+			return true
+		})
 	}
 
 	return weighJustificationAndFinalization(s, previousTargetBalance, currentTargetBalance)

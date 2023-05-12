@@ -145,7 +145,8 @@ func verifyBlockSignature(s *state.BeaconState, block *cltypes.SignedBeaconBlock
 	if err != nil {
 		return false, err
 	}
-	return bls.Verify(block.Signature[:], sigRoot[:], proposer.PublicKey[:])
+	pk := proposer.PublicKey()
+	return bls.Verify(block.Signature[:], sigRoot[:], pk[:])
 }
 
 // ProcessHistoricalRootsUpdate updates the historical root data structure by computing a new historical root batch when it is time to do so.
