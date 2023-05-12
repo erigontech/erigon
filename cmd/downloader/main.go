@@ -150,10 +150,11 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-	downloadernat.DoNat(natif, cfg)
 
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
+
+	downloadernat.DoNat(natif, cfg)
 
 	d, err := downloader.New(ctx, cfg)
 	if err != nil {

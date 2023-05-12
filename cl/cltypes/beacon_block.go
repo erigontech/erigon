@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
@@ -33,7 +33,7 @@ type BeaconBlockForStorage struct {
 	VoluntaryExits     []*SignedVoluntaryExit
 	AddressChanges     []*SignedBLSToExecutionChange
 	SyncAggregate      *SyncAggregate
-	BlobKzgCommitments []*BlobKZGCommitment
+	BlobKzgCommitments []*KZGCommitment
 	// Metadatas
 	Eth1Number    uint64
 	Eth1BlockHash libcommon.Hash
@@ -108,7 +108,7 @@ type BeaconBody struct {
 	ExecutionChanges []*SignedBLSToExecutionChange
 	// The commitments for beacon chain blobs
 	// With a max of 4 per block
-	BlobKzgCommitments []*BlobKZGCommitment
+	BlobKzgCommitments []*KZGCommitment
 	// The version of the beacon chain
 	Version clparams.StateVersion
 }
@@ -401,7 +401,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	}
 
 	if b.Version >= clparams.DenebVersion {
-		if b.BlobKzgCommitments, err = ssz.DecodeStaticList[*BlobKZGCommitment](buf, blobKzgCommitmentOffset, uint32(len(buf)), 48, MaxBlobsPerBlock, version); err != nil {
+		if b.BlobKzgCommitments, err = ssz.DecodeStaticList[*KZGCommitment](buf, blobKzgCommitmentOffset, uint32(len(buf)), 48, MaxBlobsPerBlock, version); err != nil {
 			return err
 		}
 	}

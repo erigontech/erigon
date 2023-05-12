@@ -5,6 +5,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/cache"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
@@ -16,7 +17,10 @@ func (f *ForkChoiceStore) OnAttestation(attestation *cltypes.Attestation, fromBl
 		return err
 	}
 	target := attestation.Data.Target
-
+	if cachedIndicies, ok := cache.LoadAttestatingIndicies(attestation.Data); ok {
+		f.processAttestingIndicies(attestation, cachedIndicies)
+		return nil
+	}
 	targetState, err := f.getCheckpointState(*target)
 	if err != nil {
 		return nil
@@ -26,13 +30,11 @@ func (f *ForkChoiceStore) OnAttestation(attestation *cltypes.Attestation, fromBl
 		return fmt.Errorf("target state does not exist")
 	}
 	// Now we need to find the attesting indicies.
-
 	attestationIndicies, err := targetState.getAttestingIndicies(attestation.Data, attestation.AggregationBits)
 	if err != nil {
 		return err
 	}
 	if !fromBlock {
-
 		indexedAttestation := state.GetIndexedAttestation(attestation, attestationIndicies)
 		if err != nil {
 			return err
@@ -47,8 +49,15 @@ func (f *ForkChoiceStore) OnAttestation(attestation *cltypes.Attestation, fromBl
 		}
 	}
 	// Lastly update latest messages.
+	f.processAttestingIndicies(attestation, attestationIndicies)
+	return nil
+}
+
+func (f *ForkChoiceStore) processAttestingIndicies(attestation *cltypes.Attestation, indicies []uint64) {
 	beaconBlockRoot := attestation.Data.BeaconBlockHash
-	for _, index := range attestationIndicies {
+	target := attestation.Data.Target
+
+	for _, index := range indicies {
 		if _, ok := f.equivocatingIndicies[index]; ok {
 			continue
 		}
@@ -60,7 +69,6 @@ func (f *ForkChoiceStore) OnAttestation(attestation *cltypes.Attestation, fromBl
 			}
 		}
 	}
-	return nil
 }
 
 func (f *ForkChoiceStore) validateOnAttestation(attestation *cltypes.Attestation, fromBlock bool) error {

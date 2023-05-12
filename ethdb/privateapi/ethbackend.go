@@ -23,7 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
+	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -365,8 +365,8 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 		Time:        req.Timestamp,
 		MixDigest:   gointerfaces.ConvertH256ToHash(req.PrevRandao),
 		UncleHash:   types.EmptyUncleHash,
-		Difficulty:  serenity.SerenityDifficulty,
-		Nonce:       serenity.SerenityNonce,
+		Difficulty:  merge.ProofOfStakeDifficulty,
+		Nonce:       merge.ProofOfStakeNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
 		TxHash:      types.DeriveSha(types.BinaryTransactions(req.Transactions)),
 	}

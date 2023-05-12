@@ -281,7 +281,7 @@ func (n *Node) DataDir() string {
 	return n.config.Dirs.DataDir
 }
 
-func OpenDatabase(config *nodecfg.Config, label kv.Label) (kv.RwDB, error) {
+func OpenDatabase(config *nodecfg.Config, label kv.Label, logger log.Logger) (kv.RwDB, error) {
 	var name string
 	switch label {
 	case kv.ChainDB:
@@ -299,7 +299,7 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label) (kv.RwDB, error) {
 
 	dbPath := filepath.Join(config.Dirs.DataDir, name)
 	var openFunc func(exclusive bool) (kv.RwDB, error)
-	log.Info("Opening Database", "label", name, "path", dbPath)
+	logger.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc = func(exclusive bool) (kv.RwDB, error) {
 		roTxLimit := int64(32)
 		if config.Http.DBReadConcurrency > 0 {
@@ -313,7 +313,12 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label) (kv.RwDB, error) {
 			opts = opts.Exclusive()
 		}
 		if label == kv.ChainDB {
-			opts = opts.PageSize(config.MdbxPageSize.Bytes()).MapSize(config.MdbxDBSizeLimit)
+			if config.MdbxPageSize.Bytes() > 0 {
+				opts = opts.PageSize(config.MdbxPageSize.Bytes())
+			}
+			if config.MdbxDBSizeLimit > 0 {
+				opts = opts.MapSize(config.MdbxDBSizeLimit)
+			}
 		} else {
 			opts = opts.GrowthStep(16 * datasize.MB)
 		}
@@ -334,13 +339,13 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label) (kv.RwDB, error) {
 		return nil, err
 	}
 	if has {
-		log.Info("Re-Opening DB in exclusive mode to apply migrations")
+		logger.Info("Re-Opening DB in exclusive mode to apply migrations")
 		db.Close()
 		db, err = openFunc(true)
 		if err != nil {
 			return nil, err
 		}
-		if err = migrator.Apply(db, config.Dirs.DataDir); err != nil {
+		if err = migrator.Apply(db, config.Dirs.DataDir, logger); err != nil {
 			return nil, err
 		}
 		db.Close()

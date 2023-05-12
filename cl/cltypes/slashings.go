@@ -1,7 +1,8 @@
 package cltypes
 
 import (
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
+
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
 

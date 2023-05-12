@@ -239,13 +239,8 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 		// Verify the header's EIP-1559 attributes.
 		return err
 	}
-	if !chain.Config().IsCancun(header.Time) {
-		if header.ExcessDataGas != nil {
-			return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
-		}
-	} else if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil {
-		// Verify the header's EIP-4844 attributes.
-		return err
+	if header.ExcessDataGas != nil {
+		return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
 	}
 
 	// Verify that the block number is parent's +1
@@ -569,13 +564,6 @@ func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state
 ) (types.Transactions, types.Receipts, error) {
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(config, state, header, uncles)
-	if config.IsCancun(header.Time) {
-		if parent := chain.GetHeaderByHash(header.ParentHash); parent != nil {
-			header.SetExcessDataGas(misc.CalcExcessDataGas(parent.ExcessDataGas, misc.CountBlobs(txs)))
-		} else {
-			header.SetExcessDataGas(new(big.Int))
-		}
-	}
 	return txs, r, nil
 }
 
@@ -627,6 +615,21 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash libcommon.Hash) {
 
 func (ethash *Ethash) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
 	return false
+}
+
+func (ethash *Ethash) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, _ consensus.SystemCall,
+) ([]consensus.Reward, error) {
+	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
+	rewards := make([]consensus.Reward, 1+len(uncles))
+	rewards[0].Beneficiary = header.Coinbase
+	rewards[0].Kind = consensus.RewardAuthor
+	rewards[0].Amount = minerReward
+	for i, uncle := range uncles {
+		rewards[i+1].Beneficiary = uncle.Coinbase
+		rewards[i+1].Kind = consensus.RewardUncle
+		rewards[i+1].Amount = uncleRewards[i]
+	}
+	return rewards, nil
 }
 
 // AccumulateRewards returns rewards for a given block. The mining reward consists

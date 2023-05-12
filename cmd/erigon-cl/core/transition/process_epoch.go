@@ -2,6 +2,7 @@ package transition
 
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
@@ -52,7 +53,7 @@ func ProcessParticipationRecordUpdates(state *state.BeaconState) error {
 	state.SetPreviousEpochAttestations(state.CurrentEpochAttestations())
 	state.ResetCurrentEpochAttestations()
 	// Also mark all current attesters as previous
-	for _, validator := range state.Validators() {
+	state.ForEachValidator(func(validator *cltypes.Validator, idx, total int) bool {
 		// Previous sources/target/head
 		validator.IsPreviousMatchingSourceAttester = validator.IsCurrentMatchingSourceAttester
 		validator.IsPreviousMatchingTargetAttester = validator.IsCurrentMatchingTargetAttester
@@ -63,6 +64,7 @@ func ProcessParticipationRecordUpdates(state *state.BeaconState) error {
 		validator.IsCurrentMatchingSourceAttester = false
 		validator.IsCurrentMatchingTargetAttester = false
 		validator.IsCurrentMatchingHeadAttester = false
-	}
+		return true
+	})
 	return nil
 }

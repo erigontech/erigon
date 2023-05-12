@@ -56,12 +56,13 @@ func ProcessProposerSlashing(s *state.BeaconState, propSlashing *cltypes.Propose
 		if err != nil {
 			return fmt.Errorf("unable to compute signing root: %v", err)
 		}
-		valid, err := bls.Verify(signedHeader.Signature[:], signingRoot[:], proposer.PublicKey[:])
+		pk := proposer.PublicKey()
+		valid, err := bls.Verify(signedHeader.Signature[:], signingRoot[:], pk[:])
 		if err != nil {
 			return fmt.Errorf("unable to verify signature: %v", err)
 		}
 		if !valid {
-			return fmt.Errorf("invalid signature: signature %v, root %v, pubkey %v", signedHeader.Signature[:], signingRoot[:], proposer.PublicKey[:])
+			return fmt.Errorf("invalid signature: signature %v, root %v, pubkey %v", signedHeader.Signature[:], signingRoot[:], pk)
 		}
 	}
 
@@ -187,13 +188,13 @@ func ProcessVoluntaryExit(s *state.BeaconState, signedVoluntaryExit *cltypes.Sig
 	if !validator.Active(currentEpoch) {
 		return errors.New("ProcessVoluntaryExit: validator is not active")
 	}
-	if validator.ExitEpoch != s.BeaconConfig().FarFutureEpoch {
+	if validator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch {
 		return errors.New("ProcessVoluntaryExit: another exit for the same validator is already getting processed")
 	}
 	if currentEpoch < voluntaryExit.Epoch {
 		return errors.New("ProcessVoluntaryExit: exit is happening in the future")
 	}
-	if currentEpoch < validator.ActivationEpoch+s.BeaconConfig().ShardCommitteePeriod {
+	if currentEpoch < validator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
 		return errors.New("ProcessVoluntaryExit: exit is happening too fast")
 	}
 
@@ -207,7 +208,8 @@ func ProcessVoluntaryExit(s *state.BeaconState, signedVoluntaryExit *cltypes.Sig
 		if err != nil {
 			return err
 		}
-		valid, err := bls.Verify(signedVoluntaryExit.Signature[:], signingRoot[:], validator.PublicKey[:])
+		pk := validator.PublicKey()
+		valid, err := bls.Verify(signedVoluntaryExit.Signature[:], signingRoot[:], pk[:])
 		if err != nil {
 			return err
 		}
@@ -225,7 +227,7 @@ func ProcessWithdrawals(s *state.BeaconState, withdrawals types.Withdrawals, ful
 	// Get the list of withdrawals, the expected withdrawals (if performing full validation),
 	// and the beacon configuration.
 	beaconConfig := s.BeaconConfig()
-	numValidators := uint64(len(s.Validators()))
+	numValidators := uint64(s.ValidatorLength())
 
 	// Check if full validation is required and verify expected withdrawals.
 	if fullValidation {

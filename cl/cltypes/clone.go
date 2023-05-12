@@ -1,6 +1,6 @@
 package cltypes
 
-import "github.com/ledgerwatch/erigon/cl/cltypes/clonable"
+import "github.com/ledgerwatch/erigon-lib/types/clonable"
 
 func (*SignedBeaconBlock) Clone() clonable.Clonable {
 	return &SignedBeaconBlock{}
@@ -121,12 +121,16 @@ func (*BlobSideCar) Clone() clonable.Clonable {
 	return &BlobSideCar{}
 }
 
+func (*SignedBlobSideCar) Clone() clonable.Clonable {
+	return &SignedBlobSideCar{}
+}
+
 func (*BlobIdentifier) Clone() clonable.Clonable {
 	return &BlobIdentifier{}
 }
 
-func (*BlobKZGCommitment) Clone() clonable.Clonable {
-	return &BlobKZGCommitment{}
+func (*KZGCommitment) Clone() clonable.Clonable {
+	return &KZGCommitment{}
 }
 
 func (*Eth1Header) Clone() clonable.Clonable {

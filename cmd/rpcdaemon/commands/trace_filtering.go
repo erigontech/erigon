@@ -8,6 +8,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -140,6 +141,21 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 	return nil, err
 }
 
+func rewardKindToString(kind consensus.RewardKind) string {
+	switch kind {
+	case consensus.RewardAuthor:
+		return "block"
+	case consensus.RewardEmptyStep:
+		return "emptyStep"
+	case consensus.RewardExternal:
+		return "external"
+	case consensus.RewardUncle:
+		return "uncle"
+	default:
+		return "unknown"
+	}
+}
+
 // Block implements trace_block
 func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool) (ParityTraces, error) {
 	if gasBailOut == nil {
@@ -168,68 +184,62 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, fmt.Errorf("could not find block %d", uint64(bn))
 	}
 
-	chainConfig, err := api.chainConfig(tx)
+	cfg, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
-	traces, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut /* gasBailOut */, types.MakeSigner(chainConfig, blockNum), chainConfig)
+	txnIndex := -1 // all tx indices
+	traces, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txnIndex, *gasBailOut /* gasBailOut */, types.MakeSigner(cfg, blockNum), cfg)
 	if err != nil {
 		return nil, err
 	}
 
 	out := make([]ParityTrace, 0, len(traces))
-	blockno := uint64(bn)
 	for txno, trace := range traces {
 		txhash := block.Transactions()[txno].Hash()
 		txpos := uint64(txno)
 		for _, pt := range trace.Trace {
 			pt.BlockHash = &hash
-			pt.BlockNumber = &blockno
+			pt.BlockNumber = &blockNum
 			pt.TransactionHash = &txhash
 			pt.TransactionPosition = &txpos
 			out = append(out, *pt)
 		}
 	}
 
-	difficulty := block.Difficulty()
-
-	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
-	var tr ParityTrace
-	var rewardAction = &RewardTraceAction{}
-	rewardAction.Author = block.Coinbase()
-	rewardAction.RewardType = "block" // nolint: goconst
-	if difficulty.Cmp(big.NewInt(0)) != 0 {
-		// block reward is not returned in POS
-		rewardAction.Value.ToInt().Set(minerReward.ToBig())
+	reader, err := rpchelper.CreateHistoryStateReader(tx, blockNum, txnIndex, api.historyV3(tx), cfg.ChainName)
+	if err != nil {
+		return nil, err
 	}
-	tr.Action = rewardAction
-	tr.BlockHash = &common.Hash{}
-	copy(tr.BlockHash[:], block.Hash().Bytes())
-	tr.BlockNumber = new(uint64)
-	*tr.BlockNumber = block.NumberU64()
-	tr.Type = "reward" // nolint: goconst
-	tr.TraceAddress = []int{}
-	out = append(out, tr)
+	stateDb := state.New(reader)
+	if err != nil {
+		return nil, err
+	}
+	engine := api.engine()
+	header := block.Header()
+	excessDataGas, err := api.excessDataGas(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	syscall := func(contract common.Address, data []byte) ([]byte, error) {
+		return core.SysCallContract(contract, data, cfg, stateDb, header, engine, true /* constCall */, excessDataGas)
+	}
+	rewards, err := engine.CalculateRewards(cfg, header, block.Uncles(), syscall)
 
-	// Uncles are not returned in POS
-	if difficulty.Cmp(big.NewInt(0)) != 0 {
-		for i, uncle := range block.Uncles() {
-			if i < len(uncleRewards) {
-				var tr ParityTrace
-				rewardAction = &RewardTraceAction{}
-				rewardAction.Author = uncle.Coinbase
-				rewardAction.RewardType = "uncle" // nolint: goconst
-				rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
-				tr.Action = rewardAction
-				tr.BlockHash = &common.Hash{}
-				copy(tr.BlockHash[:], block.Hash().Bytes())
-				tr.BlockNumber = new(uint64)
-				*tr.BlockNumber = block.NumberU64()
-				tr.Type = "reward" // nolint: goconst
-				tr.TraceAddress = []int{}
-				out = append(out, tr)
-			}
-		}
+	for _, r := range rewards {
+		var tr ParityTrace
+		rewardAction := &RewardTraceAction{}
+		rewardAction.Author = r.Beneficiary
+		rewardAction.RewardType = rewardKindToString(r.Kind)
+		rewardAction.Value.ToInt().Set(r.Amount.ToBig())
+		tr.Action = rewardAction
+		tr.BlockHash = &common.Hash{}
+		copy(tr.BlockHash[:], block.Hash().Bytes())
+		tr.BlockNumber = new(uint64)
+		*tr.BlockNumber = block.NumberU64()
+		tr.Type = "reward" // nolint: goconst
+		tr.TraceAddress = []int{}
+		out = append(out, tr)
 	}
 
 	return out, err
@@ -935,6 +945,25 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 	}
 }
 
+func parentNumber(blockNumber uint64) rpc.BlockNumber {
+	if blockNumber > 0 {
+		return rpc.BlockNumber(blockNumber - 1)
+	} else {
+		return 0
+	}
+}
+
+func (api *TraceAPIImpl) excessDataGas(dbtx kv.Tx, blockNumber uint64) (*big.Int, error) {
+	parentBlock, err := api.blockByRPCNumber(parentNumber(blockNumber), dbtx)
+	if err != nil {
+		return nil, err
+	}
+	if parentBlock != nil {
+		return parentBlock.ExcessDataGas(), nil
+	}
+	return nil, nil
+}
+
 func (api *TraceAPIImpl) callManyTransactions(
 	ctx context.Context,
 	dbtx kv.Tx,
@@ -946,19 +975,12 @@ func (api *TraceAPIImpl) callManyTransactions(
 	cfg *chain.Config,
 ) ([]*TraceCallResult, error) {
 	blockNumber := block.NumberU64()
-	pNo := blockNumber
-	if pNo > 0 {
-		pNo -= 1
-	}
-	parentNo := rpc.BlockNumber(pNo)
+	parentNo := parentNumber(blockNumber)
 	rules := cfg.Rules(blockNumber, block.Time())
 	header := block.Header()
-	var excessDataGas *big.Int
-	parentBlock, err := api.blockByRPCNumber(parentNo, dbtx)
+	excessDataGas, err := api.excessDataGas(dbtx, blockNumber)
 	if err != nil {
 		return nil, err
-	} else if parentBlock != nil {
-		excessDataGas = parentBlock.ExcessDataGas()
 	}
 	txs := block.Transactions()
 	callParams := make([]TraceCallParam, 0, len(txs))
@@ -993,7 +1015,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 		// gnosis might have a fee free account here
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *cfg, stateDb, header, engine, true /* constCall */, excessDataGas)
+				return core.SysCallContract(contract, data, cfg, stateDb, header, engine, true /* constCall */, excessDataGas)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}

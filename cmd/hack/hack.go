@@ -979,7 +979,7 @@ func scanTxs(chaindata string) error {
 			return err
 		}
 		var tr types.Transaction
-		if tr, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(v), 0)); err != nil {
+		if tr, err = types.DecodeTransaction(v); err != nil {
 			return err
 		}
 		if _, ok := trTypes[tr.Type()]; !ok {

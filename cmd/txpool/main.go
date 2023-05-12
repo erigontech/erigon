@@ -159,7 +159,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	newTxs := make(chan types.Announcements, 1024)
 	defer close(newTxs)
 	txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg,
-		kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient)
+		kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient, logger)
 	if err != nil {
 		return err
 	}
@@ -174,7 +174,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	*/
 	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil)
 
-	grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil)
+	grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil, logger)
 	if err != nil {
 		return err
 	}

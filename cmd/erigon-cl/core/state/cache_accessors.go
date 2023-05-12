@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/cache"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/shuffling"
 )
 
@@ -159,9 +160,7 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	var cacheKey [16]byte
 	binary.BigEndian.PutUint64(cacheKey[:], slot)
 	binary.BigEndian.PutUint64(cacheKey[8:], committeeIndex)
-	if cachedCommittee, ok := b.committeeCache.Get(cacheKey); ok {
-		return cachedCommittee, nil
-	}
+
 	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
 	committeesPerSlot := b.CommitteeCount(epoch)
 	committee, err := b.ComputeCommittee(
@@ -173,7 +172,6 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	if err != nil {
 		return nil, err
 	}
-	b.committeeCache.Add(cacheKey, committee)
 	return committee, nil
 }
 
@@ -190,7 +188,14 @@ func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error)
 	syncCommitteePubKeys := make([][48]byte, 0, cltypes.SyncCommitteeSize)
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)
 	for len(syncCommitteePubKeys) < cltypes.SyncCommitteeSize {
-		shuffledIndex, err := shuffling.ComputeShuffledIndex(b.BeaconConfig(), i%activeValidatorCount, activeValidatorCount, seed, preInputs, optimizedHashFunc)
+		shuffledIndex, err := shuffling.ComputeShuffledIndex(
+			b.BeaconConfig(),
+			i%activeValidatorCount,
+			activeValidatorCount,
+			seed,
+			preInputs,
+			optimizedHashFunc,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -205,8 +210,8 @@ func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error)
 		if err != nil {
 			return nil, err
 		}
-		if validator.EffectiveBalance*math.MaxUint8 >= beaconConfig.MaxEffectiveBalance*randomByte {
-			syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey)
+		if validator.EffectiveBalance()*math.MaxUint8 >= beaconConfig.MaxEffectiveBalance*randomByte {
+			syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey())
 		}
 		i++
 	}
@@ -230,6 +235,9 @@ func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error)
 // GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.
 // thus, it is a flag now.
 func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData, aggregationBits []byte, checkBitsLength bool) ([]uint64, error) {
+	if cached, ok := cache.LoadAttestatingIndicies(attestation); ok {
+		return cached, nil
+	}
 	committee, err := b.GetBeaconCommitee(attestation.Slot, attestation.Index)
 	if err != nil {
 		return nil, err
@@ -238,6 +246,7 @@ func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData,
 	if checkBitsLength && utils.GetBitlistLength(aggregationBits) != len(committee) {
 		return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits. agg bits size: %d, expect: %d", aggregationBitsLen, len(committee))
 	}
+
 	attestingIndices := []uint64{}
 	for i, member := range committee {
 		bitIndex := i % 8
@@ -249,6 +258,7 @@ func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData,
 			attestingIndices = append(attestingIndices, member)
 		}
 	}
+	cache.StoreAttestation(attestation, attestingIndices)
 	return attestingIndices, nil
 }
 

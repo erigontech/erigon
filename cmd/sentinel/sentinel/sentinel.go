@@ -20,7 +20,6 @@ import (
 	"math"
 	"net"
 
-	"net/http"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -40,8 +39,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const (
@@ -236,10 +233,10 @@ func New(
 	db kv.RoDB,
 ) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx: ctx,
-		cfg: cfg,
-		db:  db,
-		// metrics: true,
+		ctx:     ctx,
+		cfg:     cfg,
+		db:      db,
+		metrics: true,
 	}
 
 	// Setup discovery
@@ -265,18 +262,6 @@ func New(
 		return nil, err
 	}
 	if s.metrics {
-		http.Handle("/metrics", promhttp.Handler())
-		go func() {
-			server := &http.Server{
-				Addr:              ":2112",
-				ReadHeaderTimeout: time.Hour,
-			}
-			if err := server.ListenAndServe(); err != nil {
-				panic(err)
-			}
-		}()
-
-		rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
 
 		str, err := rcmgrObs.NewStatsTraceReporter()
 		if err != nil {

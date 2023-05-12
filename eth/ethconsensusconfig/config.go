@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
@@ -20,12 +19,13 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
+	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
-func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify []string, noverify bool, HeimdallgRPCAddress string, HeimdallURL string, WithoutHeimdall bool, datadir string, snapshots *snapshotsync.RoSnapshots, readonly bool, chainDb ...kv.RwDB) consensus.Engine {
+func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
+	heimdallGrpcAddress string, heimdallUrl string, withoutHeimdall bool, dataDir string, readonly bool,
+) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -36,7 +36,7 @@ func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify
 			eng = ethash.NewFaker()
 		case ethashcfg.ModeTest:
 			log.Warn("Ethash used in test mode")
-			eng = ethash.NewTester(nil, noverify)
+			eng = ethash.NewTester(nil, noVerify)
 		case ethashcfg.ModeShared:
 			log.Warn("Ethash used in shared mode")
 			eng = ethash.NewShared()
@@ -48,18 +48,18 @@ func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify
 				DatasetsInMem:    consensusCfg.DatasetsInMem,
 				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
 				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
-			}, notify, noverify)
+			}, notify, noVerify)
 		}
 	case *params.ConsensusSnapshotConfig:
 		if chainConfig.Clique != nil {
 			if consensusCfg.DBPath == "" {
-				consensusCfg.DBPath = filepath.Join(datadir, "clique", "db")
+				consensusCfg.DBPath = filepath.Join(dataDir, "clique", "db")
 			}
 			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory, readonly))
 		}
 	case *chain.AuRaConfig:
 		if chainConfig.Aura != nil {
-			dbPath := filepath.Join(datadir, "aura")
+			dbPath := filepath.Join(dataDir, "aura")
 			var err error
 			eng, err = aura.NewAuRa(chainConfig.Aura, db.OpenDatabase(dbPath, false, readonly))
 			if err != nil {
@@ -73,17 +73,17 @@ func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify
 		if chainConfig.Bor != nil && chainConfig.Bor.ValidatorContract != "" {
 			genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, chainConfig.Bor.ValidatorContract, chainConfig.Bor.StateReceiverContract)
 			spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig)
-			borDbPath := filepath.Join(datadir, "bor") // bor consensus path: datadir/bor
+			borDbPath := filepath.Join(dataDir, "bor") // bor consensus path: datadir/bor
 			db := db.OpenDatabase(borDbPath, false, readonly)
 
 			var heimdallClient bor.IHeimdallClient
-			if WithoutHeimdall {
+			if withoutHeimdall {
 				return bor.New(chainConfig, db, spanner, nil, genesisContractsClient)
 			} else {
-				if HeimdallgRPCAddress != "" {
-					heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(HeimdallgRPCAddress)
+				if heimdallGrpcAddress != "" {
+					heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(heimdallGrpcAddress)
 				} else {
-					heimdallClient = heimdall.NewHeimdallClient(HeimdallURL)
+					heimdallClient = heimdall.NewHeimdallClient(heimdallUrl)
 				}
 				eng = bor.New(chainConfig, db, spanner, heimdallClient, genesisContractsClient)
 			}
@@ -97,6 +97,25 @@ func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify
 	if chainConfig.TerminalTotalDifficulty == nil {
 		return eng
 	} else {
-		return serenity.New(eng) // the Merge
+		return merge.New(eng) // the Merge
 	}
+}
+
+func CreateConsensusEngineBareBones(chainConfig *chain.Config) consensus.Engine {
+	var consensusConfig interface{}
+
+	if chainConfig.Clique != nil {
+		consensusConfig = params.CliqueSnapshot
+	} else if chainConfig.Aura != nil {
+		consensusConfig = &chainConfig.Aura
+	} else if chainConfig.Bor != nil {
+		consensusConfig = &chainConfig.Bor
+	} else {
+		var ethashCfg ethashcfg.Config
+		ethashCfg.PowMode = ethashcfg.ModeFake
+		consensusConfig = &ethashCfg
+	}
+
+	return CreateConsensusEngine(chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
+		"" /* heimdallGrpcAddress */, "" /* heimdallUrl */, true /* withoutHeimdall */, "" /*dataDir*/, false /* readonly */)
 }
