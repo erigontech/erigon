@@ -206,6 +206,7 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 		parent.UncleHash(),
 		parent.Header().AuRaStep,
 	)
+	// fmt.Printf("Block Difficulty with %v offset: %v", seconds, b.header.Difficulty)
 }
 
 func (b *BlockGen) GetHeader() *types.Header {
