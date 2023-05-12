@@ -535,8 +535,7 @@ Loop:
 func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (chan uint64, context.CancelFunc) {
 	const readAheadBlocks = 100
 	readAhead := make(chan uint64, readAheadBlocks)
-	ctxForErrgroup, cancel := context.WithCancel(ctx)
-	g, gCtx := errgroup.WithContext(ctxForErrgroup)
+	g, gCtx := errgroup.WithContext(ctx)
 	for i := 0; i < workers; i++ {
 		g.Go(func() error {
 			var bn uint64
@@ -553,9 +552,8 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (ch
 		})
 	}
 	return readAhead, func() {
-		cancel()
-		_ = g.Wait()
 		close(readAhead)
+		_ = g.Wait()
 	}
 }
 func blocksReadAheadFunc(ctx context.Context, cfg *ExecuteBlockCfg, blockNum uint64) error {
