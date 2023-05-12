@@ -424,7 +424,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	if initialCycle {
 		// snapshots are often stored on chaper drives. don't expect low-read-latency and read-ahead.
 		var clean func()
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 1)
+		readAhead, clean = blocksReadAhead(ctx, &cfg, 2)
 		defer clean()
 	}
 
@@ -570,6 +570,9 @@ func blocksReadAheadFunc(ctx context.Context, cfg *ExecuteBlockCfg, blockNum uin
 	block, senders, err := cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return err
+	}
+	if block == nil {
+		return nil
 	}
 	stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
 	for _, sender := range senders {
