@@ -557,7 +557,7 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (ch
 	}
 }
 func blocksReadAheadFunc(ctx context.Context, cfg *ExecuteBlockCfg, blockNum uint64) error {
-	tx, err := cfg.db.BeginRo(context.Background())
+	tx, err := cfg.db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -577,23 +577,26 @@ func blocksReadAheadFunc(ctx context.Context, cfg *ExecuteBlockCfg, blockNum uin
 	stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
 	for _, sender := range senders {
 		a, _ := stateReader.ReadAccountData(sender)
-		if a != nil && a.Incarnation > 0 {
-			code, _ := stateReader.ReadAccountCode(sender, a.Incarnation, a.CodeHash)
-			if len(code) > 0 {
-				_, _ = code[0], code[len(code)-1]
-			}
+		if a != nil || a.Incarnation == 0 {
+			continue
+		}
+		code, _ := stateReader.ReadAccountCode(sender, a.Incarnation, a.CodeHash)
+		if len(code) > 0 {
+			_, _ = code[0], code[len(code)-1]
 		}
 	}
 	for _, txn := range block.Transactions() {
 		to := txn.GetTo()
-		if to != nil {
-			a, _ := stateReader.ReadAccountData(*to)
-			if a != nil && a.Incarnation > 0 {
-				code, _ := stateReader.ReadAccountCode(*to, a.Incarnation, a.CodeHash)
-				if len(code) > 0 {
-					_, _ = code[0], code[len(code)-1]
-				}
-			}
+		if to == nil {
+			continue
+		}
+		a, _ := stateReader.ReadAccountData(*to)
+		if a != nil || a.Incarnation == 0 {
+			continue
+		}
+		code, _ := stateReader.ReadAccountCode(*to, a.Incarnation, a.CodeHash)
+		if len(code) > 0 {
+			_, _ = code[0], code[len(code)-1]
 		}
 	}
 	_, _ = stateReader.ReadAccountData(block.Coinbase())
