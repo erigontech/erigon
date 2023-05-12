@@ -29,7 +29,7 @@ services:
 
   # Connects to `rpcdaemon:8555`, exposes 80 port
   otterscan:
-    image: otterscan/otterscan:v1.30.0
+    image: us-central1-docker.pkg.dev/dfx-server/dfx-containers/otterscan:v1.30.0-modified
     environment:
       # ERIGON_URL: "http://${VM_PUBLIC_IP:-localost}:8555"
       ERIGON_URL: "${ERIGON_VIA_HTTPS_PROXY}"
