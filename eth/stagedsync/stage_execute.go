@@ -590,7 +590,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 	stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
 	for _, sender := range senders {
 		a, _ := stateReader.ReadAccountData(sender)
-		if a != nil || a.Incarnation == 0 {
+		if a == nil || a.Incarnation == 0 {
 			continue
 		}
 		if code, _ := stateReader.ReadAccountCode(sender, a.Incarnation, a.CodeHash); len(code) > 0 {
@@ -604,7 +604,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 			continue
 		}
 		a, _ := stateReader.ReadAccountData(*to)
-		if a != nil || a.Incarnation == 0 {
+		if a == nil || a.Incarnation == 0 {
 			continue
 		}
 		if code, _ := stateReader.ReadAccountCode(*to, a.Incarnation, a.CodeHash); len(code) > 0 {
