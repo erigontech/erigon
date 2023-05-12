@@ -2,6 +2,7 @@ package state
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -200,7 +201,7 @@ func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []b
 
 func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, _ []byte) error {
 	sd.Commitment.TouchPlainKey(addr, code, sd.Commitment.TouchCode)
-	prevCode, _ := sd.Code.wal.topValue(addr)
+	prevCode, _ := sd.Code.values.Get(hex.EncodeToString(addr))
 	if len(code) == 0 {
 		return sd.Code.DeleteWithPrev(addr, nil, prevCode)
 	}

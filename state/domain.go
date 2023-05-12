@@ -29,7 +29,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -160,6 +159,7 @@ type Domain struct {
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
 	roFiles   atomic.Pointer[[]ctxItem]
+	values    *btree2.Map[string, []byte]
 	defaultDc *DomainContext
 	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
 	valsTable string // key + invertedStep -> values
@@ -176,6 +176,7 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 		keysTable: keysTable,
 		valsTable: valsTable,
 		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		values:    btree2.NewMap[string, []byte](128),
 		stats:     DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 	}
 	d.roFiles.Store(&[]ctxItem{})
@@ -411,6 +412,7 @@ func (d *Domain) reCalcRoFiles() {
 
 func (d *Domain) Close() {
 	d.History.Close()
+	d.values.Clear()
 	d.closeWhatNotInList([]string{})
 	d.reCalcRoFiles()
 }
@@ -420,6 +422,7 @@ func (d *Domain) PutWithPrev(key1, key2, val, preval []byte) error {
 	if err := d.History.AddPrevValue(key1, key2, preval); err != nil {
 		return err
 	}
+	d.values.Set(hex.EncodeToString(common.Append(key1, key2)), val)
 	return d.wal.addValue(key1, key2, val)
 }
 
@@ -428,7 +431,7 @@ func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	if err := d.History.AddPrevValue(key1, key2, prev); err != nil {
 		return err
 	}
-
+	d.values.Delete(hex.EncodeToString(common.Append(key1, key2)))
 	return d.wal.addValue(key1, key2, nil)
 }
 
@@ -503,7 +506,6 @@ func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 		buffered:    buffered,
 		discard:     discard,
 		aux:         make([]byte, 0, 128),
-		topVals:     make(map[string][]byte, 1<<14),
 		largeValues: d.largeValues,
 	}
 
@@ -518,13 +520,9 @@ func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 
 type domainWAL struct {
 	d           *Domain
-	predecessor *domainWAL
 	keys        *etl.Collector
 	values      *etl.Collector
-	topLock     sync.RWMutex
-	topVals     map[string][]byte
-	topSize     atomic.Uint64
-	flushed     atomic.Bool
+	kvsize      atomic.Uint64
 	aux         []byte
 	tmpdir      string
 	buffered    bool
@@ -544,6 +542,10 @@ func (h *domainWAL) close() {
 	}
 }
 
+func (h *domainWAL) size() uint64 {
+	return h.kvsize.Load()
+}
+
 func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if h.discard {
 		return nil
@@ -554,27 +556,7 @@ func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := h.values.Load(tx, h.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	h.flushed.Store(true)
 	return nil
-}
-
-func (h *domainWAL) topValue(key []byte) ([]byte, bool) {
-	h.topLock.RLock()
-	v, ok := h.topVals[hex.EncodeToString(key)]
-	h.topLock.RUnlock()
-	if ok {
-		return v, ok
-	}
-	if h.predecessor != nil {
-		vp, vok := h.predecessor.topValue(key)
-		if h.predecessor.flushed.Load() {
-			// when wal is synced with db, use db for further reads
-			h.predecessor.close()
-			h.predecessor = nil
-		}
-		return vp, vok
-	}
-	return nil, false
 }
 
 func (h *domainWAL) addValue(key1, key2, value []byte) error {
@@ -589,16 +571,6 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 
 	step := ^(h.d.txNum / h.d.aggregationStep)
 	binary.BigEndian.PutUint64(fullkey[kl:], step)
-
-	h.topLock.Lock()
-	switch {
-	case len(value) > 0:
-		h.topVals[hex.EncodeToString(fullkey[:kl])] = common.Copy(value)
-	default:
-		h.topVals[hex.EncodeToString(fullkey[:kl])] = []byte{}
-	}
-	h.topLock.Unlock()
-	h.topSize.Add(uint64(len(value) + kl))
 
 	if h.largeValues {
 		if !h.buffered {
@@ -617,6 +589,7 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 		if err := h.values.Collect(fullkey, value); err != nil {
 			return err
 		}
+		h.kvsize.Add(uint64(len(value)) + uint64(len(fullkey)*2))
 
 		return nil
 	}
@@ -636,20 +609,7 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 	if err := h.values.Collect(fullkey, value); err != nil {
 		return err
 	}
-	return nil
-}
-
-func (h *domainWAL) size() uint64 {
-	return h.topSize.Load()
-}
-
-func (h *domainWAL) apply(fn func(k, v []byte)) error {
-	h.topLock.RLock()
-	for k, v := range h.topVals {
-		kx, _ := hex.DecodeString(k)
-		fn(kx, v)
-	}
-	h.topLock.RUnlock()
+	h.kvsize.Add(uint64(len(value)) + uint64(len(fullkey)*2))
 	return nil
 }
 
@@ -658,6 +618,7 @@ type CursorType uint8
 const (
 	FILE_CURSOR CursorType = iota
 	DB_CURSOR
+	RAM_CURSOR
 )
 
 // CursorItem is the item in the priority queue used to do merge interation
@@ -1487,10 +1448,6 @@ func (d *Domain) Rotate() flusher {
 
 	hf.d = d.wal
 	d.wal = d.newWriter(d.wal.tmpdir, d.wal.buffered, d.wal.discard)
-	for k, v := range hf.d.topVals {
-		// stupid way to avoid cache miss while old wal is not loaded to db yet.
-		d.wal.topVals[k] = common.Copy(v)
-	}
 	log.Warn("WAL has been rotated", "domain", d.filenameBase)
 	return hf
 }
@@ -1641,6 +1598,17 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 	heap.Init(&cp)
 	var k, v []byte
 	var err error
+
+	dc.d.values.Ascend(hex.EncodeToString(prefix), func(kx string, v []byte) bool {
+		k, _ := hex.DecodeString(kx)
+		fmt.Printf("kx: %s, k: %x\n", kx, k)
+		if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
+			heap.Push(&cp, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), endTxNum: dc.d.txNum, reverse: true})
+			return true
+		}
+		return false
+	})
+
 	keysCursor, err := dc.d.tx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
 		return err
@@ -1660,17 +1628,6 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 		}
 		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
 	}
-	if dc.d.wal != nil {
-		iter := func(k, v []byte) {
-			if k != nil && bytes.HasPrefix(k, prefix) {
-				heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: dc.d.txNum, reverse: true})
-			}
-		}
-		if err := dc.d.wal.apply(iter); err != nil {
-			return err
-		}
-	}
-
 	for i, item := range dc.files {
 		bg := dc.statelessBtree(i)
 		if bg.Empty() {
@@ -1696,6 +1653,14 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := cp[0]
 			switch ci1.t {
+			case RAM_CURSOR:
+				if k != nil && bytes.HasPrefix(k, prefix) {
+					ci1.key = common.Copy(k)
+					ci1.val = common.Copy(v)
+					heap.Fix(&cp, 0)
+				} else {
+					heap.Pop(&cp)
+				}
 			case FILE_CURSOR:
 				if ci1.dg.HasNext() {
 					ci1.key, _ = ci1.dg.Next(ci1.key[:0])
@@ -1790,13 +1755,10 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
 	dc.d.stats.TotalQueries.Add(1)
 
-	if dc.d.wal != nil {
-		v0, ok := dc.d.wal.topValue(key)
-		if ok {
-			return v0, true, nil
-		}
+	v0, ok := dc.d.values.Get(hex.EncodeToString(key))
+	if ok {
+		return v0, true, nil
 	}
-
 	return dc.get(key, dc.d.txNum, roTx)
 }
 
