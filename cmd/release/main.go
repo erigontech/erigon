@@ -10,8 +10,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/hashicorp/go-version"
 )
 
 type Binary struct {

@@ -108,7 +108,6 @@ erigon: go-version erigon.cmd
 COMMANDS += devnet
 COMMANDS += erigon-el-mock
 COMMANDS += downloader
-COMMANDS += erigon-cl
 COMMANDS += hack
 COMMANDS += integration
 COMMANDS += observer

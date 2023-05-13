@@ -62,7 +62,6 @@ COPY --from=tools-builder /app/build/bin/mdbx_stat /usr/local/bin/mdbx_stat
 COPY --from=builder /app/build/bin/devnet /usr/local/bin/devnet
 COPY --from=builder /app/build/bin/downloader /usr/local/bin/downloader
 COPY --from=builder /app/build/bin/erigon /usr/local/bin/erigon
-COPY --from=builder /app/build/bin/erigon-cl /usr/local/bin/erigon-cl
 COPY --from=builder /app/build/bin/evm /usr/local/bin/evm
 COPY --from=builder /app/build/bin/hack /usr/local/bin/hack
 COPY --from=builder /app/build/bin/integration /usr/local/bin/integration
