@@ -100,9 +100,9 @@ func (arr *bitlist) getBaseHash(xs []byte, depth uint8) error {
 	elements := arr.u
 	offset := 32*(arr.l/32) + 32
 	if len(arr.u) <= offset {
-		elements = append(elements, make([]byte, offset-len(arr.u))...)
+		elements = append(elements, make([]byte, offset-len(arr.u)+1)...)
 	}
-	elements = arr.u[:offset]
+	elements = elements[:offset]
 	for i := uint8(0); i < depth; i++ {
 		// Sequential
 		layerLen := len(elements)
