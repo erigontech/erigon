@@ -738,7 +738,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	addressBytes := address.Bytes()
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
-	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
+	fmt.Printf("v3 account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash)
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, string(addressBytes))
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value)
 

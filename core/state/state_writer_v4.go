@@ -26,6 +26,7 @@ func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, accoun
 	value := accounts.SerialiseV3(account)
 	origValue := accounts.SerialiseV3(original)
 	w.agg.SetTx(w.tx.(kv.RwTx))
+	//fmt.Printf("v4 account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash)
 	return w.agg.UpdateAccount(address.Bytes(), value, origValue)
 }
 

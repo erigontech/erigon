@@ -132,6 +132,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	rw.ibs.Reset()
 	ibs := rw.ibs
 
+	//noop := state.NewNoopWriter()
+
 	rules := txTask.Rules
 	daoForkTx := rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
@@ -145,11 +147,20 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		}
 		// For Genesis, rules should be empty, so that empty accounts can be included
 		rules = &chain.Rules{}
-		// todo commitment
+		//rh, err := rw.rs.Commitment(txTask.TxNum, true)
+		//if err != nil {
+		//	panic(err)
+		//}
+		//if !bytes.Equal(rh, txTask.BlockRoot.Bytes()) {
+		//	panic("invalid root hash for genesis block: " + hex.EncodeToString(rh) + " != " + hex.EncodeToString(txTask.BlockRoot.Bytes()))
+		//}
 	} else if daoForkTx {
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
 		misc.ApplyDAOHardFork(ibs)
-		ibs.SoftFinalise()
+		if err := ibs.FinalizeTx(rules, rw.stateWriter); err != nil {
+			txTask.Error = err
+		}
+		//ibs.SoftFinalise()
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
@@ -177,7 +188,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 					txTask.TraceTos[uncle.Coinbase] = struct{}{}
 				}
 			}
-			if err := ibs.CommitBlock(txTask.Rules, rw.stateWriter); err != nil {
+			if err := ibs.CommitBlock(txTask.Rules, noop); err != nil {
 				txTask.Error = fmt.Errorf("commit block: %w", err)
 			}
 		}

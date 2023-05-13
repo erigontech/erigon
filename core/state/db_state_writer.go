@@ -7,6 +7,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -63,7 +64,7 @@ func originalAccountData(original *accounts.Account, omitHashes bool) []byte {
 }
 
 func (dsw *DbStateWriter) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
-	fmt.Printf("DBW balance %x,%d\n", address, account.Balance.Uint64())
+	//fmt.Printf("DBW balance %x,%d\n", address, account.Balance.Uint64())
 	if err := dsw.csw.UpdateAccountData(address, original, account); err != nil {
 		return err
 	}

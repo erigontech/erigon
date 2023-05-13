@@ -22,6 +22,7 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -649,7 +650,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 		if !bi.transferred {
 			sdb.getStateObject(addr)
 		}
-		fmt.Printf("FIN balanceInc: %x, %d %T\n", addr, bi.increase.Uint64(), stateWriter)
+		//fmt.Printf("FIN balanceInc: %x, %d %T\n", addr, bi.increase.Uint64(), stateWriter)
 	}
 	for addr := range sdb.journal.dirties {
 		so, exist := sdb.stateObjects[addr]
@@ -699,7 +700,7 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 		if !bi.transferred {
 			sdb.getStateObject(addr)
 		}
-		fmt.Printf("CB balanceInc: %x, %d %T\n", addr, bi.increase.Uint64(), stateWriter)
+		//fmt.Printf("CB balanceInc: %x, %d %T\n", addr, bi.increase.Uint64(), stateWriter)
 	}
 	return sdb.MakeWriteSet(chainRules, stateWriter)
 }

@@ -323,6 +323,9 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcomm
 	if err := l.receiver.Receive(CutoffStreamItem, nil, nil, nil, nil, nil, false, 0); err != nil {
 		return EmptyRoot, err
 	}
+	if l.trace {
+		fmt.Printf("StateRoot %x\n----------\n", l.receiver.Root())
+	}
 	return l.receiver.Root(), nil
 }
 
