@@ -16,6 +16,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cl/phase1/core"
+	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"os"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -26,8 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/caplin-phase1/caplin1"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"

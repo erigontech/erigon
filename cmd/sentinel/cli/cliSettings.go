@@ -2,12 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 

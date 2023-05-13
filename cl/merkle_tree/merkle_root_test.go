@@ -1,13 +1,13 @@
 package merkle_tree_test
 
 import (
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/state_encoding"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
 )
 
 func TestEmptyArraysRoot(t *testing.T) {
