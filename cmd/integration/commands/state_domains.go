@@ -157,7 +157,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	mode := libstate.ParseCommitmentMode(commitmentMode)
 	libstate.COMPARE_INDEXES = true
 
-	_, _, _, agg := newDomains(ctx, chainDb, stepSize, mode, trieVariant)
+	_, _, _, agg := newDomains(ctx, chainDb, stepSize, mode, trieVariant, logger)
 	defer agg.Close()
 
 	histTx, err := chainDb.BeginRo(ctx)
@@ -276,7 +276,7 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context, logger lo
 	}
 	mode := libstate.ParseCommitmentMode(commitmentMode)
 
-	engine, _, _, agg := newDomains(ctx, chainDb, stepSize, mode, trieVariant)
+	engine, _, _, agg := newDomains(ctx, chainDb, stepSize, mode, trieVariant, logger)
 	defer agg.Close()
 
 	histTx, err := chainDb.BeginRo(ctx)
