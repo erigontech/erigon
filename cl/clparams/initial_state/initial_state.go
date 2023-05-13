@@ -3,9 +3,9 @@ package initial_state
 import (
 	_ "embed"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 //go:embed mainnet.state.ssz
