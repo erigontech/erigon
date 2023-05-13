@@ -851,6 +851,8 @@ func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) 
 		return b.MinSlashingPenaltyQuotientBellatrix
 	case CapellaVersion:
 		return b.MinSlashingPenaltyQuotientBellatrix
+	case DenebVersion:
+		return b.MinSlashingPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")
 	}
@@ -865,6 +867,8 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 	case BellatrixVersion:
 		return b.InactivityPenaltyQuotientBellatrix
 	case CapellaVersion:
+		return b.InactivityPenaltyQuotientBellatrix
+	case DenebVersion:
 		return b.InactivityPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")
