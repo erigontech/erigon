@@ -17,12 +17,14 @@ import (
 type ChainSpanner struct {
 	validatorSet abi.ABI
 	chainConfig  *chain.Config
+	logger       log.Logger
 }
 
-func NewChainSpanner(validatorSet abi.ABI, chainConfig *chain.Config) *ChainSpanner {
+func NewChainSpanner(validatorSet abi.ABI, chainConfig *chain.Config, logger log.Logger) *ChainSpanner {
 	return &ChainSpanner{
 		validatorSet: validatorSet,
 		chainConfig:  chainConfig,
+		logger:       logger,
 	}
 }
 
@@ -34,7 +36,7 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 
 	data, err := c.validatorSet.Pack(method)
 	if err != nil {
-		log.Error("Unable to pack tx for getCurrentSpan", "error", err)
+		c.logger.Error("Unable to pack tx for getCurrentSpan", "error", err)
 		return nil, err
 	}
 
@@ -112,7 +114,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan HeimdallSpan, syscall consensus.S
 		return err
 	}
 
-	log.Debug("✅ Committing new span",
+	c.logger.Debug("✅ Committing new span",
 		"id", heimdallSpan.ID,
 		"startBlock", heimdallSpan.StartBlock,
 		"endBlock", heimdallSpan.EndBlock,
@@ -129,7 +131,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan HeimdallSpan, syscall consensus.S
 		producerBytes,
 	)
 	if err != nil {
-		log.Error("Unable to pack tx for commitSpan", "error", err)
+		c.logger.Error("Unable to pack tx for commitSpan", "error", err)
 		return err
 	}
 

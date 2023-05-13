@@ -43,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -109,7 +110,7 @@ func (bt *BlockTest) Run(t *testing.T, _ bool) error {
 	if !ok {
 		return UnsupportedForkError{bt.json.Network}
 	}
-	engine := ethconsensusconfig.CreateConsensusEngineBareBones(config)
+	engine := ethconsensusconfig.CreateConsensusEngineBareBones(config, log.New())
 	m := stages.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
 
 	// import pre accounts & construct test genesis block & state root
