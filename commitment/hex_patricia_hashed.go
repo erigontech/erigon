@@ -1815,11 +1815,11 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 		}
 	}
 
-	if branchData, err := hph.foldRoot(); err != nil {
-		return nil, nil, fmt.Errorf("foldRoot: %w", err)
-	} else if branchData != nil {
-		branchNodeUpdates[string(hexToCompact([]byte{}))] = branchData
-	}
+	//if branchData, err := hph.foldRoot(); err != nil {
+	//	return nil, nil, fmt.Errorf("foldRoot: %w", err)
+	//} else if branchData != nil {
+	//	branchNodeUpdates[string(hexToCompact([]byte{}))] = branchData
+	//}
 
 	rootHash, err = hph.RootHash()
 	if err != nil {

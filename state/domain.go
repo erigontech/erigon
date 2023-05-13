@@ -625,6 +625,7 @@ const (
 // over storage of a given account
 type CursorItem struct {
 	c        kv.CursorDupSort
+	iter     btree2.MapIter[string, []byte]
 	dg       *compress.Getter
 	dg2      *compress.Getter
 	key      []byte
@@ -1599,15 +1600,19 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 	var k, v []byte
 	var err error
 
-	dc.d.values.Ascend(hex.EncodeToString(prefix), func(kx string, v []byte) bool {
-		k, _ := hex.DecodeString(kx)
-		fmt.Printf("kx: %s, k: %x\n", kx, k)
+	iter := dc.d.values.Iter()
+	cnt := 0
+	if iter.Seek(string(prefix)) {
+		kx := iter.Key()
+		v = iter.Value()
+		cnt++
+		fmt.Printf("c %d kx: %s, k: %x\n", cnt, kx, v)
+		k, _ = hex.DecodeString(kx)
+
 		if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
-			heap.Push(&cp, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), endTxNum: dc.d.txNum, reverse: true})
-			return true
+			heap.Push(&cp, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), iter: iter, endTxNum: dc.d.txNum, reverse: true})
 		}
-		return false
-	})
+	}
 
 	keysCursor, err := dc.d.tx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
@@ -1654,9 +1659,12 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 			ci1 := cp[0]
 			switch ci1.t {
 			case RAM_CURSOR:
-				if k != nil && bytes.HasPrefix(k, prefix) {
-					ci1.key = common.Copy(k)
-					ci1.val = common.Copy(v)
+				if ci1.iter.Next() {
+					k, _ = hex.DecodeString(ci1.iter.Key())
+					if k != nil && bytes.HasPrefix(k, prefix) {
+						ci1.key = common.Copy(k)
+						ci1.val = common.Copy(ci1.iter.Value())
+					}
 					heap.Fix(&cp, 0)
 				} else {
 					heap.Pop(&cp)

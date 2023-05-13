@@ -1751,57 +1751,57 @@ func (a *AggregatorV3) AddLogTopic(topic []byte) error {
 
 func (a *AggregatorV3) UpdateAccount(addr []byte, data, prevData []byte) error {
 	return a.domains.UpdateAccountData(addr, data, prevData)
-	a.commitment.TouchPlainKey(addr, data, a.commitment.TouchAccount)
-	return a.accounts.PutWithPrev(addr, nil, data, prevData)
+	//a.commitment.TouchPlainKey(addr, data, a.commitment.TouchAccount)
+	//return a.accounts.PutWithPrev(addr, nil, data, prevData)
 }
 
 func (a *AggregatorV3) UpdateCode(addr []byte, code, prevCode []byte) error {
 	return a.domains.UpdateAccountCode(addr, code, prevCode)
-	a.commitment.TouchPlainKey(addr, code, a.commitment.TouchCode)
-	if len(code) == 0 {
-		return a.code.DeleteWithPrev(addr, nil, prevCode)
-	}
-	return a.code.PutWithPrev(addr, nil, code, prevCode)
+	//a.commitment.TouchPlainKey(addr, code, a.commitment.TouchCode)
+	//if len(code) == 0 {
+	//	return a.code.DeleteWithPrev(addr, nil, prevCode)
+	//}
+	//return a.code.PutWithPrev(addr, nil, code, prevCode)
 }
 
 func (a *AggregatorV3) DeleteAccount(addr, prev []byte) error {
 	return a.domains.DeleteAccount(addr, prev)
-	a.commitment.TouchPlainKey(addr, nil, a.commitment.TouchAccount)
-
-	if err := a.accounts.DeleteWithPrev(addr, nil, prev); err != nil {
-		return err
-	}
-	if err := a.code.Delete(addr, nil); err != nil {
-		return err
-	}
-	var e error
-	if err := a.storage.defaultDc.IteratePrefix(addr, func(k, v []byte) {
-		a.commitment.TouchPlainKey(k, nil, a.commitment.TouchStorage)
-		if e == nil {
-			e = a.storage.DeleteWithPrev(k, nil, v)
-		}
-	}); err != nil {
-		return err
-	}
-	return e
+	//a.commitment.TouchPlainKey(addr, nil, a.commitment.TouchAccount)
+	//
+	//if err := a.accounts.DeleteWithPrev(addr, nil, prev); err != nil {
+	//	return err
+	//}
+	//if err := a.code.Delete(addr, nil); err != nil {
+	//	return err
+	//}
+	//var e error
+	//if err := a.storage.defaultDc.IteratePrefix(addr, func(k, v []byte) {
+	//	a.commitment.TouchPlainKey(k, nil, a.commitment.TouchStorage)
+	//	if e == nil {
+	//		e = a.storage.DeleteWithPrev(k, nil, v)
+	//	}
+	//}); err != nil {
+	//	return err
+	//}
+	//return e
 }
 
 func (a *AggregatorV3) UpdateStorage(addr, loc []byte, value, preVal []byte) error {
 	return a.domains.WriteAccountStorage(addr, loc, value, preVal)
-	a.commitment.TouchPlainKey(common2.Append(addr, loc), value, a.commitment.TouchStorage)
-	if len(value) == 0 {
-		return a.storage.DeleteWithPrev(addr, loc, preVal)
-	}
-	return a.storage.PutWithPrev(addr, loc, value, preVal)
+	//a.commitment.TouchPlainKey(common2.Append(addr, loc), value, a.commitment.TouchStorage)
+	//if len(value) == 0 {
+	//	return a.storage.DeleteWithPrev(addr, loc, preVal)
+	//}
+	//return a.storage.PutWithPrev(addr, loc, value, preVal)
 }
 
 func (a *AggregatorV3) ComputeCommitmentOnCtx(saveStateAfter, trace bool, aggCtx *AggregatorV3Context) (rootHash []byte, err error) {
 
-	if a.domains != nil {
-		a.commitment.ResetFns(a.domains.BranchFn, a.domains.AccountFn, a.domains.StorageFn)
-	} else {
-		a.commitment.ResetFns(aggCtx.branchFn, aggCtx.accountFn, aggCtx.storageFn)
-	}
+	//if a.domains != nil {
+	a.commitment.ResetFns(a.domains.BranchFn, a.domains.AccountFn, a.domains.StorageFn)
+	//} else {
+	//	a.commitment.ResetFns(aggCtx.branchFn, aggCtx.accountFn, aggCtx.storageFn)
+	//}
 
 	mxCommitmentRunning.Inc()
 	rootHash, branchNodeUpdates, err := a.commitment.ComputeCommitment(trace)
@@ -1854,9 +1854,9 @@ func (a *AggregatorV3) ComputeCommitmentOnCtx(saveStateAfter, trace bool, aggCtx
 // If `saveStateAfter`=true, then trie state will be saved to DB after commitment evaluation.
 func (a *AggregatorV3) ComputeCommitment(saveStateAfter, trace bool) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
-	aggCtx := a.MakeContext()
-	defer aggCtx.Close()
-	return a.ComputeCommitmentOnCtx(saveStateAfter, trace, aggCtx)
+	//aggCtx := a.MakeContext()
+	//defer aggCtx.Close()
+	return a.ComputeCommitmentOnCtx(saveStateAfter, trace, a.domains.aggCtx)
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
