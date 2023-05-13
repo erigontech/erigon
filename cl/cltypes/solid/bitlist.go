@@ -38,8 +38,8 @@ func (u *bitlist) Clear() {
 
 func (u *bitlist) CopyTo(target BitList) {
 	target.Clear()
-	for _, v := range u.u {
-		target.Append(v)
+	for i := 0; i < u.l; i++ {
+		target.Append(u.u[i])
 	}
 }
 
@@ -57,7 +57,7 @@ func (u *bitlist) Pop() (x byte) {
 
 func (u *bitlist) Append(v byte) {
 	if len(u.u) <= u.l {
-		u.u = append(u.u, make([]byte, 32)...)
+		u.u = append(u.u, 0)
 	}
 	u.u[u.l] = v
 	u.l = u.l + 1
@@ -97,11 +97,12 @@ func (u *bitlist) HashSSZTo(xs []byte) error {
 }
 
 func (arr *bitlist) getBaseHash(xs []byte, depth uint8) error {
+	elements := arr.u
 	offset := 32*(arr.l/32) + 32
 	if len(arr.u) <= offset {
-		arr.u = append(arr.u, make([]byte, offset-len(arr.u))...)
+		elements = append(elements, make([]byte, offset-len(arr.u)+1)...)
 	}
-	elements := arr.u[:offset]
+	elements = elements[:offset]
 	for i := uint8(0); i < depth; i++ {
 		// Sequential
 		layerLen := len(elements)
