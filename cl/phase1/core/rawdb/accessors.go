@@ -1,8 +1,11 @@
 package rawdb
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -19,6 +22,10 @@ func EncodeNumber(n uint64) []byte {
 	return ret
 }
 
+func DecodeNumber(n []byte) uint64 {
+	return uint64(binary.BigEndian.Uint32(n))
+}
+
 // WriteBeaconState writes beacon state for specific block to database.
 func WriteBeaconState(tx kv.Putter, state *state.BeaconState) error {
 	data, err := utils.EncodeSSZSnappy(state)
@@ -29,21 +36,64 @@ func WriteBeaconState(tx kv.Putter, state *state.BeaconState) error {
 	return tx.Put(kv.BeaconState, EncodeNumber(state.Slot()), data)
 }
 
-// LengthBytes2 convert length to 2 bytes repressentation
-func LengthFromBytes2(buf []byte) int {
-	return int(buf[0])*0x100 + int(buf[1])
+func EncodeAttestationsForStorage(attestations []*solid.Attestation) ([]byte, error) {
+	var b bytes.Buffer
+	for _, att := range attestations {
+		encoded, err := att.EncodeSSZ(nil)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := b.Write(EncodeNumber(uint64(len(encoded)))); err != nil {
+			return nil, err
+		}
+		if _, err := b.Write(encoded); err != nil {
+			return nil, err
+		}
+	}
+	full := b.Bytes()
+	return utils.CompressSnappy(full), nil
 }
 
-func WriteAttestations(tx kv.RwTx, slot uint64, blockRoot libcommon.Hash, attestations []*cltypes.Attestation) error {
-	return tx.Put(kv.Attestetations, append(EncodeNumber(slot), blockRoot[:]...), cltypes.EncodeAttestationsForStorage(attestations))
+func DecodeAttestationsForStorage(buf []byte) ([]*solid.Attestation, error) {
+	pos := 0
+	var err error
+	buf, err = utils.DecompressSnappy(buf)
+	if err != nil {
+		return nil, err
+	}
+	var attestations []*solid.Attestation
+	for pos != len(buf) {
+		if pos+4 >= len(buf) {
+			return nil, fmt.Errorf("small buffer")
+		}
+		attestationSize := DecodeNumber(buf[pos : pos+4])
+		pos += 4
+		if pos+int(attestationSize) >= len(buf) {
+			return nil, fmt.Errorf("small buffer")
+		}
+		att := &solid.Attestation{}
+		if err := att.DecodeSSZ(buf[pos:pos+int(attestationSize)], 0); err != nil {
+			return nil, err
+		}
+		pos += int(attestationSize)
+	}
+	return attestations, nil
 }
 
-func ReadAttestations(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64) ([]*cltypes.Attestation, error) {
+func WriteAttestations(tx kv.RwTx, slot uint64, blockRoot libcommon.Hash, attestations []*solid.Attestation) error {
+	data, err := EncodeAttestationsForStorage(attestations)
+	if err != nil {
+		return err
+	}
+	return tx.Put(kv.Attestetations, append(EncodeNumber(slot), blockRoot[:]...), data)
+}
+
+func ReadAttestations(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64) ([]*solid.Attestation, error) {
 	attestationsEncoded, err := tx.GetOne(kv.Attestetations, append(EncodeNumber(slot), blockRoot[:]...))
 	if err != nil {
 		return nil, err
 	}
-	return cltypes.DecodeAttestationsForStorage(attestationsEncoded)
+	return DecodeAttestationsForStorage(attestationsEncoded)
 }
 
 func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error {

@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
@@ -95,7 +96,7 @@ type BeaconBody struct {
 	// A list of slashing events for validators who included invalid attestations in the chain
 	AttesterSlashings []*AttesterSlashing
 	// A list of attestations included in the block
-	Attestations []*Attestation
+	Attestations []*solid.Attestation
 	// A list of deposits made to the Ethereum 1.0 chain
 	Deposits []*Deposit
 	// A list of validators who have voluntarily exited the beacon chain
@@ -356,7 +357,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 		return err
 	}
 	// Decode attestations
-	b.Attestations, err = ssz.DecodeDynamicList[*Attestation](buf, offsetAttestations, offsetDeposits, MaxAttestations, version)
+	b.Attestations, err = ssz.DecodeDynamicList[*solid.Attestation](buf, offsetAttestations, offsetDeposits, MaxAttestations, version)
 	if err != nil {
 		return err
 	}

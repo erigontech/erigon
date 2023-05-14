@@ -2,9 +2,11 @@ package forkchoice_test
 
 import (
 	_ "embed"
+	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -31,17 +33,15 @@ var attestationEncoded []byte
 
 // this is consensus spec test altair/forkchoice/ex_ante/ex_ante_attestations_is_greater_than_proposer_boost_with_boost
 func TestForkChoiceBasic(t *testing.T) {
-	expectedCheckpoint := &cltypes.Checkpoint{
-		Epoch: 0,
-		Root:  libcommon.HexToHash("0x564d76d91f66c1fb2977484a6184efda2e1c26dd01992e048353230e10f83201"),
-	}
+	expectedCheckpoint := solid.NewCheckpointFromParameters(libcommon.HexToHash("0x564d76d91f66c1fb2977484a6184efda2e1c26dd01992e048353230e10f83201"), 0)
+
 	// Decode test blocks
 	block0x3a, block0xc2, block0xd4 := &cltypes.SignedBeaconBlock{}, &cltypes.SignedBeaconBlock{}, &cltypes.SignedBeaconBlock{}
 	require.NoError(t, utils.DecodeSSZSnappy(block0x3a, block3aEncoded, int(clparams.AltairVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(block0xc2, blockc2Encoded, int(clparams.AltairVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(block0xd4, blockd4Encoded, int(clparams.AltairVersion)))
 	// decode test attestation
-	testAttestation := &cltypes.Attestation{}
+	testAttestation := &solid.Attestation{}
 	require.NoError(t, utils.DecodeSSZSnappy(testAttestation, attestationEncoded, int(clparams.AltairVersion)))
 	// Initialize forkchoice store
 	anchorState := state.New(&clparams.MainnetBeaconConfig)

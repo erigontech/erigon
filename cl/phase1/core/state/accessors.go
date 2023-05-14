@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 
 	"github.com/Giulio2002/bls"
@@ -73,7 +74,7 @@ func GetBlockRoot(b *raw.BeaconState, epoch uint64) (libcommon.Hash, error) {
 
 // FinalityDelay determines by how many epochs we are late on finality.
 func FinalityDelay(b *raw.BeaconState) uint64 {
-	return PreviousEpoch(b) - b.FinalizedCheckpoint().Epoch
+	return PreviousEpoch(b) - b.FinalizedCheckpoint().Epoch()
 }
 
 // Implementation of is_in_inactivity_leak. tells us if network is in danger pretty much. defined in ETH 2.0 specs.
@@ -120,7 +121,7 @@ func IsValidIndexedAttestation(b *raw.BeaconState, att *cltypes.IndexedAttestati
 		pks = append(pks, pk[:])
 	}
 
-	domain, err := b.GetDomain(b.BeaconConfig().DomainBeaconAttester, att.Data.Target.Epoch)
+	domain, err := b.GetDomain(b.BeaconConfig().DomainBeaconAttester, att.Data.Target().Epoch())
 	if err != nil {
 		return false, fmt.Errorf("unable to get the domain: %v", err)
 	}
@@ -173,7 +174,7 @@ func IsValidatorEligibleForActivationQueue(b *raw.BeaconState, validator *cltype
 
 // Implementation of is_eligible_for_activation. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation
 func IsValidatorEligibleForActivation(b *raw.BeaconState, validator *cltypes.Validator) bool {
-	return validator.ActivationEligibilityEpoch() <= b.FinalizedCheckpoint().Epoch &&
+	return validator.ActivationEligibilityEpoch() <= b.FinalizedCheckpoint().Epoch() &&
 		validator.ActivationEpoch() == b.BeaconConfig().FarFutureEpoch
 }
 

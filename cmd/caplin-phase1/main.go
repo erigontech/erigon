@@ -16,9 +16,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"os"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/log/v3"
@@ -79,10 +80,10 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		NoDiscovery:   cfg.NoDiscovery,
 	}, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
 		ForkDigest:     forkDigest,
-		FinalizedRoot:  state.FinalizedCheckpoint().Root,
-		FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
-		HeadSlot:       state.FinalizedCheckpoint().Epoch * cfg.BeaconCfg.SlotsPerEpoch,
-		HeadRoot:       state.FinalizedCheckpoint().Root,
+		FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
+		FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
+		HeadSlot:       state.FinalizedCheckpoint().Epoch() * cfg.BeaconCfg.SlotsPerEpoch,
+		HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
 	})
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)

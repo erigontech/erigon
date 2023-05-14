@@ -18,9 +18,9 @@ func GetEmptyBeaconState() *BeaconState {
 		nextSyncCommittee: &cltypes.SyncCommittee{
 			PubKeys: make([][48]byte, 512),
 		},
-		previousJustifiedCheckpoint:  &cltypes.Checkpoint{},
-		currentJustifiedCheckpoint:   &cltypes.Checkpoint{},
-		finalizedCheckpoint:          &cltypes.Checkpoint{},
+		previousJustifiedCheckpoint:  solid.NewCheckpoint(),
+		currentJustifiedCheckpoint:   solid.NewCheckpoint(),
+		finalizedCheckpoint:          solid.NewCheckpoint(),
 		latestExecutionPayloadHeader: cltypes.NewEth1Header(clparams.BellatrixVersion),
 		version:                      clparams.BellatrixVersion,
 		beaconConfig:                 cfg,

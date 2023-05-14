@@ -2,8 +2,9 @@ package network
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"runtime"
+
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -115,7 +116,7 @@ func (g *GossipManager) Start() {
 				finalizedCheckpoint := g.forkChoice.FinalizedCheckpoint()
 				// Run forkchoice
 				if err := g.forkChoice.Engine().ForkChoiceUpdate(
-					g.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
+					g.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
 					g.forkChoice.GetEth1Hash(headRoot),
 				); err != nil {
 					log.Warn("Could send not forkchoice", "err", err)

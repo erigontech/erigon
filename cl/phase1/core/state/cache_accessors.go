@@ -3,9 +3,11 @@ package state
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/cache"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
-	"math"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -120,28 +122,28 @@ func (b *BeaconState) CommitteeCount(epoch uint64) uint64 {
 	return committeCount
 }
 
-func (b *BeaconState) GetAttestationParticipationFlagIndicies(data *cltypes.AttestationData, inclusionDelay uint64) ([]uint8, error) {
-	var justifiedCheckpoint *cltypes.Checkpoint
+func (b *BeaconState) GetAttestationParticipationFlagIndicies(data solid.AttestationData, inclusionDelay uint64) ([]uint8, error) {
+	var justifiedCheckpoint solid.Checkpoint
 	// get checkpoint from epoch
-	if data.Target.Epoch == Epoch(b.BeaconState) {
+	if data.Target().Epoch() == Epoch(b.BeaconState) {
 		justifiedCheckpoint = b.CurrentJustifiedCheckpoint()
 	} else {
 		justifiedCheckpoint = b.PreviousJustifiedCheckpoint()
 	}
 	// Matching roots
-	if !data.Source.Equal(justifiedCheckpoint) {
+	if !data.Source().Equal(justifiedCheckpoint) {
 		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match")
 	}
-	targetRoot, err := GetBlockRoot(b.BeaconState, data.Target.Epoch)
+	targetRoot, err := GetBlockRoot(b.BeaconState, data.Target().Epoch())
 	if err != nil {
 		return nil, err
 	}
-	headRoot, err := b.GetBlockRootAtSlot(data.Slot)
+	headRoot, err := b.GetBlockRootAtSlot(data.Slot())
 	if err != nil {
 		return nil, err
 	}
-	matchingTarget := data.Target.Root == targetRoot
-	matchingHead := matchingTarget && data.BeaconBlockHash == headRoot
+	matchingTarget := data.Target().BlockRoot() == targetRoot
+	matchingHead := matchingTarget && data.BeaconBlockRoot() == headRoot
 	participationFlagIndicies := []uint8{}
 	if inclusionDelay <= utils.IntegerSquareRoot(b.BeaconConfig().SlotsPerEpoch) {
 		participationFlagIndicies = append(participationFlagIndicies, b.BeaconConfig().TimelySourceFlagIndex)
@@ -234,11 +236,11 @@ func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error)
 
 // GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.
 // thus, it is a flag now.
-func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData, aggregationBits []byte, checkBitsLength bool) ([]uint64, error) {
-	if cached, ok := cache.LoadAttestatingIndicies(attestation); ok {
+func (b *BeaconState) GetAttestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool) ([]uint64, error) {
+	if cached, ok := cache.LoadAttestatingIndicies(&attestation); ok {
 		return cached, nil
 	}
-	committee, err := b.GetBeaconCommitee(attestation.Slot, attestation.Index)
+	committee, err := b.GetBeaconCommitee(attestation.Slot(), attestation.ValidatorIndex())
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +260,7 @@ func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData,
 			attestingIndices = append(attestingIndices, member)
 		}
 	}
-	cache.StoreAttestation(attestation, attestingIndices)
+	cache.StoreAttestation(&attestation, attestingIndices)
 	return attestingIndices, nil
 }
 

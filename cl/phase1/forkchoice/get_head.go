@@ -18,10 +18,10 @@ func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
 
 func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 	// Retrieve att
-	head := f.justifiedCheckpoint.Root
+	head := f.justifiedCheckpoint.BlockRoot()
 	blocks := f.getFilteredBlockTree(head)
 	// See which validators can be used for attestation score
-	justificationState, err := f.getCheckpointState(*f.justifiedCheckpoint)
+	justificationState, err := f.getCheckpointState(f.justifiedCheckpoint)
 	if err != nil {
 		return libcommon.Hash{}, 0, err
 	}
@@ -154,8 +154,8 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot libcommon.Hash, blocks ma
 	}
 
 	genesisEpoch := f.forkGraph.Config().GenesisEpoch
-	if (f.justifiedCheckpoint.Epoch == genesisEpoch || currentJustifiedCheckpoint.Equal(f.justifiedCheckpoint)) &&
-		(f.finalizedCheckpoint.Epoch == genesisEpoch || finalizedJustifiedCheckpoint.Equal(f.finalizedCheckpoint)) {
+	if (f.justifiedCheckpoint.Epoch() == genesisEpoch || currentJustifiedCheckpoint.Equal(f.justifiedCheckpoint)) &&
+		(f.finalizedCheckpoint.Epoch() == genesisEpoch || finalizedJustifiedCheckpoint.Equal(f.finalizedCheckpoint)) {
 		blocks[blockRoot] = header
 		return true
 	}

@@ -42,7 +42,6 @@ func NewValidatorFromParameters(
 	v.SetExitEpoch(ExitEpoch)
 	v.SetWithdrawableEpoch(WithdrawableEpoch)
 	return v
-
 }
 
 func (v *Validator) CopyTo(dst *Validator) {
@@ -99,7 +98,7 @@ func (v *Validator) CopyHashBufferTo(o []byte) error {
 		o[i] = 0
 	}
 	copy(o[:64], v[:48])
-	err := merkle_tree.InPlacePublicKeyRoot(o[:64])
+	err := merkle_tree.InPlaceRoot(o[:64])
 	if err != nil {
 		return err
 	}

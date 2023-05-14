@@ -2,6 +2,8 @@ package forkchoice
 
 import (
 	"fmt"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 
 	"github.com/Giulio2002/bls"
@@ -77,9 +79,9 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet [
 }
 
 // getAttestingIndicies retrieves the beacon committee.
-func (c *checkpointState) getAttestingIndicies(attestation *cltypes.AttestationData, aggregationBits []byte) ([]uint64, error) {
+func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationData, aggregationBits []byte) ([]uint64, error) {
 	// First get beacon committee
-	slot := attestation.Slot
+	slot := attestation.Slot()
 	epoch := c.epochAtSlot(slot)
 	// Compute shuffled indicies
 	var shuffledIndicies []uint64
@@ -95,7 +97,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *cltypes.AttestationD
 	}
 	committeesPerSlot := c.committeeCount(epoch, lenIndicies)
 	count := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
-	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + attestation.Index
+	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + attestation.ValidatorIndex()
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
 	committee := shuffledIndicies[start:end]
@@ -156,7 +158,7 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 		pks = append(pks, publicKey[:])
 	}
 
-	domain, err := c.getDomain(c.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch)
+	domain, err := c.getDomain(c.beaconConfig.DomainBeaconAttester, att.Data.Target().Epoch())
 	if err != nil {
 		return false, fmt.Errorf("unable to get the domain: %v", err)
 	}

@@ -3,11 +3,13 @@ package stages
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 	rawdb2 "github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	execution_client2 "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -101,7 +103,10 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		}
 		key := append(rawdb2.EncodeNumber(slot), blockRoot[:]...)
 		// Collect attestations
-		encodedAttestations := cltypes.EncodeAttestationsForStorage(blk.Block.Body.Attestations)
+		encodedAttestations, err := rawdb.EncodeAttestationsForStorage(blk.Block.Body.Attestations)
+		if err != nil {
+			return false, err
+		}
 		if err := attestationsCollector.Collect(key, encodedAttestations); err != nil {
 			return false, err
 		}

@@ -3,6 +3,7 @@ package consensus_tests
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/spectest"
 )
@@ -81,8 +82,8 @@ func init() {
 func addSszTests() {
 	TestFormats.Add("ssz_static").
 		With("AggregateAndProof", getSSZStaticConsensusTest(&cltypes.AggregateAndProof{})).
-		With("Attestation", getSSZStaticConsensusTest(&cltypes.Attestation{})).
-		With("AttestationData", getSSZStaticConsensusTest(&cltypes.AttestationData{})).
+		With("Attestation", getSSZStaticConsensusTest(&solid.Attestation{})).
+		With("AttestationData", getSSZStaticConsensusTest(solid.AttestationData{})).
 		With("AttesterSlashing", getSSZStaticConsensusTest(&cltypes.AttesterSlashing{})).
 		With("BeaconBlock", getSSZStaticConsensusTest(&cltypes.BeaconBlock{})).
 		With("BeaconBlockBody", getSSZStaticConsensusTest(&cltypes.BeaconBody{})).
@@ -91,7 +92,7 @@ func addSszTests() {
 		With("BlobIdentifier", getSSZStaticConsensusTest(&cltypes.BlobIdentifier{})).
 		With("BlobSidecar", getSSZStaticConsensusTest(&cltypes.BlobSideCar{})).
 		With("BLSToExecutionChange", getSSZStaticConsensusTest(&cltypes.BLSToExecutionChange{})).
-		With("Checkpoint", getSSZStaticConsensusTest(&cltypes.Checkpoint{})).
+		With("Checkpoint", getSSZStaticConsensusTest(solid.Checkpoint{})).
 		//	With("ContributionAndProof", getSSZStaticConsensusTest(&cltypes.ContributionAndProof{})).
 		With("Deposit", getSSZStaticConsensusTest(&cltypes.Deposit{})).
 		With("DepositData", getSSZStaticConsensusTest(&cltypes.DepositData{})).

@@ -1,15 +1,18 @@
 package forkchoice
 
 import (
+	"sync"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
-	"sync"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
+
+type checkpointComparable string
 
 const (
 	checkpointsPerCache = 1024
@@ -19,16 +22,16 @@ const (
 type ForkChoiceStore struct {
 	time                          uint64
 	highestSeen                   uint64
-	justifiedCheckpoint           *cltypes.Checkpoint
-	finalizedCheckpoint           *cltypes.Checkpoint
-	unrealizedJustifiedCheckpoint *cltypes.Checkpoint
-	unrealizedFinalizedCheckpoint *cltypes.Checkpoint
+	justifiedCheckpoint           solid.Checkpoint
+	finalizedCheckpoint           solid.Checkpoint
+	unrealizedJustifiedCheckpoint solid.Checkpoint
+	unrealizedFinalizedCheckpoint solid.Checkpoint
 	proposerBoostRoot             libcommon.Hash
 	// Use go map because this is actually an unordered set
 	equivocatingIndicies map[uint64]struct{}
 	forkGraph            *fork_graph.ForkGraph
 	// I use the cache due to the convenient auto-cleanup feauture.
-	checkpointStates *lru.Cache[cltypes.Checkpoint, *checkpointState] // We keep ssz snappy of it as the full beacon state is full of rendundant data.
+	checkpointStates *lru.Cache[checkpointComparable, *checkpointState] // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	latestMessages   map[uint64]*LatestMessage
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
@@ -48,11 +51,11 @@ func NewForkChoiceStore(anchorState *state2.BeaconState, engine execution_client
 	if err != nil {
 		return nil, err
 	}
-	anchorCheckpoint := &cltypes.Checkpoint{
-		Epoch: state2.Epoch(anchorState.BeaconState),
-		Root:  anchorRoot,
-	}
-	checkpointStates, err := lru.New[cltypes.Checkpoint, *checkpointState](allowedCachedStates)
+	anchorCheckpoint := solid.NewCheckpointFromParameters(
+		anchorRoot,
+		state2.Epoch(anchorState.BeaconState),
+	)
+	checkpointStates, err := lru.New[checkpointComparable, *checkpointState](allowedCachedStates)
 	if err != nil {
 		return nil, err
 	}
@@ -98,14 +101,14 @@ func (f *ForkChoiceStore) ProposerBoostRoot() libcommon.Hash {
 }
 
 // JustifiedCheckpoint returns justified checkpoint
-func (f *ForkChoiceStore) JustifiedCheckpoint() *cltypes.Checkpoint {
+func (f *ForkChoiceStore) JustifiedCheckpoint() solid.Checkpoint {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.justifiedCheckpoint
 }
 
 // FinalizedCheckpoint returns justified checkpoint
-func (f *ForkChoiceStore) FinalizedCheckpoint() *cltypes.Checkpoint {
+func (f *ForkChoiceStore) FinalizedCheckpoint() solid.Checkpoint {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.finalizedCheckpoint
