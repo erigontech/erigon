@@ -248,10 +248,6 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	}
 
 	if opts.flags&mdbx.Accede == 0 {
-		if opts.label == kv.ChainDB {
-			log.Info(fmt.Sprintf("[db] params: growStep=%s, mapsSize=%s, shrinkThreshold=%d, pageSize=%s, ", opts.growthStep, opts.mapSize, opts.shrinkThreshold, datasize.ByteSize(opts.pageSize)) +
-				fmt.Sprintf("label=%s, WriteMap=%t, Durable=%t, NoReadahead=%t, ", opts.label, opts.flags&mdbx.WriteMap != 0, opts.flags&mdbx.Durable != 0, opts.flags&mdbx.NoReadahead != 0))
-		}
 		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, int(opts.pageSize)); err != nil {
 			return nil, err
 		}
