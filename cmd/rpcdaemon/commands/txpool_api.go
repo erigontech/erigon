@@ -51,7 +51,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	baseFee := make(map[libcommon.Address][]types.Transaction, 8)
 	queued := make(map[libcommon.Address][]types.Transaction, 8)
 	for i := range reply.Txs {
-		txn, err := types.DecodeTransaction(reply.Txs[i].RlpTx)
+		txn, err := types.DecodeWrappedTransaction(reply.Txs[i].RlpTx)
 		if err != nil {
 			return nil, err
 		}
