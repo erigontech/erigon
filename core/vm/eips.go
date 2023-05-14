@@ -247,7 +247,7 @@ func enableSharding(jt *JumpTable) {
 	jt[DATAHASH] = &operation{
 		execute:     opDataHash,
 		constantGas: GasFastestStep,
-		numPop:      0,
+		numPop:      1,
 		numPush:     1,
 	}
 }
