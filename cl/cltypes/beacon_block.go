@@ -96,7 +96,7 @@ type BeaconBody struct {
 	// A list of slashing events for validators who included invalid attestations in the chain
 	AttesterSlashings []*AttesterSlashing
 	// A list of attestations included in the block
-	Attestations []*solid.Attestation
+	Attestations *AttestationList
 	// A list of deposits made to the Ethereum 1.0 chain
 	Deposits []*Deposit
 	// A list of validators who have voluntarily exited the beacon chain
@@ -150,9 +150,10 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	// Attestation offset
 	buf = append(buf, ssz.OffsetSSZ(offset)...)
-	for _, attestation := range b.Attestations {
-		offset += uint32(attestation.EncodingSizeSSZ()) + 4
-	}
+	b.Attestations.ForEach(func(a *solid.Attestation, idx, total int) bool {
+		offset += uint32(a.EncodingSizeSSZ()) + 4
+		return true
+	})
 	// Deposits offset
 	buf = append(buf, ssz.OffsetSSZ(offset)...)
 	offset += uint32(len(b.Deposits)) * 1240
@@ -187,7 +188,7 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(b.ProposerSlashings) > MaxProposerSlashings {
 		return nil, fmt.Errorf("Encode(SSZ): too many proposer slashings")
 	}
-	if len(b.Attestations) > MaxAttestations {
+	if b.Attestations.Len() > MaxAttestations {
 		return nil, fmt.Errorf("Encode(SSZ): too many attestations")
 	}
 	if len(b.Deposits) > MaxDeposits {
@@ -212,7 +213,7 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	if buf, err = ssz.EncodeDynamicList(buf, b.AttesterSlashings); err != nil {
 		return nil, err
 	}
-	if buf, err = ssz.EncodeDynamicList(buf, b.Attestations); err != nil {
+	if buf, err = b.Attestations.EncodeSSZ(buf); err != nil {
 		return nil, err
 	}
 
@@ -264,10 +265,11 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		size += slashing.EncodingSizeSSZ()
 	}
 
-	for _, attestation := range b.Attestations {
+	b.Attestations.ForEach(func(a *solid.Attestation, idx, total int) bool {
 		size += 4
-		size += attestation.EncodingSizeSSZ()
-	}
+		size += a.EncodingSizeSSZ()
+		return true
+	})
 
 	size += len(b.Deposits) * 1240
 	size += len(b.VoluntaryExits) * 112
@@ -356,8 +358,10 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	if err != nil {
 		return err
 	}
+	b.Attestations = new(AttestationList)
+
 	// Decode attestations
-	b.Attestations, err = ssz.DecodeDynamicList[*solid.Attestation](buf, offsetAttestations, offsetDeposits, MaxAttestations, version)
+	err = b.Attestations.DecodeSSZ(buf[offsetAttestations:offsetDeposits], version)
 	if err != nil {
 		return err
 	}
@@ -441,7 +445,7 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	}
 	leaves = append(leaves, attesterLeaf)
 	// Attestations leaf
-	attestationLeaf, err := merkle_tree.ListObjectSSZRoot(b.Attestations, MaxAttestations)
+	attestationLeaf, err := b.Attestations.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}

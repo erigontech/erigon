@@ -14,22 +14,27 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-func ProcessAttestations(s *state2.BeaconState, attestations []*solid.Attestation, fullValidation bool) error {
-	var err error
-	attestingIndiciesSet := make([][]uint64, len(attestations))
+func ProcessAttestations(s *state2.BeaconState, attestations *cltypes.AttestationList, fullValidation bool) error {
+	attestingIndiciesSet := make([][]uint64, attestations.Len())
 	h := methelp.NewHistTimer("beacon_process_attestations")
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
 
 	c := h.Tag("attestation_step", "process")
-	for i, attestation := range attestations {
-		if attestingIndiciesSet[i], err = processAttestation(s, attestation, baseRewardPerIncrement); err != nil {
-			return err
+	var err error
+	attestations.ForEach(func(a *solid.Attestation, idx, total int) bool {
+		if attestingIndiciesSet[idx], err = processAttestation(s, a, baseRewardPerIncrement); err != nil {
+			return false
 		}
+		return true
+	})
+	if err != nil {
+		return err
 	}
+	var valid bool
 	c.PutSince()
 	if fullValidation {
 		c = h.Tag("attestation_step", "validate")
-		valid, err := verifyAttestations(s, attestations, attestingIndiciesSet)
+		valid, err = verifyAttestations(s, attestations, attestingIndiciesSet)
 		if err != nil {
 			return err
 		}
@@ -211,16 +216,20 @@ func processAttestation(s *state2.BeaconState, attestation *solid.Attestation, b
 	return processAttestationPostAltair(s, attestation, baseRewardPerIncrement)
 }
 
-func verifyAttestations(s *state2.BeaconState, attestations []*solid.Attestation, attestingIndicies [][]uint64) (bool, error) {
-	for i, attestation := range attestations {
-		indexedAttestation := state2.GetIndexedAttestation(attestation, attestingIndicies[i])
-		success, err := state2.IsValidIndexedAttestation(s.BeaconState, indexedAttestation)
+func verifyAttestations(s *state2.BeaconState, attestations *cltypes.AttestationList, attestingIndicies [][]uint64) (bool, error) {
+	var err error
+	valid := true
+	attestations.ForEach(func(a *solid.Attestation, idx, total int) bool {
+		indexedAttestation := state2.GetIndexedAttestation(a, attestingIndicies[idx])
+		valid, err = state2.IsValidIndexedAttestation(s.BeaconState, indexedAttestation)
 		if err != nil {
-			return false, err
+			return false
 		}
-		if !success {
-			return false, nil
+		if !valid {
+			return false
 		}
-	}
-	return true, nil
+		return true
+	})
+
+	return valid, err
 }

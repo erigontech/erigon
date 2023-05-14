@@ -4,11 +4,72 @@ import (
 	"errors"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
+
+type AttestationList struct {
+	attestations []*solid.Attestation
+
+	listRoot libcommon.Hash
+}
+
+func (a *AttestationList) DecodeSSZ(buf []byte, _ int) (err error) {
+	a.attestations, err = ssz.DecodeDynamicList[*solid.Attestation](buf, 0, uint32(len(buf)), uint64(MaxAttestations), 0)
+	if err != nil {
+		return
+	}
+	a.listRoot = libcommon.Hash{}
+	return
+}
+
+func (a *AttestationList) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	dst = buf
+	dst, err = ssz.EncodeDynamicList(dst, a.attestations)
+	if err != nil {
+		return
+	}
+	return
+}
+
+func (a *AttestationList) Len() int {
+	return len(a.attestations)
+}
+
+func (a *AttestationList) HashSSZ() ([32]byte, error) {
+	if a.listRoot != (libcommon.Hash{}) {
+		return a.listRoot, nil
+	}
+	var err error
+	a.listRoot, err = merkle_tree.ListObjectSSZRoot(a.attestations, MaxAttestations)
+	return a.listRoot, err
+}
+
+func (a *AttestationList) Get(index int) *solid.Attestation {
+	return a.attestations[index]
+}
+
+func AttestionListFrom(atts ...*solid.Attestation) *AttestationList {
+	a := &AttestationList{}
+	a.attestations = atts
+	a.listRoot = libcommon.Hash{}
+	return a
+}
+
+func (a *AttestationList) ForEach(fn func(a *solid.Attestation, idx int, total int) bool) {
+	if a == nil {
+		return
+	}
+	for idx, v := range a.attestations {
+		ok := fn(v, idx, len(a.attestations))
+		if !ok {
+			break
+		}
+	}
+}
 
 /*
  * IndexedAttestation are attestantions sets to prove that someone misbehaved.

@@ -1,8 +1,9 @@
 package rawdb_test
 
 import (
-	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -19,6 +20,7 @@ func TestBeaconBlock(t *testing.T) {
 				Eth1Data:         &cltypes.Eth1Data{},
 				Graffiti:         make([]byte, 32),
 				SyncAggregate:    &cltypes.SyncAggregate{},
+				Attestations:     new(cltypes.AttestationList),
 				ExecutionPayload: emptyBlock,
 			},
 		},

@@ -174,6 +174,9 @@ MainLoop:
 			if err != nil {
 				break
 			}
+			if utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == cfg.forkChoice.HighestSeen() {
+				break
+			}
 			if peersCount < minPeersForDownload {
 				log.Debug("lost too many peers, restarting sync...")
 				continue MainLoop
