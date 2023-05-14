@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"os/exec"
+	"os"
 	"strconv"
 	"strings"
 
@@ -20,42 +20,30 @@ import (
 )
 
 // ClearDevDB cleans up the dev folder used for the operations
-func ClearDevDB(logger log.Logger) {
-	fmt.Printf("\nDeleting ./dev folders\n")
+func ClearDevDB(logger log.Logger) error {
+	logger.Info("Deleting ./dev folders")
 
-	cmd := exec.Command("rm", "-rf", "./dev0")
-	err := cmd.Run()
-	if err != nil {
-		fmt.Println("Error occurred clearing Dev DB")
-		panic("could not clear dev DB")
+	if err := os.RemoveAll("./dev0"); err != nil {
+		return err
 	}
-
-	cmd2 := exec.Command("rm", "-rf", "./dev2")
-	err2 := cmd2.Run()
-	if err2 != nil {
-		fmt.Println("Error occurred clearing Dev DB")
-		panic("could not clear dev2 DB")
+	if err := os.RemoveAll("./dev2"); err != nil {
+		return err
 	}
-
-	fmt.Printf("SUCCESS => Deleted ./dev0 and ./dev2\n")
+	logger.Info("SUCCESS => Deleted ./dev0 and ./dev2")
+	return nil
 }
 
-func DeleteLogs() {
-	fmt.Printf("\nRemoving old logs to create new ones...\nBefore re-running the devnet tool, make sure to copy out old logs if you need them!!!\n\n")
+func DeleteLogs(logger log.Logger) error {
+	log.Info("Removing old logs to create new ones...")
+	log.Info("Before re-running the devnet tool, make sure to copy out old logs if you need them!!!")
 
-	cmd := exec.Command("rm", "-rf", models.LogDirParam) //nolint
-	err := cmd.Run()
-	if err != nil {
-		fmt.Println("Error occurred removing log node_1")
-		panic("could not remove old logs")
+	if err := os.RemoveAll(models.LogDirParam); err != nil {
+		return err
 	}
-
-	cmd2 := exec.Command("rm", "-rf", "./erigon_node_2")
-	err2 := cmd2.Run()
-	if err2 != nil {
-		fmt.Println("Error occurred removing log node_2")
-		panic("could not remove old logs")
+	if err := os.RemoveAll("./erigon_node_2"); err != nil {
+		return err
 	}
+	return nil
 }
 
 // UniqueIDFromEnode returns the unique ID from a node's enode, removing the `?discport=0` part

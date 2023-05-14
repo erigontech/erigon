@@ -12,12 +12,11 @@ import (
 	"os"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/params"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	//"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/urfave/cli/v2"
 )
 
@@ -45,14 +44,23 @@ func main() {
 }
 
 func action(ctx *cli.Context) error {
-	logger := logging.SetupLoggerCtx("devent", ctx, true /* rootLogger */)
+	dataDir := ctx.String("datadir")
+	if dataDir == "" {
+		return fmt.Errorf("missing --datadir flag - required for devnet tool")
+	}
+	fmt.Printf("datadir = %s\n", dataDir)
+	logger := logging.SetupLoggerCtx("devnet", ctx, true /* rootLogger */)
 	// clear all the dev files
-	devnetutils.ClearDevDB(logger)
+	if err := devnetutils.ClearDevDB(logger); err != nil {
+		return err
+	}
 	// wait group variable to prevent main function from terminating until routines are finished
 	var wg sync.WaitGroup
 
 	// remove the old logs from previous runs
-	devnetutils.DeleteLogs()
+	if err := devnetutils.DeleteLogs(logger); err != nil {
+		return err
+	}
 
 	// start the first erigon node in a go routine
 	node.Start(&wg, logger)
