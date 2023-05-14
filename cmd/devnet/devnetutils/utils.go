@@ -16,10 +16,11 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // ClearDevDB cleans up the dev folder used for the operations
-func ClearDevDB() {
+func ClearDevDB(logger log.Logger) {
 	fmt.Printf("\nDeleting ./dev folders\n")
 
 	cmd := exec.Command("rm", "-rf", "./dev0")

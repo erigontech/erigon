@@ -24,12 +24,12 @@ import (
 var nodeNumber int
 
 // Start starts the process for two erigon nodes running on the dev chain
-func Start(wg *sync.WaitGroup) {
+func Start(wg *sync.WaitGroup, logger log.Logger) {
 	// add one goroutine to the wait-list
 	wg.Add(1)
 
 	// start the first node
-	go StartNode(wg, miningNodeArgs())
+	go StartNode(wg, miningNodeArgs(), logger)
 
 	// sleep for a while to allow first node to start
 	time.Sleep(time.Second * 10)
@@ -37,20 +37,19 @@ func Start(wg *sync.WaitGroup) {
 	// get the enode of the first node
 	enode, err := getEnode()
 	if err != nil {
-		// TODO: Log the error, it means node did not start well
-		fmt.Printf("error starting the node: %s\n", err)
+		logger.Error("Starting the node", "error", err)
 	}
 
 	// add one goroutine to the wait-list
 	wg.Add(1)
 
 	// start the second node, connect it to the mining node with the enode
-	go StartNode(wg, nonMiningNodeArgs(2, enode))
+	go StartNode(wg, nonMiningNodeArgs(2, enode), logger)
 }
 
 // StartNode starts an erigon node on the dev chain
-func StartNode(wg *sync.WaitGroup, args []string) {
-	fmt.Printf("\nRunning node %d with flags ==> %v\n", nodeNumber, args)
+func StartNode(wg *sync.WaitGroup, args []string, logger log.Logger) {
+	logger.Info("Running node", "number", nodeNumber, "args", args)
 
 	// catch any errors and avoid panics if an error occurs
 	defer func() {
@@ -60,7 +59,7 @@ func StartNode(wg *sync.WaitGroup, args []string) {
 			return
 		}
 
-		log.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
+		logger.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
 		wg.Done()
 		os.Exit(1)
 	}()
@@ -70,7 +69,7 @@ func StartNode(wg *sync.WaitGroup, args []string) {
 	if err := app.Run(args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
-			log.Warn("Error writing app run error to stderr", "err", printErr)
+			logger.Warn("Error writing app run error to stderr", "err", printErr)
 		}
 		wg.Done()
 		os.Exit(1)
@@ -93,7 +92,7 @@ func runNode(ctx *cli.Context) error {
 
 	ethNode, err := node.New(nodeCfg, ethCfg, logger)
 	if err != nil {
-		log.Error("Devnet startup", "err", err)
+		logger.Error("Devnet startup", "err", err)
 		return err
 	}
 
