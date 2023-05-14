@@ -2,10 +2,12 @@ package consensus_tests
 
 import (
 	"fmt"
-	transition2 "github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 	"io/fs"
 	"os"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	transition2 "github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/spectest"
@@ -33,11 +35,11 @@ func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 	if err != nil && !expectedError {
 		return err
 	}
-	att := &cltypes.Attestation{}
+	att := &solid.Attestation{}
 	if err := spectest.ReadSszOld(root, att, c.Version(), attestationFileName); err != nil {
 		return err
 	}
-	if err := transition2.ProcessAttestations(preState, []*cltypes.Attestation{att}, true); err != nil {
+	if err := transition2.ProcessAttestations(preState, cltypes.AttestionListFrom(att), true); err != nil {
 		if expectedError {
 			return nil
 		}

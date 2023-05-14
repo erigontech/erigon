@@ -136,7 +136,7 @@ func convertPayloadToGrpc(e *cltypes.Eth1Block) (*types.ExecutionPayload, error)
 		ExtraData:     header.Extra,
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
 		BlockHash:     gointerfaces.ConvertHashToH256(e.BlockHash),
-		Transactions:  e.Transactions,
+		Transactions:  e.Transactions.UnderlyngReference(),
 		Withdrawals:   privateapi.ConvertWithdrawalsToRpc(e.Withdrawals),
 	}
 	if e.Withdrawals != nil {

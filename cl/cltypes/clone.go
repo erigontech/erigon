@@ -1,6 +1,8 @@
 package cltypes
 
-import "github.com/ledgerwatch/erigon-lib/types/clonable"
+import (
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
+)
 
 func (*SignedBeaconBlock) Clone() clonable.Clonable {
 	return &SignedBeaconBlock{}
@@ -36,14 +38,6 @@ func (*HistoricalSummary) Clone() clonable.Clonable {
 
 func (*Validator) Clone() clonable.Clonable {
 	return &Validator{}
-}
-
-func (*Attestation) Clone() clonable.Clonable {
-	return &Attestation{}
-}
-
-func (*Checkpoint) Clone() clonable.Clonable {
-	return &Checkpoint{}
 }
 
 func (*DepositData) Clone() clonable.Clonable {
@@ -92,10 +86,6 @@ func (*BeaconBlock) Clone() clonable.Clonable {
 
 func (*AggregateAndProof) Clone() clonable.Clonable {
 	return &AggregateAndProof{}
-}
-
-func (*AttestationData) Clone() clonable.Clonable {
-	return &AttestationData{}
 }
 
 func (*BeaconBlockHeader) Clone() clonable.Clonable {

@@ -37,7 +37,7 @@ func PublicKeyRoot(key [48]byte) (libcommon.Hash, error) {
 	}, 2)
 }
 
-func InPlacePublicKeyRoot(key []byte) error {
+func InPlaceRoot(key []byte) error {
 	err := MerkleRootFromFlatLeaves(key, key)
 	if err != nil {
 		return err

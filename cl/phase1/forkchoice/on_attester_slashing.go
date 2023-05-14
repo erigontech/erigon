@@ -2,6 +2,7 @@ package forkchoice
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -18,7 +19,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		return fmt.Errorf("attestation data is not slashable")
 	}
 	// Retrieve justified state
-	s, err := f.forkGraph.GetState(f.justifiedCheckpoint.Root, false)
+	s, err := f.forkGraph.GetState(f.justifiedCheckpoint.BlockRoot(), false)
 	if err != nil {
 		return err
 	}

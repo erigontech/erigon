@@ -2,6 +2,8 @@ package forkchoice
 
 import (
 	"fmt"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 
@@ -16,21 +18,21 @@ func (f *ForkChoiceStore) Slot() uint64 {
 }
 
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.
-func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckpoint *cltypes.Checkpoint) {
-	if justifiedCheckpoint.Epoch > f.justifiedCheckpoint.Epoch {
+func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckpoint solid.Checkpoint) {
+	if justifiedCheckpoint.Epoch() > f.justifiedCheckpoint.Epoch() {
 		f.justifiedCheckpoint = justifiedCheckpoint
 	}
-	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Epoch {
+	if finalizedCheckpoint.Epoch() > f.finalizedCheckpoint.Epoch() {
 		f.finalizedCheckpoint = finalizedCheckpoint
 	}
 }
 
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.
-func (f *ForkChoiceStore) updateUnrealizedCheckpoints(justifiedCheckpoint, finalizedCheckpoint *cltypes.Checkpoint) {
-	if justifiedCheckpoint.Epoch > f.unrealizedJustifiedCheckpoint.Epoch {
+func (f *ForkChoiceStore) updateUnrealizedCheckpoints(justifiedCheckpoint, finalizedCheckpoint solid.Checkpoint) {
+	if justifiedCheckpoint.Epoch() > f.unrealizedJustifiedCheckpoint.Epoch() {
 		f.unrealizedJustifiedCheckpoint = justifiedCheckpoint
 	}
-	if finalizedCheckpoint.Epoch > f.unrealizedFinalizedCheckpoint.Epoch {
+	if finalizedCheckpoint.Epoch() > f.unrealizedFinalizedCheckpoint.Epoch() {
 		f.unrealizedFinalizedCheckpoint = finalizedCheckpoint
 	}
 }
@@ -67,13 +69,13 @@ func (f *ForkChoiceStore) Ancestor(root libcommon.Hash, slot uint64) libcommon.H
 }
 
 // getCheckpointState computes and caches checkpoint states.
-func (f *ForkChoiceStore) getCheckpointState(checkpoint cltypes.Checkpoint) (*checkpointState, error) {
+func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*checkpointState, error) {
 	// check if it can be found in cache.
-	if state, ok := f.checkpointStates.Get(checkpoint); ok {
+	if state, ok := f.checkpointStates.Get(checkpointComparable(checkpoint)); ok {
 		return state, nil
 	}
 	// If it is not in cache compute it and then put in cache.
-	baseState, err := f.forkGraph.GetState(checkpoint.Root, true)
+	baseState, err := f.forkGraph.GetState(checkpoint.BlockRoot(), true)
 	if err != nil {
 		return nil, err
 	}
@@ -81,10 +83,10 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint cltypes.Checkpoint) (*ch
 		return nil, fmt.Errorf("getCheckpointState: baseState not found in graph")
 	}
 	// By default use the no change encoding to signal that there is no future epoch here.
-	if baseState.Slot() < f.computeStartSlotAtEpoch(checkpoint.Epoch) {
+	if baseState.Slot() < f.computeStartSlotAtEpoch(checkpoint.Epoch()) {
 		log.Debug("Long checkpoint detected")
 		// If we require to change it then process the future epoch
-		if err := transition.ProcessSlots(baseState, f.computeStartSlotAtEpoch(checkpoint.Epoch)); err != nil {
+		if err := transition.ProcessSlots(baseState, f.computeStartSlotAtEpoch(checkpoint.Epoch())); err != nil {
 			return nil, err
 		}
 	}
@@ -98,6 +100,6 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint cltypes.Checkpoint) (*ch
 	checkpointState := newCheckpointState(f.forkGraph.Config(), validators,
 		mixes[:], baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), state.Epoch(baseState.BeaconState))
 	// Cache in memory what we are left with.
-	f.checkpointStates.Add(checkpoint, checkpointState)
+	f.checkpointStates.Add(checkpointComparable(checkpoint), checkpointState)
 	return checkpointState, nil
 }

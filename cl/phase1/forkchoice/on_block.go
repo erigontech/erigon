@@ -2,6 +2,7 @@ package forkchoice
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 
@@ -20,7 +21,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 		return fmt.Errorf("block is too late compared to current_slot")
 	}
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
-	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Epoch)
+	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Epoch())
 	if block.Block.Slot <= finalizedSlot {
 		return fmt.Errorf("block is too late compared to finalized")
 	}

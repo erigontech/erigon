@@ -12,8 +12,8 @@ clean:
 	rm -rf junit.xml
 	rm -rf test_report.html
 
-example: ../../cmd/ef-tests-cl/tests
-	go test -tags=spectest -v -run=/mainnet/altair/sanity
+mainnet:
+	go test -tags=spectest -v -run=/mainnet
 
-run: ../../cmd/ef-tests-cl/tests
+run:
 	go test -v

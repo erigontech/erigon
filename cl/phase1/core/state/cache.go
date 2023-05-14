@@ -3,6 +3,7 @@ package state
 import (
 	"crypto/sha256"
 	"encoding/binary"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 	shuffling2 "github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
@@ -95,7 +96,7 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 	}
 
 	for _, attestation := range b.PreviousEpochAttestations() {
-		slotRoot, err := b.GetBlockRootAtSlot(attestation.Data.Slot)
+		slotRoot, err := b.GetBlockRootAtSlot(attestation.Data.Slot())
 		if err != nil {
 			return err
 		}
@@ -116,13 +117,13 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 			if err := b.SetValidatorIsPreviousMatchingSourceAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestation.Data.Target.Root != previousEpochRoot {
+			if attestation.Data.Target().BlockRoot() != previousEpochRoot {
 				continue
 			}
 			if err := b.SetValidatorIsPreviousMatchingTargetAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestation.Data.BeaconBlockHash == slotRoot {
+			if attestation.Data.BeaconBlockRoot() == slotRoot {
 				if err := b.SetValidatorIsPreviousMatchingHeadAttester(int(index), true); err != nil {
 					return err
 				}
@@ -138,7 +139,7 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 		return err
 	}
 	for _, attestation := range b.CurrentEpochAttestations() {
-		slotRoot, err := b.GetBlockRootAtSlot(attestation.Data.Slot)
+		slotRoot, err := b.GetBlockRootAtSlot(attestation.Data.Slot())
 		if err != nil {
 			return err
 		}
@@ -162,12 +163,12 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 			if err := b.SetValidatorIsCurrentMatchingSourceAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestation.Data.Target.Root == currentEpochRoot {
+			if attestation.Data.Target().BlockRoot() == currentEpochRoot {
 				if err := b.SetValidatorIsCurrentMatchingTargetAttester(int(index), true); err != nil {
 					return err
 				}
 			}
-			if attestation.Data.BeaconBlockHash == slotRoot {
+			if attestation.Data.BeaconBlockRoot() == slotRoot {
 				if err := b.SetValidatorIsCurrentMatchingHeadAttester(int(index), true); err != nil {
 					return err
 				}

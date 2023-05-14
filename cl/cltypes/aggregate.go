@@ -3,6 +3,7 @@ package cltypes
 import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
@@ -13,7 +14,7 @@ import (
  */
 type AggregateAndProof struct {
 	AggregatorIndex uint64
-	Aggregate       *Attestation
+	Aggregate       *solid.Attestation
 	SelectionProof  [96]byte
 }
 
@@ -34,7 +35,7 @@ func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
 func (a *AggregateAndProof) DecodeSSZ(buf []byte, version int) error {
 	a.AggregatorIndex = ssz.UnmarshalUint64SSZ(buf)
 	if a.Aggregate == nil {
-		a.Aggregate = new(Attestation)
+		a.Aggregate = new(solid.Attestation)
 	}
 
 	copy(a.SelectionProof[:], buf[12:])

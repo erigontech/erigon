@@ -4,6 +4,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 	"github.com/ledgerwatch/log/v3"
@@ -49,8 +50,8 @@ type ForkGraph struct {
 	// childrens maps each block roots to its children block roots
 	childrens map[libcommon.Hash][]libcommon.Hash
 	// for each block root we also keep track of te equivalent current justified and finalized checkpoints for faster head retrieval.
-	currentJustifiedCheckpoints map[libcommon.Hash]*cltypes.Checkpoint
-	finalizedCheckpoints        map[libcommon.Hash]*cltypes.Checkpoint
+	currentJustifiedCheckpoints map[libcommon.Hash]solid.Checkpoint
+	finalizedCheckpoints        map[libcommon.Hash]solid.Checkpoint
 	// Disable for tests
 	enabledPruning bool
 	// configurations
@@ -98,8 +99,8 @@ func New(anchorState *state.BeaconState, enabledPruning bool) *ForkGraph {
 		// childrens
 		childrens: make(map[libcommon.Hash][]libcommon.Hash),
 		// checkpoints trackers
-		currentJustifiedCheckpoints: make(map[libcommon.Hash]*cltypes.Checkpoint),
-		finalizedCheckpoints:        make(map[libcommon.Hash]*cltypes.Checkpoint),
+		currentJustifiedCheckpoints: make(map[libcommon.Hash]solid.Checkpoint),
+		finalizedCheckpoints:        make(map[libcommon.Hash]solid.Checkpoint),
 		enabledPruning:              enabledPruning,
 		// configuration
 		beaconCfg:   anchorState.BeaconConfig(),
@@ -267,12 +268,12 @@ func (f *ForkGraph) GetChildren(parent libcommon.Hash) []libcommon.Hash {
 	return f.childrens[parent]
 }
 
-func (f *ForkGraph) GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (*cltypes.Checkpoint, bool) {
+func (f *ForkGraph) GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool) {
 	obj, has := f.currentJustifiedCheckpoints[blockRoot]
 	return obj, has
 }
 
-func (f *ForkGraph) GetFinalizedCheckpoint(blockRoot libcommon.Hash) (*cltypes.Checkpoint, bool) {
+func (f *ForkGraph) GetFinalizedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool) {
 	obj, has := f.finalizedCheckpoints[blockRoot]
 	return obj, has
 }

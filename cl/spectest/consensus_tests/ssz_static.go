@@ -1,9 +1,10 @@
 package consensus_tests
 
 import (
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"io/fs"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
