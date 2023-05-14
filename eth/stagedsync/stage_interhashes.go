@@ -75,6 +75,9 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
+	if s.BlockNumber > to {
+		return trie.EmptyRoot, nil
+	}
 
 	if s.BlockNumber == to {
 		// we already did hash check for this block
