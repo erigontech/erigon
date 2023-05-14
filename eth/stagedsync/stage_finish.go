@@ -54,6 +54,9 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 	if executionAt, err = s.ExecutionAt(tx); err != nil {
 		return err
 	}
+	if s.BlockNumber > executionAt {
+		return nil
+	}
 	if executionAt <= s.BlockNumber {
 		return nil
 	}
