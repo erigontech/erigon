@@ -29,6 +29,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
+	"github.com/pion/randutil"
 )
 
 func convertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
@@ -104,6 +105,8 @@ func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 	return multiAddrs
 }
 
+var shuffleSource = randutil.NewMathRandomGenerator()
+
 // will iterate onto randoms nodes until our sentinel connects to one
 func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error) {
 	var sub *GossipSubscription
@@ -121,6 +124,10 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error
 	//validPeerList := sub.topic.ListPeers()
 	if len(validPeerList) == 0 {
 		return peer.ID(""), fmt.Errorf("no peers")
+	}
+	for i := range validPeerList {
+		j := shuffleSource.Intn(i + 1)
+		validPeerList[i], validPeerList[j] = validPeerList[j], validPeerList[i]
 	}
 
 	connectedPeer := false
