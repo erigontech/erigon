@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -20,16 +21,13 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-// Holds the number id of each node on the network, the first node is node 0
-var nodeNumber int
-
 // Start starts the process for two erigon nodes running on the dev chain
 func Start(wg *sync.WaitGroup, dataDir string, logger log.Logger) {
 	// add one goroutine to the wait-list
 	wg.Add(1)
 
 	// start the first node
-	go StartNode(wg, miningNodeArgs(dataDir), logger)
+	go StartNode(wg, miningNodeArgs(dataDir, 1), 1, logger)
 
 	// sleep for a while to allow first node to start
 	time.Sleep(time.Second * 10)
@@ -44,11 +42,11 @@ func Start(wg *sync.WaitGroup, dataDir string, logger log.Logger) {
 	wg.Add(1)
 
 	// start the second node, connect it to the mining node with the enode
-	go StartNode(wg, nonMiningNodeArgs(dataDir, 2, enode), logger)
+	go StartNode(wg, nonMiningNodeArgs(dataDir, 2, enode), 2, logger)
 }
 
 // StartNode starts an erigon node on the dev chain
-func StartNode(wg *sync.WaitGroup, args []string, logger log.Logger) {
+func StartNode(wg *sync.WaitGroup, args []string, nodeNumber int, logger log.Logger) {
 	logger.Info("Running node", "number", nodeNumber, "args", args)
 
 	// catch any errors and avoid panics if an error occurs
@@ -65,7 +63,6 @@ func StartNode(wg *sync.WaitGroup, args []string, logger log.Logger) {
 	}()
 
 	app := erigonapp.MakeApp("devnet", runNode, erigoncli.DefaultFlags)
-	nodeNumber++ // increment the number of nodes on the network
 	if err := app.Run(args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -104,30 +101,32 @@ func runNode(ctx *cli.Context) error {
 }
 
 // miningNodeArgs returns custom args for starting a mining node
-func miningNodeArgs(dataDir string) []string {
-	nodeDataDir, _ := models.ParameterFromArgument(models.DataDirArg, models.DataDirParam+fmt.Sprintf("%d", nodeNumber))
+func miningNodeArgs(dataDir string, nodeNumber int) []string {
+	nodeDataDir := filepath.Join(dataDir, fmt.Sprintf("%d", nodeNumber))
+	dataDirArg, _ := models.ParameterFromArgument(models.DataDirArg, nodeDataDir)
 	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
 	devPeriod, _ := models.ParameterFromArgument(models.DevPeriodArg, models.DevPeriodParam)
 	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamMine)
 	httpApi, _ := models.ParameterFromArgument(models.HttpApiArg, models.HttpApiParam)
 	ws := models.WSArg
 	consoleVerbosity, _ := models.ParameterFromArgument(models.ConsoleVerbosityArg, models.ConsoleVerbosityParam)
-	logDir, _ := models.ParameterFromArgument(models.LogDirArg, models.LogDirParam+"/node_1")
+	p2pProtocol, _ := models.ParameterFromArgument("--p2p.protocol", "68")
 
-	return []string{models.BuildDirArg, nodeDataDir, chainType, privateApiAddr, models.Mine, httpApi, ws, devPeriod, consoleVerbosity, logDir}
+	return []string{models.BuildDirArg, dataDirArg, chainType, privateApiAddr, models.Mine, httpApi, ws, devPeriod, consoleVerbosity, p2pProtocol}
 }
 
 // nonMiningNodeArgs returns custom args for starting a non-mining node
 func nonMiningNodeArgs(dataDir string, nodeNumber int, enode string) []string {
-	nodeDataDir, _ := models.ParameterFromArgument(models.DataDirArg, models.DataDirParam+fmt.Sprintf("%d", nodeNumber))
+	nodeDataDir := filepath.Join(dataDir, fmt.Sprintf("%d", nodeNumber))
+	dataDirArg, _ := models.ParameterFromArgument(models.DataDirArg, nodeDataDir)
 	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
 	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamNoMine)
 	staticPeers, _ := models.ParameterFromArgument(models.StaticPeersArg, enode)
 	consoleVerbosity, _ := models.ParameterFromArgument(models.ConsoleVerbosityArg, models.ConsoleVerbosityParam)
-	logDir, _ := models.ParameterFromArgument(models.LogDirArg, models.LogDirParam+"/node_2")
 	torrentPort, _ := models.ParameterFromArgument(models.TorrentPortArg, models.TorrentPortParam)
+	p2pProtocol, _ := models.ParameterFromArgument("--p2p.protocol", "68")
 
-	return []string{models.BuildDirArg, nodeDataDir, chainType, privateApiAddr, staticPeers, models.NoDiscover, consoleVerbosity, logDir, torrentPort}
+	return []string{models.BuildDirArg, dataDirArg, chainType, privateApiAddr, staticPeers, models.NoDiscover, consoleVerbosity, torrentPort, p2pProtocol}
 }
 
 // getEnode returns the enode of the mining node

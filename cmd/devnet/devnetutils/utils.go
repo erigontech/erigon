@@ -23,13 +23,10 @@ import (
 func ClearDevDB(dataDir string, logger log.Logger) error {
 	logger.Info("Deleting ./dev folders")
 
-	if err := os.RemoveAll("./dev0"); err != nil {
+	if err := os.RemoveAll(dataDir); err != nil {
 		return err
 	}
-	if err := os.RemoveAll("./dev2"); err != nil {
-		return err
-	}
-	logger.Info("SUCCESS => Deleted ./dev0 and ./dev2")
+	logger.Info("SUCCESS => Deleted", "datadir", dataDir)
 	return nil
 }
 
