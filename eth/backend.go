@@ -21,8 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"io/fs"
 	"math/big"
 	"net"
@@ -32,6 +30,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
+	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -595,10 +596,10 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			TmpDir:        tmpdir,
 		}, chainKv, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, &cltypes.Status{
 			ForkDigest:     forkDigest,
-			FinalizedRoot:  state.FinalizedCheckpoint().Root,
-			FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
-			HeadSlot:       state.FinalizedCheckpoint().Epoch * beaconCfg.SlotsPerEpoch,
-			HeadRoot:       state.FinalizedCheckpoint().Root,
+			FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
+			FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
+			HeadSlot:       state.FinalizedCheckpoint().Epoch() * beaconCfg.SlotsPerEpoch,
+			HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
 		})
 		if err != nil {
 			return nil, err

@@ -3,6 +3,7 @@ package transition
 import (
 	"errors"
 	"fmt"
+
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

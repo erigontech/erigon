@@ -450,9 +450,6 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 	}
 }
 
-var genesisTmpDB kv.RwDB
-var genesisDBLock sync.Mutex
-
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
 func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
@@ -497,20 +494,19 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 	var statedb *state.IntraBlockState
 	wg := sync.WaitGroup{}
 	wg.Add(1)
+
 	var err error
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
-		genesisDBLock.Lock()
-		defer genesisDBLock.Unlock()
-		if genesisTmpDB == nil {
-			genesisTmpDB = mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).MustOpen()
-		}
+		genesisTmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
+		defer genesisTmpDB.Close()
 		var tx kv.RwTx
 		if tx, err = genesisTmpDB.BeginRw(context.Background()); err != nil {
 			return
 		}
 		defer tx.Rollback()
+
 		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 		statedb = state.New(r)
 

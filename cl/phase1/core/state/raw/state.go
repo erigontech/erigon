@@ -35,9 +35,9 @@ type BeaconState struct {
 	currentEpochParticipation  solid.BitList
 	justificationBits          cltypes.JustificationBits
 	// Altair
-	previousJustifiedCheckpoint *cltypes.Checkpoint
-	currentJustifiedCheckpoint  *cltypes.Checkpoint
-	finalizedCheckpoint         *cltypes.Checkpoint
+	previousJustifiedCheckpoint solid.Checkpoint
+	currentJustifiedCheckpoint  solid.Checkpoint
+	finalizedCheckpoint         solid.Checkpoint
 	inactivityScores            solid.Uint64Slice
 	currentSyncCommittee        *cltypes.SyncCommittee
 	nextSyncCommittee           *cltypes.SyncCommittee

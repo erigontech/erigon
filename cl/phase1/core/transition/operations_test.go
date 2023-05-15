@@ -1,8 +1,10 @@
 package transition
 
 import (
-	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/require"
@@ -52,26 +54,16 @@ func getSuccessfulAttesterSlashing() *cltypes.AttesterSlashing {
 		Attestation_1: &cltypes.IndexedAttestation{
 			AttestingIndices: []uint64{0, 1},
 			Signature:        testAggregateSignature,
-			Data: &cltypes.AttestationData{
-				Source: &cltypes.Checkpoint{
-					Epoch: 1,
-				},
-				Target: &cltypes.Checkpoint{
-					Epoch: 5,
-				},
-			},
+			Data: solid.NewAttestionDataFromParameters(0, 0, libcommon.Hash{},
+				solid.NewCheckpointFromParameters(libcommon.Hash{}, 1),
+				solid.NewCheckpointFromParameters(libcommon.Hash{}, 5)),
 		},
 		Attestation_2: &cltypes.IndexedAttestation{
 			AttestingIndices: []uint64{0, 1},
 			Signature:        testAggregateSignature2,
-			Data: &cltypes.AttestationData{
-				Source: &cltypes.Checkpoint{
-					Epoch: 2,
-				},
-				Target: &cltypes.Checkpoint{
-					Epoch: 4,
-				},
-			},
+			Data: solid.NewAttestionDataFromParameters(0, 0, libcommon.Hash{},
+				solid.NewCheckpointFromParameters(libcommon.Hash{}, 2),
+				solid.NewCheckpointFromParameters(libcommon.Hash{}, 4)),
 		},
 	}
 }

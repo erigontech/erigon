@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	rawdb2 "github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -11,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
 	stages2 "github.com/ledgerwatch/erigon/cl/phase1/stages"
-	"os"
 
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -145,10 +146,10 @@ func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, beaconS
 		NoDiscovery:   cfg.NoDiscovery,
 	}, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
 		ForkDigest:     forkDigest,
-		FinalizedRoot:  beaconState.FinalizedCheckpoint().Root,
-		FinalizedEpoch: beaconState.FinalizedCheckpoint().Epoch,
-		HeadSlot:       beaconState.FinalizedCheckpoint().Epoch * cfg.BeaconCfg.SlotsPerEpoch,
-		HeadRoot:       beaconState.FinalizedCheckpoint().Root,
+		FinalizedRoot:  beaconState.FinalizedCheckpoint().BlockRoot(),
+		FinalizedEpoch: beaconState.FinalizedCheckpoint().Epoch(),
+		HeadSlot:       beaconState.FinalizedCheckpoint().Epoch() * cfg.BeaconCfg.SlotsPerEpoch,
+		HeadRoot:       beaconState.FinalizedCheckpoint().BlockRoot(),
 	})
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)

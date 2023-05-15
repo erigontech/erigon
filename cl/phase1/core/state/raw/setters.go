@@ -247,17 +247,17 @@ func (b *BeaconState) SetJustificationBits(justificationBits cltypes.Justificati
 	b.markLeaf(JustificationBitsLeafIndex)
 }
 
-func (b *BeaconState) SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint *cltypes.Checkpoint) {
+func (b *BeaconState) SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint solid.Checkpoint) {
 	b.previousJustifiedCheckpoint = previousJustifiedCheckpoint
 	b.markLeaf(PreviousJustifiedCheckpointLeafIndex)
 }
 
-func (b *BeaconState) SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint *cltypes.Checkpoint) {
+func (b *BeaconState) SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint solid.Checkpoint) {
 	b.currentJustifiedCheckpoint = currentJustifiedCheckpoint
 	b.markLeaf(CurrentJustifiedCheckpointLeafIndex)
 }
 
-func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint *cltypes.Checkpoint) {
+func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint solid.Checkpoint) {
 	b.finalizedCheckpoint = finalizedCheckpoint
 	b.markLeaf(FinalizedCheckpointLeafIndex)
 }

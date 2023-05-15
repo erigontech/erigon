@@ -3,6 +3,7 @@ package transition
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
@@ -26,10 +27,8 @@ func weighJustificationAndFinalization(s *state2.BeaconState, previousEpochTarge
 		if err != nil {
 			return err
 		}
-		s.SetCurrentJustifiedCheckpoint(&cltypes.Checkpoint{
-			Epoch: previousEpoch,
-			Root:  checkPointRoot,
-		})
+
+		s.SetCurrentJustifiedCheckpoint(solid.NewCheckpointFromParameters(checkPointRoot, previousEpoch))
 		justificationBits[1] = true
 	}
 	if currentEpochTargetBalance*3 >= totalActiveBalance*2 {
@@ -37,23 +36,21 @@ func weighJustificationAndFinalization(s *state2.BeaconState, previousEpochTarge
 		if err != nil {
 			return err
 		}
-		s.SetCurrentJustifiedCheckpoint(&cltypes.Checkpoint{
-			Epoch: currentEpoch,
-			Root:  checkPointRoot,
-		})
+
+		s.SetCurrentJustifiedCheckpoint(solid.NewCheckpointFromParameters(checkPointRoot, currentEpoch))
 		justificationBits[0] = true
 	}
 	// Process finalization
 	// The 2nd/3rd/4th most recent epochs are justified, the 2nd using the 4th as source
 	// The 2nd/3rd most recent epochs are justified, the 2nd using the 3rd as source
-	if (justificationBits.CheckRange(1, 4) && oldPreviousJustifiedCheckpoint.Epoch+3 == currentEpoch) ||
-		(justificationBits.CheckRange(1, 3) && oldPreviousJustifiedCheckpoint.Epoch+2 == currentEpoch) {
+	if (justificationBits.CheckRange(1, 4) && oldPreviousJustifiedCheckpoint.Epoch()+3 == currentEpoch) ||
+		(justificationBits.CheckRange(1, 3) && oldPreviousJustifiedCheckpoint.Epoch()+2 == currentEpoch) {
 		s.SetFinalizedCheckpoint(oldPreviousJustifiedCheckpoint)
 	}
 	// The 1st/2nd/3rd most recent epochs are justified, the 1st using the 3rd as source
 	// The 1st/2nd most recent epochs are justified, the 1st using the 2nd as source
-	if (justificationBits.CheckRange(0, 3) && oldCurrentJustifiedCheckpoint.Epoch+2 == currentEpoch) ||
-		(justificationBits.CheckRange(0, 2) && oldCurrentJustifiedCheckpoint.Epoch+1 == currentEpoch) {
+	if (justificationBits.CheckRange(0, 3) && oldCurrentJustifiedCheckpoint.Epoch()+2 == currentEpoch) ||
+		(justificationBits.CheckRange(0, 2) && oldCurrentJustifiedCheckpoint.Epoch()+1 == currentEpoch) {
 		s.SetFinalizedCheckpoint(oldCurrentJustifiedCheckpoint)
 	}
 	// Write justification bits

@@ -57,15 +57,16 @@ func txPeekBlobVersionedHashes(txBytes []byte) []libcommon.Hash {
 	return versionedHashes
 }
 
-func VerifyKzgCommitmentsAgainstTransactions(transactionsBytes [][]byte, kzgCommitments []*cltypes.KZGCommitment) (bool, error) {
+func VerifyKzgCommitmentsAgainstTransactions(transactions *cltypes.TransactionsSSZ, kzgCommitments []*cltypes.KZGCommitment) (bool, error) {
 	allVersionedHashes := []libcommon.Hash{}
-	for _, txBytes := range transactionsBytes {
-		if txBytes[0] != types.BlobTxType {
-			continue
+	transactions.ForEach(func(tx []byte, idx, total int) bool {
+		if tx[0] != types.BlobTxType {
+			return true
 		}
 
-		allVersionedHashes = append(allVersionedHashes, txPeekBlobVersionedHashes(txBytes)...)
-	}
+		allVersionedHashes = append(allVersionedHashes, txPeekBlobVersionedHashes(tx)...)
+		return true
+	})
 
 	commitmentVersionedHash := []libcommon.Hash{}
 	for _, commitment := range kzgCommitments {

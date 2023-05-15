@@ -3,6 +3,7 @@ package rawdb
 import (
 	"encoding/binary"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -19,6 +20,10 @@ func EncodeNumber(n uint64) []byte {
 	return ret
 }
 
+func DecodeNumber(n []byte) uint64 {
+	return uint64(binary.BigEndian.Uint32(n))
+}
+
 // WriteBeaconState writes beacon state for specific block to database.
 func WriteBeaconState(tx kv.Putter, state *state.BeaconState) error {
 	data, err := utils.EncodeSSZSnappy(state)
@@ -29,21 +34,38 @@ func WriteBeaconState(tx kv.Putter, state *state.BeaconState) error {
 	return tx.Put(kv.BeaconState, EncodeNumber(state.Slot()), data)
 }
 
-// LengthBytes2 convert length to 2 bytes repressentation
-func LengthFromBytes2(buf []byte) int {
-	return int(buf[0])*0x100 + int(buf[1])
+func EncodeAttestationsForStorage(attestations *cltypes.AttestationList) ([]byte, error) {
+	encoded, err := attestations.EncodeSSZ(nil)
+	if err != nil {
+		return nil, err
+	}
+	return utils.CompressSnappy(encoded), nil
 }
 
-func WriteAttestations(tx kv.RwTx, slot uint64, blockRoot libcommon.Hash, attestations []*cltypes.Attestation) error {
-	return tx.Put(kv.Attestetations, append(EncodeNumber(slot), blockRoot[:]...), cltypes.EncodeAttestationsForStorage(attestations))
+func DecodeAttestationsForStorage(buf []byte) (*cltypes.AttestationList, error) {
+	var err error
+	if buf, err = utils.DecompressSnappy(buf); err != nil {
+		return nil, err
+	}
+
+	ret := &cltypes.AttestationList{}
+	return ret, ret.DecodeSSZ(buf, 0)
 }
 
-func ReadAttestations(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64) ([]*cltypes.Attestation, error) {
+func WriteAttestations(tx kv.RwTx, slot uint64, blockRoot libcommon.Hash, attestations *cltypes.AttestationList) error {
+	data, err := EncodeAttestationsForStorage(attestations)
+	if err != nil {
+		return err
+	}
+	return tx.Put(kv.Attestetations, append(EncodeNumber(slot), blockRoot[:]...), data)
+}
+
+func ReadAttestations(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64) (*cltypes.AttestationList, error) {
 	attestationsEncoded, err := tx.GetOne(kv.Attestetations, append(EncodeNumber(slot), blockRoot[:]...))
 	if err != nil {
 		return nil, err
 	}
-	return cltypes.DecodeAttestationsForStorage(attestationsEncoded)
+	return DecodeAttestationsForStorage(attestationsEncoded)
 }
 
 func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error {

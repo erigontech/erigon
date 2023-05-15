@@ -1,8 +1,10 @@
 package state
 
 import (
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"sort"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -21,15 +23,15 @@ func copyLRU[K comparable, V any](dst *lru.Cache[K, V], src *lru.Cache[K, V]) *l
 	return dst
 }
 
-func GetIndexedAttestation(attestation *cltypes.Attestation, attestingIndicies []uint64) *cltypes.IndexedAttestation {
+func GetIndexedAttestation(attestation *solid.Attestation, attestingIndicies []uint64) *cltypes.IndexedAttestation {
 	// Sort the the attestation indicies.
 	sort.Slice(attestingIndicies, func(i, j int) bool {
 		return attestingIndicies[i] < attestingIndicies[j]
 	})
 	return &cltypes.IndexedAttestation{
 		AttestingIndices: attestingIndicies,
-		Data:             attestation.Data,
-		Signature:        attestation.Signature,
+		Data:             attestation.AttestantionData(),
+		Signature:        attestation.Signature(),
 	}
 }
 

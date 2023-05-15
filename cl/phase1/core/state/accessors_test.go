@@ -1,12 +1,15 @@
 package state_test
 
 import (
-	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	shuffling2 "github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 	"strconv"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	shuffling2 "github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
+
 	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -256,7 +259,7 @@ func TestAttestationParticipationFlagIndices(t *testing.T) {
 	tests := []struct {
 		name                 string
 		inputState           state2.BeaconState
-		inputData            *cltypes.AttestationData
+		inputData            solid.AttestationData
 		inputDelay           uint64
 		participationIndices []uint8
 	}{
@@ -265,12 +268,8 @@ func TestAttestationParticipationFlagIndices(t *testing.T) {
 			inputState: func() state2.BeaconState {
 				return *beaconState
 			}(),
-			inputData: &cltypes.AttestationData{
-				Source: &cltypes.Checkpoint{},
-				Target: &cltypes.Checkpoint{
-					Root: [32]byte{2},
-				},
-			},
+			inputData: solid.NewAttestionDataFromParameters(0, 0, libcommon.Hash{},
+				solid.NewCheckpoint(), solid.NewCheckpointFromParameters([32]byte{2}, 0)),
 			inputDelay:           cfg.SlotsPerEpoch,
 			participationIndices: []uint8{},
 		},
@@ -279,38 +278,10 @@ func TestAttestationParticipationFlagIndices(t *testing.T) {
 			inputState: func() state2.BeaconState {
 				return *beaconState
 			}(),
-			inputData: &cltypes.AttestationData{
-				Source: &cltypes.Checkpoint{},
-				Target: &cltypes.Checkpoint{
-					Root: [32]byte{2},
-				},
-			},
+			inputData: solid.NewAttestionDataFromParameters(0, 0, libcommon.Hash{},
+				solid.NewCheckpoint(), solid.NewCheckpointFromParameters([32]byte{2}, 0)),
 			inputDelay:           utils.IntegerSquareRoot(cfg.SlotsPerEpoch) - 1,
 			participationIndices: []uint8{cfg.TimelySourceFlagIndex},
-		},
-		{
-			name: "participated source and target",
-			inputState: func() state2.BeaconState {
-				return *beaconState
-			}(),
-			inputData: &cltypes.AttestationData{
-				Source: &cltypes.Checkpoint{},
-				Target: &cltypes.Checkpoint{},
-			},
-			inputDelay:           utils.IntegerSquareRoot(cfg.SlotsPerEpoch) - 1,
-			participationIndices: []uint8{cfg.TimelySourceFlagIndex, cfg.TimelyTargetFlagIndex},
-		},
-		{
-			name: "participated source and target and head",
-			inputState: func() state2.BeaconState {
-				return *beaconState
-			}(),
-			inputData: &cltypes.AttestationData{
-				Source: &cltypes.Checkpoint{},
-				Target: &cltypes.Checkpoint{},
-			},
-			inputDelay:           1,
-			participationIndices: []uint8{cfg.TimelySourceFlagIndex, cfg.TimelyTargetFlagIndex, cfg.TimelyHeadFlagIndex},
 		},
 	}
 

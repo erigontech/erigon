@@ -2,8 +2,10 @@ package network
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"runtime"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -90,12 +92,12 @@ func (g *GossipManager) Start() {
 				log.Debug("[Beacon Gossip] Failure in processing block", "err", err)
 				continue
 			}
-			for _, attestation := range block.Block.Body.Attestations {
-				if err := g.forkChoice.OnAttestation(attestation, true); err != nil {
+			block.Block.Body.Attestations.ForEach(func(a *solid.Attestation, idx, total int) bool {
+				if err = g.forkChoice.OnAttestation(a, true); err != nil {
 					log.Debug("[Beacon Gossip] Failure in processing attestation", "err", err)
-					continue
 				}
-			}
+				return true
+			})
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
 			// Now check the head
@@ -115,7 +117,7 @@ func (g *GossipManager) Start() {
 				finalizedCheckpoint := g.forkChoice.FinalizedCheckpoint()
 				// Run forkchoice
 				if err := g.forkChoice.Engine().ForkChoiceUpdate(
-					g.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
+					g.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
 					g.forkChoice.GetEth1Hash(headRoot),
 				); err != nil {
 					log.Warn("Could send not forkchoice", "err", err)

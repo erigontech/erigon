@@ -2,12 +2,13 @@ package stages
 
 import (
 	"context"
+	"runtime"
+	"time"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
-	"runtime"
-	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -127,7 +128,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 					finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
 					// Run forkchoice
 					if err := cfg.forkChoice.Engine().ForkChoiceUpdate(
-						cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
+						cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
 						cfg.forkChoice.GetEth1Hash(headRoot),
 					); err != nil {
 						log.Warn("Could send not forkchoice", "err", err)
@@ -171,6 +172,9 @@ MainLoop:
 			cfg.downloader.RequestMore()
 			peersCount, err = cfg.downloader.Peers()
 			if err != nil {
+				break
+			}
+			if utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == cfg.forkChoice.HighestSeen() {
 				break
 			}
 			if peersCount < minPeersForDownload {

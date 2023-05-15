@@ -56,6 +56,9 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	}
 	logPrefix := s.LogPrefix()
 	endBlock, err := s.ExecutionAt(tx)
+	if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
+		return nil
+	}
 	if err != nil {
 		return err
 	}

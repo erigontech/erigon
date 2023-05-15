@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -30,7 +29,7 @@ type Eth1Block struct {
 	BaseFeePerGas [32]byte
 	// Extra fields
 	BlockHash     libcommon.Hash
-	Transactions  [][]byte
+	Transactions  *TransactionsSSZ
 	Withdrawals   types.Withdrawals
 	ExcessDataGas [32]byte
 	// internals
@@ -74,7 +73,7 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 		Extra:         header.Extra,
 		BaseFeePerGas: baseFee32,
 		BlockHash:     header.Hash(),
-		Transactions:  body.Transactions,
+		Transactions:  NewTransactionsSSZFromTransactions(body.Transactions),
 		Withdrawals:   body.Withdrawals,
 		ExcessDataGas: excessDataGas32,
 	}
@@ -93,7 +92,7 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 	var err error
 	var transactionsRoot, withdrawalsRoot libcommon.Hash
-	if transactionsRoot, err = merkle_tree.TransactionsListRoot(b.Transactions); err != nil {
+	if transactionsRoot, err = b.Transactions.HashSSZ(); err != nil {
 		return nil, err
 	}
 	if b.version >= clparams.CapellaVersion {
@@ -130,10 +129,7 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 	// Field (10) 'ExtraData'
 	size += len(b.Extra)
 	// Field (13) 'Transactions'
-	for _, tx := range b.Transactions {
-		size += 4
-		size += len(tx)
-	}
+	size += b.Transactions.EncodingSize()
 
 	if b.version >= clparams.CapellaVersion {
 		size += len(b.Withdrawals)*44 + 4
@@ -185,57 +181,14 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	if len(b.Extra) > 32 {
 		return fmt.Errorf("[Eth1Block] err: Decode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Extra))
 	}
-	// Compute transactions
-	var transactionsBuffer []byte
-	if withdrawalOffset == nil {
-		if len(transactionsBuffer) > len(buf) {
-			return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrLowBufferSize)
-		}
-		transactionsBuffer = buf[transactionsOffset:]
-	} else {
-		if len(transactionsBuffer) > int(*withdrawalOffset) || int(*withdrawalOffset) > len(buf) {
-			return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrBadOffset)
-		}
-		transactionsBuffer = buf[transactionsOffset:*withdrawalOffset]
+	endOffset := uint32(len(buf))
+	if withdrawalOffset != nil {
+		endOffset = *withdrawalOffset
 	}
 
-	length := uint32(0)
-	transactionsPosition := 4
-	var txOffset uint32
-	if len(transactionsBuffer) == 0 {
-		length = 0
-	} else {
-		if len(transactionsBuffer) < 4 {
-			return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrLowBufferSize)
-		}
-		txOffset = ssz.DecodeOffset(transactionsBuffer)
-		length = txOffset / 4
-		// Retrieve tx length
-		if txOffset%4 != 0 {
-			return fmt.Errorf("Eth1Block] err: %s", ssz.ErrBadDynamicLength)
-		}
-	}
-
-	b.Transactions = make([][]byte, length)
-	txIdx := 0
-	// Loop through each transaction
-	for length > 0 {
-		var txEndOffset uint32
-		if length == 1 {
-			txEndOffset = uint32(len(transactionsBuffer))
-		} else {
-			txEndOffset = ssz.DecodeOffset(transactionsBuffer[transactionsPosition:])
-		}
-		transactionsPosition += 4
-		if txOffset > txEndOffset {
-			return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrBadOffset)
-		}
-		b.Transactions[txIdx] = transactionsBuffer[txOffset:txEndOffset]
-		// Decode RLP and put it in the tx list.
-		// Update parameters for next iteration
-		txOffset = txEndOffset
-		txIdx++
-		length--
+	b.Transactions = new(TransactionsSSZ)
+	if err := b.Transactions.DecodeSSZ(buf[transactionsOffset:endOffset], version); err != nil {
+		return err
 	}
 
 	// If withdrawals are enabled, process them.
@@ -274,9 +227,7 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	// Write transaction offset
 	buf = append(buf, ssz.OffsetSSZ(uint32(currentOffset))...)
 
-	for _, tx := range b.Transactions {
-		currentOffset += len(tx) + 4
-	}
+	currentOffset += b.Transactions.EncodingSize()
 	// Write withdrawals offset if exist
 	if b.version >= clparams.CapellaVersion {
 		buf = append(buf, ssz.OffsetSSZ(uint32(currentOffset))...)
@@ -296,14 +247,8 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 
 	buf = append(buf, b.Extra...)
 	// Write all tx offsets
-	txOffset := len(b.Transactions) * 4
-	for _, tx := range b.Transactions {
-		buf = append(buf, ssz.OffsetSSZ(uint32(txOffset))...)
-		txOffset += len(tx)
-	}
-	// Write all transactions
-	for _, tx := range b.Transactions {
-		buf = append(buf, tx...)
+	if buf, err = b.Transactions.EncodeSSZ(buf); err != nil {
+		return nil, err
 	}
 
 	// Append all withdrawals SSZ
@@ -356,7 +301,7 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 		UncleHash:       types.EmptyUncleHash,
 		Coinbase:        b.FeeRecipient,
 		Root:            b.StateRoot,
-		TxHash:          types.DeriveSha(types.BinaryTransactions(b.Transactions)),
+		TxHash:          types.DeriveSha(types.BinaryTransactions(b.Transactions.UnderlyngReference())),
 		ReceiptHash:     b.ReceiptsRoot,
 		Bloom:           b.LogsBloom,
 		Difficulty:      merge.ProofOfStakeDifficulty,
@@ -383,7 +328,7 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 // Body returns the equivalent raw body (only eth1 body section).
 func (b *Eth1Block) Body() *types.RawBody {
 	return &types.RawBody{
-		Transactions: b.Transactions,
+		Transactions: b.Transactions.UnderlyngReference(),
 		Withdrawals:  b.Withdrawals,
 	}
 }

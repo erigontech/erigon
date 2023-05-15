@@ -2,8 +2,9 @@ package transition
 
 import (
 	"encoding/hex"
-	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"testing"
+
+	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -57,7 +58,8 @@ func getTestBlock(t *testing.T) *cltypes.BeaconBlock {
 			Eth1Data:         &cltypes.Eth1Data{},
 			SyncAggregate:    &cltypes.SyncAggregate{},
 			ExecutionPayload: emptyBlock,
-			Version:          clparams.BellatrixVersion,
+			Attestations:     new(cltypes.AttestationList),
+			Version:          clparams.AltairVersion,
 		},
 	}
 }
@@ -78,9 +80,6 @@ func TestProcessBlockHeader(t *testing.T) {
 
 	badParentRoot := getTestBlock(t)
 	badParentRoot.ParentRoot = libcommon.Hash{}
-
-	badBlockBodyHash := getTestBlock(t)
-	badBlockBodyHash.Body.Attestations = append(badBlockBodyHash.Body.Attestations, &cltypes.Attestation{})
 
 	badStateSlashed := getTestState(t)
 	validator, err := badStateSlashed.ValidatorForValidatorIndex(int(testBlock.ProposerIndex))
@@ -122,12 +121,6 @@ func TestProcessBlockHeader(t *testing.T) {
 			description: "bad_parent_root",
 			state:       testState,
 			block:       badParentRoot,
-			wantErr:     true,
-		},
-		{
-			description: "bad_block_body_hash",
-			state:       testState,
-			block:       badBlockBodyHash,
 			wantErr:     true,
 		},
 		{

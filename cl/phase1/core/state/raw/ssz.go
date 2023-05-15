@@ -2,6 +2,7 @@ package raw
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/state_encoding"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -329,9 +330,9 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	b.justificationBits.FromByte(buf[pos])
 	pos++
 	// Decode checkpoints
-	b.previousJustifiedCheckpoint = new(cltypes.Checkpoint)
-	b.currentJustifiedCheckpoint = new(cltypes.Checkpoint)
-	b.finalizedCheckpoint = new(cltypes.Checkpoint)
+	b.previousJustifiedCheckpoint = solid.NewCheckpoint()
+	b.currentJustifiedCheckpoint = solid.NewCheckpoint()
+	b.finalizedCheckpoint = solid.NewCheckpoint()
 	if err := b.previousJustifiedCheckpoint.DecodeSSZ(buf[pos:], version); err != nil {
 		return err
 	}

@@ -2,10 +2,12 @@ package consensus_tests
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"io/fs"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -195,7 +197,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				require.Error(t, err, stepstr)
 			}
 		case "attestation":
-			att := &cltypes.Attestation{}
+			att := &solid.Attestation{}
 			err := spectest.ReadSsz(root, c.Version(), step.GetAttestation()+".ssz_snappy", att)
 			require.NoError(t, err, stepstr)
 			err = forkStore.OnAttestation(att, false)
@@ -247,19 +249,19 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 	if e.FinalizedCheckpoint != nil {
 		cp := store.FinalizedCheckpoint()
 		if e.FinalizedCheckpoint.Root != nil {
-			assert.EqualValues(t, *e.FinalizedCheckpoint.Root, cp.Root, stepstr)
+			assert.EqualValues(t, *e.FinalizedCheckpoint.Root, cp.BlockRoot(), stepstr)
 		}
 		if e.FinalizedCheckpoint.Epoch != nil {
-			assert.EqualValues(t, *e.FinalizedCheckpoint.Epoch, cp.Epoch, stepstr)
+			assert.EqualValues(t, *e.FinalizedCheckpoint.Epoch, cp.Epoch(), stepstr)
 		}
 	}
 	if e.JustifiedCheckpoint != nil {
 		cp := store.JustifiedCheckpoint()
 		if e.JustifiedCheckpoint.Root != nil {
-			assert.EqualValues(t, *e.JustifiedCheckpoint.Root, cp.Root, stepstr)
+			assert.EqualValues(t, *e.JustifiedCheckpoint.Root, cp.BlockRoot(), stepstr)
 		}
 		if e.JustifiedCheckpoint.Epoch != nil {
-			assert.EqualValues(t, *e.JustifiedCheckpoint.Epoch, cp.Epoch, stepstr)
+			assert.EqualValues(t, *e.JustifiedCheckpoint.Epoch, cp.Epoch(), stepstr)
 		}
 	}
 }
