@@ -117,6 +117,9 @@ func searchBlockForHashes(hashmap map[libcommon.Hash]bool) (*map[libcommon.Hash]
 
 // UnsubscribeAll closes all the client subscriptions and empties their global subscription channel
 func UnsubscribeAll() {
+	if models.MethodSubscriptionMap == nil {
+		return
+	}
 	for _, methodSub := range *models.MethodSubscriptionMap {
 		if methodSub != nil {
 			methodSub.ClientSub.Unsubscribe()

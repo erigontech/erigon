@@ -24,12 +24,12 @@ import (
 var nodeNumber int
 
 // Start starts the process for two erigon nodes running on the dev chain
-func Start(wg *sync.WaitGroup, logger log.Logger) {
+func Start(wg *sync.WaitGroup, dataDir string, logger log.Logger) {
 	// add one goroutine to the wait-list
 	wg.Add(1)
 
 	// start the first node
-	go StartNode(wg, miningNodeArgs(), logger)
+	go StartNode(wg, miningNodeArgs(dataDir), logger)
 
 	// sleep for a while to allow first node to start
 	time.Sleep(time.Second * 10)
@@ -44,7 +44,7 @@ func Start(wg *sync.WaitGroup, logger log.Logger) {
 	wg.Add(1)
 
 	// start the second node, connect it to the mining node with the enode
-	go StartNode(wg, nonMiningNodeArgs(2, enode), logger)
+	go StartNode(wg, nonMiningNodeArgs(dataDir, 2, enode), logger)
 }
 
 // StartNode starts an erigon node on the dev chain
@@ -104,8 +104,8 @@ func runNode(ctx *cli.Context) error {
 }
 
 // miningNodeArgs returns custom args for starting a mining node
-func miningNodeArgs() []string {
-	dataDir, _ := models.ParameterFromArgument(models.DataDirArg, models.DataDirParam+fmt.Sprintf("%d", nodeNumber))
+func miningNodeArgs(dataDir string) []string {
+	nodeDataDir, _ := models.ParameterFromArgument(models.DataDirArg, models.DataDirParam+fmt.Sprintf("%d", nodeNumber))
 	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
 	devPeriod, _ := models.ParameterFromArgument(models.DevPeriodArg, models.DevPeriodParam)
 	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamMine)
@@ -114,12 +114,12 @@ func miningNodeArgs() []string {
 	consoleVerbosity, _ := models.ParameterFromArgument(models.ConsoleVerbosityArg, models.ConsoleVerbosityParam)
 	logDir, _ := models.ParameterFromArgument(models.LogDirArg, models.LogDirParam+"/node_1")
 
-	return []string{models.BuildDirArg, dataDir, chainType, privateApiAddr, models.Mine, httpApi, ws, devPeriod, consoleVerbosity, logDir}
+	return []string{models.BuildDirArg, nodeDataDir, chainType, privateApiAddr, models.Mine, httpApi, ws, devPeriod, consoleVerbosity, logDir}
 }
 
 // nonMiningNodeArgs returns custom args for starting a non-mining node
-func nonMiningNodeArgs(nodeNumber int, enode string) []string {
-	dataDir, _ := models.ParameterFromArgument(models.DataDirArg, models.DataDirParam+fmt.Sprintf("%d", nodeNumber))
+func nonMiningNodeArgs(dataDir string, nodeNumber int, enode string) []string {
+	nodeDataDir, _ := models.ParameterFromArgument(models.DataDirArg, models.DataDirParam+fmt.Sprintf("%d", nodeNumber))
 	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
 	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamNoMine)
 	staticPeers, _ := models.ParameterFromArgument(models.StaticPeersArg, enode)
@@ -127,7 +127,7 @@ func nonMiningNodeArgs(nodeNumber int, enode string) []string {
 	logDir, _ := models.ParameterFromArgument(models.LogDirArg, models.LogDirParam+"/node_2")
 	torrentPort, _ := models.ParameterFromArgument(models.TorrentPortArg, models.TorrentPortParam)
 
-	return []string{models.BuildDirArg, dataDir, chainType, privateApiAddr, staticPeers, models.NoDiscover, consoleVerbosity, logDir, torrentPort}
+	return []string{models.BuildDirArg, nodeDataDir, chainType, privateApiAddr, staticPeers, models.NoDiscover, consoleVerbosity, logDir, torrentPort}
 }
 
 // getEnode returns the enode of the mining node

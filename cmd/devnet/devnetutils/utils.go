@@ -20,7 +20,7 @@ import (
 )
 
 // ClearDevDB cleans up the dev folder used for the operations
-func ClearDevDB(logger log.Logger) error {
+func ClearDevDB(dataDir string, logger log.Logger) error {
 	logger.Info("Deleting ./dev folders")
 
 	if err := os.RemoveAll("./dev0"); err != nil {
@@ -33,7 +33,7 @@ func ClearDevDB(logger log.Logger) error {
 	return nil
 }
 
-func DeleteLogs(logger log.Logger) error {
+func DeleteLogs(dataDir string, logger log.Logger) error {
 	log.Info("Removing old logs to create new ones...")
 	log.Info("Before re-running the devnet tool, make sure to copy out old logs if you need them!!!")
 

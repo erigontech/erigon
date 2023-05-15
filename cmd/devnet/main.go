@@ -13,12 +13,19 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/node"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
 )
+
+var DataDirFlag = flags.DirectoryFlag{
+	Name:     "datadir",
+	Usage:    "Data directory for the devnet",
+	Value:    flags.DirectoryString(""),
+	Required: true,
+}
 
 func main() {
 
@@ -30,7 +37,7 @@ func main() {
 		return action(ctx)
 	}
 	app.Flags = []cli.Flag{
-		&utils.DataDirFlag,
+		&DataDirFlag,
 	}
 
 	app.After = func(ctx *cli.Context) error {
@@ -38,32 +45,28 @@ func main() {
 		services.UnsubscribeAll()
 		return nil
 	}
-	if err := app.Run([]string{}); err != nil {
+	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
 }
 
 func action(ctx *cli.Context) error {
 	dataDir := ctx.String("datadir")
-	if dataDir == "" {
-		return fmt.Errorf("missing --datadir flag - required for devnet tool")
-	}
-	fmt.Printf("datadir = %s\n", dataDir)
 	logger := logging.SetupLoggerCtx("devnet", ctx, true /* rootLogger */)
 	// clear all the dev files
-	if err := devnetutils.ClearDevDB(logger); err != nil {
+	if err := devnetutils.ClearDevDB(dataDir, logger); err != nil {
 		return err
 	}
 	// wait group variable to prevent main function from terminating until routines are finished
 	var wg sync.WaitGroup
 
 	// remove the old logs from previous runs
-	if err := devnetutils.DeleteLogs(logger); err != nil {
+	if err := devnetutils.DeleteLogs(dataDir, logger); err != nil {
 		return err
 	}
 
 	// start the first erigon node in a go routine
-	node.Start(&wg, logger)
+	node.Start(&wg, dataDir, logger)
 
 	// send a quit signal to the quit channels when done making checks
 	node.QuitOnSignal(&wg)
