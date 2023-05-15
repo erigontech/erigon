@@ -803,6 +803,8 @@ func HeadersPOW(
 	var lastSkeletonTime time.Time
 	var peer [64]byte
 	var sentToPeer bool
+
+	chain := cfg.hd.GetChain()
 Loop:
 	for !stopped {
 
@@ -859,7 +861,7 @@ Loop:
 		}
 		// Load headers into the database
 		var inSync bool
-		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix())); err != nil {
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader, chain, &cfg.chainConfig), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix())); err != nil {
 			return err
 		}
 

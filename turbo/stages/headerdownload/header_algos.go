@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -27,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -785,9 +787,9 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 	return link
 }
 
-func (hi *HeaderInserter) NewFeedHeaderFunc(db kv.StatelessRwTx, headerReader services.HeaderReader) FeedHeaderFunc {
+func (hi *HeaderInserter) NewFeedHeaderFunc(db kv.StatelessRwTx, headerReader services.HeaderReader, chain []*types.Header, chainConfig *chain.Config) FeedHeaderFunc {
 	return func(header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64) (*big.Int, error) {
-		return hi.FeedHeaderPoW(db, headerReader, header, headerRaw, hash, blockHeight)
+		return hi.FeedHeaderPoW(db, headerReader, header, headerRaw, hash, blockHeight, chain, chainConfig)
 	}
 }
 
@@ -844,7 +846,7 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 	return
 }
 
-func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader services.HeaderReader, header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64) (td *big.Int, err error) {
+func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader services.HeaderReader, header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64, chain []*types.Header, chainConfig *chain.Config) (td *big.Int, err error) {
 	if hash == hi.prevHash {
 		// Skip duplicates
 		return nil, nil
@@ -875,6 +877,13 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	td = new(big.Int).Add(parentTd, header.Difficulty)
 	// Now we can decide wether this header will create a change in the canonical head
 	if td.Cmp(hi.localTd) > 0 {
+		finality, err := ValidateReorg(parent, chain, chainConfig)
+		if err != nil {
+			return nil, err
+		}
+		if !finality {
+			return nil, fmt.Errorf("incoming header doesn't conform to the bor finality")
+		}
 		hi.newCanonical = true
 		forkingPoint, err := hi.ForkingPoint(db, header, parent)
 		if err != nil {
@@ -1366,4 +1375,16 @@ func DecodeTips(encodings []string) (map[libcommon.Hash]HeaderRecord, error) {
 	}
 
 	return hardTips, nil
+}
+
+// ValidateReorg calls the chain validator service to check if the reorg is valid or not
+// This function is specific to Bor chain
+func ValidateReorg(current *types.Header, chain []*types.Header, config *chain.Config) (bool, error) {
+	// Call the bor chain validator service
+	s := whitelist.Service{}
+	if config.Bor != nil {
+		return s.IsValidChain(current, chain)
+	}
+
+	return true, nil
 }

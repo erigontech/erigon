@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/btree"
-	"github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 
@@ -270,6 +270,15 @@ type HeaderDownload struct {
 	unsettledHeadHeight  uint64                       // Height of unsettledForkChoice.headBlockHash
 	posDownloaderTip     common.Hash                  // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
 	badPoSHeaders        map[common.Hash]common.Hash  // Invalid Tip -> Last Valid Ancestor
+}
+
+func (hd *HeaderDownload) GetChain() []*types.Header {
+	chainLength := hd.insertQueue.Len()
+	chain := make([]*types.Header, chainLength)
+	for i := 0; i < chainLength; i++ {
+		chain = append(chain, hd.insertQueue[i].header)
+	}
+	return chain
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
