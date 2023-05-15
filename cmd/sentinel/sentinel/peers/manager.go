@@ -40,7 +40,8 @@ func NewManager(ctx context.Context, host host.Host) *Manager {
 	go m.run(ctx)
 	return m
 }
-func (m *Manager) TryPeer(id peer.ID, fn func(peer *Peer, ok bool)) {
+
+func (m *Manager) getPeer(id peer.ID) (peer *Peer) {
 	m.mu.Lock()
 	p, ok := m.peers[id]
 	if !ok {
@@ -55,6 +56,22 @@ func (m *Manager) TryPeer(id peer.ID, fn func(peer *Peer, ok bool)) {
 	}
 	p.lastTouched = time.Now()
 	m.mu.Unlock()
+	return p
+}
+func (m *Manager) CtxPeer(ctx context.Context, id peer.ID, fn func(peer *Peer)) error {
+	p := m.getPeer(id)
+	select {
+	case p.working <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	fn(p)
+	<-p.working
+	return nil
+}
+
+func (m *Manager) TryPeer(id peer.ID, fn func(peer *Peer, ok bool)) {
+	p := m.getPeer(id)
 	select {
 	case p.working <- struct{}{}:
 	default:
@@ -68,20 +85,7 @@ func (m *Manager) TryPeer(id peer.ID, fn func(peer *Peer, ok bool)) {
 // WithPeer will get the peer with id and run your lambda with it. it will update the last queried time
 // It will do all synchronization and so you can use the peer thread safe inside
 func (m *Manager) WithPeer(id peer.ID, fn func(peer *Peer)) {
-	m.mu.Lock()
-	p, ok := m.peers[id]
-	if !ok {
-		p = &Peer{
-			pid:       id,
-			working:   make(chan struct{}, 1),
-			m:         m,
-			Penalties: 0,
-			Banned:    false,
-		}
-		m.peers[id] = p
-	}
-	p.lastTouched = time.Now()
-	m.mu.Unlock()
+	p := m.getPeer(id)
 	p.working <- struct{}{}
 	fn(p)
 	<-p.working

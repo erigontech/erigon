@@ -127,61 +127,72 @@ func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sen
 	}
 }
 
-func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
+func (s *SentinelServer) withTimeoutCtx(ctx context.Context, dur time.Duration) (context.Context, func()) {
+	ctx, cn := context.WithTimeout(ctx, 8*time.Second)
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			cn()
+		case <-ctx.Done():
+			return
+		}
+	}()
+	return ctx, cn
+}
+
+func (s *SentinelServer) SendRequest(pctx context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	retryReqInterval := time.NewTicker(200 * time.Millisecond)
 	defer retryReqInterval.Stop()
-	timeout := time.NewTimer(2 * time.Second)
-	defer retryReqInterval.Stop()
+	ctx, cn := s.withTimeoutCtx(pctx, 8*time.Second)
+	defer cn()
 	doneCh := make(chan *sentinelrpc.ResponseData)
 	// Try finding the data to our peers
-	for {
-		select {
-		case <-s.ctx.Done():
-			return nil, context.Canceled
-		case <-retryReqInterval.C:
-			// Spawn new thread for request
-			pid, err := s.sentinel.RandomPeer(req.Topic)
-			if err != nil {
-				// Wait a bit to not exhaust CPU and skip.
-				continue
-			}
-			pidText, err := pid.MarshalText()
-			if err != nil {
-				return nil, err
-			}
-			go s.sentinel.Peers().WithPeer(pid, func(peer *peers.Peer) {
-				data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.sentinel.Host(), req.Data, req.Topic, pid)
+	go func() {
+		for {
+			select {
+			case <-retryReqInterval.C:
+				pid, err := s.sentinel.RandomPeer(req.Topic)
 				if err != nil {
-					peer.Penalize()
-					return
-				} else if isError {
-					peer.Disconnect()
+					continue
 				}
-				ans := &sentinelrpc.ResponseData{
-					Data:  data,
-					Error: isError,
-					Peer: &sentinelrpc.Peer{
-						Pid: string(pidText),
-					},
-				}
-				select {
-				case doneCh <- ans:
-				default:
-				}
-			})
-		case resp := <-doneCh:
-			return resp, nil
-		case <-timeout.C:
-			return &sentinelrpc.ResponseData{
-				Data:  []byte("sentinel timeout"),
-				Error: true,
-				Peer: &sentinelrpc.Peer{
-					Pid: "",
-				},
-			}, nil
+				go s.sentinel.Peers().WithPeer(pid, func(peer *peers.Peer) {
+					data, isError, err := communication.SendRequestRawToPeer(ctx, s.sentinel.Host(), req.Data, req.Topic, pid)
+					if err != nil {
+						peer.Penalize()
+						return
+					}
+					if isError {
+						peer.Disconnect()
+					}
+					ans := &sentinelrpc.ResponseData{
+						Data:  data,
+						Error: isError,
+						Peer: &sentinelrpc.Peer{
+							Pid: pid.String(),
+						},
+					}
+					select {
+					case doneCh <- ans:
+					case <-ctx.Done():
+						return
+					}
+				})
+			case <-ctx.Done():
+				return
+			}
 		}
+	}()
+	select {
+	case resp := <-doneCh:
+		return resp, nil
+	case <-ctx.Done():
+		return &sentinelrpc.ResponseData{
+			Data:  []byte("sentinel goodbye"),
+			Error: true,
+			Peer:  &sentinelrpc.Peer{Pid: ""},
+		}, nil
 	}
 }
 
