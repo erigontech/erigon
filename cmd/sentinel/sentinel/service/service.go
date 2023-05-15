@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -149,27 +150,26 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 				return nil, err
 			}
 			//log.Trace("[sentinel] Sent request", "pid", pid)
-			s.sentinel.Peers().PeerDoRequest(pid)
-			go func() {
+			go s.sentinel.Peers().WithPeer(pid, func(peer *peers.Peer, newPeer bool) {
 				data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.sentinel.Host(), req.Data, req.Topic, pid)
-				s.sentinel.Peers().PeerFinishRequest(pid)
 				if err != nil {
-					s.sentinel.Peers().Penalize(pid)
+					peer.Penalize()
 					return
 				} else if isError {
-					s.sentinel.Peers().DisconnectPeer(pid)
+					peer.Disconnect()
 				}
-				select {
-				case doneCh <- &sentinelrpc.ResponseData{
+				ans := &sentinelrpc.ResponseData{
 					Data:  data,
 					Error: isError,
 					Peer: &sentinelrpc.Peer{
 						Pid: string(pidText),
 					},
-				}:
+				}
+				select {
+				case doneCh <- ans:
 				default:
 				}
-			}()
+			})
 		case resp := <-doneCh:
 			return resp, nil
 		case <-timeout.C:

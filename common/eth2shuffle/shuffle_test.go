@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/common/eth2shuffle"
+	"github.com/stretchr/testify/assert"
 )
 
 func getStandardHashFn() eth2shuffle.HashFn {
@@ -73,7 +74,9 @@ func TestAgainstSpec(t *testing.T) {
 			t.Fatalf("list size on line %d cannot be parsed\n", lineIndex)
 		}
 		inputItems, err := readEncodedListInput(line[2], listSize, lineIndex)
+		assert.NoError(t, err)
 		expectedItems, err := readEncodedListInput(line[3], listSize, lineIndex)
+		assert.NoError(t, err)
 
 		t.Run("", func(listSize uint64, shuffleIn []uint64, shuffleOut []uint64) func(st *testing.T) {
 			return func(st *testing.T) {

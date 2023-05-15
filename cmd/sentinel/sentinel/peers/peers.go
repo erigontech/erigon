@@ -33,12 +33,6 @@ const (
 // Time to wait before asking the same peer again.
 const reqRetryTime = 0
 
-// Record Peer data.
-type Peer struct {
-	lastQueried time.Time
-	busy        bool
-}
-
 type Peers struct {
 	badPeers   *lru.Cache[peer.ID, int]  // Keep track of bad peers
 	penalties  *lru.Cache[peer.ID, int]  // Keep track on how many penalties a peer accumulated, PeerId => penalties
@@ -121,24 +115,22 @@ func (p *Peers) PeerDoRequest(pid peer.ID) {
 	defer p.mu.Unlock()
 	p.peerRecord.Add(pid, Peer{
 		lastQueried: time.Now(),
-		busy:        true,
 	})
 }
 
 // IsPeerAvaiable returns if the peer is in cooldown or is being requested already .
-func (p *Peers) IsPeerAvaiable(pid peer.ID) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	peer, ok := p.peerRecord.Get(pid)
-	return !ok || (!peer.busy && time.Since(peer.lastQueried) >= reqRetryTime)
-}
+//func (p *Peers) IsPeerAvaiable(pid peer.ID) bool {
+//	p.mu.Lock()
+//	defer p.mu.Unlock()
+//	peer, ok := p.peerRecord.Get(pid)
+//	return !ok || (!peer.busy && time.Since(peer.lastQueried) >= reqRetryTime)
+//}
 
 // PeerFinishRequest signals that the peer is done doing a request.
 func (p *Peers) PeerFinishRequest(pid peer.ID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.peerRecord.Add(pid, Peer{
-		busy:        false,
 		lastQueried: time.Now(),
 	})
 }
