@@ -60,10 +60,13 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	endBlock, err := s.ExecutionAt(tx)
-	logPrefix := s.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
+	if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
+		return nil
+	}
+	logPrefix := s.LogPrefix()
 	// if prematureEndBlock is nonzero and less than the latest executed block,
 	// then we only run the log index stage until prematureEndBlock
 	if prematureEndBlock != 0 && prematureEndBlock < endBlock {

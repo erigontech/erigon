@@ -71,8 +71,9 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
 		return nil
 	}
-	if s.BlockNumber > to {
-		return fmt.Errorf("hashstate: promotion backwards from %d to %d", s.BlockNumber, to)
+	if s.BlockNumber > to { // Erigon will self-heal (download missed blocks) eventually
+		log.Warn(fmt.Sprintf("[%s] promotion backwards from %d to %d", s.LogPrefix(), s.BlockNumber, to))
+		return nil
 	}
 
 	if to > s.BlockNumber+16 {
