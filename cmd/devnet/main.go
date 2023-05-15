@@ -4,17 +4,17 @@ import (
 	"fmt"
 	"sync"
 
+	"os"
+	"time"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/commands"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/node"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"os"
-	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/params"
-	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
@@ -29,9 +29,9 @@ func main() {
 	app.Action = func(ctx *cli.Context) error {
 		return action(ctx)
 	}
-	app.Flags = append(erigoncli.DefaultFlags, debug.Flags...) // debug flags are required
-	app.Flags = append(app.Flags, utils.MetricFlags...)
-	app.Flags = append(app.Flags, logging.Flags...)
+	app.Flags = []cli.Flag{
+		&utils.DataDirFlag,
+	}
 
 	app.After = func(ctx *cli.Context) error {
 		// unsubscribe from all the subscriptions made
