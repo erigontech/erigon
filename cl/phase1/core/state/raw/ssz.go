@@ -61,7 +61,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		return nil, fmt.Errorf("too many summaries")
 	}
 
-	if len(b.eth1DataVotes) > state_encoding.Eth1DataVotesRootsLimit {
+	if len(b.eth1DataVotes) > int(b.beaconConfig.Eth1DataVotesLength()) {
 		return nil, fmt.Errorf("too many votes")
 	}
 
@@ -383,7 +383,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if b.historicalRoots, err = ssz.DecodeHashList(buf, historicalRootsOffset, votesOffset, state_encoding.HistoricalRootsLength); err != nil {
 		return err
 	}
-	if b.eth1DataVotes, err = ssz.DecodeStaticList[*cltypes.Eth1Data](buf, votesOffset, validatorsOffset, 72, maxEth1Votes, version); err != nil {
+	if b.eth1DataVotes, err = ssz.DecodeStaticList[*cltypes.Eth1Data](buf, votesOffset, validatorsOffset, 72, b.beaconConfig.Eth1DataVotesLength(), version); err != nil {
 		return err
 	}
 	if b.validators, err = ssz.DecodeStaticList[*cltypes.Validator](buf, validatorsOffset, balancesOffset, 121, state_encoding.ValidatorRegistryLimit, version); err != nil {
@@ -393,6 +393,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if err != nil {
 		return err
 	}
+
 	b.SetBalances(rawBalances)
 	if b.version == clparams.Phase0Version {
 		maxAttestations := b.beaconConfig.SlotsPerEpoch * b.beaconConfig.MaxAttestations
@@ -429,6 +430,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if err != nil {
 		return err
 	}
+
 	b.SetInactivityScores(inactivityScores)
 	if b.version == clparams.AltairVersion {
 		return b.init()
@@ -437,7 +439,6 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if historicalSummariesOffset != 0 {
 		endOffset = historicalSummariesOffset
 	}
-
 	if len(buf) < int(endOffset) || executionPayloadOffset > endOffset {
 		return fmt.Errorf("[BeaconState] err: %s", ssz.ErrLowBufferSize)
 	}
