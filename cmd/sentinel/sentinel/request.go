@@ -17,21 +17,21 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, error) {
-
+func (s *Sentinel) SendRequestRaw(input []byte, topic string) (data []byte, isError bool, err error) {
 	pid, err := s.RandomPeer(topic)
 	if err != nil {
 		return nil, false, err
 	}
-	s.peers.PeerDoRequest(pid)
-	defer s.peers.PeerFinishRequest(pid)
-	data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.host, data, topic, pid)
-	if err != nil {
-		s.peers.Penalize(pid)
-	}
+	s.peers.WithPeer(pid, func(peer *peers.Peer) {
+		data, isError, err = communication.SendRequestRawToPeer(s.ctx, s.host, data, topic, pid)
+		if err != nil {
+			peer.Penalize()
+		}
+	})
 	return data, isError, err
 }
 
@@ -40,9 +40,7 @@ func (s *Sentinel) RandomPeer(topic string) (peer.ID, error) {
 		pid peer.ID
 		err error
 	)
-
 	pid, err = connectToRandomPeer(s, string(BeaconBlockTopic))
-
 	if err != nil {
 		return peer.ID(""), fmt.Errorf("failed to connect to a random peer err=%s", err)
 	}

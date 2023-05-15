@@ -139,11 +139,16 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error
 			}
 			index = n.Int64()
 		}
-
-		if !s.peers.IsPeerAvaiable(validPeerList[index]) {
+		available := false
+		s.peers.TryPeer(validPeerList[index], func(peer *peers.Peer, ok bool) {
+			if !ok {
+				return
+			}
+			available = !peer.IsBad()
+		})
+		if !available {
 			continue
 		}
-
 		return validPeerList[index], nil
 	}
 

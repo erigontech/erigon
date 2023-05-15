@@ -60,7 +60,9 @@ func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*senti
 	if err := pid.UnmarshalText([]byte(p.Pid)); err != nil {
 		return nil, err
 	}
-	s.sentinel.Peers().BanBadPeer(pid)
+	s.sentinel.Peers().WithPeer(pid, func(peer *peers.Peer, newPeer bool) {
+		peer.Ban()
+	})
 	return &sentinelrpc.EmptyMessage{}, nil
 }
 

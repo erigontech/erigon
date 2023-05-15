@@ -5,38 +5,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-// Record Peer data.
-type Peer struct {
-	Penalties int
-	Banned    bool
-
-	lastTouched time.Time
-	working     chan struct{}
-
-	pid peer.ID
-	m   *Manager
-}
-
-func (p *Peer) Disconnect() {
-	log.Trace("[Sentinel Peers] disconnecting from peer", "peer-id", p.pid)
-	p.m.host.Peerstore().RemovePeer(p.pid)
-	p.m.host.Network().ClosePeer(p.pid)
-	p.Penalties = 0
-}
-func (p *Peer) Ban() {
-	log.Debug("[Sentinel Peers] bad peers has been banned", "peer-id", p)
-	p.Banned = true
-	p.Disconnect()
-	return
-}
-func (p *Peer) Penalize() {
-	p.Penalties++
-}
+const (
+	maxBadPeers       = 50000
+	maxPeerRecordSize = 1000
+	DefaultMaxPeers   = 33
+	MaxBadResponses   = 50
+)
 
 func newPeer() *Peer {
 	return &Peer{
@@ -60,46 +38,50 @@ func NewManager(ctx context.Context, host host.Host) *Manager {
 	go m.run(ctx)
 	return m
 }
-
-func (m *Manager) IsBadPeer(pid peer.ID) (bad bool) {
-	m.WithPeer(pid, func(peer *Peer, newPeer bool) {
-		if peer.Banned {
-			bad = true
-			return
-		}
-		bad = peer.Penalties > MaxBadResponses
-	})
-	return
-}
-
-func (m *Manager) Forgive(pid peer.ID) {
-	m.WithPeer(pid, func(peer *Peer, newPeer bool) {
-		if peer.Penalties > 0 {
-			peer.Penalties--
-		}
-	})
-}
-
-// WithPeer will get the peer with id and run your lambda with it. it will update the last queried time
-// It will do all synchronization and so you can use the peer thread safe inside
-func (m *Manager) WithPeer(id peer.ID, fn func(peer *Peer, newPeer bool)) {
+func (m *Manager) TryPeer(id peer.ID, fn func(peer *Peer, ok bool)) {
 	m.mu.Lock()
 	p, ok := m.peers[id]
 	if !ok {
 		p = &Peer{
-			pid:         id,
-			working:     make(chan struct{}),
-			lastTouched: time.Now(),
-			m:           m,
-			Penalties:   0,
-			Banned:      false,
+			pid:       id,
+			working:   make(chan struct{}),
+			m:         m,
+			Penalties: 0,
+			Banned:    false,
 		}
 		m.peers[id] = p
 	}
+	p.lastTouched = time.Now()
+	m.mu.Unlock()
+	select {
+	case p.working <- struct{}{}:
+	default:
+		fn(nil, false)
+		return
+	}
+	fn(p, true)
+	<-p.working
+}
+
+// WithPeer will get the peer with id and run your lambda with it. it will update the last queried time
+// It will do all synchronization and so you can use the peer thread safe inside
+func (m *Manager) WithPeer(id peer.ID, fn func(peer *Peer)) {
+	m.mu.Lock()
+	p, ok := m.peers[id]
+	if !ok {
+		p = &Peer{
+			pid:       id,
+			working:   make(chan struct{}),
+			m:         m,
+			Penalties: 0,
+			Banned:    false,
+		}
+		m.peers[id] = p
+	}
+	p.lastTouched = time.Now()
 	m.mu.Unlock()
 	p.working <- struct{}{}
-	p.lastTouched = time.Now()
-	fn(p, !ok)
+	fn(p)
 	<-p.working
 }
 
