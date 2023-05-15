@@ -46,7 +46,7 @@ func (m *Manager) TryPeer(id peer.ID, fn func(peer *Peer, ok bool)) {
 	if !ok {
 		p = &Peer{
 			pid:       id,
-			working:   make(chan struct{}),
+			working:   make(chan struct{}, 1),
 			m:         m,
 			Penalties: 0,
 			Banned:    false,
@@ -73,7 +73,7 @@ func (m *Manager) WithPeer(id peer.ID, fn func(peer *Peer)) {
 	if !ok {
 		p = &Peer{
 			pid:       id,
-			working:   make(chan struct{}),
+			working:   make(chan struct{}, 1),
 			m:         m,
 			Penalties: 0,
 			Banned:    false,

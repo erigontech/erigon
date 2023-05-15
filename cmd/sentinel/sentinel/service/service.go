@@ -151,7 +151,6 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 			if err != nil {
 				return nil, err
 			}
-			//log.Trace("[sentinel] Sent request", "pid", pid)
 			go s.sentinel.Peers().WithPeer(pid, func(peer *peers.Peer) {
 				data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.sentinel.Host(), req.Data, req.Topic, pid)
 				if err != nil {
