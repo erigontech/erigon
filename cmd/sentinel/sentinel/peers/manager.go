@@ -34,6 +34,8 @@ type Manager struct {
 func NewManager(ctx context.Context, host host.Host) *Manager {
 	m := &Manager{
 		peerTimeout: 1 * time.Hour,
+		peers:       make(map[peer.ID]*Peer),
+		host:        host,
 	}
 	go m.run(ctx)
 	return m

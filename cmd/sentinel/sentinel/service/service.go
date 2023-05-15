@@ -60,7 +60,7 @@ func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*senti
 	if err := pid.UnmarshalText([]byte(p.Pid)); err != nil {
 		return nil, err
 	}
-	s.sentinel.Peers().WithPeer(pid, func(peer *peers.Peer, newPeer bool) {
+	s.sentinel.Peers().WithPeer(pid, func(peer *peers.Peer) {
 		peer.Ban()
 	})
 	return &sentinelrpc.EmptyMessage{}, nil
@@ -152,7 +152,7 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 				return nil, err
 			}
 			//log.Trace("[sentinel] Sent request", "pid", pid)
-			go s.sentinel.Peers().WithPeer(pid, func(peer *peers.Peer, newPeer bool) {
+			go s.sentinel.Peers().WithPeer(pid, func(peer *peers.Peer) {
 				data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.sentinel.Host(), req.Data, req.Topic, pid)
 				if err != nil {
 					peer.Penalize()
