@@ -36,7 +36,9 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, skip
 		return nil
 	}
 	s.peers.WithPeer(info.ID, func(peer *peers.Peer) {
-		err = fmt.Errorf("refused to connect to bad peer")
+		if peer.IsBad() {
+			err = fmt.Errorf("refused to connect to bad peer")
+		}
 	})
 	if err != nil {
 		return err
