@@ -96,7 +96,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 			sendForckchoice :=
 				utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == block.Block.Slot
 			if err := cfg.forkChoice.OnBlock(block, false, true); err != nil {
-				log.Warn("Could not download block", "reason", err)
+				log.Warn("Could not download block", "reason", err, "slot", block.Block.Slot)
 				return highestSlotProcessed, libcommon.Hash{}, err
 			}
 			highestSlotProcessed = utils.Max64(block.Block.Slot, highestSlotProcessed)
