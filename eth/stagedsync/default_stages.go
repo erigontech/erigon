@@ -34,7 +34,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageHeaders(s, u, ctx, tx, headers, firstCycle, test)
+				return SpawnStageHeaders(s, u, ctx, tx, headers, firstCycle, test, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return HeadersUnwind(u, s, tx, headers, test)
