@@ -60,11 +60,6 @@ func action(ctx *cli.Context) error {
 	// wait group variable to prevent main function from terminating until routines are finished
 	var wg sync.WaitGroup
 
-	// remove the old logs from previous runs
-	if err := devnetutils.DeleteLogs(dataDir, logger); err != nil {
-		return err
-	}
-
 	// start the first erigon node in a go routine
 	node.Start(&wg, dataDir, logger)
 

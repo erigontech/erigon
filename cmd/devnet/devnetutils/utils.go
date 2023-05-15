@@ -12,7 +12,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -27,19 +26,6 @@ func ClearDevDB(dataDir string, logger log.Logger) error {
 		return err
 	}
 	logger.Info("SUCCESS => Deleted", "datadir", dataDir)
-	return nil
-}
-
-func DeleteLogs(dataDir string, logger log.Logger) error {
-	log.Info("Removing old logs to create new ones...")
-	log.Info("Before re-running the devnet tool, make sure to copy out old logs if you need them!!!")
-
-	if err := os.RemoveAll(models.LogDirParam); err != nil {
-		return err
-	}
-	if err := os.RemoveAll("./erigon_node_2"); err != nil {
-		return err
-	}
 	return nil
 }
 
