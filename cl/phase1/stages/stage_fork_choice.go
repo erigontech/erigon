@@ -160,10 +160,16 @@ MainLoop:
 			time.Sleep(waitWhenNotEnoughPeers)
 			continue
 		}
+		highestSeen := cfg.forkChoice.HighestSeen()
+		startDownloadSlot := highestSeen - uint64(maxBlockBehindBeforeDownload)
+		// Detect underflow
+		if startDownloadSlot > highestSeen {
+			startDownloadSlot = 0
+		}
 
 		cfg.downloader.SetHighestProcessedRoot(libcommon.Hash{})
 		cfg.downloader.SetHighestProcessedSlot(
-			utils.Max64(cfg.forkChoice.HighestSeen()-uint64(maxBlockBehindBeforeDownload), cfg.forkChoice.AnchorSlot()))
+			utils.Max64(startDownloadSlot, cfg.forkChoice.AnchorSlot()))
 
 		// Wait small time
 		log.Debug("Caplin may have missed some slots, started downloading chain")

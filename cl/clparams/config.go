@@ -502,6 +502,7 @@ func configForkSchedule(b *BeaconChainConfig) map[[VersionLength]byte]uint64 {
 	fvs[utils.Uint32ToBytes4(b.AltairForkVersion)] = b.AltairForkEpoch
 	fvs[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = b.BellatrixForkEpoch
 	fvs[utils.Uint32ToBytes4(b.CapellaForkVersion)] = b.CapellaForkEpoch
+	fvs[utils.Uint32ToBytes4(b.DenebForkVersion)] = b.DenebForkEpoch
 	return fvs
 }
 
@@ -511,6 +512,7 @@ func configForkNames(b *BeaconChainConfig) map[[VersionLength]byte]string {
 	fvn[utils.Uint32ToBytes4(b.AltairForkVersion)] = "altair"
 	fvn[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = "bellatrix"
 	fvn[utils.Uint32ToBytes4(b.CapellaForkVersion)] = "capella"
+	fvn[utils.Uint32ToBytes4(b.DenebForkVersion)] = "deneb"
 	return fvn
 }
 
@@ -732,16 +734,16 @@ func CustomConfig(configFile string) (BeaconChainConfig, error) {
 	return cfg, err
 }
 
-func ParseGenesisSSZToGenesisConfig(genesisFile string) (GenesisConfig, error) {
+func ParseGenesisSSZToGenesisConfig(genesisFile string, genesisVersion StateVersion) (GenesisConfig, []byte, error) {
 	cfg := GenesisConfig{}
 	b, err := os.ReadFile(genesisFile) // just pass the file name
 	if err != nil {
-		return GenesisConfig{}, nil
+		return GenesisConfig{}, nil, err
 	}
 	// Read first 2 fields of SSZ
 	cfg.GenesisTime = ssz.UnmarshalUint64SSZ(b)
 	copy(cfg.GenesisValidatorRoot[:], b[8:])
-	return cfg, nil
+	return cfg, b, nil
 }
 
 func sepoliaConfig() BeaconChainConfig {
