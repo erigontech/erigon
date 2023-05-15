@@ -175,6 +175,8 @@ func (s *SentinelServer) SendRequest(pctx context.Context, req *sentinelrpc.Requ
 					}
 					select {
 					case doneCh <- ans:
+						retryReqInterval.Stop()
+						return
 					case <-ctx.Done():
 						return
 					}
