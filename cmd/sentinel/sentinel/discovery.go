@@ -72,9 +72,15 @@ func (s *Sentinel) listenForPeers() {
 			log.Warn("Could not connect to static peer", "peer", node, "reason", err)
 		}
 	}
-
+	log.Info("Static peers", "len", len(enodes))
+	if s.cfg.NoDiscovery {
+		return
+	}
 	multiAddresses := convertToMultiAddr(enodes)
-	s.connectWithAllPeers(multiAddresses)
+	if err := s.connectWithAllPeers(multiAddresses); err != nil {
+		log.Warn("Could not connect to static peers", "reason", err)
+
+	}
 
 	iterator := s.listener.RandomNodes()
 	defer iterator.Close()

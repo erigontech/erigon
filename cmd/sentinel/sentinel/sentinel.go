@@ -315,9 +315,9 @@ func (s *Sentinel) Start() error {
 		ConnectedF: s.onConnection,
 	})
 	s.subManager = NewGossipManager(s.ctx)
-	if !s.cfg.NoDiscovery {
-		go s.listenForPeers()
-	}
+
+	go s.listenForPeers()
+
 	return nil
 }
 

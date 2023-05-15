@@ -31,8 +31,8 @@ import (
 
 func ForkDigestVersion(digest [4]byte, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) (clparams.StateVersion, error) {
 	var (
-		phase0ForkDigest, altairForkDigest, bellatrixForkDigest, capellaForkDigest [4]byte
-		err                                                                        error
+		phase0ForkDigest, altairForkDigest, bellatrixForkDigest, capellaForkDigest, denebForkDigest [4]byte
+		err                                                                                         error
 	)
 	phase0ForkDigest, err = ComputeForkDigestForVersion(
 		utils.Uint32ToBytes4(b.GenesisForkVersion),
@@ -65,6 +65,14 @@ func ForkDigestVersion(digest [4]byte, b *clparams.BeaconChainConfig, genesisVal
 	if err != nil {
 		return 0, err
 	}
+
+	denebForkDigest, err = ComputeForkDigestForVersion(
+		utils.Uint32ToBytes4(b.DenebForkVersion),
+		genesisValidatorRoot,
+	)
+	if err != nil {
+		return 0, err
+	}
 	switch digest {
 	case phase0ForkDigest:
 		return clparams.Phase0Version, nil
@@ -74,6 +82,8 @@ func ForkDigestVersion(digest [4]byte, b *clparams.BeaconChainConfig, genesisVal
 		return clparams.BellatrixVersion, nil
 	case capellaForkDigest:
 		return clparams.CapellaVersion, nil
+	case denebForkDigest:
+		return clparams.DenebVersion, nil
 	}
 	return 0, fmt.Errorf("invalid state version")
 }
@@ -99,7 +109,6 @@ func ComputeForkDigest(
 		}
 		break
 	}
-
 	return ComputeForkDigestForVersion(currentForkVersion, genesisConfig.GenesisValidatorRoot)
 }
 
