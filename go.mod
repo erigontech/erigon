@@ -103,6 +103,11 @@ require (
 )
 
 require (
+	github.com/herumi/bls-eth-go-binary v1.28.1 // indirect
+	github.com/kilic/bls12-381 v0.1.1-0.20220929213557-ca162e8a70f4 // indirect
+)
+
+require (
 	crawshaw.io/sqlite v0.3.3-0.20220618202545-d1964889ea3c // indirect
 	github.com/agnivade/levenshtein v1.1.1 // indirect
 	github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0 // indirect
@@ -225,6 +230,7 @@ require (
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/prometheus/procfs v0.9.0 // indirect
+	github.com/protolambda/go-kzg v0.0.0-20221224134646-c91cee5e954e
 	github.com/quic-go/qpack v0.4.0 // indirect
 	github.com/quic-go/qtls-go1-19 v0.3.2 // indirect
 	github.com/quic-go/qtls-go1-20 v0.2.2 // indirect
