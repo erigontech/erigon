@@ -111,8 +111,9 @@ func miningNodeArgs(dataDir string, nodeNumber int) []string {
 	ws := models.WSArg
 	consoleVerbosity, _ := models.ParameterFromArgument(models.ConsoleVerbosityArg, models.ConsoleVerbosityParam)
 	p2pProtocol, _ := models.ParameterFromArgument("--p2p.protocol", "68")
+	downloaderArg, _ := models.ParameterFromArgument("--no-downloader", "true")
 
-	return []string{models.BuildDirArg, dataDirArg, chainType, privateApiAddr, models.Mine, httpApi, ws, devPeriod, consoleVerbosity, p2pProtocol}
+	return []string{models.BuildDirArg, dataDirArg, chainType, privateApiAddr, models.Mine, httpApi, ws, devPeriod, consoleVerbosity, p2pProtocol, downloaderArg}
 }
 
 // nonMiningNodeArgs returns custom args for starting a non-mining node
@@ -125,8 +126,9 @@ func nonMiningNodeArgs(dataDir string, nodeNumber int, enode string) []string {
 	consoleVerbosity, _ := models.ParameterFromArgument(models.ConsoleVerbosityArg, models.ConsoleVerbosityParam)
 	torrentPort, _ := models.ParameterFromArgument(models.TorrentPortArg, models.TorrentPortParam)
 	p2pProtocol, _ := models.ParameterFromArgument("--p2p.protocol", "68")
+	downloaderArg, _ := models.ParameterFromArgument("--no-downloader", "true")
 
-	return []string{models.BuildDirArg, dataDirArg, chainType, privateApiAddr, staticPeers, models.NoDiscover, consoleVerbosity, torrentPort, p2pProtocol}
+	return []string{models.BuildDirArg, dataDirArg, chainType, privateApiAddr, staticPeers, models.NoDiscover, consoleVerbosity, torrentPort, p2pProtocol, downloaderArg}
 }
 
 // getEnode returns the enode of the mining node
