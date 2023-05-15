@@ -196,6 +196,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | ------------------------------------------ |---------|--------------------------------------|
 | admin_nodeInfo                             | Yes     |                                      |
 | admin_peers                                | Yes     |                                      |
+| admin_addPeer                              | Yes     |                                      |
 |                                            |         |                                      |
 | web3_clientVersion                         | Yes     |                                      |
 | web3_sha3                                  | Yes     |                                      |
