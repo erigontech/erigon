@@ -15,6 +15,7 @@
   "eip1559FeeCollector": "0x1559000000000000000000000000000000000000",
   "terminalTotalDifficulty": 231707791542740786049188744689299064356246512,
   "terminalTotalDifficultyPassed": true,
+  "shanghaiTime": 1684930320,
   "aura": {
     "stepDuration": 5,
     "blockReward": 0,
@@ -23,7 +24,9 @@
     "validators": {
       "multi": {
         "0": {
-          "list": ["0x14747a698Ec1227e6753026C08B29b4d5D3bC484"]
+          "list": [
+            "0x14747a698Ec1227e6753026C08B29b4d5D3bC484"
+          ]
         },
         "67334": {
           "list": [
@@ -47,6 +50,7 @@
     "blockGasLimitContractTransitions": {
       "0": "0x4000000000000000000000000000000000000001"
     },
-    "registrar": "0x6000000000000000000000000000000000000000"
+    "registrar": "0x6000000000000000000000000000000000000000",
+    "withdrawalContractAddress": "0xb97036A26259B7147018913bD58a774cf91acf25"
   }
 }
