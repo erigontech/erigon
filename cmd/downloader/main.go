@@ -103,7 +103,7 @@ func main() {
 var rootCmd = &cobra.Command{
 	Use:     "",
 	Short:   "snapshot downloader",
-	Example: "go run ./cmd/snapshots --datadir <your_datadir> --downloader.api.addr 127.0.0.1:9093",
+	Example: "go run ./cmd/downloader --datadir <your_datadir> --downloader.api.addr 127.0.0.1:9093",
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	},
