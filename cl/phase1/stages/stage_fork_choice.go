@@ -169,7 +169,7 @@ MainLoop:
 
 		cfg.downloader.SetHighestProcessedRoot(libcommon.Hash{})
 		cfg.downloader.SetHighestProcessedSlot(
-			utils.Max64(startDownloadSlot, cfg.forkChoice.AnchorSlot()))
+			utils.Max64(startDownloadSlot, cfg.forkChoice.FinalizedSlot()))
 
 		// Wait small time
 		log.Debug("Caplin may have missed some slots, started downloading chain")
