@@ -216,7 +216,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 		if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
 			logger.Info("Timings (slower than 50ms)", logCtx...)
 			if len(tableSizes) > 0 {
-				log.Info("Tables", tableSizes...)
+				logger.Info("Tables", tableSizes...)
 			}
 		}
 

@@ -56,7 +56,7 @@ func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify
 			if consensusCfg.DBPath == "" {
 				consensusCfg.DBPath = filepath.Join(dataDir, "clique", "db")
 			}
-			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory, readonly))
+			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory, readonly), logger)
 		}
 	case *chain.AuRaConfig:
 		if chainConfig.Aura != nil {

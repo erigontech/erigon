@@ -115,7 +115,7 @@ func loadSnapshot(config *chain.CliqueConfig, db kv.RwDB, num uint64, hash libco
 
 var ErrNotFound = errors.New("not found")
 
-func lastSnapshot(db kv.RwDB) (uint64, error) {
+func lastSnapshot(db kv.RwDB, logger log.Logger) (uint64, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return 0, err
@@ -132,7 +132,7 @@ func lastSnapshot(db kv.RwDB) (uint64, error) {
 
 	lastNum, err := dbutils.DecodeBlockNumber(lastEnc)
 	if err != nil {
-		log.Error("can't decode last snapshot", "err", err)
+		logger.Error("can't decode last snapshot", "err", err)
 		return 0, ErrNotFound
 	}
 
@@ -196,7 +196,7 @@ func (s *Snapshot) uncast(address libcommon.Address, authorize bool) bool {
 
 // apply creates a new authorization snapshot by applying the given headers to
 // the original one.
-func (s *Snapshot) apply(sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], headers ...*types.Header) (*Snapshot, error) {
+func (s *Snapshot) apply(sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], logger log.Logger, headers ...*types.Header) (*Snapshot, error) {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return s, nil
@@ -307,12 +307,12 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache[libcommon.Hash, libcommon.Addres
 		}
 		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
-			log.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
+			logger.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()
 		}
 	}
 	if time.Since(start) > 8*time.Second {
-		log.Info("Reconstructed voting history", "processed", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
+		logger.Info("Reconstructed voting history", "processed", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
 	}
 	snap.Number += uint64(len(headers))
 	snap.Hash = headers[len(headers)-1].Hash()
