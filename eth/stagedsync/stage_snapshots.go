@@ -416,7 +416,7 @@ Loop:
 		case <-logEvery.C:
 			if stats, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else if stats.Completed {
+			} else if stats.Progress > 90 {
 				if !cfg.snapshots.Cfg().Verify { // will verify after loop
 					if _, err := cfg.snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 						return err
