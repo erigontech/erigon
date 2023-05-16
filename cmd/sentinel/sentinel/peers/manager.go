@@ -2,6 +2,7 @@ package peers
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -33,7 +34,7 @@ type Manager struct {
 
 func NewManager(ctx context.Context, host host.Host) *Manager {
 	m := &Manager{
-		peerTimeout: 1 * time.Hour,
+		peerTimeout: 8 * time.Hour,
 		peers:       make(map[peer.ID]*Peer),
 		host:        host,
 	}
@@ -92,13 +93,15 @@ func (m *Manager) WithPeer(id peer.ID, fn func(peer *Peer)) {
 }
 
 func (m *Manager) run(ctx context.Context) {
-	m1 := time.NewTimer(1 * time.Minute)
-	select {
-	case <-m1.C:
-		m.gc()
-	case <-ctx.Done():
-		m1.Stop()
-		return
+	m1 := time.NewTicker(10 * time.Second)
+	for {
+		select {
+		case <-m1.C:
+			m.gc()
+		case <-ctx.Done():
+			m1.Stop()
+			return
+		}
 	}
 }
 
@@ -106,16 +109,20 @@ func (m *Manager) gc() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	log.Println("started gc")
+	deleted := 0
 	n := time.Now()
 	for k, v := range m.peers {
 		select {
 		case v.working <- struct{}{}:
-			defer func() { <-v.working }()
 		default:
 			continue
 		}
+		<-v.working
 		if n.Sub(v.lastTouched) > m.peerTimeout {
+			deleted = deleted + 1
 			delete(m.peers, k)
 		}
 	}
+	log.Println("ended gc", time.Since(n), "deleted", deleted, "saw", len(m.peers))
 }

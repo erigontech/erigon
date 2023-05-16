@@ -77,7 +77,6 @@ var skipReasons = []string{
 
 func (p *Peer) Disconnect(reason ...string) {
 	rzn := strings.Join(reason, " ")
-
 	func() {
 		for _, v := range skipReasons {
 			if strings.Contains(rzn, v) {
