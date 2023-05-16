@@ -222,7 +222,7 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliq
 		signatures:     signatures,
 		proposals:      make(map[libcommon.Address]bool),
 		exitCh:         exitCh,
-		logger: logger,
+		logger:         logger,
 	}
 
 	// warm the cache

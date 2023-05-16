@@ -84,7 +84,7 @@ func runNode(ctx *cli.Context) error {
 	}
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
-	nodeCfg := node.NewNodConfigUrfave(ctx)
+	nodeCfg := node.NewNodConfigUrfave(ctx, logger)
 	ethCfg := node.NewEthConfigUrfave(ctx, nodeCfg)
 
 	ethNode, err := node.New(nodeCfg, ethCfg, logger)

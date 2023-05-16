@@ -57,7 +57,7 @@ func runErigon(cliCtx *cli.Context) error {
 	// initializing the node and providing the current git commit there
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
-	nodeCfg := node.NewNodConfigUrfave(cliCtx)
+	nodeCfg := node.NewNodConfigUrfave(cliCtx, logger)
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg)
 
 	ethNode, err := backend.NewNode(nodeCfg, ethCfg, logger)
