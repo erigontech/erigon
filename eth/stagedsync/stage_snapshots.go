@@ -407,11 +407,10 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 		goto Finish
 	}
 
-	iter := 0
 	// Print download progress until all segments are available
 Loop:
-	for {
-		iter++
+
+	for iter := 0; ; iter++ {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
