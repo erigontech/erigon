@@ -67,7 +67,7 @@ func action(ctx *cli.Context) error {
 	logger := logging.SetupLoggerCtx("devnet", ctx, false /* rootLogger */)
 
 	// Make root logger fail
-	//log.Root().SetHandler(PanicHandler{})
+	log.Root().SetHandler(PanicHandler{})
 
 	// clear all the dev files
 	if err := devnetutils.ClearDevDB(dataDir, logger); err != nil {
