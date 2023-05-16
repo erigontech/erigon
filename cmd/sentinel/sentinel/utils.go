@@ -151,7 +151,7 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error
 			if !ok {
 				return
 			}
-			available = !peer.IsBad()
+			available = peer.IsAvailable()
 		})
 		if !available {
 			continue

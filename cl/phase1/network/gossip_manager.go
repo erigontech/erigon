@@ -82,7 +82,19 @@ func (g *GossipManager) Start() {
 				}
 			}
 
-			log.Debug("Received block via gossip", "slot", block.Block.Slot)
+			count, err := g.sentinel.GetPeers(g.ctx, &sentinel.EmptyMessage{})
+			if err != nil {
+				log.Debug("[Beacon Gossip] could not get sentinel peer count", "err", err)
+				continue
+			}
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			log.Debug("Received block via gossip",
+				"peers", count.Amount,
+				"slot", block.Block.Slot,
+				"alloc/sys", libcommon.ByteCount(m.Alloc)+"/"+libcommon.ByteCount(m.Sys),
+				"numGC", m.NumGC,
+			)
 
 			if err := g.forkChoice.OnBlock(block, true, true); err != nil {
 				// if we are within a quarter of an epoch within chain tip we ban it
@@ -98,18 +110,12 @@ func (g *GossipManager) Start() {
 				}
 				return true
 			})
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
 			// Now check the head
 			headRoot, headSlot, err := g.forkChoice.GetHead()
 			if err != nil {
-				log.Debug("Could not fetch head data", "err", err)
-				log.Debug("New block imported",
+				log.Debug("Could not fetch head data",
 					"slot", block.Block.Slot,
-					"alloc", libcommon.ByteCount(m.Alloc),
-					"sys", libcommon.ByteCount(m.Sys),
-					"numGC", m.NumGC,
-				)
+					"err", err)
 				continue
 			}
 			// Do forkchoice if possible
@@ -124,13 +130,11 @@ func (g *GossipManager) Start() {
 					return
 				}
 			}
-
 			// Log final result
-			log.Debug("New block imported",
-				"slot", block.Block.Slot, "head", headSlot, "headRoot", headRoot,
-				"alloc", libcommon.ByteCount(m.Alloc),
-				"sys", libcommon.ByteCount(m.Sys),
-				"numGC", m.NumGC,
+			log.Debug("New gossip block imported",
+				"slot", block.Block.Slot,
+				"head", headSlot,
+				"headRoot", headRoot,
 			)
 		case sentinel.GossipType_VoluntaryExitGossipType:
 			object = &cltypes.SignedVoluntaryExit{}

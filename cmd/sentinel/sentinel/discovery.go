@@ -47,7 +47,7 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, skip
 	defer cancel()
 	if err := s.host.Connect(ctxWithTimeout, info); err != nil {
 		s.peers.WithPeer(info.ID, func(peer *peers.Peer) {
-			peer.Disconnect()
+			peer.Disconnect(err.Error())
 		})
 		return err
 	}
@@ -165,7 +165,7 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 		if invalid {
 			log.Trace("Handshake was unsuccessful")
 			s.peers.WithPeer(peerId, func(peer *peers.Peer) {
-				peer.Disconnect()
+				peer.Disconnect("invalid peer", "bad handshake")
 			})
 		}
 	}()

@@ -105,23 +105,20 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 				dbg.ReadMemStats(&m)
 				// Import the head
 				headRoot, headSlot, err := cfg.forkChoice.GetHead()
-				if err != nil {
-					log.Debug("Could not fetch head data", "err", err)
-					log.Debug("New block imported",
-						"slot", block.Block.Slot,
-						"alloc", libcommon.ByteCount(m.Alloc),
-						"sys", libcommon.ByteCount(m.Sys),
-						"numGC", m.NumGC,
-					)
-					continue
-				}
 
 				log.Debug("New block imported",
-					"slot", block.Block.Slot, "head", headSlot, "headRoot", headRoot,
-					"alloc", libcommon.ByteCount(m.Alloc),
-					"sys", libcommon.ByteCount(m.Sys),
+					"slot", block.Block.Slot,
+					"head", headSlot,
+					"headRoot", headRoot,
+					"alloc/sys", libcommon.ByteCount(m.Alloc)+"/"+libcommon.ByteCount(m.Sys),
 					"numGC", m.NumGC,
 				)
+				if err != nil {
+					log.Debug("Could not fetch head data",
+						"slot", block.Block.Slot,
+						"err", err)
+					continue
+				}
 
 				// Do forkchoice if possible
 				if cfg.forkChoice.Engine() != nil {
@@ -141,6 +138,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 	})
 	maxBlockBehindBeforeDownload := int64(32)
 	overtimeMargin := uint64(6) // how much time has passed before trying download the next block in seconds
+	ctx := context.TODO()
 MainLoop:
 	for {
 		targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
@@ -175,7 +173,9 @@ MainLoop:
 		log.Debug("Caplin may have missed some slots, started downloading chain")
 		// Process blocks until we reach our target
 		for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
-			cfg.downloader.RequestMore()
+			ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+			cfg.downloader.RequestMore(ctx)
+			cancel()
 			peersCount, err = cfg.downloader.Peers()
 			if err != nil {
 				break

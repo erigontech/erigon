@@ -16,24 +16,8 @@ package sentinel
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
-
-func (s *Sentinel) SendRequestRaw(input []byte, topic string) (data []byte, isError bool, err error) {
-	pid, err := s.RandomPeer(topic)
-	if err != nil {
-		return nil, false, err
-	}
-	s.peers.WithPeer(pid, func(peer *peers.Peer) {
-		data, isError, err = communication.SendRequestRawToPeer(s.ctx, s.host, data, topic, pid)
-		if err != nil {
-			peer.Penalize()
-		}
-	})
-	return data, isError, err
-}
 
 func (s *Sentinel) RandomPeer(topic string) (peer.ID, error) {
 	var (
