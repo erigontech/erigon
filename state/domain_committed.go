@@ -647,9 +647,11 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 		rootHash, err = d.patriciaTrie.RootHash()
 		return rootHash, nil, err
 	}
+	if len(updates) > 1 {
+		d.patriciaTrie.Reset()
+	}
 
 	// data accessing functions should be set once before
-	d.patriciaTrie.Reset()
 	d.patriciaTrie.SetTrace(trace)
 
 	switch d.updates.mode {

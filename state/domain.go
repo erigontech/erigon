@@ -1606,7 +1606,7 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 		kx := iter.Key()
 		v = iter.Value()
 		cnt++
-		fmt.Printf("c %d kx: %s, k: %x\n", cnt, kx, v)
+		//fmt.Printf("c %d kx: %s, k: %x\n", cnt, kx, v)
 		k, _ = hex.DecodeString(kx)
 
 		if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
