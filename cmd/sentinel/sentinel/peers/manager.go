@@ -2,10 +2,10 @@ package peers
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -26,16 +26,20 @@ func newPeer() *Peer {
 
 type Manager struct {
 	host        host.Host
-	peers       map[peer.ID]*Peer
+	peers       *lru.Cache[peer.ID, *Peer]
 	peerTimeout time.Duration
 
 	mu sync.Mutex
 }
 
 func NewManager(ctx context.Context, host host.Host) *Manager {
+	c, err := lru.New[peer.ID, *Peer]("beacon_peer_manager", 500)
+	if err != nil {
+		panic(err)
+	}
 	m := &Manager{
 		peerTimeout: 8 * time.Hour,
-		peers:       make(map[peer.ID]*Peer),
+		peers:       c,
 		host:        host,
 	}
 	go m.run(ctx)
@@ -44,7 +48,7 @@ func NewManager(ctx context.Context, host host.Host) *Manager {
 
 func (m *Manager) getPeer(id peer.ID) (peer *Peer) {
 	m.mu.Lock()
-	p, ok := m.peers[id]
+	p, ok := m.peers.Get(id)
 	if !ok {
 		p = &Peer{
 			pid:       id,
@@ -53,7 +57,7 @@ func (m *Manager) getPeer(id peer.ID) (peer *Peer) {
 			Penalties: 0,
 			Banned:    false,
 		}
-		m.peers[id] = p
+		m.peers.Add(id, p)
 	}
 	p.lastTouched = time.Now()
 	m.mu.Unlock()
@@ -93,7 +97,7 @@ func (m *Manager) WithPeer(id peer.ID, fn func(peer *Peer)) {
 }
 
 func (m *Manager) run(ctx context.Context) {
-	m1 := time.NewTicker(10 * time.Second)
+	m1 := time.NewTicker(1 * time.Hour)
 	for {
 		select {
 		case <-m1.C:
@@ -108,11 +112,15 @@ func (m *Manager) run(ctx context.Context) {
 func (m *Manager) gc() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	log.Println("started gc")
 	deleted := 0
+	saw := 0
 	n := time.Now()
-	for k, v := range m.peers {
+	for _, k := range m.peers.Keys() {
+		v, ok := m.peers.Get(k)
+		if !ok {
+			continue
+		}
+		saw = saw + 1
 		select {
 		case v.working <- struct{}{}:
 		default:
@@ -121,8 +129,7 @@ func (m *Manager) gc() {
 		<-v.working
 		if n.Sub(v.lastTouched) > m.peerTimeout {
 			deleted = deleted + 1
-			delete(m.peers, k)
+			m.peers.Remove(k)
 		}
 	}
-	log.Println("ended gc", time.Since(n), "deleted", deleted, "saw", len(m.peers))
 }
