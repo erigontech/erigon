@@ -273,13 +273,12 @@ type HeaderDownload struct {
 }
 
 func (hd *HeaderDownload) GetChain() []*types.Header {
+	fmt.Println("Get Chain Called")
 	if hd.insertQueue.Len() == 0 {
 		return nil
 	}
 	chain := make([]*types.Header, 0, 100)
-	fmt.Println("Get Chain Called")
 	link := hd.insertQueue[0].fChild
-
 	for link != nil {
 		chain = append(chain, link.header)
 		link = link.next
