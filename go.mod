@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230516032725-8abedf7fae9f
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230516035100-dc908ccccff0
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230404044759-5dec854ce336
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -274,4 +274,4 @@ replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.3
 
 replace github.com/VictoriaMetrics/metrics => github.com/greyireland/metrics v0.0.5
 
-replace github.com/anacrolix/torrent => github.com/AskAlexSharov/torrent e52897f8e58f24281babccf030189295af9dc626
+replace github.com/anacrolix/torrent => github.com/AskAlexSharov/torrent v1.46.1-0.20230516034920-e52897f8e58f
