@@ -152,7 +152,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 
 func RegenerateIntermediateHashes(logPrefix string, db kv.RwTx, cfg TrieCfg, expectedRootHash libcommon.Hash, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
 	logger.Info(fmt.Sprintf("[%s] Regeneration trie hashes started", logPrefix))
-	defer log.Info(fmt.Sprintf("[%s] Regeneration ended", logPrefix))
+	defer logger.Info(fmt.Sprintf("[%s] Regeneration ended", logPrefix))
 	_ = db.ClearBucket(kv.TrieOfAccounts)
 	_ = db.ClearBucket(kv.TrieOfStorage)
 	clean := kv.ReadAhead(ctx, cfg.db, &atomic.Bool{}, kv.HashedAccounts, nil, math.MaxUint32)
@@ -468,7 +468,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	} else {
 		changeSetBucket = kv.AccountChangeSet
 	}
-	log.Info(fmt.Sprintf("[%s] Unwinding", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
+	p.logger.Info(fmt.Sprintf("[%s] Unwinding", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
 	startkey := hexutility.EncodeTs(to + 1)
 
@@ -712,7 +712,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	if hash != expectedRootHash {
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
 	}
-	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex())
+	logger.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex())
 	if err := accTrieCollector.Load(db, kv.TrieOfAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
