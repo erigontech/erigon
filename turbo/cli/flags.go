@@ -340,20 +340,20 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	}
 }
 
-func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config) {
+func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
 	setPrivateApi(ctx, cfg)
-	setEmbeddedRpcDaemon(ctx, cfg)
+	setEmbeddedRpcDaemon(ctx, cfg, logger)
 	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.Int(DatabaseVerbosityFlag.Name))
 }
 
-func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
+func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
 	jwtSecretPath := ctx.String(utils.JWTSecretPath.Name)
 	if jwtSecretPath == "" {
 		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
 	}
 
 	apis := ctx.String(utils.HTTPApiFlag.Name)
-	log.Info("starting HTTP APIs", "APIs", apis)
+	logger.Info("starting HTTP APIs", "APIs", apis)
 
 	c := &httpcfg.HttpCfg{
 		Enabled: ctx.Bool(utils.HTTPEnabledFlag.Name),
