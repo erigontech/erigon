@@ -20,11 +20,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth"
-	"github.com/ledgerwatch/erigon/eth/borfinality"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/rlp"
 	turboNode "github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
 const (
@@ -215,7 +215,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack) error {
 
 	// Check the validity of incoming chain - only in case of bor consensus
 	currentHead := rawdb.ReadCurrentHeader(tx)
-	if isValid, _ := borfinality.ValidateReorg(currentHead, chain.Headers, ethereum.ChainConfig()); !isValid {
+	if isValid, _ := headerdownload.ValidateReorg(currentHead, chain.Headers, ethereum.ChainConfig()); !isValid {
 		return whitelist.ErrMismatch
 	}
 

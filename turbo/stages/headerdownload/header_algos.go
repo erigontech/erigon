@@ -877,7 +877,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	td = new(big.Int).Add(parentTd, header.Difficulty)
 	// Now we can decide wether this header will create a change in the canonical head
 	if td.Cmp(hi.localTd) > 0 {
-		finality, err := ValidateReorg(parent, chain, chainConfig)
+		finality, err := ValidateReorg(header, chain, chainConfig)
 		if err != nil {
 			return nil, err
 		}

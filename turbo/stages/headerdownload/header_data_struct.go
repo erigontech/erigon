@@ -273,11 +273,19 @@ type HeaderDownload struct {
 }
 
 func (hd *HeaderDownload) GetChain() []*types.Header {
-	chainLength := hd.insertQueue.Len()
-	chain := make([]*types.Header, chainLength)
-	for i := 0; i < chainLength; i++ {
-		chain = append(chain, hd.insertQueue[i].header)
+	if hd.insertQueue.Len() == 0 {
+		return nil
 	}
+	chain := make([]*types.Header, 0, 100)
+	fmt.Println("Get Chain Called")
+	link := hd.insertQueue[0].fChild
+
+	for link != nil {
+		chain = append(chain, link.header)
+		link = link.next
+	}
+	fmt.Println("Insert Queue: ", hd.insertQueue)
+	fmt.Println("CHAIN: ", chain)
 	return chain
 }
 
