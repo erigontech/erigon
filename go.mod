@@ -274,4 +274,4 @@ replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.3
 
 replace github.com/VictoriaMetrics/metrics => github.com/greyireland/metrics v0.0.5
 
-replace github.com/anacrolix/torrent => github.com/AskAlexSharov/torrent v1.46.1-0.20230516034920-e52897f8e58f
+replace github.com/anacrolix/torrent => github.com/AskAlexSharov/torrent f28c814c8c67a912fa608735ebc9f0ea6700e2c1
