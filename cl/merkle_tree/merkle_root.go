@@ -9,29 +9,29 @@ import (
 )
 
 func HashByteSlice(out, in []byte) error {
-	return hashByteSlice(out, in)
+	return gohashtree.Hash(out, in)
 }
 
 // HashByteSlice is gohashtree HashBytSlice but using our hopefully safer header converstion
-func hashByteSlice(out, in []byte) error {
-	if len(in) == 0 {
-		return errors.New("zero leaves provided")
-	}
-
-	if len(out)%32 != 0 {
-		return errors.New("output must be multple of 32")
-	}
-	if len(in)%64 != 0 {
-		return errors.New("input must be multple of 64")
-	}
-	c_in := convertHeader(in)
-	c_out := convertHeader(out)
-	err := gohashtree.Hash(c_out, c_in)
-	if err != nil {
-		return err
-	}
-	return nil
-}
+//func hashByteSlice(out, in []byte) error {
+//	if len(in) == 0 {
+//		return errors.New("zero leaves provided")
+//	}
+//
+//	if len(out)%32 != 0 {
+//		return errors.New("output must be multple of 32")
+//	}
+//	if len(in)%64 != 0 {
+//		return errors.New("input must be multple of 64")
+//	}
+//	c_in := convertHeader(in)
+//	c_out := convertHeader(out)
+//	err := gohashtree.Hash(c_out, c_in)
+//	if err != nil {
+//		return err
+//	}
+//	return nil
+//}
 
 func convertHeader(xs []byte) [][32]byte {
 	// this commented naive method of conversion supposedly leads to corruption https://github.com/golang/go/issues/40701
