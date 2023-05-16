@@ -8,8 +8,11 @@ import (
 	"github.com/prysmaticlabs/gohashtree"
 )
 
-// HashByteSlice is gohashtree HashBytSlice but using our hopefully safer header converstion
 func HashByteSlice(out, in []byte) error {
+}
+
+// HashByteSlice is gohashtree HashBytSlice but using our hopefully safer header converstion
+func hashByteSlice(out, in []byte) error {
 	if len(in) == 0 {
 		return errors.New("zero leaves provided")
 	}
