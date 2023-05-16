@@ -61,7 +61,7 @@ func runErigon(cliCtx *cli.Context) error {
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
 	nodeCfg := node.NewNodConfigUrfave(cliCtx, logger)
-	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg)
+	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
 	ethNode, err := node.New(nodeCfg, ethCfg, logger)
 	if err != nil {

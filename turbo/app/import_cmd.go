@@ -60,7 +60,7 @@ func importChain(cliCtx *cli.Context) error {
 	}
 
 	nodeCfg := turboNode.NewNodConfigUrfave(cliCtx, logger)
-	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg)
+	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
 	stack := makeConfigNode(nodeCfg, logger)
 	defer stack.Close()

@@ -1440,7 +1440,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 }
 
 // SetEthConfig applies eth-related command line flags to the config.
-func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config) {
+func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
 	cfg.LightClientDiscoveryAddr = ctx.String(LightClientDiscoveryAddrFlag.Name)
 	cfg.LightClientDiscoveryPort = ctx.Uint64(LightClientDiscoveryPortFlag.Name)
 	cfg.LightClientDiscoveryTCPPort = ctx.Uint64(LightClientDiscoveryTCPPortFlag.Name)
@@ -1472,7 +1472,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err != nil {
 			panic(err)
 		}
-		log.Info("torrent verbosity", "level", lvl.LogString())
+		logger.Info("torrent verbosity", "level", lvl.LogString())
 		version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs.Snap, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name), ctx.StringSlice(TorrentDownloadSlotsFlag.Name))
 		if err != nil {
@@ -1512,9 +1512,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
 	}
 	if cfg.RPCGasCap != 0 {
-		log.Info("Set global gas cap", "cap", cfg.RPCGasCap)
+		logger.Info("Set global gas cap", "cap", cfg.RPCGasCap)
 	} else {
-		log.Info("Global gas cap disabled")
+		logger.Info("Global gas cap disabled")
 	}
 	if ctx.IsSet(RPCGlobalTxFeeCapFlag.Name) {
 		cfg.RPCTxFeeCap = ctx.Float64(RPCGlobalTxFeeCapFlag.Name)
@@ -1559,11 +1559,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if developer == (libcommon.Address{}) {
 			Fatalf("Please specify developer account address using --miner.etherbase")
 		}
-		log.Info("Using developer account", "address", developer)
+		logger.Info("Using developer account", "address", developer)
 
 		// Create a new developer genesis block or reuse existing one
 		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.Int(DeveloperPeriodFlag.Name)), developer)
-		log.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
+		logger.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
 		if !ctx.IsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}
