@@ -9,7 +9,7 @@ import (
 )
 
 func HashByteSlice(out, in []byte) error {
-	return gohashtree.Hash(out, in)
+	return gohashtree.HashByteSlice(out, in)
 }
 
 // HashByteSlice is gohashtree HashBytSlice but using our hopefully safer header converstion
