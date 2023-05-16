@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // API is a user facing RPC API to allow controlling the signer and voting
@@ -33,6 +34,7 @@ type API struct {
 	// chain  consensus.ChainHeaderReader
 	db     kv.RoDB
 	clique *Clique
+	logger log.Logger
 }
 
 // GetSnapshot retrieves the state snapshot at a given block.

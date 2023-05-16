@@ -59,7 +59,7 @@ func importChain(cliCtx *cli.Context) error {
 		return err
 	}
 
-	nodeCfg := turboNode.NewNodConfigUrfave(cliCtx)
+	nodeCfg := turboNode.NewNodConfigUrfave(cliCtx, logger)
 	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg)
 
 	stack := makeConfigNode(nodeCfg, logger)
@@ -74,14 +74,14 @@ func importChain(cliCtx *cli.Context) error {
 		return err
 	}
 
-	if err := ImportChain(ethereum, ethereum.ChainDB(), cliCtx.Args().First()); err != nil {
+	if err := ImportChain(ethereum, ethereum.ChainDB(), cliCtx.Args().First(), logger); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string) error {
+func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.Logger) error {
 	// Watch for Ctrl-C while the import is running.
 	// If a signal is received, the import will stop at the next batch.
 	interrupt := make(chan os.Signal, 1)
@@ -91,7 +91,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string) error {
 	defer close(interrupt)
 	go func() {
 		if _, ok := <-interrupt; ok {
-			log.Info("Interrupted during import, stopping at next batch")
+			logger.Info("Interrupted during import, stopping at next batch")
 		}
 		close(stop)
 	}()
@@ -104,7 +104,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string) error {
 		}
 	}
 
-	log.Info("Importing blockchain", "file", fn)
+	logger.Info("Importing blockchain", "file", fn)
 
 	// Open the file handle and potentially unwrap the gzip stream
 	fh, err := os.Open(fn)
@@ -155,7 +155,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string) error {
 
 		missing := missingBlocks(chainDB, blocks[:i])
 		if len(missing) == 0 {
-			log.Info("Skipping batch as all blocks present", "batch", batch, "first", blocks[0].Hash(), "last", blocks[i-1].Hash())
+			logger.Info("Skipping batch as all blocks present", "batch", batch, "first", blocks[0].Hash(), "last", blocks[i-1].Hash())
 			continue
 		}
 
@@ -165,7 +165,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string) error {
 			TopBlock: missing[len(missing)-1],
 		}
 
-		if err := InsertChain(ethereum, missingChain); err != nil {
+		if err := InsertChain(ethereum, missingChain, logger); err != nil {
 			return err
 		}
 	}
@@ -209,7 +209,7 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block) []*types.Block {
 	return nil
 }
 
-func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack) error {
+func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logger) error {
 	sentryControlServer := ethereum.SentryControlServer()
 	initialCycle := false
 
@@ -220,7 +220,8 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack) error {
 
 	sentryControlServer.Hd.MarkAllVerified()
 
-	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainConfig(), ethereum.ChainDB(), ethereum.StagedSync(), ethereum.Notifications(), initialCycle, sentryControlServer.UpdateHead)
+	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainConfig(), ethereum.ChainDB(), ethereum.StagedSync(), ethereum.Notifications(),
+		initialCycle, sentryControlServer.UpdateHead, logger)
 	if err != nil {
 		return err
 	}

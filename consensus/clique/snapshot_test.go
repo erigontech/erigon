@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // testerAccountPool is a pool to maintain currently active tester accounts,
@@ -423,7 +424,7 @@ func TestClique(t *testing.T) {
 
 			cliqueDB := memdb.NewTestDB(t)
 
-			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB)
+			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB, log.New())
 			engine.FakeDiff = true
 			// Create a pristine blockchain with the genesis injected
 			m := stages.MockWithGenesisEngine(t, genesis, engine, false)
