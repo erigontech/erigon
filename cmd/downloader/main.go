@@ -163,12 +163,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	defer d.Close()
 	logger.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.Torrent().PeerID()))
 
-	if forceVerify { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx); err != nil {
-			return err
-		}
-	}
-
 	d.MainLoopInBackground(ctx, false)
 
 	bittorrentServer, err := downloader.NewGrpcServer(d)
@@ -181,6 +175,12 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 	defer grpcServer.GracefulStop()
+
+	if forceVerify { // remove and create .torrent files (will re-read all snapshots)
+		if err = d.VerifyData(ctx); err != nil {
+			return err
+		}
+	}
 
 	<-ctx.Done()
 	return nil
