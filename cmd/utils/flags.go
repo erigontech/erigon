@@ -135,7 +135,7 @@ var (
 	}
 	InternalConsensusFlag = cli.BoolFlag{
 		Name:  "internalcl",
-		Usage: "enables external consensus",
+		Usage: "enables internal consensus",
 	}
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
