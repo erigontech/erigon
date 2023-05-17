@@ -76,6 +76,7 @@ func StageLoop(
 	updateHead func(ctx context.Context, headHeight, headTime uint64, hash libcommon.Hash, td *uint256.Int),
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
+	blockSnapshots *snapshotsync.RoSnapshots,
 ) {
 	defer close(waitForDone)
 	initialCycle := true
@@ -91,7 +92,7 @@ func StageLoop(
 		}
 
 		// Estimate the current top height seen from the peer
-		headBlockHash, err := StageLoopStep(ctx, chainConfig, db, sync, notifications, initialCycle, updateHead)
+		headBlockHash, err := StageLoopStep(ctx, chainConfig, db, sync, notifications, initialCycle, updateHead, blockSnapshots)
 
 		SendPayloadStatus(hd, headBlockHash, err)
 
@@ -124,9 +125,7 @@ func StageLoop(
 	}
 }
 
-func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, sync *stagedsync.Sync, notifications *shards.Notifications, initialCycle bool,
-	updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int),
-) (headBlockHash libcommon.Hash, err error) {
+func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, sync *stagedsync.Sync, notifications *shards.Notifications, initialCycle bool, updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int), blockSnapshots *snapshotsync.RoSnapshots) (headBlockHash libcommon.Hash, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -148,7 +147,11 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 
 	// Sync from scratch must be able Commit partial progress
 	// In all other cases - process blocks batch in 1 RwTx
-	isSynced := finishProgressBefore > 0 && finishProgressBefore == headersProgressBefore
+	blocksInSnapshots := uint64(0)
+	if blockSnapshots != nil {
+		blocksInSnapshots = blockSnapshots.BlocksAvailable()
+	}
+	isSynced := finishProgressBefore > 0 && finishProgressBefore > blocksInSnapshots && finishProgressBefore == headersProgressBefore
 	canRunCycleInOneTransaction := true
 	if initialCycle && !isSynced {
 		canRunCycleInOneTransaction = false

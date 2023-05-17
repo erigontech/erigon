@@ -220,7 +220,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack) error {
 
 	sentryControlServer.Hd.MarkAllVerified()
 
-	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainConfig(), ethereum.ChainDB(), ethereum.StagedSync(), ethereum.Notifications(), initialCycle, sentryControlServer.UpdateHead)
+	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainConfig(), ethereum.ChainDB(), ethereum.StagedSync(), ethereum.Notifications(), initialCycle, sentryControlServer.UpdateHead, nil)
 	if err != nil {
 		return err
 	}
