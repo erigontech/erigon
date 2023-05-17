@@ -176,7 +176,7 @@ func (h *httpServer) start() error {
 	for _, path := range paths {
 		name := h.handlerNames[path]
 		if !logged[name] {
-			log.Info(name+" enabled", "url", "http://"+listener.Addr().String()+path)
+			h.log.Info(name+" enabled", "url", "http://"+listener.Addr().String()+path)
 			logged[name] = true
 		}
 	}
@@ -267,7 +267,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig, allowList rpc.
 	// Create RPC server and handler.
 	srv := rpc.NewServer(50, false /* traceRequests */, true)
 	srv.SetAllowList(allowList)
-	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false); err != nil {
+	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false, h.log); err != nil {
 		return err
 	}
 	h.httpConfig = config
@@ -300,12 +300,12 @@ func (h *httpServer) enableWS(apis []rpc.API, config wsConfig, allowList rpc.All
 	// Create RPC server and handler.
 	srv := rpc.NewServer(50, false /* traceRequests */, true)
 	srv.SetAllowList(allowList)
-	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false); err != nil {
+	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false, h.log); err != nil {
 		return err
 	}
 	h.wsConfig = config
 	h.wsHandler.Store(&rpcHandler{
-		Handler: srv.WebsocketHandler(config.Origins, nil, false),
+		Handler: srv.WebsocketHandler(config.Origins, nil, false, h.log),
 		server:  srv,
 	})
 	return nil
@@ -451,9 +451,9 @@ func newGzipHandler(next http.Handler) http.Handler {
 
 // RegisterApisFromWhitelist checks the given modules' availability, generates a whitelist based on the allowed modules,
 // and then registers all of the APIs exposed by the services.
-func RegisterApisFromWhitelist(apis []rpc.API, modules []string, srv *rpc.Server, exposeAll bool) error {
+func RegisterApisFromWhitelist(apis []rpc.API, modules []string, srv *rpc.Server, exposeAll bool, logger log.Logger) error {
 	if bad, available := checkModuleAvailability(modules, apis); len(bad) > 0 {
-		log.Error("Non-existing modules in HTTP API list, please remove it", "non-existing", bad, "existing", available)
+		logger.Error("Non-existing modules in HTTP API list, please remove it", "non-existing", bad, "existing", available)
 	}
 	// Generate the whitelist based on the allowed modules
 	whitelist := make(map[string]bool)

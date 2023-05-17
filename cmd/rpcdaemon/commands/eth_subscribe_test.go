@@ -46,7 +46,7 @@ func TestEthSubscribe(t *testing.T) {
 	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events, br, nil, nil, nil, false, logger)
 	backendClient := direct.NewEthBackendClientDirect(backendServer)
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, br)
-	ff := rpchelper.New(ctx, backend, nil, nil, func() {})
+	ff := rpchelper.New(ctx, backend, nil, nil, func() {}, m.Log)
 
 	newHeads, id := ff.SubscribeNewHeads(16)
 	defer ff.UnsubscribeHeads(id)
