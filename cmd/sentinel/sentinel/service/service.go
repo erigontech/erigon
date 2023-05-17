@@ -147,7 +147,7 @@ func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration)
 func (s *SentinelServer) SendRequest(pctx context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	retryReqInterval := time.NewTicker(500 * time.Millisecond)
+	retryReqInterval := time.NewTicker(200 * time.Millisecond)
 	defer retryReqInterval.Stop()
 	ctx, cn := s.withTimeoutCtx(pctx, 0)
 	defer cn()
