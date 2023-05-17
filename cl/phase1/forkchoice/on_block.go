@@ -28,12 +28,15 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 
 	config := f.forkGraph.Config()
 	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
-	if status != fork_graph.Success {
-		if status != fork_graph.PreValidated {
-			log.Debug("Could not replay block", "slot", block.Block.Slot, "code", status, "reason", err)
-			return fmt.Errorf("could not replay block, err: %s, code: %d", err, status)
-		}
+	if err != nil {
+		return err
+	}
+	switch status {
+	case fork_graph.PreValidated:
 		return nil
+	case fork_graph.Success:
+	default:
+		return fmt.Errorf("replay block, code: %+v", status)
 	}
 	if newPayload && f.engine != nil {
 		if err := f.engine.NewPayload(block.Block.Body.ExecutionPayload); err != nil {

@@ -58,7 +58,7 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 			return err
 		}
 		block := object.(*cltypes.SignedBeaconBlock)
-
+		l["slot"] = block.Block.Slot
 		currentSlotByTime := utils.GetCurrentSlot(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot)
 		maxGossipSlotThreshold := uint64(4)
 		// Skip if slot is too far behind.
