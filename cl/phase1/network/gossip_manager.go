@@ -175,7 +175,7 @@ func (g *GossipManager) Start() {
 	for {
 		data, err := subscription.Recv()
 		if err != nil {
-			log.Debug("[Beacon Gossip] Fatal error receiving gossip", "err", err)
+			log.Warn("[Beacon Gossip] Fatal error receiving gossip", "err", err)
 			break
 		}
 		for k := range l {
@@ -184,7 +184,7 @@ func (g *GossipManager) Start() {
 		err = g.onRecv(data, l)
 		if err != nil {
 			l["err"] = err
-			log.Debug("[Beacon Gossip]", l)
+			log.Debug("[Beacon Gossip] Recoverable Error", l)
 		}
 	}
 }
