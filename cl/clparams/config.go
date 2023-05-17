@@ -836,8 +836,6 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.AltairForkVersion = 0x0100006f
 	cfg.BellatrixForkEpoch = 180
 	cfg.BellatrixForkVersion = 0x0200006f
-	cfg.CapellaForkEpoch = 244224
-	cfg.CapellaForkVersion = 0x0300006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
 	cfg.BaseRewardFactor = 25
@@ -948,7 +946,11 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 // 100 is Gnosis Mainnet
 // 10200 is Chiado Testnet
 func EmbeddedSupported(id uint64) bool {
-	return id == 1 || id == 5 || id == 11155111 || id == 100 || id == 10200
+	return id == 1 // ||
+	//id == 5 ||
+	//id == 11155111 ||
+	//id == 100 ||
+	//id == 10200
 }
 
 // Subset of supported networks where embedded CL is stable enough
