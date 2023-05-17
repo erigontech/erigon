@@ -717,7 +717,7 @@ Loop:
 					t2 = time.Since(tt)
 
 					tt = time.Now()
-					rh, err := rs.Commitment(inputTxNum, true)
+					rh, err := agg.ComputeCommitment(true, false)
 					if err != nil {
 						return err
 					}

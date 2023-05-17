@@ -650,7 +650,6 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 		if !bi.transferred {
 			sdb.getStateObject(addr)
 		}
-		//fmt.Printf("FIN balanceInc: %x, %d %T\n", addr, bi.increase.Uint64(), stateWriter)
 	}
 	for addr := range sdb.journal.dirties {
 		so, exist := sdb.stateObjects[addr]
@@ -700,7 +699,6 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 		if !bi.transferred {
 			sdb.getStateObject(addr)
 		}
-		//fmt.Printf("CB balanceInc: %x, %d %T\n", addr, bi.increase.Uint64(), stateWriter)
 	}
 	return sdb.MakeWriteSet(chainRules, stateWriter)
 }
