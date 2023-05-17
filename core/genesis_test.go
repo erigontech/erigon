@@ -20,9 +20,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
+	logger := log.New()
 	_, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil)
 	check := func(network string) {
 		genesis := core.GenesisBlockByChainName(network)
@@ -31,7 +33,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer tx.Rollback()
-		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, "")
+		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, "", logger)
 		require.NoError(t, err)
 		expect := params.GenesisHashByChainName(network)
 		require.NotNil(t, expect, network)
@@ -71,19 +73,20 @@ func TestGenesisBlockRoots(t *testing.T) {
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
+	logger := log.New()
 	_, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
 	genesis := core.GenesisBlockByChainName(networkname.MainnetChainName)
-	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "")
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "")
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger)
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
@@ -94,6 +97,7 @@ func TestAllocConstructor(t *testing.T) {
 	require := require.New(t)
 	assert := assert.New(t)
 
+	logger := log.New()
 	// This deployment code initially sets contract's 0th storage to 0x2a
 	// and its 1st storage to 0x01c9.
 	deploymentCode := common.FromHex("602a5f556101c960015560048060135f395ff35f355f55")
@@ -108,7 +112,7 @@ func TestAllocConstructor(t *testing.T) {
 	}
 
 	historyV3, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil)
-	_, _, err := core.CommitGenesisBlock(db, genSpec, "")
+	_, _, err := core.CommitGenesisBlock(db, genSpec, "", logger)
 	require.NoError(err)
 
 	tx, err := db.BeginRo(context.Background())
