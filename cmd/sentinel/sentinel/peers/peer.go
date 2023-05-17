@@ -81,16 +81,20 @@ var skipReasons = []string{
 	"dial backoff",
 }
 
+func containsString(set []string, in string) bool {
+	for _, v := range skipReasons {
+		if strings.Contains(in, v) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Peer) Disconnect(reason ...string) {
 	rzn := strings.Join(reason, " ")
-	func() {
-		for _, v := range skipReasons {
-			if strings.Contains(rzn, v) {
-				return
-			}
-		}
+	if containsString(skipReasons, rzn) {
 		log.Debug("[Sentinel Peers] disconnecting from peer", "peer-id", p.pid, "reason", strings.Join(reason, " "))
-	}()
+	}
 	p.m.host.Peerstore().RemovePeer(p.pid)
 	p.m.host.Network().ClosePeer(p.pid)
 	p.Penalties = 0
