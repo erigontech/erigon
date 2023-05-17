@@ -76,6 +76,7 @@ func StageLoop(
 	updateHead func(ctx context.Context, headHeight, headTime uint64, hash libcommon.Hash, td *uint256.Int),
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
+	logger log.Logger,
 	blockSnapshots *snapshotsync.RoSnapshots,
 ) {
 	defer close(waitForDone)
@@ -92,7 +93,7 @@ func StageLoop(
 		}
 
 		// Estimate the current top height seen from the peer
-		headBlockHash, err := StageLoopStep(ctx, chainConfig, db, sync, notifications, initialCycle, updateHead, blockSnapshots)
+		headBlockHash, err := StageLoopStep(ctx, chainConfig, db, sync, notifications, initialCycle, updateHead, logger, blockSnapshots)
 
 		SendPayloadStatus(hd, headBlockHash, err)
 
@@ -125,7 +126,11 @@ func StageLoop(
 	}
 }
 
-func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, sync *stagedsync.Sync, notifications *shards.Notifications, initialCycle bool, updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int), blockSnapshots *snapshotsync.RoSnapshots) (headBlockHash libcommon.Hash, err error) {
+func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, sync *stagedsync.Sync, notifications *shards.Notifications, initialCycle bool,
+	updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int),
+	logger log.Logger,
+	blockSnapshots *snapshotsync.RoSnapshots,
+) (headBlockHash libcommon.Hash, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -177,7 +182,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 	if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction {
 		stateVersion, err := rawdb.GetStateVersion(tx)
 		if err != nil {
-			log.Error("problem reading plain state version", "err", err)
+			logger.Error("problem reading plain state version", "err", err)
 		}
 		notifications.Accumulator.Reset(stateVersion)
 	}
@@ -228,12 +233,12 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 		notifications.Accumulator.SetStateID(plainStateVersion)
 
 		if canRunCycleInOneTransaction && (head != finishProgressBefore || commitTime > 500*time.Millisecond) {
-			log.Info("Commit cycle", "in", commitTime)
+			logger.Info("Commit cycle", "in", commitTime)
 		}
 		if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
-			log.Info("Timings (slower than 50ms)", logCtx...)
+			logger.Info("Timings (slower than 50ms)", logCtx...)
 			if len(tableSizes) > 0 {
-				log.Info("Tables", tableSizes...)
+				logger.Info("Tables", tableSizes...)
 			}
 		}
 
@@ -246,7 +251,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 		}
 
 		if notifications != nil && notifications.Events != nil {
-			if err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx); err != nil {
+			if err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx, logger); err != nil {
 				return nil
 			}
 		}

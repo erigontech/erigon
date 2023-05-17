@@ -48,41 +48,41 @@ type Params struct {
 	CustomBuckets kv.TableCfg
 }
 
-func NewNodConfigUrfave(ctx *cli.Context) *nodecfg.Config {
+func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) *nodecfg.Config {
 	// If we're running a known preset, log it for convenience.
 	chain := ctx.String(utils.ChainFlag.Name)
 	switch chain {
 	case networkname.SepoliaChainName:
-		log.Info("Starting Erigon on Sepolia testnet...")
+		logger.Info("Starting Erigon on Sepolia testnet...")
 	case networkname.RinkebyChainName:
-		log.Info("Starting Erigon on Rinkeby testnet...")
+		logger.Info("Starting Erigon on Rinkeby testnet...")
 	case networkname.GoerliChainName:
-		log.Info("Starting Erigon on Görli testnet...")
+		logger.Info("Starting Erigon on Görli testnet...")
 	case networkname.DevChainName:
-		log.Info("Starting Erigon in ephemeral dev mode...")
+		logger.Info("Starting Erigon in ephemeral dev mode...")
 	case networkname.MumbaiChainName:
-		log.Info("Starting Erigon on Mumbai testnet...")
+		logger.Info("Starting Erigon on Mumbai testnet...")
 	case networkname.BorMainnetChainName:
-		log.Info("Starting Erigon on Bor Mainnet...")
+		logger.Info("Starting Erigon on Bor Mainnet...")
 	case networkname.BorDevnetChainName:
-		log.Info("Starting Erigon on Bor Devnet...")
+		logger.Info("Starting Erigon on Bor Devnet...")
 	case "", networkname.MainnetChainName:
 		if !ctx.IsSet(utils.NetworkIdFlag.Name) {
 			log.Info("Starting Erigon on Ethereum mainnet...")
 		}
 	default:
-		log.Info("Starting Erigon on", "devnet", chain)
+		logger.Info("Starting Erigon on", "devnet", chain)
 	}
 
 	nodeConfig := NewNodeConfig()
-	utils.SetNodeConfig(ctx, nodeConfig)
-	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig)
+	utils.SetNodeConfig(ctx, nodeConfig, logger)
+	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig, logger)
 	return nodeConfig
 }
-func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config) *ethconfig.Config {
+func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
 	ethConfig := &ethconfig.Defaults
-	utils.SetEthConfig(ctx, nodeConfig, ethConfig)
-	erigoncli.ApplyFlagsForEthConfig(ctx, ethConfig)
+	utils.SetEthConfig(ctx, nodeConfig, ethConfig, logger)
+	erigoncli.ApplyFlagsForEthConfig(ctx, ethConfig, logger)
 
 	return ethConfig
 }

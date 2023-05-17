@@ -63,17 +63,17 @@ import (
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, tmpDir string) (*chain.Config, *types.Block, error) {
-	return CommitGenesisBlockWithOverride(db, genesis, nil, tmpDir)
+func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
+	return CommitGenesisBlockWithOverride(db, genesis, nil, tmpDir, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideShanghaiTime *big.Int, tmpDir string) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideShanghaiTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overrideShanghaiTime, tmpDir)
+	c, b, err := WriteGenesisBlock(tx, genesis, overrideShanghaiTime, tmpDir, logger)
 	if err != nil {
 		return c, b, err
 	}
@@ -84,7 +84,7 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 	return c, b, nil
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime *big.Int, tmpDir string) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllProtocolChanges, nil, types.ErrGenesisNoConfig
 	}
@@ -103,7 +103,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 	if (storedHash == libcommon.Hash{}) {
 		custom := true
 		if genesis == nil {
-			log.Info("Writing main-net genesis block")
+			logger.Info("Writing main-net genesis block")
 			genesis = MainnetGenesisBlock()
 			custom = false
 		}
@@ -113,7 +113,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 			return genesis.Config, nil, err1
 		}
 		if custom {
-			log.Info("Writing custom genesis block", "hash", block.Hash().String())
+			logger.Info("Writing custom genesis block", "hash", block.Hash().String())
 		}
 		return genesis.Config, block, nil
 	}
@@ -144,7 +144,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 		return newCfg, nil, storedErr
 	}
 	if storedCfg == nil {
-		log.Warn("Found genesis block without chain config")
+		logger.Warn("Found genesis block without chain config")
 		err1 := rawdb.WriteChainConfig(tx, storedHash, newCfg)
 		if err1 != nil {
 			return newCfg, nil, err1

@@ -1452,7 +1452,7 @@ func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.
 	//events := shards.NewEvents()
 	genesis := core.GenesisBlockByChainName(chain)
 
-	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "")
+	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "", logger)
 	_ = genesisBlock // TODO apply if needed here
 
 	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
@@ -1489,7 +1489,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	events := shards.NewEvents()
 
 	genesis := core.GenesisBlockByChainName(chain)
-	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "")
+	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "", logger)
 	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}

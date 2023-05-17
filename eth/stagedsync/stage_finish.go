@@ -123,10 +123,10 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 	return nil
 }
 
-func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishStageAfterSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx) error {
+func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishStageAfterSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx, logger log.Logger) error {
 	t := time.Now()
 	if notifier == nil {
-		log.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
+		logger.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
 		return nil
 	}
 	// Notify all headers we have (either canonical or not) in a maximum range span of 1024
@@ -154,7 +154,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		notifyTo = binary.BigEndian.Uint64(k)
 		var err error
 		if notifyToHash, err = rawdb.ReadCanonicalHash(tx, notifyTo); err != nil {
-			log.Warn("[Finish] failed checking if header is cannonical")
+			logger.Warn("[Finish] failed checking if header is cannonical")
 		}
 
 		headerHash := libcommon.BytesToHash(k[8:])
@@ -164,7 +164,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 
 		return libcommon.Stopped(ctx.Done())
 	}); err != nil {
-		log.Error("RPC Daemon notification failed", "err", err)
+		logger.Error("RPC Daemon notification failed", "err", err)
 		return err
 	}
 
@@ -181,7 +181,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			notifier.OnLogs(logs)
 		}
 		logTiming := time.Since(t)
-		log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
+		logger.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
 	}
 	return nil
 }
