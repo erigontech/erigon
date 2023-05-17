@@ -41,14 +41,14 @@ func (p *Peer) Forgive() {
 }
 
 func (p *Peer) MarkUsed() {
-	log.Debug("[Sentinel Peers] peer used", "peer-id", p.pid, "uses", p.useCount)
 	p.useCount++
+	log.Debug("[Sentinel Peers] peer used", "peer-id", p.pid, "uses", p.useCount)
 	p.lastRequest = time.Now()
 }
 
 func (p *Peer) MarkReplied() {
-	log.Debug("[Sentinel Peers] peer replied", "peer-id", p.pid, "uses", p.useCount, "success", p.successCount)
 	p.successCount++
+	log.Debug("[Sentinel Peers] peer replied", "peer-id", p.pid, "uses", p.useCount, "success", p.successCount)
 }
 
 func (p *Peer) IsAvailable() (available bool) {
