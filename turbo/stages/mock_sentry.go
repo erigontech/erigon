@@ -619,7 +619,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
-	if _, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, ms.Log); err != nil {
+	if _, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, ms.Log, nil); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {
@@ -642,7 +642,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	}
 
 	initialCycle := false
-	headBlockHash, err := StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, ms.Log)
+	headBlockHash, err := StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, ms.Log, nil)
 	if err != nil {
 		return err
 	}
@@ -655,7 +655,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
 	ms.SendForkChoiceRequest(&fc)
-	headBlockHash, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, ms.Log)
+	headBlockHash, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, ms.Log, nil)
 	if err != nil {
 		return err
 	}

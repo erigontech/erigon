@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"sync"
-
 	"os"
+	dbg "runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/commands"
@@ -19,8 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
-
-	dbg "runtime/debug"
 )
 
 var DataDirFlag = flags.DirectoryFlag{
