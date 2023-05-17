@@ -96,7 +96,7 @@ func (p *Peer) Disconnect(reason ...string) {
 	p.Penalties = 0
 }
 func (p *Peer) Ban(reason ...string) {
-	log.Debug("[Sentinel Peers] bad peers has been banned", "peer-id", p, "reason", strings.Join(reason, " "))
+	log.Debug("[Sentinel Peers] bad peers has been banned", "peer-id", p.pid, "reason", strings.Join(reason, " "))
 	p.Banned = true
 	p.Disconnect(reason...)
 	return
