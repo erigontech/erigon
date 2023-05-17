@@ -96,7 +96,7 @@ type ExecutionPayloadBodyV1 struct {
 type EngineAPI interface {
 	NewPayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	NewPayloadV2(context.Context, *ExecutionPayload) (map[string]interface{}, error)
-	NewPayloadV3(context.Context, *ExecutionPayload) (map[string]interface{}, error)
+	// NewPayloadV3(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
 	ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutility.Bytes) (*ExecutionPayload, error)
