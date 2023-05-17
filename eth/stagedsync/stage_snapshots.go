@@ -409,14 +409,14 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 
 	// Print download progress until all segments are available
 Loop:
-	for iter := 0; ; iter++ {
+	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
 			if stats, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else if stats.MetadataReady >= stats.FilesTotal-1 {
+			} else if stats.Completed {
 				if !cfg.snapshots.Cfg().Verify { // will verify after loop
 					if _, err := cfg.snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 						return err
