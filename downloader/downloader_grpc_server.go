@@ -82,7 +82,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 }
 
 func (s *GrpcServer) Verify(ctx context.Context, request *proto_downloader.VerifyRequest) (*emptypb.Empty, error) {
-	err := s.d.verify()
+	err := s.d.VerifyData(ctx)
 	if err != nil {
 		return nil, err
 	}
