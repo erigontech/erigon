@@ -82,7 +82,7 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) *nodecfg.Config {
 func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
 	ethConfig := &ethconfig.Defaults
 	utils.SetEthConfig(ctx, nodeConfig, ethConfig, logger)
-	erigoncli.ApplyFlagsForEthConfig(ctx, ethConfig)
+	erigoncli.ApplyFlagsForEthConfig(ctx, ethConfig, logger)
 
 	return ethConfig
 }
