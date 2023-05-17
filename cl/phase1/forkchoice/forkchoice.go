@@ -115,6 +115,13 @@ func (f *ForkChoiceStore) FinalizedCheckpoint() solid.Checkpoint {
 }
 
 // FinalizedCheckpoint returns justified checkpoint
+func (f *ForkChoiceStore) FinalizedSlot() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Epoch())
+}
+
+// FinalizedCheckpoint returns justified checkpoint
 func (f *ForkChoiceStore) Engine() execution_client.ExecutionEngine {
 	f.mu.Lock()
 	defer f.mu.Unlock()
