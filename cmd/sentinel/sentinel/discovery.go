@@ -20,6 +20,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
@@ -30,17 +31,24 @@ import (
 	"github.com/prysmaticlabs/go-bitfield"
 )
 
-func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, skipHandshake bool) error {
+func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, skipHandshake bool) (err error) {
 	if info.ID == s.host.ID() {
 		return nil
 	}
-	if s.peers.IsBadPeer(info.ID) {
-		return fmt.Errorf("refused to connect to bad peer")
+	s.peers.WithPeer(info.ID, func(peer *peers.Peer) {
+		if peer.IsBad() {
+			err = fmt.Errorf("refused to connect to bad peer")
+		}
+	})
+	if err != nil {
+		return err
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
 	if err := s.host.Connect(ctxWithTimeout, info); err != nil {
-		s.peers.DisconnectPeer(info.ID)
+		s.peers.WithPeer(info.ID, func(peer *peers.Peer) {
+			peer.Disconnect(err.Error())
+		})
 		return err
 	}
 	return nil
@@ -156,7 +164,9 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 		invalid := !s.handshaker.ValidatePeer(peerId)
 		if invalid {
 			log.Trace("Handshake was unsuccessful")
-			s.peers.DisconnectPeer(peerId)
+			s.peers.WithPeer(peerId, func(peer *peers.Peer) {
+				peer.Disconnect("invalid peer", "bad handshake")
+			})
 		}
 	}()
 }

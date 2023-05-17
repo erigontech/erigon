@@ -65,7 +65,7 @@ type Sentinel struct {
 	ctx        context.Context
 	host       host.Host
 	cfg        *SentinelConfig
-	peers      *peers.Peers
+	peers      *peers.Manager
 	metadataV2 *cltypes.Metadata
 	handshaker *handshake.HandShaker
 
@@ -282,7 +282,7 @@ func New(
 	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host)
 
 	s.host = host
-	s.peers = peers.New(s.host)
+	s.peers = peers.NewManager(ctx, s.host)
 
 	pubsub.TimeCacheDuration = 550 * gossipSubHeartbeatInterval
 	s.pubsub, err = pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
@@ -344,7 +344,7 @@ func (s *Sentinel) Host() host.Host {
 	return s.host
 }
 
-func (s *Sentinel) Peers() *peers.Peers {
+func (s *Sentinel) Peers() *peers.Manager {
 	return s.peers
 }
 

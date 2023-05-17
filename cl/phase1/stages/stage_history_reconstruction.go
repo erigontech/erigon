@@ -183,7 +183,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		}
 	}()
 	for !cfg.downloader.Finished() {
-		cfg.downloader.RequestMore()
+		cfg.downloader.RequestMore(ctx)
 	}
 	close(finishCh)
 	if err := attestationsCollector.Load(tx, kv.Attestetations, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
