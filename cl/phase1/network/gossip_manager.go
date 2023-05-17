@@ -106,7 +106,7 @@ func (g *GossipManager) Start() {
 			}
 			block.Block.Body.Attestations.ForEach(func(a *solid.Attestation, idx, total int) bool {
 				if err = g.forkChoice.OnAttestation(a, true); err != nil {
-					log.Debug("[Beacon Gossip] Failure in processing attestation", "err", err)
+					log.Debug("[Beacon Gossip] Failure in processing attestation", "idx", idx, "err", err)
 				}
 				return true
 			})
