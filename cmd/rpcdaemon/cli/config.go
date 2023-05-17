@@ -524,14 +524,14 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 		}
 	}
 
-	if err := node.RegisterApisFromWhitelist(defaultAPIList, apiFlags, srv, false); err != nil {
+	if err := node.RegisterApisFromWhitelist(defaultAPIList, apiFlags, srv, false, logger); err != nil {
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
 
 	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
-		wsHandler = srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression)
+		wsHandler = srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression, logger)
 	}
 
 	graphQLHandler := graphql.CreateHandler(defaultAPIList)
@@ -711,7 +711,7 @@ func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API, logger log.L
 
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, true)
 
-	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true); err != nil {
+	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true, logger); err != nil {
 		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
 	}
 
@@ -720,7 +720,7 @@ func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API, logger log.L
 		return nil, nil, "", err
 	}
 
-	wsHandler := engineSrv.WebsocketHandler([]string{"*"}, jwtSecret, cfg.WebsocketCompression)
+	wsHandler := engineSrv.WebsocketHandler([]string{"*"}, jwtSecret, cfg.WebsocketCompression, logger)
 
 	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, cfg.HttpCompression)
 
