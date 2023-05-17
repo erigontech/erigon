@@ -71,10 +71,10 @@ func init() {
 	rootCmd.Flags().StringVar(&staticPeersStr, utils.TorrentStaticPeersFlag.Name, utils.TorrentStaticPeersFlag.Value, utils.TorrentStaticPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV6.Usage)
+	rootCmd.PersistentFlags().BoolVar(&forceVerify, "verify", false, "Force verify data files if have .torrent files")
 
 	withDataDir(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
-	printTorrentHashes.PersistentFlags().BoolVar(&forceVerify, "verify", false, "Force verify data files if have .torrent files")
 	printTorrentHashes.Flags().StringVar(&targetFile, "targetfile", "", "write output to file")
 	if err := printTorrentHashes.MarkFlagFilename("targetfile"); err != nil {
 		panic(err)
@@ -162,6 +162,13 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	defer d.Close()
 	logger.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.Torrent().PeerID()))
+
+	if forceVerify { // remove and create .torrent files (will re-read all snapshots)
+		if err = d.VerifyData(ctx); err != nil {
+			return err
+		}
+	}
+
 	d.MainLoopInBackground(ctx, false)
 
 	bittorrentServer, err := downloader.NewGrpcServer(d)
@@ -191,10 +198,6 @@ var printTorrentHashes = &cobra.Command{
 		}
 		dirs := datadir.New(datadirCli)
 		ctx := cmd.Context()
-
-		if forceVerify { // remove and create .torrent files (will re-read all snapshots)
-			return downloader.VerifyDtaFiles(ctx, dirs.Snap)
-		}
 
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 			//removePieceCompletionStorage(snapDir)
