@@ -15,8 +15,9 @@ type Peer struct {
 	InRequest bool
 
 	// request info
-	lastRequest time.Time
-	useCount    int
+	lastRequest  time.Time
+	successCount int
+	useCount     int
 	// gc data
 	lastTouched time.Time
 	// acts as the mutex. channel used to avoid use of TryLock
@@ -43,6 +44,11 @@ func (p *Peer) MarkUsed() {
 	log.Debug("[Sentinel Peers] peer used", "peer-id", p.pid, "uses", p.useCount)
 	p.useCount++
 	p.lastRequest = time.Now()
+}
+
+func (p *Peer) MarkReplied() {
+	log.Debug("[Sentinel Peers] peer replied", "peer-id", p.pid, "uses", p.useCount, "success", p.successCount)
+	p.successCount++
 }
 
 func (p *Peer) IsAvailable() (available bool) {
