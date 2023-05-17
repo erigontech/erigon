@@ -564,7 +564,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			stack.Config().PrivateApiAddr,
 			stack.Config().PrivateApiRateLimit,
 			creds,
-			stack.Config().HealthCheck)
+			stack.Config().HealthCheck,
+			logger)
 		if err != nil {
 			return nil, fmt.Errorf("private api: %w", err)
 		}
@@ -740,7 +741,8 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
-	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, ethBackendRPC, backend.txPool2GrpcServer, miningRPC, stateDiffClient)
+	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, ethBackendRPC,
+		backend.txPool2GrpcServer, miningRPC, stateDiffClient, backend.logger)
 	if err != nil {
 		return err
 	}
@@ -752,7 +754,7 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, backend.logger)
 	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, backend.logger)
 	go func() {
-		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList); err != nil {
+		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList, backend.logger); err != nil {
 			backend.logger.Error(err.Error())
 			return
 		}

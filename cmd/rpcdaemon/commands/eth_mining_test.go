@@ -24,7 +24,7 @@ func TestPendingBlock(t *testing.T) {
 	m := stages.Mock(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
-	ff := rpchelper.New(ctx, nil, nil, mining, func() {})
+	ff := rpchelper.New(ctx, nil, nil, mining, func() {}, m.Log)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	engine := ethash.NewFaker()
 	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3), nil, false, rpccfg.DefaultEvmCallTimeout, engine,
@@ -48,9 +48,10 @@ func TestPendingBlock(t *testing.T) {
 }
 
 func TestPendingLogs(t *testing.T) {
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
+	m := stages.Mock(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	mining := txpool.NewMiningClient(conn)
-	ff := rpchelper.New(ctx, nil, nil, mining, func() {})
+	ff := rpchelper.New(ctx, nil, nil, mining, func() {}, m.Log)
 	expect := []byte{211}
 
 	ch, id := ff.SubscribePendingLogs(1)
