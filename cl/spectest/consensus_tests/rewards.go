@@ -4,24 +4,10 @@ import (
 	"io/fs"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/spectest"
 )
 
 type RewardsCore struct {
-}
-
-func readDelta(root fs.FS, name string) (*cltypes.Deltas, error) {
-	sszSnappy, err := fs.ReadFile(root, name)
-	if err != nil {
-		return nil, err
-	}
-	testState := &cltypes.Deltas{}
-	if err := utils.DecodeSSZSnappy(testState, sszSnappy, 0); err != nil {
-		return nil, err
-	}
-	return testState, nil
 }
 
 func (b *RewardsCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {

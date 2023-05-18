@@ -7,6 +7,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
 )
@@ -68,7 +69,7 @@ func (b *BeaconState) Eth1Data() *cltypes.Eth1Data {
 	return b.eth1Data
 }
 
-func (b *BeaconState) Eth1DataVotes() []*cltypes.Eth1Data {
+func (b *BeaconState) Eth1DataVotes() *generic.ListSSZ[*cltypes.Eth1Data] {
 	return b.eth1DataVotes
 }
 

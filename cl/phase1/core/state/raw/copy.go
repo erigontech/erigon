@@ -4,6 +4,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
 )
 
 func (b *BeaconState) CopyInto(dst *BeaconState) error {
@@ -17,10 +18,12 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 	dst.historicalRoots = make([]libcommon.Hash, len(b.historicalRoots))
 	copy(dst.historicalRoots, b.historicalRoots)
 	dst.eth1Data = b.eth1Data.Copy()
-	dst.eth1DataVotes = make([]*cltypes.Eth1Data, len(b.eth1DataVotes))
-	for i := range b.eth1DataVotes {
-		dst.eth1DataVotes[i] = b.eth1DataVotes[i].Copy()
-	}
+	dst.eth1DataVotes = generic.NewDynamicListSSZ[*cltypes.Eth1Data](int(b.beaconConfig.Eth1DataVotesLength()))
+	b.eth1DataVotes.Range(func(index int, value *cltypes.Eth1Data, length int) bool {
+		dst.eth1DataVotes.Append(value.Copy())
+		return true
+	})
+
 	dst.eth1DepositIndex = b.eth1DepositIndex
 	for i, validator := range b.validators {
 		if i >= len(dst.validators) {

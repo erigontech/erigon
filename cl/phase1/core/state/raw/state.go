@@ -4,6 +4,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
@@ -25,7 +26,7 @@ type BeaconState struct {
 	stateRoots                 [stateRootsLength]common.Hash
 	historicalRoots            []common.Hash
 	eth1Data                   *cltypes.Eth1Data
-	eth1DataVotes              []*cltypes.Eth1Data
+	eth1DataVotes              *generic.ListSSZ[*cltypes.Eth1Data]
 	eth1DepositIndex           uint64
 	validators                 []*cltypes.Validator
 	balances                   solid.Uint64Slice

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
@@ -14,15 +15,15 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-func ProcessAttestations(s *state2.BeaconState, attestations *cltypes.AttestationList, fullValidation bool) error {
+func ProcessAttestations(s *state2.BeaconState, attestations *generic.ListSSZ[*solid.Attestation], fullValidation bool) error {
 	attestingIndiciesSet := make([][]uint64, attestations.Len())
 	h := methelp.NewHistTimer("beacon_process_attestations")
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
 
 	c := h.Tag("attestation_step", "process")
 	var err error
-	attestations.ForEach(func(a *solid.Attestation, idx, total int) bool {
-		if attestingIndiciesSet[idx], err = processAttestation(s, a, baseRewardPerIncrement); err != nil {
+	attestations.Range(func(index int, a *solid.Attestation, _ int) bool {
+		if attestingIndiciesSet[index], err = processAttestation(s, a, baseRewardPerIncrement); err != nil {
 			return false
 		}
 		return true
@@ -216,10 +217,10 @@ func processAttestation(s *state2.BeaconState, attestation *solid.Attestation, b
 	return processAttestationPostAltair(s, attestation, baseRewardPerIncrement)
 }
 
-func verifyAttestations(s *state2.BeaconState, attestations *cltypes.AttestationList, attestingIndicies [][]uint64) (bool, error) {
+func verifyAttestations(s *state2.BeaconState, attestations *generic.ListSSZ[*solid.Attestation], attestingIndicies [][]uint64) (bool, error) {
 	var err error
 	valid := true
-	attestations.ForEach(func(a *solid.Attestation, idx, total int) bool {
+	attestations.Range(func(idx int, a *solid.Attestation, _ int) bool {
 		indexedAttestation := state2.GetIndexedAttestation(a, attestingIndicies[idx])
 		valid, err = state2.IsValidIndexedAttestation(s.BeaconState, indexedAttestation)
 		if err != nil {

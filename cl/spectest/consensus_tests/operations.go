@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	transition2 "github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 
@@ -39,7 +40,7 @@ func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 	if err := spectest.ReadSszOld(root, att, c.Version(), attestationFileName); err != nil {
 		return err
 	}
-	if err := transition2.ProcessAttestations(preState, cltypes.AttestionListFrom(att), true); err != nil {
+	if err := transition2.ProcessAttestations(preState, generic.NewDynamicListSSZFromList([]*solid.Attestation{att}, 128), true); err != nil {
 		if expectedError {
 			return nil
 		}

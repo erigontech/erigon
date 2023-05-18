@@ -79,7 +79,7 @@ func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
 
 func (b *BeaconState) AddEth1DataVote(vote *cltypes.Eth1Data) {
 	b.markLeaf(Eth1DataVotesLeafIndex)
-	b.eth1DataVotes = append(b.eth1DataVotes, vote)
+	b.eth1DataVotes.Append(vote)
 }
 
 func (b *BeaconState) ResetEth1DataVotes() {

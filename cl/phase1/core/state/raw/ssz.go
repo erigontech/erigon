@@ -11,6 +11,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
@@ -61,7 +62,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		return nil, fmt.Errorf("too many summaries")
 	}
 
-	if len(b.eth1DataVotes) > int(b.beaconConfig.Eth1DataVotesLength()) {
+	if b.eth1DataVotes.Len() > int(b.beaconConfig.Eth1DataVotesLength()) {
 		return nil, fmt.Errorf("too many votes")
 	}
 
@@ -117,7 +118,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 
 	// votes offset
 	dst = append(dst, ssz.OffsetSSZ(offset)...)
-	offset += uint32(len(b.eth1DataVotes)) * 72
+	offset += uint32(b.eth1DataVotes.EncodingSizeSSZ())
 
 	dst = append(dst, ssz.Uint64SSZ(b.eth1DepositIndex)...)
 
@@ -202,10 +203,8 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		dst = append(dst, root[:]...)
 	}
 	// Write votes (offset 2)
-	for _, vote := range b.eth1DataVotes {
-		if dst, err = vote.EncodeSSZ(dst); err != nil {
-			return nil, err
-		}
+	if dst, err = b.eth1DataVotes.EncodeSSZ(dst); err != nil {
+		return nil, err
 	}
 	// Write validators (offset 3)
 	for _, validator := range b.validators {
@@ -383,7 +382,10 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if b.historicalRoots, err = ssz.DecodeHashList(buf, historicalRootsOffset, votesOffset, state_encoding.HistoricalRootsLength); err != nil {
 		return err
 	}
-	if b.eth1DataVotes, err = ssz.DecodeStaticList[*cltypes.Eth1Data](buf, votesOffset, validatorsOffset, 72, b.beaconConfig.Eth1DataVotesLength(), version); err != nil {
+	if b.eth1DataVotes == nil {
+		b.eth1DataVotes = generic.NewStaticListSSZ[*cltypes.Eth1Data](int(b.beaconConfig.Eth1DataVotesLength()), 72)
+	}
+	if err = b.eth1Data.DecodeSSZ(buf[votesOffset:validatorsOffset], version); err != nil {
 		return err
 	}
 	if b.validators, err = ssz.DecodeStaticList[*cltypes.Validator](buf, validatorsOffset, balancesOffset, 121, state_encoding.ValidatorRegistryLimit, version); err != nil {
@@ -459,7 +461,10 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 // SSZ size of the Beacon State
 func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	size = int(b.baseOffsetSSZ()) + (len(b.historicalRoots) * 32)
-	size += len(b.eth1DataVotes) * 72
+	if b.eth1DataVotes == nil {
+		b.eth1DataVotes = generic.NewStaticListSSZ[*cltypes.Eth1Data](int(b.beaconConfig.Eth1DataVotesLength()), 72)
+	}
+	size += b.eth1DataVotes.EncodingSizeSSZ()
 	size += len(b.validators) * 121
 	size += b.balances.Length() * 8
 	if b.version == clparams.Phase0Version {
