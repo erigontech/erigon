@@ -24,6 +24,7 @@ type mapmutation struct {
 	size   int
 	count  uint64
 	tmpdir string
+	logger log.Logger
 }
 
 // NewBatch - starts in-mem batch
@@ -34,7 +35,7 @@ type mapmutation struct {
 // defer batch.Rollback()
 // ... some calculations on `batch`
 // batch.Commit()
-func NewHashBatch(tx kv.RwTx, quit <-chan struct{}, tmpdir string) *mapmutation {
+func NewHashBatch(tx kv.RwTx, quit <-chan struct{}, tmpdir string, logger log.Logger) *mapmutation {
 	clean := func() {}
 	if quit == nil {
 		ch := make(chan struct{})
@@ -48,6 +49,7 @@ func NewHashBatch(tx kv.RwTx, quit <-chan struct{}, tmpdir string) *mapmutation 
 		quit:   quit,
 		clean:  clean,
 		tmpdir: tmpdir,
+		logger: logger,
 	}
 }
 
@@ -220,7 +222,7 @@ func (m *mapmutation) doCommit(tx kv.RwTx) error {
 	count := 0
 	total := float64(m.count)
 	for table, bucket := range m.puts {
-		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), m.logger)
 		defer collector.Close()
 		for key, value := range bucket {
 			collector.Collect([]byte(key), value)
@@ -229,7 +231,7 @@ func (m *mapmutation) doCommit(tx kv.RwTx) error {
 			default:
 			case <-logEvery.C:
 				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
-				log.Info("Write to db", "progress", progress, "current table", table)
+				m.logger.Info("Write to db", "progress", progress, "current table", table)
 				tx.CollectMetrics()
 			}
 		}

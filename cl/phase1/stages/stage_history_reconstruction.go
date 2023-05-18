@@ -46,7 +46,7 @@ func StageHistoryReconstruction(db kv.RwDB, downloader *network.BackwardBeaconDo
 }
 
 // SpawnStageBeaconsForward spawn the beacon forward stage
-func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context) error {
+func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context, logger log.Logger) error {
 	// This stage must be done only once.
 	progress := s.BlockNumber
 	if progress != 0 {
@@ -73,20 +73,20 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	}
 
 	// ETL collectors for attestations + beacon blocks
-	beaconBlocksCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	beaconBlocksCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer beaconBlocksCollector.Close()
-	attestationsCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	attestationsCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer attestationsCollector.Close()
-	executionPayloadsCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	executionPayloadsCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer executionPayloadsCollector.Close()
 	// Indexes collector
-	rootToSlotCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	rootToSlotCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer rootToSlotCollector.Close()
 	// Lastly finalizations markers collector.
-	finalizationCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	finalizationCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer finalizationCollector.Close()
 	// Start the procedure
-	log.Info(fmt.Sprintf("[%s] Reconstructing", s.LogPrefix()), "from", cfg.state.LatestBlockHeader().Slot, "to", destinationSlot)
+	logger.Info(fmt.Sprintf("[%s] Reconstructing", s.LogPrefix()), "from", cfg.state.LatestBlockHeader().Slot, "to", destinationSlot)
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
@@ -174,7 +174,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 				if currentSlot > destinationSlot {
 					logArgs = append(logArgs, "remaining", currProgress-destinationSlot)
 				}
-				log.Info(fmt.Sprintf("[%s] Backwards downloading phase", s.LogPrefix()), logArgs...)
+				logger.Info(fmt.Sprintf("[%s] Backwards downloading phase", s.LogPrefix()), logArgs...)
 			case <-finishCh:
 				return
 			case <-ctx.Done():

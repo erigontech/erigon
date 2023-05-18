@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
@@ -22,7 +23,7 @@ func ConsensusStages(ctx context.Context, historyReconstruction StageHistoryReco
 			ID:          stages.BeaconHistoryReconstruction,
 			Description: "Download beacon blocks backwards.",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnStageHistoryReconstruction(historyReconstruction, s, tx, ctx)
+				return SpawnStageHistoryReconstruction(historyReconstruction, s, tx, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
 				return nil

@@ -308,7 +308,7 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context, logger lo
 		engine:      engine,
 		reader:      aggReader,
 		writer:      aggWriter,
-		blockReader: getBlockReader(chainDb),
+		blockReader: getBlockReader(chainDb, logger),
 		stateTx:     stateTx,
 		stateDb:     stateDb,
 		blockNum:    latestBlock,

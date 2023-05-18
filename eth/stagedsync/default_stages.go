@@ -18,12 +18,12 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageSnapshots(s, ctx, tx, snapshots, firstCycle)
+				return SpawnStageSnapshots(s, ctx, tx, snapshots, firstCycle, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return nil
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return SnapshotsPrune(p, snapshots, ctx, tx)
 			},
 		},
@@ -39,7 +39,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return HeadersUnwind(u, s, tx, headers, test)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return HeadersPrune(p, tx, headers, ctx)
 			},
 		},
@@ -52,7 +52,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return UnwindCumulativeIndexStage(u, cumulativeIndex, tx, ctx)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneCumulativeIndexStage(p, tx, ctx)
 			},
 		},
@@ -60,12 +60,12 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			ID:          stages.BlockHashes,
 			Description: "Write block hashes",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx)
+				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return UnwindBlockHashStage(u, tx, blockHashCfg, ctx)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneBlockHashStage(p, tx, blockHashCfg, ctx)
 			},
 		},
@@ -78,7 +78,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return UnwindBodiesStage(u, tx, bodies, ctx)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneBodiesStage(p, tx, bodies, ctx)
 			},
 		},
@@ -91,7 +91,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return UnwindSendersStage(u, tx, senders, ctx)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneSendersStage(p, tx, senders, ctx)
 			},
 		},
@@ -102,9 +102,9 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 				return SpawnExecuteBlocksStage(s, u, tx, 0, ctx, exec, firstCycle, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
-				return UnwindExecutionStage(u, s, tx, ctx, exec, firstCycle)
+				return UnwindExecutionStage(u, s, tx, ctx, exec, firstCycle, logger)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneExecutionStage(p, tx, exec, ctx, firstCycle)
 			},
 		},
@@ -116,9 +116,9 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 				return SpawnHashStateStage(s, tx, hashState, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
-				return UnwindHashStateStage(u, s, tx, hashState, ctx)
+				return UnwindHashStateStage(u, s, tx, hashState, ctx, logger)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneHashStateStage(p, tx, hashState, ctx)
 			},
 		},
@@ -128,7 +128,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			Disabled:    bodies.historyV3 && ethconfig.EnableHistoryV4InTest,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
 				if exec.chainConfig.IsPrague(0) {
-					_, err := SpawnVerkleTrie(s, u, tx, trieCfg, ctx)
+					_, err := SpawnVerkleTrie(s, u, tx, trieCfg, ctx, logger)
 					return err
 				}
 				_, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx, logger)
@@ -136,11 +136,11 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				if exec.chainConfig.IsPrague(0) {
-					return UnwindVerkleTrie(u, s, tx, trieCfg, ctx)
+					return UnwindVerkleTrie(u, s, tx, trieCfg, ctx, logger)
 				}
 				return UnwindIntermediateHashesStage(u, s, tx, trieCfg, ctx, logger)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneIntermediateHashesStage(p, tx, trieCfg, ctx)
 			},
 		},
@@ -150,13 +150,13 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			DisabledDescription: "Work In Progress",
 			Disabled:            bodies.historyV3,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnCallTraces(s, tx, callTraces, ctx)
+				return SpawnCallTraces(s, tx, callTraces, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
-				return UnwindCallTraces(u, s, tx, callTraces, ctx)
+				return UnwindCallTraces(u, s, tx, callTraces, ctx, logger)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneCallTraces(p, tx, callTraces, ctx)
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				return PruneCallTraces(p, tx, callTraces, ctx, logger)
 			},
 		},
 		{
@@ -164,13 +164,13 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			Description: "Generate account history index",
 			Disabled:    bodies.historyV3,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnAccountHistoryIndex(s, tx, history, ctx)
+				return SpawnAccountHistoryIndex(s, tx, history, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return UnwindAccountHistoryIndex(u, s, tx, history, ctx)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneAccountHistoryIndex(p, tx, history, ctx)
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				return PruneAccountHistoryIndex(p, tx, history, ctx, logger)
 			},
 		},
 		{
@@ -178,13 +178,13 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			Description: "Generate storage history index",
 			Disabled:    bodies.historyV3,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnStorageHistoryIndex(s, tx, history, ctx)
+				return SpawnStorageHistoryIndex(s, tx, history, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return UnwindStorageHistoryIndex(u, s, tx, history, ctx)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneStorageHistoryIndex(p, tx, history, ctx)
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				return PruneStorageHistoryIndex(p, tx, history, ctx, logger)
 			},
 		},
 		{
@@ -192,26 +192,26 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			Description: "Generate receipt logs index",
 			Disabled:    bodies.historyV3,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnLogIndex(s, tx, logIndex, ctx, 0)
+				return SpawnLogIndex(s, tx, logIndex, ctx, 0, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return UnwindLogIndex(u, s, tx, logIndex, ctx)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneLogIndex(p, tx, logIndex, ctx)
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				return PruneLogIndex(p, tx, logIndex, ctx, logger)
 			},
 		},
 		{
 			ID:          stages.TxLookup,
 			Description: "Generate tx lookup index",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnTxLookup(s, tx, 0 /* toBlock */, txLookup, ctx)
+				return SpawnTxLookup(s, tx, 0 /* toBlock */, txLookup, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
-				return UnwindTxLookup(u, s, tx, txLookup, ctx)
+				return UnwindTxLookup(u, s, tx, txLookup, ctx, logger)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneTxLookup(p, tx, txLookup, ctx, firstCycle)
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				return PruneTxLookup(p, tx, txLookup, ctx, firstCycle, logger)
 			},
 		},
 		{
@@ -223,7 +223,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return UnwindFinish(u, tx, finish, ctx)
 			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneFinish(p, tx, finish, ctx)
 			},
 		},
@@ -257,7 +257,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 			ID:          stages.BlockHashes,
 			Description: "Write block hashes",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx)
+				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return UnwindBlockHashStage(u, tx, blockHashCfg, ctx)
@@ -280,7 +280,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 				return SpawnExecuteBlocksStage(s, u, tx, 0, ctx, exec, firstCycle, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
-				return UnwindExecutionStage(u, s, tx, ctx, exec, firstCycle)
+				return UnwindExecutionStage(u, s, tx, ctx, exec, firstCycle, logger)
 			},
 		},
 		{
@@ -290,7 +290,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 				return SpawnHashStateStage(s, tx, hashState, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
-				return UnwindHashStateStage(u, s, tx, hashState, ctx)
+				return UnwindHashStateStage(u, s, tx, hashState, ctx, logger)
 			},
 		},
 		{

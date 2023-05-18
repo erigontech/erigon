@@ -301,7 +301,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.WithDatadir {
 		var rwKv kv.RwDB
 		dir.MustExist(cfg.Dirs.SnapHistory)
-		log.Trace("Creating chain db", "path", cfg.Dirs.Chaindata)
+		logger.Trace("Creating chain db", "path", cfg.Dirs.Chaindata)
 		limiter := semaphore.NewWeighted(int64(cfg.DBReadConcurrency))
 		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Readonly().Open()
 		if err != nil {
@@ -338,17 +338,17 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 		cfg.Snap.Enabled = cfg.Snap.Enabled || cfg.Sync.UseSnapshots
 		if !cfg.Snap.Enabled {
-			log.Info("Use --snapshots=false")
+			logger.Info("Use --snapshots=false")
 		}
 
 		// Configure sapshots
-		allSnapshots = snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
+		allSnapshots = snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 		allSnapshots.OptimisticReopenWithDB(db)
 		allSnapshots.LogStat()
 
-		if agg, err = libstate.NewAggregatorV3(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, ethconfig.HistoryV3AggregationStep, db); err != nil {
+		if agg, err = libstate.NewAggregatorV3(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
 		}
 		_ = agg.OpenFolder()
@@ -364,11 +364,11 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			go func() { // don't block events processing by network communication
 				reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
 				if err != nil {
-					log.Warn("[snapshots] reopen", "err", err)
+					logger.Warn("[snapshots] reopen", "err", err)
 					return
 				}
 				if err := allSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
-					log.Error("[snapshots] reopen", "err", err)
+					logger.Error("[snapshots] reopen", "err", err)
 				} else {
 					allSnapshots.LogStat()
 				}
@@ -376,7 +376,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				_ = reply.HistoryFiles
 
 				if err = agg.OpenFolder(); err != nil {
-					log.Error("[snapshots] reopen", "err", err)
+					logger.Error("[snapshots] reopen", "err", err)
 				} else {
 					db.View(context.Background(), func(tx kv.Tx) error {
 						agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
@@ -397,7 +397,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			return nil
 		})
 		if histV3Enabled {
-			log.Info("HistoryV3", "enable", histV3Enabled)
+			logger.Info("HistoryV3", "enable", histV3Enabled)
 			db, err = temporal.New(rwKv, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[cc.ChainName])
 			if err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, nil, nil, err
@@ -421,7 +421,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			}
 			tmpDb.Close()
 		}
-		log.Trace("Creating consensus db", "path", borDbPath)
+		logger.Trace("Creating consensus db", "path", borDbPath)
 		borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Readonly().Open()
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, err
@@ -434,7 +434,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		} else {
 			stateCache = kvcache.NewDummy()
 		}
-		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
+		logger.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 
 	subscribeToStateChangesLoop(ctx, remoteKvClient, stateCache)
