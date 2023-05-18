@@ -127,3 +127,8 @@ func (l *ListSSZ[T]) Append(obj T) {
 	l.list = append(l.list, obj)
 	l.root = libcommon.Hash{}
 }
+
+func (l *ListSSZ[T]) Clear() {
+	l.list = nil
+	l.root = libcommon.Hash{}
+}

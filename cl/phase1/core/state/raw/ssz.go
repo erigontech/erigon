@@ -79,7 +79,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		return nil, fmt.Errorf("too many participations")
 	}
 
-	if b.version == clparams.Phase0Version && len(b.previousEpochAttestations) > maxEpochAttestations || len(b.currentEpochAttestations) > maxEpochAttestations {
+	if b.version == clparams.Phase0Version && b.previousEpochAttestations.Len() > maxEpochAttestations || b.currentEpochAttestations.Len() > maxEpochAttestations {
 		return nil, fmt.Errorf("too many participations")
 	}
 
@@ -142,9 +142,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	dst = append(dst, ssz.OffsetSSZ(offset)...)
 	// Gotta account for phase0 format (we used to store the attestations).
 	if b.version == clparams.Phase0Version {
-		for _, attestation := range b.previousEpochAttestations {
-			offset += uint32(attestation.EncodingSizeSSZ()) + 4
-		}
+		offset += uint32(b.previousEpochAttestations.EncodingSizeSSZ())
 	} else {
 		offset += uint32(b.previousEpochParticipation.Length())
 	}
@@ -152,9 +150,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	dst = append(dst, ssz.OffsetSSZ(offset)...)
 	// Gotta account for phase0 format (we used to store the attestations).
 	if b.version == clparams.Phase0Version {
-		for _, attestation := range b.currentEpochAttestations {
-			offset += uint32(attestation.EncodingSizeSSZ()) + 4
-		}
+		offset += uint32(b.currentEpochAttestations.EncodingSizeSSZ())
 	} else {
 		offset += uint32(b.currentEpochParticipation.Length())
 	}
@@ -220,10 +216,10 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 
 	// Write participations (offset 4 & 5)
 	if b.version == clparams.Phase0Version {
-		if dst, err = ssz.EncodeDynamicList(dst, b.previousEpochAttestations); err != nil {
+		if dst, err = b.previousEpochAttestations.EncodeSSZ(dst); err != nil {
 			return nil, err
 		}
-		if dst, err = ssz.EncodeDynamicList(dst, b.currentEpochAttestations); err != nil {
+		if dst, err = b.currentEpochAttestations.EncodeSSZ(dst); err != nil {
 			return nil, err
 		}
 	} else {
@@ -385,7 +381,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if b.eth1DataVotes == nil {
 		b.eth1DataVotes = generic.NewStaticListSSZ[*cltypes.Eth1Data](int(b.beaconConfig.Eth1DataVotesLength()), 72)
 	}
-	if err = b.eth1Data.DecodeSSZ(buf[votesOffset:validatorsOffset], version); err != nil {
+	if err = b.eth1DataVotes.DecodeSSZ(buf[votesOffset:validatorsOffset], version); err != nil {
 		return err
 	}
 	if b.validators, err = ssz.DecodeStaticList[*cltypes.Validator](buf, validatorsOffset, balancesOffset, 121, state_encoding.ValidatorRegistryLimit, version); err != nil {
@@ -398,11 +394,13 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 
 	b.SetBalances(rawBalances)
 	if b.version == clparams.Phase0Version {
-		maxAttestations := b.beaconConfig.SlotsPerEpoch * b.beaconConfig.MaxAttestations
-		if b.previousEpochAttestations, err = ssz.DecodeDynamicList[*cltypes.PendingAttestation](buf, previousEpochParticipationOffset, currentEpochParticipationOffset, maxAttestations, version); err != nil {
+		b.previousEpochAttestations = generic.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.BeaconConfig().PreviousEpochAttestationsLength()))
+		b.currentEpochAttestations = generic.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.BeaconConfig().CurrentEpochAttestationsLength()))
+
+		if err = b.previousEpochAttestations.DecodeSSZ(buf[previousEpochParticipationOffset:currentEpochParticipationOffset], version); err != nil {
 			return err
 		}
-		if b.currentEpochAttestations, err = ssz.DecodeDynamicList[*cltypes.PendingAttestation](buf, currentEpochParticipationOffset, uint32(len(buf)), maxAttestations, version); err != nil {
+		if err = b.currentEpochAttestations.DecodeSSZ(buf[currentEpochParticipationOffset:uint32(len(buf))], version); err != nil {
 			return err
 		}
 		return b.init()
@@ -467,13 +465,15 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	size += b.eth1DataVotes.EncodingSizeSSZ()
 	size += len(b.validators) * 121
 	size += b.balances.Length() * 8
+	if b.previousEpochAttestations == nil {
+		b.previousEpochAttestations = generic.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.BeaconConfig().PreviousEpochAttestationsLength()))
+	}
+	if b.currentEpochAttestations == nil {
+		b.currentEpochAttestations = generic.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.BeaconConfig().CurrentEpochAttestationsLength()))
+	}
 	if b.version == clparams.Phase0Version {
-		for _, pendingAttestation := range b.previousEpochAttestations {
-			size += pendingAttestation.EncodingSizeSSZ()
-		}
-		for _, pendingAttestation := range b.currentEpochAttestations {
-			size += pendingAttestation.EncodingSizeSSZ()
-		}
+		size += b.previousEpochAttestations.EncodingSizeSSZ()
+		size += b.currentEpochAttestations.EncodingSizeSSZ()
 	} else {
 		size += b.previousEpochParticipation.Length()
 		size += b.currentEpochParticipation.Length()

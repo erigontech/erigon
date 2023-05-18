@@ -160,7 +160,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		var root libcommon.Hash
 		var err error
 		if b.version == clparams.Phase0Version {
-			root, err = merkle_tree.ListObjectSSZRoot(b.previousEpochAttestations, b.beaconConfig.SlotsPerEpoch*b.beaconConfig.MaxAttestations)
+			root, err = b.previousEpochAttestations.HashSSZ()
 		} else {
 			err = b.previousEpochParticipation.HashSSZTo(root[:])
 		}
@@ -176,7 +176,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		var root libcommon.Hash
 		var err error
 		if b.version == clparams.Phase0Version {
-			root, err = merkle_tree.ListObjectSSZRoot(b.currentEpochAttestations, b.beaconConfig.SlotsPerEpoch*b.beaconConfig.MaxAttestations)
+			root, err = b.currentEpochAttestations.HashSSZ()
 		} else {
 			err = b.currentEpochParticipation.HashSSZTo(root[:])
 		}

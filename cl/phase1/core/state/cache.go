@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 	shuffling2 "github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
@@ -95,12 +96,12 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 		return err
 	}
 
-	for _, attestation := range b.PreviousEpochAttestations() {
-		slotRoot, err := b.GetBlockRootAtSlot(attestation.Data.Slot())
+	if err := generic.RangeErr[*cltypes.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *cltypes.PendingAttestation, _ int) error {
+		slotRoot, err := b.GetBlockRootAtSlot(pa.Data.Slot())
 		if err != nil {
 			return err
 		}
-		indicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
+		indicies, err := b.GetAttestingIndicies(pa.Data, pa.AggregationBits, false)
 		if err != nil {
 			return err
 		}
@@ -109,26 +110,29 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 			if err != nil {
 				return err
 			}
-			if previousMinAttestationDelay == nil || previousMinAttestationDelay.InclusionDelay > attestation.InclusionDelay {
-				if err := b.SetValidatorMinPreviousInclusionDelayAttestation(int(index), attestation); err != nil {
+			if previousMinAttestationDelay == nil || previousMinAttestationDelay.InclusionDelay > pa.InclusionDelay {
+				if err := b.SetValidatorMinPreviousInclusionDelayAttestation(int(index), pa); err != nil {
 					return err
 				}
 			}
 			if err := b.SetValidatorIsPreviousMatchingSourceAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestation.Data.Target().BlockRoot() != previousEpochRoot {
+			if pa.Data.Target().BlockRoot() != previousEpochRoot {
 				continue
 			}
 			if err := b.SetValidatorIsPreviousMatchingTargetAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestation.Data.BeaconBlockRoot() == slotRoot {
+			if pa.Data.BeaconBlockRoot() == slotRoot {
 				if err := b.SetValidatorIsPreviousMatchingHeadAttester(int(index), true); err != nil {
 					return err
 				}
 			}
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	// Current Pending attestations
 	if b.CurrentEpochAttestationsLength() == 0 {
@@ -138,15 +142,15 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 	if err != nil {
 		return err
 	}
-	for _, attestation := range b.CurrentEpochAttestations() {
-		slotRoot, err := b.GetBlockRootAtSlot(attestation.Data.Slot())
+	if err := generic.RangeErr[*cltypes.PendingAttestation](b.CurrentEpochAttestations(), func(i1 int, pa *cltypes.PendingAttestation, _ int) error {
+		slotRoot, err := b.GetBlockRootAtSlot(pa.Data.Slot())
 		if err != nil {
 			return err
 		}
 		if err != nil {
 			return err
 		}
-		indicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
+		indicies, err := b.GetAttestingIndicies(pa.Data, pa.AggregationBits, false)
 		if err != nil {
 			return err
 		}
@@ -155,25 +159,28 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 			if err != nil {
 				return err
 			}
-			if currentMinAttestationDelay == nil || currentMinAttestationDelay.InclusionDelay > attestation.InclusionDelay {
-				if err := b.SetValidatorMinCurrentInclusionDelayAttestation(int(index), attestation); err != nil {
+			if currentMinAttestationDelay == nil || currentMinAttestationDelay.InclusionDelay > pa.InclusionDelay {
+				if err := b.SetValidatorMinCurrentInclusionDelayAttestation(int(index), pa); err != nil {
 					return err
 				}
 			}
 			if err := b.SetValidatorIsCurrentMatchingSourceAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestation.Data.Target().BlockRoot() == currentEpochRoot {
+			if pa.Data.Target().BlockRoot() == currentEpochRoot {
 				if err := b.SetValidatorIsCurrentMatchingTargetAttester(int(index), true); err != nil {
 					return err
 				}
 			}
-			if attestation.Data.BeaconBlockRoot() == slotRoot {
+			if pa.Data.BeaconBlockRoot() == slotRoot {
 				if err := b.SetValidatorIsCurrentMatchingHeadAttester(int(index), true); err != nil {
 					return err
 				}
 			}
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }

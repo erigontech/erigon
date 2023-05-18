@@ -226,17 +226,20 @@ func (b *BeaconState) NextWithdrawalIndex() uint64 {
 	return b.nextWithdrawalIndex
 }
 
-func (b *BeaconState) CurrentEpochAttestations() []*cltypes.PendingAttestation {
+func (b *BeaconState) CurrentEpochAttestations() *generic.ListSSZ[*cltypes.PendingAttestation] {
 	return b.currentEpochAttestations
 }
+
 func (b *BeaconState) CurrentEpochAttestationsLength() int {
-	return len(b.currentEpochAttestations)
+	return b.currentEpochAttestations.Len()
 }
-func (b *BeaconState) PreviousEpochAttestations() []*cltypes.PendingAttestation {
+
+func (b *BeaconState) PreviousEpochAttestations() *generic.ListSSZ[*cltypes.PendingAttestation] {
 	return b.previousEpochAttestations
 }
+
 func (b *BeaconState) PreviousEpochAttestationsLength() int {
-	return len(b.previousEpochAttestations)
+	return b.previousEpochAttestations.Len()
 }
 
 func (b *BeaconState) NextWithdrawalValidatorIndex() uint64 {

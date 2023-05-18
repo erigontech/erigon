@@ -4,6 +4,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/state_encoding"
 )
@@ -84,7 +85,7 @@ func (b *BeaconState) AddEth1DataVote(vote *cltypes.Eth1Data) {
 
 func (b *BeaconState) ResetEth1DataVotes() {
 	b.markLeaf(Eth1DataVotesLeafIndex)
-	b.eth1DataVotes = nil
+	b.eth1DataVotes.Clear()
 }
 
 func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
@@ -358,25 +359,25 @@ func (b *BeaconState) AddPreviousEpochParticipationAt(index int, delta byte) {
 // phase0 fields
 func (b *BeaconState) AddCurrentEpochAtteastation(attestation *cltypes.PendingAttestation) {
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
-	b.currentEpochAttestations = append(b.currentEpochAttestations, attestation)
+	b.currentEpochAttestations.Append(attestation)
 }
 
 func (b *BeaconState) AddPreviousEpochAttestation(attestation *cltypes.PendingAttestation) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
-	b.previousEpochAttestations = append(b.previousEpochAttestations, attestation)
+	b.previousEpochAttestations.Append(attestation)
 }
 
 func (b *BeaconState) ResetCurrentEpochAttestations() {
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
-	b.currentEpochAttestations = nil
+	b.currentEpochAttestations.Clear()
 }
 
-func (b *BeaconState) SetPreviousEpochAttestations(attestations []*cltypes.PendingAttestation) {
+func (b *BeaconState) SetPreviousEpochAttestations(attestations *generic.ListSSZ[*cltypes.PendingAttestation]) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochAttestations = attestations
 }
 
 func (b *BeaconState) ResetPreviousEpochAttestations() {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
-	b.previousEpochAttestations = nil
+	b.previousEpochAttestations.Clear()
 }
