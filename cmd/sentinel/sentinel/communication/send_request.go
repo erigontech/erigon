@@ -41,7 +41,7 @@ Loop:
 	for err != nil {
 		select {
 		case <-ctx.Done():
-			log.Warn("[Sentinel Resp] sentinel has been shutdown")
+			log.Warn("[Sentinel Resp] context timeout")
 			break Loop
 		case <-respRetryTimer.C:
 			log.Trace("[Sentinel Resp] timeout", "topic", topic, "peer", peerId)

@@ -49,11 +49,10 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	}
 }
 
-func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 	// Prepare output slice.
 	responsePacket := []*cltypes.SignedBeaconBlock{}
-
-	message, err := b.sentinel.SendRequest(b.ctx, &sentinel.RequestData{
+	message, err := b.sentinel.SendRequest(ctx, &sentinel.RequestData{
 		Data:  reqData,
 		Topic: topic,
 	})
@@ -120,7 +119,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
-func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 	req := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: start,
 		Count:     count,
@@ -132,18 +131,18 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(start, count uint64) ([]*cltyp
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-	return b.sendBlocksRequest(communication.BeaconBlocksByRangeProtocolV2, data, count)
+	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRangeProtocolV2, data, count)
 }
 
 // SendBeaconBlocksByRootReq retrieves blocks by root from beacon chain.
-func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(roots [][32]byte) ([]*cltypes.SignedBeaconBlock, string, error) {
+func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(ctx context.Context, roots [][32]byte) ([]*cltypes.SignedBeaconBlock, string, error) {
 	var req cltypes.BeaconBlocksByRootRequest = roots
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, &req); err != nil {
 		return nil, "", err
 	}
 	data := common.CopyBytes(buffer.Bytes())
-	return b.sendBlocksRequest(communication.BeaconBlocksByRootProtocolV2, data, uint64(len(roots)))
+	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRootProtocolV2, data, uint64(len(roots)))
 }
 
 // Peers retrieves peer count.

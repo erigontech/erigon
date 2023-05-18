@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230518063529-b65ec949bcf1
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230518034552-b6fecb3c3074
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230404044759-5dec854ce336
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -63,13 +63,13 @@ require (
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.0.7
+	github.com/pion/randutil v0.1.0
 	github.com/pion/stun v0.4.0
 	github.com/prometheus/client_golang v1.15.1
 	github.com/prometheus/common v0.42.0
-	github.com/protolambda/eth2-shuffle v1.1.0
 	github.com/protolambda/ztyp v0.2.2
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
-	github.com/prysmaticlabs/gohashtree v0.0.3-alpha
+	github.com/prysmaticlabs/gohashtree v0.0.3-alpha.0.20230510131438-bf992328364a
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/rs/cors v1.9.0
 	github.com/shirou/gopsutil/v3 v3.23.4
@@ -209,7 +209,6 @@ require (
 	github.com/pion/interceptor v0.1.11 // indirect
 	github.com/pion/logging v0.2.2 // indirect
 	github.com/pion/mdns v0.0.5 // indirect
-	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.9 // indirect
 	github.com/pion/rtp v1.7.13 // indirect
 	github.com/pion/sctp v1.8.2 // indirect
