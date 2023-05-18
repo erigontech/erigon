@@ -47,7 +47,7 @@ type StateV3 struct {
 	tmpdir              string
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
-	logger log.Logger
+	logger              log.Logger
 }
 
 func NewStateV3(tmpdir string, logger log.Logger) *StateV3 {
@@ -63,7 +63,7 @@ func NewStateV3(tmpdir string, logger log.Logger) *StateV3 {
 
 		applyPrevAccountBuf: make([]byte, 256),
 		addrIncBuf:          make([]byte, 20+8),
-		logger: logger,
+		logger:              logger,
 	}
 	return rs
 }
