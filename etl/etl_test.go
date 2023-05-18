@@ -27,6 +27,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -40,8 +41,9 @@ func decodeHex(in string) []byte {
 }
 
 func TestEmptyValueIsNotANil(t *testing.T) {
+	logger := log.New()
 	t.Run("sortable", func(t *testing.T) {
-		collector := NewCollector(t.Name(), "", NewSortableBuffer(1))
+		collector := NewCollector(t.Name(), "", NewSortableBuffer(1), logger)
 		defer collector.Close()
 		require := require.New(t)
 		require.NoError(collector.Collect([]byte{1}, []byte{}))
@@ -57,7 +59,7 @@ func TestEmptyValueIsNotANil(t *testing.T) {
 	})
 	t.Run("append", func(t *testing.T) {
 		// append buffer doesn't support nil values
-		collector := NewCollector(t.Name(), "", NewAppendBuffer(1))
+		collector := NewCollector(t.Name(), "", NewAppendBuffer(1), logger)
 		defer collector.Close()
 		require := require.New(t)
 		require.NoError(collector.Collect([]byte{1}, []byte{}))
@@ -68,7 +70,7 @@ func TestEmptyValueIsNotANil(t *testing.T) {
 		}, TransformArgs{}))
 	})
 	t.Run("oldest", func(t *testing.T) {
-		collector := NewCollector(t.Name(), "", NewOldestEntryBuffer(1))
+		collector := NewCollector(t.Name(), "", NewOldestEntryBuffer(1), logger)
 		defer collector.Close()
 		require := require.New(t)
 		require.NoError(collector.Collect([]byte{1}, []byte{}))
@@ -85,10 +87,11 @@ func TestEmptyValueIsNotANil(t *testing.T) {
 }
 
 func TestEmptyKeyValue(t *testing.T) {
+	logger := log.New()
 	_, tx := memdb.NewTestTx(t)
 	require := require.New(t)
 	table := kv.ChaindataTables[0]
-	collector := NewCollector(t.Name(), "", NewSortableBuffer(1))
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(1), logger)
 	defer collector.Close()
 	require.NoError(collector.Collect([]byte{2}, []byte{}))
 	require.NoError(collector.Collect([]byte{1}, []byte{1}))
@@ -100,7 +103,7 @@ func TestEmptyKeyValue(t *testing.T) {
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
 
-	collector = NewCollector(t.Name(), "", NewSortableBuffer(1))
+	collector = NewCollector(t.Name(), "", NewSortableBuffer(1), logger)
 	defer collector.Close()
 	require.NoError(collector.Collect([]byte{}, nil))
 	require.NoError(collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
@@ -168,15 +171,16 @@ func TestNextKeyErr(t *testing.T) {
 }
 
 func TestFileDataProviders(t *testing.T) {
+	logger := log.New()
 	// test invariant when we go through files (> 1 buffer)
 	_, tx := memdb.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 
 	generateTestData(t, tx, sourceBucket, 10)
 
-	collector := NewCollector(t.Name(), "", NewSortableBuffer(1))
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(1), logger)
 
-	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil)
+	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil, logger)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 10, len(collector.dataProviders))
@@ -199,13 +203,14 @@ func TestFileDataProviders(t *testing.T) {
 }
 
 func TestRAMDataProviders(t *testing.T) {
+	logger := log.New()
 	// test invariant when we go through memory (1 buffer)
 	_, tx := memdb.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	generateTestData(t, tx, sourceBucket, 10)
 
-	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize))
-	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil)
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize), logger)
+	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil, logger)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(collector.dataProviders))
@@ -218,6 +223,7 @@ func TestRAMDataProviders(t *testing.T) {
 }
 
 func TestTransformRAMOnly(t *testing.T) {
+	logger := log.New()
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	_, tx := memdb.NewTestTx(t)
 
@@ -233,12 +239,14 @@ func TestTransformRAMOnly(t *testing.T) {
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
 		TransformArgs{},
+		logger,
 	)
 	assert.Nil(t, err)
 	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 }
 
 func TestEmptySourceBucket(t *testing.T) {
+	logger := log.New()
 	_, tx := memdb.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
@@ -251,12 +259,14 @@ func TestEmptySourceBucket(t *testing.T) {
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
 		TransformArgs{},
+		logger,
 	)
 	assert.Nil(t, err)
 	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 }
 
 func TestTransformExtractStartKey(t *testing.T) {
+	logger := log.New()
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	_, tx := memdb.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
@@ -271,12 +281,14 @@ func TestTransformExtractStartKey(t *testing.T) {
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
 		TransformArgs{ExtractStartKey: []byte(fmt.Sprintf("%10d-key-%010d", 5, 5))},
+		logger,
 	)
 	assert.Nil(t, err)
 	compareBuckets(t, tx, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
 }
 
 func TestTransformThroughFiles(t *testing.T) {
+	logger := log.New()
 	// test invariant when we go through files (> 1 buffer)
 	_, tx := memdb.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
@@ -293,12 +305,14 @@ func TestTransformThroughFiles(t *testing.T) {
 		TransformArgs{
 			BufferSize: 1,
 		},
+		logger,
 	)
 	assert.Nil(t, err)
 	compareBuckets(t, tx, sourceBucket, destBucket, nil)
 }
 
 func TestTransformDoubleOnExtract(t *testing.T) {
+	logger := log.New()
 	// test invariant when extractFunc multiplies the data 2x
 	_, tx := memdb.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
@@ -313,12 +327,14 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 		testExtractDoubleToMapFunc,
 		testLoadFromMapFunc,
 		TransformArgs{},
+		logger,
 	)
 	assert.Nil(t, err)
 	compareBucketsDouble(t, tx, sourceBucket, destBucket)
 }
 
 func TestTransformDoubleOnLoad(t *testing.T) {
+	logger := log.New()
 	// test invariant when loadFunc multiplies the data 2x
 	_, tx := memdb.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
@@ -333,6 +349,7 @@ func TestTransformDoubleOnLoad(t *testing.T) {
 		testExtractToMapFunc,
 		testLoadFromMapDoubleFunc,
 		TransformArgs{},
+		logger,
 	)
 	assert.Nil(t, err)
 	compareBucketsDouble(t, tx, sourceBucket, destBucket)
@@ -444,8 +461,9 @@ func compareBucketsDouble(t *testing.T, db kv.Tx, b1, b2 string) {
 }
 
 func TestReuseCollectorAfterLoad(t *testing.T) {
+	logger := log.New()
 	buf := NewSortableBuffer(128)
-	c := NewCollector("", t.TempDir(), buf)
+	c := NewCollector("", t.TempDir(), buf, logger)
 
 	err := c.Collect([]byte{1}, []byte{2})
 	require.NoError(t, err)

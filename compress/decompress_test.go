@@ -31,10 +31,11 @@ import (
 
 func prepareLoremDict(t *testing.T) *Decompressor {
 	t.Helper()
+	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug)
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,10 +101,11 @@ func TestDecompressMatchOK(t *testing.T) {
 
 func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	t.Helper()
+	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed2")
 	t.Name()
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug)
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,10 +216,11 @@ func TestDecompressMatchPrefix(t *testing.T) {
 
 func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	t.Helper()
+	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug)
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

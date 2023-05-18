@@ -38,10 +38,9 @@ import (
 	btree2 "github.com/tidwall/btree"
 )
 
-func testDbAndHistory(tb testing.TB, largeValues bool) (string, kv.RwDB, *History) {
+func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (string, kv.RwDB, *History) {
 	tb.Helper()
 	path := tb.TempDir()
-	logger := log.New()
 	keysTable := "AccountKeys"
 	indexTable := "AccountIndex"
 	valsTable := "AccountVals"
@@ -54,7 +53,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool) (string, kv.RwDB, *Histor
 			settingsTable: kv.TableCfgItem{},
 		}
 	}).MustOpen()
-	h, err := NewHistory(path, path, 16, "hist", keysTable, indexTable, valsTable, false, nil, false)
+	h, err := NewHistory(path, path, 16, "hist", keysTable, indexTable, valsTable, false, nil, false, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(db.Close)
 	tb.Cleanup(h.Close)
@@ -62,6 +61,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool) (string, kv.RwDB, *Histor
 }
 
 func TestHistoryCollationBuild(t *testing.T) {
+	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
@@ -164,16 +164,17 @@ func TestHistoryCollationBuild(t *testing.T) {
 		}
 	}
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h := testDbAndHistory(t, true)
+		_, db, h := testDbAndHistory(t, true, logger)
 		test(t, h, db)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h := testDbAndHistory(t, false)
+		_, db, h := testDbAndHistory(t, false, logger)
 		test(t, h, db)
 	})
 }
 
 func TestHistoryAfterPrune(t *testing.T) {
+	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
@@ -234,18 +235,18 @@ func TestHistoryAfterPrune(t *testing.T) {
 		}
 	}
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h := testDbAndHistory(t, true)
+		_, db, h := testDbAndHistory(t, true, logger)
 		test(t, h, db)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h := testDbAndHistory(t, false)
+		_, db, h := testDbAndHistory(t, false, logger)
 		test(t, h, db)
 	})
 }
 
-func filledHistory(tb testing.TB, largeValues bool) (string, kv.RwDB, *History, uint64) {
+func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (string, kv.RwDB, *History, uint64) {
 	tb.Helper()
-	path, db, h := testDbAndHistory(tb, largeValues)
+	path, db, h := testDbAndHistory(tb, largeValues, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
@@ -327,6 +328,7 @@ func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 }
 
 func TestHistoryHistory(t *testing.T) {
+	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
@@ -353,11 +355,11 @@ func TestHistoryHistory(t *testing.T) {
 		checkHistoryHistory(t, h, txs)
 	}
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, true)
+		_, db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, false)
+		_, db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
 
@@ -420,6 +422,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 }
 
 func TestHistoryMergeFiles(t *testing.T) {
+	logger := log.New()
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
 		collateAndMergeHistory(t, db, h, txs)
@@ -427,16 +430,17 @@ func TestHistoryMergeFiles(t *testing.T) {
 	}
 
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, true)
+		_, db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, false)
+		_, db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
 }
 
 func TestHistoryScanFiles(t *testing.T) {
+	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
@@ -453,16 +457,17 @@ func TestHistoryScanFiles(t *testing.T) {
 	}
 
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, true)
+		_, db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, false)
+		_, db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
 }
 
 func TestIterateChanged(t *testing.T) {
+	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
@@ -600,16 +605,17 @@ func TestIterateChanged(t *testing.T) {
 		require.Equal([]string{"ff000000000003cf", "ff000000000001e7"}, vals)
 	}
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, true)
+		_, db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, false)
+		_, db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
 }
 
 func TestIterateChanged2(t *testing.T) {
+	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
@@ -791,18 +797,20 @@ func TestIterateChanged2(t *testing.T) {
 		})
 	}
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, true)
+		_, db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, false)
+		_, db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
 }
 
 func TestScanStaticFilesH(t *testing.T) {
-	h := &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1},
-		files: btree2.NewBTreeG[*filesItem](filesItemLess),
+	logger := log.New()
+	h := &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1, logger: logger},
+		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
+		logger: logger,
 	}
 	files := []string{
 		"test.0-1.v",

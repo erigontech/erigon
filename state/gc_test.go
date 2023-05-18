@@ -6,10 +6,12 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGCReadAfterRemoveFile(t *testing.T) {
+	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
@@ -86,11 +88,11 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 		})
 	}
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, true)
+		_, db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, false)
+		_, db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
 }
@@ -167,6 +169,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			require.Nil(lastOnFs.decompressor)
 		})
 	}
-	_, db, d, txs := filledDomain(t)
+	logger := log.New()
+	_, db, d, txs := filledDomain(t, logger)
 	test(t, d, db, txs)
 }

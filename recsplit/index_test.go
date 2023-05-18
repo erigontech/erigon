@@ -23,10 +23,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
 func TestReWriteIndex(t *testing.T) {
+	logger := log.New()
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
 	rs, err := NewRecSplit(RecSplitArgs{
@@ -36,7 +38,7 @@ func TestReWriteIndex(t *testing.T) {
 		TmpDir:     tmpDir,
 		IndexFile:  indexFile,
 		LeafSize:   8,
-	})
+	}, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

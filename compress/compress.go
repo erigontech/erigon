@@ -69,9 +69,10 @@ type Compressor struct {
 	Ratio            CompressionRatio
 	lvl              log.Lvl
 	trace            bool
+	logger           log.Logger
 }
 
-func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, minPatternScore uint64, workers int, lvl log.Lvl) (*Compressor, error) {
+func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, minPatternScore uint64, workers int, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
 	dir2.MustExist(tmpDir)
 	dir, fileName := filepath.Split(outputFile)
 	tmpOutFilePath := filepath.Join(dir, fileName) + ".tmp"
@@ -92,11 +93,11 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 	wg.Add(workers)
 	suffixCollectors := make([]*etl.Collector, workers)
 	for i := 0; i < workers; i++ {
-		collector := etl.NewCollector(logPrefix+"_dict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
+		collector := etl.NewCollector(logPrefix+"_dict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger)
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
-		go processSuperstring(superstrings, collector, minPatternScore, wg)
+		go processSuperstring(superstrings, collector, minPatternScore, wg, logger)
 	}
 
 	return &Compressor{
@@ -111,6 +112,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 		suffixCollectors: suffixCollectors,
 		lvl:              lvl,
 		wg:               wg,
+		logger:           logger,
 	}, nil
 }
 
@@ -179,10 +181,10 @@ func (c *Compressor) Compress() error {
 	c.wg.Wait()
 
 	if c.lvl < log.LvlTrace {
-		log.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.workers)
+		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.workers)
 	}
 	t := time.Now()
-	db, err := DictionaryBuilderFromCollectors(c.ctx, compressLogPrefix, c.tmpDir, c.suffixCollectors, c.lvl)
+	db, err := DictionaryBuilderFromCollectors(c.ctx, compressLogPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 	if err != nil {
 
 		return err
@@ -195,11 +197,11 @@ func (c *Compressor) Compress() error {
 	}
 	defer os.Remove(c.tmpOutFilePath)
 	if c.lvl < log.LvlTrace {
-		log.Log(c.lvl, fmt.Sprintf("[%s] BuildDict", c.logPrefix), "took", time.Since(t))
+		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict", c.logPrefix), "took", time.Since(t))
 	}
 
 	t = time.Now()
-	if err := reducedict(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, c.uncompressedFile, c.workers, db, c.lvl); err != nil {
+	if err := reducedict(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, c.uncompressedFile, c.workers, db, c.lvl, c.logger); err != nil {
 		return err
 	}
 
@@ -213,7 +215,7 @@ func (c *Compressor) Compress() error {
 
 	_, fName := filepath.Split(c.outputFile)
 	if c.lvl < log.LvlTrace {
-		log.Log(c.lvl, fmt.Sprintf("[%s] Compress", c.logPrefix), "took", time.Since(t), "ratio", c.Ratio, "file", fName)
+		c.logger.Log(c.lvl, fmt.Sprintf("[%s] Compress", c.logPrefix), "took", time.Since(t), "ratio", c.Ratio, "file", fName)
 	}
 	return nil
 }
