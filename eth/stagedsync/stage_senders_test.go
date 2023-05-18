@@ -21,6 +21,7 @@ import (
 )
 
 func TestSenders(t *testing.T) {
+	logger := log.New()
 	ctx := context.Background()
 	db, tx := memdb.NewTestTx(t)
 	require := require.New(t)
@@ -111,7 +112,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil), nil)
+	cfg := StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil, logger), nil)
 	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx, log.New())
 	assert.NoError(t, err)
 

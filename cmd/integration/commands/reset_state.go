@@ -41,7 +41,7 @@ var cmdResetState = &cobra.Command{
 		}
 		ctx, _ := common.RootContext()
 		defer db.Close()
-		sn, agg := allSnapshots(ctx, db)
+		sn, agg := allSnapshots(ctx, db, logger)
 		defer sn.Close()
 		defer agg.Close()
 

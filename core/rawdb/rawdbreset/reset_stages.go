@@ -51,7 +51,8 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) er
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3, br services.FullBlockReader, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine) error {
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3,
+	br services.FullBlockReader, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -109,7 +110,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 	}
 
 	if snapshots != nil && snapshots.Cfg().Enabled && snapshots.BlocksAvailable() > 0 {
-		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, dirs, snapshots, br, cc, engine, agg); err != nil {
+		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, dirs, snapshots, br, cc, engine, agg, logger); err != nil {
 			return err
 		}
 		_ = stages.SaveStageProgress(tx, stages.Snapshots, snapshots.BlocksAvailable())

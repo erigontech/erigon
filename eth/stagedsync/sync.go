@@ -424,7 +424,7 @@ func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx)
 		return err
 	}
 
-	err = stage.Prune(firstCycle, prune, tx)
+	err = stage.Prune(firstCycle, prune, tx, s.logger)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}

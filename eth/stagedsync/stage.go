@@ -20,7 +20,7 @@ type UnwindFunc func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx,
 
 // PruneFunc is the execution function for the stage to prune old data.
 // * state - is the current state of the stage and contains stage data.
-type PruneFunc func(firstCycle bool, p *PruneState, tx kv.RwTx) error
+type PruneFunc func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error
 
 // Stage is a single sync stage in staged sync.
 type Stage struct {

@@ -528,7 +528,7 @@ func extractBodies(datadir string) error {
 		Enabled:    true,
 		KeepBlocks: true,
 		Produce:    false,
-	}, filepath.Join(datadir, "snapshots"))
+	}, filepath.Join(datadir, "snapshots"), log.New())
 	snaps.ReopenFolder()
 	snaps.Bodies.View(func(sns []*snapshotsync.BodySegment) error {
 		for _, sn := range sns {
