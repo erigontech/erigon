@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -92,6 +93,7 @@ func genReceipts(t *testing.T, tx kv.RwTx, blocks uint64) (map[libcommon.Address
 }
 
 func TestPromoteLogIndex(t *testing.T) {
+	logger := log.New()
 	require, ctx := require.New(t), context.Background()
 	_, tx := memdb.NewTestTx(t)
 
@@ -102,7 +104,7 @@ func TestPromoteLogIndex(t *testing.T) {
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
 
-	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx)
+	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
 
 	// Check indices GetCardinality (in how many blocks they meet)
@@ -119,6 +121,7 @@ func TestPromoteLogIndex(t *testing.T) {
 }
 
 func TestPruneLogIndex(t *testing.T) {
+	logger := log.New()
 	require, tmpDir, ctx := require.New(t), t.TempDir(), context.Background()
 	_, tx := memdb.NewTestTx(t)
 
@@ -128,11 +131,11 @@ func TestPruneLogIndex(t *testing.T) {
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
-	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx)
+	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
 
 	// Mode test
-	err = pruneLogIndex("", tx, tmpDir, 50, ctx)
+	err = pruneLogIndex("", tx, tmpDir, 50, ctx, logger)
 	require.NoError(err)
 
 	{
@@ -158,6 +161,7 @@ func TestPruneLogIndex(t *testing.T) {
 }
 
 func TestUnwindLogIndex(t *testing.T) {
+	logger := log.New()
 	require, tmpDir, ctx := require.New(t), t.TempDir(), context.Background()
 	_, tx := memdb.NewTestTx(t)
 
@@ -167,11 +171,11 @@ func TestUnwindLogIndex(t *testing.T) {
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
-	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx)
+	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
 
 	// Mode test
-	err = pruneLogIndex("", tx, tmpDir, 50, ctx)
+	err = pruneLogIndex("", tx, tmpDir, 50, ctx, logger)
 	require.NoError(err)
 
 	// Unwind test

@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func genTestCallTraceSet(t *testing.T, tx kv.RwTx, to uint64) {
@@ -32,6 +33,7 @@ func genTestCallTraceSet(t *testing.T, tx kv.RwTx, to uint64) {
 }
 
 func TestCallTrace(t *testing.T) {
+	logger := log.New()
 	ctx, assert := context.Background(), assert.New(t)
 	_, tx := memdb.NewTestTx(t)
 	genTestCallTraceSet(t, tx, 30)
@@ -52,24 +54,24 @@ func TestCallTrace(t *testing.T) {
 	assert.NoError(err)
 
 	// forward 0->20
-	err = promoteCallTraces("test", tx, 0, 20, 0, time.Nanosecond, ctx.Done(), "")
+	err = promoteCallTraces("test", tx, 0, 20, 0, time.Nanosecond, ctx.Done(), "", logger)
 	assert.NoError(err)
 	assert.Equal([]uint64{6, 16}, froms().ToArray())
 	assert.Equal([]uint64{1, 11}, tos().ToArray())
 
 	// unwind 20->10
-	err = DoUnwindCallTraces("test", tx, 20, 10, ctx, "")
+	err = DoUnwindCallTraces("test", tx, 20, 10, ctx, "", logger)
 	assert.NoError(err)
 	assert.Equal([]uint64{6}, froms().ToArray())
 	assert.Equal([]uint64{1}, tos().ToArray())
 
 	// forward 10->30
-	err = promoteCallTraces("test", tx, 10, 30, 0, time.Nanosecond, ctx.Done(), "")
+	err = promoteCallTraces("test", tx, 10, 30, 0, time.Nanosecond, ctx.Done(), "", logger)
 	assert.NoError(err)
 	assert.Equal([]uint64{6, 16, 26}, froms().ToArray())
 	assert.Equal([]uint64{1, 11, 21}, tos().ToArray())
 
 	// prune 0 -> 10
-	err = pruneCallTraces(tx, "test", 10, ctx, "")
+	err = pruneCallTraces(tx, "test", 10, ctx, "", logger)
 	assert.NoError(err)
 }
