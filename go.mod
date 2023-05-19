@@ -19,7 +19,7 @@ require (
 	github.com/VictoriaMetrics/fastcache v1.12.1
 	github.com/VictoriaMetrics/metrics v1.23.1
 	github.com/anacrolix/sync v0.4.0
-	github.com/anacrolix/torrent v1.48.1-0.20230219022425-e8971ea0f1bf
+	github.com/anacrolix/torrent v1.51.1
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd/btcec/v2 v2.1.3
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
@@ -112,7 +112,7 @@ require (
 	github.com/anacrolix/envpprof v1.2.1 // indirect
 	github.com/anacrolix/generics v0.0.0-20230428105757-683593396d68 // indirect
 	github.com/anacrolix/go-libutp v1.2.0 // indirect
-	github.com/anacrolix/log v0.13.2-0.20221123232138-02e2764801c3 // indirect
+	github.com/anacrolix/log v0.13.2-0.20230518105052-6aef2c4c91f1 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
 	github.com/anacrolix/missinggo/v2 v2.7.1 // indirect
