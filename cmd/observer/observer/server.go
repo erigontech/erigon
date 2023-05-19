@@ -133,7 +133,7 @@ func (server *Server) mapNATPort(ctx context.Context, realAddr *net.UDPAddr) {
 
 	go func() {
 		defer debug.LogPanic()
-		nat.Map(server.natInterface, ctx.Done(), "udp", realAddr.Port, realAddr.Port, "ethereum discovery")
+		nat.Map(server.natInterface, ctx.Done(), "udp", realAddr.Port, realAddr.Port, "ethereum discovery", server.logger)
 	}()
 }
 

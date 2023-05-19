@@ -609,7 +609,7 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 			go func() {
 				defer debug.LogPanic()
 				defer srv.loopWG.Done()
-				nat.Map(srv.NAT, srv.quit, "udp", realaddr.Port, realaddr.Port, "ethereum discovery")
+				nat.Map(srv.NAT, srv.quit, "udp", realaddr.Port, realaddr.Port, "ethereum discovery", srv.logger)
 			}()
 		}
 	}
@@ -721,7 +721,7 @@ func (srv *Server) setupListening(ctx context.Context) error {
 			go func() {
 				defer debug.LogPanic()
 				defer srv.loopWG.Done()
-				nat.Map(srv.NAT, srv.quit, "tcp", tcp.Port, tcp.Port, "ethereum p2p")
+				nat.Map(srv.NAT, srv.quit, "tcp", tcp.Port, tcp.Port, "ethereum p2p", srv.logger)
 			}()
 		}
 	}
