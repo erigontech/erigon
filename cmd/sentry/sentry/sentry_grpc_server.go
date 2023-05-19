@@ -967,7 +967,7 @@ func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *proto_sentry.St
 		}
 
 		// Add protocol
-		if err = srv.Start(ss.ctx); err != nil {
+		if err = srv.Start(ss.ctx, ss.logger); err != nil {
 			srv.Stop()
 			return reply, fmt.Errorf("could not start server: %w", err)
 		}

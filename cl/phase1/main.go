@@ -95,7 +95,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	// Start the sentinel service
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", cfg)
-	s, err := startSentinel(cliCtx, *cfg, cpState)
+	s, err := startSentinel(cliCtx, *cfg, cpState, log.Root())
 	if err != nil {
 		log.Error("Could not start sentinel service", "err", err)
 	}
@@ -131,7 +131,7 @@ Loop:
 	return nil
 }
 
-func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, beaconState *state.BeaconState) (sentinelrpc.SentinelClient, error) {
+func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, beaconState *state.BeaconState, logger log.Logger) (sentinelrpc.SentinelClient, error) {
 	forkDigest, err := fork.ComputeForkDigest(cfg.BeaconCfg, cfg.GenesisCfg)
 	if err != nil {
 		return nil, err
@@ -150,12 +150,12 @@ func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, beaconS
 		FinalizedEpoch: beaconState.FinalizedCheckpoint().Epoch(),
 		HeadSlot:       beaconState.FinalizedCheckpoint().Epoch() * cfg.BeaconCfg.SlotsPerEpoch,
 		HeadRoot:       beaconState.FinalizedCheckpoint().BlockRoot(),
-	})
+	}, logger)
 	if err != nil {
-		log.Error("Could not start sentinel", "err", err)
+		logger.Error("Could not start sentinel", "err", err)
 		return nil, err
 	}
-	log.Info("Sentinel started", "addr", cfg.ServerAddr)
+	logger.Info("Sentinel started", "addr", cfg.ServerAddr)
 	return s, nil
 }
 

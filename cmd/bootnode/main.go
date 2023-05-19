@@ -51,7 +51,7 @@ func main() {
 	)
 	flag.Parse()
 
-	logging.SetupLogger("bootnode")
+	logger := logging.SetupLogger("bootnode")
 
 	natm, err := nat.Parse(*natdesc)
 	if err != nil {
@@ -121,7 +121,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	ln := enode.NewLocalNode(db, nodeKey)
+	ln := enode.NewLocalNode(db, nodeKey, logger)
 	cfg := discover.Config{
 		PrivateKey:  nodeKey,
 		NetRestrict: restrictList,
