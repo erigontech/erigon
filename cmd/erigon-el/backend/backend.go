@@ -846,7 +846,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	if !snConfig.NoDownloader {
 		allSnapshots.OptimisticalyReopenWithDB(s.chainDB)
 	}
-	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, transactionsV3)
+	blockReader := snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
 
 	if !snConfig.NoDownloader {
 		if snConfig.DownloaderAddr != "" {

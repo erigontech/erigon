@@ -389,7 +389,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			}()
 		}
 		onNewSnapshot()
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, ethconfig.Defaults.TransactionsV3)
+		blockReader = snapshotsync.NewBlockReader(allSnapshots, ethconfig.Defaults.TransactionsV3)
 
 		var histV3Enabled bool
 		_ = db.View(ctx, func(tx kv.Tx) error {
