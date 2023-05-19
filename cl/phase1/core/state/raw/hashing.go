@@ -130,8 +130,10 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(12): Balances
 	if b.isLeafDirty(BalancesLeafIndex) {
-		root := [32]byte{}
-		b.balances.HashSSZTo(root[:])
+		root, err := b.balances.HashSSZ()
+		if err != nil {
+			return err
+		}
 		b.updateLeaf(BalancesLeafIndex, root)
 	}
 
@@ -146,7 +148,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(14): Slashings
 	if b.isLeafDirty(SlashingsLeafIndex) {
-		root, err := state_encoding.SlashingsRoot(b.slashings[:])
+		root, err := b.slashings.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -162,7 +164,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		if b.version == clparams.Phase0Version {
 			root, err = b.previousEpochAttestations.HashSSZ()
 		} else {
-			err = b.previousEpochParticipation.HashSSZTo(root[:])
+			root, err = b.previousEpochParticipation.HashSSZ()
 		}
 		if err != nil {
 			return err
@@ -178,7 +180,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		if b.version == clparams.Phase0Version {
 			root, err = b.currentEpochAttestations.HashSSZ()
 		} else {
-			err = b.currentEpochParticipation.HashSSZTo(root[:])
+			root, err = b.currentEpochParticipation.HashSSZ()
 		}
 		if err != nil {
 			return err
@@ -224,8 +226,10 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 	// Field(21): Inactivity Scores
 	if b.isLeafDirty(InactivityScoresLeafIndex) {
-		root := [32]byte{}
-		b.inactivityScores.HashSSZTo(root[:])
+		root, err := b.inactivityScores.HashSSZ()
+		if err != nil {
+			return err
+		}
 		b.updateLeaf(InactivityScoresLeafIndex, root)
 	}
 

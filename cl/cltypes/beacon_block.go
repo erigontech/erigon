@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
@@ -61,24 +60,24 @@ type BeaconBody struct {
 	// A byte array used to customize validators' behavior
 	Graffiti []byte
 	// A list of slashing events for validators who included invalid blocks in the chain
-	ProposerSlashings *generic.ListSSZ[*ProposerSlashing]
+	ProposerSlashings *solid.ListSSZ[*ProposerSlashing]
 	// A list of slashing events for validators who included invalid attestations in the chain
-	AttesterSlashings *generic.ListSSZ[*AttesterSlashing]
+	AttesterSlashings *solid.ListSSZ[*AttesterSlashing]
 	// A list of attestations included in the block
-	Attestations *generic.ListSSZ[*solid.Attestation]
+	Attestations *solid.ListSSZ[*solid.Attestation]
 	// A list of deposits made to the Ethereum 1.0 chain
-	Deposits *generic.ListSSZ[*Deposit]
+	Deposits *solid.ListSSZ[*Deposit]
 	// A list of validators who have voluntarily exited the beacon chain
-	VoluntaryExits *generic.ListSSZ[*SignedVoluntaryExit]
+	VoluntaryExits *solid.ListSSZ[*SignedVoluntaryExit]
 	// A summary of the current state of the beacon chain
 	SyncAggregate *SyncAggregate
 	// Data related to crosslink records and executing operations on the Ethereum 2.0 chain
 	ExecutionPayload *Eth1Block
 	// Withdrawals Diffs for Execution Layer
-	ExecutionChanges *generic.ListSSZ[*SignedBLSToExecutionChange]
+	ExecutionChanges *solid.ListSSZ[*SignedBLSToExecutionChange]
 	// The commitments for beacon chain blobs
 	// With a max of 4 per block
-	BlobKzgCommitments *generic.ListSSZ[*KZGCommitment]
+	BlobKzgCommitments *solid.ListSSZ[*KZGCommitment]
 	// The version of the beacon chain
 	Version clparams.StateVersion
 }
@@ -212,28 +211,28 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 	size = int(getBeaconBlockMinimumSize(b.Version))
 
 	if b.ProposerSlashings == nil {
-		b.ProposerSlashings = generic.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
+		b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
 	}
 	if b.AttesterSlashings == nil {
-		b.AttesterSlashings = generic.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashings)
+		b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashings)
 	}
 	if b.Attestations == nil {
-		b.Attestations = generic.NewDynamicListSSZ[*solid.Attestation](MaxAttestations)
+		b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestations)
 	}
 	if b.Deposits == nil {
-		b.Deposits = generic.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
+		b.Deposits = solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
 	}
 	if b.VoluntaryExits == nil {
-		b.VoluntaryExits = generic.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
+		b.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
 	}
 	if b.ExecutionPayload == nil {
 		b.ExecutionPayload = new(Eth1Block)
 	}
 	if b.ExecutionChanges == nil {
-		b.ExecutionChanges = generic.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
+		b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
 	}
 	if b.BlobKzgCommitments == nil {
-		b.BlobKzgCommitments = generic.NewStaticListSSZ[*KZGCommitment](MaxBlobsPerBlock, 48)
+		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsPerBlock, 48)
 	}
 
 	size += b.ProposerSlashings.EncodingSizeSSZ()
@@ -265,28 +264,28 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
 	}
 	if b.ProposerSlashings == nil {
-		b.ProposerSlashings = generic.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
+		b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
 	}
 	if b.AttesterSlashings == nil {
-		b.AttesterSlashings = generic.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashings)
+		b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashings)
 	}
 	if b.Attestations == nil {
-		b.Attestations = generic.NewDynamicListSSZ[*solid.Attestation](MaxAttestations)
+		b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestations)
 	}
 	if b.Deposits == nil {
-		b.Deposits = generic.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
+		b.Deposits = solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
 	}
 	if b.VoluntaryExits == nil {
-		b.VoluntaryExits = generic.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
+		b.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
 	}
 	if b.ExecutionPayload == nil {
 		b.ExecutionPayload = new(Eth1Block)
 	}
 	if b.ExecutionChanges == nil {
-		b.ExecutionChanges = generic.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
+		b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
 	}
 	if b.BlobKzgCommitments == nil {
-		b.BlobKzgCommitments = generic.NewStaticListSSZ[*KZGCommitment](MaxBlobsPerBlock, 48)
+		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsPerBlock, 48)
 	}
 
 	// Start wildly decoding this thing

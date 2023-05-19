@@ -4,7 +4,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/state_encoding"
 )
@@ -214,11 +213,11 @@ func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {
 
 func (b *BeaconState) SetSlashingSegmentAt(index int, segment uint64) {
 	b.markLeaf(SlashingsLeafIndex)
-	b.slashings[index] = segment
+	b.slashings.Set(index, segment)
 }
 func (b *BeaconState) IncrementSlashingSegmentAt(index int, delta uint64) {
 	b.markLeaf(SlashingsLeafIndex)
-	b.slashings[index] += delta
+	b.slashings.Set(index, b.SlashingSegmentAt(index)+delta)
 }
 
 func (b *BeaconState) SetEpochParticipationForValidatorIndex(isCurrentEpoch bool, index int, flags cltypes.ParticipationFlags) {
@@ -370,15 +369,15 @@ func (b *BeaconState) AddPreviousEpochAttestation(attestation *cltypes.PendingAt
 
 func (b *BeaconState) ResetCurrentEpochAttestations() {
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
-	b.currentEpochAttestations = generic.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.beaconConfig.PreviousEpochAttestationsLength()))
+	b.currentEpochAttestations = solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.beaconConfig.PreviousEpochAttestationsLength()))
 }
 
-func (b *BeaconState) SetPreviousEpochAttestations(attestations *generic.ListSSZ[*cltypes.PendingAttestation]) {
+func (b *BeaconState) SetPreviousEpochAttestations(attestations *solid.ListSSZ[*cltypes.PendingAttestation]) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochAttestations = attestations
 }
 
 func (b *BeaconState) ResetPreviousEpochAttestations() {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
-	b.previousEpochAttestations = generic.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.beaconConfig.PreviousEpochAttestationsLength()))
+	b.previousEpochAttestations = solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.beaconConfig.PreviousEpochAttestationsLength()))
 }

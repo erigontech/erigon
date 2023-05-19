@@ -7,7 +7,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
 )
@@ -69,7 +68,7 @@ func (b *BeaconState) Eth1Data() *cltypes.Eth1Data {
 	return b.eth1Data
 }
 
-func (b *BeaconState) Eth1DataVotes() *generic.ListSSZ[*cltypes.Eth1Data] {
+func (b *BeaconState) Eth1DataVotes() *solid.ListSSZ[*cltypes.Eth1Data] {
 	return b.eth1DataVotes
 }
 
@@ -156,21 +155,12 @@ func (b *BeaconState) GetRandaoMixes(epoch uint64) [32]byte {
 	return b.randaoMixes[epoch%b.beaconConfig.EpochsPerHistoricalVector]
 }
 
-func (b *BeaconState) ForEachSlashingSegment(fn func(v uint64, idx int, total int) bool) {
-	for idx, v := range &b.slashings {
-		ok := fn(v, idx, len(b.slashings))
-		if !ok {
-			break
-		}
-	}
-}
-
-func (b *BeaconState) Slashings() [slashingsLength]uint64 {
-	return b.slashings
+func (b *BeaconState) ForEachSlashingSegment(fn func(idx int, v uint64, total int) bool) {
+	b.slashings.Range(fn)
 }
 
 func (b *BeaconState) SlashingSegmentAt(pos int) uint64 {
-	return b.slashings[pos]
+	return b.slashings.Get(pos)
 }
 
 func (b *BeaconState) EpochParticipation(currentEpoch bool) solid.BitList {
@@ -226,7 +216,7 @@ func (b *BeaconState) NextWithdrawalIndex() uint64 {
 	return b.nextWithdrawalIndex
 }
 
-func (b *BeaconState) CurrentEpochAttestations() *generic.ListSSZ[*cltypes.PendingAttestation] {
+func (b *BeaconState) CurrentEpochAttestations() *solid.ListSSZ[*cltypes.PendingAttestation] {
 	return b.currentEpochAttestations
 }
 
@@ -234,7 +224,7 @@ func (b *BeaconState) CurrentEpochAttestationsLength() int {
 	return b.currentEpochAttestations.Len()
 }
 
-func (b *BeaconState) PreviousEpochAttestations() *generic.ListSSZ[*cltypes.PendingAttestation] {
+func (b *BeaconState) PreviousEpochAttestations() *solid.ListSSZ[*cltypes.PendingAttestation] {
 	return b.previousEpochAttestations
 }
 

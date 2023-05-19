@@ -4,7 +4,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -23,7 +23,7 @@ func (b *BeaconState) UpgradeToAltair() error {
 	// Change version
 	b.SetVersion(clparams.AltairVersion)
 	// Fill in previous epoch participation from the pre state's pending attestations
-	if err := generic.RangeErr[*cltypes.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *cltypes.PendingAttestation, i2 int) error {
+	if err := solid.RangeErr[*cltypes.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *cltypes.PendingAttestation, i2 int) error {
 		flags, err := b.GetAttestationParticipationFlagIndicies(pa.Data, pa.InclusionDelay)
 		if err != nil {
 			return err

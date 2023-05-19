@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 	shuffling2 "github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
@@ -96,7 +96,7 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 		return err
 	}
 
-	if err := generic.RangeErr[*cltypes.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *cltypes.PendingAttestation, _ int) error {
+	if err := solid.RangeErr[*cltypes.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *cltypes.PendingAttestation, _ int) error {
 		slotRoot, err := b.GetBlockRootAtSlot(pa.Data.Slot())
 		if err != nil {
 			return err
@@ -142,7 +142,7 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 	if err != nil {
 		return err
 	}
-	return generic.RangeErr[*cltypes.PendingAttestation](b.CurrentEpochAttestations(), func(i1 int, pa *cltypes.PendingAttestation, _ int) error {
+	return solid.RangeErr[*cltypes.PendingAttestation](b.CurrentEpochAttestations(), func(i1 int, pa *cltypes.PendingAttestation, _ int) error {
 		slotRoot, err := b.GetBlockRootAtSlot(pa.Data.Slot())
 		if err != nil {
 			return err

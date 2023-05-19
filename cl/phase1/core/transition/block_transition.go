@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -105,7 +105,7 @@ func processOperations(state *state2.BeaconState, blockBody *cltypes.BeaconBody,
 	// Process each proposer slashing
 	var err error
 	c := h.Tag("operation", "proposer_slashings")
-	if err := generic.RangeErr[*cltypes.ProposerSlashing](blockBody.ProposerSlashings, func(index int, slashing *cltypes.ProposerSlashing, length int) error {
+	if err := solid.RangeErr[*cltypes.ProposerSlashing](blockBody.ProposerSlashings, func(index int, slashing *cltypes.ProposerSlashing, length int) error {
 		if err = ProcessProposerSlashing(state, slashing); err != nil {
 			return fmt.Errorf("ProcessProposerSlashing: %s", err)
 		}
@@ -116,7 +116,7 @@ func processOperations(state *state2.BeaconState, blockBody *cltypes.BeaconBody,
 	c.PutSince()
 
 	c = h.Tag("operation", "attester_slashings")
-	if err := generic.RangeErr[*cltypes.AttesterSlashing](blockBody.AttesterSlashings, func(index int, slashing *cltypes.AttesterSlashing, length int) error {
+	if err := solid.RangeErr[*cltypes.AttesterSlashing](blockBody.AttesterSlashings, func(index int, slashing *cltypes.AttesterSlashing, length int) error {
 		if err = ProcessAttesterSlashing(state, slashing); err != nil {
 			return fmt.Errorf("ProcessAttesterSlashing: %s", err)
 		}
@@ -139,7 +139,7 @@ func processOperations(state *state2.BeaconState, blockBody *cltypes.BeaconBody,
 
 	// Process each deposit
 	c = h.Tag("operation", "deposit")
-	if err := generic.RangeErr[*cltypes.Deposit](blockBody.Deposits, func(index int, deposit *cltypes.Deposit, length int) error {
+	if err := solid.RangeErr[*cltypes.Deposit](blockBody.Deposits, func(index int, deposit *cltypes.Deposit, length int) error {
 		if err = ProcessDeposit(state, deposit, fullValidation); err != nil {
 			return fmt.Errorf("ProcessDeposit: %s", err)
 		}
@@ -151,7 +151,7 @@ func processOperations(state *state2.BeaconState, blockBody *cltypes.BeaconBody,
 
 	// Process each voluntary exit.
 	c = h.Tag("operation", "voluntary_exit")
-	if err := generic.RangeErr[*cltypes.SignedVoluntaryExit](blockBody.VoluntaryExits, func(index int, exit *cltypes.SignedVoluntaryExit, length int) error {
+	if err := solid.RangeErr[*cltypes.SignedVoluntaryExit](blockBody.VoluntaryExits, func(index int, exit *cltypes.SignedVoluntaryExit, length int) error {
 		if err = ProcessVoluntaryExit(state, exit, fullValidation); err != nil {
 			return fmt.Errorf("ProcessVoluntaryExit: %s", err)
 		}
@@ -165,7 +165,7 @@ func processOperations(state *state2.BeaconState, blockBody *cltypes.BeaconBody,
 	}
 	// Process each execution change. this will only have entries after the capella fork.
 	c = h.Tag("operation", "execution_change")
-	if err := generic.RangeErr[*cltypes.SignedBLSToExecutionChange](blockBody.ExecutionChanges, func(index int, addressChange *cltypes.SignedBLSToExecutionChange, length int) error {
+	if err := solid.RangeErr[*cltypes.SignedBLSToExecutionChange](blockBody.ExecutionChanges, func(index int, addressChange *cltypes.SignedBLSToExecutionChange, length int) error {
 		if err := ProcessBlsToExecutionChange(state, addressChange, fullValidation); err != nil {
 			return fmt.Errorf("ProcessBlsToExecutionChange: %s", err)
 		}

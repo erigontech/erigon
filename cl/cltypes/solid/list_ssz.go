@@ -1,4 +1,4 @@
-package generic
+package solid
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

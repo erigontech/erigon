@@ -51,7 +51,7 @@ func GetTotalBalance(b *raw.BeaconState, validatorSet []uint64) (uint64, error) 
 
 // GetTotalSlashingAmount return the sum of all slashings.
 func GetTotalSlashingAmount(b *raw.BeaconState) (t uint64) {
-	b.ForEachSlashingSegment(func(v uint64, idx, total int) bool {
+	b.ForEachSlashingSegment(func(idx int, v uint64, total int) bool {
 		t += v
 		return true
 	})

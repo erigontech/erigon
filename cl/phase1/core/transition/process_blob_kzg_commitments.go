@@ -6,7 +6,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/generic"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -58,7 +58,7 @@ func txPeekBlobVersionedHashes(txBytes []byte) []libcommon.Hash {
 	return versionedHashes
 }
 
-func VerifyKzgCommitmentsAgainstTransactions(transactions *cltypes.TransactionsSSZ, kzgCommitments *generic.ListSSZ[*cltypes.KZGCommitment]) (bool, error) {
+func VerifyKzgCommitmentsAgainstTransactions(transactions *cltypes.TransactionsSSZ, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) (bool, error) {
 	allVersionedHashes := []libcommon.Hash{}
 	transactions.ForEach(func(tx []byte, idx, total int) bool {
 		if tx[0] != types.BlobTxType {

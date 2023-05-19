@@ -1,8 +1,10 @@
 package solid
 
 import (
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 type bitlist struct {
@@ -36,7 +38,7 @@ func (u *bitlist) Clear() {
 	u.l = 0
 }
 
-func (u *bitlist) CopyTo(target BitList) {
+func (u *bitlist) CopyTo(target IterableSSZ[byte]) {
 	target.Clear()
 	for i := 0; i < u.l; i++ {
 		target.Append(u.u[i])
@@ -79,7 +81,7 @@ func (u *bitlist) Cap() int {
 	return u.c
 }
 
-func (u *bitlist) HashSSZTo(xs []byte) error {
+func (u *bitlist) HashSSZ() ([32]byte, error) {
 	depth := getDepth((uint64(u.c) + 31) / 32)
 	baseRoot := [32]byte{}
 	if u.l == 0 {
@@ -87,13 +89,11 @@ func (u *bitlist) HashSSZTo(xs []byte) error {
 	} else {
 		err := u.getBaseHash(baseRoot[:], depth)
 		if err != nil {
-			return err
+			return baseRoot, err
 		}
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(u.l))
-	ans := utils.Keccak256(baseRoot[:], lengthRoot[:])
-	copy(xs, ans[:])
-	return nil
+	return utils.Keccak256(baseRoot[:], lengthRoot[:]), nil
 }
 
 func (arr *bitlist) getBaseHash(xs []byte, depth uint8) error {
@@ -120,8 +120,22 @@ func (arr *bitlist) getBaseHash(xs []byte, depth uint8) error {
 	return nil
 }
 
-func (u *bitlist) EncodeSSZ(dst []byte) []byte {
+func (u *bitlist) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	buf = append(buf, u.u[:u.l]...)
-	return buf
+	return buf, nil
+}
+
+func (u *bitlist) DecodeSSZ(dst []byte, _ int) error {
+	u.u = common.CopyBytes(u.buf)
+	u.l = len(u.buf)
+	return nil
+}
+
+func (u *bitlist) EncodingSizeSSZ() int {
+	return u.l
+}
+
+func (u *bitlist) Clone() clonable.Clonable {
+	return NewBitList(u.l, u.c)
 }

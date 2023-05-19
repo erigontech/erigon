@@ -3,6 +3,9 @@ package solid
 import (
 	"encoding/binary"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
@@ -19,7 +22,7 @@ type byteBasedUint64Slice struct {
 	hashBuf
 }
 
-func NewUint64Slice(limit int) Uint64Slice {
+func NewUint64Slice(limit int) *byteBasedUint64Slice {
 	o := &byteBasedUint64Slice{
 		c: limit,
 	}
@@ -34,24 +37,16 @@ func (arr *byteBasedUint64Slice) Clear() {
 	}
 }
 
-func (arr *byteBasedUint64Slice) CopyTo(target Uint64Slice) {
+func (arr *byteBasedUint64Slice) CopyTo(target *byteBasedUint64Slice) {
 	target.Clear()
-	switch c := target.(type) {
-	case *byteBasedUint64Slice:
-		c.c = arr.c
-		c.l = arr.l
-		if len(c.u) < len(arr.u) {
-			c.u = make([]byte, len(arr.u))
-		}
-		c.u = c.u[:len(arr.u)]
-		copy(c.u, arr.u)
-		return
-	default:
+
+	target.c = arr.c
+	target.l = arr.l
+	if len(target.u) < len(arr.u) {
+		target.u = make([]byte, len(arr.u))
 	}
-	target.Range(func(index int, value uint64, length int) bool {
-		target.Append(value)
-		return true
-	})
+	target.u = target.u[:len(arr.u)]
+	copy(target.u, arr.u)
 }
 
 func (arr *byteBasedUint64Slice) depth() int {
@@ -108,24 +103,23 @@ func (arr *byteBasedUint64Slice) Cap() int {
 	return arr.c
 }
 
-func (arr *byteBasedUint64Slice) HashSSZTo(xs []byte) error {
+func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
 	depth := getDepth((uint64(arr.c)*8 + 31) / 32)
 	baseRoot := [32]byte{}
+	var err error
 	if arr.l == 0 {
 		copy(baseRoot[:], merkle_tree.ZeroHashes[depth][:])
 	} else {
-		err := arr.getBaseHash(baseRoot[:])
+		baseRoot, err = arr.HashVectorSSZ()
 		if err != nil {
-			return err
+			return [32]byte{}, err
 		}
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(arr.l))
-	ans := utils.Keccak256(baseRoot[:], lengthRoot[:])
-	copy(xs, ans[:])
-	return nil
+	return utils.Keccak256(baseRoot[:], lengthRoot[:]), nil
 }
 
-func (arr *byteBasedUint64Slice) getBaseHash(xs []byte) error {
+func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
 	depth := getDepth((uint64(arr.c)*8 + 31) / 32)
 	offset := 32*((arr.l-1)/4) + 32
 	elements := arr.u[:offset]
@@ -138,10 +132,30 @@ func (arr *byteBasedUint64Slice) getBaseHash(xs []byte) error {
 		outputLen := len(elements) / 2
 		arr.makeBuf(outputLen)
 		if err := merkle_tree.HashByteSlice(arr.buf, elements); err != nil {
-			return err
+			return [32]byte{}, err
 		}
 		elements = arr.buf
 	}
-	copy(xs, elements[:32])
+
+	return common.BytesToHash(elements[:32]), nil
+}
+
+func (arr *byteBasedUint64Slice) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	dst = append(dst, arr.u[:arr.l*8]...)
+	return
+}
+
+func (arr *byteBasedUint64Slice) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf)%8 > 0 {
+		return ssz.ErrBadDynamicLength
+	}
+	bufferLength := len(buf) + (length.Hash - (len(buf) % length.Hash))
+	arr.u = make([]byte, bufferLength)
+	copy(arr.u, buf)
+	arr.l = len(buf) / 8
 	return nil
+}
+
+func (arr *byteBasedUint64Slice) EncodingSizeSSZ() int {
+	return arr.l * 8
 }

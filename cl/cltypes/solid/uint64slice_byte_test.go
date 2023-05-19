@@ -20,8 +20,7 @@ func TestUint64SliceBasic(t *testing.T) {
 	assert.EqualValues(t, 2, slice.Get(1))
 	assert.EqualValues(t, 1, slice.Get(2))
 
-	out := [32]byte{}
-	err := slice.HashSSZTo(out[:])
+	out, err := slice.HashListSSZ()
 	require.NoError(t, err)
 
 	nums := []uint64{3, 2, 1}

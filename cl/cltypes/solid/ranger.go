@@ -1,4 +1,4 @@
-package generic
+package solid
 
 type Ranger[T any] interface {
 	Range(func(idx int, v T, leng int) bool)
