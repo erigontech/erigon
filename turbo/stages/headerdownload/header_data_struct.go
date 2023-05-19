@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type QueueID uint8
@@ -270,6 +271,7 @@ type HeaderDownload struct {
 	unsettledHeadHeight  uint64                       // Height of unsettledForkChoice.headBlockHash
 	posDownloaderTip     common.Hash                  // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
 	badPoSHeaders        map[common.Hash]common.Hash  // Invalid Tip -> Last Valid Ancestor
+	logger               log.Logger
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -283,6 +285,7 @@ func NewHeaderDownload(
 	linkLimit int,
 	engine consensus.Engine,
 	headerReader services.HeaderAndCanonicalReader,
+	logger log.Logger,
 ) *HeaderDownload {
 	persistentLinkLimit := linkLimit / 16
 	hd := &HeaderDownload{
@@ -303,6 +306,7 @@ func NewHeaderDownload(
 		ShutdownCh:         make(chan struct{}),
 		headerReader:       headerReader,
 		badPoSHeaders:      make(map[common.Hash]common.Hash),
+		logger:             logger,
 	}
 	heap.Init(&hd.persistedLinkQueue)
 	heap.Init(&hd.linkQueue)
