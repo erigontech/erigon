@@ -174,7 +174,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	require.True(ok)
 	require.Equal(int(seg.ranges.to), 1_000_000)
 
-	seg, ok = view.TxsSegment(1_000_000)
+	_, ok = view.TxsSegment(1_000_000)
 	require.False(ok)
 
 	// Erigon may create new snapshots by itself - with high bigger than hardcoded ExpectedBlocks
