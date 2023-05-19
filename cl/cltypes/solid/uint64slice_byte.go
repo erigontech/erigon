@@ -141,7 +141,7 @@ func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
 }
 
 func (arr *byteBasedUint64Slice) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	dst = append(dst, arr.u[:arr.l*8]...)
+	dst = append(buf, arr.u[:arr.l*8]...)
 	return
 }
 

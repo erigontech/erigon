@@ -91,7 +91,6 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	dst = append(dst, ssz.Uint64SSZ(b.genesisTime)...)
 	dst = append(dst, b.genesisValidatorsRoot[:]...)
 	dst = append(dst, ssz.Uint64SSZ(b.slot)...)
-
 	if dst, err = b.fork.EncodeSSZ(dst); err != nil {
 		return nil, err
 	}
@@ -132,6 +131,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	for _, mix := range &b.randaoMixes {
 		dst = append(dst, mix[:]...)
 	}
+	fmt.Println(dst[:10])
 
 	if dst, err = b.slashings.EncodeSSZ(dst); err != nil {
 		return nil, err

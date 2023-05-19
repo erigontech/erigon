@@ -2,8 +2,9 @@ package state_test
 
 import (
 	_ "embed"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -41,7 +42,7 @@ func TestBeaconStatePhase0EncodingDecoding(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash(root), libcommon.HexToHash("0x5fd0bc1a74028b598f2eb0190a25e58896b26d4aad24fa9cb7672e6114e01446"))
 	// encoding it back
-	dec, err := state.EncodeSSZ(nil)
+	dec, err := state.EncodeSSZ(make([]byte, 0))
 	require.NoError(t, err)
 	require.Equal(t, dec, decodedSSZ)
 }

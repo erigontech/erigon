@@ -69,6 +69,8 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		previousEpochParticipation: solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
 		currentEpochParticipation:  solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
 		slashings:                  solid.NewUint64VectorSSZ(slashingsLength),
+		currentEpochAttestations:   solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(cfg.CurrentEpochAttestationsLength())),
+		previousEpochAttestations:  solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(cfg.PreviousEpochAttestationsLength())),
 	}
 	state.init()
 	return state
