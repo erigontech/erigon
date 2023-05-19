@@ -628,7 +628,7 @@ func schedulePoSDownload(
 	cfg.hd.SetPOSSync(true) // This needs to be called after SetHeaderToDownloadPOS because SetHeaderToDownloadPOS sets `posAnchor` member field which is used by ProcessHeadersPOS
 
 	//nolint
-	headerCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	headerCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	// headerCollector is closed in saveDownloadedPoSHeaders, thus nolint
 
 	cfg.hd.SetHeadersCollector(headerCollector)

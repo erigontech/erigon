@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestWebsocketClientHeaders(t *testing.T) {
@@ -51,9 +52,10 @@ func TestWebsocketClientHeaders(t *testing.T) {
 func TestWebsocketOriginCheck(t *testing.T) {
 	t.Parallel()
 
+	logger := log.New()
 	var (
 		srv     = newTestServer()
-		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"http://example.com"}, nil, false))
+		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"http://example.com"}, nil, false, logger))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)
 	defer srv.Stop()
@@ -80,10 +82,11 @@ func TestWebsocketOriginCheck(t *testing.T) {
 // This test checks whether calls exceeding the request size limit are rejected.
 func TestWebsocketLargeCall(t *testing.T) {
 	t.Parallel()
+	logger := log.New()
 
 	var (
 		srv     = newTestServer()
-		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false))
+		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)
 	defer srv.Stop()
@@ -162,9 +165,10 @@ func TestClientWebsocketPing(t *testing.T) {
 
 // This checks that the websocket transport can deal with large messages.
 func TestClientWebsocketLargeMessage(t *testing.T) {
+	logger := log.New()
 	var (
 		srv     = NewServer(50, false /* traceRequests */, true)
-		httpsrv = httptest.NewServer(srv.WebsocketHandler(nil, nil, false))
+		httpsrv = httptest.NewServer(srv.WebsocketHandler(nil, nil, false, logger))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)
 	defer srv.Stop()

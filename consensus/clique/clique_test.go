@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // This test case is a repro of an annoying bug that took us forever to catch.
@@ -47,7 +48,7 @@ func TestReimportMirroredState(t *testing.T) {
 		cliqueDB = memdb.NewTestDB(t)
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr     = crypto.PubkeyToAddress(key.PublicKey)
-		engine   = clique.New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB)
+		engine   = clique.New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB, log.New())
 		signer   = types.LatestSignerForChainID(nil)
 	)
 	genspec := &types.Genesis{

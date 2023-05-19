@@ -3,9 +3,10 @@ package core
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"io"
 	"net/http"
+
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/utils"

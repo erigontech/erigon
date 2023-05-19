@@ -76,6 +76,8 @@ func StageLoop(
 	updateHead func(ctx context.Context, headHeight, headTime uint64, hash libcommon.Hash, td *uint256.Int),
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
+	logger log.Logger,
+	blockSnapshots *snapshotsync.RoSnapshots,
 ) {
 	defer close(waitForDone)
 	initialCycle := true
@@ -91,7 +93,7 @@ func StageLoop(
 		}
 
 		// Estimate the current top height seen from the peer
-		headBlockHash, err := StageLoopStep(ctx, chainConfig, db, sync, notifications, initialCycle, updateHead)
+		headBlockHash, err := StageLoopStep(ctx, chainConfig, db, sync, notifications, initialCycle, updateHead, logger, blockSnapshots)
 
 		SendPayloadStatus(hd, headBlockHash, err)
 
@@ -126,6 +128,8 @@ func StageLoop(
 
 func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, sync *stagedsync.Sync, notifications *shards.Notifications, initialCycle bool,
 	updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int),
+	logger log.Logger,
+	blockSnapshots *snapshotsync.RoSnapshots,
 ) (headBlockHash libcommon.Hash, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -133,21 +137,41 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	var finishProgressBefore uint64
+	var finishProgressBefore, headersProgressBefore uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
-		finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
-		if err != nil {
+		if finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
+			return err
+		}
+		if headersProgressBefore, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
 			return err
 		}
 		return nil
 	}); err != nil {
 		return headBlockHash, err
 	}
-	canRunCycleInOneTransaction := !initialCycle
+
+	// Sync from scratch must be able Commit partial progress
+	// In all other cases - process blocks batch in 1 RwTx
+	blocksInSnapshots := uint64(0)
+	if blockSnapshots != nil {
+		blocksInSnapshots = blockSnapshots.BlocksAvailable()
+	}
+	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
+	isSynced := finishProgressBefore > 0 && finishProgressBefore > blocksInSnapshots && finishProgressBefore == headersProgressBefore
+	canRunCycleInOneTransaction := true
+	if initialCycle && !isSynced {
+		canRunCycleInOneTransaction = false
+	}
+
+	// Main steps:
+	// - process new blocks
+	// - commit(no_sync). NoSync - making data available for readers as-soon-as-possible. Can
+	//       send notifications Now and do write to disks Later.
+	// - Send Notifications: about new blocks, new receipts, state changes, etc...
+	// - Prune(limited time)+Commit(sync). Write to disk happening here.
 
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
-		// -- Process new blocks + commit(no_sync)
 		tx, err = db.BeginRwNosync(ctx)
 		if err != nil {
 			return headBlockHash, err
@@ -158,7 +182,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 	if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction {
 		stateVersion, err := rawdb.GetStateVersion(tx)
 		if err != nil {
-			log.Error("problem reading plain state version", "err", err)
+			logger.Error("problem reading plain state version", "err", err)
 		}
 		notifications.Accumulator.Reset(stateVersion)
 	}
@@ -209,12 +233,12 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 		notifications.Accumulator.SetStateID(plainStateVersion)
 
 		if canRunCycleInOneTransaction && (head != finishProgressBefore || commitTime > 500*time.Millisecond) {
-			log.Info("Commit cycle", "in", commitTime)
+			logger.Info("Commit cycle", "in", commitTime)
 		}
 		if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
-			log.Info("Timings (slower than 50ms)", logCtx...)
+			logger.Info("Timings (slower than 50ms)", logCtx...)
 			if len(tableSizes) > 0 {
-				log.Info("Tables", tableSizes...)
+				logger.Info("Tables", tableSizes...)
 			}
 		}
 
@@ -227,7 +251,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 		}
 
 		if notifications != nil && notifications.Events != nil {
-			if err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx); err != nil {
+			if err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx, logger); err != nil {
 				return nil
 			}
 		}
@@ -355,10 +379,11 @@ func NewDefaultStages(ctx context.Context,
 	agg *state.AggregatorV3,
 	forkValidator *engineapi.ForkValidator,
 	engine consensus.Engine,
+	logger log.Logger,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots, cfg.TransactionsV3)
-	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events)
+	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events, logger)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.

@@ -33,7 +33,7 @@ func MiningStages(
 				return SpawnMiningCreateBlockStage(s, tx, createBlockCfg, ctx.Done(), logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
 			ID:          stages.MiningExecution,
@@ -42,7 +42,7 @@ func MiningStages(
 				return SpawnMiningExecStage(s, tx, execCfg, ctx.Done(), logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
 			ID:          stages.HashState,
@@ -51,7 +51,7 @@ func MiningStages(
 				return SpawnHashStateStage(s, tx, hashStateCfg, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
 			ID:          stages.IntermediateHashes,
@@ -65,7 +65,7 @@ func MiningStages(
 				return nil
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
 			ID:          stages.MiningFinish,
@@ -74,7 +74,7 @@ func MiningStages(
 				return SpawnMiningFinishStage(s, tx, finish, ctx.Done(), logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 	}
 }

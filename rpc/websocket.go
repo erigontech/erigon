@@ -46,13 +46,13 @@ var wsBufferPool = new(sync.Pool)
 //
 // allowedOrigins should be a comma-separated list of allowed origin URLs.
 // To allow connections with any origin, pass "*".
-func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, compression bool) http.Handler {
+func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, compression bool, logger log.Logger) http.Handler {
 	upgrader := websocket.Upgrader{
 		EnableCompression: compression,
 		ReadBufferSize:    wsReadBuffer,
 		WriteBufferSize:   wsWriteBuffer,
 		WriteBufferPool:   wsBufferPool,
-		CheckOrigin:       wsHandshakeValidator(allowedOrigins),
+		CheckOrigin:       wsHandshakeValidator(allowedOrigins, logger),
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if jwtSecret != nil && !CheckJwtSecret(w, r, jwtSecret) {
@@ -60,7 +60,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Warn("WebSocket upgrade failed", "err", err)
+			logger.Warn("WebSocket upgrade failed", "err", err)
 			return
 		}
 		codec := newWebsocketCodec(conn)
@@ -71,7 +71,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 // wsHandshakeValidator returns a handler that verifies the origin during the
 // websocket upgrade process. When a '*' is specified as an allowed origins all
 // connections are accepted.
-func wsHandshakeValidator(allowedOrigins []string) func(*http.Request) bool {
+func wsHandshakeValidator(allowedOrigins []string, logger log.Logger) func(*http.Request) bool {
 	origins := mapset.NewSet()
 	allowAllOrigins := false
 
@@ -90,7 +90,7 @@ func wsHandshakeValidator(allowedOrigins []string) func(*http.Request) bool {
 			origins.Add("http://" + hostname)
 		}
 	}
-	log.Trace(fmt.Sprintf("Allowed origin(s) for WS RPC interface %v", origins.ToSlice()))
+	logger.Trace(fmt.Sprintf("Allowed origin(s) for WS RPC interface %v", origins.ToSlice()))
 
 	f := func(req *http.Request) bool {
 		// Skip origin verification if no Origin header is present. The origin check
@@ -102,10 +102,10 @@ func wsHandshakeValidator(allowedOrigins []string) func(*http.Request) bool {
 		}
 		// Verify origin against whitelist.
 		origin := strings.ToLower(req.Header.Get("Origin"))
-		if allowAllOrigins || originIsAllowed(origins, origin) {
+		if allowAllOrigins || originIsAllowed(origins, origin, logger) {
 			return true
 		}
-		log.Warn("Rejected WebSocket connection", "origin", origin)
+		logger.Warn("Rejected WebSocket connection", "origin", origin)
 		return false
 	}
 
@@ -125,17 +125,17 @@ func (e wsHandshakeError) Error() string {
 	return s
 }
 
-func originIsAllowed(allowedOrigins mapset.Set, browserOrigin string) bool {
+func originIsAllowed(allowedOrigins mapset.Set, browserOrigin string, logger log.Logger) bool {
 	it := allowedOrigins.Iterator()
 	for origin := range it.C {
-		if ruleAllowsOrigin(origin.(string), browserOrigin) {
+		if ruleAllowsOrigin(origin.(string), browserOrigin, logger) {
 			return true
 		}
 	}
 	return false
 }
 
-func ruleAllowsOrigin(allowedOrigin string, browserOrigin string) bool {
+func ruleAllowsOrigin(allowedOrigin string, browserOrigin string, logger log.Logger) bool {
 	var (
 		allowedScheme, allowedHostname, allowedPort string
 		browserScheme, browserHostname, browserPort string
@@ -143,12 +143,12 @@ func ruleAllowsOrigin(allowedOrigin string, browserOrigin string) bool {
 	)
 	allowedScheme, allowedHostname, allowedPort, err = parseOriginURL(allowedOrigin)
 	if err != nil {
-		log.Warn("Error parsing allowed origin specification", "spec", allowedOrigin, "err", err)
+		logger.Warn("Error parsing allowed origin specification", "spec", allowedOrigin, "err", err)
 		return false
 	}
 	browserScheme, browserHostname, browserPort, err = parseOriginURL(browserOrigin)
 	if err != nil {
-		log.Warn("Error parsing browser 'Origin' field", "Origin", browserOrigin, "err", err)
+		logger.Warn("Error parsing browser 'Origin' field", "Origin", browserOrigin, "err", err)
 		return false
 	}
 	if allowedScheme != "" && allowedScheme != browserScheme {

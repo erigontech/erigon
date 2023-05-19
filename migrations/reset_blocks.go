@@ -20,7 +20,7 @@ import (
 
 var resetBlocks4 = Migration{
 	Name: "reset_blocks_4",
-	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback) (err error) {
+	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			return err
@@ -43,7 +43,7 @@ var resetBlocks4 = Migration{
 			Enabled:    true,
 			KeepBlocks: true,
 			Produce:    false,
-		}, dirs.Snap)
+		}, dirs.Snap, logger)
 		snaps.ReopenFolder()
 		var lastFound bool
 		var lastBlockNum, lastBaseTxNum, lastAmount uint64
@@ -95,7 +95,7 @@ var resetBlocks4 = Migration{
 				continue
 			}
 			if lastBaseTxNum+lastAmount+1 != baseTxId {
-				log.Info("Fix required, last block in seg files", "height", lastBlockNum, "baseTxNum", lastBaseTxNum, "txAmount", lastAmount, "first txId in DB", baseTxId, "expected", lastBaseTxNum+lastAmount+1)
+				logger.Info("Fix required, last block in seg files", "height", lastBlockNum, "baseTxNum", lastBaseTxNum, "txAmount", lastAmount, "first txId in DB", baseTxId, "expected", lastBaseTxNum+lastAmount+1)
 				fixNeeded = true
 			}
 		}
@@ -113,7 +113,7 @@ var resetBlocks4 = Migration{
 		}
 
 		cc := tool.ChainConfig(tx)
-		if err := rawdbreset.ResetBlocks(tx, db, nil, nil, nil, dirs, *cc, nil); err != nil {
+		if err := rawdbreset.ResetBlocks(tx, db, nil, nil, nil, dirs, *cc, nil, logger); err != nil {
 			return err
 		}
 

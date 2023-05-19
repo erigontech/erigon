@@ -47,9 +47,10 @@ type StateV3 struct {
 	tmpdir              string
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
+	logger              log.Logger
 }
 
-func NewStateV3(tmpdir string) *StateV3 {
+func NewStateV3(tmpdir string, logger log.Logger) *StateV3 {
 	rs := &StateV3{
 		tmpdir:         tmpdir,
 		triggers:       map[uint64]*exec22.TxTask{},
@@ -62,6 +63,7 @@ func NewStateV3(tmpdir string) *StateV3 {
 
 		applyPrevAccountBuf: make([]byte, 256),
 		addrIncBuf:          make([]byte, 20+8),
+		logger:              logger,
 	}
 	return rs
 }
@@ -138,7 +140,7 @@ func (rs *StateV3) get(table string, key []byte) (v []byte, ok bool) {
 }
 
 func (rs *StateV3) flushMap(ctx context.Context, rwTx kv.RwTx, table string, m map[string][]byte, logPrefix string, logEvery *time.Ticker) error {
-	collector := etl.NewCollector(logPrefix, "", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collector := etl.NewCollector(logPrefix, "", etl.NewSortableBuffer(etl.BufferOptimalSize), rs.logger)
 	defer collector.Close()
 
 	var count int
@@ -152,7 +154,7 @@ func (rs *StateV3) flushMap(ctx context.Context, rwTx kv.RwTx, table string, m m
 		default:
 		case <-logEvery.C:
 			progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, float64(total)/1_000_000)
-			log.Info("Write to db", "progress", progress, "current table", table)
+			rs.logger.Info("Write to db", "progress", progress, "current table", table)
 			rwTx.CollectMetrics()
 		}
 	}
@@ -181,7 +183,7 @@ func (rs *StateV3) flushBtree(ctx context.Context, rwTx kv.RwTx, table string, m
 
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_prefix", hex.EncodeToString([]byte(iter.Key())[:4]))
+			rs.logger.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_prefix", hex.EncodeToString([]byte(iter.Key())[:4]))
 		case <-ctx.Done():
 			return ctx.Err()
 		default:

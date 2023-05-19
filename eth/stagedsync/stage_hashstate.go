@@ -80,7 +80,7 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 		logger.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
-		if err := PromoteHashedStateCleanly(logPrefix, tx, cfg, ctx); err != nil {
+		if err := PromoteHashedStateCleanly(logPrefix, tx, cfg, ctx, logger); err != nil {
 			return err
 		}
 	} else {
@@ -101,7 +101,7 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 	return nil
 }
 
-func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context) (err error) {
+func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, logger log.Logger) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -112,7 +112,7 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashSta
 	}
 
 	logPrefix := u.LogPrefix()
-	if err = unwindHashStateStageImpl(logPrefix, u, s, tx, cfg, ctx); err != nil {
+	if err = unwindHashStateStageImpl(logPrefix, u, s, tx, cfg, ctx, logger); err != nil {
 		return err
 	}
 	if err = u.Done(tx); err != nil {
@@ -126,10 +126,10 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashSta
 	return nil
 }
 
-func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context) error {
+func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, logger log.Logger) error {
 	// Currently it does not require unwinding because it does not create any Intermediate Hash records
 	// and recomputes the state root from scratch
-	prom := NewPromoter(tx, cfg.dirs, ctx)
+	prom := NewPromoter(tx, cfg.dirs, ctx, logger)
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
 		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, true); err != nil {
@@ -155,13 +155,14 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 	return nil
 }
 
-func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, ctx context.Context) error {
+func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, logger log.Logger) error {
 	err := promotePlainState(
 		logPrefix,
 		cfg.db,
 		tx,
 		cfg.dirs.Tmp,
 		ctx,
+		logger,
 	)
 	if err != nil {
 		return err
@@ -184,6 +185,7 @@ func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, c
 		etl.TransformArgs{
 			Quit: ctx.Done(),
 		},
+		logger,
 	)
 }
 
@@ -193,11 +195,12 @@ func promotePlainState(
 	tx kv.RwTx,
 	tmpdir string,
 	ctx context.Context,
+	logger log.Logger,
 ) error {
-	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer accCollector.Close()
 	accCollector.LogLvl(log.LvlTrace)
-	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer storageCollector.Close()
 	storageCollector.LogLvl(log.LvlTrace)
 
@@ -223,7 +226,7 @@ func promotePlainState(
 		g.Go(func() error { return collectChan(ctx, out, collect) })
 		g.Go(func() error { return parallelWarmup(ctx, db, kv.PlainState, 2) })
 
-		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
+		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix, logger); err != nil {
 			// if ctx canceled, then maybe it's because of error in errgroup
 			//
 			// errgroup doesn't play with pattern where some 1 goroutine-producer is outside of errgroup
@@ -252,7 +255,7 @@ func promotePlainState(
 
 type pair struct{ k, v []byte }
 
-func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pair, logPrefix string) error {
+func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pair, logPrefix string, logger log.Logger) error {
 	defer close(in)
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -267,7 +270,7 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current_prefix", hex.EncodeToString(k[:4]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+			logger.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current_prefix", hex.EncodeToString(k[:4]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		default:
 		}
 		return nil
@@ -393,12 +396,13 @@ func (l *OldestAppearedLoad) LoadFunc(k, v []byte, table etl.CurrentTableReader,
 	return l.innerLoadFunc(k, v, table, next)
 }
 
-func NewPromoter(db kv.RwTx, dirs datadir.Dirs, ctx context.Context) *Promoter {
+func NewPromoter(db kv.RwTx, dirs datadir.Dirs, ctx context.Context, logger log.Logger) *Promoter {
 	return &Promoter{
 		tx:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
 		dirs:             dirs,
 		ctx:              ctx,
+		logger:           logger,
 	}
 }
 
@@ -407,6 +411,7 @@ type Promoter struct {
 	ChangeSetBufSize uint64
 	dirs             datadir.Dirs
 	ctx              context.Context
+	logger           log.Logger
 }
 
 func getExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
@@ -551,9 +556,9 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 	}
 }
 
-func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3, from, to uint64, storage bool, logger log.Logger) error {
+func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3, from, to uint64, storage bool) error {
 	if to > from+16 {
-		logger.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "storage", storage)
+		p.logger.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "storage", storage)
 	}
 
 	txnFrom, err := rawdbv3.TxNums.Min(p.tx, from+1)
@@ -561,7 +566,7 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 		return err
 	}
 	txnTo := uint64(math.MaxUint64)
-	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), p.logger)
 	defer collector.Close()
 
 	if storage {
@@ -608,7 +613,7 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 		return nil
 	}
 
-	codeCollector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	codeCollector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), p.logger)
 	defer codeCollector.Close()
 
 	it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
@@ -669,7 +674,7 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 	}
 	return nil
 }
-func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes bool, logger log.Logger) error {
+func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes bool) error {
 	var changeSetBucket string
 	if storage {
 		changeSetBucket = kv.StorageChangeSet
@@ -677,7 +682,7 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 		changeSetBucket = kv.AccountChangeSet
 	}
 	if to > from+16 {
-		logger.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
+		p.logger.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
 	}
 
 	startkey := hexutility.EncodeTs(from + 1)
@@ -709,6 +714,7 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 			ExtractStartKey: startkey,
 			Quit:            p.ctx.Done(),
 		},
+		p.logger,
 	); err != nil {
 		return err
 	}
@@ -717,14 +723,14 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 }
 
 func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, unwindFrom, unwindTo uint64, storage, codes bool) error {
-	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
+	p.logger.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
 
 	txnFrom, err := rawdbv3.TxNums.Min(p.tx, unwindTo+1)
 	if err != nil {
 		return err
 	}
 	txnTo := uint64(math.MaxUint64)
-	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), p.logger)
 	defer collector.Close()
 
 	acc := accounts.NewAccount()
@@ -848,7 +854,7 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 	from := s.BlockNumber
 	to := u.UnwindPoint
 
-	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", from, "to", to, "storage", storage, "codes", codes)
+	p.logger.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", from, "to", to, "storage", storage, "codes", codes)
 
 	startkey := hexutility.EncodeTs(to + 1)
 
@@ -888,29 +894,30 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 				return []interface{}{"progress", etl.ProgressFromKey(k) + 50} // loading is the second stage, from 50..100
 			},
 		},
+		p.logger,
 	)
 }
 
 func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, logger log.Logger) error {
-	prom := NewPromoter(tx, cfg.dirs, ctx)
+	prom := NewPromoter(tx, cfg.dirs, ctx, logger)
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
-		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, false, logger); err != nil {
+		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, false); err != nil {
 			return err
 		}
-		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, true, logger); err != nil {
+		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, true); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	if err := prom.Promote(logPrefix, from, to, false, true, logger); err != nil {
+	if err := prom.Promote(logPrefix, from, to, false, true); err != nil {
 		return err
 	}
-	if err := prom.Promote(logPrefix, from, to, false, false, logger); err != nil {
+	if err := prom.Promote(logPrefix, from, to, false, false); err != nil {
 		return err
 	}
-	if err := prom.Promote(logPrefix, from, to, true, false, logger); err != nil {
+	if err := prom.Promote(logPrefix, from, to, true, false); err != nil {
 		return err
 	}
 	return nil

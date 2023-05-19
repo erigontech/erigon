@@ -88,5 +88,6 @@ func (h *HandShaker) ValidatePeer(id peer.ID) bool {
 	if err != nil {
 		return false
 	}
+
 	return responseStatus.ForkDigest == forkDigest
 }

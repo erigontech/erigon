@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"sync"
-
 	"os"
+	dbg "runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/commands"
@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/node"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/params"
@@ -25,6 +26,15 @@ var DataDirFlag = flags.DirectoryFlag{
 	Usage:    "Data directory for the devnet",
 	Value:    flags.DirectoryString(""),
 	Required: true,
+}
+
+type PanicHandler struct {
+}
+
+func (ph PanicHandler) Log(r *log.Record) error {
+	fmt.Printf("Stack: %s\n", dbg.Stack())
+	os.Exit(1)
+	return nil
 }
 
 func main() {
@@ -52,7 +62,11 @@ func main() {
 
 func action(ctx *cli.Context) error {
 	dataDir := ctx.String("datadir")
-	logger := logging.SetupLoggerCtx("devnet", ctx, true /* rootLogger */)
+	logger := logging.SetupLoggerCtx("devnet", ctx, false /* rootLogger */)
+
+	// Make root logger fail
+	//log.Root().SetHandler(PanicHandler{})
+
 	// clear all the dev files
 	if err := devnetutils.ClearDevDB(dataDir, logger); err != nil {
 		return err

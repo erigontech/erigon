@@ -7,7 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	eth2_shuffle "github.com/protolambda/eth2-shuffle"
+	"github.com/ledgerwatch/erigon/common/eth2shuffle"
 )
 
 func ComputeShuffledIndex(conf *clparams.BeaconChainConfig, ind, ind_count uint64, seed [32]byte, preInputs [][32]byte, hashFunc utils.HashFunc) (uint64, error) {
@@ -73,6 +73,6 @@ func ComputeShuffledIndicies(beaconConfig *clparams.BeaconChainConfig, mixes []c
 		hashed := hashFunc(data)
 		return hashed[:]
 	}
-	eth2_shuffle.UnshuffleList(eth2ShuffleHashFunc, shuffledIndicies, uint8(beaconConfig.ShuffleRoundCount), seed)
+	eth2shuffle.UnshuffleList(eth2ShuffleHashFunc, shuffledIndicies, uint8(beaconConfig.ShuffleRoundCount), seed)
 	return shuffledIndicies
 }

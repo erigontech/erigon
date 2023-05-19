@@ -107,7 +107,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(9): Eth1DataVotes
 	if b.isLeafDirty(Eth1DataVotesLeafIndex) {
-		root, err := merkle_tree.ListObjectSSZRoot(b.eth1DataVotes, maxEth1Votes)
+		root, err := merkle_tree.ListObjectSSZRoot(b.eth1DataVotes, b.beaconConfig.Eth1DataVotesLength())
 		if err != nil {
 			return err
 		}

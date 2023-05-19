@@ -78,14 +78,14 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 // It then processes the response by iterating over the blocks in reverse order and calling a provided callback function onNewBlock on each block.
 // If the callback returns an error or signals that the download should be finished, the function will exit.
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
-func (b *BackwardBeaconDownloader) RequestMore() {
+func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) {
 	count := uint64(64)
 	start := b.slotToDownload - count + 1
 	// Overflow? round to 0.
 	if start > b.slotToDownload {
 		start = 0
 	}
-	responses, _, err := b.rpc.SendBeaconBlocksByRangeReq(start, count)
+	responses, _, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
 	if err != nil {
 		return
 	}

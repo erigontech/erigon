@@ -31,7 +31,7 @@ func TestInserter1(t *testing.T) {
 	}
 	db := memdb.NewTestDB(t)
 	defer db.Close()
-	_, genesis, err := core.CommitGenesisBlock(db, gspec, "")
+	_, genesis, err := core.CommitGenesisBlock(db, gspec, "", m.Log)
 	if err != nil {
 		t.Fatal(err)
 	}

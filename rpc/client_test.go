@@ -502,13 +502,14 @@ func TestClientHTTP(t *testing.T) {
 }
 
 func TestClientReconnect(t *testing.T) {
+	logger := log.New()
 	startServer := func(addr string) (*Server, net.Listener) {
 		srv := newTestServer()
 		l, err := net.Listen("tcp", addr)
 		if err != nil {
 			t.Fatal("can't listen:", err)
 		}
-		go http.Serve(l, srv.WebsocketHandler([]string{"*"}, nil, false))
+		go http.Serve(l, srv.WebsocketHandler([]string{"*"}, nil, false, logger))
 		return srv, l
 	}
 
@@ -569,11 +570,12 @@ func TestClientReconnect(t *testing.T) {
 }
 
 func httpTestClient(srv *Server, transport string, fl *flakeyListener) (*Client, *httptest.Server) {
+	logger := log.New()
 	// Create the HTTP server.
 	var hs *httptest.Server
 	switch transport {
 	case "ws":
-		hs = httptest.NewUnstartedServer(srv.WebsocketHandler([]string{"*"}, nil, false))
+		hs = httptest.NewUnstartedServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
 	case "http":
 		hs = httptest.NewUnstartedServer(srv)
 	default:
