@@ -562,13 +562,13 @@ func extractBodies(datadir string) error {
 		}
 		return nil
 	})
-	if _, err := snaps.ViewTxs(snaps.BlocksAvailable(), func(sn *snapshotsync.TxnSegment) error {
-		lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
-		fmt.Printf("txTxnID = %d\n", lastTxnID)
-		return nil
-	}); err != nil {
+	br := snapshotsync.NewBlockReader(snaps, false)
+	lastTxnID, _, err := br.LastTxNumInSnapshot(snaps.BlocksAvailable())
+	if err != nil {
 		return err
 	}
+	fmt.Printf("txTxnID = %d\n", lastTxnID)
+
 	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
 	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
