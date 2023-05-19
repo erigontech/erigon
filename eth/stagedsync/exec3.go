@@ -243,7 +243,7 @@ func ExecV3(ctx context.Context,
 
 	// MA setio
 	doms := cfg.agg.SharedDomains()
-	rs := state.NewStateV3(cfg.dirs.Tmp, doms)
+	rs := state.NewStateV3(doms)
 
 	//_, reader := state.WrapStateIO(doms)
 	//_ = ssw
@@ -426,9 +426,9 @@ func ExecV3(ctx context.Context,
 
 						t1 = time.Since(commitStart)
 						tt := time.Now()
-						if err := rs.Flush(ctx, tx, logPrefix, logEvery); err != nil {
-							return err
-						}
+						//if err := rs.Flush(ctx, tx, logPrefix, logEvery); err != nil {
+						//	return err
+						//}
 						t2 = time.Since(tt)
 
 						tt = time.Now()
@@ -469,9 +469,9 @@ func ExecV3(ctx context.Context,
 					log.Info("Committed", "time", time.Since(commitStart), "drain", t0, "drain_and_lock", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				}
 			}
-			if err = rs.Flush(ctx, tx, logPrefix, logEvery); err != nil {
-				return err
-			}
+			//if err = rs.Flush(ctx, tx, logPrefix, logEvery); err != nil {
+			//	return err
+			//}
 			if err = agg.Flush(ctx, tx); err != nil {
 				return err
 			}
@@ -711,9 +711,9 @@ Loop:
 				if err := func() error {
 					t1 = time.Since(commitStart)
 					tt := time.Now()
-					if err := rs.Flush(ctx, applyTx, logPrefix, logEvery); err != nil {
-						return err
-					}
+					//if err := rs.Flush(ctx, applyTx, logPrefix, logEvery); err != nil {
+					//	return err
+					//}
 					t2 = time.Since(tt)
 
 					tt = time.Now()
@@ -724,9 +724,9 @@ Loop:
 					if !bytes.Equal(rh, header.Root.Bytes()) {
 						return fmt.Errorf("root hash mismatch: %x != %x, bn=%d", rh, header.Root.Bytes(), blockNum)
 					}
-					if err := agg.Flush(ctx, applyTx); err != nil {
-						return err
-					}
+					//if err := agg.Flush(ctx, applyTx); err != nil {
+					//	return err
+					//}
 					t3 = time.Since(tt)
 
 					if err = execStage.Update(applyTx, outputBlockNum.Get()); err != nil {
@@ -762,9 +762,9 @@ Loop:
 		}
 		waitWorkers()
 	} else {
-		if err = rs.Flush(ctx, applyTx, logPrefix, logEvery); err != nil {
-			return err
-		}
+		//if err = rs.Flush(ctx, applyTx, logPrefix, logEvery); err != nil {
+		//	return err
+		//}
 
 		if err = agg.Flush(ctx, applyTx); err != nil {
 			return err

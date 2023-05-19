@@ -448,6 +448,8 @@ github.com/ledgerwatch/erigon-lib v0.0.0-20230513081853-766ef3e2dd23 h1:P+peyoYs
 github.com/ledgerwatch/erigon-lib v0.0.0-20230513081853-766ef3e2dd23/go.mod h1:sHCMKi2OsgWSyPLdsXJFAWW1uvw6crUmu1+R82XWhOU=
 github.com/ledgerwatch/erigon-lib v0.0.0-20230516055801-48f4533d818f h1:FBY78eWRhhSFzXHqhf3zNJ6w/QgGvbhW6S2UJbWXhTU=
 github.com/ledgerwatch/erigon-lib v0.0.0-20230516055801-48f4533d818f/go.mod h1:sHCMKi2OsgWSyPLdsXJFAWW1uvw6crUmu1+R82XWhOU=
+github.com/ledgerwatch/erigon-lib v0.0.0-20230519145707-686b7dbd8191 h1:zVTwcBc2LbKGcbDwwi0ghWhMDel+agD86qpwrDa/1og=
+github.com/ledgerwatch/erigon-lib v0.0.0-20230519145707-686b7dbd8191/go.mod h1:sHCMKi2OsgWSyPLdsXJFAWW1uvw6crUmu1+R82XWhOU=
 github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230404044759-5dec854ce336 h1:Yxmt4Wyd0RCLr7UJJAl0ApCP/f5qkWfvHfgPbnI8ghM=
 github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230404044759-5dec854ce336/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
 github.com/ledgerwatch/interfaces v0.0.0-20230506191109-292e4ca4d85f h1:DYvoCnEExrvyYC+3/35xfCvOWmQUsMMVHGXFiiOIbVY=

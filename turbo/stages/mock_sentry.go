@@ -749,8 +749,8 @@ func (ms *MockSentry) NewStateWriter(tx kv.RwTx, blockNum uint64) state.StateWri
 
 func (ms *MockSentry) CalcStateRoot(tx kv.Tx) libcommon.Hash {
 	if ethconfig.EnableHistoryV4InTest {
-		aggCtx := tx.(kv.TemporalTx).(*temporal.Tx).AggCtx()
-		rootBytes, err := tx.(kv.TemporalTx).(*temporal.Tx).Agg().ComputeCommitmentOnCtx(false, false, aggCtx)
+		//aggCtx := tx.(kv.TemporalTx).(*temporal.Tx).AggCtx()
+		rootBytes, err := tx.(kv.TemporalTx).(*temporal.Tx).Agg().ComputeCommitment(false, false)
 		if err != nil {
 			panic(fmt.Errorf("ComputeCommitment: %w", err))
 		}
