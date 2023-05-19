@@ -601,7 +601,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
 			HeadSlot:       state.FinalizedCheckpoint().Epoch() * beaconCfg.SlotsPerEpoch,
 			HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
-		})
+		}, logger)
 		if err != nil {
 			return nil, err
 		}

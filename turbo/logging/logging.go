@@ -106,7 +106,7 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 
 // SetupLoggerCmd perform the logging using parametrs specifying by `flag` package, and sets it to the root logger
 // This is the function which is NOT used by Erigon itself, but instead by utility commans
-func SetupLogger(filePrefix string) {
+func SetupLogger(filePrefix string) log.Logger {
 	var logConsoleVerbosity = flag.String(LogConsoleVerbosityFlag.Name, "", LogConsoleVerbosityFlag.Usage)
 	var logDirVerbosity = flag.String(LogDirVerbosityFlag.Name, "", LogDirVerbosityFlag.Usage)
 	var logDirPath = flag.String(LogDirPathFlag.Name, "", LogDirPathFlag.Usage)
@@ -134,6 +134,7 @@ func SetupLogger(filePrefix string) {
 	}
 
 	initSeparatedLogging(log.Root(), filePrefix, *logDirPath, consoleLevel, dirLevel, consoleJson, *dirJson)
+	return log.Root()
 }
 
 // initSeparatedLogging construct a log handler accrosing to the configuration parameters passed to it
