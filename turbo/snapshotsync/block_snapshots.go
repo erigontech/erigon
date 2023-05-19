@@ -194,26 +194,6 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 	return nil
 }
 
-func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmount uint64) error) error {
-	defer sn.seg.EnableMadvNormal().DisableReadAhead()
-
-	var buf []byte
-	g := sn.seg.MakeGetter()
-	blockNum := sn.ranges.from
-	var b types.BodyForStorage
-	for g.HasNext() {
-		buf, _ = g.Next(buf[:0])
-		if err := rlp.DecodeBytes(buf, &b); err != nil {
-			return err
-		}
-		if err := f(blockNum, b.BaseTxId, uint64(b.TxAmount)); err != nil {
-			return err
-		}
-		blockNum++
-	}
-	return nil
-}
-
 func (sn *TxnSegment) closeIdx() {
 	if sn.IdxTxnHash != nil {
 		sn.IdxTxnHash.Close()

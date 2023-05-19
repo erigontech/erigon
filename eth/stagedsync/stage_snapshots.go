@@ -291,28 +291,24 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if err := rawdbv3.TxNums.WriteForGenesis(tx, 1); err != nil {
 					return err
 				}
-				if err := sn.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-					for _, b := range bs {
-						if err := b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
-							if blockNum == 0 || blockNum > toBlock {
-								return nil
-							}
-							select {
-							case <-ctx.Done():
-								return ctx.Err()
-							case <-logEvery.C:
-								logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, sn.BlocksAvailable()/1000))
-							default:
-							}
-							maxTxNum := baseTxNum + txAmount - 1
+				type IterBody interface {
+					IterateBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error
+				}
+				if err := blockReader.(IterBody).IterateBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+					if blockNum == 0 || blockNum > toBlock {
+						return nil
+					}
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-logEvery.C:
+						logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, sn.BlocksAvailable()/1000))
+					default:
+					}
+					maxTxNum := baseTxNum + txAmount - 1
 
-							if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
-								return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
-							}
-							return nil
-						}); err != nil {
-							return err
-						}
+					if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+						return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
 					}
 					return nil
 				}); err != nil {

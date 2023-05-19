@@ -708,3 +708,29 @@ func (back *BlockReader) LastTxNumInSnapshot(blockNum uint64) (uint64, bool, err
 	lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
 	return lastTxnID, true, nil
 }
+
+func (back *BlockReader) IterateBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error {
+	view := back.sn.View()
+	defer view.Close()
+
+	for _, sn := range view.Bodies() {
+		sn := sn
+		defer sn.seg.EnableMadvNormal().DisableReadAhead()
+
+		var buf []byte
+		g := sn.seg.MakeGetter()
+		blockNum := sn.ranges.from
+		var b types.BodyForStorage
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+			if err := rlp.DecodeBytes(buf, &b); err != nil {
+				return err
+			}
+			if err := f(blockNum, b.BaseTxId, uint64(b.TxAmount)); err != nil {
+				return err
+			}
+			blockNum++
+		}
+	}
+	return nil
+}

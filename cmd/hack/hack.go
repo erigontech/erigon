@@ -530,6 +530,8 @@ func extractBodies(datadir string) error {
 		Produce:    false,
 	}, filepath.Join(datadir, "snapshots"), log.New())
 	snaps.ReopenFolder()
+
+	/* method Iterate was removed, need re-implement
 	snaps.Bodies.View(func(sns []*snapshotsync.BodySegment) error {
 		for _, sn := range sns {
 			var firstBlockNum, firstBaseTxNum, firstAmount uint64
@@ -562,6 +564,7 @@ func extractBodies(datadir string) error {
 		}
 		return nil
 	})
+	*/
 	br := snapshotsync.NewBlockReader(snaps, false)
 	lastTxnID, _, err := br.LastTxNumInSnapshot(snaps.BlocksAvailable())
 	if err != nil {
