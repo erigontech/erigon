@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -88,7 +87,7 @@ type AggregatorV3 struct {
 	wg                    sync.WaitGroup
 
 	onFreeze OnFreezeFunc
-	walLock  sync.RWMutex
+	walLock  sync.RWMutex // TODO transfer it to the shareddomain
 
 	ps *background.ProgressSet
 
@@ -1795,68 +1794,15 @@ func (a *AggregatorV3) UpdateStorage(addr, loc []byte, value, preVal []byte) err
 	//return a.storage.PutWithPrev(addr, loc, value, preVal)
 }
 
-func (a *AggregatorV3) ComputeCommitmentOnCtx(saveStateAfter, trace bool, aggCtx *AggregatorV3Context) (rootHash []byte, err error) {
-
-	//if a.domains != nil {
-	a.commitment.ResetFns(a.domains.BranchFn, a.domains.AccountFn, a.domains.StorageFn)
-	//} else {
-	//	a.commitment.ResetFns(aggCtx.branchFn, aggCtx.accountFn, aggCtx.storageFn)
-	//}
-
-	mxCommitmentRunning.Inc()
-	rootHash, branchNodeUpdates, err := a.commitment.ComputeCommitment(trace)
-	mxCommitmentRunning.Dec()
-
-	if err != nil {
-		return nil, err
-	}
-
-	mxCommitmentKeys.Add(int(a.commitment.comKeys))
-	mxCommitmentTook.Update(a.commitment.comTook.Seconds())
-
-	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
-
-	for pref, update := range branchNodeUpdates {
-		prefix := []byte(pref)
-
-		stateValue, _, err := aggCtx.CommitmentLatest(prefix, a.rwTx)
-		if err != nil {
-			return nil, err
-		}
-		mxCommitmentUpdates.Inc()
-		stated := commitment.BranchData(stateValue)
-		merged, err := a.commitment.branchMerger.Merge(stated, update)
-		if err != nil {
-			return nil, err
-		}
-		if bytes.Equal(stated, merged) {
-			continue
-		}
-		if trace {
-			fmt.Printf("computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
-		}
-		if err = a.commitment.PutWithPrev(prefix, nil, merged, stated); err != nil {
-			return nil, err
-		}
-		mxCommitmentUpdatesApplied.Inc()
-	}
-
-	if saveStateAfter {
-		if err := a.commitment.storeCommitmentState(a.domains.blockNum.Load()); err != nil {
-			return nil, err
-		}
-	}
-
-	return rootHash, nil
-}
-
 // ComputeCommitment evaluates commitment for processed state.
 // If `saveStateAfter`=true, then trie state will be saved to DB after commitment evaluation.
 func (a *AggregatorV3) ComputeCommitment(saveStateAfter, trace bool) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
+	// TODO: create new SharedDomain with new aggregator Context to compute commitment on most recent committed state.
+	//       for now we use only one sharedDomain -> no major difference among contexts.
 	//aggCtx := a.MakeContext()
 	//defer aggCtx.Close()
-	return a.ComputeCommitmentOnCtx(saveStateAfter, trace, a.domains.aggCtx)
+	return a.domains.Commit(saveStateAfter, trace)
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
@@ -2066,6 +2012,7 @@ func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
 	return ac
 }
 
+// --- Domain part START ---
 func (ac *AggregatorV3Context) branchFn(prefix []byte) ([]byte, error) {
 	stateValue, ok, err := ac.CommitmentLatest(prefix, ac.a.rwTx)
 	if err != nil {
@@ -2119,6 +2066,21 @@ func (ac *AggregatorV3Context) storageFn(plainKey []byte, cell *commitment.Cell)
 	cell.Delete = cell.StorageLen == 0
 	return nil
 }
+
+func (ac *AggregatorV3Context) AccountLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
+	return ac.accounts.GetLatest(addr, nil, roTx)
+}
+func (ac *AggregatorV3Context) StorageLatest(addr []byte, loc []byte, roTx kv.Tx) ([]byte, bool, error) {
+	return ac.storage.GetLatest(addr, loc, roTx)
+}
+func (ac *AggregatorV3Context) CodeLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
+	return ac.code.GetLatest(addr, nil, roTx)
+}
+func (ac *AggregatorV3Context) CommitmentLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
+	return ac.commitment.GetLatest(addr, nil, roTx)
+}
+
+// --- Domain part END ---
 
 func (ac *AggregatorV3Context) Close() {
 	ac.a.delTraceCtx(ac)
@@ -2212,30 +2174,6 @@ func (as *AggregatorStep) IterateCodeTxs() *ScanIteratorInc {
 func (as *AggregatorStep) ReadAccountDataNoState(addr []byte, txNum uint64) ([]byte, bool, uint64) {
 	return as.accounts.GetNoState(addr, txNum)
 }
-
-// --- Domain part START ---
-func (ac *AggregatorV3Context) AccountLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
-	return ac.accounts.GetLatest(addr, nil, roTx)
-}
-func (ac *AggregatorV3Context) StorageLatest(addr []byte, loc []byte, roTx kv.Tx) ([]byte, bool, error) {
-	return ac.storage.GetLatest(addr, loc, roTx)
-}
-func (ac *AggregatorV3Context) CodeLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
-	return ac.code.GetLatest(addr, nil, roTx)
-}
-func (ac *AggregatorV3Context) IterAcc(prefix []byte, it func(k, v []byte), tx kv.RwTx) error {
-	ac.a.SetTx(tx)
-	return ac.accounts.IteratePrefix(prefix, it)
-}
-func (ac *AggregatorV3Context) CommitmentLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
-	return ac.commitment.GetLatest(addr, nil, roTx)
-}
-func (ac *AggregatorV3Context) IterStorage(prefix []byte, it func(k, v []byte), tx kv.RwTx) error {
-	ac.a.SetTx(tx)
-	return ac.storage.IteratePrefix(prefix, it)
-}
-
-// --- Domain part END ---
 
 func (as *AggregatorStep) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, uint64) {
 	if cap(as.keyBuf) < len(addr)+len(loc) {

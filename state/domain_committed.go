@@ -603,39 +603,6 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	return
 }
 
-// Deprecated?
-func (d *DomainCommitted) CommitmentOver(touchedKeys, hashedKeys [][]byte, updates []commitment.Update, trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
-	defer func(s time.Time) { d.comTook = time.Since(s) }(time.Now())
-
-	d.comKeys = uint64(len(touchedKeys))
-	if len(touchedKeys) == 0 {
-		rootHash, err = d.patriciaTrie.RootHash()
-		return rootHash, nil, err
-	}
-
-	// data accessing functions should be set once before
-	d.patriciaTrie.Reset()
-	d.patriciaTrie.SetTrace(trace)
-
-	switch d.updates.mode {
-	case CommitmentModeDirect:
-		rootHash, branchNodeUpdates, err = d.patriciaTrie.ReviewKeys(touchedKeys, hashedKeys)
-		if err != nil {
-			return nil, nil, err
-		}
-	case CommitmentModeUpdate:
-		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessUpdates(touchedKeys, hashedKeys, updates)
-		if err != nil {
-			return nil, nil, err
-		}
-	case CommitmentModeDisabled:
-		return nil, nil, nil
-	default:
-		return nil, nil, fmt.Errorf("invalid commitment mode: %d", d.updates.mode)
-	}
-	return rootHash, branchNodeUpdates, err
-}
-
 // Evaluates commitment for processed state.
 func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
 	defer func(s time.Time) { d.comTook = time.Since(s) }(time.Now())
