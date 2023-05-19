@@ -16,10 +16,10 @@ func (b *BeaconState) HashSSZ() ([32]byte, error) {
 	if err = b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
-	/*fmt.Println(b.slot)
-	for i, val := range b.leaves {
-		fmt.Println(i, libcommon.Hash(val))
-	}*/
+
+	// for i, val := range b.leaves {
+	// 	fmt.Println(i, libcommon.Hash(val))
+	// }
 
 	// Pad to 32 of length
 	return merkle_tree.MerkleRootFromLeaves(b.leaves[:])
@@ -275,7 +275,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(27): HistoricalSummaries
 	if b.isLeafDirty(HistoricalSummariesLeafIndex) {
-		root, err := merkle_tree.ListObjectSSZRoot(b.historicalSummaries, state_encoding.HistoricalRootsLength)
+		root, err := b.historicalSummaries.HashSSZ()
 		if err != nil {
 			return err
 		}

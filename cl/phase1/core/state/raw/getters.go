@@ -246,10 +246,6 @@ func (b *BeaconState) NextWithdrawalValidatorIndex() uint64 {
 	return b.nextWithdrawalValidatorIndex
 }
 
-func (b *BeaconState) HistoricalSummaries() []*cltypes.HistoricalSummary {
-	return b.historicalSummaries
-}
-
 // more compluicated ones
 
 // GetBlockRootAtSlot returns the block root at a given slot

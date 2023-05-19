@@ -57,13 +57,11 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 	}
 	dst.nextWithdrawalIndex = b.nextWithdrawalIndex
 	dst.nextWithdrawalValidatorIndex = b.nextWithdrawalValidatorIndex
-	dst.historicalSummaries = make([]*cltypes.HistoricalSummary, len(b.historicalSummaries))
-	for i := range b.historicalSummaries {
-		dst.historicalSummaries[i] = &cltypes.HistoricalSummary{
-			BlockSummaryRoot: b.historicalSummaries[i].BlockSummaryRoot,
-			StateSummaryRoot: b.historicalSummaries[i].StateSummaryRoot,
-		}
-	}
+	dst.historicalSummaries = generic.NewStaticListSSZ[*cltypes.HistoricalSummary](int(b.beaconConfig.HistoricalRootsLimit), 64)
+	b.historicalSummaries.Range(func(_ int, value *cltypes.HistoricalSummary, _ int) bool {
+		dst.historicalSummaries.Append(value)
+		return true
+	})
 	dst.version = b.version
 	// Now sync internals
 	copy(dst.leaves[:], b.leaves[:])

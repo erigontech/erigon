@@ -289,11 +289,12 @@ func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
 }
 
 func (b *BeaconState) ResetHistoricalSummaries() {
-	b.historicalSummaries = nil
+	b.historicalSummaries.Clear()
 	b.markLeaf(HistoricalSummariesLeafIndex)
 }
+
 func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
-	b.historicalSummaries = append(b.historicalSummaries, summary)
+	b.historicalSummaries.Append(summary)
 	b.markLeaf(HistoricalSummariesLeafIndex)
 }
 
@@ -369,7 +370,7 @@ func (b *BeaconState) AddPreviousEpochAttestation(attestation *cltypes.PendingAt
 
 func (b *BeaconState) ResetCurrentEpochAttestations() {
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
-	b.currentEpochAttestations.Clear()
+	b.currentEpochAttestations = generic.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.beaconConfig.PreviousEpochAttestationsLength()))
 }
 
 func (b *BeaconState) SetPreviousEpochAttestations(attestations *generic.ListSSZ[*cltypes.PendingAttestation]) {
@@ -379,5 +380,5 @@ func (b *BeaconState) SetPreviousEpochAttestations(attestations *generic.ListSSZ
 
 func (b *BeaconState) ResetPreviousEpochAttestations() {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
-	b.previousEpochAttestations.Clear()
+	b.previousEpochAttestations = generic.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.beaconConfig.PreviousEpochAttestationsLength()))
 }

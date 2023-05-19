@@ -47,7 +47,7 @@ type BeaconState struct {
 	// Capella
 	nextWithdrawalIndex          uint64
 	nextWithdrawalValidatorIndex uint64
-	historicalSummaries          []*cltypes.HistoricalSummary
+	historicalSummaries          *generic.ListSSZ[*cltypes.HistoricalSummary]
 	// Phase0: genesis fork. these 2 fields replace participation bits.
 	previousEpochAttestations *generic.ListSSZ[*cltypes.PendingAttestation]
 	currentEpochAttestations  *generic.ListSSZ[*cltypes.PendingAttestation]

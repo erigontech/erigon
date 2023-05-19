@@ -22,12 +22,14 @@ func ProcessAttestations(s *state2.BeaconState, attestations *generic.ListSSZ[*s
 
 	c := h.Tag("attestation_step", "process")
 	var err error
-	attestations.Range(func(index int, a *solid.Attestation, _ int) bool {
-		if attestingIndiciesSet[index], err = processAttestation(s, a, baseRewardPerIncrement); err != nil {
-			return false
+	if err := generic.RangeErr[*solid.Attestation](attestations, func(i int, a *solid.Attestation, _ int) error {
+		if attestingIndiciesSet[i], err = processAttestation(s, a, baseRewardPerIncrement); err != nil {
+			return err
 		}
-		return true
-	})
+		return nil
+	}); err != nil {
+		return err
+	}
 	if err != nil {
 		return err
 	}

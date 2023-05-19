@@ -58,7 +58,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		return nil, fmt.Errorf("too many historical roots")
 	}
 
-	if len(b.historicalSummaries) > state_encoding.HistoricalRootsLength {
+	if b.historicalSummaries.Len() > state_encoding.HistoricalRootsLength {
 		return nil, fmt.Errorf("too many summaries")
 	}
 
@@ -242,10 +242,8 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	}
 
 	if b.version >= clparams.CapellaVersion {
-		for _, summary := range b.historicalSummaries {
-			if dst, err = summary.EncodeSSZ(dst); err != nil {
-				return nil, err
-			}
+		if dst, err = b.historicalSummaries.EncodeSSZ(dst); err != nil {
+			return nil, err
 		}
 	}
 
@@ -449,7 +447,11 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if b.version == clparams.BellatrixVersion {
 		return b.init()
 	}
-	if b.historicalSummaries, err = ssz.DecodeStaticList[*cltypes.HistoricalSummary](buf, historicalSummariesOffset, uint32(len(buf)), 64, state_encoding.HistoricalRootsLength, version); err != nil {
+	if b.historicalSummaries == nil {
+		b.historicalSummaries = generic.NewStaticListSSZ[*cltypes.HistoricalSummary](int(b.beaconConfig.HistoricalRootsLimit), 64)
+	}
+
+	if err := b.historicalSummaries.DecodeSSZ(buf[historicalSummariesOffset:len(buf)], version); err != nil {
 		return err
 	}
 	// Capella
@@ -480,7 +482,10 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	}
 
 	size += b.inactivityScores.Length() * 8
-	size += len(b.historicalSummaries) * 64
+	if b.historicalSummaries == nil {
+		b.historicalSummaries = generic.NewStaticListSSZ[*cltypes.HistoricalSummary](int(b.beaconConfig.HistoricalRootsLimit), 64)
+	}
+	size += b.historicalSummaries.EncodingSizeSSZ()
 	return
 }
 

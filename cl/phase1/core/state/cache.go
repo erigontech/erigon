@@ -142,7 +142,7 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 	if err != nil {
 		return err
 	}
-	if err := generic.RangeErr[*cltypes.PendingAttestation](b.CurrentEpochAttestations(), func(i1 int, pa *cltypes.PendingAttestation, _ int) error {
+	return generic.RangeErr[*cltypes.PendingAttestation](b.CurrentEpochAttestations(), func(i1 int, pa *cltypes.PendingAttestation, _ int) error {
 		slotRoot, err := b.GetBlockRootAtSlot(pa.Data.Slot())
 		if err != nil {
 			return err
@@ -179,10 +179,7 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 			}
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
-	return nil
+	})
 }
 
 func (b *BeaconState) _refreshActiveBalances() {
