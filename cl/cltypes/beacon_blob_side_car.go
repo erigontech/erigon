@@ -54,5 +54,5 @@ func (b *KZGCommitment) EncodingSizeSSZ() int {
 }
 
 func (b *KZGCommitment) HashSSZ() ([32]byte, error) {
-	return merkle_tree.PublicKeyRoot(*b)
+	return merkle_tree.BytesRoot(b[:])
 }

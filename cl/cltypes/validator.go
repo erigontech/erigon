@@ -9,7 +9,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 const (
@@ -47,35 +46,11 @@ func (d *DepositData) EncodingSizeSSZ() int {
 }
 
 func (d *DepositData) HashSSZ() ([32]byte, error) {
-	var (
-		leaves = make([][32]byte, 4)
-		err    error
-	)
-	leaves[0], err = merkle_tree.PublicKeyRoot(d.PubKey)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	leaves[1] = d.WithdrawalCredentials
-	leaves[2] = merkle_tree.Uint64Root(d.Amount)
-	leaves[3], err = merkle_tree.SignatureRoot(d.Signature)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return merkle_tree.ArraysRoot(leaves, 4)
+	return merkle_tree.HashTreeRoot(d.PubKey[:], d.WithdrawalCredentials[:], d.Amount, d.Signature[:])
 }
 
 func (d *DepositData) MessageHash() ([32]byte, error) {
-	var (
-		leaves = make([][32]byte, 4)
-		err    error
-	)
-	leaves[0], err = merkle_tree.PublicKeyRoot(d.PubKey)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	leaves[1] = d.WithdrawalCredentials
-	leaves[2] = merkle_tree.Uint64Root(d.Amount)
-	return merkle_tree.ArraysRoot(leaves, 4)
+	return merkle_tree.HashTreeRoot(d.PubKey[:], d.WithdrawalCredentials[:], d.Amount)
 }
 
 type Deposit struct {
@@ -143,9 +118,7 @@ func (e *VoluntaryExit) DecodeSSZ(buf []byte) error {
 }
 
 func (e *VoluntaryExit) HashSSZ() ([32]byte, error) {
-	epochRoot := merkle_tree.Uint64Root(e.Epoch)
-	indexRoot := merkle_tree.Uint64Root(e.ValidatorIndex)
-	return utils.Keccak256(epochRoot[:], indexRoot[:]), nil
+	return merkle_tree.HashTreeRoot(e.Epoch, e.ValidatorIndex)
 }
 
 func (e *VoluntaryExit) EncodingSizeSSZ() int {
@@ -175,15 +148,7 @@ func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte, _ int) error {
 }
 
 func (e *SignedVoluntaryExit) HashSSZ() ([32]byte, error) {
-	sigRoot, err := merkle_tree.SignatureRoot(e.Signature)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	exitRoot, err := e.VolunaryExit.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return utils.Keccak256(exitRoot[:], sigRoot[:]), nil
+	return merkle_tree.HashTreeRoot(e.VolunaryExit, e.Signature[:])
 }
 
 func (e *SignedVoluntaryExit) EncodingSizeSSZ() int {
@@ -250,7 +215,7 @@ func (s *SyncCommittee) HashSSZ() ([32]byte, error) {
 	}
 	var err error
 	for i, key := range s.PubKeys {
-		pubKeysLeaves[i], err = merkle_tree.PublicKeyRoot(key)
+		pubKeysLeaves[i], err = merkle_tree.BytesRoot(key[:])
 		if err != nil {
 			return [32]byte{}, err
 		}
@@ -259,7 +224,7 @@ func (s *SyncCommittee) HashSSZ() ([32]byte, error) {
 	if err != nil {
 		return [32]byte{}, err
 	}
-	aggregatePublicKeyRoot, err := merkle_tree.PublicKeyRoot(s.AggregatePublicKey)
+	aggregatePublicKeyRoot, err := merkle_tree.BytesRoot(s.AggregatePublicKey[:])
 	if err != nil {
 		return [32]byte{}, err
 	}

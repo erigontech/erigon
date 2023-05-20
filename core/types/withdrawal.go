@@ -109,14 +109,7 @@ func (obj *Withdrawal) EncodingSizeSSZ() int {
 }
 
 func (obj *Withdrawal) HashSSZ() ([32]byte, error) { // the [32]byte is temporary
-	var addressLeaf [32]byte
-	copy(addressLeaf[:], obj.Address[:])
-	return merkle_tree.ArraysRoot([][32]byte{
-		merkle_tree.Uint64Root(obj.Index),
-		merkle_tree.Uint64Root(obj.Validator),
-		addressLeaf,
-		merkle_tree.Uint64Root(obj.Amount),
-	}, 4)
+	return merkle_tree.HashTreeRoot(obj.Index, obj.Validator, obj.Address[:], obj.Amount)
 }
 
 func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {

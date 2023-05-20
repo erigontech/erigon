@@ -56,10 +56,5 @@ func (e *Eth1Data) EncodingSizeSSZ() int {
 
 // HashSSZ ssz hashes the Eth1Data object
 func (e *Eth1Data) HashSSZ() ([32]byte, error) {
-	leaves := [][32]byte{
-		e.Root,
-		merkle_tree.Uint64Root(e.DepositCount),
-		e.BlockHash,
-	}
-	return merkle_tree.ArraysRoot(leaves, 4)
+	return merkle_tree.HashTreeRoot(e.Root[:], e.DepositCount, e.BlockHash[:])
 }

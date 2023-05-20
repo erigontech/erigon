@@ -391,19 +391,19 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	switch b.Version {
 	case clparams.Phase0Version:
-		return merkle_tree.HashTreeRoot(b.RandaoReveal, b.Eth1Data, b.Graffiti, b.ProposerSlashings, b.AttesterSlashings,
+		return merkle_tree.HashTreeRoot(b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings,
 			b.Attestations, b.Deposits, b.VoluntaryExits)
 	case clparams.AltairVersion:
-		return merkle_tree.HashTreeRoot(b.RandaoReveal, b.Eth1Data, b.Graffiti, b.ProposerSlashings, b.AttesterSlashings,
+		return merkle_tree.HashTreeRoot(b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings,
 			b.Attestations, b.Deposits, b.VoluntaryExits, b.SyncAggregate)
 	case clparams.BellatrixVersion:
-		return merkle_tree.HashTreeRoot(b.RandaoReveal, b.Eth1Data, b.Graffiti, b.ProposerSlashings, b.AttesterSlashings,
+		return merkle_tree.HashTreeRoot(b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings,
 			b.Attestations, b.Deposits, b.VoluntaryExits, b.SyncAggregate, b.ExecutionPayload)
 	case clparams.CapellaVersion:
-		return merkle_tree.HashTreeRoot(b.RandaoReveal, b.Eth1Data, b.Graffiti, b.ProposerSlashings, b.AttesterSlashings,
+		return merkle_tree.HashTreeRoot(b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings,
 			b.Attestations, b.Deposits, b.VoluntaryExits, b.SyncAggregate, b.ExecutionPayload, b.ExecutionChanges)
 	case clparams.DenebVersion:
-		return merkle_tree.HashTreeRoot(b.RandaoReveal, b.Eth1Data, b.Graffiti, b.ProposerSlashings, b.AttesterSlashings,
+		return merkle_tree.HashTreeRoot(b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings,
 			b.Attestations, b.Deposits, b.VoluntaryExits, b.SyncAggregate, b.ExecutionPayload, b.ExecutionChanges, b.BlobKzgCommitments)
 	default:
 		panic("rust is delusional")
@@ -446,17 +446,7 @@ func (b *BeaconBlock) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
-	blockRoot, err := b.Body.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return merkle_tree.ArraysRoot([][32]byte{
-		merkle_tree.Uint64Root(b.Slot),
-		merkle_tree.Uint64Root(b.ProposerIndex),
-		b.ParentRoot,
-		b.StateRoot,
-		blockRoot,
-	}, 8)
+	return merkle_tree.HashTreeRoot(b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
 
 func (b *SignedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
@@ -487,13 +477,5 @@ func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
 }
 
 func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
-	blockRoot, err := b.Block.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	signatureRoot, err := merkle_tree.SignatureRoot(b.Signature)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return merkle_tree.ArraysRoot([][32]byte{blockRoot, signatureRoot}, 2)
+	return merkle_tree.HashTreeRoot(b.Block, b.Signature[:])
 }

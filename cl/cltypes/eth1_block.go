@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -266,14 +267,23 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 
 // HashSSZ calculates the SSZ hash of the Eth1Block's payload header.
 func (b *Eth1Block) HashSSZ() ([32]byte, error) {
-	// Get the payload header.
-	header, err := b.PayloadHeader()
-	if err != nil {
-		return [32]byte{}, err
+	switch b.version {
+	case clparams.BellatrixVersion:
+		return merkle_tree.HashTreeRoot(b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
+			b.PrevRandao[:], b.BlockNumber, b.GasLimit, b.GasUsed, b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions)
+	case clparams.CapellaVersion:
+		return merkle_tree.HashTreeRoot(b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
+			b.PrevRandao[:], b.BlockNumber, b.GasLimit, b.GasUsed, b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions,
+			b.Withdrawals,
+		)
+	case clparams.DenebVersion:
+		return merkle_tree.HashTreeRoot(b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
+			b.PrevRandao[:], b.BlockNumber, b.GasLimit, b.GasUsed, b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions,
+			b.Withdrawals, b.ExcessDataGas[:],
+		)
+	default:
+		panic("what do you want")
 	}
-
-	// Calculate the SSZ hash of the header and return it.
-	return header.HashSSZ()
 }
 
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.

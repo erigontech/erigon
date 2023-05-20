@@ -19,24 +19,18 @@ func HashTreeRoot(schema ...interface{}) ([32]byte, error) {
 		switch obj := element.(type) {
 		case uint64:
 			binary.LittleEndian.PutUint64(leaves[pos:], obj)
-		case [32]byte:
-			copy(leaves[pos:], obj[:])
-		case common.Hash:
-			copy(leaves[pos:], obj[:])
+		case []byte:
+			if len(obj) < length.Hash {
+				copy(leaves[pos:], obj[:])
+			} else {
+				root, err := BytesRoot(obj)
+				if err != nil {
+					return [32]byte{}, err
+				}
+				copy(leaves[pos:], root[:])
+			}
 		case ssz.HashableSSZ:
 			root, err := obj.HashSSZ()
-			if err != nil {
-				return [32]byte{}, err
-			}
-			copy(leaves[pos:], root[:])
-		case [48]byte:
-			root, err := PublicKeyRoot(obj)
-			if err != nil {
-				return [32]byte{}, err
-			}
-			copy(leaves[pos:], root[:])
-		case [96]byte:
-			root, err := SignatureRoot(obj)
 			if err != nil {
 				return [32]byte{}, err
 			}

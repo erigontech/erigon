@@ -36,7 +36,10 @@ type Eth1Header struct {
 
 // NewEth1Header creates new header with given version.
 func NewEth1Header(version clparams.StateVersion) *Eth1Header {
-	return &Eth1Header{version: version}
+	return &Eth1Header{
+		version: version,
+		Extra:   solid.NewExtraData(),
+	}
 }
 
 func (e *Eth1Header) Copy() *Eth1Header {
@@ -200,55 +203,21 @@ func (h *Eth1Header) EncodingSizeSSZ() int {
 
 // HashSSZ encodes the header in SSZ tree format.
 func (h *Eth1Header) HashSSZ() ([32]byte, error) {
-	// Compute coinbase leaf
-	var coinbase32 [32]byte
-	copy(coinbase32[:], h.FeeRecipient[:])
-	// Compute Bloom leaf
-	bloomLeaf, err := merkle_tree.ArraysRoot([][32]byte{
-		libcommon.BytesToHash(h.LogsBloom[:32]),
-		libcommon.BytesToHash(h.LogsBloom[32:64]),
-		libcommon.BytesToHash(h.LogsBloom[64:96]),
-		libcommon.BytesToHash(h.LogsBloom[96:128]),
-		libcommon.BytesToHash(h.LogsBloom[128:160]),
-		libcommon.BytesToHash(h.LogsBloom[160:192]),
-		libcommon.BytesToHash(h.LogsBloom[192:224]),
-		libcommon.BytesToHash(h.LogsBloom[224:]),
-	}, 8)
-	if err != nil {
-		return [32]byte{}, err
+	switch h.version {
+	case clparams.BellatrixVersion:
+		return merkle_tree.HashTreeRoot(h.ParentHash[:], h.FeeRecipient[:], h.StateRoot[:], h.ReceiptsRoot[:], h.LogsBloom[:],
+			h.PrevRandao[:], h.BlockNumber, h.GasLimit, h.GasUsed, h.Time, h.Extra, h.BaseFeePerGas[:], h.BlockHash[:], h.TransactionsRoot[:])
+	case clparams.CapellaVersion:
+		return merkle_tree.HashTreeRoot(h.ParentHash[:], h.FeeRecipient[:], h.StateRoot[:], h.ReceiptsRoot[:], h.LogsBloom[:],
+			h.PrevRandao[:], h.BlockNumber, h.GasLimit, h.GasUsed, h.Time, h.Extra, h.BaseFeePerGas[:], h.BlockHash[:], h.TransactionsRoot[:],
+			h.WithdrawalsRoot[:],
+		)
+	case clparams.DenebVersion:
+		return merkle_tree.HashTreeRoot(h.ParentHash[:], h.FeeRecipient[:], h.StateRoot[:], h.ReceiptsRoot[:], h.LogsBloom[:],
+			h.PrevRandao[:], h.BlockNumber, h.GasLimit, h.GasUsed, h.Time, h.Extra, h.BaseFeePerGas[:], h.BlockHash[:], h.TransactionsRoot[:],
+			h.WithdrawalsRoot[:], h.ExcessDataGas[:],
+		)
+	default:
+		panic("what do you want")
 	}
-
-	if h.Extra == nil {
-		h.Extra = solid.NewExtraData()
-	}
-	extraLeaf, err := h.Extra.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-
-	leaves := [][32]byte{
-		h.ParentHash,
-		coinbase32,
-		h.StateRoot,
-		h.ReceiptsRoot,
-		bloomLeaf,
-		h.PrevRandao,
-		merkle_tree.Uint64Root(h.BlockNumber),
-		merkle_tree.Uint64Root(h.GasLimit),
-		merkle_tree.Uint64Root(h.GasUsed),
-		merkle_tree.Uint64Root(h.Time),
-		extraLeaf,
-		h.BaseFeePerGas,
-		h.BlockHash,
-		h.TransactionsRoot,
-	}
-	if h.version >= clparams.CapellaVersion {
-		leaves = append(leaves, h.WithdrawalsRoot)
-	}
-
-	if h.version >= clparams.DenebVersion {
-		leaves = append(leaves, h.ExcessDataGas)
-	}
-
-	return merkle_tree.ArraysRoot(leaves, 16)
 }

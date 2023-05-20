@@ -72,23 +72,7 @@ func (i *IndexedAttestation) EncodingSizeSSZ() int {
 
 // HashSSZ ssz hashes the IndexedAttestation object
 func (i *IndexedAttestation) HashSSZ() ([32]byte, error) {
-	leaves := make([][32]byte, 3)
-	var err error
-	leaves[0], err = i.AttestingIndices.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-
-	leaves[1], err = i.Data.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-
-	leaves[2], err = merkle_tree.SignatureRoot(i.Signature)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return merkle_tree.ArraysRoot(leaves, 4)
+	return merkle_tree.HashTreeRoot(i.AttestingIndices, i.Data, i.Signature[:])
 }
 
 // Pending attestation. (only in Phase0 state)

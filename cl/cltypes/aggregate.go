@@ -5,7 +5,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 /*
@@ -50,16 +49,7 @@ func (a *AggregateAndProof) EncodingSizeSSZ() int {
 }
 
 func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
-	indexRoot := merkle_tree.Uint64Root(a.AggregatorIndex)
-	aggregateRoot, err := a.Aggregate.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	selectionProof, err := merkle_tree.SignatureRoot(a.SelectionProof)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return merkle_tree.ArraysRoot([][32]byte{indexRoot, aggregateRoot, selectionProof}, 4)
+	return merkle_tree.HashTreeRoot(a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
 type SignedAggregateAndProof struct {
@@ -136,15 +126,6 @@ func (agg *SyncAggregate) EncodingSizeSSZ() int {
 }
 
 func (agg *SyncAggregate) HashSSZ() ([32]byte, error) {
-	var (
-		leaves = make([][32]byte, 2)
-		err    error
-	)
-	leaves[0] = utils.Keccak256(agg.SyncCommiteeBits[:32], agg.SyncCommiteeBits[32:])
-	leaves[1], err = merkle_tree.SignatureRoot(agg.SyncCommiteeSignature)
-	if err != nil {
-		return [32]byte{}, err
-	}
+	return merkle_tree.HashTreeRoot(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 
-	return merkle_tree.ArraysRoot(leaves, 2)
 }

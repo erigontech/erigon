@@ -24,15 +24,7 @@ func (b *BLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (b *BLSToExecutionChange) HashSSZ() ([32]byte, error) {
-	leaves := make([][32]byte, 3)
-	var err error
-	leaves[0] = merkle_tree.Uint64Root(b.ValidatorIndex)
-	leaves[1], err = merkle_tree.PublicKeyRoot(b.From)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	copy(leaves[2][:], b.To[:])
-	return merkle_tree.ArraysRoot(leaves, 4)
+	return merkle_tree.HashTreeRoot(b.ValidatorIndex, b.From[:], b.To[:])
 }
 
 func (b *BLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
@@ -77,15 +69,7 @@ func (s *SignedBLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (s *SignedBLSToExecutionChange) HashSSZ() ([32]byte, error) {
-	messageRoot, err := s.Message.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	signatureRoot, err := merkle_tree.SignatureRoot(s.Signature)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return merkle_tree.ArraysRoot([][32]byte{messageRoot, signatureRoot}, 2)
+	return merkle_tree.HashTreeRoot(s.Message, s.Signature[:])
 }
 
 func (s *SignedBLSToExecutionChange) EncodingSizeSSZ() int {

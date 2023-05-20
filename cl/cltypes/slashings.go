@@ -36,15 +36,7 @@ func (p *ProposerSlashing) EncodingSizeSSZ() int {
 }
 
 func (p *ProposerSlashing) HashSSZ() ([32]byte, error) {
-	root1, err := p.Header1.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	root2, err := p.Header2.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return merkle_tree.ArraysRoot([][32]byte{root1, root2}, 2)
+	return merkle_tree.HashTreeRoot(p.Header1, p.Header2)
 }
 
 type AttesterSlashing struct {
@@ -87,13 +79,5 @@ func (a *AttesterSlashing) EncodingSizeSSZ() int {
 }
 
 func (a *AttesterSlashing) HashSSZ() ([32]byte, error) {
-	root1, err := a.Attestation_1.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	root2, err := a.Attestation_2.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return merkle_tree.ArraysRoot([][32]byte{root1, root2}, 2)
+	return merkle_tree.HashTreeRoot(a.Attestation_1, a.Attestation_2)
 }
