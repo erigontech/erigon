@@ -54,14 +54,14 @@ func TestWebsocketOriginCheck(t *testing.T) {
 
 	logger := log.New()
 	var (
-		srv     = newTestServer()
+		srv     = newTestServer(logger)
 		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"http://example.com"}, nil, false, logger))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)
 	defer srv.Stop()
 	defer httpsrv.Close()
 
-	client, err := DialWebsocket(context.Background(), wsURL, "http://ekzample.com")
+	client, err := DialWebsocket(context.Background(), wsURL, "http://ekzample.com", logger)
 	if err == nil {
 		client.Close()
 		t.Fatal("no error for wrong origin")
@@ -72,7 +72,7 @@ func TestWebsocketOriginCheck(t *testing.T) {
 	}
 
 	// Connections without origin header should work.
-	client, err = DialWebsocket(context.Background(), wsURL, "")
+	client, err = DialWebsocket(context.Background(), wsURL, "", logger)
 	if err != nil {
 		t.Fatal("error for empty origin")
 	}
@@ -85,14 +85,14 @@ func TestWebsocketLargeCall(t *testing.T) {
 	logger := log.New()
 
 	var (
-		srv     = newTestServer()
+		srv     = newTestServer(logger)
 		httpsrv = httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)
 	defer srv.Stop()
 	defer httpsrv.Close()
 
-	client, clientErr := DialWebsocket(context.Background(), wsURL, "")
+	client, clientErr := DialWebsocket(context.Background(), wsURL, "", logger)
 	if clientErr != nil {
 		t.Fatalf("can't dial: %v", clientErr)
 	}
@@ -122,6 +122,7 @@ func TestClientWebsocketPing(t *testing.T) {
 	}
 
 	t.Parallel()
+	logger := log.New()
 
 	var (
 		sendPing    = make(chan struct{})
@@ -131,7 +132,7 @@ func TestClientWebsocketPing(t *testing.T) {
 	defer cancel()
 	defer server.Shutdown(ctx)
 
-	client, err := DialContext(ctx, "ws://"+server.Addr)
+	client, err := DialContext(ctx, "ws://"+server.Addr, logger)
 	if err != nil {
 		t.Fatalf("client dial error: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestClientWebsocketPing(t *testing.T) {
 func TestClientWebsocketLargeMessage(t *testing.T) {
 	logger := log.New()
 	var (
-		srv     = NewServer(50, false /* traceRequests */, true)
+		srv     = NewServer(50, false /* traceRequests */, true, logger)
 		httpsrv = httptest.NewServer(srv.WebsocketHandler(nil, nil, false, logger))
 		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
 	)
@@ -179,7 +180,7 @@ func TestClientWebsocketLargeMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, err := DialWebsocket(context.Background(), wsURL, "")
+	c, err := DialWebsocket(context.Background(), wsURL, "", logger)
 	if err != nil {
 		t.Fatal(err)
 	}

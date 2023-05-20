@@ -65,7 +65,7 @@ func action(ctx *cli.Context) error {
 	logger := logging.SetupLoggerCtx("devnet", ctx, false /* rootLogger */)
 
 	// Make root logger fail
-	//log.Root().SetHandler(PanicHandler{})
+	log.Root().SetHandler(PanicHandler{})
 
 	// clear all the dev files
 	if err := devnetutils.ClearDevDB(dataDir, logger); err != nil {
@@ -84,7 +84,7 @@ func action(ctx *cli.Context) error {
 	time.Sleep(time.Second * 10)
 
 	// start up the subscription services for the different sub methods
-	services.InitSubscriptions([]models.SubMethod{models.ETHNewHeads})
+	services.InitSubscriptions([]models.SubMethod{models.ETHNewHeads}, logger)
 
 	// execute all rpc methods amongst the two nodes
 	commands.ExecuteAllMethods()

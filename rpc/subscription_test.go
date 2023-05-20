@@ -23,6 +23,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestNewID(t *testing.T) {
@@ -47,13 +49,14 @@ func TestNewID(t *testing.T) {
 }
 
 func TestSubscriptions(t *testing.T) {
+	logger := log.New()
 	var (
 		namespaces        = []string{"eth", "bzz"}
 		service           = &notificationTestService{}
 		subCount          = len(namespaces)
 		notificationCount = 3
 
-		server                 = NewServer(50, false /* traceRequests */, true)
+		server                 = NewServer(50, false /* traceRequests */, true, logger)
 		clientConn, serverConn = net.Pipe()
 		out                    = json.NewEncoder(clientConn)
 		in                     = json.NewDecoder(clientConn)
@@ -125,11 +128,12 @@ func TestSubscriptions(t *testing.T) {
 
 // This test checks that unsubscribing works.
 func TestServerUnsubscribe(t *testing.T) {
+	logger := log.New()
 	p1, p2 := net.Pipe()
 	defer p2.Close()
 
 	// Start the server.
-	server := newTestServer()
+	server := newTestServer(logger)
 	service := &notificationTestService{unsubscribed: make(chan string, 1)}
 	server.RegisterName("nftest2", service)
 	go server.ServeCodec(NewCodec(p1), 0)
