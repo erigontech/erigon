@@ -163,7 +163,7 @@ func (b *BeaconState) SlashingSegmentAt(pos int) uint64 {
 	return b.slashings.Get(pos)
 }
 
-func (b *BeaconState) EpochParticipation(currentEpoch bool) solid.BitList {
+func (b *BeaconState) EpochParticipation(currentEpoch bool) *solid.BitList {
 	if currentEpoch {
 		return b.currentEpochParticipation
 	}

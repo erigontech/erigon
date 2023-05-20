@@ -9,7 +9,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -26,11 +25,11 @@ type Eth1Block struct {
 	GasLimit      uint64
 	GasUsed       uint64
 	Time          uint64
-	Extra         []byte
+	Extra         *solid.ExtraData
 	BaseFeePerGas [32]byte
 	// Extra fields
 	BlockHash     libcommon.Hash
-	Transactions  *TransactionsSSZ
+	Transactions  *solid.TransactionsSSZ
 	Withdrawals   *solid.ListSSZ[*types.Withdrawal]
 	ExcessDataGas [32]byte
 	// internals
@@ -59,7 +58,8 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 		}
 		copy(excessDataGas32[:], excessDataGasBytes)
 	}
-
+	extra := solid.NewExtraData()
+	extra.SetBytes(header.Extra)
 	block := &Eth1Block{
 		ParentHash:    header.ParentHash,
 		FeeRecipient:  header.Coinbase,
@@ -71,10 +71,10 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 		GasLimit:      header.GasLimit,
 		GasUsed:       header.GasUsed,
 		Time:          header.Time,
-		Extra:         header.Extra,
+		Extra:         extra,
 		BaseFeePerGas: baseFee32,
 		BlockHash:     header.Hash(),
-		Transactions:  NewTransactionsSSZFromTransactions(body.Transactions),
+		Transactions:  solid.NewTransactionsSSZFromTransactions(body.Transactions),
 		Withdrawals:   solid.NewStaticListSSZFromList(body.Withdrawals, 16, 44),
 		ExcessDataGas: excessDataGas32,
 	}
@@ -127,8 +127,11 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 // Return minimum required buffer length to be an acceptable SSZ encoding.
 func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 	size = 508
+	if b.Extra == nil {
+		b.Extra = solid.NewExtraData()
+	}
 	// Field (10) 'ExtraData'
-	size += len(b.Extra)
+	size += b.Extra.EncodingSize()
 	// Field (13) 'Transactions'
 	size += b.Transactions.EncodingSize()
 
@@ -180,17 +183,19 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	if version >= int(clparams.DenebVersion) {
 		copy(b.ExcessDataGas[:], buf[pos:])
 	}
+	if b.Extra == nil {
+		b.Extra = solid.NewExtraData()
+	}
 	// Compute extra data.
-	b.Extra = common.CopyBytes(buf[extraDataOffset:transactionsOffset])
-	if len(b.Extra) > 32 {
-		return fmt.Errorf("[Eth1Block] err: Decode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Extra))
+	if err := b.Extra.DecodeSSZ(buf[extraDataOffset:transactionsOffset], version); err != nil {
+		return err
 	}
 	endOffset := uint32(len(buf))
 	if withdrawalOffset != nil {
 		endOffset = *withdrawalOffset
 	}
 
-	b.Transactions = new(TransactionsSSZ)
+	b.Transactions = new(solid.TransactionsSSZ)
 	if err := b.Transactions.DecodeSSZ(buf[transactionsOffset:endOffset], version); err != nil {
 		return err
 	}
@@ -229,7 +234,10 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	currentOffset += len(b.Extra)
+	if b.Extra == nil {
+		b.Extra = solid.NewExtraData()
+	}
+	currentOffset += b.Extra.EncodingSize()
 	// Write transaction offset
 	buf = append(buf, ssz.OffsetSSZ(uint32(currentOffset))...)
 
@@ -244,12 +252,7 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 		buf = append(buf, b.ExcessDataGas[:]...)
 	}
 
-	// Sanity check for extra data then write it.
-	if len(b.Extra) > 32 {
-		return nil, fmt.Errorf("Encode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Extra))
-	}
-
-	buf = append(buf, b.Extra...)
+	buf = append(buf, b.Extra.Bytes()...)
 	// Write all tx offsets
 	if buf, err = b.Transactions.EncodeSSZ(buf); err != nil {
 		return nil, err
@@ -317,7 +320,7 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 		GasLimit:        b.GasLimit,
 		GasUsed:         b.GasUsed,
 		Time:            b.Time,
-		Extra:           b.Extra,
+		Extra:           b.Extra.Bytes(),
 		MixDigest:       b.PrevRandao,
 		Nonce:           merge.ProofOfStakeNonce,
 		BaseFee:         baseFee,

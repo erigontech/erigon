@@ -99,7 +99,7 @@ func ProcessAttesterSlashing(s *state2.BeaconState, attSlashing *cltypes.Atteste
 
 	slashedAny := false
 	currentEpoch := state2.GetEpochAtSlot(s.BeaconConfig(), s.Slot())
-	for _, ind := range utils.IntersectionOfSortedSets(att1.AttestingIndices, att2.AttestingIndices) {
+	for _, ind := range solid.IntersectionOfSortedSets(att1.AttestingIndices, att2.AttestingIndices) {
 		validator, err := s.ValidatorForValidatorIndex(int(ind))
 		if err != nil {
 			return err

@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 const randaoMixesLength = 65536
@@ -151,15 +150,16 @@ func (c *checkpointState) getDomain(domainType [4]byte, epoch uint64) ([]byte, e
 // isValidIndexedAttestation verifies indexed attestation
 func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
-	if len(inds) == 0 || !utils.IsSliceSortedSet(inds) {
+	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
 		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 
 	pks := [][]byte{}
-	for _, v := range inds {
+	inds.Range(func(_ int, v uint64, _ int) bool {
 		publicKey := c.validators[v].publicKey
 		pks = append(pks, publicKey[:])
-	}
+		return true
+	})
 
 	domain, err := c.getDomain(c.beaconConfig.DomainBeaconAttester, att.Data.Target().Epoch())
 	if err != nil {

@@ -14,7 +14,7 @@ import (
  * IndexedAttestation are attestantions sets to prove that someone misbehaved.
  */
 type IndexedAttestation struct {
-	AttestingIndices []uint64
+	AttestingIndices solid.Uint64ListSSZ
 	Data             solid.AttestationData
 	Signature        [96]byte
 }
@@ -32,14 +32,11 @@ func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	dst = append(dst, i.Signature[:]...)
 
 	// Field (0) 'AttestingIndices'
-	if len(i.AttestingIndices) > 2048 {
+	if i.AttestingIndices.Length() > 2048 {
 		return nil, errors.New("too bing attesting indices")
 	}
-	for _, index := range i.AttestingIndices {
-		dst = append(dst, ssz.Uint64SSZ(index)...)
-	}
 
-	return
+	return i.AttestingIndices.EncodeSSZ(dst)
 }
 
 // DecodeSSZ ssz unmarshals the IndexedAttestation object
@@ -64,24 +61,20 @@ func (i *IndexedAttestation) DecodeSSZ(buf []byte, version int) error {
 	if num > 2048 {
 		return ssz.ErrBadDynamicLength
 	}
-	i.AttestingIndices = make([]uint64, num)
-
-	for index := 0; index < num; index++ {
-		i.AttestingIndices[index] = ssz.UnmarshalUint64SSZ(bitsBuf[index*8:])
-	}
-	return nil
+	i.AttestingIndices = solid.NewUint64ListSSZ(2048)
+	return i.AttestingIndices.DecodeSSZ(bitsBuf, version)
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the IndexedAttestation object
 func (i *IndexedAttestation) EncodingSizeSSZ() int {
-	return 228 + len(i.AttestingIndices)*8
+	return 228 + i.AttestingIndices.EncodingSizeSSZ()
 }
 
 // HashSSZ ssz hashes the IndexedAttestation object
 func (i *IndexedAttestation) HashSSZ() ([32]byte, error) {
 	leaves := make([][32]byte, 3)
 	var err error
-	leaves[0], err = merkle_tree.Uint64ListRootWithLimit(i.AttestingIndices, ssz.CalculateIndiciesLimit(2048, uint64(len(i.AttestingIndices)), 8))
+	leaves[0], err = i.AttestingIndices.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}

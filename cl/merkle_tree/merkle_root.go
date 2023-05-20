@@ -1,12 +1,56 @@
 package merkle_tree
 
 import (
+	"encoding/binary"
 	"errors"
 	"reflect"
 	"unsafe"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/prysmaticlabs/gohashtree"
 )
+
+func HashTreeRoot(schema ...interface{}) ([32]byte, error) {
+	leaves := make([]byte, nextPowerOf2(len(schema))*length.Hash)
+	pos := 0
+	for _, element := range schema {
+		switch obj := element.(type) {
+		case uint64:
+			binary.LittleEndian.PutUint64(leaves[pos:], obj)
+		case [32]byte:
+			copy(leaves[pos:], obj[:])
+		case common.Hash:
+			copy(leaves[pos:], obj[:])
+		case ssz.HashableSSZ:
+			root, err := obj.HashSSZ()
+			if err != nil {
+				return [32]byte{}, err
+			}
+			copy(leaves[pos:], root[:])
+		case [48]byte:
+			root, err := PublicKeyRoot(obj)
+			if err != nil {
+				return [32]byte{}, err
+			}
+			copy(leaves[pos:], root[:])
+		case [96]byte:
+			root, err := SignatureRoot(obj)
+			if err != nil {
+				return [32]byte{}, err
+			}
+			copy(leaves[pos:], root[:])
+		default:
+			panic("get it out of my face")
+		}
+		pos += length.Hash
+	}
+	if err := MerkleRootFromFlatLeaves(leaves, leaves); err != nil {
+		return [32]byte{}, err
+	}
+	return common.BytesToHash(leaves[:length.Hash]), nil
+}
 
 // HashByteSlice is gohashtree HashBytSlice but using our hopefully safer header converstion
 func HashByteSlice(out, in []byte) error {

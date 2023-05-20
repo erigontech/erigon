@@ -31,8 +31,8 @@ type BeaconState struct {
 	balances                   solid.Uint64ListSSZ
 	randaoMixes                solid.HashVectorSSZ
 	slashings                  solid.Uint64VectorSSZ
-	previousEpochParticipation solid.BitList
-	currentEpochParticipation  solid.BitList
+	previousEpochParticipation *solid.BitList
+	currentEpochParticipation  *solid.BitList
 	justificationBits          cltypes.JustificationBits
 	// Altair
 	previousJustifiedCheckpoint solid.Checkpoint

@@ -58,7 +58,7 @@ func txPeekBlobVersionedHashes(txBytes []byte) []libcommon.Hash {
 	return versionedHashes
 }
 
-func VerifyKzgCommitmentsAgainstTransactions(transactions *cltypes.TransactionsSSZ, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) (bool, error) {
+func VerifyKzgCommitmentsAgainstTransactions(transactions *solid.TransactionsSSZ, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) (bool, error) {
 	allVersionedHashes := []libcommon.Hash{}
 	transactions.ForEach(func(tx []byte, idx, total int) bool {
 		if tx[0] != types.BlobTxType {

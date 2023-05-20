@@ -14,6 +14,16 @@ func NewUint64ListSSZ(limit int) Uint64ListSSZ {
 	}
 }
 
+func NewUint64ListSSZFromSlice(limit int, slice []uint64) Uint64ListSSZ {
+	x := &uint64ListSSZ{
+		u: NewUint64Slice(limit),
+	}
+	for _, num := range slice {
+		x.Append(num)
+	}
+	return x
+}
+
 func (arr *uint64ListSSZ) Clear() {
 	arr.u.Clear()
 }
@@ -72,4 +82,37 @@ func (arr *uint64ListSSZ) Pop() uint64 {
 
 func (arr *uint64ListSSZ) Append(v uint64) {
 	arr.u.Append(v)
+}
+
+// Check if it is sorted and check if there are duplicates. O(N) complexity.
+func IsUint64SortedSet(set IterableSSZ[uint64]) bool {
+	for i := 0; i < set.Length()-1; i++ {
+		if set.Get(i) >= set.Get(i+1) {
+			return false
+		}
+	}
+	return true
+}
+
+func IntersectionOfSortedSets(v1, v2 IterableSSZ[uint64]) []uint64 {
+	intersection := []uint64{}
+	// keep track of v1 and v2 element iteration
+	var i, j int
+	// Note that v1 and v2 are both sorted.
+	for i < v1.Length() && j < v2.Length() {
+		if v1.Get(i) == v2.Get(j) {
+			intersection = append(intersection, v1.Get(i))
+			// Change both iterators
+			i++
+			j++
+			continue
+		}
+		// increase i and j accordingly
+		if v1.Get(i) > v2.Get(j) {
+			j++
+		} else {
+			i++
+		}
+	}
+	return intersection
 }

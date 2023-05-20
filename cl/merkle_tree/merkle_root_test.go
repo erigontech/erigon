@@ -1,8 +1,9 @@
 package merkle_tree_test
 
 import (
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/state_encoding"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/state_encoding"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/require"
@@ -30,14 +31,6 @@ func TestEmptyArraysWithLengthRoot(t *testing.T) {
 		libcommon.BytesToHash([]byte{8}),
 	}
 	root, err := merkle_tree.ArraysRootWithLimit(roots, 8192)
-	require.NoError(t, err)
-	require.Equal(t, expected, libcommon.Hash(root))
-}
-
-func TestUint64ListRootWithLimit(t *testing.T) {
-	expected := libcommon.HexToHash("0xfbe583f8fbcc3683d98c12ae969e93aaa5ac472e15422c14759cb7f3ef60673c")
-	nums := []uint64{1, 2, 4, 5, 2, 5, 6, 7, 1, 4, 3, 5, 100, 6, 64, 2}
-	root, err := merkle_tree.Uint64ListRootWithLimit(nums, 274877906944)
 	require.NoError(t, err)
 	require.Equal(t, expected, libcommon.Hash(root))
 }

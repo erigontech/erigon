@@ -6,8 +6,8 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -23,7 +23,7 @@ type Eth1Header struct {
 	GasLimit      uint64
 	GasUsed       uint64
 	Time          uint64
-	Extra         []byte
+	Extra         *solid.ExtraData
 	BaseFeePerGas [32]byte
 	// Extra fields
 	BlockHash        libcommon.Hash
@@ -41,7 +41,8 @@ func NewEth1Header(version clparams.StateVersion) *Eth1Header {
 
 func (e *Eth1Header) Copy() *Eth1Header {
 	copied := *e
-	copied.Extra = libcommon.Copy(e.Extra)
+	copied.Extra = solid.NewExtraData()
+	copied.Extra.SetBytes(e.Extra.Bytes())
 	return &copied
 }
 
@@ -58,9 +59,12 @@ func (e *Eth1Header) Deneb() {
 }
 
 func (e *Eth1Header) IsZero() bool {
+	if e.Extra == nil {
+		e.Extra = solid.NewExtraData()
+	}
 	return e.ParentHash == libcommon.Hash{} && e.FeeRecipient == libcommon.Address{} && e.StateRoot == libcommon.Hash{} &&
 		e.ReceiptsRoot == libcommon.Hash{} && e.LogsBloom == types.Bloom{} && e.PrevRandao == libcommon.Hash{} && e.BlockNumber == 0 &&
-		e.GasLimit == 0 && e.GasUsed == 0 && e.Time == 0 && len(e.Extra) == 0 && e.BaseFeePerGas == [32]byte{} && e.BlockHash == libcommon.Hash{} && e.TransactionsRoot == libcommon.Hash{}
+		e.GasLimit == 0 && e.GasUsed == 0 && e.Time == 0 && e.Extra.EncodingSize() == 0 && e.BaseFeePerGas == [32]byte{} && e.BlockHash == libcommon.Hash{} && e.TransactionsRoot == libcommon.Hash{}
 }
 
 // Encodes header data partially. used to not dupicate code across Eth1Block and Eth1Header.
@@ -111,7 +115,7 @@ func (h *Eth1Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 		buf = append(buf, h.ExcessDataGas[:]...)
 	}
 
-	buf = append(buf, h.Extra...)
+	buf = append(buf, h.Extra.Bytes()...)
 	return
 }
 
@@ -170,8 +174,10 @@ func (h *Eth1Header) DecodeSSZ(buf []byte, version int) error {
 		copy(h.ExcessDataGas[:], buf[pos:pos+32])
 		pos += 32
 	}
-	h.Extra = common.CopyBytes(buf[pos:])
-	return nil
+	if h.Extra == nil {
+		h.Extra = solid.NewExtraData()
+	}
+	return h.Extra.DecodeSSZ(buf[pos:], version)
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the Header object
@@ -185,8 +191,11 @@ func (h *Eth1Header) EncodingSizeSSZ() int {
 	if h.version >= clparams.DenebVersion {
 		size += 32
 	}
+	if h.Extra == nil {
+		h.Extra = solid.NewExtraData()
+	}
 
-	return size + len(h.Extra)
+	return size + h.Extra.EncodingSize()
 }
 
 // HashSSZ encodes the header in SSZ tree format.
@@ -208,14 +217,11 @@ func (h *Eth1Header) HashSSZ() ([32]byte, error) {
 	if err != nil {
 		return [32]byte{}, err
 	}
-	// Compute extra data leaf
-	var extraLeaf libcommon.Hash
 
-	var baseExtraLeaf [32]byte
-	copy(baseExtraLeaf[:], h.Extra)
-	extraLeaf, err = merkle_tree.ArraysRoot([][32]byte{
-		baseExtraLeaf,
-		merkle_tree.Uint64Root(uint64(len(h.Extra)))}, 2)
+	if h.Extra == nil {
+		h.Extra = solid.NewExtraData()
+	}
+	extraLeaf, err := h.Extra.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}

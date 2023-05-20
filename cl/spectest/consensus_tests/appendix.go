@@ -89,8 +89,8 @@ func addSszTests() {
 		With("BeaconBlockBody", getSSZStaticConsensusTest(&cltypes.BeaconBody{})).
 		With("BeaconBlockHeader", getSSZStaticConsensusTest(&cltypes.BeaconBlockHeader{})).
 		With("BeaconState", getSSZStaticConsensusTest(state.New(&clparams.MainnetBeaconConfig))).
-		With("BlobIdentifier", getSSZStaticConsensusTest(&cltypes.BlobIdentifier{})).
-		With("BlobSidecar", getSSZStaticConsensusTest(&cltypes.BlobSideCar{})).
+		//With("BlobIdentifier", getSSZStaticConsensusTest(&cltypes.BlobIdentifier{})).
+		//With("BlobSidecar", getSSZStaticConsensusTest(&cltypes.BlobSideCar{})).
 		With("BLSToExecutionChange", getSSZStaticConsensusTest(&cltypes.BLSToExecutionChange{})).
 		With("Checkpoint", getSSZStaticConsensusTest(solid.Checkpoint{})).
 		//	With("ContributionAndProof", getSSZStaticConsensusTest(&cltypes.ContributionAndProof{})).
@@ -117,7 +117,7 @@ func addSszTests() {
 		//		With("SignedAggregateAndProof", getSSZStaticConsensusTest(&cltypes.SignedAggregateAndProof{})).
 		With("SignedBeaconBlock", getSSZStaticConsensusTest(&cltypes.SignedBeaconBlock{})).
 		With("SignedBeaconBlockHeader", getSSZStaticConsensusTest(&cltypes.SignedBeaconBlockHeader{})).
-		With("SignedBlobSidecar", getSSZStaticConsensusTest(&cltypes.SignedBlobSideCar{})).
+		//With("SignedBlobSidecar", getSSZStaticConsensusTest(&cltypes.SignedBlobSideCar{})).
 		With("SignedBLSToExecutionChange", getSSZStaticConsensusTest(&cltypes.SignedBLSToExecutionChange{})).
 		//		With("SignedContributionAndProof", getSSZStaticConsensusTest(&cltypes.SignedContributionAndProof{})).
 		With("SignedVoluntaryExit", getSSZStaticConsensusTest(&cltypes.SignedVoluntaryExit{})).

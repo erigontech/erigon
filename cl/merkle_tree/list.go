@@ -47,23 +47,6 @@ func ArraysRoot(input [][32]byte, length uint64) ([32]byte, error) {
 	return res, nil
 }
 
-// Uint64ListRootWithLimit calculates the root hash of an array of uint64 values by first packing the input array into chunks using the PackUint64IntoChunks function,
-// then vectorizing the chunks using the MerkleizeVector function, then calculating the
-// root hash of the vectorized array using the Keccak256 function and
-// the root hash of the length of the input array.
-func Uint64ListRootWithLimit(list []uint64, limit uint64) ([32]byte, error) {
-	var err error
-	roots := PackUint64IntoChunks(list)
-
-	base, err := MerkleizeVector(roots, limit)
-	if err != nil {
-		return [32]byte{}, err
-	}
-
-	lengthRoot := Uint64Root(uint64(len(list)))
-	return utils.Keccak256(base[:], lengthRoot[:]), nil
-}
-
 // BitlistRootWithLimit computes the HashSSZ merkleization of
 // participation roots.
 func BitlistRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {

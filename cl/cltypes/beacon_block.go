@@ -58,7 +58,7 @@ type BeaconBody struct {
 	// Data related to the Ethereum 1.0 chain
 	Eth1Data *Eth1Data
 	// A byte array used to customize validators' behavior
-	Graffiti []byte
+	Graffiti [32]byte
 	// A list of slashing events for validators who included invalid blocks in the chain
 	ProposerSlashings *solid.ListSSZ[*ProposerSlashing]
 	// A list of slashing events for validators who included invalid attestations in the chain
@@ -107,7 +107,7 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(b.Graffiti) != 32 {
 		return nil, fmt.Errorf("bad graffiti length")
 	}
-	buf = append(buf, b.Graffiti...)
+	buf = append(buf, b.Graffiti[:]...)
 	// Write offsets for proposer slashings
 	buf = append(buf, ssz.OffsetSSZ(offset)...)
 	offset += uint32(b.ProposerSlashings.Len()) * 416
@@ -296,7 +296,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 		return err
 	}
 	// Decode graffiti.
-	b.Graffiti = libcommon.Copy(buf[168:200])
+	copy(b.Graffiti[:], buf[168:200])
 
 	// Decode offsets
 	offSetProposerSlashings := ssz.DecodeOffset(buf[200:])
@@ -389,88 +389,25 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {
-	leaves := make([][32]byte, 0, 16)
-	// Signature leaf
-	randaoLeaf, err := merkle_tree.SignatureRoot(b.RandaoReveal)
-	if err != nil {
-		return [32]byte{}, err
+	switch b.Version {
+	case clparams.Phase0Version:
+		return merkle_tree.HashTreeRoot(b.RandaoReveal, b.Eth1Data, b.Graffiti, b.ProposerSlashings, b.AttesterSlashings,
+			b.Attestations, b.Deposits, b.VoluntaryExits)
+	case clparams.AltairVersion:
+		return merkle_tree.HashTreeRoot(b.RandaoReveal, b.Eth1Data, b.Graffiti, b.ProposerSlashings, b.AttesterSlashings,
+			b.Attestations, b.Deposits, b.VoluntaryExits, b.SyncAggregate)
+	case clparams.BellatrixVersion:
+		return merkle_tree.HashTreeRoot(b.RandaoReveal, b.Eth1Data, b.Graffiti, b.ProposerSlashings, b.AttesterSlashings,
+			b.Attestations, b.Deposits, b.VoluntaryExits, b.SyncAggregate, b.ExecutionPayload)
+	case clparams.CapellaVersion:
+		return merkle_tree.HashTreeRoot(b.RandaoReveal, b.Eth1Data, b.Graffiti, b.ProposerSlashings, b.AttesterSlashings,
+			b.Attestations, b.Deposits, b.VoluntaryExits, b.SyncAggregate, b.ExecutionPayload, b.ExecutionChanges)
+	case clparams.DenebVersion:
+		return merkle_tree.HashTreeRoot(b.RandaoReveal, b.Eth1Data, b.Graffiti, b.ProposerSlashings, b.AttesterSlashings,
+			b.Attestations, b.Deposits, b.VoluntaryExits, b.SyncAggregate, b.ExecutionPayload, b.ExecutionChanges, b.BlobKzgCommitments)
+	default:
+		panic("rust is delusional")
 	}
-	leaves = append(leaves, randaoLeaf)
-	// Eth1Data Leaf
-	dataLeaf, err := b.Eth1Data.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	leaves = append(leaves, dataLeaf)
-	// Graffiti leaf
-	var graffitiLeaf [32]byte
-	copy(graffitiLeaf[:], b.Graffiti)
-	leaves = append(leaves, graffitiLeaf)
-	// Proposer slashings leaf
-	proposerLeaf, err := b.ProposerSlashings.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	leaves = append(leaves, proposerLeaf)
-	// Attester slashings leaf
-	attesterLeaf, err := b.AttesterSlashings.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	leaves = append(leaves, attesterLeaf)
-	// Attestations leaf
-	attestationLeaf, err := b.Attestations.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	leaves = append(leaves, attestationLeaf)
-	// Deposits leaf
-	depositLeaf, err := b.Deposits.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	leaves = append(leaves, depositLeaf)
-	// Voluntary exits leaf
-	exitLeaf, err := b.VoluntaryExits.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	leaves = append(leaves, exitLeaf)
-	// Sync aggreate leaf
-	if b.Version >= clparams.AltairVersion {
-		aggLeaf, err := b.SyncAggregate.HashSSZ()
-		if err != nil {
-			return [32]byte{}, err
-		}
-		leaves = append(leaves, aggLeaf)
-	}
-	if b.Version >= clparams.BellatrixVersion {
-		payloadLeaf, err := b.ExecutionPayload.HashSSZ()
-		if err != nil {
-			return [32]byte{}, err
-		}
-		leaves = append(leaves, payloadLeaf)
-	}
-	if b.Version >= clparams.CapellaVersion {
-		blsExecutionLeaf, err := b.ExecutionChanges.HashSSZ()
-		if err != nil {
-			return [32]byte{}, err
-		}
-		leaves = append(leaves, blsExecutionLeaf)
-	}
-
-	if b.Version >= clparams.DenebVersion {
-		blobKzgCommitmentsLeaf, err := b.BlobKzgCommitments.HashSSZ()
-		if err != nil {
-			return [32]byte{}, err
-		}
-		leaves = append(leaves, blobKzgCommitmentsLeaf)
-	}
-
-	if b.Version == clparams.Phase0Version {
-		return merkle_tree.ArraysRoot(leaves, 8)
-	}
-	return merkle_tree.ArraysRoot(leaves, 16)
 }
 
 func (b *BeaconBlock) EncodeSSZ(buf []byte) (dst []byte, err error) {
