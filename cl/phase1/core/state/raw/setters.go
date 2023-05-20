@@ -29,17 +29,12 @@ func (b *BeaconState) SetLatestBlockHeader(header *cltypes.BeaconBlockHeader) {
 
 func (b *BeaconState) SetBlockRootAt(index int, root libcommon.Hash) {
 	b.markLeaf(BlockRootsLeafIndex)
-	b.blockRoots[index] = root
+	b.blockRoots.Set(index, root)
 }
 
 func (b *BeaconState) SetStateRootAt(index int, root libcommon.Hash) {
 	b.markLeaf(StateRootsLeafIndex)
-	b.stateRoots[index] = root
-}
-
-func (b *BeaconState) SetHistoricalRootAt(index int, root [32]byte) {
-	b.markLeaf(HistoricalRootsLeafIndex)
-	b.historicalRoots[index] = root
+	b.stateRoots.Set(index, root)
 }
 
 func (b *BeaconState) SetWithdrawalCredentialForValidatorAtIndex(index int, creds libcommon.Hash) {
@@ -208,7 +203,7 @@ func (b *BeaconState) SetBalances(balances []uint64) {
 
 func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {
 	b.markLeaf(RandaoMixesLeafIndex)
-	b.randaoMixes[index] = mix
+	b.randaoMixes.Set(index, mix)
 }
 
 func (b *BeaconState) SetSlashingSegmentAt(index int, segment uint64) {
@@ -298,7 +293,7 @@ func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
 }
 
 func (b *BeaconState) AddHistoricalRoot(root libcommon.Hash) {
-	b.historicalRoots = append(b.historicalRoots, root)
+	b.historicalRoots.Append(root)
 	b.markLeaf(HistoricalRootsLeafIndex)
 }
 

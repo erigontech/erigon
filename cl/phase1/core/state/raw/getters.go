@@ -52,16 +52,12 @@ func (b *BeaconState) LatestBlockHeader() cltypes.BeaconBlockHeader {
 	return *b.latestBlockHeader
 }
 
-func (b *BeaconState) BlockRoots() [blockRootsLength]libcommon.Hash {
+func (b *BeaconState) BlockRoots() solid.HashVectorSSZ {
 	return b.blockRoots
 }
 
-func (b *BeaconState) StateRoots() [stateRootsLength]libcommon.Hash {
+func (b *BeaconState) StateRoots() solid.HashVectorSSZ {
 	return b.stateRoots
-}
-
-func (b *BeaconState) HistoricalRoots() []libcommon.Hash {
-	return b.historicalRoots
 }
 
 func (b *BeaconState) Eth1Data() *cltypes.Eth1Data {
@@ -147,12 +143,16 @@ func (b *BeaconState) ValidatorMinPreviousInclusionDelayAttestation(index int) (
 	return b.validators[index].MinPreviousInclusionDelayAttestation, nil
 }
 
-func (b *BeaconState) RandaoMixes() [randoMixesLength]libcommon.Hash {
+func (b *BeaconState) RandaoMixes() solid.HashVectorSSZ {
 	return b.randaoMixes
 }
 
 func (b *BeaconState) GetRandaoMixes(epoch uint64) [32]byte {
-	return b.randaoMixes[epoch%b.beaconConfig.EpochsPerHistoricalVector]
+	return b.randaoMixes.Get(int(epoch % b.beaconConfig.EpochsPerHistoricalVector))
+}
+
+func (b *BeaconState) GetRandaoMix(index int) [32]byte {
+	return b.randaoMixes.Get(index)
 }
 
 func (b *BeaconState) ForEachSlashingSegment(fn func(idx int, v uint64, total int) bool) {
@@ -246,7 +246,7 @@ func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (libcommon.Hash, error) {
 	if b.Slot() > slot+b.BeaconConfig().SlotsPerHistoricalRoot {
 		return libcommon.Hash{}, fmt.Errorf("GetBlockRootAtSlot: slot too much far behind")
 	}
-	return b.blockRoots[slot%b.BeaconConfig().SlotsPerHistoricalRoot], nil
+	return b.blockRoots.Get(int(slot % b.BeaconConfig().SlotsPerHistoricalRoot)), nil
 }
 
 // GetDomain

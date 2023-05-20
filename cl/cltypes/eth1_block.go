@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -30,7 +31,7 @@ type Eth1Block struct {
 	// Extra fields
 	BlockHash     libcommon.Hash
 	Transactions  *TransactionsSSZ
-	Withdrawals   types.Withdrawals
+	Withdrawals   *solid.ListSSZ[*types.Withdrawal]
 	ExcessDataGas [32]byte
 	// internals
 	version clparams.StateVersion
@@ -74,7 +75,7 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 		BaseFeePerGas: baseFee32,
 		BlockHash:     header.Hash(),
 		Transactions:  NewTransactionsSSZFromTransactions(body.Transactions),
-		Withdrawals:   body.Withdrawals,
+		Withdrawals:   solid.NewStaticListSSZFromList(body.Withdrawals, 16, 44),
 		ExcessDataGas: excessDataGas32,
 	}
 
@@ -96,7 +97,7 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 		return nil, err
 	}
 	if b.version >= clparams.CapellaVersion {
-		withdrawalsRoot, err = b.Withdrawals.HashSSZ(16)
+		withdrawalsRoot, err = b.Withdrawals.HashSSZ()
 		if err != nil {
 			return nil, err
 		}
@@ -132,7 +133,10 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 	size += b.Transactions.EncodingSize()
 
 	if b.version >= clparams.CapellaVersion {
-		size += len(b.Withdrawals)*44 + 4
+		if b.Withdrawals == nil {
+			b.Withdrawals = solid.NewStaticListSSZ[*types.Withdrawal](16, 44)
+		}
+		size += b.Withdrawals.EncodingSizeSSZ() + 4
 	}
 
 	if b.version >= clparams.DenebVersion {
@@ -193,10 +197,12 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 
 	// If withdrawals are enabled, process them.
 	if withdrawalOffset != nil {
-		var err error
-		b.Withdrawals, err = ssz.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(len(buf)), 44, 16, version)
-		if err != nil {
+		if b.Withdrawals == nil {
+			b.Withdrawals = solid.NewStaticListSSZ[*types.Withdrawal](16, 44)
+		}
+		if err := b.Withdrawals.DecodeSSZ(buf[*withdrawalOffset:], version); err != nil {
 			return fmt.Errorf("[Eth1Block] err: %s", err)
+
 		}
 	}
 
@@ -231,9 +237,7 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	// Write withdrawals offset if exist
 	if b.version >= clparams.CapellaVersion {
 		buf = append(buf, ssz.OffsetSSZ(uint32(currentOffset))...)
-		for _, withdrawal := range b.Withdrawals {
-			currentOffset += withdrawal.EncodingSize()
-		}
+		currentOffset += b.Withdrawals.EncodingSizeSSZ()
 	}
 
 	if b.version >= clparams.DenebVersion {
@@ -250,13 +254,11 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	if buf, err = b.Transactions.EncodeSSZ(buf); err != nil {
 		return nil, err
 	}
-
-	// Append all withdrawals SSZ
-	for _, withdrawal := range b.Withdrawals {
-		buf = append(buf, withdrawal.EncodeSSZ()...)
+	if b.version < clparams.CapellaVersion {
+		return buf, nil
 	}
 
-	return buf, nil
+	return b.Withdrawals.EncodeSSZ(buf)
 }
 
 // HashSSZ calculates the SSZ hash of the Eth1Block's payload header.
@@ -284,7 +286,13 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 	var withdrawalsHash *libcommon.Hash
 	if b.version >= clparams.CapellaVersion {
 		withdrawalsHash = new(libcommon.Hash)
-		*withdrawalsHash = types.DeriveSha(b.Withdrawals)
+		// extract all withdrawals from itearable list
+		withdrawals := make([]*types.Withdrawal, b.Withdrawals.Len())
+		b.Withdrawals.Range(func(_ int, w *types.Withdrawal, _ int) bool {
+			withdrawals = append(withdrawals, w)
+			return true
+		})
+		*withdrawalsHash = types.DeriveSha(types.Withdrawals(withdrawals))
 	}
 
 	var excessDataGas *big.Int
@@ -327,8 +335,13 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 
 // Body returns the equivalent raw body (only eth1 body section).
 func (b *Eth1Block) Body() *types.RawBody {
+	withdrawals := make([]*types.Withdrawal, b.Withdrawals.Len())
+	b.Withdrawals.Range(func(_ int, w *types.Withdrawal, _ int) bool {
+		withdrawals = append(withdrawals, w)
+		return true
+	})
 	return &types.RawBody{
 		Transactions: b.Transactions.UnderlyngReference(),
-		Withdrawals:  b.Withdrawals,
+		Withdrawals:  types.Withdrawals(withdrawals),
 	}
 }

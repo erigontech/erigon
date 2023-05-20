@@ -3,6 +3,8 @@ package transition
 import (
 	"errors"
 	"fmt"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	"github.com/Giulio2002/bls"
@@ -223,7 +225,7 @@ func ProcessVoluntaryExit(s *state2.BeaconState, signedVoluntaryExit *cltypes.Si
 
 // ProcessWithdrawals processes withdrawals by decreasing the balance of each validator
 // and updating the next withdrawal index and validator index.
-func ProcessWithdrawals(s *state2.BeaconState, withdrawals types.Withdrawals, fullValidation bool) error {
+func ProcessWithdrawals(s *state2.BeaconState, withdrawals *solid.ListSSZ[*types.Withdrawal], fullValidation bool) error {
 	// Get the list of withdrawals, the expected withdrawals (if performing full validation),
 	// and the beacon configuration.
 	beaconConfig := s.BeaconConfig()
@@ -232,32 +234,37 @@ func ProcessWithdrawals(s *state2.BeaconState, withdrawals types.Withdrawals, fu
 	// Check if full validation is required and verify expected withdrawals.
 	if fullValidation {
 		expectedWithdrawals := state2.ExpectedWithdrawals(s.BeaconState)
-		if len(expectedWithdrawals) != len(withdrawals) {
-			return fmt.Errorf("ProcessWithdrawals: expected %d withdrawals, but got %d", len(expectedWithdrawals), len(withdrawals))
+		if len(expectedWithdrawals) != withdrawals.Len() {
+			return fmt.Errorf("ProcessWithdrawals: expected %d withdrawals, but got %d", len(expectedWithdrawals), withdrawals.Len())
 		}
-		for i, withdrawal := range withdrawals {
-			if !expectedWithdrawals[i].Equal(withdrawal) {
+		if err := solid.RangeErr[*types.Withdrawal](withdrawals, func(i int, w *types.Withdrawal, _ int) error {
+			if !expectedWithdrawals[i].Equal(w) {
 				return fmt.Errorf("ProcessWithdrawals: withdrawal %d does not match expected withdrawal", i)
 			}
-		}
-	}
-
-	// Decrease the balance of each validator for the corresponding withdrawal.
-	for _, withdrawal := range withdrawals {
-		if err := state2.DecreaseBalance(s.BeaconState, withdrawal.Validator, withdrawal.Amount); err != nil {
+			return nil
+		}); err != nil {
 			return err
 		}
 	}
 
+	if err := solid.RangeErr[*types.Withdrawal](withdrawals, func(_ int, w *types.Withdrawal, _ int) error {
+		if err := state2.DecreaseBalance(s.BeaconState, w.Validator, w.Amount); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
 	// Update next withdrawal index based on number of withdrawals.
-	if len(withdrawals) > 0 {
-		lastWithdrawalIndex := withdrawals[len(withdrawals)-1].Index
+	if withdrawals.Len() > 0 {
+		lastWithdrawalIndex := withdrawals.Get(withdrawals.Len() - 1).Index
 		s.SetNextWithdrawalIndex(lastWithdrawalIndex + 1)
 	}
 
 	// Update next withdrawal validator index based on number of withdrawals.
-	if len(withdrawals) == int(beaconConfig.MaxWithdrawalsPerPayload) {
-		lastWithdrawalValidatorIndex := withdrawals[len(withdrawals)-1].Validator + 1
+	if withdrawals.Len() == int(beaconConfig.MaxWithdrawalsPerPayload) {
+		lastWithdrawalValidatorIndex := withdrawals.Get(withdrawals.Len()-1).Validator + 1
 		s.SetNextWithdrawalValidatorIndex(lastWithdrawalValidatorIndex % numValidators)
 	} else {
 		nextIndex := s.NextWithdrawalValidatorIndex() + beaconConfig.MaxValidatorsPerWithdrawalsSweep

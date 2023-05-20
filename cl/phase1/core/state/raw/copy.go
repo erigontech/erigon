@@ -3,7 +3,6 @@ package raw
 import (
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -15,10 +14,9 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 	dst.slot = b.slot
 	dst.fork = b.fork.Copy()
 	dst.latestBlockHeader = b.latestBlockHeader.Copy()
-	copy(dst.blockRoots[:], b.blockRoots[:])
-	copy(dst.stateRoots[:], b.stateRoots[:])
-	dst.historicalRoots = make([]libcommon.Hash, len(b.historicalRoots))
-	copy(dst.historicalRoots, b.historicalRoots)
+	b.blockRoots.CopyTo(dst.blockRoots)
+	b.stateRoots.CopyTo(dst.stateRoots)
+	b.historicalRoots.CopyTo(dst.historicalRoots)
 	dst.eth1Data = b.eth1Data.Copy()
 	dst.eth1DataVotes = solid.NewDynamicListSSZ[*cltypes.Eth1Data](int(b.beaconConfig.Eth1DataVotesLength()))
 	b.eth1DataVotes.Range(func(index int, value *cltypes.Eth1Data, length int) bool {
@@ -38,7 +36,7 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 	}
 	dst.validators = dst.validators[:len(b.validators)]
 	b.balances.CopyTo(dst.balances)
-	copy(dst.randaoMixes[:], b.randaoMixes[:])
+	b.randaoMixes.CopyTo(dst.randaoMixes)
 	b.slashings.CopyTo(dst.slashings)
 	b.previousEpochParticipation.CopyTo(dst.previousEpochParticipation)
 	b.currentEpochParticipation.CopyTo(dst.currentEpochParticipation)

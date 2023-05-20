@@ -21,15 +21,15 @@ type BeaconState struct {
 	slot                       uint64
 	fork                       *cltypes.Fork
 	latestBlockHeader          *cltypes.BeaconBlockHeader
-	blockRoots                 [blockRootsLength]common.Hash
-	stateRoots                 [stateRootsLength]common.Hash
-	historicalRoots            []common.Hash
+	blockRoots                 solid.HashVectorSSZ
+	stateRoots                 solid.HashVectorSSZ
+	historicalRoots            solid.HashListSSZ
 	eth1Data                   *cltypes.Eth1Data
 	eth1DataVotes              *solid.ListSSZ[*cltypes.Eth1Data]
 	eth1DepositIndex           uint64
 	validators                 []*cltypes.Validator
 	balances                   solid.Uint64ListSSZ
-	randaoMixes                [randoMixesLength]common.Hash
+	randaoMixes                solid.HashVectorSSZ
 	slashings                  solid.Uint64VectorSSZ
 	previousEpochParticipation solid.BitList
 	currentEpochParticipation  solid.BitList
@@ -71,6 +71,10 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		slashings:                  solid.NewUint64VectorSSZ(slashingsLength),
 		currentEpochAttestations:   solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(cfg.CurrentEpochAttestationsLength())),
 		previousEpochAttestations:  solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(cfg.PreviousEpochAttestationsLength())),
+		historicalRoots:            solid.NewHashList(int(cfg.HistoricalRootsLimit)),
+		blockRoots:                 solid.NewHashVector(blockRootsLength),
+		stateRoots:                 solid.NewHashVector(stateRootsLength),
+		randaoMixes:                solid.NewHashVector(randoMixesLength),
 	}
 	state.init()
 	return state

@@ -85,7 +85,6 @@ type Deposit struct {
 }
 
 func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {
-
 	buf := dst
 	for _, proofSeg := range d.Proof {
 		buf = append(buf, proofSeg[:]...)
@@ -331,20 +330,7 @@ func (v *Validator) DecodeSSZ(buf []byte, _ int) error {
 	return v.Validator.DecodeSSZ(buf, 0)
 }
 
-//var validatorLeavesPool = sync.Pool{
-//	New: func() any {
-//		p := make([]byte, 8*32)
-//		return &p
-//	},
-//}
-
 func (v *Validator) HashSSZ() (o [32]byte, err error) {
-	// leavesp, _ := validatorLeavesPool.Get().(*[]byte)
-	// leaves := *leavesp
-	//
-	//	defer func() {
-	//		validatorLeavesPool.Put(leavesp)
-	//	}()
 	leaves := make([]byte, 8*32)
 	v.CopyHashBufferTo(leaves)
 	leaves = leaves[:(8 * 32)]

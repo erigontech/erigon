@@ -1,6 +1,9 @@
 package solid
 
-import "github.com/ledgerwatch/erigon-lib/types/ssz"
+import (
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
+)
 
 type IterableSSZ[T any] interface {
 	Clear()
@@ -20,4 +23,6 @@ type IterableSSZ[T any] interface {
 
 type Uint64VectorSSZ IterableSSZ[uint64]
 type Uint64ListSSZ IterableSSZ[uint64]
+type HashListSSZ IterableSSZ[common.Hash]
+type HashVectorSSZ IterableSSZ[common.Hash]
 type BitList IterableSSZ[byte]

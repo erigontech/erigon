@@ -48,12 +48,17 @@ func (b *BeaconState) ComputeCommittee(indicies []uint64, slot uint64, index, co
 	end := (lenIndicies * (index + 1)) / count
 	var shuffledIndicies []uint64
 	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
-	randaoMixes := b.RandaoMixes()
-	seed := shuffling.GetSeed(b.BeaconConfig(), randaoMixes[:], epoch, b.BeaconConfig().DomainBeaconAttester)
+	beaconConfig := b.BeaconConfig()
+
+	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+		beaconConfig.EpochsPerHistoricalVector
+	// Input for the seed hash.
+	mix := b.GetRandaoMix(int(mixPosition))
+	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconAttester)
 	if shuffledIndicesInterface, ok := b.shuffledSetsCache.Get(seed); ok {
 		shuffledIndicies = shuffledIndicesInterface
 	} else {
-		shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), randaoMixes[:], indicies, slot)
+		shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, indicies, slot)
 		b.shuffledSetsCache.Add(seed, shuffledIndicies)
 	}
 	return shuffledIndicies[start:end], nil
@@ -184,8 +189,11 @@ func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error)
 	//math.MaxUint8
 	activeValidatorIndicies := b.GetActiveValidatorsIndices(epoch)
 	activeValidatorCount := uint64(len(activeValidatorIndicies))
-	mixes := b.RandaoMixes()
-	seed := shuffling.GetSeed(b.BeaconConfig(), mixes[:], epoch, beaconConfig.DomainSyncCommittee)
+	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+		beaconConfig.EpochsPerHistoricalVector
+	// Input for the seed hash.
+	mix := b.GetRandaoMix(int(mixPosition))
+	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, beaconConfig.DomainSyncCommittee)
 	i := uint64(0)
 	syncCommitteePubKeys := make([][48]byte, 0, cltypes.SyncCommitteeSize)
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)

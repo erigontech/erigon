@@ -50,6 +50,15 @@ func NewDynamicListSSZFromList[T encodableHashableSSZ](list []T, limit int) *Lis
 	}
 }
 
+func NewStatucListSSZFromList[T encodableHashableSSZ](list []T, limit int, bytesPerElement int) *ListSSZ[T] {
+	return &ListSSZ[T]{
+		list:            list,
+		limit:           limit,
+		static:          true,
+		bytesPerElement: bytesPerElement,
+	}
+}
+
 func NewStaticListSSZFromList[T encodableHashableSSZ](list []T, limit int, bytesPerElement int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:            list,
@@ -108,6 +117,10 @@ func (l *ListSSZ[T]) Clone() clonable.Clonable {
 		return NewStaticListSSZ[T](l.limit, l.bytesPerElement)
 	}
 	return NewDynamicListSSZ[T](l.limit)
+}
+
+func (l *ListSSZ[T]) Get(index int) T {
+	return l.list[index]
 }
 
 func (l *ListSSZ[T]) Range(fn func(index int, value T, length int) bool) {

@@ -10,6 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	types2 "github.com/ledgerwatch/erigon/core/types"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 )
@@ -120,6 +122,11 @@ func convertPayloadToGrpc(e *cltypes.Eth1Block) (*types.ExecutionPayload, error)
 			panic("NewPayload BaseFeePerGas overflow")
 		}
 	}
+	withdrawals := make([]*types2.Withdrawal, e.Withdrawals.Len())
+	e.Withdrawals.Range(func(_ int, w *types2.Withdrawal, _ int) bool {
+		withdrawals = append(withdrawals, w)
+		return true
+	})
 
 	res := &types.ExecutionPayload{
 		Version:       1,
@@ -137,11 +144,11 @@ func convertPayloadToGrpc(e *cltypes.Eth1Block) (*types.ExecutionPayload, error)
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
 		BlockHash:     gointerfaces.ConvertHashToH256(e.BlockHash),
 		Transactions:  e.Transactions.UnderlyngReference(),
-		Withdrawals:   privateapi.ConvertWithdrawalsToRpc(e.Withdrawals),
+		Withdrawals:   privateapi.ConvertWithdrawalsToRpc(withdrawals),
 	}
 	if e.Withdrawals != nil {
 		res.Version = 2
-		res.Withdrawals = privateapi.ConvertWithdrawalsToRpc(e.Withdrawals)
+		res.Withdrawals = privateapi.ConvertWithdrawalsToRpc(withdrawals)
 	}
 
 	return res, nil

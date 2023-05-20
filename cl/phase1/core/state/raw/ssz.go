@@ -5,7 +5,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/state_encoding"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
@@ -53,7 +52,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		err error
 	)
 	// Sanity checks
-	if len(b.historicalRoots) > state_encoding.HistoricalRootsLength {
+	if b.historicalRoots.Length() > state_encoding.HistoricalRootsLength {
 		return nil, fmt.Errorf("too many historical roots")
 	}
 
@@ -98,17 +97,17 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	for _, blockRoot := range &b.blockRoots {
-		dst = append(dst, blockRoot[:]...)
+	if dst, err = b.blockRoots.EncodeSSZ(dst); err != nil {
+		return nil, err
 	}
 
-	for _, stateRoot := range &b.stateRoots {
-		dst = append(dst, stateRoot[:]...)
+	if dst, err = b.stateRoots.EncodeSSZ(dst); err != nil {
+		return nil, err
 	}
 
 	// Historical roots offset
 	dst = append(dst, ssz.OffsetSSZ(offset)...)
-	offset += uint32(len(b.historicalRoots) * 32)
+	offset += uint32(b.historicalRoots.EncodingSizeSSZ())
 
 	if dst, err = b.eth1Data.EncodeSSZ(dst); err != nil {
 		return nil, err
@@ -128,8 +127,8 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	dst = append(dst, ssz.OffsetSSZ(offset)...)
 	offset += uint32(b.balances.Length()) * 8
 
-	for _, mix := range &b.randaoMixes {
-		dst = append(dst, mix[:]...)
+	if dst, err = b.randaoMixes.EncodeSSZ(dst); err != nil {
+		return nil, err
 	}
 	fmt.Println(dst[:10])
 
@@ -194,8 +193,8 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		dst = append(dst, ssz.OffsetSSZ(offset)...)
 	}
 	// Write historical roots (offset 1)
-	for _, root := range b.historicalRoots {
-		dst = append(dst, root[:]...)
+	if dst, err = b.historicalRoots.EncodeSSZ(dst); err != nil {
+		return nil, err
 	}
 	// Write votes (offset 2)
 	if dst, err = b.eth1DataVotes.EncodeSSZ(dst); err != nil {
@@ -275,16 +274,23 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		return err
 	}
 	pos += b.latestBlockHeader.EncodingSizeSSZ()
+	if b.blockRoots == nil {
+		b.blockRoots = solid.NewHashVector(blockRootsLength)
+	}
 	// Decode block roots
-	for i := range b.blockRoots {
-		copy(b.blockRoots[i][:], buf[pos:])
-		pos += length.Hash
+	if err := b.blockRoots.DecodeSSZ(buf[pos:], version); err != nil {
+		return err
+	}
+	pos += b.blockRoots.EncodingSizeSSZ()
+	if b.stateRoots == nil {
+		b.stateRoots = solid.NewHashVector(stateRootsLength)
 	}
 	// Decode state roots
-	for i := range b.stateRoots {
-		copy(b.stateRoots[i][:], buf[pos:])
-		pos += 32
+	if err := b.stateRoots.DecodeSSZ(buf[pos:], version); err != nil {
+		return err
 	}
+	pos += b.stateRoots.EncodingSizeSSZ()
+
 	// Read historical roots offset
 	historicalRootsOffset := ssz.DecodeOffset(buf[pos:])
 	pos += 4
@@ -306,11 +312,14 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	// Read balances offset
 	balancesOffset := ssz.DecodeOffset(buf[pos:])
 	pos += 4
-	// Decode randao mixes
-	for i := range b.randaoMixes {
-		copy(b.randaoMixes[i][:], buf[pos:])
-		pos += 32
+	if b.randaoMixes == nil {
+		b.randaoMixes = solid.NewHashVector(randoMixesLength)
 	}
+	// Decode randao mixes
+	if err := b.randaoMixes.DecodeSSZ(buf[pos:], version); err != nil {
+		return err
+	}
+	pos += b.randaoMixes.EncodingSizeSSZ()
 	if b.slashings == nil {
 		b.slashings = solid.NewUint64VectorSSZ(slashingsLength)
 	}
@@ -378,8 +387,11 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		// pos += 4
 	}
 	// Now decode all the lists.
+	if b.historicalRoots == nil {
+		b.historicalRoots = solid.NewHashList(int(b.beaconConfig.HistoricalRootsLimit))
+	}
 	var err error
-	if b.historicalRoots, err = ssz.DecodeHashList(buf, historicalRootsOffset, votesOffset, state_encoding.HistoricalRootsLength); err != nil {
+	if err = b.historicalRoots.DecodeSSZ(buf[historicalRootsOffset:votesOffset], version); err != nil {
 		return err
 	}
 	if b.eth1DataVotes == nil {
@@ -460,7 +472,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		b.historicalSummaries = solid.NewStaticListSSZ[*cltypes.HistoricalSummary](int(b.beaconConfig.HistoricalRootsLimit), 64)
 	}
 
-	if err := b.historicalSummaries.DecodeSSZ(buf[historicalSummariesOffset:len(buf)], version); err != nil {
+	if err := b.historicalSummaries.DecodeSSZ(buf[historicalSummariesOffset:], version); err != nil {
 		return err
 	}
 	// Capella
@@ -469,7 +481,10 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 
 // SSZ size of the Beacon State
 func (b *BeaconState) EncodingSizeSSZ() (size int) {
-	size = int(b.baseOffsetSSZ()) + (len(b.historicalRoots) * 32)
+	if b.historicalRoots == nil {
+		b.historicalRoots = solid.NewHashList(int(b.beaconConfig.HistoricalRootsLimit))
+	}
+	size = int(b.baseOffsetSSZ()) + b.historicalRoots.EncodingSizeSSZ()
 	if b.eth1DataVotes == nil {
 		b.eth1DataVotes = solid.NewStaticListSSZ[*cltypes.Eth1Data](int(b.beaconConfig.Eth1DataVotesLength()), 72)
 	}

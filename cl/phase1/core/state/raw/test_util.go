@@ -18,6 +18,9 @@ func GetEmptyBeaconState() *BeaconState {
 		nextSyncCommittee: &cltypes.SyncCommittee{
 			PubKeys: make([][48]byte, 512),
 		},
+		blockRoots:                   solid.NewHashVector(blockRootsLength),
+		stateRoots:                   solid.NewHashVector(stateRootsLength),
+		randaoMixes:                  solid.NewHashVector(randoMixesLength),
 		previousJustifiedCheckpoint:  solid.NewCheckpoint(),
 		currentJustifiedCheckpoint:   solid.NewCheckpoint(),
 		finalizedCheckpoint:          solid.NewCheckpoint(),
