@@ -6,6 +6,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
@@ -19,11 +20,11 @@ const (
 	sendValue        uint64 = 10000
 )
 
-func callSendTx(value uint64, toAddr, fromAddr string) (*libcommon.Hash, error) {
+func callSendTx(value uint64, toAddr, fromAddr string, logger log.Logger) (*libcommon.Hash, error) {
 	fmt.Printf("Sending %d ETH to %q from %q...\n", value, toAddr, fromAddr)
 
 	// get the latest nonce for the next transaction
-	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(fromAddr))
+	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(fromAddr), logger)
 	if err != nil {
 		fmt.Printf("failed to get latest nonce: %s\n", err)
 		return nil, err
@@ -37,7 +38,7 @@ func callSendTx(value uint64, toAddr, fromAddr string) (*libcommon.Hash, error) 
 	}
 
 	// send the signed transaction
-	hash, err := requests.SendTransaction(models.ReqId, signedTx)
+	hash, err := requests.SendTransaction(models.ReqId, signedTx, logger)
 	if err != nil {
 		fmt.Printf("failed to send transaction: %s\n", err)
 		return nil, err
@@ -51,33 +52,33 @@ func callSendTx(value uint64, toAddr, fromAddr string) (*libcommon.Hash, error) 
 	return hash, nil
 }
 
-func callSendTxWithDynamicFee(toAddr, fromAddr string) ([]*libcommon.Hash, error) {
+func callSendTxWithDynamicFee(toAddr, fromAddr string, logger log.Logger) ([]*libcommon.Hash, error) {
 	// get the latest nonce for the next transaction
-	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(fromAddr))
+	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(fromAddr), logger)
 	if err != nil {
 		fmt.Printf("failed to get latest nonce: %s\n", err)
 		return nil, err
 	}
 
-	lowerThanBaseFeeTxs, higherThanBaseFeeTxs, err := services.CreateManyEIP1559TransactionsRefWithBaseFee2(toAddr, &nonce)
+	lowerThanBaseFeeTxs, higherThanBaseFeeTxs, err := services.CreateManyEIP1559TransactionsRefWithBaseFee2(toAddr, &nonce, logger)
 	if err != nil {
 		fmt.Printf("failed CreateManyEIP1559TransactionsRefWithBaseFee: %s\n", err)
 		return nil, err
 	}
 
-	lowerThanBaseFeeHashlist, err := services.SendManyTransactions(lowerThanBaseFeeTxs)
+	lowerThanBaseFeeHashlist, err := services.SendManyTransactions(lowerThanBaseFeeTxs, logger)
 	if err != nil {
 		fmt.Printf("failed SendManyTransactions(lowerThanBaseFeeTxs): %s\n", err)
 		return nil, err
 	}
 
-	higherThanBaseFeeHashlist, err := services.SendManyTransactions(higherThanBaseFeeTxs)
+	higherThanBaseFeeHashlist, err := services.SendManyTransactions(higherThanBaseFeeTxs, logger)
 	if err != nil {
 		fmt.Printf("failed SendManyTransactions(higherThanBaseFeeTxs): %s\n", err)
 		return nil, err
 	}
 
-	services.CheckTxPoolContent(100, 0, 100)
+	services.CheckTxPoolContent(100, 0, 100, logger)
 
 	hashmap := make(map[libcommon.Hash]bool)
 	for _, hash := range higherThanBaseFeeHashlist {
@@ -91,13 +92,13 @@ func callSendTxWithDynamicFee(toAddr, fromAddr string) ([]*libcommon.Hash, error
 	fmt.Println("SUCCESS: All transactions in pending pool mined.")
 
 	for i := 1; i <= 20; i++ {
-		blockNumber, err := requests.BlockNumber(models.ReqId)
+		blockNumber, err := requests.BlockNumber(models.ReqId, logger)
 		if err != nil {
 			fmt.Printf("FAILURE => error getting block number: %v\n", err)
 		} else {
 			fmt.Printf("Block number: %d\n", blockNumber)
 		}
-		pendingSize, queuedSize, baseFeeSize, err := requests.TxpoolContent(models.ReqId)
+		pendingSize, queuedSize, baseFeeSize, err := requests.TxpoolContent(models.ReqId, logger)
 		if err != nil {
 			fmt.Printf("FAILURE => error getting txpool content: %v\n", err)
 		} else {
@@ -109,11 +110,11 @@ func callSendTxWithDynamicFee(toAddr, fromAddr string) ([]*libcommon.Hash, error
 	return append(lowerThanBaseFeeHashlist, higherThanBaseFeeHashlist...), nil
 }
 
-func callContractTx() (*libcommon.Hash, error) {
+func callContractTx(logger log.Logger) (*libcommon.Hash, error) {
 	// hashset to hold hashes for search after mining
 	hashes := make(map[libcommon.Hash]bool)
 	// get the latest nonce for the next transaction
-	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(models.DevAddress))
+	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(models.DevAddress), logger)
 	if err != nil {
 		fmt.Printf("failed to get latest nonce: %s\n", err)
 		return nil, err
@@ -127,7 +128,7 @@ func callContractTx() (*libcommon.Hash, error) {
 	}
 
 	// send the contract transaction to the node
-	hash, err := requests.SendTransaction(models.ReqId, signedTx)
+	hash, err := requests.SendTransaction(models.ReqId, signedTx, logger)
 	if err != nil {
 		fmt.Printf("failed to send transaction: %v\n", err)
 		return nil, err
@@ -135,7 +136,7 @@ func callContractTx() (*libcommon.Hash, error) {
 	hashes[*hash] = true
 	fmt.Println()
 
-	eventHash, err := services.EmitFallbackEvent(subscriptionContract, transactOpts)
+	eventHash, err := services.EmitFallbackEvent(subscriptionContract, transactOpts, logger)
 	if err != nil {
 		fmt.Printf("failed to emit events: %v\n", err)
 		return nil, err
@@ -149,7 +150,7 @@ func callContractTx() (*libcommon.Hash, error) {
 
 	blockNum := (*txToBlockMap)[*eventHash]
 
-	block, err := requests.GetBlockByNumber(models.ReqId, devnetutils.HexToInt(blockNum), true)
+	block, err := requests.GetBlockByNumber(models.ReqId, devnetutils.HexToInt(blockNum), true, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +159,7 @@ func callContractTx() (*libcommon.Hash, error) {
 		devnetutils.GenerateTopic(models.SolContractMethodSignature), hexutility.Bytes{}, hexutil.Uint(1),
 		block.Result.Hash, hexutil.Uint(0), false)
 
-	if err = requests.GetAndCompareLogs(models.ReqId, 0, 20, expectedLog); err != nil {
+	if err = requests.GetAndCompareLogs(models.ReqId, 0, 20, expectedLog, logger); err != nil {
 		return nil, fmt.Errorf("failed to get logs: %v", err)
 	}
 
