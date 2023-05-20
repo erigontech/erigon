@@ -112,8 +112,8 @@ func (s *testService) ReturnError() error {
 	return testError{}
 }
 
-func (s *testService) CallMeBack(ctx context.Context, method string, args []interface{}, logger log.Logger) (interface{}, error) {
-	c, ok := ClientFromContext(ctx, logger)
+func (s *testService) CallMeBack(ctx context.Context, method string, args []interface{}) (interface{}, error) {
+	c, ok := ClientFromContext(ctx, log.New())
 	if !ok {
 		return nil, errors.New("no client")
 	}
@@ -122,8 +122,8 @@ func (s *testService) CallMeBack(ctx context.Context, method string, args []inte
 	return result, err
 }
 
-func (s *testService) CallMeBackLater(ctx context.Context, method string, args []interface{}, logger log.Logger) error {
-	c, ok := ClientFromContext(ctx, logger)
+func (s *testService) CallMeBackLater(ctx context.Context, method string, args []interface{}) error {
+	c, ok := ClientFromContext(ctx, log.New())
 	if !ok {
 		return errors.New("no client")
 	}
