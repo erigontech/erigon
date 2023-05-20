@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 )
 
-func post(client *http.Client, url, request string, response interface{}) error {
+func post(client *http.Client, url, request string, response interface{}, logger log.Logger) error {
 	start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request)) // nolint:bodyclose
 	if err != nil {
@@ -24,7 +24,7 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	defer func(Body io.ReadCloser) {
 		closeErr := Body.Close()
 		if closeErr != nil {
-			log.Warn("body close", "err", closeErr)
+			logger.Warn("body close", "err", closeErr)
 		}
 	}(r.Body)
 
@@ -42,18 +42,19 @@ func post(client *http.Client, url, request string, response interface{}) error 
 		return fmt.Errorf("failed to unmarshal response: %s", err)
 	}
 
-	log.Info("Got in", "time", time.Since(start).Seconds())
+	logger.Info("Got in", "time", time.Since(start).Seconds())
 	return nil
 }
 
 type RequestGenerator struct {
 	reqID  int
 	client *http.Client
+	logger log.Logger
 }
 
 func (req *RequestGenerator) call(target string, method, body string, response interface{}) rpctest.CallResult {
 	start := time.Now()
-	err := post(req.client, models.ErigonUrl, body, response)
+	err := post(req.client, models.ErigonUrl, body, response, req.logger)
 	return rpctest.CallResult{
 		RequestBody: body,
 		Target:      target,
@@ -136,7 +137,7 @@ func (req *RequestGenerator) PingErigonRpc() rpctest.CallResult {
 	defer func(body io.ReadCloser) {
 		closeErr := body.Close()
 		if closeErr != nil {
-			log.Warn("failed to close readCloser", "err", closeErr)
+			req.logger.Warn("failed to close readCloser", "err", closeErr)
 		}
 	}(resp.Body)
 
@@ -160,7 +161,7 @@ func (req *RequestGenerator) PingErigonRpc() rpctest.CallResult {
 	return res
 }
 
-func initialiseRequestGenerator(reqId int) *RequestGenerator {
+func initialiseRequestGenerator(reqId int, logger log.Logger) *RequestGenerator {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -168,6 +169,7 @@ func initialiseRequestGenerator(reqId int) *RequestGenerator {
 	reqGen := RequestGenerator{
 		client: client,
 		reqID:  reqId,
+		logger: logger,
 	}
 	if reqGen.reqID == 0 {
 		reqGen.reqID++

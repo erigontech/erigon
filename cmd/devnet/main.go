@@ -87,7 +87,7 @@ func action(ctx *cli.Context) error {
 	services.InitSubscriptions([]models.SubMethod{models.ETHNewHeads}, logger)
 
 	// execute all rpc methods amongst the two nodes
-	commands.ExecuteAllMethods()
+	commands.ExecuteAllMethods(logger)
 
 	// wait for all goroutines to complete before exiting
 	wg.Wait()

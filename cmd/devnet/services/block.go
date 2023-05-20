@@ -8,6 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
@@ -26,10 +27,10 @@ var (
 	signer = types.LatestSigner(params.AllCliqueProtocolChanges)
 )
 
-func CreateManyEIP1559TransactionsRefWithBaseFee(addr string, startingNonce *uint64) ([]*types.Transaction, []*types.Transaction, error) {
+func CreateManyEIP1559TransactionsRefWithBaseFee(addr string, startingNonce *uint64, logger log.Logger) ([]*types.Transaction, []*types.Transaction, error) {
 	toAddress := libcommon.HexToAddress(addr)
 
-	baseFeePerGas, err := BaseFeeFromBlock()
+	baseFeePerGas, err := BaseFeeFromBlock(logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed BaseFeeFromBlock: %v", err)
 	}
@@ -44,10 +45,10 @@ func CreateManyEIP1559TransactionsRefWithBaseFee(addr string, startingNonce *uin
 	return lowerBaseFeeTransactions, higherBaseFeeTransactions, nil
 }
 
-func CreateManyEIP1559TransactionsRefWithBaseFee2(addr string, startingNonce *uint64) ([]*types.Transaction, []*types.Transaction, error) {
+func CreateManyEIP1559TransactionsRefWithBaseFee2(addr string, startingNonce *uint64, logger log.Logger) ([]*types.Transaction, []*types.Transaction, error) {
 	toAddress := libcommon.HexToAddress(addr)
 
-	baseFeePerGas, err := BaseFeeFromBlock()
+	baseFeePerGas, err := BaseFeeFromBlock(logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed BaseFeeFromBlock: %v", err)
 	}
@@ -255,7 +256,7 @@ func txHashInBlock(client *rpc.Client, hashmap map[libcommon.Hash]bool, blockNum
 }
 
 // EmitFallbackEvent emits an event from the contract using the fallback method
-func EmitFallbackEvent(subContract *contracts.Subscription, opts *bind.TransactOpts) (*libcommon.Hash, error) {
+func EmitFallbackEvent(subContract *contracts.Subscription, opts *bind.TransactOpts, logger log.Logger) (*libcommon.Hash, error) {
 	fmt.Println("EMITTING EVENT FROM FALLBACK...")
 
 	// adding one to the nonce before initiating another transaction
@@ -271,7 +272,7 @@ func EmitFallbackEvent(subContract *contracts.Subscription, opts *bind.TransactO
 		return nil, fmt.Errorf("failed to sign fallback transaction: %v", err)
 	}
 
-	hash, err := requests.SendTransaction(models.ReqId, &signedTx)
+	hash, err := requests.SendTransaction(models.ReqId, &signedTx, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send fallback transaction: %v", err)
 	}
@@ -279,9 +280,9 @@ func EmitFallbackEvent(subContract *contracts.Subscription, opts *bind.TransactO
 	return hash, nil
 }
 
-func BaseFeeFromBlock() (uint64, error) {
+func BaseFeeFromBlock(logger log.Logger) (uint64, error) {
 	var val uint64
-	res, err := requests.GetBlockByNumberDetails(0, "latest", false)
+	res, err := requests.GetBlockByNumberDetails(0, "latest", false, logger)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get base fee from block: %v\n", err)
 	}
@@ -295,12 +296,12 @@ func BaseFeeFromBlock() (uint64, error) {
 	return val, err
 }
 
-func SendManyTransactions(signedTransactions []*types.Transaction) ([]*libcommon.Hash, error) {
+func SendManyTransactions(signedTransactions []*types.Transaction, logger log.Logger) ([]*libcommon.Hash, error) {
 	fmt.Println("Sending multiple transactions to the txpool...")
 	hashes := make([]*libcommon.Hash, len(signedTransactions))
 
 	for idx, tx := range signedTransactions {
-		hash, err := requests.SendTransaction(models.ReqId, tx)
+		hash, err := requests.SendTransaction(models.ReqId, tx, logger)
 		if err != nil {
 			fmt.Printf("failed SendTransaction: %s\n", err)
 			return nil, err

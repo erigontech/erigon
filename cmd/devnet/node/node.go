@@ -33,7 +33,7 @@ func Start(wg *sync.WaitGroup, dataDir string, logger log.Logger) {
 	time.Sleep(time.Second * 10)
 
 	// get the enode of the first node
-	enode, err := getEnode()
+	enode, err := getEnode(logger)
 	if err != nil {
 		logger.Error("Starting the node", "error", err)
 	}
@@ -132,8 +132,8 @@ func nonMiningNodeArgs(dataDir string, nodeNumber int, enode string) []string {
 }
 
 // getEnode returns the enode of the mining node
-func getEnode() (string, error) {
-	nodeInfo, err := requests.AdminNodeInfo(0)
+func getEnode(logger log.Logger) (string, error) {
+	nodeInfo, err := requests.AdminNodeInfo(0, logger)
 	if err != nil {
 		return "", err
 	}

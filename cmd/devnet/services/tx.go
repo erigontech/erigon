@@ -5,10 +5,11 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/log/v3"
 )
 
-func CheckTxPoolContent(expectedPendingSize, expectedQueuedSize, expectedBaseFeeSize int) {
-	pendingSize, queuedSize, baseFeeSize, err := requests.TxpoolContent(models.ReqId)
+func CheckTxPoolContent(expectedPendingSize, expectedQueuedSize, expectedBaseFeeSize int, logger log.Logger) {
+	pendingSize, queuedSize, baseFeeSize, err := requests.TxpoolContent(models.ReqId, logger)
 	if err != nil {
 		fmt.Printf("FAILURE => error getting txpool content: %v\n", err)
 		return
