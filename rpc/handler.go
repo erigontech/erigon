@@ -61,7 +61,7 @@ type handler struct {
 	rootCtx        context.Context                // canceled by close()
 	cancelRoot     func()                         // cancel function for rootCtx
 	conn           jsonWriter                     // where responses will be sent
-	log            log.Logger
+	logger         log.Logger
 	allowSubscribe bool
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
@@ -110,7 +110,7 @@ func HandleError(err error, stream *jsoniter.Stream) error {
 	return nil
 }
 
-func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool) *handler {
+func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool, logger log.Logger) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	forbiddenList := newForbiddenList()
 	h := &handler{
@@ -123,7 +123,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		cancelRoot:     cancelRoot,
 		allowSubscribe: true,
 		serverSubs:     make(map[ID]*Subscription),
-		log:            log.Root(),
+		logger:         logger,
 		allowList:      allowList,
 		forbiddenList:  forbiddenList,
 
@@ -132,7 +132,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 	}
 
 	if conn.remoteAddr() != "" {
-		h.log = h.log.New("conn", conn.remoteAddr())
+		h.logger = h.logger.New("conn", conn.remoteAddr())
 	}
 	h.unsubscribeCb = newCallback(reflect.Value{}, reflect.ValueOf(h.unsubscribe), "unsubscribe")
 	return h
@@ -330,7 +330,7 @@ func (h *handler) handleImmediate(msg *jsonrpcMessage) bool {
 		return false
 	case msg.isResponse():
 		h.handleResponse(msg)
-		h.log.Trace("Handled RPC response", "reqid", idForLog{msg.ID}, "t", time.Since(start))
+		h.logger.Trace("Handled RPC response", "reqid", idForLog{msg.ID}, "t", time.Since(start))
 		return true
 	default:
 		return false
@@ -341,7 +341,7 @@ func (h *handler) handleImmediate(msg *jsonrpcMessage) bool {
 func (h *handler) handleSubscriptionResult(msg *jsonrpcMessage) {
 	var result subscriptionResult
 	if err := json.Unmarshal(msg.Params, &result); err != nil {
-		h.log.Trace("Dropping invalid subscription message")
+		h.logger.Trace("Dropping invalid subscription message")
 		return
 	}
 	if h.clientSubs[result.ID] != nil {
@@ -353,7 +353,7 @@ func (h *handler) handleSubscriptionResult(msg *jsonrpcMessage) {
 func (h *handler) handleResponse(msg *jsonrpcMessage) {
 	op := h.respWait[string(msg.ID)]
 	if op == nil {
-		h.log.Trace("Unsolicited RPC response", "reqid", idForLog{msg.ID})
+		h.logger.Trace("Unsolicited RPC response", "reqid", idForLog{msg.ID})
 		return
 	}
 	delete(h.respWait, string(msg.ID))
@@ -383,26 +383,26 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 	case msg.isNotification():
 		h.handleCall(ctx, msg, stream)
 		if h.traceRequests {
-			h.log.Info("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
+			h.logger.Info("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
 		} else {
-			h.log.Trace("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
+			h.logger.Trace("Served", "t", time.Since(start), "method", msg.Method, "params", string(msg.Params))
 		}
 		return nil
 	case msg.isCall():
 		resp := h.handleCall(ctx, msg, stream)
 		if resp != nil && resp.Error != nil {
 			if resp.Error.Data != nil {
-				h.log.Warn("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
+				h.logger.Warn("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
 			} else {
-				h.log.Warn("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
+				h.logger.Warn("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
 					"err", resp.Error.Message)
 			}
 		}
 		if h.traceRequests {
-			h.log.Info("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+			h.logger.Info("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
 		} else {
-			h.log.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
+			h.logger.Trace("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
 		}
 		return resp
 	case msg.hasValidID():

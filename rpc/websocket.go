@@ -186,7 +186,7 @@ func parseOriginURL(origin string) (string, string, string, error) {
 
 // DialWebsocketWithDialer creates a new RPC client that communicates with a JSON-RPC server
 // that is listening on the given endpoint using the provided dialer.
-func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, dialer websocket.Dialer) (*Client, error) {
+func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, dialer websocket.Dialer, logger log.Logger) (*Client, error) {
 	endpoint, header, err := wsClientHeaders(endpoint, origin)
 	if err != nil {
 		return nil, err
@@ -202,7 +202,7 @@ func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, diale
 			return nil, hErr
 		}
 		return newWebsocketCodec(conn), nil
-	})
+	}, logger)
 }
 
 // DialWebsocket creates a new RPC client that communicates with a JSON-RPC server
@@ -210,13 +210,13 @@ func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, diale
 //
 // The context is used for the initial connection establishment. It does not
 // affect subsequent interactions with the client.
-func DialWebsocket(ctx context.Context, endpoint, origin string) (*Client, error) {
+func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logger) (*Client, error) {
 	dialer := websocket.Dialer{
 		ReadBufferSize:  wsReadBuffer,
 		WriteBufferSize: wsWriteBuffer,
 		WriteBufferPool: wsBufferPool,
 	}
-	return DialWebsocketWithDialer(ctx, endpoint, origin, dialer)
+	return DialWebsocketWithDialer(ctx, endpoint, origin, dialer, logger)
 }
 
 func wsClientHeaders(endpoint, origin string) (string, http.Header, error) {

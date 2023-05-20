@@ -9,11 +9,12 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
-func InitSubscriptions(methods []models.SubMethod) {
+func InitSubscriptions(methods []models.SubMethod, logger log.Logger) {
 	fmt.Printf("CONNECTING TO WEBSOCKETS AND SUBSCRIBING TO METHODS...\n")
-	if err := subscribeAll(methods); err != nil {
+	if err := subscribeAll(methods, logger); err != nil {
 		fmt.Printf("failed to subscribe to all methods: %v\n", err)
 		return
 	}
@@ -65,8 +66,8 @@ func subscribe(client *rpc.Client, method models.SubMethod, args ...interface{})
 	return methodSub, nil
 }
 
-func subscribeToMethod(method models.SubMethod) (*models.MethodSubscription, error) {
-	client, err := rpc.DialWebsocket(context.Background(), fmt.Sprintf("ws://%s", models.Localhost), "")
+func subscribeToMethod(method models.SubMethod, logger log.Logger) (*models.MethodSubscription, error) {
+	client, err := rpc.DialWebsocket(context.Background(), fmt.Sprintf("ws://%s", models.Localhost), "", logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial websocket: %v", err)
 	}
@@ -132,11 +133,11 @@ func UnsubscribeAll() {
 }
 
 // subscribeAll subscribes to the range of methods provided
-func subscribeAll(methods []models.SubMethod) error {
+func subscribeAll(methods []models.SubMethod, logger log.Logger) error {
 	m := make(map[models.SubMethod]*models.MethodSubscription)
 	models.MethodSubscriptionMap = &m
 	for _, method := range methods {
-		sub, err := subscribeToMethod(method)
+		sub, err := subscribeToMethod(method, logger)
 		if err != nil {
 			return err
 		}
