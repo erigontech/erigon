@@ -7,6 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 const (
@@ -23,12 +24,7 @@ type DepositData struct {
 }
 
 func (d *DepositData) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	buf = append(buf, d.PubKey[:]...)
-	buf = append(buf, d.WithdrawalCredentials[:]...)
-	buf = append(buf, ssz.Uint64SSZ(d.Amount)...)
-	buf = append(buf, d.Signature[:]...)
-	return buf, nil
+	return ssz2.Encode(dst, d.PubKey[:], d.WithdrawalCredentials[:], ssz.Uint64SSZ(d.Amount), d.Signature[:])
 }
 
 func (d *DepositData) DecodeSSZ(buf []byte, _ int) error {

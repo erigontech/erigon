@@ -23,6 +23,10 @@ func (arr *uint64VectorSSZ) Clear() {
 	arr.u.Clear()
 }
 
+func (*uint64VectorSSZ) Static() bool {
+	return true
+}
+
 func (arr *uint64VectorSSZ) CopyTo(target IterableSSZ[uint64]) {
 	c := target.(*uint64VectorSSZ)
 	arr.u.CopyTo(c.u)

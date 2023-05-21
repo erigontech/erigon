@@ -2,7 +2,6 @@ package solid
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -23,15 +22,18 @@ func NewExtraData() *ExtraData {
 }
 
 func (*ExtraData) Clone() clonable.Clonable {
-	fmt.Println("A")
 	return NewExtraData()
+}
+
+func (*ExtraData) Static() bool {
+	return false
 }
 
 func (e *ExtraData) EncodeSSZ(buf []byte) ([]byte, error) {
 	return append(buf, e.Bytes()...), nil
 }
 
-func (e *ExtraData) EncodingSize() int {
+func (e *ExtraData) EncodingSizeSSZ() int {
 	return e.l
 }
 

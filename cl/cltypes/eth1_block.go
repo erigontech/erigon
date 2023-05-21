@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -90,6 +91,10 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 	return block
 }
 
+func (*Eth1Block) Static() bool {
+	return false
+}
+
 // PayloadHeader returns the equivalent ExecutionPayloadHeader object.
 func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 	var err error
@@ -132,9 +137,9 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 		b.Extra = solid.NewExtraData()
 	}
 	// Field (10) 'ExtraData'
-	size += b.Extra.EncodingSize()
+	size += b.Extra.EncodingSizeSSZ()
 	// Field (13) 'Transactions'
-	size += b.Transactions.EncodingSize()
+	size += b.Transactions.EncodingSizeSSZ()
 
 	if b.version >= clparams.CapellaVersion {
 		if b.Withdrawals == nil {
@@ -217,73 +222,24 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 
 // EncodeSSZ encodes the block in SSZ format.
 func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	var err error
-	currentOffset := ssz.BaseExtraDataSSZOffsetBlock
-
-	if b.version >= clparams.CapellaVersion {
-		currentOffset += 4
-	}
-	if b.version >= clparams.DenebVersion {
-		currentOffset += 32
-	}
-	payloadHeader, err := b.PayloadHeader()
-	if err != nil {
-		return nil, err
-	}
-	buf, err = payloadHeader.encodeHeaderMetadataForSSZ(buf, currentOffset)
-	if err != nil {
-		return nil, err
-	}
-	if b.Extra == nil {
-		b.Extra = solid.NewExtraData()
-	}
-	currentOffset += b.Extra.EncodingSize()
-	// Write transaction offset
-	buf = append(buf, ssz.OffsetSSZ(uint32(currentOffset))...)
-
-	currentOffset += b.Transactions.EncodingSize()
-	// Write withdrawals offset if exist
-	if b.version >= clparams.CapellaVersion {
-		buf = append(buf, ssz.OffsetSSZ(uint32(currentOffset))...)
-		currentOffset += b.Withdrawals.EncodingSizeSSZ()
-	}
-
-	if b.version >= clparams.DenebVersion {
-		buf = append(buf, b.ExcessDataGas[:]...)
-	}
-
-	buf = append(buf, b.Extra.Bytes()...)
-	// Write all tx offsets
-	if buf, err = b.Transactions.EncodeSSZ(buf); err != nil {
-		return nil, err
-	}
-	if b.version < clparams.CapellaVersion {
-		return buf, nil
-	}
-
-	return b.Withdrawals.EncodeSSZ(buf)
+	return ssz2.Encode(dst, b.getSchema()...)
 }
 
 // HashSSZ calculates the SSZ hash of the Eth1Block's payload header.
 func (b *Eth1Block) HashSSZ() ([32]byte, error) {
-	switch b.version {
-	case clparams.BellatrixVersion:
-		return merkle_tree.HashTreeRoot(b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
-			b.PrevRandao[:], b.BlockNumber, b.GasLimit, b.GasUsed, b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions)
-	case clparams.CapellaVersion:
-		return merkle_tree.HashTreeRoot(b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
-			b.PrevRandao[:], b.BlockNumber, b.GasLimit, b.GasUsed, b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions,
-			b.Withdrawals,
-		)
-	case clparams.DenebVersion:
-		return merkle_tree.HashTreeRoot(b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
-			b.PrevRandao[:], b.BlockNumber, b.GasLimit, b.GasUsed, b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions,
-			b.Withdrawals, b.ExcessDataGas[:],
-		)
-	default:
-		panic("what do you want")
+	return merkle_tree.HashTreeRoot(b.getSchema()...)
+}
+
+func (b *Eth1Block) getSchema() []interface{} {
+	s := []interface{}{b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
+		b.PrevRandao[:], b.BlockNumber, b.GasLimit, b.GasUsed, b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions}
+	if b.version >= clparams.CapellaVersion {
+		s = append(s, b.Withdrawals)
 	}
+	if b.version >= clparams.DenebVersion {
+		s = append(s, b.ExcessDataGas[:])
+	}
+	return s
 }
 
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.

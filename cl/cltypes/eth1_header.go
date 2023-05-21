@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -67,59 +68,12 @@ func (e *Eth1Header) IsZero() bool {
 	}
 	return e.ParentHash == libcommon.Hash{} && e.FeeRecipient == libcommon.Address{} && e.StateRoot == libcommon.Hash{} &&
 		e.ReceiptsRoot == libcommon.Hash{} && e.LogsBloom == types.Bloom{} && e.PrevRandao == libcommon.Hash{} && e.BlockNumber == 0 &&
-		e.GasLimit == 0 && e.GasUsed == 0 && e.Time == 0 && e.Extra.EncodingSize() == 0 && e.BaseFeePerGas == [32]byte{} && e.BlockHash == libcommon.Hash{} && e.TransactionsRoot == libcommon.Hash{}
-}
-
-// Encodes header data partially. used to not dupicate code across Eth1Block and Eth1Header.
-func (h *Eth1Header) encodeHeaderMetadataForSSZ(dst []byte, extraDataOffset int) ([]byte, error) {
-	buf := dst
-	buf = append(buf, h.ParentHash[:]...)
-	buf = append(buf, h.FeeRecipient[:]...)
-	buf = append(buf, h.StateRoot[:]...)
-	buf = append(buf, h.ReceiptsRoot[:]...)
-	buf = append(buf, h.LogsBloom[:]...)
-	buf = append(buf, h.PrevRandao[:]...)
-	buf = append(buf, ssz.Uint64SSZ(h.BlockNumber)...)
-	buf = append(buf, ssz.Uint64SSZ(h.GasLimit)...)
-	buf = append(buf, ssz.Uint64SSZ(h.GasUsed)...)
-	buf = append(buf, ssz.Uint64SSZ(h.Time)...)
-	buf = append(buf, ssz.OffsetSSZ(uint32(extraDataOffset))...)
-
-	// Add Base Fee
-	buf = append(buf, h.BaseFeePerGas[:]...)
-	buf = append(buf, h.BlockHash[:]...)
-	return buf, nil
+		e.GasLimit == 0 && e.GasUsed == 0 && e.Time == 0 && e.Extra.EncodingSizeSSZ() == 0 && e.BaseFeePerGas == [32]byte{} && e.BlockHash == libcommon.Hash{} && e.TransactionsRoot == libcommon.Hash{}
 }
 
 // EncodeSSZ encodes the header in SSZ format.
-func (h *Eth1Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
-	buf = dst
-	offset := ssz.BaseExtraDataSSZOffsetHeader
-
-	if h.version >= clparams.CapellaVersion {
-		offset += 32
-	}
-
-	if h.version >= clparams.DenebVersion {
-		offset += 32
-	}
-
-	buf, err = h.encodeHeaderMetadataForSSZ(buf, offset)
-	if err != nil {
-		return nil, err
-	}
-	buf = append(buf, h.TransactionsRoot[:]...)
-
-	if h.version >= clparams.CapellaVersion {
-		buf = append(buf, h.WithdrawalsRoot[:]...)
-	}
-
-	if h.version >= clparams.DenebVersion {
-		buf = append(buf, h.ExcessDataGas[:]...)
-	}
-
-	buf = append(buf, h.Extra.Bytes()...)
-	return
+func (h *Eth1Header) EncodeSSZ(dst []byte) ([]byte, error) {
+	return ssz2.Encode(dst, h.getSchema()...)
 }
 
 // Decodes header data partially. used to not dupicate code across Eth1Block and Eth1Header.
@@ -198,26 +152,24 @@ func (h *Eth1Header) EncodingSizeSSZ() int {
 		h.Extra = solid.NewExtraData()
 	}
 
-	return size + h.Extra.EncodingSize()
+	return size + h.Extra.EncodingSizeSSZ()
 }
 
 // HashSSZ encodes the header in SSZ tree format.
 func (h *Eth1Header) HashSSZ() ([32]byte, error) {
-	switch h.version {
-	case clparams.BellatrixVersion:
-		return merkle_tree.HashTreeRoot(h.ParentHash[:], h.FeeRecipient[:], h.StateRoot[:], h.ReceiptsRoot[:], h.LogsBloom[:],
-			h.PrevRandao[:], h.BlockNumber, h.GasLimit, h.GasUsed, h.Time, h.Extra, h.BaseFeePerGas[:], h.BlockHash[:], h.TransactionsRoot[:])
-	case clparams.CapellaVersion:
-		return merkle_tree.HashTreeRoot(h.ParentHash[:], h.FeeRecipient[:], h.StateRoot[:], h.ReceiptsRoot[:], h.LogsBloom[:],
-			h.PrevRandao[:], h.BlockNumber, h.GasLimit, h.GasUsed, h.Time, h.Extra, h.BaseFeePerGas[:], h.BlockHash[:], h.TransactionsRoot[:],
-			h.WithdrawalsRoot[:],
-		)
-	case clparams.DenebVersion:
-		return merkle_tree.HashTreeRoot(h.ParentHash[:], h.FeeRecipient[:], h.StateRoot[:], h.ReceiptsRoot[:], h.LogsBloom[:],
-			h.PrevRandao[:], h.BlockNumber, h.GasLimit, h.GasUsed, h.Time, h.Extra, h.BaseFeePerGas[:], h.BlockHash[:], h.TransactionsRoot[:],
-			h.WithdrawalsRoot[:], h.ExcessDataGas[:],
-		)
-	default:
-		panic("what do you want")
+	return merkle_tree.HashTreeRoot(h.getSchema()...)
+}
+
+func (h *Eth1Header) getSchema() []interface{} {
+	s := []interface{}{
+		h.ParentHash[:], h.FeeRecipient[:], h.StateRoot[:], h.ReceiptsRoot[:], h.LogsBloom[:],
+		h.PrevRandao[:], h.BlockNumber, h.GasLimit, h.GasUsed, h.Time, h.Extra, h.BaseFeePerGas[:], h.BlockHash[:], h.TransactionsRoot[:],
 	}
+	if h.version >= clparams.CapellaVersion {
+		s = append(s, h.WithdrawalsRoot[:])
+	}
+	if h.version >= clparams.DenebVersion {
+		s = append(s, h.ExcessDataGas[:])
+	}
+	return s
 }

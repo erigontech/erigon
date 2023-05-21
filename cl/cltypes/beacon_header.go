@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 /*
@@ -25,13 +26,7 @@ func (b *BeaconBlockHeader) Copy() *BeaconBlockHeader {
 	return &copied
 }
 func (b *BeaconBlockHeader) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	buf = append(buf, ssz.Uint64SSZ(b.Slot)...)
-	buf = append(buf, ssz.Uint64SSZ(b.ProposerIndex)...)
-	buf = append(buf, b.ParentRoot[:]...)
-	buf = append(buf, b.Root[:]...)
-	buf = append(buf, b.BodyRoot[:]...)
-	return buf, nil
+	return ssz2.Encode(dst, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.Root[:], b.BodyRoot[:])
 }
 
 func (b *BeaconBlockHeader) DecodeSSZ(buf []byte, _ int) error {
@@ -52,6 +47,10 @@ func (b *BeaconBlockHeader) EncodingSizeSSZ() int {
 	return length.Hash*3 + length.BlockNum*2
 }
 
+func (*BeaconBlockHeader) Static() bool {
+	return true
+}
+
 /*
  * SignedBeaconBlockHeader is a beacon block header + validator signature.
  */
@@ -60,15 +59,12 @@ type SignedBeaconBlockHeader struct {
 	Signature [96]byte
 }
 
+func (b *SignedBeaconBlockHeader) Static() bool {
+	return true
+}
+
 func (b *SignedBeaconBlockHeader) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	var err error
-	buf, err = b.Header.EncodeSSZ(buf)
-	if err != nil {
-		return nil, err
-	}
-	buf = append(buf, b.Signature[:]...)
-	return buf, nil
+	return ssz2.Encode(dst, b.Header, b.Signature[:])
 }
 
 func (b *SignedBeaconBlockHeader) DecodeSSZ(buf []byte, version int) error {

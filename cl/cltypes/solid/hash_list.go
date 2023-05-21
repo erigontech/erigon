@@ -60,6 +60,10 @@ func (h *hashList) CopyTo(t IterableSSZ[libcommon.Hash]) {
 	copy(tu.u, h.u)
 }
 
+func (h *hashList) Static() bool {
+	return false
+}
+
 func (h *hashList) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%length.Hash > 0 {
 		return ssz.ErrBadDynamicLength

@@ -40,6 +40,10 @@ func (u *BitList) Clear() {
 	u.l = 0
 }
 
+func (*BitList) Static() bool {
+	return false
+}
+
 func (u *BitList) CopyTo(target IterableSSZ[byte]) {
 	target.Clear()
 	for i := 0; i < u.l; i++ {

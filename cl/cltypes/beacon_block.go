@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 const (
@@ -95,116 +96,7 @@ func (b *BeaconBlock) Version() clparams.StateVersion {
 }
 
 func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	var err error
-	//start := len(buf)
-	offset := getBeaconBlockMinimumSize(b.Version)
-	// Write "easy" fields
-	buf = append(buf, b.RandaoReveal[:]...)
-	if buf, err = b.Eth1Data.EncodeSSZ(buf); err != nil {
-		return nil, err
-	}
-	if len(b.Graffiti) != 32 {
-		return nil, fmt.Errorf("bad graffiti length")
-	}
-	buf = append(buf, b.Graffiti[:]...)
-	// Write offsets for proposer slashings
-	buf = append(buf, ssz.OffsetSSZ(offset)...)
-	offset += uint32(b.ProposerSlashings.Len()) * 416
-	// Attester slashings offset
-	buf = append(buf, ssz.OffsetSSZ(offset)...)
-	offset += uint32(b.AttesterSlashings.EncodingSizeSSZ())
-	// Attestation offset
-	buf = append(buf, ssz.OffsetSSZ(offset)...)
-	offset += uint32(b.Attestations.EncodingSizeSSZ())
-	// Deposits offset
-	buf = append(buf, ssz.OffsetSSZ(offset)...)
-	offset += uint32(b.Deposits.EncodingSizeSSZ())
-	// Voluntary Exit offset
-	buf = append(buf, ssz.OffsetSSZ(offset)...)
-	offset += uint32(b.VoluntaryExits.EncodingSizeSSZ())
-	// Encode Sync Aggregate
-	if b.Version >= clparams.AltairVersion {
-		if buf, err = b.SyncAggregate.EncodeSSZ(buf); err != nil {
-			return nil, err
-		}
-	}
-	if b.Version >= clparams.BellatrixVersion {
-		buf = append(buf, ssz.OffsetSSZ(offset)...)
-		offset += uint32(b.ExecutionPayload.EncodingSizeSSZ())
-	}
-	if b.Version >= clparams.CapellaVersion {
-		buf = append(buf, ssz.OffsetSSZ(offset)...)
-		offset += uint32(b.ExecutionChanges.EncodingSizeSSZ())
-	}
-
-	if b.Version >= clparams.DenebVersion {
-		buf = append(buf, ssz.OffsetSSZ(offset)...)
-	}
-
-	// Now start encoding the rest of the fields.
-	if b.AttesterSlashings.Len() > MaxAttesterSlashings {
-		return nil, fmt.Errorf("Encode(SSZ): too many attester slashings")
-	}
-	if b.ProposerSlashings.Len() > MaxProposerSlashings {
-		return nil, fmt.Errorf("Encode(SSZ): too many proposer slashings")
-	}
-	if b.Attestations.Len() > MaxAttestations {
-		return nil, fmt.Errorf("Encode(SSZ): too many attestations")
-	}
-	if b.Deposits.Len() > MaxDeposits {
-		return nil, fmt.Errorf("Encode(SSZ): too many attestations")
-	}
-	if b.VoluntaryExits.Len() > MaxVoluntaryExits {
-		return nil, fmt.Errorf("Encode(SSZ): too many attestations")
-	}
-	if b.ExecutionChanges.Len() > MaxExecutionChanges {
-		return nil, fmt.Errorf("Encode(SSZ): too many changes")
-	}
-	if b.BlobKzgCommitments.Len() > MaxBlobsPerBlock {
-		return nil, fmt.Errorf("Encode(SSZ): too many blob kzg commitments in the block")
-	}
-	// Write proposer slashings
-	if buf, err = b.ProposerSlashings.EncodeSSZ(buf); err != nil {
-		return nil, err
-	}
-	// Write attester slashings as a dynamic list.
-	if buf, err = b.AttesterSlashings.EncodeSSZ(buf); err != nil {
-		return nil, err
-	}
-
-	if buf, err = b.Attestations.EncodeSSZ(buf); err != nil {
-		return nil, err
-	}
-
-	if buf, err = b.Deposits.EncodeSSZ(buf); err != nil {
-		return nil, err
-	}
-
-	if buf, err = b.VoluntaryExits.EncodeSSZ(buf); err != nil {
-		return nil, err
-	}
-
-	if b.Version >= clparams.BellatrixVersion {
-		buf, err = b.ExecutionPayload.EncodeSSZ(buf)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if b.Version >= clparams.CapellaVersion {
-		if buf, err = b.ExecutionChanges.EncodeSSZ(buf); err != nil {
-			return nil, err
-		}
-	}
-
-	if b.Version >= clparams.DenebVersion {
-		if buf, err = b.BlobKzgCommitments.EncodeSSZ(buf); err != nil {
-			return nil, err
-		}
-	}
-
-	return buf, nil
+	return ssz2.Encode(dst, b.getSchema()...)
 }
 
 func (b *BeaconBody) EncodingSizeSSZ() (size int) {
@@ -240,15 +132,12 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 	size += b.Attestations.EncodingSizeSSZ()
 	size += b.Deposits.EncodingSizeSSZ()
 	size += b.VoluntaryExits.EncodingSizeSSZ()
-
 	if b.Version >= clparams.BellatrixVersion {
 		size += b.ExecutionPayload.EncodingSizeSSZ()
 	}
-
 	if b.Version >= clparams.CapellaVersion {
 		size += b.ExecutionChanges.EncodingSizeSSZ()
 	}
-
 	if b.Version >= clparams.DenebVersion {
 		size += b.ExecutionChanges.EncodingSizeSSZ()
 	}
@@ -389,41 +278,28 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {
-	switch b.Version {
-	case clparams.Phase0Version:
-		return merkle_tree.HashTreeRoot(b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings,
-			b.Attestations, b.Deposits, b.VoluntaryExits)
-	case clparams.AltairVersion:
-		return merkle_tree.HashTreeRoot(b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings,
-			b.Attestations, b.Deposits, b.VoluntaryExits, b.SyncAggregate)
-	case clparams.BellatrixVersion:
-		return merkle_tree.HashTreeRoot(b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings,
-			b.Attestations, b.Deposits, b.VoluntaryExits, b.SyncAggregate, b.ExecutionPayload)
-	case clparams.CapellaVersion:
-		return merkle_tree.HashTreeRoot(b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings,
-			b.Attestations, b.Deposits, b.VoluntaryExits, b.SyncAggregate, b.ExecutionPayload, b.ExecutionChanges)
-	case clparams.DenebVersion:
-		return merkle_tree.HashTreeRoot(b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings,
-			b.Attestations, b.Deposits, b.VoluntaryExits, b.SyncAggregate, b.ExecutionPayload, b.ExecutionChanges, b.BlobKzgCommitments)
-	default:
-		panic("rust is delusional")
+	return merkle_tree.HashTreeRoot(b.getSchema()...)
+}
+
+func (b *BeaconBody) getSchema() []interface{} {
+	s := []interface{}{b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings, b.Attestations, b.Deposits, b.VoluntaryExits}
+	if b.Version >= clparams.AltairVersion {
+		s = append(s, b.SyncAggregate)
 	}
+	if b.Version >= clparams.BellatrixVersion {
+		s = append(s, b.ExecutionPayload)
+	}
+	if b.Version >= clparams.CapellaVersion {
+		s = append(s, b.ExecutionChanges)
+	}
+	if b.Version >= clparams.DenebVersion {
+		s = append(s, b.BlobKzgCommitments)
+	}
+	return s
 }
 
 func (b *BeaconBlock) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	dst = buf
-	// Encode base params
-	dst = append(dst, ssz.Uint64SSZ(b.Slot)...)
-	dst = append(dst, ssz.Uint64SSZ(b.ProposerIndex)...)
-	dst = append(dst, b.ParentRoot[:]...)
-	dst = append(dst, b.StateRoot[:]...)
-	// Encode body
-	dst = append(dst, ssz.OffsetSSZ(84)...)
-	if dst, err = b.Body.EncodeSSZ(dst); err != nil {
-		return
-	}
-
-	return
+	return ssz2.Encode(buf, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
 
 func (b *BeaconBlock) EncodingSizeSSZ() int {
@@ -450,15 +326,7 @@ func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
 }
 
 func (b *SignedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
-	dst := buf
-	var err error
-	dst = append(dst, ssz.OffsetSSZ(100)...)
-	dst = append(dst, b.Signature[:]...)
-	dst, err = b.Block.EncodeSSZ(dst)
-	if err != nil {
-		return nil, err
-	}
-	return dst, nil
+	return ssz2.Encode(buf, b.Block, b.Signature[:])
 }
 
 func (b *SignedBeaconBlock) EncodingSizeSSZ() int {
@@ -478,4 +346,12 @@ func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
 
 func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.Block, b.Signature[:])
+}
+
+func (*BeaconBody) Static() bool {
+	return false
+}
+
+func (*BeaconBlock) Static() bool {
+	return false
 }

@@ -6,6 +6,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 // Change to EL engine
@@ -16,11 +17,7 @@ type BLSToExecutionChange struct {
 }
 
 func (b *BLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {
-	dst := buf
-	dst = append(dst, ssz.Uint64SSZ(b.ValidatorIndex)...)
-	dst = append(dst, b.From[:]...)
-	dst = append(dst, b.To[:]...)
-	return dst, nil
+	return ssz2.Encode(buf, b.ValidatorIndex, b.From[:], b.To[:])
 }
 
 func (b *BLSToExecutionChange) HashSSZ() ([32]byte, error) {
@@ -41,19 +38,17 @@ func (*BLSToExecutionChange) EncodingSizeSSZ() int {
 	return 76
 }
 
+func (*BLSToExecutionChange) Static() bool {
+	return true
+}
+
 type SignedBLSToExecutionChange struct {
 	Message   *BLSToExecutionChange
 	Signature [96]byte
 }
 
 func (s *SignedBLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {
-	dst := buf
-	var err error
-	if dst, err = s.Message.EncodeSSZ(dst); err != nil {
-		return nil, err
-	}
-	dst = append(dst, s.Signature[:]...)
-	return dst, nil
+	return ssz2.Encode(buf, s.Message, s.Signature[:])
 }
 
 func (s *SignedBLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {

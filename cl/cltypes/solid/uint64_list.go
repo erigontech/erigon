@@ -14,6 +14,10 @@ func NewUint64ListSSZ(limit int) Uint64ListSSZ {
 	}
 }
 
+func (h *uint64ListSSZ) Static() bool {
+	return false
+}
+
 func NewUint64ListSSZFromSlice(limit int, slice []uint64) Uint64ListSSZ {
 	x := &uint64ListSSZ{
 		u: NewUint64Slice(limit),

@@ -47,6 +47,10 @@ func (h *hashVector) CopyTo(t IterableSSZ[libcommon.Hash]) {
 	h.u.CopyTo(tu.u)
 }
 
+func (h *hashVector) Static() bool {
+	return true
+}
+
 func (h *hashVector) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < h.Length()*length.Hash {
 		return ssz.ErrBadDynamicLength

@@ -68,6 +68,10 @@ func NewStaticListSSZFromList[T encodableHashableSSZ](list []T, limit int, bytes
 	}
 }
 
+func (l *ListSSZ[T]) Static() bool {
+	return false
+}
+
 func (l *ListSSZ[T]) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	if !l.static {
 		return ssz.EncodeDynamicList(buf, l.list)

@@ -24,6 +24,10 @@ type Attestation struct {
 	aggregationBitsBuffer []byte
 }
 
+func (*Attestation) Static() bool {
+	return false
+}
+
 func NewAttestionFromParameters(
 	aggregationBits []byte,
 	attestationData AttestationData,

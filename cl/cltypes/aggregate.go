@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 /*
@@ -18,17 +19,7 @@ type AggregateAndProof struct {
 }
 
 func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-
-	var err error
-	buf = append(buf, ssz.Uint64SSZ(a.AggregatorIndex)...)
-	buf = append(buf, ssz.OffsetSSZ(108)...)
-	buf = append(buf, a.SelectionProof[:]...)
-	buf, err = a.Aggregate.EncodeSSZ(buf)
-	if err != nil {
-		return nil, err
-	}
-	return buf, nil
+	return ssz2.Encode(dst, a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
 func (a *AggregateAndProof) DecodeSSZ(buf []byte, version int) error {
@@ -57,18 +48,8 @@ type SignedAggregateAndProof struct {
 	Signature [96]byte
 }
 
-func (a *SignedAggregateAndProof) EncodedSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	var err error
-	buf = append(buf, ssz.OffsetSSZ(100)...)
-
-	buf = append(buf, a.Signature[:]...)
-	buf, err = a.Message.EncodeSSZ(buf)
-	if err != nil {
-		return nil, err
-	}
-
-	return buf, nil
+func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
+	return ssz2.Encode(dst, a.Message, a.Signature[:])
 }
 
 func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte, version int) error {
@@ -113,6 +94,10 @@ func (agg *SyncAggregate) Sum() int {
 
 func (agg *SyncAggregate) EncodeSSZ(buf []byte) ([]byte, error) {
 	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...), nil
+}
+
+func (*SyncAggregate) Static() bool {
+	return true
 }
 
 func (agg *SyncAggregate) DecodeSSZ(buf []byte, _ int) error {

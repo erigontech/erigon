@@ -3,6 +3,7 @@ package solid
 import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 type IterableSSZ[T any] interface {
@@ -17,6 +18,7 @@ type IterableSSZ[T any] interface {
 	Pop() T
 	Append(v T)
 
+	ssz2.Sized
 	ssz.EncodableSSZ
 	ssz.HashableSSZ
 }

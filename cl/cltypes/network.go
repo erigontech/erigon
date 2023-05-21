@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -15,15 +16,10 @@ type Metadata struct {
 }
 
 func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
-	ret := buf
-	ret = append(ret, ssz.Uint64SSZ(m.SeqNumber)...)
-	ret = append(ret, ssz.Uint64SSZ(m.Attnets)...)
 	if m.Syncnets == nil {
-		return ret, nil
+		return ssz2.Encode(buf, m.SeqNumber, m.Attnets)
 	}
-	ret = append(ret, ssz.Uint64SSZ(*m.Syncnets)...)
-
-	return ret, nil
+	return ssz2.Encode(buf, m.SeqNumber, m.Attnets, *m.Syncnets)
 }
 
 func (m *Metadata) EncodingSizeSSZ() (ret int) {
@@ -86,33 +82,6 @@ func (*SingleRoot) Clone() clonable.Clonable {
 }
 
 /*
- * LightClientUpdatesByRangeRequest that helps syncing to chain tip from a past point.
- * It takes the Period of the starting update and the amount of updates we want (MAX: 128).
- */
-type LightClientUpdatesByRangeRequest struct {
-	Period uint64
-	Count  uint64
-}
-
-func (*LightClientUpdatesByRangeRequest) Clone() clonable.Clonable {
-	return &LightClientUpdatesByRangeRequest{}
-}
-
-func (l *LightClientUpdatesByRangeRequest) DecodeSSZ(buf []byte, _ int) error {
-	l.Period = ssz.UnmarshalUint64SSZ(buf)
-	l.Count = ssz.UnmarshalUint64SSZ(buf[8:])
-	return nil
-}
-
-func (l *LightClientUpdatesByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, append(ssz.Uint64SSZ(l.Period), ssz.Uint64SSZ(l.Count)...)...), nil
-}
-
-func (l *LightClientUpdatesByRangeRequest) EncodingSizeSSZ() int {
-	return 2 * common.BlockNumberLength
-}
-
-/*
  * BeaconBlocksByRangeRequest is the request for getting a range of blocks.
  */
 type BeaconBlocksByRangeRequest struct {
@@ -122,11 +91,7 @@ type BeaconBlocksByRangeRequest struct {
 }
 
 func (b *BeaconBlocksByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	dst := buf
-	dst = append(dst, ssz.Uint64SSZ(b.StartSlot)...)
-	dst = append(dst, ssz.Uint64SSZ(b.Count)...)
-	dst = append(dst, ssz.Uint64SSZ(b.Step)...)
-	return dst, nil
+	return ssz2.Encode(buf, b.StartSlot, b.Count, b.Step)
 }
 
 func (b *BeaconBlocksByRangeRequest) DecodeSSZ(buf []byte, _ int) error {
@@ -157,13 +122,7 @@ type Status struct {
 }
 
 func (s *Status) EncodeSSZ(buf []byte) ([]byte, error) {
-	dst := buf
-	dst = append(dst, s.ForkDigest[:]...)
-	dst = append(dst, s.FinalizedRoot[:]...)
-	dst = append(dst, ssz.Uint64SSZ(s.FinalizedEpoch)...)
-	dst = append(dst, s.HeadRoot[:]...)
-	dst = append(dst, ssz.Uint64SSZ(s.HeadSlot)...)
-	return dst, nil
+	return ssz2.Encode(buf, s.ForkDigest[:], s.FinalizedRoot[:], s.FinalizedEpoch, s.HeadRoot[:], s.HeadSlot)
 }
 
 func (s *Status) DecodeSSZ(buf []byte, _ int) error {

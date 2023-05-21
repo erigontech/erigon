@@ -40,6 +40,10 @@ func NewAttestationData() AttestationData {
 	return make([]byte, attestationDataBufferSize)
 }
 
+func (a AttestationData) Static() bool {
+	return true
+}
+
 func (a AttestationData) Slot() uint64 {
 	return binary.LittleEndian.Uint64(a[:8])
 }

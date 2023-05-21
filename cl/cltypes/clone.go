@@ -8,6 +8,10 @@ func (*SignedBeaconBlock) Clone() clonable.Clonable {
 	return &SignedBeaconBlock{}
 }
 
+func (*IndexedAttestation) Clone() clonable.Clonable {
+	return &IndexedAttestation{}
+}
+
 func (*BeaconBody) Clone() clonable.Clonable {
 	return &BeaconBody{}
 }

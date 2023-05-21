@@ -7,6 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 // Fork data, contains if we were on bellatrix/alteir/phase0 and transition epoch.
@@ -25,11 +26,7 @@ func (f *Fork) Copy() *Fork {
 }
 
 func (f *Fork) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	buf = append(buf, f.PreviousVersion[:]...)
-	buf = append(buf, f.CurrentVersion[:]...)
-	buf = append(buf, ssz.Uint64SSZ(f.Epoch)...)
-	return buf, nil
+	return ssz2.Encode(dst, f.PreviousVersion[:], f.CurrentVersion[:], f.Epoch)
 }
 
 func (f *Fork) DecodeSSZ(buf []byte, _ int) error {

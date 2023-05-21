@@ -1,13 +1,13 @@
 package cltypes
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 /*
@@ -19,24 +19,12 @@ type IndexedAttestation struct {
 	Signature        [96]byte
 }
 
+func (i *IndexedAttestation) Static() bool {
+	return false
+}
+
 func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	dst = buf
-	// Write indicies offset.
-	dst = append(dst, ssz.OffsetSSZ(228)...)
-
-	// Process data field.
-	if dst, err = i.Data.EncodeSSZ(dst); err != nil {
-		return
-	}
-	// Write signature
-	dst = append(dst, i.Signature[:]...)
-
-	// Field (0) 'AttestingIndices'
-	if i.AttestingIndices.Length() > 2048 {
-		return nil, errors.New("too bing attesting indices")
-	}
-
-	return i.AttestingIndices.EncodeSSZ(dst)
+	return ssz2.Encode(buf, i.AttestingIndices, i.Data, i.Signature[:])
 }
 
 // DecodeSSZ ssz unmarshals the IndexedAttestation object

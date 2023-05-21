@@ -36,8 +36,7 @@ func (b *KZGCommitment) Copy() *KZGCommitment {
 }
 
 func (b *KZGCommitment) EncodeSSZ(buf []byte) ([]byte, error) {
-	buf = append(buf, b[:]...)
-	return buf, nil
+	return append(buf, b[:]...), nil
 }
 
 func (b *KZGCommitment) DecodeSSZ(buf []byte, version int) error {

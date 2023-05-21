@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 type HistoricalSummary struct {
@@ -16,7 +17,7 @@ type HistoricalSummary struct {
 }
 
 func (h *HistoricalSummary) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, append(h.BlockSummaryRoot[:], h.StateSummaryRoot[:]...)...), nil
+	return ssz2.Encode(h.BlockSummaryRoot[:], h.StateSummaryRoot[:])
 }
 
 func (h *HistoricalSummary) DecodeSSZ(buf []byte, _ int) error {

@@ -8,13 +8,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 	"github.com/ledgerwatch/erigon/common"
 )
 
 type Eth1Data struct {
 	Root         libcommon.Hash
-	BlockHash    libcommon.Hash
 	DepositCount uint64
+	BlockHash    libcommon.Hash
 }
 
 func (e *Eth1Data) Copy() *Eth1Data {
@@ -27,12 +28,9 @@ func (e *Eth1Data) Equal(b *Eth1Data) bool {
 }
 
 // MarshalSSZTo ssz marshals the Eth1Data object to a target array
-func (e *Eth1Data) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	dst = buf
-	dst = append(dst, e.Root[:]...)
-	dst = append(dst, ssz.Uint64SSZ(e.DepositCount)...)
-	dst = append(dst, e.BlockHash[:]...)
-	return
+func (e *Eth1Data) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.Encode(buf, e.Root[:], e.DepositCount, e.BlockHash[:])
+
 }
 
 func (e *Eth1Data) DecodeSSZ(buf []byte, _ int) error {
@@ -57,4 +55,8 @@ func (e *Eth1Data) EncodingSizeSSZ() int {
 // HashSSZ ssz hashes the Eth1Data object
 func (e *Eth1Data) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(e.Root[:], e.DepositCount, e.BlockHash[:])
+}
+
+func (e *Eth1Data) Static() bool {
+	return true
 }
