@@ -111,7 +111,7 @@ func addSszTests() {
 		//	With("LightClientHeader", getSSZStaticConsensusTest(&cltypes.LightClientHeader{})). Unimplemented
 		//	With("LightClientOptimisticUpdate", getSSZStaticConsensusTest(&cltypes.LightClientOptimisticUpdate{})). Unimplemented
 		//	With("LightClientUpdate", getSSZStaticConsensusTest(&cltypes.LightClientUpdate{})). Unimplemented
-		With("PendingAttestation", getSSZStaticConsensusTest(&cltypes.PendingAttestation{})).
+		With("PendingAttestation", getSSZStaticConsensusTest(&solid.PendingAttestation{})).
 		//		With("PowBlock", getSSZStaticConsensusTest(&cltypes.PowBlock{})). Unimplemented
 		With("ProposerSlashing", getSSZStaticConsensusTest(&cltypes.ProposerSlashing{})).
 		//		With("SignedAggregateAndProof", getSSZStaticConsensusTest(&cltypes.SignedAggregateAndProof{})).
@@ -124,7 +124,7 @@ func addSszTests() {
 		//	With("SigningData", getSSZStaticConsensusTest(&cltypes.SigningData{})). Not needed.
 		With("SyncAggregate", getSSZStaticConsensusTest(&cltypes.SyncAggregate{})).
 		//	With("SyncAggregatorSelectionData", getSSZStaticConsensusTest(&cltypes.SyncAggregatorSelectionData{})). Unimplemented
-		With("SyncCommittee", getSSZStaticConsensusTest(&cltypes.SyncCommittee{})).
+		With("SyncCommittee", getSSZStaticConsensusTest(&solid.SyncCommittee{})).
 		//	With("SyncCommitteeContribution", getSSZStaticConsensusTest(&cltypes.SyncCommitteeContribution{})).
 		//	With("SyncCommitteeMessage", getSSZStaticConsensusTest(&cltypes.SyncCommitteeMessage{})).
 		With("Validator", getSSZStaticConsensusTest(&cltypes.Validator{}))

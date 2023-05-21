@@ -1,16 +1,20 @@
 package merkle_tree
 
-func nextPowerOf2(n int) int {
+func NextPowerOfTwo(n uint64) uint64 {
 	if n == 0 {
 		return 1
 	}
-	if n&(n-1) == 0 {
-		return n
-	}
-	for n&(n-1) > 0 {
-		n &= (n - 1)
-	}
-	return n << 1
+	// http://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
+	n--
+	n |= n >> 1
+	n |= n >> 2
+	n |= n >> 4
+	n |= n >> 8
+	n |= n >> 16
+	n |= n >> 32
+	n++
+
+	return n
 }
 
 // getDepth returns the depth of a merkle tree with a given number of nodes.

@@ -359,8 +359,8 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if b.version >= clparams.AltairVersion {
 		inactivityScoresOffset = ssz.DecodeOffset(buf[pos:])
 		pos += 4
-		b.currentSyncCommittee = new(cltypes.SyncCommittee)
-		b.nextSyncCommittee = new(cltypes.SyncCommittee)
+		b.currentSyncCommittee = new(solid.SyncCommittee)
+		b.nextSyncCommittee = new(solid.SyncCommittee)
 		if err := b.currentSyncCommittee.DecodeSSZ(buf[pos:], version); err != nil {
 			return err
 		}
@@ -411,8 +411,8 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	}
 
 	if b.version == clparams.Phase0Version {
-		b.previousEpochAttestations = solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.BeaconConfig().PreviousEpochAttestationsLength()))
-		b.currentEpochAttestations = solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.BeaconConfig().CurrentEpochAttestationsLength()))
+		b.previousEpochAttestations = solid.NewDynamicListSSZ[*solid.PendingAttestation](int(b.BeaconConfig().PreviousEpochAttestationsLength()))
+		b.currentEpochAttestations = solid.NewDynamicListSSZ[*solid.PendingAttestation](int(b.BeaconConfig().CurrentEpochAttestationsLength()))
 
 		if err = b.previousEpochAttestations.DecodeSSZ(buf[previousEpochParticipationOffset:currentEpochParticipationOffset], version); err != nil {
 			return err
@@ -492,10 +492,10 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	size += len(b.validators) * 121
 	size += b.balances.Length() * 8
 	if b.previousEpochAttestations == nil {
-		b.previousEpochAttestations = solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.BeaconConfig().PreviousEpochAttestationsLength()))
+		b.previousEpochAttestations = solid.NewDynamicListSSZ[*solid.PendingAttestation](int(b.BeaconConfig().PreviousEpochAttestationsLength()))
 	}
 	if b.currentEpochAttestations == nil {
-		b.currentEpochAttestations = solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.BeaconConfig().CurrentEpochAttestationsLength()))
+		b.currentEpochAttestations = solid.NewDynamicListSSZ[*solid.PendingAttestation](int(b.BeaconConfig().CurrentEpochAttestationsLength()))
 	}
 	if b.version == clparams.Phase0Version {
 		size += b.previousEpochAttestations.EncodingSizeSSZ()

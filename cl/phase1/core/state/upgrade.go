@@ -23,12 +23,13 @@ func (b *BeaconState) UpgradeToAltair() error {
 	// Change version
 	b.SetVersion(clparams.AltairVersion)
 	// Fill in previous epoch participation from the pre state's pending attestations
-	if err := solid.RangeErr[*cltypes.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *cltypes.PendingAttestation, i2 int) error {
-		flags, err := b.GetAttestationParticipationFlagIndicies(pa.Data, pa.InclusionDelay)
+	if err := solid.RangeErr[*solid.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, i2 int) error {
+		attestationData := pa.AttestantionData()
+		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay())
 		if err != nil {
 			return err
 		}
-		indices, err := b.GetAttestingIndicies(pa.Data, pa.AggregationBits, false)
+		indices, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits(), false)
 		if err != nil {
 			return err
 		}

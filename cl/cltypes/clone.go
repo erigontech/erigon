@@ -8,10 +8,6 @@ func (*SignedBeaconBlock) Clone() clonable.Clonable {
 	return &SignedBeaconBlock{}
 }
 
-func (*PendingAttestation) Clone() clonable.Clonable {
-	return &PendingAttestation{}
-}
-
 func (*BeaconBody) Clone() clonable.Clonable {
 	return &BeaconBody{}
 }
@@ -100,9 +96,6 @@ func (*SignedBeaconBlockHeader) Clone() clonable.Clonable {
 	return &SignedBeaconBlockHeader{}
 }
 
-func (*SyncCommittee) Clone() clonable.Clonable {
-	return &SyncCommittee{}
-}
 func (*Fork) Clone() clonable.Clonable {
 	return &Fork{}
 }

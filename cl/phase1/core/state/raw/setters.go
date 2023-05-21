@@ -104,7 +104,7 @@ func (b *BeaconState) SetValidatorWithdrawableEpoch(index int, epoch uint64) err
 	b.validators[index].SetWithdrawableEpoch(epoch)
 	return nil
 }
-func (b *BeaconState) SetValidatorMinCurrentInclusionDelayAttestation(index int, value *cltypes.PendingAttestation) error {
+func (b *BeaconState) SetValidatorMinCurrentInclusionDelayAttestation(index int, value *solid.PendingAttestation) error {
 	if index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
@@ -136,7 +136,7 @@ func (b *BeaconState) SetValidatorIsCurrentMatchingHeadAttester(index int, value
 	b.validators[index].IsCurrentMatchingHeadAttester = value
 	return nil
 }
-func (b *BeaconState) SetValidatorMinPreviousInclusionDelayAttestation(index int, value *cltypes.PendingAttestation) error {
+func (b *BeaconState) SetValidatorMinPreviousInclusionDelayAttestation(index int, value *solid.PendingAttestation) error {
 	if index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
@@ -257,12 +257,12 @@ func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint solid.Checkpoin
 	b.markLeaf(FinalizedCheckpointLeafIndex)
 }
 
-func (b *BeaconState) SetCurrentSyncCommittee(currentSyncCommittee *cltypes.SyncCommittee) {
+func (b *BeaconState) SetCurrentSyncCommittee(currentSyncCommittee *solid.SyncCommittee) {
 	b.currentSyncCommittee = currentSyncCommittee
 	b.markLeaf(CurrentSyncCommitteeLeafIndex)
 }
 
-func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *cltypes.SyncCommittee) {
+func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *solid.SyncCommittee) {
 	b.nextSyncCommittee = nextSyncCommittee
 	b.markLeaf(NextSyncCommitteeLeafIndex)
 }
@@ -352,27 +352,27 @@ func (b *BeaconState) AddPreviousEpochParticipationAt(index int, delta byte) {
 }
 
 // phase0 fields
-func (b *BeaconState) AddCurrentEpochAtteastation(attestation *cltypes.PendingAttestation) {
+func (b *BeaconState) AddCurrentEpochAtteastation(attestation *solid.PendingAttestation) {
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
 	b.currentEpochAttestations.Append(attestation)
 }
 
-func (b *BeaconState) AddPreviousEpochAttestation(attestation *cltypes.PendingAttestation) {
+func (b *BeaconState) AddPreviousEpochAttestation(attestation *solid.PendingAttestation) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochAttestations.Append(attestation)
 }
 
 func (b *BeaconState) ResetCurrentEpochAttestations() {
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
-	b.currentEpochAttestations = solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.beaconConfig.PreviousEpochAttestationsLength()))
+	b.currentEpochAttestations = solid.NewDynamicListSSZ[*solid.PendingAttestation](int(b.beaconConfig.PreviousEpochAttestationsLength()))
 }
 
-func (b *BeaconState) SetPreviousEpochAttestations(attestations *solid.ListSSZ[*cltypes.PendingAttestation]) {
+func (b *BeaconState) SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation]) {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 	b.previousEpochAttestations = attestations
 }
 
 func (b *BeaconState) ResetPreviousEpochAttestations() {
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
-	b.previousEpochAttestations = solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(b.beaconConfig.PreviousEpochAttestationsLength()))
+	b.previousEpochAttestations = solid.NewDynamicListSSZ[*solid.PendingAttestation](int(b.beaconConfig.PreviousEpochAttestationsLength()))
 }

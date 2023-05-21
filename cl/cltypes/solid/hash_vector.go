@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
 
 type hashVector struct {
@@ -15,7 +16,7 @@ func NewHashVector(s int) HashVectorSSZ {
 	return &hashVector{
 		u: &hashList{
 			u: make([]byte, s*length.Hash),
-			c: s,
+			c: int(merkle_tree.NextPowerOfTwo(uint64(s))),
 			l: s,
 		},
 	}
@@ -26,7 +27,7 @@ func (h *hashVector) Append(val libcommon.Hash) {
 }
 
 func (h *hashVector) Cap() int {
-	return h.u.c
+	return h.u.l
 }
 
 func (h *hashVector) Length() int {
@@ -38,7 +39,7 @@ func (h *hashVector) Clear() {
 }
 
 func (h *hashVector) Clone() clonable.Clonable {
-	return NewHashVector(h.u.c)
+	return NewHashVector(h.u.l)
 }
 
 func (h *hashVector) CopyTo(t IterableSSZ[libcommon.Hash]) {

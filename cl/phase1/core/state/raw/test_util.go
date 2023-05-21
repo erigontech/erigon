@@ -9,15 +9,11 @@ import (
 func GetEmptyBeaconState() *BeaconState {
 	cfg := &clparams.MainnetBeaconConfig
 	b := &BeaconState{
-		fork:              &cltypes.Fork{},
-		latestBlockHeader: &cltypes.BeaconBlockHeader{},
-		eth1Data:          &cltypes.Eth1Data{},
-		currentSyncCommittee: &cltypes.SyncCommittee{
-			PubKeys: make([][48]byte, 512),
-		},
-		nextSyncCommittee: &cltypes.SyncCommittee{
-			PubKeys: make([][48]byte, 512),
-		},
+		fork:                         &cltypes.Fork{},
+		latestBlockHeader:            &cltypes.BeaconBlockHeader{},
+		eth1Data:                     &cltypes.Eth1Data{},
+		currentSyncCommittee:         &solid.SyncCommittee{},
+		nextSyncCommittee:            &solid.SyncCommittee{},
 		blockRoots:                   solid.NewHashVector(blockRootsLength),
 		stateRoots:                   solid.NewHashVector(stateRootsLength),
 		randaoMixes:                  solid.NewHashVector(randoMixesLength),

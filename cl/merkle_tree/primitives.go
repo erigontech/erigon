@@ -22,7 +22,7 @@ func BoolRoot(b bool) (root libcommon.Hash) {
 }
 
 func BytesRoot(b []byte) (out [32]byte, err error) {
-	leafCount := nextPowerOf2((len(b) + 31) / length.Hash)
+	leafCount := NextPowerOfTwo(uint64((len(b) + 31) / length.Hash))
 	leaves := make([]byte, leafCount*length.Hash)
 	copy(leaves[:], b)
 	if err = MerkleRootFromFlatLeaves(leaves, leaves); err != nil {

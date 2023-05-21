@@ -8,7 +8,6 @@ import (
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/metrics/methelp"
 	"golang.org/x/exp/slices"
@@ -124,12 +123,13 @@ func processAttestationPhase0(s *state2.BeaconState, attestation *solid.Attestat
 		return nil, err
 	}
 	// Create the attestation to add to pending attestations
-	pendingAttestation := &cltypes.PendingAttestation{
-		Data:            data,
-		AggregationBits: attestation.AggregationBits(),
-		InclusionDelay:  s.Slot() - data.Slot(),
-		ProposerIndex:   proposerIndex,
-	}
+	pendingAttestation := solid.NewPendingAttestionFromParameters(
+		attestation.AggregationBits(),
+		data,
+		s.Slot()-data.Slot(),
+		proposerIndex,
+	)
+
 	isCurrentAttestation := data.Target().Epoch() == state2.Epoch(s.BeaconState)
 	// Depending of what slot we are on we put in either the current justified or previous justified.
 	if isCurrentAttestation {
@@ -165,7 +165,8 @@ func processAttestationPhase0(s *state2.BeaconState, attestation *solid.Attestat
 		// NOTE: does not affect state root.
 		// We need to set it to currents or previouses depending on which attestation we process.
 		if isCurrentAttestation {
-			if validator.MinCurrentInclusionDelayAttestation == nil || validator.MinCurrentInclusionDelayAttestation.InclusionDelay > pendingAttestation.InclusionDelay {
+			if validator.MinCurrentInclusionDelayAttestation == nil ||
+				validator.MinCurrentInclusionDelayAttestation.InclusionDelay() > pendingAttestation.InclusionDelay() {
 				validator.MinCurrentInclusionDelayAttestation = pendingAttestation
 			}
 			validator.IsCurrentMatchingSourceAttester = true
@@ -178,7 +179,8 @@ func processAttestationPhase0(s *state2.BeaconState, attestation *solid.Attestat
 				validator.IsCurrentMatchingHeadAttester = true
 			}
 		} else {
-			if validator.MinPreviousInclusionDelayAttestation == nil || validator.MinPreviousInclusionDelayAttestation.InclusionDelay > pendingAttestation.InclusionDelay {
+			if validator.MinPreviousInclusionDelayAttestation == nil ||
+				validator.MinPreviousInclusionDelayAttestation.InclusionDelay() > pendingAttestation.InclusionDelay() {
 				validator.MinPreviousInclusionDelayAttestation = pendingAttestation
 			}
 			validator.IsPreviousMatchingSourceAttester = true

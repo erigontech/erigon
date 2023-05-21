@@ -13,7 +13,7 @@ import (
 )
 
 func HashTreeRoot(schema ...interface{}) ([32]byte, error) {
-	leaves := make([]byte, nextPowerOf2(len(schema))*length.Hash)
+	leaves := make([]byte, NextPowerOfTwo(uint64(len(schema)*length.Hash)))
 	pos := 0
 	for _, element := range schema {
 		switch obj := element.(type) {
@@ -88,17 +88,6 @@ func convertHeader(xs []byte) [][32]byte {
 	chunkedHeader.Cap = header.Cap / 32
 	chunkedHeader.Data = header.Data
 	return dat
-}
-
-func MerkleRootFromLeaves(leaves [][32]byte) ([32]byte, error) {
-	if len(leaves) == 0 {
-		return [32]byte{}, errors.New("zero leaves provided")
-	}
-	if len(leaves) == 1 {
-		return leaves[0], nil
-	}
-	hashLayer := leaves
-	return globalHasher.merkleizeTrieLeaves(hashLayer)
 }
 
 func MerkleRootFromFlatLeaves(leaves []byte, out []byte) (err error) {

@@ -182,7 +182,7 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	return committee, nil
 }
 
-func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error) {
+func (b *BeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, error) {
 	beaconConfig := b.BeaconConfig()
 	optimizedHashFunc := utils.OptimizedKeccak256NotThreadSafe()
 	epoch := Epoch(b.BeaconState) + 1
@@ -235,11 +235,10 @@ func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error)
 	if err != nil {
 		return nil, err
 	}
-	o := &cltypes.SyncCommittee{
-		PubKeys: syncCommitteePubKeys,
-	}
-	copy(o.AggregatePublicKey[:], aggregatePublicKeyBytes)
-	return o, nil
+	var aggregate [48]byte
+	copy(aggregate[:], aggregatePublicKeyBytes)
+
+	return solid.NewSyncCommitteeFromParameters(syncCommitteePubKeys, aggregate), nil
 }
 
 // GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.

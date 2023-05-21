@@ -39,8 +39,8 @@ type BeaconState struct {
 	currentJustifiedCheckpoint  solid.Checkpoint
 	finalizedCheckpoint         solid.Checkpoint
 	inactivityScores            solid.Uint64ListSSZ
-	currentSyncCommittee        *cltypes.SyncCommittee
-	nextSyncCommittee           *cltypes.SyncCommittee
+	currentSyncCommittee        *solid.SyncCommittee
+	nextSyncCommittee           *solid.SyncCommittee
 	// Bellatrix
 	latestExecutionPayloadHeader *cltypes.Eth1Header
 	// Capella
@@ -48,11 +48,11 @@ type BeaconState struct {
 	nextWithdrawalValidatorIndex uint64
 	historicalSummaries          *solid.ListSSZ[*cltypes.HistoricalSummary]
 	// Phase0: genesis fork. these 2 fields replace participation bits.
-	previousEpochAttestations *solid.ListSSZ[*cltypes.PendingAttestation]
-	currentEpochAttestations  *solid.ListSSZ[*cltypes.PendingAttestation]
+	previousEpochAttestations *solid.ListSSZ[*solid.PendingAttestation]
+	currentEpochAttestations  *solid.ListSSZ[*solid.PendingAttestation]
 
 	//  leaves for computing hashes
-	leaves        [32][32]byte            // Pre-computed leaves.
+	leaves        []byte                  // Pre-computed leaves.
 	touchedLeaves map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
 
 	// cl version
@@ -69,12 +69,13 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		previousEpochParticipation: solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
 		currentEpochParticipation:  solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),
 		slashings:                  solid.NewUint64VectorSSZ(slashingsLength),
-		currentEpochAttestations:   solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(cfg.CurrentEpochAttestationsLength())),
-		previousEpochAttestations:  solid.NewDynamicListSSZ[*cltypes.PendingAttestation](int(cfg.PreviousEpochAttestationsLength())),
+		currentEpochAttestations:   solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.CurrentEpochAttestationsLength())),
+		previousEpochAttestations:  solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.PreviousEpochAttestationsLength())),
 		historicalRoots:            solid.NewHashList(int(cfg.HistoricalRootsLimit)),
 		blockRoots:                 solid.NewHashVector(blockRootsLength),
 		stateRoots:                 solid.NewHashVector(stateRootsLength),
 		randaoMixes:                solid.NewHashVector(randoMixesLength),
+		leaves:                     make([]byte, 32*32),
 	}
 	state.init()
 	return state

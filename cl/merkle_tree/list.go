@@ -33,20 +33,6 @@ func MerkleizeVector(elements [][32]byte, length uint64) ([32]byte, error) {
 	return elements[0], nil
 }
 
-// ArraysRoot calculates the root hash of an array of hashes by first making a copy of the input array, then calculating the Merkle root of the copy using the MerkleRootFromLeaves function.
-func ArraysRoot(input [][32]byte, length uint64) ([32]byte, error) {
-	for uint64(len(input)) != length {
-		input = append(input, [32]byte{})
-	}
-
-	res, err := MerkleRootFromLeaves(input)
-	if err != nil {
-		return [32]byte{}, err
-	}
-
-	return res, nil
-}
-
 // BitlistRootWithLimit computes the HashSSZ merkleization of
 // participation roots.
 func BitlistRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {

@@ -129,14 +129,14 @@ func (b *BeaconState) ValidatorEffectiveBalance(index int) (uint64, error) {
 	return b.validators[index].EffectiveBalance(), nil
 }
 
-func (b *BeaconState) ValidatorMinCurrentInclusionDelayAttestation(index int) (*cltypes.PendingAttestation, error) {
+func (b *BeaconState) ValidatorMinCurrentInclusionDelayAttestation(index int) (*solid.PendingAttestation, error) {
 	if index >= len(b.validators) {
 		return nil, ErrInvalidValidatorIndex
 	}
 	return b.validators[index].MinCurrentInclusionDelayAttestation, nil
 }
 
-func (b *BeaconState) ValidatorMinPreviousInclusionDelayAttestation(index int) (*cltypes.PendingAttestation, error) {
+func (b *BeaconState) ValidatorMinPreviousInclusionDelayAttestation(index int) (*solid.PendingAttestation, error) {
 	if index >= len(b.validators) {
 		return nil, ErrInvalidValidatorIndex
 	}
@@ -200,11 +200,11 @@ func (b *BeaconState) FinalizedCheckpoint() solid.Checkpoint {
 	return b.finalizedCheckpoint
 }
 
-func (b *BeaconState) CurrentSyncCommittee() *cltypes.SyncCommittee {
+func (b *BeaconState) CurrentSyncCommittee() *solid.SyncCommittee {
 	return b.currentSyncCommittee
 }
 
-func (b *BeaconState) NextSyncCommittee() *cltypes.SyncCommittee {
+func (b *BeaconState) NextSyncCommittee() *solid.SyncCommittee {
 	return b.nextSyncCommittee
 }
 
@@ -216,7 +216,7 @@ func (b *BeaconState) NextWithdrawalIndex() uint64 {
 	return b.nextWithdrawalIndex
 }
 
-func (b *BeaconState) CurrentEpochAttestations() *solid.ListSSZ[*cltypes.PendingAttestation] {
+func (b *BeaconState) CurrentEpochAttestations() *solid.ListSSZ[*solid.PendingAttestation] {
 	return b.currentEpochAttestations
 }
 
@@ -224,7 +224,7 @@ func (b *BeaconState) CurrentEpochAttestationsLength() int {
 	return b.currentEpochAttestations.Len()
 }
 
-func (b *BeaconState) PreviousEpochAttestations() *solid.ListSSZ[*cltypes.PendingAttestation] {
+func (b *BeaconState) PreviousEpochAttestations() *solid.ListSSZ[*solid.PendingAttestation] {
 	return b.previousEpochAttestations
 }
 

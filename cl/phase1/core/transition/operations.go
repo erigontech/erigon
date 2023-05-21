@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
@@ -129,10 +130,15 @@ func ProcessDeposit(s *state2.BeaconState, deposit *cltypes.Deposit, fullValidat
 	}
 	depositIndex := s.Eth1DepositIndex()
 	eth1Data := s.Eth1Data()
+	rawProof := []common.Hash{}
+	deposit.Proof.Range(func(_ int, l common.Hash, _ int) bool {
+		rawProof = append(rawProof, l)
+		return true
+	})
 	// Validate merkle proof for deposit leaf.
 	if fullValidation && !utils.IsValidMerkleBranch(
 		depositLeaf,
-		deposit.Proof,
+		rawProof,
 		s.BeaconConfig().DepositContractTreeDepth+1,
 		depositIndex,
 		eth1Data.Root,

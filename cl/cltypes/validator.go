@@ -1,10 +1,8 @@
 package cltypes
 
 import (
-	"bytes"
-	"fmt"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -55,22 +53,23 @@ func (d *DepositData) MessageHash() ([32]byte, error) {
 
 type Deposit struct {
 	// Merkle proof is used for deposits
-	Proof []libcommon.Hash // 33 X 32 size.
+	Proof solid.HashVectorSSZ // 33 X 32 size.
 	Data  *DepositData
 }
 
 func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
-	for _, proofSeg := range d.Proof {
-		buf = append(buf, proofSeg[:]...)
+	var err error
+	if buf, err = d.Proof.EncodeSSZ(buf); err != nil {
+		return nil, err
 	}
 	return d.Data.EncodeSSZ(buf)
 }
 
 func (d *Deposit) DecodeSSZ(buf []byte, version int) error {
-	d.Proof = make([]libcommon.Hash, DepositProofLength)
-	for i := range d.Proof {
-		copy(d.Proof[i][:], buf[i*32:i*32+32])
+	d.Proof = solid.NewHashVector(33)
+	if err := d.Proof.DecodeSSZ(buf[:33*length.Hash], version); err != nil {
+		return err
 	}
 
 	if d.Data == nil {
@@ -84,22 +83,7 @@ func (d *Deposit) EncodingSizeSSZ() int {
 }
 
 func (d *Deposit) HashSSZ() ([32]byte, error) {
-	proofLeaves := make([][32]byte, DepositProofLength)
-	for i, segProof := range d.Proof {
-		copy(proofLeaves[i][:], segProof[:])
-	}
-
-	proofRoot, err := merkle_tree.ArraysRoot(proofLeaves, 64)
-	if err != nil {
-		return [32]byte{}, err
-	}
-
-	depositRoot, err := d.Data.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-
-	return merkle_tree.ArraysRoot([][32]byte{proofRoot, depositRoot}, 2)
+	return merkle_tree.HashTreeRoot(d.Proof, d.Data)
 }
 
 type VoluntaryExit struct {
@@ -155,98 +139,6 @@ func (e *SignedVoluntaryExit) EncodingSizeSSZ() int {
 	return 96 + e.VolunaryExit.EncodingSizeSSZ()
 }
 
-/*
- * Sync committe public keys and their aggregate public keys, we use array of pubKeys.
- */
-type SyncCommittee struct {
-	PubKeys            [][48]byte `ssz-size:"512,48"`
-	AggregatePublicKey [48]byte   `ssz-size:"48"`
-}
-
-func (s *SyncCommittee) Copy() *SyncCommittee {
-	copied := new(SyncCommittee)
-	copied.AggregatePublicKey = s.AggregatePublicKey
-	copied.PubKeys = make([][48]byte, len(s.PubKeys))
-	copy(copied.PubKeys, s.PubKeys)
-	return copied
-}
-
-// MarshalSSZTo ssz marshals the SyncCommittee object to a target array
-func (s *SyncCommittee) EncodeSSZ(buf []byte) ([]byte, error) {
-	dst := buf
-
-	if len(s.PubKeys) != SyncCommitteeSize {
-		return nil, fmt.Errorf("wrong sync committee size")
-	}
-	for _, key := range s.PubKeys {
-		dst = append(dst, key[:]...)
-	}
-	dst = append(dst, s.AggregatePublicKey[:]...)
-
-	return dst, nil
-}
-
-func (s *SyncCommittee) DecodeSSZ(buf []byte, version int) error {
-	if len(buf) < 24624 {
-		return fmt.Errorf("[SyncCommittee] err: %s", ssz.ErrLowBufferSize)
-	}
-
-	s.PubKeys = make([][48]byte, SyncCommitteeSize)
-	for i := range s.PubKeys {
-		copy(s.PubKeys[i][:], buf[i*48:(i*48)+48])
-	}
-	copy(s.AggregatePublicKey[:], buf[24576:])
-
-	return nil
-}
-
-// EncodingSizeSSZ returns the ssz encoded size in bytes for the SyncCommittee object
-func (s *SyncCommittee) EncodingSizeSSZ() (size int) {
-	size = 24624
-	return
-}
-
-// HashTreeRootWith ssz hashes the SyncCommittee object with a hasher
-func (s *SyncCommittee) HashSSZ() ([32]byte, error) {
-	// Compute the sync committee leaf
-	pubKeysLeaves := make([][32]byte, SyncCommitteeSize)
-	if len(s.PubKeys) != SyncCommitteeSize {
-		return [32]byte{}, fmt.Errorf("wrong sync committee size")
-	}
-	var err error
-	for i, key := range s.PubKeys {
-		pubKeysLeaves[i], err = merkle_tree.BytesRoot(key[:])
-		if err != nil {
-			return [32]byte{}, err
-		}
-	}
-	pubKeyLeaf, err := merkle_tree.ArraysRoot(pubKeysLeaves, SyncCommitteeSize)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	aggregatePublicKeyRoot, err := merkle_tree.BytesRoot(s.AggregatePublicKey[:])
-	if err != nil {
-		return [32]byte{}, err
-	}
-
-	return merkle_tree.ArraysRoot([][32]byte{pubKeyLeaf, aggregatePublicKeyRoot}, 2)
-}
-
-func (s *SyncCommittee) Equal(s2 *SyncCommittee) bool {
-	if !bytes.Equal(s.AggregatePublicKey[:], s2.AggregatePublicKey[:]) {
-		return false
-	}
-	if len(s.PubKeys) != len(s2.PubKeys) {
-		return false
-	}
-	for i := range s.PubKeys {
-		if !bytes.Equal(s.PubKeys[i][:], s2.PubKeys[i][:]) {
-			return false
-		}
-	}
-	return true
-}
-
 // Validator, contains if we were on bellatrix/alteir/phase0 and transition epoch.
 type Validator struct {
 	solid.Validator
@@ -262,8 +154,8 @@ type Validator struct {
 	IsCurrentMatchingHeadAttester  bool
 	IsPreviousMatchingHeadAttester bool
 	// MinInclusionDelay
-	MinCurrentInclusionDelayAttestation  *PendingAttestation
-	MinPreviousInclusionDelayAttestation *PendingAttestation
+	MinCurrentInclusionDelayAttestation  *solid.PendingAttestation
+	MinPreviousInclusionDelayAttestation *solid.PendingAttestation
 }
 
 // DutiesAttested returns how many of its duties the validator attested and missed

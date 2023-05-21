@@ -8,8 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/state_encoding"
 )
 
-func (b *BeaconState) HashSSZ() ([32]byte, error) {
-	var err error
+func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	if err = b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
@@ -17,9 +16,9 @@ func (b *BeaconState) HashSSZ() ([32]byte, error) {
 	// for i, val := range b.leaves {
 	// 	fmt.Println(i, libcommon.Hash(val))
 	// }
-
 	// Pad to 32 of length
-	return merkle_tree.MerkleRootFromLeaves(b.leaves[:])
+	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves[:], out[:])
+	return
 }
 
 func preparateRootsForHashing(roots []common.Hash) [][32]byte {
@@ -287,7 +286,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 func (b *BeaconState) updateLeaf(idx StateLeafIndex, leaf libcommon.Hash) {
 	// Update leaf with new value.
-	b.leaves[idx] = leaf
+	copy(b.leaves[idx*32:], leaf[:])
 	// Now leaf is clean :).
 	b.touchedLeaves[idx] = false
 }
