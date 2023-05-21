@@ -23,6 +23,7 @@ func GetEmptyBeaconState() *BeaconState {
 		latestExecutionPayloadHeader: cltypes.NewEth1Header(clparams.BellatrixVersion),
 		version:                      clparams.BellatrixVersion,
 		beaconConfig:                 cfg,
+		validators:                   cltypes.NewValidatorSet(int(cfg.ValidatorRegistryLimit)),
 		inactivityScores:             solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
 		balances:                     solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
 		previousEpochParticipation:   solid.NewBitList(0, int(cfg.ValidatorRegistryLimit)),

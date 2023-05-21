@@ -95,3 +95,7 @@ func (c Checkpoint) HashSSZ() (o [32]byte, err error) {
 	err = TreeHashFlatSlice(leaves, o[:])
 	return
 }
+
+func (c *Checkpoint) Static() bool {
+	return true
+}

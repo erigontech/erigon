@@ -173,3 +173,7 @@ func (h *Eth1Header) getSchema() []interface{} {
 	}
 	return s
 }
+
+func (h *Eth1Header) Static() bool {
+	return false
+}

@@ -87,3 +87,7 @@ func (s *SyncCommittee) HashSSZ() ([32]byte, error) {
 	}
 	return merkle_tree.HashTreeRoot(syncCommitteeLayer, s[syncCommitteeSize-48:])
 }
+
+func (s *SyncCommittee) Static() bool {
+	return true
+}

@@ -25,16 +25,7 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 	})
 
 	dst.eth1DepositIndex = b.eth1DepositIndex
-	for i, validator := range b.validators {
-		if i >= len(dst.validators) {
-			nv := &cltypes.Validator{}
-			validator.CopyTo(nv)
-			dst.validators = append(dst.validators, nv)
-			continue
-		}
-		validator.CopyTo(dst.validators[i])
-	}
-	dst.validators = dst.validators[:len(b.validators)]
+	b.validators.CopyTo(dst.validators)
 	b.balances.CopyTo(dst.balances)
 	b.randaoMixes.CopyTo(dst.randaoMixes)
 	b.slashings.CopyTo(dst.slashings)

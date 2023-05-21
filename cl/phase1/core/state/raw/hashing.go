@@ -5,7 +5,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/state_encoding"
 )
 
 func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
@@ -117,7 +116,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(11): Validators
 	if b.isLeafDirty(ValidatorsLeafIndex) {
-		root, err := merkle_tree.ListObjectSSZRoot(b.validators, state_encoding.ValidatorRegistryLimit)
+		root, err := b.validators.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -185,8 +184,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(17): JustificationBits
 	if b.isLeafDirty(JustificationBitsLeafIndex) {
-		var root [32]byte
-		root[0] = b.justificationBits.Byte()
+		root, _ := b.justificationBits.HashSSZ()
 		b.updateLeaf(JustificationBitsLeafIndex, root)
 	}
 
