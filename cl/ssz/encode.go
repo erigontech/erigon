@@ -3,7 +3,6 @@ package ssz2
 import (
 	"encoding/binary"
 	"fmt"
-	"reflect"
 
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 )
@@ -22,10 +21,6 @@ type SizedObjectSSZ interface {
 	Sized
 }
 
-func isNil(i interface{}) bool {
-	return i == nil || reflect.ValueOf(i).IsNil()
-}
-
 func Encode(buf []byte, schema ...interface{}) (dst []byte, err error) {
 	dst = buf
 	currentOffset := 0
@@ -35,6 +30,9 @@ func Encode(buf []byte, schema ...interface{}) (dst []byte, err error) {
 		switch obj := element.(type) {
 		case uint64:
 			dst = append(dst, ssz.Uint64SSZ(obj)...)
+			currentOffset += 8
+		case *uint64:
+			dst = append(dst, ssz.Uint64SSZ(*obj)...)
 			currentOffset += 8
 		case []byte:
 			dst = append(dst, obj...)
