@@ -2,7 +2,7 @@ package cltypes
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -27,12 +27,8 @@ func (d *DepositData) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.Encode(dst, d.PubKey[:], d.WithdrawalCredentials[:], ssz.Uint64SSZ(d.Amount), d.Signature[:])
 }
 
-func (d *DepositData) DecodeSSZ(buf []byte, _ int) error {
-	copy(d.PubKey[:], buf)
-	copy(d.WithdrawalCredentials[:], buf[48:])
-	d.Amount = ssz.UnmarshalUint64SSZ(buf[80:])
-	copy(d.Signature[:], buf[88:])
-	return nil
+func (d *DepositData) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.Decode(buf[:], version, d.PubKey[:], d.WithdrawalCredentials[:], &d.Amount, d.Signature[:])
 }
 
 func (d *DepositData) EncodingSizeSSZ() int {
@@ -47,6 +43,10 @@ func (d *DepositData) MessageHash() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(d.PubKey[:], d.WithdrawalCredentials[:], d.Amount)
 }
 
+func (*DepositData) Static() bool {
+	return true
+}
+
 type Deposit struct {
 	// Merkle proof is used for deposits
 	Proof solid.HashVectorSSZ // 33 X 32 size.
@@ -54,24 +54,14 @@ type Deposit struct {
 }
 
 func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	var err error
-	if buf, err = d.Proof.EncodeSSZ(buf); err != nil {
-		return nil, err
-	}
-	return d.Data.EncodeSSZ(buf)
+	return ssz2.Encode(dst, d.Proof, d.Data)
 }
 
 func (d *Deposit) DecodeSSZ(buf []byte, version int) error {
 	d.Proof = solid.NewHashVector(33)
-	if err := d.Proof.DecodeSSZ(buf[:33*length.Hash], version); err != nil {
-		return err
-	}
+	d.Data = new(DepositData)
 
-	if d.Data == nil {
-		d.Data = new(DepositData)
-	}
-	return d.Data.DecodeSSZ(buf[33*32:], version)
+	return ssz2.Decode(buf, version, d.Proof, d.Data)
 }
 
 func (d *Deposit) EncodingSizeSSZ() int {
@@ -87,21 +77,27 @@ type VoluntaryExit struct {
 	ValidatorIndex uint64
 }
 
-func (e *VoluntaryExit) EncodeSSZ(buf []byte) []byte {
-	return append(buf, append(ssz.Uint64SSZ(e.Epoch), ssz.Uint64SSZ(e.ValidatorIndex)...)...)
+func (e *VoluntaryExit) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.Encode(buf, e.Epoch, e.ValidatorIndex)
 }
 
-func (e *VoluntaryExit) DecodeSSZ(buf []byte) error {
-	e.Epoch = ssz.UnmarshalUint64SSZ(buf)
-	e.ValidatorIndex = ssz.UnmarshalUint64SSZ(buf[8:])
-	return nil
+func (*VoluntaryExit) Clone() clonable.Clonable {
+	return &VoluntaryExit{}
+}
+
+func (*VoluntaryExit) Static() bool {
+	return true
+}
+
+func (e *VoluntaryExit) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.Decode(buf, 0, &e.Epoch, &e.ValidatorIndex)
 }
 
 func (e *VoluntaryExit) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(e.Epoch, e.ValidatorIndex)
 }
 
-func (e *VoluntaryExit) EncodingSizeSSZ() int {
+func (*VoluntaryExit) EncodingSizeSSZ() int {
 	return 16
 }
 
@@ -111,20 +107,12 @@ type SignedVoluntaryExit struct {
 }
 
 func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := e.VolunaryExit.EncodeSSZ(dst)
-	return append(buf, e.Signature[:]...), nil
+	return ssz2.Encode(dst, e.VolunaryExit, e.Signature[:])
 }
 
-func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte, _ int) error {
-	if e.VolunaryExit == nil {
-		e.VolunaryExit = new(VoluntaryExit)
-	}
-
-	if err := e.VolunaryExit.DecodeSSZ(buf); err != nil {
-		return err
-	}
-	copy(e.Signature[:], buf[16:])
-	return nil
+func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte, version int) error {
+	e.VolunaryExit = new(VoluntaryExit)
+	return ssz2.Decode(buf, version, e.VolunaryExit, e.Signature[:])
 }
 
 func (e *SignedVoluntaryExit) HashSSZ() ([32]byte, error) {
@@ -187,7 +175,7 @@ func (v *Validator) HashSSZ() (o [32]byte, err error) {
 	leaves := make([]byte, 8*32)
 	v.CopyHashBufferTo(leaves)
 	leaves = leaves[:(8 * 32)]
-	err = solid.TreeHashFlatSlice(leaves, o[:])
+	err = merkle_tree.MerkleRootFromFlatLeaves(leaves, o[:])
 	return
 }
 

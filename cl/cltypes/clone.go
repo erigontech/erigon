@@ -20,10 +20,6 @@ func (*Eth1Block) Clone() clonable.Clonable {
 	return &Eth1Block{}
 }
 
-func (*BeaconBlocksByRootRequest) Clone() clonable.Clonable {
-	return &BeaconBlocksByRootRequest{}
-}
-
 func (*Eth1Data) Clone() clonable.Clonable {
 	return &Eth1Data{}
 }
@@ -102,10 +98,6 @@ func (*SignedBeaconBlockHeader) Clone() clonable.Clonable {
 
 func (*Fork) Clone() clonable.Clonable {
 	return &Fork{}
-}
-
-func (*BlobSideCar) Clone() clonable.Clonable {
-	return &BlobSideCar{}
 }
 
 func (*KZGCommitment) Clone() clonable.Clonable {

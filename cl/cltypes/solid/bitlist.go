@@ -9,6 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 )
 
+// BitList is like a dynamic binary string. It's like a flipbook of 1s and 0s!
+// And just like a flipbook, we can add (Append), remove (Pop), or look at any bit (Get) we want.
 type BitList struct {
 	// the underlying bytes that store the data
 	u []byte
@@ -20,6 +22,8 @@ type BitList struct {
 	hashBuf
 }
 
+// NewBitList creates a brand new BitList, just like when Zordon created the Power Rangers!
+// We make sure to set its length and capacity first.
 func NewBitList(l int, c int) *BitList {
 	return &BitList{
 		u: make([]byte, l+32),
@@ -27,6 +31,8 @@ func NewBitList(l int, c int) *BitList {
 		c: c,
 	}
 }
+
+// BitlistFromBytes is like getting a new Power Ranger from a civilian - we already have the bits!
 func BitlistFromBytes(xs []byte, c int) *BitList {
 	return &BitList{
 		u: xs,
@@ -35,15 +41,18 @@ func BitlistFromBytes(xs []byte, c int) *BitList {
 	}
 }
 
+// Clear wipes the BitList clean, just like the memory wipe spell from a particularly forgetful wizard.
 func (u *BitList) Clear() {
 	u.u = u.u[:0]
 	u.l = 0
 }
 
+// Static returns false, because BitLists, like Power Rangers, are dynamic!
 func (*BitList) Static() bool {
 	return false
 }
 
+// CopyTo is like a Power Rangers team up episode - we get the bits from another list!
 func (u *BitList) CopyTo(target IterableSSZ[byte]) {
 	target.Clear()
 	for i := 0; i < u.l; i++ {
@@ -51,18 +60,21 @@ func (u *BitList) CopyTo(target IterableSSZ[byte]) {
 	}
 }
 
+// Range allows us to do something to each bit in the list, just like a Power Rangers roll call.
 func (u *BitList) Range(fn func(index int, value byte, length int) bool) {
 	for i, v := range u.u {
 		fn(i, v, len(u.u))
 	}
 }
 
+// Pop removes the first bit from the list, like when the Red Ranger takes the first hit.
 func (u *BitList) Pop() (x byte) {
 	x, u.u = u.u[0], u.u[1:]
 	u.l = u.l - 1
 	return x
 }
 
+// Append is like adding a new Power Ranger to the team - the bitlist gets bigger!
 func (u *BitList) Append(v byte) {
 	if len(u.u) <= u.l {
 		u.u = append(u.u, 0)
@@ -71,18 +83,22 @@ func (u *BitList) Append(v byte) {
 	u.l = u.l + 1
 }
 
+// Get lets us peek at a bit in the list, like when the team uses their sensors to spot the monster.
 func (u *BitList) Get(index int) byte {
 	return u.u[index]
 }
 
+// Set is like the Red Ranger giving an order - we set a bit to a certain value.
 func (u *BitList) Set(index int, v byte) {
 	u.u[index] = v
 }
 
+// Length gives us the length of the bitlist, just like a roll call tells us how many Rangers there are.
 func (u *BitList) Length() int {
 	return u.l
 }
 
+// Cap gives capacity of the bitlist
 func (u *BitList) Cap() int {
 	return u.c
 }
@@ -126,22 +142,30 @@ func (arr *BitList) getBaseHash(xs []byte, depth uint8) error {
 	return nil
 }
 
+// EncodeSSZ appends the underlying byte slice of the BitList to the destination byte slice.
+// It returns the resulting byte slice.
 func (u *BitList) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	buf = append(buf, u.u[:u.l]...)
 	return buf, nil
 }
 
+// DecodeSSZ replaces the underlying byte slice of the BitList with a copy of the input byte slice.
+// It then updates the length of the BitList to match the length of the new byte slice.
 func (u *BitList) DecodeSSZ(dst []byte, _ int) error {
 	u.u = common.CopyBytes(dst)
 	u.l = len(dst)
 	return nil
 }
 
+// EncodingSizeSSZ returns the current length of the BitList.
+// This is the number of bytes that would be written out when EncodeSSZ is called.
 func (u *BitList) EncodingSizeSSZ() int {
 	return u.l
 }
 
+// Clone creates a new BitList with the same length and capacity as the original.
+// Note that the underlying byte slice is not copied.
 func (u *BitList) Clone() clonable.Clonable {
 	return NewBitList(u.l, u.c)
 }

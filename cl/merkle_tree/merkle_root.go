@@ -98,5 +98,9 @@ func MerkleRootFromFlatLeaves(leaves []byte, out []byte) (err error) {
 		copy(out, leaves)
 		return
 	}
-	return globalHasher.merkleizeTrieLeavesFlat(leaves, out)
+	return globalHasher.merkleizeTrieLeavesFlat(leaves, out, NextPowerOfTwo(uint64((len(leaves)+31)/32)))
+}
+
+func MerkleRootFromFlatLeavesWithLimit(leaves []byte, out []byte, limit uint64) (err error) {
+	return globalHasher.merkleizeTrieLeavesFlat(leaves, out, limit)
 }

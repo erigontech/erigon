@@ -1,8 +1,6 @@
 package cltypes
 
 import (
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
@@ -23,16 +21,8 @@ func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (a *AggregateAndProof) DecodeSSZ(buf []byte, version int) error {
-	a.AggregatorIndex = ssz.UnmarshalUint64SSZ(buf)
-	if a.Aggregate == nil {
-		a.Aggregate = new(solid.Attestation)
-	}
-
-	copy(a.SelectionProof[:], buf[12:])
-	if err := a.Aggregate.DecodeSSZ(buf[108:], version); err != nil {
-		return err
-	}
-	return nil
+	a.Aggregate = new(solid.Attestation)
+	return ssz2.Decode(buf, version, &a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
 func (a *AggregateAndProof) EncodingSizeSSZ() int {
@@ -53,17 +43,8 @@ func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte, version int) error {
-	if a.Message == nil {
-		a.Message = new(AggregateAndProof)
-	}
-
-	copy(a.Signature[:], buf[4:])
-
-	if err := a.Message.DecodeSSZ(buf[100:], version); err != nil {
-		return err
-	}
-
-	return nil
+	a.Message = new(AggregateAndProof)
+	return ssz2.Decode(buf, version, a.Message, a.Signature[:])
 }
 
 func (a *SignedAggregateAndProof) EncodingSizeSSZ() int {
@@ -100,10 +81,8 @@ func (*SyncAggregate) Static() bool {
 	return true
 }
 
-func (agg *SyncAggregate) DecodeSSZ(buf []byte, _ int) error {
-	copy(agg.SyncCommiteeBits[:], buf)
-	copy(agg.SyncCommiteeSignature[:], buf[64:])
-	return nil
+func (agg *SyncAggregate) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.Decode(buf, version, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 }
 
 func (agg *SyncAggregate) EncodingSizeSSZ() int {

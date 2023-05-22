@@ -29,11 +29,15 @@ func newMerkleHasher() *merkleHasher {
 }
 
 // merkleizeTrieLeaves returns intermediate roots of given leaves.
-func (m *merkleHasher) merkleizeTrieLeavesFlat(leaves []byte, out []byte) (err error) {
+func (m *merkleHasher) merkleizeTrieLeavesFlat(leaves []byte, out []byte, limit uint64) (err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	layer := m.getBufferFromFlat(leaves)
-	for len(layer) > 1 {
+	for i := uint8(0); i < getDepth(limit); i++ {
+		layerLen := len(layer)
+		if layerLen%2 != 0 {
+			layer = append(layer, ZeroHashes[i])
+		}
 		if err := gohashtree.Hash(layer, layer); err != nil {
 			return err
 		}

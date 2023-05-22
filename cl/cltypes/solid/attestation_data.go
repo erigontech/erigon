@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
 
 // slot: 8 bytes
@@ -129,7 +130,7 @@ func (a AttestationData) HashSSZ() (o [32]byte, err error) {
 	if err = a.CopyHashBufferTo(leaves); err != nil {
 		return
 	}
-	err = TreeHashFlatSlice(leaves, o[:])
+	err = merkle_tree.MerkleRootFromFlatLeaves(leaves, o[:])
 	return
 }
 

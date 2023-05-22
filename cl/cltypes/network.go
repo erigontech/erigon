@@ -1,7 +1,6 @@
 package cltypes
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
@@ -59,28 +58,6 @@ func (p *Ping) DecodeSSZ(buf []byte, _ int) error {
 	return nil
 }
 
-// P2P Message for bootstrap
-type SingleRoot struct {
-	Root [32]byte
-}
-
-func (s *SingleRoot) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, s.Root[:]...), nil
-}
-
-func (s *SingleRoot) EncodingSizeSSZ() int {
-	return length.Hash
-}
-
-func (s *SingleRoot) DecodeSSZ(buf []byte, _ int) error {
-	copy(s.Root[:], buf)
-	return nil
-}
-
-func (*SingleRoot) Clone() clonable.Clonable {
-	return &SingleRoot{}
-}
-
 /*
  * BeaconBlocksByRangeRequest is the request for getting a range of blocks.
  */
@@ -94,11 +71,8 @@ func (b *BeaconBlocksByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
 	return ssz2.Encode(buf, b.StartSlot, b.Count, b.Step)
 }
 
-func (b *BeaconBlocksByRangeRequest) DecodeSSZ(buf []byte, _ int) error {
-	b.StartSlot = ssz.UnmarshalUint64SSZ(buf)
-	b.Count = ssz.UnmarshalUint64SSZ(buf[8:])
-	b.Step = ssz.UnmarshalUint64SSZ(buf[16:])
-	return nil
+func (b *BeaconBlocksByRangeRequest) DecodeSSZ(buf []byte, v int) error {
+	return ssz2.Decode(buf, v, &b.StartSlot, &b.Count, &b.Step)
 }
 
 func (b *BeaconBlocksByRangeRequest) EncodingSizeSSZ() int {
@@ -114,10 +88,10 @@ func (*BeaconBlocksByRangeRequest) Clone() clonable.Clonable {
  * It contains network information about the other peer and if mismatching we drop it.
  */
 type Status struct {
-	ForkDigest     [4]byte  `ssz-size:"4"`
-	FinalizedRoot  [32]byte `ssz-size:"32"`
+	ForkDigest     [4]byte
+	FinalizedRoot  [32]byte
 	FinalizedEpoch uint64
-	HeadRoot       [32]byte `ssz-size:"32"`
+	HeadRoot       [32]byte
 	HeadSlot       uint64
 }
 
@@ -125,13 +99,8 @@ func (s *Status) EncodeSSZ(buf []byte) ([]byte, error) {
 	return ssz2.Encode(buf, s.ForkDigest[:], s.FinalizedRoot[:], s.FinalizedEpoch, s.HeadRoot[:], s.HeadSlot)
 }
 
-func (s *Status) DecodeSSZ(buf []byte, _ int) error {
-	copy(s.ForkDigest[:], buf)
-	copy(s.FinalizedRoot[:], buf[4:])
-	s.FinalizedEpoch = ssz.UnmarshalUint64SSZ(buf[36:])
-	copy(s.HeadRoot[:], buf[44:])
-	s.HeadSlot = ssz.UnmarshalUint64SSZ(buf[76:])
-	return nil
+func (s *Status) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.Decode(buf, version, s.ForkDigest[:], s.FinalizedRoot[:], &s.FinalizedEpoch, s.HeadRoot[:], &s.HeadSlot)
 }
 
 func (s *Status) EncodingSizeSSZ() int {

@@ -1,27 +1,13 @@
 package cltypes
 
 import (
-	"fmt"
-
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 type Blob gokzg4844.Blob
 type KZGProof gokzg4844.KZGProof // [48]byte
-
-type BlobSideCar struct {
-	BlockRoot       libcommon.Hash
-	Index           uint64 // index of blob in block
-	Slot            uint64
-	BlockParentRoot libcommon.Hash
-	ProposerIndex   uint64 // validator index
-	Blob            *Blob
-	KZGCommitment   KZGCommitment
-	KZGProof        KZGProof
-}
 
 // https://github.com/ethereum/consensus-specs/blob/3a2304981a3b820a22b518fe4859f4bba0ebc83b/specs/deneb/polynomial-commitments.md#custom-types
 const BYTES_PER_FIELD_ELEMENT = 32
@@ -40,12 +26,7 @@ func (b *KZGCommitment) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (b *KZGCommitment) DecodeSSZ(buf []byte, version int) error {
-	if len(buf) < b.EncodingSizeSSZ() {
-		return fmt.Errorf("[KZGCommitment] err: %w", ssz.ErrLowBufferSize)
-	}
-	copy(b[:], buf)
-
-	return nil
+	return ssz2.Decode(buf, version, b[:])
 }
 
 func (b *KZGCommitment) EncodingSizeSSZ() int {
