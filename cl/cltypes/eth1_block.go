@@ -5,7 +5,6 @@ import (
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -157,67 +156,11 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 
 // DecodeSSZ decodes the block in SSZ format.
 func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
+	b.Extra = solid.NewExtraData()
+	b.Transactions = &solid.TransactionsSSZ{}
+	b.Withdrawals = solid.NewStaticListSSZ[*types.Withdrawal](16, 44)
 	b.version = clparams.StateVersion(version)
-	if len(buf) < b.EncodingSizeSSZ() {
-		return fmt.Errorf("[Eth1Block] err: %s", ssz.ErrLowBufferSize)
-	}
-	// We can reuse code from eth1-header for partial decoding
-	payloadHeader := Eth1Header{}
-	pos, extraDataOffset := payloadHeader.decodeHeaderMetadataForSSZ(buf)
-	// Set all header shared fields accordingly
-	b.ParentHash = payloadHeader.ParentHash
-	b.FeeRecipient = payloadHeader.FeeRecipient
-	b.StateRoot = payloadHeader.StateRoot
-	b.ReceiptsRoot = payloadHeader.ReceiptsRoot
-	b.BlockHash = payloadHeader.BlockHash
-	b.LogsBloom = payloadHeader.LogsBloom
-	b.PrevRandao = payloadHeader.PrevRandao
-	b.BlockNumber = payloadHeader.BlockNumber
-	b.GasLimit = payloadHeader.GasLimit
-	b.GasUsed = payloadHeader.GasUsed
-	b.Time = payloadHeader.Time
-	b.BaseFeePerGas = payloadHeader.BaseFeePerGas
-	// Decode the rest
-	transactionsOffset := ssz.DecodeOffset(buf[pos:])
-	pos += 4
-	var withdrawalOffset *uint32
-	if version >= int(clparams.CapellaVersion) {
-		withdrawalOffset = new(uint32)
-		*withdrawalOffset = ssz.DecodeOffset(buf[pos:])
-	}
-	pos += 4
-	if version >= int(clparams.DenebVersion) {
-		copy(b.ExcessDataGas[:], buf[pos:])
-	}
-	if b.Extra == nil {
-		b.Extra = solid.NewExtraData()
-	}
-	// Compute extra data.
-	if err := b.Extra.DecodeSSZ(buf[extraDataOffset:transactionsOffset], version); err != nil {
-		return err
-	}
-	endOffset := uint32(len(buf))
-	if withdrawalOffset != nil {
-		endOffset = *withdrawalOffset
-	}
-
-	b.Transactions = new(solid.TransactionsSSZ)
-	if err := b.Transactions.DecodeSSZ(buf[transactionsOffset:endOffset], version); err != nil {
-		return err
-	}
-
-	// If withdrawals are enabled, process them.
-	if withdrawalOffset != nil {
-		if b.Withdrawals == nil {
-			b.Withdrawals = solid.NewStaticListSSZ[*types.Withdrawal](16, 44)
-		}
-		if err := b.Withdrawals.DecodeSSZ(buf[*withdrawalOffset:], version); err != nil {
-			return fmt.Errorf("[Eth1Block] err: %s", err)
-
-		}
-	}
-
-	return nil
+	return ssz2.Decode(buf, version, b.getSchema()...)
 }
 
 // EncodeSSZ encodes the block in SSZ format.
@@ -232,7 +175,7 @@ func (b *Eth1Block) HashSSZ() ([32]byte, error) {
 
 func (b *Eth1Block) getSchema() []interface{} {
 	s := []interface{}{b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
-		b.PrevRandao[:], b.BlockNumber, b.GasLimit, b.GasUsed, b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions}
+		b.PrevRandao[:], &b.BlockNumber, &b.GasLimit, &b.GasUsed, &b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions}
 	if b.version >= clparams.CapellaVersion {
 		s = append(s, b.Withdrawals)
 	}

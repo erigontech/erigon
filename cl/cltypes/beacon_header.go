@@ -3,7 +3,6 @@ package cltypes
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
@@ -29,13 +28,8 @@ func (b *BeaconBlockHeader) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.Encode(dst, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.Root[:], b.BodyRoot[:])
 }
 
-func (b *BeaconBlockHeader) DecodeSSZ(buf []byte, _ int) error {
-	b.Slot = ssz.UnmarshalUint64SSZ(buf)
-	b.ProposerIndex = ssz.UnmarshalUint64SSZ(buf[8:])
-	copy(b.ParentRoot[:], buf[16:])
-	copy(b.Root[:], buf[48:])
-	copy(b.BodyRoot[:], buf[80:])
-	return nil
+func (b *BeaconBlockHeader) DecodeSSZ(buf []byte, v int) error {
+	return ssz2.Decode(buf, v, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.Root[:], b.BodyRoot[:])
 }
 
 func (b *BeaconBlockHeader) HashSSZ() ([32]byte, error) {
@@ -69,11 +63,8 @@ func (b *SignedBeaconBlockHeader) EncodeSSZ(dst []byte) ([]byte, error) {
 
 func (b *SignedBeaconBlockHeader) DecodeSSZ(buf []byte, version int) error {
 	b.Header = new(BeaconBlockHeader)
-	if err := b.Header.DecodeSSZ(buf, version); err != nil {
-		return err
-	}
-	copy(b.Signature[:], buf[b.Header.EncodingSizeSSZ():])
-	return nil
+	return ssz2.Decode(buf, version, b.Header, b.Signature[:])
+
 }
 
 func (b *SignedBeaconBlockHeader) HashSSZ() ([32]byte, error) {

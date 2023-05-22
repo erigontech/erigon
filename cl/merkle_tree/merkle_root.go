@@ -3,6 +3,7 @@ package merkle_tree
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"reflect"
 	"unsafe"
 
@@ -15,10 +16,12 @@ import (
 func HashTreeRoot(schema ...interface{}) ([32]byte, error) {
 	leaves := make([]byte, NextPowerOfTwo(uint64(len(schema)*length.Hash)))
 	pos := 0
-	for _, element := range schema {
+	for i, element := range schema {
 		switch obj := element.(type) {
 		case uint64:
 			binary.LittleEndian.PutUint64(leaves[pos:], obj)
+		case *uint64:
+			binary.LittleEndian.PutUint64(leaves[pos:], *obj)
 		case []byte:
 			if len(obj) < length.Hash {
 				copy(leaves[pos:], obj[:])
@@ -36,7 +39,7 @@ func HashTreeRoot(schema ...interface{}) ([32]byte, error) {
 			}
 			copy(leaves[pos:], root[:])
 		default:
-			panic("get it out of my face")
+			panic(fmt.Sprintf("get it out of my face, u put a bad component in the schema. index %d", i))
 		}
 		pos += length.Hash
 	}

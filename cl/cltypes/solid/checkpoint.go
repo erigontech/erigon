@@ -49,8 +49,8 @@ func (c Checkpoint) BlockRoot() (o libcommon.Hash) {
 	return
 }
 
-func (c Checkpoint) EncodingSizeSSZ() int {
-	return 40
+func (Checkpoint) EncodingSizeSSZ() int {
+	return checkpointSize
 }
 
 func (c Checkpoint) DecodeSSZ(buf []byte, _ int) error {
@@ -96,6 +96,6 @@ func (c Checkpoint) HashSSZ() (o [32]byte, err error) {
 	return
 }
 
-func (c *Checkpoint) Static() bool {
+func (c Checkpoint) Static() bool {
 	return true
 }

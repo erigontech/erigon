@@ -19,11 +19,12 @@ func (j JustificationBits) Byte() (out byte) {
 	return
 }
 
-func (j *JustificationBits) DecodeSSZ(b []byte, _ int) {
+func (j *JustificationBits) DecodeSSZ(b []byte, _ int) error {
 	j[0] = b[0]&1 > 0
 	j[1] = b[0]&2 > 0
 	j[2] = b[0]&4 > 0
 	j[3] = b[0]&8 > 0
+	return nil
 }
 
 func (j *JustificationBits) EncodeSSZ(buf []byte) ([]byte, error) {

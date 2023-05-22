@@ -31,7 +31,7 @@ func (b *BLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
 	b.ValidatorIndex = ssz.UnmarshalUint64SSZ(buf)
 	copy(b.From[:], buf[8:])
 	copy(b.To[:], buf[56:])
-	return nil
+	return ssz2.Decode(buf, version, &b.ValidatorIndex, b.From[:], b.To[:])
 }
 
 func (*BLSToExecutionChange) EncodingSizeSSZ() int {
@@ -52,15 +52,8 @@ func (s *SignedBLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (s *SignedBLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
-	if len(buf) < s.EncodingSizeSSZ() {
-		return fmt.Errorf("[SignedBLSToExecutionChange] err: %s", ssz.ErrLowBufferSize)
-	}
 	s.Message = new(BLSToExecutionChange)
-	if err := s.Message.DecodeSSZ(buf, version); err != nil {
-		return err
-	}
-	copy(s.Signature[:], buf[s.Message.EncodingSizeSSZ():])
-	return nil
+	return ssz2.Decode(buf, version, s.Message, s.Signature[:])
 }
 
 func (s *SignedBLSToExecutionChange) HashSSZ() ([32]byte, error) {

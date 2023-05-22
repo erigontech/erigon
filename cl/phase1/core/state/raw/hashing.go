@@ -121,6 +121,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 			return err
 		}
 		b.updateLeaf(ValidatorsLeafIndex, root)
+
 	}
 
 	// Field(12): Balances

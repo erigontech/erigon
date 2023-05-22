@@ -76,65 +76,13 @@ func (h *Eth1Header) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.Encode(dst, h.getSchema()...)
 }
 
-// Decodes header data partially. used to not dupicate code across Eth1Block and Eth1Header.
-func (h *Eth1Header) decodeHeaderMetadataForSSZ(buf []byte) (pos int, extraDataOffset int) {
-	copy(h.ParentHash[:], buf)
-	pos = len(h.ParentHash)
-
-	copy(h.FeeRecipient[:], buf[pos:])
-	pos += len(h.FeeRecipient)
-
-	copy(h.StateRoot[:], buf[pos:])
-	pos += len(h.StateRoot)
-
-	copy(h.ReceiptsRoot[:], buf[pos:])
-	pos += len(h.ReceiptsRoot)
-
-	h.LogsBloom.SetBytes(buf[pos : pos+types.BloomByteLength])
-	pos += types.BloomByteLength
-
-	copy(h.PrevRandao[:], buf[pos:])
-	pos += len(h.PrevRandao)
-
-	h.BlockNumber = ssz.UnmarshalUint64SSZ(buf[pos:])
-	h.GasLimit = ssz.UnmarshalUint64SSZ(buf[pos+8:])
-	h.GasUsed = ssz.UnmarshalUint64SSZ(buf[pos+16:])
-	h.Time = ssz.UnmarshalUint64SSZ(buf[pos+24:])
-	pos += 32
-	extraDataOffset = int(ssz.DecodeOffset(buf[pos:]))
-	pos += 4
-	// Add Base Fee
-	copy(h.BaseFeePerGas[:], buf[pos:])
-	pos += 32
-	copy(h.BlockHash[:], buf[pos:])
-	pos += 32
-
-	return
-}
-
 // DecodeSSZ decodes given SSZ slice.
 func (h *Eth1Header) DecodeSSZ(buf []byte, version int) error {
 	h.version = clparams.StateVersion(version)
 	if len(buf) < h.EncodingSizeSSZ() {
 		return fmt.Errorf("[Eth1Header] err: %s", ssz.ErrLowBufferSize)
 	}
-	pos, _ := h.decodeHeaderMetadataForSSZ(buf)
-	copy(h.TransactionsRoot[:], buf[pos:])
-	pos += len(h.TransactionsRoot)
-
-	if h.version >= clparams.CapellaVersion {
-		copy(h.WithdrawalsRoot[:], buf[pos:])
-		pos += len(h.WithdrawalsRoot)
-	}
-
-	if h.version >= clparams.DenebVersion {
-		copy(h.ExcessDataGas[:], buf[pos:pos+32])
-		pos += 32
-	}
-	if h.Extra == nil {
-		h.Extra = solid.NewExtraData()
-	}
-	return h.Extra.DecodeSSZ(buf[pos:], version)
+	return ssz2.Decode(buf, version, h.getSchema()...)
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the Header object
@@ -163,7 +111,7 @@ func (h *Eth1Header) HashSSZ() ([32]byte, error) {
 func (h *Eth1Header) getSchema() []interface{} {
 	s := []interface{}{
 		h.ParentHash[:], h.FeeRecipient[:], h.StateRoot[:], h.ReceiptsRoot[:], h.LogsBloom[:],
-		h.PrevRandao[:], h.BlockNumber, h.GasLimit, h.GasUsed, h.Time, h.Extra, h.BaseFeePerGas[:], h.BlockHash[:], h.TransactionsRoot[:],
+		h.PrevRandao[:], &h.BlockNumber, &h.GasLimit, &h.GasUsed, &h.Time, h.Extra, h.BaseFeePerGas[:], h.BlockHash[:], h.TransactionsRoot[:],
 	}
 	if h.version >= clparams.CapellaVersion {
 		s = append(s, h.WithdrawalsRoot[:])

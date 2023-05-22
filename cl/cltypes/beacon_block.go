@@ -102,6 +102,15 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 	size = int(getBeaconBlockMinimumSize(b.Version))
 
+	if b.Eth1Data == nil {
+		b.Eth1Data = &Eth1Data{}
+	}
+	if b.SyncAggregate == nil {
+		b.SyncAggregate = &SyncAggregate{}
+	}
+	if b.ExecutionPayload == nil {
+		b.ExecutionPayload = &Eth1Block{}
+	}
 	if b.ProposerSlashings == nil {
 		b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
 	}
@@ -147,134 +156,12 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 
 func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	b.Version = clparams.StateVersion(version)
-	var err error
 
 	if len(buf) < b.EncodingSizeSSZ() {
 		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
 	}
-	if b.ProposerSlashings == nil {
-		b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
-	}
-	if b.AttesterSlashings == nil {
-		b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashings)
-	}
-	if b.Attestations == nil {
-		b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestations)
-	}
-	if b.Deposits == nil {
-		b.Deposits = solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
-	}
-	if b.VoluntaryExits == nil {
-		b.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
-	}
-	if b.ExecutionPayload == nil {
-		b.ExecutionPayload = new(Eth1Block)
-	}
-	if b.ExecutionChanges == nil {
-		b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
-	}
-	if b.BlobKzgCommitments == nil {
-		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsPerBlock, 48)
-	}
 
-	// Start wildly decoding this thing
-	copy(b.RandaoReveal[:], buf)
-	// Decode ethereum 1 data.
-	b.Eth1Data = new(Eth1Data)
-	if err := b.Eth1Data.DecodeSSZ(buf[96:168], version); err != nil {
-		return err
-	}
-	// Decode graffiti.
-	copy(b.Graffiti[:], buf[168:200])
-
-	// Decode offsets
-	offSetProposerSlashings := ssz.DecodeOffset(buf[200:])
-	offsetAttesterSlashings := ssz.DecodeOffset(buf[204:])
-	offsetAttestations := ssz.DecodeOffset(buf[208:])
-	offsetDeposits := ssz.DecodeOffset(buf[212:])
-	offsetExits := ssz.DecodeOffset(buf[216:])
-	// Decode sync aggregate if we are past altair.
-	if b.Version >= clparams.AltairVersion {
-		if len(buf) < 380 {
-			return fmt.Errorf("[BeaconBody] altair version err: %s", ssz.ErrLowBufferSize)
-		}
-		b.SyncAggregate = new(SyncAggregate)
-		if err := b.SyncAggregate.DecodeSSZ(buf[220:380], version); err != nil {
-			return fmt.Errorf("[BeaconBody] err: %s", err)
-		}
-	}
-
-	// Execution Payload offset if past bellatrix.
-	var offsetExecution uint32
-	if b.Version >= clparams.BellatrixVersion {
-		offsetExecution = ssz.DecodeOffset(buf[380:])
-	}
-	// Execution to BLS changes
-	var blsChangesOffset uint32
-	if b.Version >= clparams.CapellaVersion {
-		blsChangesOffset = ssz.DecodeOffset(buf[384:])
-	}
-
-	var blobKzgCommitmentOffset uint32
-	if b.Version >= clparams.DenebVersion {
-		blobKzgCommitmentOffset = ssz.DecodeOffset(buf[388:])
-	}
-
-	// Decode Proposer slashings
-	if err = b.ProposerSlashings.DecodeSSZ(buf[offSetProposerSlashings:offsetAttesterSlashings], version); err != nil {
-		return err
-	}
-	if err = b.AttesterSlashings.DecodeSSZ(buf[offsetAttesterSlashings:offsetAttestations], version); err != nil {
-		return err
-	}
-
-	// Decode attestations
-	if err = b.Attestations.DecodeSSZ(buf[offsetAttestations:offsetDeposits], version); err != nil {
-		return err
-	}
-	// Decode deposits
-	if err = b.Deposits.DecodeSSZ(buf[offsetDeposits:offsetExits], version); err != nil {
-		return err
-	}
-	// Decode exits
-	endOffset := len(buf)
-	if b.Version >= clparams.BellatrixVersion {
-		endOffset = int(offsetExecution)
-	}
-	if err = b.VoluntaryExits.DecodeSSZ(buf[offsetExits:endOffset], version); err != nil {
-		return err
-	}
-
-	endOffset = len(buf)
-	if b.Version >= clparams.CapellaVersion {
-		endOffset = int(blsChangesOffset)
-	}
-	if b.Version >= clparams.BellatrixVersion {
-		b.ExecutionPayload = new(Eth1Block)
-		if offsetExecution > uint32(endOffset) || len(buf) < endOffset {
-			return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrBadOffset)
-		}
-		if err := b.ExecutionPayload.DecodeSSZ(buf[offsetExecution:endOffset], version); err != nil {
-			return fmt.Errorf("[BeaconBody] err: %s", err)
-		}
-	}
-	endOffset = len(buf)
-	if b.Version >= clparams.DenebVersion {
-		endOffset = int(blobKzgCommitmentOffset)
-	}
-	if b.Version >= clparams.CapellaVersion {
-		if err = b.ExecutionChanges.DecodeSSZ(buf[blsChangesOffset:endOffset], version); err != nil {
-			return err
-		}
-	}
-
-	if b.Version >= clparams.DenebVersion {
-		if err = b.BlobKzgCommitments.DecodeSSZ(buf[blobKzgCommitmentOffset:len(buf)], version); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return ssz2.Decode(buf, version, b.getSchema()...)
 }
 
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {
@@ -310,15 +197,8 @@ func (b *BeaconBlock) EncodingSizeSSZ() int {
 }
 
 func (b *BeaconBlock) DecodeSSZ(buf []byte, version int) error {
-	if len(buf) < b.EncodingSizeSSZ() {
-		return fmt.Errorf("[BeaconBlock] err: %s", ssz.ErrLowBufferSize)
-	}
-	b.Slot = ssz.UnmarshalUint64SSZ(buf)
-	b.ProposerIndex = ssz.UnmarshalUint64SSZ(buf[8:])
-	copy(b.ParentRoot[:], buf[16:])
-	copy(b.StateRoot[:], buf[48:])
 	b.Body = new(BeaconBody)
-	return b.Body.DecodeSSZ(buf[84:], version)
+	return ssz2.Decode(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
 
 func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
@@ -337,11 +217,8 @@ func (b *SignedBeaconBlock) EncodingSizeSSZ() int {
 }
 
 func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
-	if len(buf) < b.EncodingSizeSSZ() {
-		return fmt.Errorf("[SignedBeaconBlock] err: %s", ssz.ErrLowBufferSize)
-	}
-	copy(b.Signature[:], buf[4:100])
-	return b.Block.DecodeSSZ(buf[100:], s)
+	b.Block = new(BeaconBlock)
+	return ssz2.Decode(buf, s, b.Block, b.Signature[:])
 }
 
 func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
