@@ -17,11 +17,12 @@ import (
 
 	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -246,6 +247,7 @@ type Bor struct {
 	spanCache *btree.BTree
 
 	closeOnce sync.Once
+	logger    log.Logger
 }
 
 type signer struct {
@@ -260,6 +262,7 @@ func New(
 	spanner Spanner,
 	heimdallClient IHeimdallClient,
 	genesisContracts GenesisContract,
+	logger log.Logger,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor
@@ -283,6 +286,7 @@ func New(
 		HeimdallClient:         heimdallClient,
 		spanCache:              btree.New(32),
 		execCtx:                context.Background(),
+		logger:                 logger,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -476,6 +480,33 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 		return err
 	}
 
+	// Verify the validator list match the local contract
+	if isSprintStart(number+1, c.config.CalculateSprint(number)) {
+		newValidators, err := c.spanner.GetCurrentValidators(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
+
+		if err != nil {
+			return err
+		}
+
+		sort.Sort(valset.ValidatorsByAddress(newValidators))
+
+		headerVals, err := valset.ParseValidators(header.Extra[extraVanity : len(header.Extra)-extraSeal])
+
+		if err != nil {
+			return err
+		}
+
+		if len(newValidators) != len(headerVals) {
+			return errInvalidSpanValidators
+		}
+
+		for i, val := range newValidators {
+			if !bytes.Equal(val.HeaderBytes(), headerVals[i].HeaderBytes()) {
+				return errInvalidSpanValidators
+			}
+		}
+	}
+
 	// verify the validator list in the last sprint block
 	if isSprintStart(number, c.config.CalculateSprint(number)) {
 		parentValidatorBytes := parent.Extra[extraVanity : len(parent.Extra)-extraSeal]
@@ -516,7 +547,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%checkpointInterval == 0 {
 			if s, err := loadSnapshot(c.config, c.signatures, c.DB, hash); err == nil {
-				log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
+				c.logger.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 
 				snap = s
 
@@ -549,7 +580,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 					return nil, err
 				}
 
-				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
+				c.logger.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
 
 				break
 			}
@@ -587,7 +618,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
 
-	snap, err := snap.apply(headers)
+	snap, err := snap.apply(headers, c.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -600,7 +631,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			return nil, err
 		}
 
-		log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+		c.logger.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
 
 	return snap, err
@@ -750,6 +781,11 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	return nil
 }
 
+func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall,
+) ([]consensus.Reward, error) {
+	return []consensus.Reward{}, nil
+}
+
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
@@ -764,7 +800,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 		// check and commit span
 		if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
-			log.Error("Error while committing span", "err", err)
+			c.logger.Error("Error while committing span", "err", err)
 			return nil, types.Receipts{}, err
 		}
 
@@ -772,14 +808,14 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 			// commit states
 			_, err = c.CommitStates(state, header, cx, syscall)
 			if err != nil {
-				log.Error("Error while committing states", "err", err)
+				c.logger.Error("Error while committing states", "err", err)
 				return nil, types.Receipts{}, err
 			}
 		}
 	}
 
 	if err = c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
-		log.Error("Error changing contract code", "err", err)
+		c.logger.Error("Error changing contract code", "err", err)
 		return nil, types.Receipts{}, err
 	}
 
@@ -817,7 +853,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 			}
 
 			for addr, account := range allocs {
-				log.Trace("change contract code", "address", addr)
+				c.logger.Trace("change contract code", "address", addr)
 				state.SetCode(addr, account.Code)
 			}
 		}
@@ -841,7 +877,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		// check and commit span
 		err := c.checkAndCommitSpan(state, header, cx, syscall)
 		if err != nil {
-			log.Error("Error while committing span", "err", err)
+			c.logger.Error("Error while committing span", "err", err)
 			return nil, nil, types.Receipts{}, err
 		}
 
@@ -849,14 +885,14 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 			// commit states
 			_, err = c.CommitStates(state, header, cx, syscall)
 			if err != nil {
-				log.Error("Error while committing states", "err", err)
+				c.logger.Error("Error while committing states", "err", err)
 				return nil, nil, types.Receipts{}, err
 			}
 		}
 	}
 
 	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
-		log.Error("Error changing contract code", "err", err)
+		c.logger.Error("Error changing contract code", "err", err)
 		return nil, nil, types.Receipts{}, err
 	}
 
@@ -905,7 +941,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 
 	// For 0-period chains, refuse to seal empty blocks (no reward but would spin sealing)
 	if c.config.CalculatePeriod(number) == 0 && len(block.Transactions()) == 0 {
-		log.Trace("Sealing paused, waiting for transactions")
+		c.logger.Trace("Sealing paused, waiting for transactions")
 		return nil
 	}
 
@@ -942,16 +978,16 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 
 	// Wait until sealing is terminated or delay timeout.
-	log.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay-in-sec", uint(delay), "delay", common.PrettyDuration(delay))
+	c.logger.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay-in-sec", uint(delay), "delay", common.PrettyDuration(delay))
 
 	go func() {
 		select {
 		case <-stop:
-			log.Info("Discarding sealing operation for block", "number", number)
+			c.logger.Info("Discarding sealing operation for block", "number", number)
 			return
 		case <-time.After(delay):
 			if wiggle > 0 {
-				log.Info(
+				c.logger.Info(
 					"Sealing out-of-turn",
 					"number", number,
 					"wiggle", common.PrettyDuration(wiggle),
@@ -959,7 +995,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 				)
 			}
 
-			log.Info(
+			c.logger.Info(
 				"Sealing successful",
 				"number", number,
 				"delay", delay,
@@ -969,7 +1005,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 		select {
 		case results <- block.WithSeal(header):
 		default:
-			log.Warn("Sealing result was not read by miner", "number", number, "sealhash", SealHash(header, c.config))
+			c.logger.Warn("Sealing result was not read by miner", "number", number, "sealhash", SealHash(header, c.config))
 		}
 	}()
 	return nil
@@ -1067,7 +1103,7 @@ func (c *Bor) needToCommitSpan(currentSpan *span.Span, headerNumber uint64) bool
 }
 
 func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
-	log.Info("Getting span", "for block", blockNum)
+	c.logger.Info("Getting span", "for block", blockNum)
 	var borSpan *span.HeimdallSpan
 	c.spanCache.AscendGreaterOrEqual(&span.HeimdallSpan{Span: span.Span{EndBlock: blockNum}}, func(item btree.Item) bool {
 		borSpan = item.(*span.HeimdallSpan)
@@ -1081,7 +1117,7 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
 			spanID = c.spanCache.Max().(*span.HeimdallSpan).ID + 1
 		}
 		for borSpan == nil || borSpan.EndBlock < blockNum {
-			log.Info("Span with high enough block number is not loaded", "fetching span", spanID)
+			c.logger.Info("Span with high enough block number is not loaded", "fetching span", spanID)
 			response, err := c.HeimdallClient.Span(c.execCtx, spanID)
 			if err != nil {
 				return nil, err
@@ -1094,7 +1130,7 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
 		for borSpan.StartBlock > blockNum {
 			// Span wit low enough block number is not loaded
 			var spanID = borSpan.ID - 1
-			log.Info("Span with low enough block number is not loaded", "fetching span", spanID)
+			c.logger.Info("Span with low enough block number is not loaded", "fetching span", spanID)
 			response, err := c.HeimdallClient.Span(c.execCtx, spanID)
 			if err != nil {
 				return nil, err
@@ -1167,7 +1203,7 @@ func (c *Bor) CommitStates(
 	to := time.Unix(int64(chain.Chain.GetHeaderByNumber(number-c.config.CalculateSprint(number)).Time), 0)
 	lastStateID := _lastStateID.Uint64()
 
-	log.Debug(
+	c.logger.Debug(
 		"Fetching state updates from Heimdall",
 		"fromID", lastStateID+1,
 		"to", to.Format(time.RFC3339))
@@ -1190,7 +1226,7 @@ func (c *Bor) CommitStates(
 		}
 
 		if err := validateEventRecord(eventRecord, number, to, lastStateID, chainID); err != nil {
-			log.Error(err.Error())
+			c.logger.Error(err.Error())
 			break
 		}
 
@@ -1287,7 +1323,7 @@ func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Vali
 	return nil, false
 }
 
-func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*valset.Validator) *valset.ValidatorSet {
+func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*valset.Validator, logger log.Logger) *valset.ValidatorSet {
 	v := oldValidatorSet
 	oldVals := v.Validators
 
@@ -1310,7 +1346,7 @@ func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*val
 	}
 
 	if err := v.UpdateWithChangeSet(changes); err != nil {
-		log.Error("Error while updating change set", "error", err)
+		logger.Error("Error while updating change set", "error", err)
 	}
 
 	return v

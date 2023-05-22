@@ -4,11 +4,11 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 )
 
 var testMetadata = &cltypes.Metadata{
@@ -71,6 +71,6 @@ func TestMarshalNetworkTypes(t *testing.T) {
 		marshalledBytes, err := tc.EncodeSSZ(nil)
 		require.NoError(t, err)
 		require.Equal(t, len(marshalledBytes), tc.EncodingSizeSSZ())
-		require.NoError(t, unmarshalDestinations[i].DecodeSSZWithVersion(marshalledBytes, int(clparams.CapellaVersion)))
+		require.NoError(t, unmarshalDestinations[i].DecodeSSZ(marshalledBytes, int(clparams.CapellaVersion)))
 	}
 }

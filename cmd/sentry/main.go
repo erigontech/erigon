@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -68,11 +69,6 @@ func init() {
 var rootCmd = &cobra.Command{
 	Use:   "sentry",
 	Short: "Run p2p sentry",
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if err := debug.SetupCobra(cmd); err != nil {
-			panic(err)
-		}
-	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	},
@@ -98,8 +94,13 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		logging.SetupLoggerCmd("sentry", cmd)
-		return sentry.Sentry(cmd.Context(), dirs, sentryAddr, discoveryDNS, p2pConfig, protocol, healthCheck)
+		var logger log.Logger
+		if logger, err = debug.SetupCobra(cmd, "sentry"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return err
+		}
+
+		return sentry.Sentry(cmd.Context(), dirs, sentryAddr, discoveryDNS, p2pConfig, protocol, healthCheck, logger)
 	},
 }
 

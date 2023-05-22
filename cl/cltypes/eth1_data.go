@@ -1,9 +1,12 @@
 package cltypes
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
+
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
 )
@@ -32,12 +35,11 @@ func (e *Eth1Data) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	return
 }
 
-// DecodeSSZ ssz unmarshals the Eth1Data object
-func (e *Eth1Data) DecodeSSZ(buf []byte) error {
+func (e *Eth1Data) DecodeSSZ(buf []byte, _ int) error {
 	var err error
 	size := uint64(len(buf))
 	if size < 72 {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[Eth1Data] err: %s", ssz.ErrLowBufferSize)
 	}
 
 	copy(e.Root[:], buf[0:32])
@@ -45,10 +47,6 @@ func (e *Eth1Data) DecodeSSZ(buf []byte) error {
 	copy(e.BlockHash[:], buf[40:72])
 
 	return err
-}
-
-func (e *Eth1Data) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return e.DecodeSSZ(buf)
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the Eth1Data object

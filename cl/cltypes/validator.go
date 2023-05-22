@@ -5,8 +5,9 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
@@ -33,16 +34,12 @@ func (d *DepositData) EncodeSSZ(dst []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (d *DepositData) DecodeSSZ(buf []byte) error {
+func (d *DepositData) DecodeSSZ(buf []byte, _ int) error {
 	copy(d.PubKey[:], buf)
 	copy(d.WithdrawalCredentials[:], buf[48:])
 	d.Amount = ssz.UnmarshalUint64SSZ(buf[80:])
 	copy(d.Signature[:], buf[88:])
 	return nil
-}
-
-func (d *DepositData) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return d.DecodeSSZ(buf)
 }
 
 func (d *DepositData) EncodingSizeSSZ() int {
@@ -96,7 +93,7 @@ func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {
 	return d.Data.EncodeSSZ(buf)
 }
 
-func (d *Deposit) DecodeSSZ(buf []byte) error {
+func (d *Deposit) DecodeSSZ(buf []byte, version int) error {
 	d.Proof = make([]libcommon.Hash, DepositProofLength)
 	for i := range d.Proof {
 		copy(d.Proof[i][:], buf[i*32:i*32+32])
@@ -105,11 +102,7 @@ func (d *Deposit) DecodeSSZ(buf []byte) error {
 	if d.Data == nil {
 		d.Data = new(DepositData)
 	}
-	return d.Data.DecodeSSZ(buf[33*32:])
-}
-
-func (d *Deposit) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return d.DecodeSSZ(buf)
+	return d.Data.DecodeSSZ(buf[33*32:], version)
 }
 
 func (d *Deposit) EncodingSizeSSZ() int {
@@ -165,12 +158,12 @@ type SignedVoluntaryExit struct {
 	Signature    [96]byte
 }
 
-func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) []byte {
+func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := e.VolunaryExit.EncodeSSZ(dst)
-	return append(buf, e.Signature[:]...)
+	return append(buf, e.Signature[:]...), nil
 }
 
-func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte) error {
+func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte, _ int) error {
 	if e.VolunaryExit == nil {
 		e.VolunaryExit = new(VoluntaryExit)
 	}
@@ -180,10 +173,6 @@ func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte) error {
 	}
 	copy(e.Signature[:], buf[16:])
 	return nil
-}
-
-func (e *SignedVoluntaryExit) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return e.DecodeSSZ(buf)
 }
 
 func (e *SignedVoluntaryExit) HashSSZ() ([32]byte, error) {
@@ -233,10 +222,9 @@ func (s *SyncCommittee) EncodeSSZ(buf []byte) ([]byte, error) {
 	return dst, nil
 }
 
-// DecodeSSZ ssz unmarshals the SyncCommittee object
-func (s *SyncCommittee) DecodeSSZ(buf []byte) error {
+func (s *SyncCommittee) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < 24624 {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[SyncCommittee] err: %s", ssz.ErrLowBufferSize)
 	}
 
 	s.PubKeys = make([][48]byte, SyncCommitteeSize)
@@ -297,14 +285,8 @@ func (s *SyncCommittee) Equal(s2 *SyncCommittee) bool {
 
 // Validator, contains if we were on bellatrix/alteir/phase0 and transition epoch.
 type Validator struct {
-	PublicKey                  [48]byte
-	WithdrawalCredentials      libcommon.Hash
-	EffectiveBalance           uint64
-	Slashed                    bool
-	ActivationEligibilityEpoch uint64
-	ActivationEpoch            uint64
-	ExitEpoch                  uint64
-	WithdrawableEpoch          uint64
+	solid.Validator
+
 	// This is all stuff used by phase0 state transition. It makes many operations faster.
 	// Source attesters
 	IsCurrentMatchingSourceAttester  bool
@@ -322,7 +304,7 @@ type Validator struct {
 
 // DutiesAttested returns how many of its duties the validator attested and missed
 func (v *Validator) DutiesAttested() (attested, missed uint64) {
-	if v.Slashed {
+	if v.Slashed() {
 		return 0, 3
 	}
 	if v.IsPreviousMatchingSourceAttester {
@@ -338,71 +320,43 @@ func (v *Validator) DutiesAttested() (attested, missed uint64) {
 	return
 }
 func (v *Validator) IsSlashable(epoch uint64) bool {
-	return !v.Slashed && (v.ActivationEpoch <= epoch) && (epoch < v.WithdrawableEpoch)
+	return !v.Slashed() && (v.ActivationEpoch() <= epoch) && (epoch < v.WithdrawableEpoch())
 }
 
 func (v *Validator) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	buf = append(buf, v.PublicKey[:]...)
-	buf = append(buf, v.WithdrawalCredentials[:]...)
-	buf = append(buf, ssz.Uint64SSZ(v.EffectiveBalance)...)
-	buf = append(buf, ssz.BoolSSZ(v.Slashed))
-	buf = append(buf, ssz.Uint64SSZ(v.ActivationEligibilityEpoch)...)
-	buf = append(buf, ssz.Uint64SSZ(v.ActivationEpoch)...)
-	buf = append(buf, ssz.Uint64SSZ(v.ExitEpoch)...)
-	buf = append(buf, ssz.Uint64SSZ(v.WithdrawableEpoch)...)
-	return buf, nil
+	return v.Validator.EncodeSSZ(dst), nil
 }
 
-func (v *Validator) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return v.DecodeSSZ(buf)
+func (v *Validator) DecodeSSZ(buf []byte, _ int) error {
+	return v.Validator.DecodeSSZ(buf, 0)
 }
 
-func (v *Validator) DecodeSSZ(buf []byte) error {
-	if len(buf) < v.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
-	}
-	copy(v.PublicKey[:], buf)
-	copy(v.WithdrawalCredentials[:], buf[48:])
-	v.EffectiveBalance = ssz.UnmarshalUint64SSZ(buf[80:])
-	v.Slashed = buf[88] == 1
-	v.ActivationEligibilityEpoch = ssz.UnmarshalUint64SSZ(buf[89:])
-	v.ActivationEpoch = ssz.UnmarshalUint64SSZ(buf[97:])
-	v.ExitEpoch = ssz.UnmarshalUint64SSZ(buf[105:])
-	v.WithdrawableEpoch = ssz.UnmarshalUint64SSZ(buf[113:])
-	return nil
-}
+//var validatorLeavesPool = sync.Pool{
+//	New: func() any {
+//		p := make([]byte, 8*32)
+//		return &p
+//	},
+//}
 
-func (v *Validator) EncodingSizeSSZ() int {
-	return 121
-}
-
-func (v *Validator) HashSSZ() ([32]byte, error) {
-	var (
-		leaves = make([][32]byte, 8)
-		err    error
-	)
-
-	leaves[0], err = merkle_tree.PublicKeyRoot(v.PublicKey)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	leaves[1] = v.WithdrawalCredentials
-	leaves[2] = merkle_tree.Uint64Root(v.EffectiveBalance)
-	leaves[3] = merkle_tree.BoolRoot(v.Slashed)
-	leaves[4] = merkle_tree.Uint64Root(v.ActivationEligibilityEpoch)
-	leaves[5] = merkle_tree.Uint64Root(v.ActivationEpoch)
-	leaves[6] = merkle_tree.Uint64Root(v.ExitEpoch)
-	leaves[7] = merkle_tree.Uint64Root(v.WithdrawableEpoch)
-	return merkle_tree.ArraysRoot(leaves, 8)
+func (v *Validator) HashSSZ() (o [32]byte, err error) {
+	// leavesp, _ := validatorLeavesPool.Get().(*[]byte)
+	// leaves := *leavesp
+	//
+	//	defer func() {
+	//		validatorLeavesPool.Put(leavesp)
+	//	}()
+	leaves := make([]byte, 8*32)
+	v.CopyHashBufferTo(leaves)
+	leaves = leaves[:(8 * 32)]
+	err = solid.TreeHashFlatSlice(leaves, o[:])
+	return
 }
 
 // Active returns if validator is active for given epoch
 func (v *Validator) Active(epoch uint64) bool {
-	return v.ActivationEpoch <= epoch && epoch < v.ExitEpoch
+	return v.ActivationEpoch() <= epoch && epoch < v.ExitEpoch()
 }
 
-func (v *Validator) Copy() *Validator {
-	copied := *v
-	return &copied
+func (v *Validator) CopyTo(target *Validator) {
+	v.Validator.CopyTo(&target.Validator)
 }

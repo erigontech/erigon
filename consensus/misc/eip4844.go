@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 
 	"github.com/ledgerwatch/erigon/core/types"
@@ -45,16 +46,33 @@ func CalcExcessDataGas(parentExcessDataGas *big.Int, newBlobs int) *big.Int {
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
 // as described in the EIP-4844 spec.
-func FakeExponential(factor, num, denom *big.Int) *big.Int {
-	output := new(big.Int)
-	numAccum := new(big.Int).Mul(factor, denom)
-	for i := 1; numAccum.Sign() > 0; i++ {
-		output.Add(output, numAccum)
-		numAccum.Mul(numAccum, num)
-		iBig := big.NewInt(int64(i))
-		numAccum.Div(numAccum, iBig.Mul(iBig, denom))
+func FakeExponential(factor, denom *uint256.Int, edg *big.Int) (*uint256.Int, error) {
+	numerator, overflow := uint256.FromBig(edg)
+	if overflow {
+		return nil, fmt.Errorf("FakeExponential: overflow converting excessDataGas: %v", edg)
 	}
-	return output.Div(output, denom)
+	output := uint256.NewInt(0)
+	numeratorAccum := new(uint256.Int)
+	_, overflow = numeratorAccum.MulOverflow(factor, denom)
+	if overflow {
+		return nil, fmt.Errorf("FakeExponential: overflow in MulOverflow(factor=%v, denom=%v)", factor, denom)
+	}
+	divisor := new(uint256.Int)
+	for i := 1; numeratorAccum.Sign() > 0; i++ {
+		_, overflow = output.AddOverflow(output, numeratorAccum)
+		if overflow {
+			return nil, fmt.Errorf("FakeExponential: overflow in AddOverflow(output=%v, numeratorAccum=%v)", output, numeratorAccum)
+		}
+		_, overflow = divisor.MulOverflow(denom, uint256.NewInt(uint64(i)))
+		if overflow {
+			return nil, fmt.Errorf("FakeExponential: overflow in MulOverflow(denom=%v, i=%v)", denom, i)
+		}
+		_, overflow = numeratorAccum.MulDivOverflow(numeratorAccum, numerator, divisor)
+		if overflow {
+			return nil, fmt.Errorf("FakeExponential: overflow in MulDivOverflow(numeratorAccum=%v, numerator=%v, divisor=%v)", numeratorAccum, numerator, divisor)
+		}
+	}
+	return output.Div(output, denom), nil
 }
 
 // CountBlobs returns the number of blob transactions in txs
@@ -75,8 +93,8 @@ func VerifyEip4844Header(config *chain.Config, parent, header *types.Header) err
 }
 
 // GetDataGasPrice implements get_data_gas_price from EIP-4844
-func GetDataGasPrice(excessDataGas *big.Int) *big.Int {
-	return FakeExponential(big.NewInt(params.MinDataGasPrice), excessDataGas, big.NewInt(params.DataGasPriceUpdateFraction))
+func GetDataGasPrice(excessDataGas *big.Int) (*uint256.Int, error) {
+	return FakeExponential(uint256.NewInt(params.MinDataGasPrice), uint256.NewInt(params.DataGasPriceUpdateFraction), excessDataGas)
 }
 
 func GetDataGasUsed(numBlobs int) uint64 {

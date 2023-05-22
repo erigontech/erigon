@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // This test checks that calls with n replies may take up to n * respTimeout.
@@ -18,6 +19,7 @@ func TestUDPv5_callTimeoutReset(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
+	logger := log.New()
 
 	replyTimeout := respTimeoutV5
 	// This must be significantly lower than replyTimeout to not get "RPC timeout" error.
@@ -32,13 +34,13 @@ func TestUDPv5_callTimeoutReset(t *testing.T) {
 	ctx := context.Background()
 	ctx = contextWithReplyTimeout(ctx, replyTimeout)
 
-	test := newUDPV5TestContext(ctx, t)
+	test := newUDPV5TestContext(ctx, t, logger)
 	t.Cleanup(test.close)
 
 	// Launch the request:
 	var (
 		distance = uint(230)
-		remote   = test.getNode(test.remotekey, test.remoteaddr).Node()
+		remote   = test.getNode(test.remotekey, test.remoteaddr, logger).Node()
 		nodes    = nodesAtDistance(remote.ID(), int(distance), totalNodesResponseLimit)
 		done     = make(chan error, 1)
 	)
@@ -55,7 +57,7 @@ func TestUDPv5_callTimeoutReset(t *testing.T) {
 				ReqID: p.ReqID,
 				Total: totalNodesResponseLimit,
 				Nodes: nodesToRecords(nodes[i : i+1]),
-			})
+			}, logger)
 		}
 	})
 	if err := <-done; err != nil {

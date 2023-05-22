@@ -23,21 +23,23 @@ import (
 
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enr"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 )
 
-func newLocalNodeForTesting(tmpDir string) (*LocalNode, *DB) {
+func newLocalNodeForTesting(tmpDir string, logger log.Logger) (*LocalNode, *DB) {
 	db, err := OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}
 	key, _ := crypto.GenerateKey()
-	return NewLocalNode(db, key), db
+	return NewLocalNode(db, key, logger), db
 }
 
 func TestLocalNode(t *testing.T) {
 	tmpDir := t.TempDir()
-	ln, db := newLocalNodeForTesting(tmpDir)
+	logger := log.New()
+	ln, db := newLocalNodeForTesting(tmpDir, logger)
 	defer db.Close()
 
 	if ln.Node().ID() != ln.ID() {
@@ -55,7 +57,8 @@ func TestLocalNode(t *testing.T) {
 
 func TestLocalNodeSeqPersist(t *testing.T) {
 	tmpDir := t.TempDir()
-	ln, db := newLocalNodeForTesting(tmpDir)
+	logger := log.New()
+	ln, db := newLocalNodeForTesting(tmpDir, logger)
 	defer db.Close()
 
 	if s := ln.Node().Seq(); s != 1 {
@@ -69,7 +72,7 @@ func TestLocalNodeSeqPersist(t *testing.T) {
 	// Create a new instance, it should reload the sequence number.
 	// The number increases just after that because a new record is
 	// created without the "x" entry.
-	ln2 := NewLocalNode(db, ln.key)
+	ln2 := NewLocalNode(db, ln.key, logger)
 	if s := ln2.Node().Seq(); s != 3 {
 		t.Fatalf("wrong seq %d on new instance, want 3", s)
 	}
@@ -77,7 +80,7 @@ func TestLocalNodeSeqPersist(t *testing.T) {
 	// Create a new instance with a different node key on the same database.
 	// This should reset the sequence number.
 	key, _ := crypto.GenerateKey()
-	ln3 := NewLocalNode(db, key)
+	ln3 := NewLocalNode(db, key, logger)
 	if s := ln3.Node().Seq(); s != 1 {
 		t.Fatalf("wrong seq %d on instance with changed key, want 1", s)
 	}
@@ -91,7 +94,8 @@ func TestLocalNodeEndpoint(t *testing.T) {
 		staticIP  = net.IP{127, 0, 1, 2}
 	)
 	tmpDir := t.TempDir()
-	ln, db := newLocalNodeForTesting(tmpDir)
+	logger := log.New()
+	ln, db := newLocalNodeForTesting(tmpDir, logger)
 	defer db.Close()
 
 	// Nothing is set initially.

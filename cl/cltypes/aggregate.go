@@ -1,7 +1,9 @@
 package cltypes
 
 import (
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
@@ -12,7 +14,7 @@ import (
  */
 type AggregateAndProof struct {
 	AggregatorIndex uint64
-	Aggregate       *Attestation
+	Aggregate       *solid.Attestation
 	SelectionProof  [96]byte
 }
 
@@ -30,14 +32,14 @@ func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (a *AggregateAndProof) DecodeSSZ(buf []byte) error {
+func (a *AggregateAndProof) DecodeSSZ(buf []byte, version int) error {
 	a.AggregatorIndex = ssz.UnmarshalUint64SSZ(buf)
 	if a.Aggregate == nil {
-		a.Aggregate = new(Attestation)
+		a.Aggregate = new(solid.Attestation)
 	}
 
 	copy(a.SelectionProof[:], buf[12:])
-	if err := a.Aggregate.DecodeSSZ(buf[108:]); err != nil {
+	if err := a.Aggregate.DecodeSSZ(buf[108:], version); err != nil {
 		return err
 	}
 	return nil
@@ -45,6 +47,19 @@ func (a *AggregateAndProof) DecodeSSZ(buf []byte) error {
 
 func (a *AggregateAndProof) EncodingSizeSSZ() int {
 	return 108 + a.Aggregate.EncodingSizeSSZ()
+}
+
+func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
+	indexRoot := merkle_tree.Uint64Root(a.AggregatorIndex)
+	aggregateRoot, err := a.Aggregate.HashSSZ()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	selectionProof, err := merkle_tree.SignatureRoot(a.SelectionProof)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ArraysRoot([][32]byte{indexRoot, aggregateRoot, selectionProof}, 4)
 }
 
 type SignedAggregateAndProof struct {
@@ -66,21 +81,18 @@ func (a *SignedAggregateAndProof) EncodedSSZ(dst []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte) error {
+func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte, version int) error {
 	if a.Message == nil {
 		a.Message = new(AggregateAndProof)
 	}
 
 	copy(a.Signature[:], buf[4:])
 
-	if err := a.Message.DecodeSSZ(buf[100:]); err != nil {
+	if err := a.Message.DecodeSSZ(buf[100:], version); err != nil {
 		return err
 	}
 
 	return nil
-}
-func (a *SignedAggregateAndProof) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return a.DecodeSSZ(buf)
 }
 
 func (a *SignedAggregateAndProof) EncodingSizeSSZ() int {
@@ -109,18 +121,14 @@ func (agg *SyncAggregate) Sum() int {
 	return ret
 }
 
-func (agg *SyncAggregate) EncodeSSZ(buf []byte) []byte {
-	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...)
+func (agg *SyncAggregate) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...), nil
 }
 
-func (agg *SyncAggregate) DecodeSSZ(buf []byte) error {
+func (agg *SyncAggregate) DecodeSSZ(buf []byte, _ int) error {
 	copy(agg.SyncCommiteeBits[:], buf)
 	copy(agg.SyncCommiteeSignature[:], buf[64:])
 	return nil
-}
-
-func (agg *SyncAggregate) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return agg.DecodeSSZ(buf)
 }
 
 func (agg *SyncAggregate) EncodingSizeSSZ() int {

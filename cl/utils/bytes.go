@@ -17,8 +17,9 @@ import (
 	"encoding/binary"
 	"math/bits"
 
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
+
 	"github.com/golang/snappy"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 )
 
 func Uint32ToBytes4(n uint32) (ret [4]byte) {
@@ -69,27 +70,13 @@ func EncodeSSZSnappy(data ssz.Marshaler) ([]byte, error) {
 	return snappy.Encode(nil, enc), nil
 }
 
-func DecodeSSZSnappy(dst ssz.Unmarshaler, src []byte) error {
+func DecodeSSZSnappy(dst ssz.Unmarshaler, src []byte, version int) error {
 	dec, err := snappy.Decode(nil, src)
 	if err != nil {
 		return err
 	}
 
-	err = dst.DecodeSSZ(dec)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func DecodeSSZSnappyWithVersion(dst ssz.Unmarshaler, src []byte, version int) error {
-	dec, err := snappy.Decode(nil, src)
-	if err != nil {
-		return err
-	}
-
-	err = dst.DecodeSSZWithVersion(dec, version)
+	err = dst.DecodeSSZ(dec, version)
 	if err != nil {
 		return err
 	}

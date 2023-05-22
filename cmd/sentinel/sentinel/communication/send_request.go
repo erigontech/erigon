@@ -15,9 +15,8 @@ import (
 )
 
 var NoRequestHandlers = map[string]bool{
-	MetadataProtocolV1:          true,
-	MetadataProtocolV2:          true,
-	LightClientFinalityUpdateV1: true,
+	MetadataProtocolV1: true,
+	MetadataProtocolV2: true,
 }
 
 func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topic string, peerId peer.ID) ([]byte, bool, error) {
@@ -42,7 +41,7 @@ Loop:
 	for err != nil {
 		select {
 		case <-ctx.Done():
-			log.Warn("[Sentinel Resp] sentinel has been shutdown")
+			log.Warn("[Sentinel Resp] context timeout")
 			break Loop
 		case <-respRetryTimer.C:
 			log.Trace("[Sentinel Resp] timeout", "topic", topic, "peer", peerId)

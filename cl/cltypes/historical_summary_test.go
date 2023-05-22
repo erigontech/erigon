@@ -17,7 +17,7 @@ var (
 func TestHistoricalSummary(t *testing.T) {
 	decompressed, _ := utils.DecompressSnappy(serializedHistoricalSummarySnappy)
 	obj := &cltypes.HistoricalSummary{}
-	require.NoError(t, obj.DecodeSSZ(decompressed))
+	require.NoError(t, obj.DecodeSSZ(decompressed, 0))
 	root, err := obj.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, root[:], historicalSummaryRoot)

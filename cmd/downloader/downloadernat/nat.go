@@ -6,7 +6,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func DoNat(natif nat.Interface, cfg *downloadercfg.Cfg) {
+func DoNat(natif nat.Interface, cfg *downloadercfg.Cfg, logger log.Logger) {
 	switch natif.(type) {
 	case nil:
 		// No NAT interface, do nothing.
@@ -20,7 +20,7 @@ func DoNat(natif nat.Interface, cfg *downloadercfg.Cfg) {
 				cfg.PublicIp6 = ip
 			}
 		}
-		log.Info("[torrent] Public IP", "ip", ip)
+		logger.Info("[torrent] Public IP", "ip", ip)
 
 	default:
 		// Ask the router about the IP. This takes a while and blocks startup,
@@ -33,7 +33,7 @@ func DoNat(natif nat.Interface, cfg *downloadercfg.Cfg) {
 					cfg.PublicIp6 = ip
 				}
 			}
-			log.Info("[torrent] Public IP", "ip", ip)
+			logger.Info("[torrent] Public IP", "ip", ip)
 		}
 	}
 }

@@ -1,9 +1,12 @@
 package cltypes
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
+
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
 
@@ -16,17 +19,13 @@ func (h *HistoricalSummary) EncodeSSZ(buf []byte) ([]byte, error) {
 	return append(buf, append(h.BlockSummaryRoot[:], h.StateSummaryRoot[:]...)...), nil
 }
 
-func (h *HistoricalSummary) DecodeSSZ(buf []byte) error {
+func (h *HistoricalSummary) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < h.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[HistoricalSummary] err: %s", ssz.ErrLowBufferSize)
 	}
 	copy(h.BlockSummaryRoot[:], buf)
 	copy(h.StateSummaryRoot[:], buf[length.Hash:])
 	return nil
-}
-
-func (h *HistoricalSummary) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return h.DecodeSSZ(buf)
 }
 
 func (h *HistoricalSummary) HashSSZ() ([32]byte, error) {

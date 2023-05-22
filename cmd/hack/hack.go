@@ -528,8 +528,10 @@ func extractBodies(datadir string) error {
 		Enabled:    true,
 		KeepBlocks: true,
 		Produce:    false,
-	}, filepath.Join(datadir, "snapshots"))
+	}, filepath.Join(datadir, "snapshots"), log.New())
 	snaps.ReopenFolder()
+
+	/* method Iterate was removed, need re-implement
 	snaps.Bodies.View(func(sns []*snapshotsync.BodySegment) error {
 		for _, sn := range sns {
 			var firstBlockNum, firstBaseTxNum, firstAmount uint64
@@ -562,13 +564,14 @@ func extractBodies(datadir string) error {
 		}
 		return nil
 	})
-	if _, err := snaps.ViewTxs(snaps.BlocksAvailable(), func(sn *snapshotsync.TxnSegment) error {
-		lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
-		fmt.Printf("txTxnID = %d\n", lastTxnID)
-		return nil
-	}); err != nil {
+	*/
+	br := snapshotsync.NewBlockReader(snaps, false)
+	lastTxnID, _, err := br.LastTxNumInSnapshot(snaps.BlocksAvailable())
+	if err != nil {
 		return err
 	}
+	fmt.Printf("txTxnID = %d\n", lastTxnID)
+
 	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
 	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
@@ -979,7 +982,7 @@ func scanTxs(chaindata string) error {
 			return err
 		}
 		var tr types.Transaction
-		if tr, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(v), 0)); err != nil {
+		if tr, err = types.DecodeTransaction(v); err != nil {
 			return err
 		}
 		if _, ok := trTypes[tr.Type()]; !ok {

@@ -28,7 +28,7 @@ func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
 	}
 }
 
-func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticker, key []byte) error {
+func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticker, key []byte, logger log.Logger) error {
 	var err error
 	totalInserted := 0
 	node.(*verkle.InternalNode).Flush(func(node verkle.VerkleNode) {
@@ -43,14 +43,14 @@ func flushVerkleNode(db kv.RwTx, node verkle.VerkleNode, logInterval *time.Ticke
 		totalInserted++
 		select {
 		case <-logInterval.C:
-			log.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
+			logger.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
 		default:
 		}
 	})
 	return err
 }
 
-func collectVerkleNode(collector *etl.Collector, node verkle.VerkleNode, logInterval *time.Ticker, key []byte) error {
+func collectVerkleNode(collector *etl.Collector, node verkle.VerkleNode, logInterval *time.Ticker, key []byte, logger log.Logger) error {
 	var err error
 	totalInserted := 0
 	node.(*verkle.InternalNode).Flush(func(node verkle.VerkleNode) {
@@ -68,7 +68,7 @@ func collectVerkleNode(collector *etl.Collector, node verkle.VerkleNode, logInte
 		totalInserted++
 		select {
 		case <-logInterval.C:
-			log.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
+			logger.Info("Flushing Verkle nodes", "inserted", totalInserted, "key", common.Bytes2Hex(key))
 		default:
 		}
 	})
@@ -80,13 +80,15 @@ type VerkleTreeWriter struct {
 	collector *etl.Collector
 	mu        sync.Mutex
 	tmpdir    string
+	logger    log.Logger
 }
 
-func NewVerkleTreeWriter(db kv.RwTx, tmpdir string) *VerkleTreeWriter {
+func NewVerkleTreeWriter(db kv.RwTx, tmpdir string, logger log.Logger) *VerkleTreeWriter {
 	return &VerkleTreeWriter{
 		db:        db,
-		collector: etl.NewCollector("verkleTreeWriterLogPrefix", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*8)),
+		collector: etl.NewCollector("verkleTreeWriterLogPrefix", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*8), logger),
 		tmpdir:    tmpdir,
+		logger:    logger,
 	}
 }
 
@@ -186,17 +188,17 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error)
 		return libcommon.Hash{}, err
 	}
 
-	verkleCollector := etl.NewCollector(kv.VerkleTrie, v.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	verkleCollector := etl.NewCollector(kv.VerkleTrie, v.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), v.logger)
 	defer verkleCollector.Close()
 
 	root := verkle.New()
 
 	logInterval := time.NewTicker(30 * time.Second)
-	if err := v.collector.Load(v.db, kv.VerkleTrie, func(k []byte, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if len(v) == 0 {
+	if err := v.collector.Load(v.db, kv.VerkleTrie, func(k []byte, val []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if len(val) == 0 {
 			return next(k, nil, nil)
 		}
-		if err := root.InsertOrdered(common.CopyBytes(k), common.CopyBytes(v), func(node verkle.VerkleNode) {
+		if err := root.InsertOrdered(common.CopyBytes(k), common.CopyBytes(val), func(node verkle.VerkleNode) {
 			rootHash := node.Commitment().Bytes()
 			encodedNode, err := node.Serialize()
 			if err != nil {
@@ -207,7 +209,7 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error)
 			}
 			select {
 			case <-logInterval.C:
-				log.Info("[Verkle] Assembling Verkle Tree", "key", common.Bytes2Hex(k))
+				v.logger.Info("[Verkle] Assembling Verkle Tree", "key", common.Bytes2Hex(k))
 			default:
 			}
 		}); err != nil {
@@ -219,11 +221,11 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error)
 	}
 
 	// Flush the rest all at once
-	if err := collectVerkleNode(v.collector, root, logInterval, nil); err != nil {
+	if err := collectVerkleNode(v.collector, root, logInterval, nil, v.logger); err != nil {
 		return libcommon.Hash{}, err
 	}
 
-	log.Info("Started Verkle Tree Flushing")
+	v.logger.Info("Started Verkle Tree Flushing")
 	return root.Commitment().Bytes(), verkleCollector.Load(v.db, kv.VerkleTrie, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done(),
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"key", common.Bytes2Hex(k)}
@@ -246,7 +248,7 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root libcommon.Hash) (libcommon.Hash
 		return v.CommitVerkleTreeFromScratch() // TODO(Giulio2002): ETL is buggy, go fix it >:(.
 	}
 
-	verkleCollector := etl.NewCollector(kv.VerkleTrie, v.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	verkleCollector := etl.NewCollector(kv.VerkleTrie, v.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), v.logger)
 	defer verkleCollector.Close()
 
 	insertionBeforeFlushing := 2_000_000 // 2M node to flush at a time
@@ -260,7 +262,7 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root libcommon.Hash) (libcommon.Hash
 			insertions++
 		}
 		if insertions > insertionBeforeFlushing {
-			if err := flushVerkleNode(v.db, rootNode, logInterval, key); err != nil {
+			if err := flushVerkleNode(v.db, rootNode, logInterval, key, v.logger); err != nil {
 				return err
 			}
 			insertions = 0
@@ -270,7 +272,7 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root libcommon.Hash) (libcommon.Hash
 		return libcommon.Hash{}, err
 	}
 	commitment := rootNode.Commitment().Bytes()
-	return libcommon.BytesToHash(commitment[:]), flushVerkleNode(v.db, rootNode, logInterval, nil)
+	return libcommon.BytesToHash(commitment[:]), flushVerkleNode(v.db, rootNode, logInterval, nil, v.logger)
 }
 
 func (v *VerkleTreeWriter) Close() {

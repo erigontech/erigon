@@ -20,7 +20,6 @@ import (
 	"math"
 	"net"
 
-	"net/http"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -40,8 +39,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const (
@@ -68,7 +65,7 @@ type Sentinel struct {
 	ctx        context.Context
 	host       host.Host
 	cfg        *SentinelConfig
-	peers      *peers.Peers
+	peers      *peers.Manager
 	metadataV2 *cltypes.Metadata
 	handshaker *handshake.HandShaker
 
@@ -79,6 +76,7 @@ type Sentinel struct {
 	subManager           *GossipManager
 	metrics              bool
 	listenForPeersDoneCh chan struct{}
+	logger               log.Logger
 }
 
 func (s *Sentinel) createLocalNode(
@@ -91,7 +89,7 @@ func (s *Sentinel) createLocalNode(
 	if err != nil {
 		return nil, fmt.Errorf("could not open node's peer database: %w", err)
 	}
-	localNode := enode.NewLocalNode(db, privKey)
+	localNode := enode.NewLocalNode(db, privKey, s.logger)
 
 	ipEntry := enr.IP(ipAddr)
 	udpEntry := enr.UDP(udpPort)
@@ -234,12 +232,14 @@ func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
 	db kv.RoDB,
+	logger log.Logger,
 ) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx: ctx,
-		cfg: cfg,
-		db:  db,
-		// metrics: true,
+		ctx:     ctx,
+		cfg:     cfg,
+		db:      db,
+		metrics: true,
+		logger:  logger,
 	}
 
 	// Setup discovery
@@ -265,18 +265,6 @@ func New(
 		return nil, err
 	}
 	if s.metrics {
-		http.Handle("/metrics", promhttp.Handler())
-		go func() {
-			server := &http.Server{
-				Addr:              ":2112",
-				ReadHeaderTimeout: time.Hour,
-			}
-			if err := server.ListenAndServe(); err != nil {
-				panic(err)
-			}
-		}()
-
-		rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
 
 		str, err := rcmgrObs.NewStatsTraceReporter()
 		if err != nil {
@@ -297,7 +285,7 @@ func New(
 	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host)
 
 	s.host = host
-	s.peers = peers.New(s.host)
+	s.peers = peers.NewManager(ctx, s.host)
 
 	pubsub.TimeCacheDuration = 550 * gossipSubHeartbeatInterval
 	s.pubsub, err = pubsub.NewGossipSub(s.ctx, s.host, s.pubsubOptions()...)
@@ -314,7 +302,7 @@ func (s *Sentinel) RecvGossip() <-chan *pubsub.Message {
 
 func (s *Sentinel) Start() error {
 	if s.started {
-		log.Warn("[Sentinel] already running")
+		s.logger.Warn("[Sentinel] already running")
 	}
 	var err error
 	s.listener, err = s.createListener()
@@ -330,9 +318,9 @@ func (s *Sentinel) Start() error {
 		ConnectedF: s.onConnection,
 	})
 	s.subManager = NewGossipManager(s.ctx)
-	if !s.cfg.NoDiscovery {
-		go s.listenForPeers()
-	}
+
+	go s.listenForPeers()
+
 	return nil
 }
 
@@ -359,7 +347,7 @@ func (s *Sentinel) Host() host.Host {
 	return s.host
 }
 
-func (s *Sentinel) Peers() *peers.Peers {
+func (s *Sentinel) Peers() *peers.Manager {
 	return s.peers
 }
 

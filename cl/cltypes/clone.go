@@ -1,6 +1,8 @@
 package cltypes
 
-import "github.com/ledgerwatch/erigon/cl/cltypes/clonable"
+import (
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
+)
 
 func (*SignedBeaconBlock) Clone() clonable.Clonable {
 	return &SignedBeaconBlock{}
@@ -36,14 +38,6 @@ func (*HistoricalSummary) Clone() clonable.Clonable {
 
 func (*Validator) Clone() clonable.Clonable {
 	return &Validator{}
-}
-
-func (*Attestation) Clone() clonable.Clonable {
-	return &Attestation{}
-}
-
-func (*Checkpoint) Clone() clonable.Clonable {
-	return &Checkpoint{}
 }
 
 func (*DepositData) Clone() clonable.Clonable {
@@ -88,4 +82,47 @@ func (*Deposit) Clone() clonable.Clonable {
 
 func (*BeaconBlock) Clone() clonable.Clonable {
 	return &BeaconBlock{}
+}
+
+func (*AggregateAndProof) Clone() clonable.Clonable {
+	return &AggregateAndProof{}
+}
+
+func (*BeaconBlockHeader) Clone() clonable.Clonable {
+	return &BeaconBlockHeader{}
+}
+
+func (*BLSToExecutionChange) Clone() clonable.Clonable {
+	return &BLSToExecutionChange{}
+}
+
+func (*SignedBeaconBlockHeader) Clone() clonable.Clonable {
+	return &SignedBeaconBlockHeader{}
+}
+
+func (*SyncCommittee) Clone() clonable.Clonable {
+	return &SyncCommittee{}
+}
+func (*Fork) Clone() clonable.Clonable {
+	return &Fork{}
+}
+
+func (*BlobSideCar) Clone() clonable.Clonable {
+	return &BlobSideCar{}
+}
+
+func (*SignedBlobSideCar) Clone() clonable.Clonable {
+	return &SignedBlobSideCar{}
+}
+
+func (*BlobIdentifier) Clone() clonable.Clonable {
+	return &BlobIdentifier{}
+}
+
+func (*KZGCommitment) Clone() clonable.Clonable {
+	return &KZGCommitment{}
+}
+
+func (*Eth1Header) Clone() clonable.Clonable {
+	return &Eth1Header{}
 }

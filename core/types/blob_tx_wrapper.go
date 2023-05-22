@@ -9,16 +9,16 @@ import (
 	"math/big"
 	"time"
 
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
+	"github.com/protolambda/ztyp/codec"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
-	"github.com/protolambda/ztyp/codec"
-
-	"github.com/ledgerwatch/erigon/crypto/kzg"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -59,7 +59,7 @@ func (p *KZGCommitment) UnmarshalText(text []byte) error {
 }
 
 func (c KZGCommitment) ComputeVersionedHash() libcommon.Hash {
-	return libcommon.Hash(kzg.KZGToVersionedHash(gokzg4844.KZGCommitment(c)))
+	return libcommon.Hash(libkzg.KZGToVersionedHash(gokzg4844.KZGCommitment(c)))
 }
 
 // Compressed BLS12-381 G1 element
@@ -272,20 +272,20 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	proofs = make([]KZGProof, len(blobs))
 	versionedHashes = make([]libcommon.Hash, len(blobs))
 
-	cryptoCtx := kzg.CrpytoCtx()
+	kzgCtx := libkzg.Ctx()
 	for i, blob := range blobs {
-		commitment, err := cryptoCtx.BlobToKZGCommitment(gokzg4844.Blob(blob))
+		commitment, err := kzgCtx.BlobToKZGCommitment(gokzg4844.Blob(blob), 1 /*numGoRoutines*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %v", err)
 		}
 
-		proof, err := cryptoCtx.ComputeBlobKZGProof(gokzg4844.Blob(blob), commitment)
+		proof, err := kzgCtx.ComputeBlobKZGProof(gokzg4844.Blob(blob), commitment, 1 /*numGoRoutnes*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not compute proof for blob: %v", err)
 		}
 		commitments[i] = KZGCommitment(commitment)
 		proofs[i] = KZGProof(proof)
-		versionedHashes[i] = libcommon.Hash(kzg.KZGToVersionedHash(commitment))
+		versionedHashes[i] = libcommon.Hash(libkzg.KZGToVersionedHash(commitment))
 	}
 
 	return commitments, versionedHashes, proofs, nil
@@ -348,7 +348,7 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	l2 := len(txw.Commitments)
 	l3 := len(txw.Blobs)
 	l4 := len(txw.Proofs)
-	if l1 != l2 || l2 != l3 || l1 != l4 {
+	if l1 != l2 || l1 != l3 || l1 != l4 {
 		return fmt.Errorf("lengths don't match %v %v %v %v", l1, l2, l3, l4)
 	}
 	// the following check isn't strictly necessary as it would be caught by data gas processing
@@ -357,8 +357,8 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	if l1 > params.MaxBlobsPerBlock {
 		return fmt.Errorf("number of blobs exceeds max: %v", l1)
 	}
-	cryptoCtx := kzg.CrpytoCtx()
-	err := cryptoCtx.VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.Commitments), toProofs(txw.Proofs))
+	kzgCtx := libkzg.Ctx()
+	err := kzgCtx.VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.Commitments), toProofs(txw.Proofs))
 	if err != nil {
 		return fmt.Errorf("error during proof verification: %v", err)
 	}

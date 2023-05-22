@@ -5,7 +5,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -16,6 +15,7 @@ type All struct {
 
 type BlockReader interface {
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error)
+	TxsV3Enabled() bool
 }
 
 type HeaderReader interface {
@@ -56,3 +56,19 @@ type FullBlockReader interface {
 	TxnReader
 	CanonicalReader
 }
+
+/*
+type HeaderWriter interface {
+	WriteHeader(tx kv.RwTx, header *types.Header) error
+	WriteHeaderRaw(tx kv.StatelessRwTx, number uint64, hash libcommon.Hash, headerRlp []byte, skipIndexing bool) error
+	WriteCanonicalHash(tx kv.RwTx, hash libcommon.Hash, number uint64) error
+	WriteTd(db kv.Putter, hash libcommon.Hash, number uint64, td *big.Int) error
+	// [from,to)
+	FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir string, from, to uint64, ctx context.Context, logger log.Logger) error
+}
+type BlockWriter interface {
+	HeaderWriter
+	WriteRawBodyIfNotExists(tx kv.RwTx, hash libcommon.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnNum uint64, err error)
+	WriteBody(tx kv.RwTx, hash libcommon.Hash, number uint64, body *types.Body) error
+}
+*/

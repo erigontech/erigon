@@ -5,9 +5,10 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
@@ -24,15 +25,16 @@ type BeaconBlockForStorage struct {
 	ParentRoot    libcommon.Hash
 	StateRoot     libcommon.Hash
 	// Body fields
-	RandaoReveal      [96]byte
-	Eth1Data          *Eth1Data
-	Graffiti          []byte
-	ProposerSlashings []*ProposerSlashing
-	AttesterSlashings []*AttesterSlashing
-	Deposits          []*Deposit
-	VoluntaryExits    []*SignedVoluntaryExit
-	AddressChanges    []*SignedBLSToExecutionChange
-	SyncAggregate     *SyncAggregate
+	RandaoReveal       [96]byte
+	Eth1Data           *Eth1Data
+	Graffiti           []byte
+	ProposerSlashings  []*ProposerSlashing
+	AttesterSlashings  []*AttesterSlashing
+	Deposits           []*Deposit
+	VoluntaryExits     []*SignedVoluntaryExit
+	AddressChanges     []*SignedBLSToExecutionChange
+	SyncAggregate      *SyncAggregate
+	BlobKzgCommitments []*KZGCommitment
 	// Metadatas
 	Eth1Number    uint64
 	Eth1BlockHash libcommon.Hash
@@ -48,10 +50,13 @@ const (
 	MaxDeposits          = 16
 	MaxVoluntaryExits    = 16
 	MaxExecutionChanges  = 16
+	MaxBlobsPerBlock     = 4
 )
 
 func getBeaconBlockMinimumSize(v clparams.StateVersion) (size uint32) {
 	switch v {
+	case clparams.DenebVersion:
+		size = 392
 	case clparams.CapellaVersion:
 		size = 388
 	case clparams.BellatrixVersion:
@@ -91,7 +96,7 @@ type BeaconBody struct {
 	// A list of slashing events for validators who included invalid attestations in the chain
 	AttesterSlashings []*AttesterSlashing
 	// A list of attestations included in the block
-	Attestations []*Attestation
+	Attestations *AttestationList
 	// A list of deposits made to the Ethereum 1.0 chain
 	Deposits []*Deposit
 	// A list of validators who have voluntarily exited the beacon chain
@@ -102,6 +107,9 @@ type BeaconBody struct {
 	ExecutionPayload *Eth1Block
 	// Withdrawals Diffs for Execution Layer
 	ExecutionChanges []*SignedBLSToExecutionChange
+	// The commitments for beacon chain blobs
+	// With a max of 4 per block
+	BlobKzgCommitments []*KZGCommitment
 	// The version of the beacon chain
 	Version clparams.StateVersion
 }
@@ -142,9 +150,10 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	// Attestation offset
 	buf = append(buf, ssz.OffsetSSZ(offset)...)
-	for _, attestation := range b.Attestations {
-		offset += uint32(attestation.EncodingSizeSSZ()) + 4
-	}
+	b.Attestations.ForEach(func(a *solid.Attestation, idx, total int) bool {
+		offset += uint32(a.EncodingSizeSSZ()) + 4
+		return true
+	})
 	// Deposits offset
 	buf = append(buf, ssz.OffsetSSZ(offset)...)
 	offset += uint32(len(b.Deposits)) * 1240
@@ -153,7 +162,9 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	offset += uint32(len(b.VoluntaryExits)) * 112
 	// Encode Sync Aggregate
 	if b.Version >= clparams.AltairVersion {
-		buf = b.SyncAggregate.EncodeSSZ(buf)
+		if buf, err = b.SyncAggregate.EncodeSSZ(buf); err != nil {
+			return nil, err
+		}
 	}
 	if b.Version >= clparams.BellatrixVersion {
 		buf = append(buf, ssz.OffsetSSZ(offset)...)
@@ -161,7 +172,15 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	if b.Version >= clparams.CapellaVersion {
 		buf = append(buf, ssz.OffsetSSZ(offset)...)
+		for _, changes := range b.ExecutionChanges {
+			offset += uint32(changes.EncodingSizeSSZ())
+		}
 	}
+
+	if b.Version >= clparams.DenebVersion {
+		buf = append(buf, ssz.OffsetSSZ(offset)...)
+	}
+
 	// Now start encoding the rest of the fields.
 	if len(b.AttesterSlashings) > MaxAttesterSlashings {
 		return nil, fmt.Errorf("Encode(SSZ): too many attester slashings")
@@ -169,7 +188,7 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(b.ProposerSlashings) > MaxProposerSlashings {
 		return nil, fmt.Errorf("Encode(SSZ): too many proposer slashings")
 	}
-	if len(b.Attestations) > MaxAttestations {
+	if b.Attestations.Len() > MaxAttestations {
 		return nil, fmt.Errorf("Encode(SSZ): too many attestations")
 	}
 	if len(b.Deposits) > MaxDeposits {
@@ -181,6 +200,9 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(b.ExecutionChanges) > MaxExecutionChanges {
 		return nil, fmt.Errorf("Encode(SSZ): too many changes")
 	}
+	if len(b.BlobKzgCommitments) > MaxBlobsPerBlock {
+		return nil, fmt.Errorf("Encode(SSZ): too many blob kzg commitments in the block")
+	}
 	// Write proposer slashings
 	for _, proposerSlashing := range b.ProposerSlashings {
 		if buf, err = proposerSlashing.EncodeSSZ(buf); err != nil {
@@ -191,7 +213,7 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	if buf, err = ssz.EncodeDynamicList(buf, b.AttesterSlashings); err != nil {
 		return nil, err
 	}
-	if buf, err = ssz.EncodeDynamicList(buf, b.Attestations); err != nil {
+	if buf, err = b.Attestations.EncodeSSZ(buf); err != nil {
 		return nil, err
 	}
 
@@ -202,7 +224,9 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 
 	for _, exit := range b.VoluntaryExits {
-		buf = exit.EncodeSSZ(buf)
+		if buf, err = exit.EncodeSSZ(buf); err != nil {
+			return nil, err
+		}
 	}
 
 	if b.Version >= clparams.BellatrixVersion {
@@ -219,6 +243,15 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 			}
 		}
 	}
+
+	if b.Version >= clparams.DenebVersion {
+		for _, commitment := range b.BlobKzgCommitments {
+			if buf, err = commitment.EncodeSSZ(buf); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	return buf, nil
 }
 
@@ -232,10 +265,11 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		size += slashing.EncodingSizeSSZ()
 	}
 
-	for _, attestation := range b.Attestations {
+	b.Attestations.ForEach(func(a *solid.Attestation, idx, total int) bool {
 		size += 4
-		size += attestation.EncodingSizeSSZ()
-	}
+		size += a.EncodingSizeSSZ()
+		return true
+	})
 
 	size += len(b.Deposits) * 1240
 	size += len(b.VoluntaryExits) * 112
@@ -252,26 +286,29 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 			size += change.EncodingSizeSSZ()
 		}
 	}
+
+	if b.Version >= clparams.DenebVersion {
+		for _, commitment := range b.BlobKzgCommitments {
+			size += commitment.EncodingSizeSSZ()
+		}
+	}
+
 	return
 }
 
-func (b *BeaconBody) DecodeSSZ(buf []byte) error {
-	panic("yo")
-}
-
-func (b *BeaconBody) DecodeSSZWithVersion(buf []byte, version int) error {
+func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	b.Version = clparams.StateVersion(version)
 	var err error
 
 	if len(buf) < b.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
 	}
 
 	// Start wildly decoding this thing
 	copy(b.RandaoReveal[:], buf)
 	// Decode ethereum 1 data.
 	b.Eth1Data = new(Eth1Data)
-	if err := b.Eth1Data.DecodeSSZ(buf[96:168]); err != nil {
+	if err := b.Eth1Data.DecodeSSZ(buf[96:168], version); err != nil {
 		return err
 	}
 	// Decode graffiti.
@@ -286,11 +323,11 @@ func (b *BeaconBody) DecodeSSZWithVersion(buf []byte, version int) error {
 	// Decode sync aggregate if we are past altair.
 	if b.Version >= clparams.AltairVersion {
 		if len(buf) < 380 {
-			return ssz.ErrLowBufferSize
+			return fmt.Errorf("[BeaconBody] altair version err: %s", ssz.ErrLowBufferSize)
 		}
 		b.SyncAggregate = new(SyncAggregate)
-		if err := b.SyncAggregate.DecodeSSZ(buf[220:380]); err != nil {
-			return err
+		if err := b.SyncAggregate.DecodeSSZ(buf[220:380], version); err != nil {
+			return fmt.Errorf("[BeaconBody] err: %s", err)
 		}
 	}
 
@@ -304,25 +341,33 @@ func (b *BeaconBody) DecodeSSZWithVersion(buf []byte, version int) error {
 	if b.Version >= clparams.CapellaVersion {
 		blsChangesOffset = ssz.DecodeOffset(buf[384:])
 	}
+
+	var blobKzgCommitmentOffset uint32
+	if b.Version >= clparams.DenebVersion {
+		blobKzgCommitmentOffset = ssz.DecodeOffset(buf[388:])
+	}
+
 	// Decode Proposer slashings
 	proposerSlashingLength := 416
-	b.ProposerSlashings, err = ssz.DecodeStaticList[*ProposerSlashing](buf, offSetProposerSlashings, offsetAttesterSlashings, uint32(proposerSlashingLength), MaxProposerSlashings)
+	b.ProposerSlashings, err = ssz.DecodeStaticList[*ProposerSlashing](buf, offSetProposerSlashings, offsetAttesterSlashings, uint32(proposerSlashingLength), MaxProposerSlashings, version)
 	if err != nil {
 		return err
 	}
 	// Decode attester slashings
-	b.AttesterSlashings, err = ssz.DecodeDynamicList[*AttesterSlashing](buf, offsetAttesterSlashings, offsetAttestations, MaxAttesterSlashings)
+	b.AttesterSlashings, err = ssz.DecodeDynamicList[*AttesterSlashing](buf, offsetAttesterSlashings, offsetAttestations, MaxAttesterSlashings, version)
 	if err != nil {
 		return err
 	}
+	b.Attestations = new(AttestationList)
+
 	// Decode attestations
-	b.Attestations, err = ssz.DecodeDynamicList[*Attestation](buf, offsetAttestations, offsetDeposits, MaxAttestations)
+	err = b.Attestations.DecodeSSZ(buf[offsetAttestations:offsetDeposits], version)
 	if err != nil {
 		return err
 	}
 	// Decode deposits
 	depositsLength := 1240
-	b.Deposits, err = ssz.DecodeStaticList[*Deposit](buf, offsetDeposits, offsetExits, uint32(depositsLength), MaxDeposits)
+	b.Deposits, err = ssz.DecodeStaticList[*Deposit](buf, offsetDeposits, offsetExits, uint32(depositsLength), MaxDeposits, version)
 	if err != nil {
 		return err
 	}
@@ -332,7 +377,7 @@ func (b *BeaconBody) DecodeSSZWithVersion(buf []byte, version int) error {
 	if b.Version >= clparams.BellatrixVersion {
 		endOffset = int(offsetExecution)
 	}
-	b.VoluntaryExits, err = ssz.DecodeStaticList[*SignedVoluntaryExit](buf, offsetExits, uint32(endOffset), uint32(exitLength), MaxVoluntaryExits)
+	b.VoluntaryExits, err = ssz.DecodeStaticList[*SignedVoluntaryExit](buf, offsetExits, uint32(endOffset), uint32(exitLength), MaxVoluntaryExits, version)
 	if err != nil {
 		return err
 	}
@@ -344,19 +389,28 @@ func (b *BeaconBody) DecodeSSZWithVersion(buf []byte, version int) error {
 	if b.Version >= clparams.BellatrixVersion {
 		b.ExecutionPayload = new(Eth1Block)
 		if offsetExecution > uint32(endOffset) || len(buf) < endOffset {
-			return ssz.ErrBadOffset
+			return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrBadOffset)
 		}
-		if err := b.ExecutionPayload.DecodeSSZWithVersion(buf[offsetExecution:endOffset], int(b.Version)); err != nil {
-			return err
+		if err := b.ExecutionPayload.DecodeSSZ(buf[offsetExecution:endOffset], int(b.Version)); err != nil {
+			return fmt.Errorf("[BeaconBody] err: %s", err)
 		}
 	}
-
+	endOffset = len(buf)
+	if b.Version >= clparams.DenebVersion {
+		endOffset = int(blobKzgCommitmentOffset)
+	}
 	if b.Version >= clparams.CapellaVersion {
-		if b.ExecutionChanges, err = ssz.DecodeStaticList[*SignedBLSToExecutionChange](buf, blsChangesOffset, uint32(len(buf)), 172, MaxExecutionChanges); err != nil {
+		if b.ExecutionChanges, err = ssz.DecodeStaticList[*SignedBLSToExecutionChange](buf, blsChangesOffset, uint32(endOffset), 172, MaxExecutionChanges, version); err != nil {
 			return err
 		}
-
 	}
+
+	if b.Version >= clparams.DenebVersion {
+		if b.BlobKzgCommitments, err = ssz.DecodeStaticList[*KZGCommitment](buf, blobKzgCommitmentOffset, uint32(len(buf)), 48, MaxBlobsPerBlock, version); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -391,7 +445,7 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	}
 	leaves = append(leaves, attesterLeaf)
 	// Attestations leaf
-	attestationLeaf, err := merkle_tree.ListObjectSSZRoot(b.Attestations, MaxAttestations)
+	attestationLeaf, err := b.Attestations.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -417,7 +471,7 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 		leaves = append(leaves, aggLeaf)
 	}
 	if b.Version >= clparams.BellatrixVersion {
-		payloadLeaf, err := b.ExecutionPayload.HashSSZ(b.Version)
+		payloadLeaf, err := b.ExecutionPayload.HashSSZ()
 		if err != nil {
 			return [32]byte{}, err
 		}
@@ -430,6 +484,15 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 		}
 		leaves = append(leaves, blsExecutionLeaf)
 	}
+
+	if b.Version >= clparams.DenebVersion {
+		blobKzgCommitmentsLeaf, err := merkle_tree.ListObjectSSZRoot(b.BlobKzgCommitments, MaxBlobsPerBlock)
+		if err != nil {
+			return [32]byte{}, err
+		}
+		leaves = append(leaves, blobKzgCommitmentsLeaf)
+	}
+
 	if b.Version == clparams.Phase0Version {
 		return merkle_tree.ArraysRoot(leaves, 8)
 	}
@@ -459,16 +522,16 @@ func (b *BeaconBlock) EncodingSizeSSZ() int {
 	return 80 + b.Body.EncodingSizeSSZ()
 }
 
-func (b *BeaconBlock) DecodeSSZWithVersion(buf []byte, version int) error {
+func (b *BeaconBlock) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[BeaconBlock] err: %s", ssz.ErrLowBufferSize)
 	}
 	b.Slot = ssz.UnmarshalUint64SSZ(buf)
 	b.ProposerIndex = ssz.UnmarshalUint64SSZ(buf[8:])
 	copy(b.ParentRoot[:], buf[16:])
 	copy(b.StateRoot[:], buf[48:])
 	b.Body = new(BeaconBody)
-	return b.Body.DecodeSSZWithVersion(buf[84:], version)
+	return b.Body.DecodeSSZ(buf[84:], version)
 }
 
 func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
@@ -485,9 +548,6 @@ func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
 	}, 8)
 }
 
-func (*BeaconBlock) DecodeSSZ(buf []byte) error {
-	panic("A")
-}
 func (b *SignedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
 	dst := buf
 	var err error
@@ -507,16 +567,12 @@ func (b *SignedBeaconBlock) EncodingSizeSSZ() int {
 	return 100 + b.Block.EncodingSizeSSZ()
 }
 
-func (b *SignedBeaconBlock) DecodeSSZ(buf []byte) error {
-	return b.DecodeSSZWithVersion(buf, int(clparams.BellatrixVersion))
-}
-
-func (b *SignedBeaconBlock) DecodeSSZWithVersion(buf []byte, s int) error {
+func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[SignedBeaconBlock] err: %s", ssz.ErrLowBufferSize)
 	}
 	copy(b.Signature[:], buf[4:100])
-	return b.Block.DecodeSSZWithVersion(buf[100:], s)
+	return b.Block.DecodeSSZ(buf[100:], s)
 }
 
 func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
@@ -564,6 +620,10 @@ func (b *SignedBeaconBlock) EncodeForStorage() ([]byte, error) {
 		storageObject.Eth1Number = eth1Block.BlockNumber
 		storageObject.Eth1BlockHash = eth1Block.BlockHash
 	}
+	if b.Version() >= clparams.DenebVersion {
+		storageObject.BlobKzgCommitments = b.Block.Body.BlobKzgCommitments
+	}
+
 	var buffer bytes.Buffer
 	if err := cbor.Marshal(&buffer, storageObject); err != nil {
 		return nil, err
@@ -594,16 +654,17 @@ func DecodeBeaconBlockForStorage(buf []byte) (block *SignedBeaconBlock, eth1Numb
 			ParentRoot:    storageObject.ParentRoot,
 			StateRoot:     storageObject.StateRoot,
 			Body: &BeaconBody{
-				RandaoReveal:      storageObject.RandaoReveal,
-				Eth1Data:          storageObject.Eth1Data,
-				Graffiti:          storageObject.Graffiti,
-				ProposerSlashings: storageObject.ProposerSlashings,
-				AttesterSlashings: storageObject.AttesterSlashings,
-				Deposits:          storageObject.Deposits,
-				VoluntaryExits:    storageObject.VoluntaryExits,
-				SyncAggregate:     storageObject.SyncAggregate,
-				ExecutionChanges:  storageObject.AddressChanges,
-				Version:           clparams.StateVersion(storageObject.Version),
+				RandaoReveal:       storageObject.RandaoReveal,
+				Eth1Data:           storageObject.Eth1Data,
+				Graffiti:           storageObject.Graffiti,
+				ProposerSlashings:  storageObject.ProposerSlashings,
+				AttesterSlashings:  storageObject.AttesterSlashings,
+				Deposits:           storageObject.Deposits,
+				VoluntaryExits:     storageObject.VoluntaryExits,
+				SyncAggregate:      storageObject.SyncAggregate,
+				ExecutionChanges:   storageObject.AddressChanges,
+				BlobKzgCommitments: storageObject.BlobKzgCommitments,
+				Version:            clparams.StateVersion(storageObject.Version),
 			},
 		},
 	}, storageObject.Eth1Number, storageObject.Eth1BlockHash, storageObject.Eth2BlockRoot, nil

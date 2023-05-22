@@ -44,6 +44,9 @@ func NewRemoteBackend(client remote.ETHBACKENDClient, db kv.RoDB, blockReader se
 	}
 }
 
+func (back *RemoteBackend) TxsV3Enabled() bool {
+	panic("not implemented")
+}
 func (back *RemoteBackend) EnsureVersionCompatibility() bool {
 	versionReply, err := back.remoteEthBackend.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
@@ -318,7 +321,7 @@ func (back *RemoteBackend) PendingBlock(ctx context.Context) (*types.Block, erro
 	var block types.Block
 	err = rlp.Decode(bytes.NewReader(blockRlp.BlockRlp), &block)
 	if err != nil {
-		return nil, fmt.Errorf("decoding block from %x: %w", blockRlp, err)
+		return nil, fmt.Errorf("decoding block from %x: %w", blockRlp.BlockRlp, err)
 	}
 
 	return &block, nil

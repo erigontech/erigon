@@ -75,7 +75,6 @@ func (h *HandShaker) ValidatePeer(id peer.ID) bool {
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-
 	response, errResponse, err := communication.SendRequestRawToPeer(h.ctx, h.host, data, communication.StatusProtocolV1, id)
 	if err != nil || errResponse {
 		return false
@@ -89,5 +88,6 @@ func (h *HandShaker) ValidatePeer(id peer.ID) bool {
 	if err != nil {
 		return false
 	}
+
 	return responseStatus.ForkDigest == forkDigest
 }

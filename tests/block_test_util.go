@@ -36,15 +36,14 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -111,15 +110,7 @@ func (bt *BlockTest) Run(t *testing.T, _ bool) error {
 	if !ok {
 		return UnsupportedForkError{bt.json.Network}
 	}
-	var engine consensus.Engine
-	if bt.json.SealEngine == "NoProof" {
-		engine = ethash.NewFaker()
-	} else {
-		engine = ethash.NewShared()
-	}
-	if config.TerminalTotalDifficulty != nil {
-		engine = serenity.New(engine) // the Merge
-	}
+	engine := ethconsensusconfig.CreateConsensusEngineBareBones(config, log.New())
 	m := stages.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
 
 	// import pre accounts & construct test genesis block & state root

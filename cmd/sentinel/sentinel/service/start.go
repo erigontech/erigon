@@ -11,6 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/log/v3"
+	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -23,54 +25,54 @@ type ServerConfig struct {
 	Addr    string
 }
 
-func createSentinel(cfg *sentinel.SentinelConfig, db kv.RoDB) (*sentinel.Sentinel, error) {
-	sent, err := sentinel.New(context.Background(), cfg, db)
+func createSentinel(cfg *sentinel.SentinelConfig, db kv.RoDB, logger log.Logger) (*sentinel.Sentinel, error) {
+	sent, err := sentinel.New(context.Background(), cfg, db, logger)
 	if err != nil {
 		return nil, err
 	}
 	if err := sent.Start(); err != nil {
 		return nil, err
 	}
-	gossip_topics := []sentinel.GossipTopic{
+	gossipTopics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
-		// Cause problem due to buggy msg id will uncomment in the future.
 		//sentinel.BeaconAggregateAndProofSsz,
 		//sentinel.VoluntaryExitSsz,
 		//sentinel.ProposerSlashingSsz,
 		//sentinel.AttesterSlashingSsz,
 	}
+	// gossipTopics = append(gossipTopics, sentinel.GossipSidecarTopics(params.MaxBlobsPerBlock)...)
 
-	for _, v := range gossip_topics {
+	for _, v := range gossipTopics {
 		if err := sent.Unsubscribe(v); err != nil {
-			log.Error("[Sentinel] failed to start sentinel", "err", err)
+			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 			continue
 		}
 		// now lets separately connect to the gossip topics. this joins the room
 		subscriber, err := sent.SubscribeGossip(v)
 		if err != nil {
-			log.Error("[Sentinel] failed to start sentinel", "err", err)
+			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
 		// actually start the subscription, aka listening and sending packets to the sentinel recv channel
 		err = subscriber.Listen()
 		if err != nil {
-			log.Error("[Sentinel] failed to start sentinel", "err", err)
+			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
 	}
 	return sent, nil
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status) (sentinelrpc.SentinelClient, error) {
+func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, logger log.Logger) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
-
-	sent, err := createSentinel(cfg, db)
+	sent, err := createSentinel(cfg, db, logger)
 	if err != nil {
 		return nil, err
 	}
-	log.Info("[Sentinel] Sentinel started", "enr", sent.String())
+	rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
+	logger.Info("[Sentinel] Sentinel started", "enr", sent.String())
 	if initialStatus != nil {
 		sent.SetStatus(initialStatus)
 	}
-	server := NewSentinelServer(ctx, sent)
+	server := NewSentinelServer(ctx, sent, logger)
 	if creds == nil {
 		creds = insecure.NewCredentials()
 	}
@@ -89,7 +91,11 @@ WaitingLoop:
 		}
 	}
 
-	conn, err := grpc.DialContext(ctx, srvCfg.Addr, grpc.WithTransportCredentials(creds), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMessageSize)))
+	conn, err := grpc.DialContext(ctx,
+		srvCfg.Addr,
+		grpc.WithTransportCredentials(creds),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMessageSize)),
+	)
 	if err != nil {
 		return nil, err
 	}
