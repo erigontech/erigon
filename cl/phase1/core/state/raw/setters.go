@@ -113,7 +113,7 @@ func (b *BeaconState) SetValidatorIsCurrentMatchingSourceAttester(index int, val
 		return ErrInvalidValidatorIndex
 	}
 	b.markLeaf(ValidatorsLeafIndex)
-	b.validators.Get(index).IsCurrentMatchingHeadAttester = value
+	b.validators.Get(index).IsCurrentMatchingSourceAttester = value
 	return nil
 }
 func (b *BeaconState) SetValidatorIsCurrentMatchingTargetAttester(index int, value bool) error {

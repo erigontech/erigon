@@ -133,8 +133,8 @@ func (u *BitList) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (u *BitList) DecodeSSZ(dst []byte, _ int) error {
-	u.u = common.CopyBytes(u.buf)
-	u.l = len(u.buf)
+	u.u = common.CopyBytes(dst)
+	u.l = len(dst)
 	return nil
 }
 
