@@ -120,7 +120,7 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 	bigNum := new(big.Int)
 	txsV3Enabled := cfg.blockReader.TxsV3Enabled()
 	if txsV3Enabled {
-		panic("implement me. need store non-canonical tx hashes also")
+		panic("implement me. need iterate by kv.BlockID instead of kv.HeaderCanonical")
 	}
 
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
