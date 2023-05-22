@@ -50,6 +50,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	return ssz2.Encode(buf, b.getSchema()...)
 }
 
+// getSchema gives the schema for the current beacon state version according to ETH 2.0 specs.
 func (b *BeaconState) getSchema() []interface{} {
 	s := []interface{}{&b.genesisTime, b.genesisValidatorsRoot[:], &b.slot, b.fork, b.latestBlockHeader, b.blockRoots, b.stateRoots, b.historicalRoots,
 		b.eth1Data, b.eth1DataVotes, &b.eth1DepositIndex, b.validators, b.balances, b.randaoMixes, b.slashings}
