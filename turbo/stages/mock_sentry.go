@@ -413,7 +413,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				cfg.HistoryV3,
 				cfg.TransactionsV3,
 			),
-			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockRetire, mock.sentriesClient.Hd),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockRetire, blockWriter, mock.sentriesClient.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				prune,
