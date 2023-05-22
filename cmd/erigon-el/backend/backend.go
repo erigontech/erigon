@@ -753,50 +753,49 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		log.Info("Starting to mine", "etherbase", eb)
 
 		var works bool
-		var hasWork bool
+		hasWork := true // Start mining immediately
 		errc := make(chan error, 1)
 
-		// create an empty channel to immediately start mining
-		first := make(chan struct{}, 1)
-		first <- struct{}{}
-		defer close(first)
-
 		for {
-			// Only reset if some work was done previously
+			// Only reset if some work was done previously as we'd like to rely
+			// on the `miner.recommit` as backup.
 			if hasWork {
 				mineEvery.Reset(cfg.Recommit)
 			}
-			select {
-			case <-first:
-				log.Debug("Start mining new block")
-				hasWork = true
-			case <-newHeadCh:
-				log.Debug("Start mining new block based on new head channel")
-				hasWork = true
-			case <-s.notifyMiningAboutNewTxs:
-				// Skip mining based on new tx notif for bor consensus
-				hasWork = s.chainConfig.Bor == nil
-				if hasWork {
-					log.Debug("Start mining new block based on txpool notif")
-				}
-			case <-mineEvery.C:
-				log.Debug("Start mining new block based on miner.recommit")
-				hasWork = true
-			case err := <-errc:
-				works = false
-				hasWork = false
-				if errors.Is(err, libcommon.ErrStopped) {
+
+			// Only check for case if you're already mining (i.e. works = true) and
+			// waiting for error or you don't have any work yet (i.e. hasWork = false).
+			if works || !hasWork {
+				select {
+				case <-newHeadCh:
+					log.Debug("Start mining new block based on new head channel")
+					hasWork = true
+				case <-s.notifyMiningAboutNewTxs:
+					// Skip mining based on new tx notif for bor consensus
+					hasWork = s.chainConfig.Bor == nil
+					if hasWork {
+						log.Debug("Start mining new block based on txpool notif")
+					}
+				case <-mineEvery.C:
+					log.Debug("Start mining new block based on miner.recommit")
+					hasWork = true
+				case err := <-errc:
+					works = false
+					hasWork = false
+					if errors.Is(err, libcommon.ErrStopped) {
+						return
+					}
+					if err != nil {
+						log.Warn("mining", "err", err)
+					}
+				case <-quitCh:
 					return
 				}
-				if err != nil {
-					log.Warn("mining", "err", err)
-				}
-			case <-quitCh:
-				return
 			}
 
 			if !works && hasWork {
 				works = true
+				hasWork = false
 				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir) }()
 			}
 		}
