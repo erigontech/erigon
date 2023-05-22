@@ -243,7 +243,7 @@ func Erigon4(genesis *types.Genesis, chainConfig *chain2.Config, logger log.Logg
 	}
 	//transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
 	transactionsV3 := false
-	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, transactionsV3)
+	blockReader = snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
 	engine := initConsensusEngine(chainConfig, allSnapshots, logger)
 
 	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {

@@ -194,26 +194,6 @@ func (sn *BodySegment) reopenIdx(dir string) (err error) {
 	return nil
 }
 
-func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmount uint64) error) error {
-	defer sn.seg.EnableMadvNormal().DisableReadAhead()
-
-	var buf []byte
-	g := sn.seg.MakeGetter()
-	blockNum := sn.ranges.from
-	var b types.BodyForStorage
-	for g.HasNext() {
-		buf, _ = g.Next(buf[:0])
-		if err := rlp.DecodeBytes(buf, &b); err != nil {
-			return err
-		}
-		if err := f(blockNum, b.BaseTxId, uint64(b.TxAmount)); err != nil {
-			return err
-		}
-		blockNum++
-	}
-	return nil
-}
-
 func (sn *TxnSegment) closeIdx() {
 	if sn.IdxTxnHash != nil {
 		sn.IdxTxnHash.Close()
@@ -298,17 +278,6 @@ func (s *headerSegments) View(f func(segments []*HeaderSegment) error) error {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	return f(s.segments)
-}
-func (s *headerSegments) ViewSegment(blockNum uint64, f func(sn *HeaderSegment) error) (found bool, err error) {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-	for _, seg := range s.segments {
-		if !(blockNum >= seg.ranges.from && blockNum < seg.ranges.to) {
-			continue
-		}
-		return true, f(seg)
-	}
-	return false, nil
 }
 
 type bodySegments struct {
@@ -699,12 +668,12 @@ Loop:
 }
 
 func (s *RoSnapshots) Ranges() (ranges []Range) {
-	_ = s.Headers.View(func(segments []*HeaderSegment) error {
-		for _, sn := range segments {
-			ranges = append(ranges, sn.ranges)
-		}
-		return nil
-	})
+	view := s.View()
+	defer view.Close()
+
+	for _, sn := range view.Headers() {
+		ranges = append(ranges, sn.ranges)
+	}
 	return ranges
 }
 
@@ -842,24 +811,6 @@ func (s *RoSnapshots) PrintDebug() {
 	for _, sn := range s.Txs.segments {
 		fmt.Printf("%d,  %t, %t\n", sn.ranges.from, sn.IdxTxnHash == nil, sn.IdxTxnHash2BlockNum == nil)
 	}
-}
-func (s *RoSnapshots) ViewHeaders(blockNum uint64, f func(sn *HeaderSegment) error) (found bool, err error) {
-	if !s.indicesReady.Load() || blockNum > s.BlocksAvailable() {
-		return false, nil
-	}
-	return s.Headers.ViewSegment(blockNum, f)
-}
-func (s *RoSnapshots) ViewBodies(blockNum uint64, f func(sn *BodySegment) error) (found bool, err error) {
-	if !s.indicesReady.Load() || blockNum > s.BlocksAvailable() {
-		return false, nil
-	}
-	return s.Bodies.ViewSegment(blockNum, f)
-}
-func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (found bool, err error) {
-	if !s.indicesReady.Load() || blockNum > s.BlocksAvailable() {
-		return false, nil
-	}
-	return s.Txs.ViewSegment(blockNum, f)
 }
 
 func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainID uint256.Int, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
@@ -1926,30 +1877,28 @@ RETRY:
 func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *types.Header) error) error {
 	r := bytes.NewReader(nil)
 	word := make([]byte, 0, 2*4096)
-	err := s.Headers.View(func(snapshots []*HeaderSegment) error {
-		for _, sn := range snapshots {
-			if err := sn.seg.WithReadAhead(func() error {
-				g := sn.seg.MakeGetter()
-				for g.HasNext() {
-					word, _ = g.Next(word[:0])
-					var header types.Header
-					r.Reset(word[1:])
-					if err := rlp.Decode(r, &header); err != nil {
-						return err
-					}
-					if err := walker(&header); err != nil {
-						return err
-					}
+
+	view := s.View()
+	defer view.Close()
+
+	for _, sn := range view.Headers() {
+		if err := sn.seg.WithReadAhead(func() error {
+			g := sn.seg.MakeGetter()
+			for g.HasNext() {
+				word, _ = g.Next(word[:0])
+				var header types.Header
+				r.Reset(word[1:])
+				if err := rlp.Decode(r, &header); err != nil {
+					return err
 				}
-				return nil
-			}); err != nil {
-				return err
+				if err := walker(&header); err != nil {
+					return err
+				}
 			}
+			return nil
+		}); err != nil {
+			return err
 		}
-		return nil
-	})
-	if err != nil {
-		return err
 	}
 
 	return nil
@@ -2000,28 +1949,81 @@ func (*Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	return toMerge
 }
 
+type View struct {
+	s      *RoSnapshots
+	closed bool
+}
+
+func (s *RoSnapshots) View() *View {
+	v := &View{s: s}
+	v.s.Headers.lock.RLock()
+	v.s.Bodies.lock.RLock()
+	v.s.Txs.lock.RLock()
+	return v
+}
+
+func (v *View) Close() {
+	if v.closed {
+		return
+	}
+	v.closed = true
+	v.s.Headers.lock.RUnlock()
+	v.s.Bodies.lock.RUnlock()
+	v.s.Txs.lock.RUnlock()
+}
+func (v *View) Headers() []*HeaderSegment { return v.s.Headers.segments }
+func (v *View) Bodies() []*BodySegment    { return v.s.Bodies.segments }
+func (v *View) Txs() []*TxnSegment        { return v.s.Txs.segments }
+func (v *View) HeadersSegment(blockNum uint64) (*HeaderSegment, bool) {
+	for _, seg := range v.Headers() {
+		if !(blockNum >= seg.ranges.from && blockNum < seg.ranges.to) {
+			continue
+		}
+		return seg, true
+	}
+	return nil, false
+}
+func (v *View) BodiesSegment(blockNum uint64) (*BodySegment, bool) {
+	for _, seg := range v.Bodies() {
+		if !(blockNum >= seg.ranges.from && blockNum < seg.ranges.to) {
+			continue
+		}
+		return seg, true
+	}
+	return nil, false
+}
+func (v *View) TxsSegment(blockNum uint64) (*TxnSegment, bool) {
+	for _, seg := range v.Txs() {
+		if !(blockNum >= seg.ranges.from && blockNum < seg.ranges.to) {
+			continue
+		}
+		return seg, true
+	}
+	return nil, false
+}
+
 func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snaptype.Type][]string, error) {
 	toMerge := map[snaptype.Type][]string{}
-	err := snapshots.Headers.View(func(hSegments []*HeaderSegment) error {
-		return snapshots.Bodies.View(func(bSegments []*BodySegment) error {
-			return snapshots.Txs.View(func(tSegments []*TxnSegment) error {
-				for i, sn := range hSegments {
-					if sn.ranges.from < from {
-						continue
-					}
-					if sn.ranges.to > to {
-						break
-					}
-					toMerge[snaptype.Headers] = append(toMerge[snaptype.Headers], hSegments[i].seg.FilePath())
-					toMerge[snaptype.Bodies] = append(toMerge[snaptype.Bodies], bSegments[i].seg.FilePath())
-					toMerge[snaptype.Transactions] = append(toMerge[snaptype.Transactions], tSegments[i].Seg.FilePath())
-				}
+	view := snapshots.View()
+	defer view.Close()
 
-				return nil
-			})
-		})
-	})
-	return toMerge, err
+	hSegments := view.Headers()
+	bSegments := view.Bodies()
+	tSegments := view.Txs()
+
+	for i, sn := range hSegments {
+		if sn.ranges.from < from {
+			continue
+		}
+		if sn.ranges.to > to {
+			break
+		}
+		toMerge[snaptype.Headers] = append(toMerge[snaptype.Headers], hSegments[i].seg.FilePath())
+		toMerge[snaptype.Bodies] = append(toMerge[snaptype.Bodies], bSegments[i].seg.FilePath())
+		toMerge[snaptype.Transactions] = append(toMerge[snaptype.Transactions], tSegments[i].Seg.FilePath())
+	}
+
+	return toMerge, nil
 }
 
 // Merge does merge segments in given ranges
@@ -2173,55 +2175,4 @@ func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.Down
 		}
 	}
 	return req
-}
-
-type BodiesIterator struct{}
-
-func (i BodiesIterator) ForEach(tx kv.Tx, s *RoSnapshots, f func(blockNum uint64, baseTxNum uint64, txAmount uint64) error) error {
-	var blocksInSnapshtos uint64
-	if s != nil && s.cfg.Enabled {
-		blocksInSnapshtos = s.SegmentsMax()
-	}
-
-	if s != nil && s.cfg.Enabled {
-		if err := s.Bodies.View(func(bs []*BodySegment) error {
-			for _, b := range bs {
-				if err := b.Iterate(f); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
-			return fmt.Errorf("build txNum => blockNum mapping: %w", err)
-		}
-	}
-
-	for i := blocksInSnapshtos + 1; ; i++ {
-		body, baseTxId, txAmount, err := rawdb.ReadBodyByNumber(tx, i)
-		if err != nil {
-			return err
-		}
-		if body == nil {
-			break
-		}
-		if err := f(i, baseTxId-1, uint64(txAmount)+2); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// BackgroundResult - used only indicate that some work is done
-// no much reason to pass exact results by this object, just get latest state when need
-type BackgroundResult struct {
-	has bool
-	err error
-}
-
-func (br *BackgroundResult) Has() bool     { return br.has }
-func (br *BackgroundResult) Set(err error) { br.has, br.err = true, err }
-func (br *BackgroundResult) GetAndReset() (bool, error) {
-	has, err := br.has, br.err
-	br.has, br.err = false, nil
-	return has, err
 }

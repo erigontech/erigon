@@ -1400,7 +1400,7 @@ func getBlockReader(db kv.RoDB, logger log.Logger) (blockReader services.FullBlo
 	openBlockReaderOnce.Do(func() {
 		sn, _ := allSnapshots(context.Background(), db, logger)
 		transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
-		_blockReaderSingleton = snapshotsync.NewBlockReaderWithSnapshots(sn, transactionsV3)
+		_blockReaderSingleton = snapshotsync.NewBlockReader(sn, transactionsV3)
 	})
 	return _blockReaderSingleton
 }
