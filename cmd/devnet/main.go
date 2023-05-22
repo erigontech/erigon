@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	dbg "runtime/debug"
 	"sync"
 	"time"
@@ -62,10 +63,14 @@ func main() {
 
 func action(ctx *cli.Context) error {
 	dataDir := ctx.String("datadir")
+	logsDir := filepath.Join(dataDir, "logs")
+	if err := os.MkdirAll(logsDir, os.ModeDir); err != nil {
+		return err
+	}
 	logger := logging.SetupLoggerCtx("devnet", ctx, false /* rootLogger */)
 
 	// Make root logger fail
-	//log.Root().SetHandler(PanicHandler{})
+	log.Root().SetHandler(PanicHandler{})
 
 	// clear all the dev files
 	if err := devnetutils.ClearDevDB(dataDir, logger); err != nil {
@@ -84,10 +89,10 @@ func action(ctx *cli.Context) error {
 	time.Sleep(time.Second * 10)
 
 	// start up the subscription services for the different sub methods
-	services.InitSubscriptions([]models.SubMethod{models.ETHNewHeads})
+	services.InitSubscriptions([]models.SubMethod{models.ETHNewHeads}, logger)
 
 	// execute all rpc methods amongst the two nodes
-	commands.ExecuteAllMethods()
+	commands.ExecuteAllMethods(logger)
 
 	// wait for all goroutines to complete before exiting
 	wg.Wait()

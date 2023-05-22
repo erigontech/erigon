@@ -1,9 +1,13 @@
 package requests
 
-import "fmt"
+import (
+	"fmt"
 
-func PingErigonRpc(reqId int) error {
-	reqGen := initialiseRequestGenerator(reqId)
+	"github.com/ledgerwatch/log/v3"
+)
+
+func PingErigonRpc(reqId int, logger log.Logger) error {
+	reqGen := initialiseRequestGenerator(reqId, logger)
 	res := reqGen.PingErigonRpc()
 	if res.Err != nil {
 		return fmt.Errorf("failed to ping erigon rpc url: %v", res.Err)

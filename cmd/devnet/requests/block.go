@@ -5,14 +5,15 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-func BlockNumber(reqId int) (uint64, error) {
-	reqGen := initialiseRequestGenerator(reqId)
+func BlockNumber(reqId int, logger log.Logger) (uint64, error) {
+	reqGen := initialiseRequestGenerator(reqId, logger)
 	var b rpctest.EthBlockNumber
 
 	req := reqGen.BlockNumber()
@@ -26,8 +27,8 @@ func BlockNumber(reqId int) (uint64, error) {
 	return number, nil
 }
 
-func GetBlockByNumber(reqId int, blockNum uint64, withTxs bool) (rpctest.EthBlockByNumber, error) {
-	reqGen := initialiseRequestGenerator(reqId)
+func GetBlockByNumber(reqId int, blockNum uint64, withTxs bool, logger log.Logger) (rpctest.EthBlockByNumber, error) {
+	reqGen := initialiseRequestGenerator(reqId, logger)
 	var b rpctest.EthBlockByNumber
 
 	req := reqGen.GetBlockByNumber(blockNum, withTxs)
@@ -44,8 +45,8 @@ func GetBlockByNumber(reqId int, blockNum uint64, withTxs bool) (rpctest.EthBloc
 	return b, nil
 }
 
-func GetBlockByNumberDetails(reqId int, blockNum string, withTxs bool) (map[string]interface{}, error) {
-	reqGen := initialiseRequestGenerator(reqId)
+func GetBlockByNumberDetails(reqId int, blockNum string, withTxs bool, logger log.Logger) (map[string]interface{}, error) {
+	reqGen := initialiseRequestGenerator(reqId, logger)
 	var b struct {
 		rpctest.CommonResponse
 		Result interface{} `json:"result"`
@@ -70,8 +71,8 @@ func GetBlockByNumberDetails(reqId int, blockNum string, withTxs bool) (map[stri
 	return m, nil
 }
 
-func GetTransactionCount(reqId int, address libcommon.Address, blockNum models.BlockNumber) (rpctest.EthGetTransactionCount, error) {
-	reqGen := initialiseRequestGenerator(reqId)
+func GetTransactionCount(reqId int, address libcommon.Address, blockNum models.BlockNumber, logger log.Logger) (rpctest.EthGetTransactionCount, error) {
+	reqGen := initialiseRequestGenerator(reqId, logger)
 	var b rpctest.EthGetTransactionCount
 
 	if res := reqGen.Erigon(models.ETHGetTransactionCount, reqGen.GetTransactionCount(address, blockNum), &b); res.Err != nil {
@@ -85,8 +86,8 @@ func GetTransactionCount(reqId int, address libcommon.Address, blockNum models.B
 	return b, nil
 }
 
-func SendTransaction(reqId int, signedTx *types.Transaction) (*libcommon.Hash, error) {
-	reqGen := initialiseRequestGenerator(reqId)
+func SendTransaction(reqId int, signedTx *types.Transaction, logger log.Logger) (*libcommon.Hash, error) {
+	reqGen := initialiseRequestGenerator(reqId, logger)
 	var b rpctest.EthSendRawTransaction
 
 	var buf bytes.Buffer
