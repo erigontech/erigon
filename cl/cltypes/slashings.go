@@ -1,8 +1,6 @@
 package cltypes
 
 import (
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
-
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
@@ -19,10 +17,7 @@ func (p *ProposerSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 func (p *ProposerSlashing) DecodeSSZ(buf []byte, version int) error {
 	p.Header1 = new(SignedBeaconBlockHeader)
 	p.Header2 = new(SignedBeaconBlockHeader)
-	if err := p.Header1.DecodeSSZ(buf, version); err != nil {
-		return err
-	}
-	return p.Header2.DecodeSSZ(buf[p.Header1.EncodingSizeSSZ():], version)
+	return ssz2.Decode(buf, version, p.Header1, p.Header2)
 }
 
 func (p *ProposerSlashing) EncodingSizeSSZ() int {
@@ -45,11 +40,7 @@ func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 func (a *AttesterSlashing) DecodeSSZ(buf []byte, version int) error {
 	a.Attestation_1 = new(IndexedAttestation)
 	a.Attestation_2 = new(IndexedAttestation)
-	attestation2Offset := ssz.DecodeOffset(buf[4:])
-	if err := a.Attestation_1.DecodeSSZ(buf[8:attestation2Offset], version); err != nil {
-		return err
-	}
-	return a.Attestation_2.DecodeSSZ(buf[attestation2Offset:], version)
+	return ssz2.Decode(buf, version, a.Attestation_1, a.Attestation_2)
 }
 
 func (a *AttesterSlashing) EncodingSizeSSZ() int {
