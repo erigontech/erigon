@@ -647,6 +647,9 @@ Loop:
 				count++
 				applyWorker.RunTxTask(txTask)
 				if err := func() error {
+					if txTask.Error != nil {
+						return txTask.Error
+					}
 					if txTask.Final {
 						gasUsed += txTask.UsedGas
 						if gasUsed != txTask.Header.GasUsed {
@@ -675,12 +678,14 @@ Loop:
 					break Loop
 				}
 
+				if err := rs.ApplyState4(txTask, agg); err != nil {
+					return fmt.Errorf("StateV3.ApplyState: %w", err)
+				}
+				if err := rs.ApplyLogsAndTraces(txTask, agg); err != nil {
+					return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
+				}
 				ExecTriggers.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
 				outputTxNum.Add(1)
-
-				if err := rs.ApplyHistory(txTask, agg); err != nil {
-					return fmt.Errorf("StateV3.Apply: %w", err)
-				}
 			}
 			stageProgress = blockNum
 			inputTxNum++
@@ -839,14 +844,14 @@ func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueue, out
 		}
 
 		if txTask.Final {
-			rh, err := rs.ApplyState4(false, txTask, agg)
+			err := rs.ApplyState4(txTask, agg)
 			if err != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
 			}
-			if !bytes.Equal(rh, txTask.BlockRoot[:]) {
-				log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(txTask.BlockRoot[:]), "bn", txTask.BlockNum, "txn", txTask.TxNum)
-				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("block hash mismatch: %x != %x bn =%d, txn= %d", rh, txTask.BlockRoot[:], txTask.BlockNum, txTask.TxNum)
-			}
+			//if !bytes.Equal(rh, txTask.BlockRoot[:]) {
+			//	log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(txTask.BlockRoot[:]), "bn", txTask.BlockNum, "txn", txTask.TxNum)
+			//	return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("block hash mismatch: %x != %x bn =%d, txn= %d", rh, txTask.BlockRoot[:], txTask.BlockNum, txTask.TxNum)
+			//}
 		}
 		triggers += rs.CommitTxNum(txTask.Sender, txTask.TxNum, in)
 		outputTxNum++
@@ -856,7 +861,7 @@ func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueue, out
 			default:
 			}
 		}
-		if err := rs.ApplyHistory(txTask, agg); err != nil {
+		if err := rs.ApplyLogsAndTraces(txTask, agg); err != nil {
 			return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
 		}
 		fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)

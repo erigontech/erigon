@@ -227,15 +227,18 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		//for addr, bal := range txTask.BalanceIncreaseSet {
-		//	fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
-		//}
+		for addr, bal := range txTask.BalanceIncreaseSet {
+			fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
+		}
 		if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
 			panic(err)
 		}
+		//ibs.SoftFinalise()
 		txTask.ReadLists = rw.stateReader.ReadSet()
 		txTask.WriteLists = rw.stateWriter.WriteSet()
 		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
+	} else {
+		fmt.Printf("[ERR] %v\n", txTask.Error)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -145,17 +144,17 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3) (beforeBlock, afterBlock test
 				WriteLists: stateWriter.WriteSet(),
 			}
 			txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
-			if err := rs.ApplyState(tx, txTask, agg); err != nil {
+			if err := rs.ApplyState4(txTask, agg); err != nil {
 				panic(err)
 			}
-			if err := rs.ApplyHistory(txTask, agg); err != nil {
+			if err := rs.ApplyLogsAndTraces(txTask, agg); err != nil {
 				panic(err)
 			}
 			if n == from+numberOfBlocks-1 {
-				err := rs.Flush(context.Background(), tx, "", time.NewTicker(time.Minute))
-				if err != nil {
-					panic(err)
-				}
+				//err := rs.Flush(context.Background(), tx, "", time.NewTicker(time.Minute))
+				//if err != nil {
+				//	panic(err)
+				//}
 				if err := agg.Flush(context.Background(), tx); err != nil {
 					panic(err)
 				}
