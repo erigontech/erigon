@@ -163,24 +163,18 @@ func TestOpenAllSnapshot(t *testing.T) {
 	require.NoError(err)
 	require.Equal(2, len(s.Headers.segments))
 
-	ok, err := s.ViewTxs(10, func(sn *TxnSegment) error {
-		require.Equal(int(sn.ranges.to), 500_000)
-		return nil
-	})
-	require.NoError(err)
-	require.True(ok)
+	view := s.View()
+	defer view.Close()
 
-	ok, err = s.ViewTxs(500_000, func(sn *TxnSegment) error {
-		require.Equal(int(sn.ranges.to), 1_000_000) // [from:to)
-		return nil
-	})
-	require.NoError(err)
+	seg, ok := view.TxsSegment(10)
 	require.True(ok)
+	require.Equal(int(seg.ranges.to), 500_000)
 
-	ok, err = s.ViewTxs(1_000_000, func(sn *TxnSegment) error {
-		return nil
-	})
-	require.NoError(err)
+	seg, ok = view.TxsSegment(500_000)
+	require.True(ok)
+	require.Equal(int(seg.ranges.to), 1_000_000)
+
+	_, ok = view.TxsSegment(1_000_000)
 	require.False(ok)
 
 	// Erigon may create new snapshots by itself - with high bigger than hardcoded ExpectedBlocks
