@@ -5,22 +5,12 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
-
-func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
-	// We only want to extract entries composed by Block Number + Header Hash
-	if len(k) != 40 {
-		return nil
-	}
-	return next(k, libcommon.Copy(k[8:]), libcommon.Copy(k[:8]))
-}
 
 type BlockHashesCfg struct {
 	db     kv.RwDB
