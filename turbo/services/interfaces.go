@@ -15,6 +15,7 @@ type All struct {
 
 type BlockReader interface {
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error)
+	TxsV3Enabled() bool
 }
 
 type HeaderReader interface {

@@ -16,6 +16,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 
@@ -42,9 +44,11 @@ type SendersCfg struct {
 	chainConfig     *chain.Config
 	blockRetire     *snapshotsync.BlockRetire
 	hd              *headerdownload.HeaderDownload
+	blockReader     services.FullBlockReader
+	blockWriter     *blockio.BlockWriter
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire, hd *headerdownload.HeaderDownload) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire, blockWriter *blockio.BlockWriter, hd *headerdownload.HeaderDownload) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -61,6 +65,8 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpd
 		prune:           prune,
 		blockRetire:     br,
 		hd:              hd,
+
+		blockWriter: blockWriter,
 	}
 }
 
@@ -68,6 +74,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	if cfg.blockRetire != nil && cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled && s.BlockNumber < cfg.blockRetire.Snapshots().BlocksAvailable() {
 		s.BlockNumber = cfg.blockRetire.Snapshots().BlocksAvailable()
 	}
+	txsV3Enabled := cfg.blockWriter.TxsV3Enabled() // allow stor senders for non-canonical blocks
 
 	quitCh := ctx.Done()
 	useExternalTx := tx != nil
@@ -110,25 +117,27 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	currentHeaderIdx := uint64(0)
 	canonical := make([]libcommon.Hash, to-s.BlockNumber)
 
-	for k, v, err := canonicalC.Seek(hexutility.EncodeTs(startFrom)); k != nil; k, v, err = canonicalC.Next() {
-		if err != nil {
-			return err
-		}
-		if err := libcommon.Stopped(quitCh); err != nil {
-			return err
-		}
+	if !txsV3Enabled {
+		for k, v, err := canonicalC.Seek(hexutility.EncodeTs(startFrom)); k != nil; k, v, err = canonicalC.Next() {
+			if err != nil {
+				return err
+			}
+			if err := libcommon.Stopped(quitCh); err != nil {
+				return err
+			}
 
-		if currentHeaderIdx >= to-s.BlockNumber { // if header stage is ehead of body stage
-			break
-		}
+			if currentHeaderIdx >= to-s.BlockNumber { // if header stage is ehead of body stage
+				break
+			}
 
-		copy(canonical[currentHeaderIdx][:], v)
-		currentHeaderIdx++
+			copy(canonical[currentHeaderIdx][:], v)
+			currentHeaderIdx++
 
-		select {
-		default:
-		case <-logEvery.C:
-			logger.Info(fmt.Sprintf("[%s] Preload headers", logPrefix), "block_number", binary.BigEndian.Uint64(k))
+			select {
+			default:
+			case <-logEvery.C:
+				logger.Info(fmt.Sprintf("[%s] Preload headers", logPrefix), "block_number", binary.BigEndian.Uint64(k))
+			}
 		}
 	}
 	logger.Trace(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "amount", len(canonical))
@@ -226,15 +235,25 @@ Loop:
 			break
 		}
 
-		if canonical[blockNumber-s.BlockNumber-1] != blockHash {
-			// non-canonical case
-			continue
-		}
-
-		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNumber)
-		if body == nil {
-			logger.Warn(fmt.Sprintf("[%s] ReadCanonicalBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
-			continue
+		var body *types.Body
+		if txsV3Enabled {
+			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
+				return err
+			}
+			if body == nil {
+				logger.Warn(fmt.Sprintf("[%s] blockReader.BodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
+				continue
+			}
+		} else {
+			if canonical[blockNumber-s.BlockNumber-1] != blockHash {
+				// non-canonical case
+				continue
+			}
+			body = rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNumber)
+			if body == nil {
+				logger.Warn(fmt.Sprintf("[%s] ReadCanonicalBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
+				continue
+			}
 		}
 
 		select {

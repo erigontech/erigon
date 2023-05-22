@@ -24,6 +24,7 @@ type BlockWriter struct {
 
 func NewBlockWriter(txsV3 bool) *BlockWriter { return &BlockWriter{txsV3: txsV3} }
 
+func (w *BlockWriter) TxsV3Enabled() bool { return w.txsV3 }
 func (w *BlockWriter) WriteHeader(tx kv.RwTx, header *types.Header) error {
 	return rawdb.WriteHeader(tx, header)
 }

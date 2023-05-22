@@ -871,7 +871,8 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, br, nil)
+	_, bw := blocksIO(db, logger)
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, br, bw, nil)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
@@ -1299,7 +1300,8 @@ func stageTxLookup(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	}
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageTxLookupCfg(db, pm, dirs.Tmp, sn, chainConfig.Bor)
+	br, _ := blocksIO(db, logger)
+	cfg := stagedsync.StageTxLookupCfg(db, pm, dirs.Tmp, sn, chainConfig.Bor, br)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.TxLookup, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ctx, logger)
