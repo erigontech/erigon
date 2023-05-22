@@ -6,6 +6,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -112,7 +113,9 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil, logger), nil)
+	br := snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil, logger)
+	bw := blockio.NewBlockWriter(false)
+	cfg := StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, br, bw, nil)
 	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx, log.New())
 	assert.NoError(t, err)
 
