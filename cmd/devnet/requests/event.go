@@ -11,7 +11,7 @@ import (
 )
 
 func GetAndCompareLogs(reqId int, fromBlock uint64, toBlock uint64, expected rpctest.Log, logger log.Logger) error {
-	fmt.Printf("\nGETTING AND COMPARING LOGS\n")
+	logger.Info("GETTING AND COMPARING LOGS")
 	reqGen := initialiseRequestGenerator(reqId, logger)
 	var b rpctest.EthGetLogs
 
@@ -32,7 +32,7 @@ func GetAndCompareLogs(reqId int, fromBlock uint64, toBlock uint64, expected rpc
 	// compare the log events
 	errs, ok := devnetutils.CompareLogEvents(expected, actual)
 	if !ok {
-		fmt.Printf("FAILURE => log result is incorrect: %v\n", errs)
+		logger.Error("Log result is incorrect", "errors", errs)
 		return fmt.Errorf("incorrect logs: %v", errs)
 	}
 
@@ -41,7 +41,7 @@ func GetAndCompareLogs(reqId int, fromBlock uint64, toBlock uint64, expected rpc
 		return fmt.Errorf("error parsing response: %v", err)
 	}
 
-	fmt.Println("SUCCESS => Logs compared successfully, no discrepancies")
+	log.Info("SUCCESS => Logs compared successfully, no discrepancies")
 
 	return nil
 }
