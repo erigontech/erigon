@@ -331,14 +331,6 @@ func WriteHeader(db kv.RwTx, header *types.Header) error {
 		return fmt.Errorf("HeaderNumber mapping: %w", err)
 	}
 
-	//newID, err := db.IncrementSequence(kv.BlockID, 1)
-	//if err != nil {
-	//	log.Crit("Failed to RLP encode header", "err", err)
-	//}
-	//if err := db.Put(kv.BlockID, headerKey, hexutility.EncodeTs(newID)); err != nil {
-	//	log.Crit("Failed to store BlockID", "err", err)
-	//}
-
 	// Write the encoded header
 	data, err := rlp.EncodeToBytes(header)
 	if err != nil {
