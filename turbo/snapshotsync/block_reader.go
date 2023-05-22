@@ -55,6 +55,9 @@ func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blo
 func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
 	return &RemoteBlockReader{client}
 }
+func (r *RemoteBlockReader) TxsV3Enabled() bool {
+	panic("not implemented")
+}
 
 func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash libcommon.Hash) (uint64, bool, error) {
 	reply, err := r.client.TxnLookup(ctx, &remote.TxnLookupRequest{TxnHash: gointerfaces.ConvertHashToH256(txnHash)})
