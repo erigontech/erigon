@@ -106,18 +106,20 @@ func TestSenders(t *testing.T) {
 	}))
 	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.HexToHash("02"), 2))
 
-	require.NoError(rawdb.WriteBody(tx, libcommon.HexToHash("03"), 3, &types.Body{
+	bw := blockio.NewBlockWriter(false)
+	err := bw.WriteBody(tx, libcommon.HexToHash("03"), 3, &types.Body{
 		Transactions: []types.Transaction{}, Uncles: []*types.Header{{GasLimit: 3}},
-	}))
+	})
+	require.NoError(err)
+
 	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.HexToHash("03"), 3))
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
 	br := snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil, logger)
-	bw := blockio.NewBlockWriter(false)
 	cfg := StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, br, bw, nil)
-	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx, log.New())
-	assert.NoError(t, err)
+	err = SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx, log.New())
+	require.NoError(err)
 
 	{
 		found := rawdb.ReadCanonicalBodyWithTransactions(tx, libcommon.HexToHash("01"), 1)
