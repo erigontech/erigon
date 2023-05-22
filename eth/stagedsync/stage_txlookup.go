@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -21,11 +22,12 @@ import (
 )
 
 type TxLookupCfg struct {
-	db        kv.RwDB
-	prune     prune.Mode
-	tmpdir    string
-	snapshots *snapshotsync.RoSnapshots
-	borConfig *chain.BorConfig
+	db          kv.RwDB
+	prune       prune.Mode
+	tmpdir      string
+	snapshots   *snapshotsync.RoSnapshots
+	borConfig   *chain.BorConfig
+	blockReader services.FullBlockReader
 }
 
 func StageTxLookupCfg(
@@ -34,18 +36,19 @@ func StageTxLookupCfg(
 	tmpdir string,
 	snapshots *snapshotsync.RoSnapshots,
 	borConfig *chain.BorConfig,
+	blockReader services.FullBlockReader,
 ) TxLookupCfg {
 	return TxLookupCfg{
-		db:        db,
-		prune:     prune,
-		tmpdir:    tmpdir,
-		snapshots: snapshots,
-		borConfig: borConfig,
+		db:          db,
+		prune:       prune,
+		tmpdir:      tmpdir,
+		snapshots:   snapshots,
+		borConfig:   borConfig,
+		blockReader: blockReader,
 	}
 }
 
 func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
-	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -90,12 +93,12 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		startBlock++
 	}
 	// etl.Transform uses ExtractEndKey as exclusive bound, therefore endBlock + 1
-	if err = txnLookupTransform(logPrefix, tx, startBlock, endBlock+1, quitCh, cfg, logger); err != nil {
+	if err = txnLookupTransform(logPrefix, tx, startBlock, endBlock+1, ctx, cfg, logger); err != nil {
 		return fmt.Errorf("txnLookupTransform: %w", err)
 	}
 
 	if cfg.borConfig != nil {
-		if err = borTxnLookupTransform(logPrefix, tx, startBlock, endBlock+1, quitCh, cfg, logger); err != nil {
+		if err = borTxnLookupTransform(logPrefix, tx, startBlock, endBlock+1, ctx.Done(), cfg, logger); err != nil {
 			return fmt.Errorf("borTxnLookupTransform: %w", err)
 		}
 	}
@@ -113,8 +116,13 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 }
 
 // txnLookupTransform - [startKey, endKey)
-func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, quitCh <-chan struct{}, cfg TxLookupCfg, logger log.Logger) error {
+func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
 	bigNum := new(big.Int)
+	txsV3Enabled := cfg.blockReader.TxsV3Enabled()
+	if txsV3Enabled {
+		panic("implement me. need iterate by kv.BlockID instead of kv.HeaderCanonical")
+	}
+
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum)
@@ -131,7 +139,7 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
-		Quit:            quitCh,
+		Quit:            ctx.Done(),
 		ExtractStartKey: hexutility.EncodeTs(blockFrom),
 		ExtractEndKey:   hexutility.EncodeTs(blockTo),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {

@@ -44,6 +44,9 @@ func NewRemoteBackend(client remote.ETHBACKENDClient, db kv.RoDB, blockReader se
 	}
 }
 
+func (back *RemoteBackend) TxsV3Enabled() bool {
+	panic("not implemented")
+}
 func (back *RemoteBackend) EnsureVersionCompatibility() bool {
 	versionReply, err := back.remoteEthBackend.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {

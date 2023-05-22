@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -50,6 +51,7 @@ type HeadersCfg struct {
 
 	snapshots     *snapshotsync.RoSnapshots
 	blockReader   services.FullBlockReader
+	blockWriter   *blockio.BlockWriter
 	forkValidator *engineapi.ForkValidator
 	notifications *shards.Notifications
 }
@@ -66,6 +68,7 @@ func StageHeadersCfg(
 	noP2PDiscovery bool,
 	snapshots *snapshotsync.RoSnapshots,
 	blockReader services.FullBlockReader,
+	blockWriter *blockio.BlockWriter,
 	tmpdir string,
 	notifications *shards.Notifications,
 	forkValidator *engineapi.ForkValidator) HeadersCfg {
@@ -82,6 +85,7 @@ func StageHeadersCfg(
 		noP2PDiscovery:    noP2PDiscovery,
 		snapshots:         snapshots,
 		blockReader:       blockReader,
+		blockWriter:       blockWriter,
 		forkValidator:     forkValidator,
 		notifications:     notifications,
 	}
@@ -178,7 +182,7 @@ func HeadersPOS(
 	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(syncing, test)
 
 	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
-	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
+	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader, cfg.blockWriter)
 
 	interrupted, err := handleInterrupt(interrupt, cfg, tx, headerInserter, useExternalTx, logger)
 	if err != nil {
@@ -802,7 +806,7 @@ func HeadersPOW(
 	if localTd == nil {
 		return fmt.Errorf("localTD is nil: %d, %x", headerProgress, hash)
 	}
-	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress, cfg.blockReader)
+	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress, cfg.blockReader, cfg.blockWriter)
 	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	stopped := false

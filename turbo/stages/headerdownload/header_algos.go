@@ -892,19 +892,19 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 		// This makes sure we end up choosing the chain with the max total difficulty
 		hi.localTd.Set(td)
 	}
-	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
+	if err = hi.headerWriter.WriteTd(db, hash, blockHeight, td); err != nil {
 		return nil, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
-
-	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), headerRaw); err != nil {
-		return nil, fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
+	// skipIndexing=true - because next stages will build indices in-batch (for example StageBlockHash)
+	if err = hi.headerWriter.WriteHeaderRaw(db, blockHeight, hash, headerRaw, true); err != nil {
+		return nil, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
 
 	hi.prevHash = hash
 	return td, nil
 }
 
-func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash libcommon.Hash) error {
+func (hi *HeaderInserter) FeedHeaderPoS(db kv.RwTx, header *types.Header, hash libcommon.Hash) error {
 	blockHeight := header.Number.Uint64()
 	// TODO(yperbasis): do we need to check if the header is already inserted (oldH)?
 
@@ -913,10 +913,12 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash
 		return fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
 	td := new(big.Int).Add(parentTd, header.Difficulty)
-	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
+	if err = hi.headerWriter.WriteHeader(db, header); err != nil {
+		return fmt.Errorf("[%s] failed to WriteHeader: %w", hi.logPrefix, err)
+	}
+	if err = hi.headerWriter.WriteTd(db, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
-	rawdb.WriteHeader(db, header)
 
 	hi.highest = blockHeight
 	hi.highestHash = hash

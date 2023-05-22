@@ -302,13 +302,14 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context, logger lo
 	}
 
 	aggWriter, aggReader := WrapAggregator(agg, stateTx)
+	br, _ := blocksIO(chainDb, logger)
 	proc := blockProcessor{
 		chainConfig: fromdb.ChainConfig(chainDb),
 		vmConfig:    vm.Config{},
 		engine:      engine,
 		reader:      aggReader,
 		writer:      aggWriter,
-		blockReader: getBlockReader(chainDb, logger),
+		blockReader: br,
 		stateTx:     stateTx,
 		stateDb:     stateDb,
 		blockNum:    latestBlock,
