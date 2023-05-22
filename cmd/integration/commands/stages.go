@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
@@ -694,7 +695,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	sn, agg := allSnapshots(ctx, db, logger)
 	defer sn.Close()
 	defer agg.Close()
-	br := getBlockReader(db, logger)
+	br, bw := blocksIO(db, logger)
 	engine, _, _, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	chainConfig, _, _ := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 
@@ -705,7 +706,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 		if reset {
 			dirs := datadir.New(datadirCli)
-			if err := reset2.ResetBlocks(tx, db, sn, agg, br, dirs, *chainConfig, engine, logger); err != nil {
+			if err := reset2.ResetBlocks(tx, db, sn, agg, br, bw, dirs, *chainConfig, engine, logger); err != nil {
 				return err
 			}
 			return nil
@@ -730,7 +731,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 			return fmt.Errorf("re-read Headers progress: %w", err)
 		}
 		{ // hard-unwind stage_body also
-			if err := rawdb.TruncateBlocks(ctx, tx, progress+1); err != nil {
+			if err := bw.TruncateBlocks(ctx, tx, progress+1); err != nil {
 				return err
 			}
 			progressBodies, err := stages.GetStageProgress(tx, stages.Bodies)
@@ -747,7 +748,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err = rawdb.TruncateCanonicalHash(tx, progress+1, false); err != nil {
 			return err
 		}
-		if err = rawdb.TruncateTd(tx, progress+1); err != nil {
+		if err = bw.TruncateTd(tx, progress+1); err != nil {
 			return err
 		}
 		hash, err := rawdb.ReadCanonicalHash(tx, progress-1)
@@ -779,7 +780,9 @@ func stageBodies(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 			}
 
 			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber)
-			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, sn, getBlockReader(db, logger), historyV3, transactionsV3), ctx); err != nil {
+			br, _ := blocksIO(db, logger)
+			cfg := stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, sn, br, historyV3, transactionsV3)
+			if err := stagedsync.UnwindBodiesStage(u, tx, cfg, ctx); err != nil {
 				return err
 			}
 
@@ -809,7 +812,8 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	must(sync.SetCurrentStage(stages.Senders))
 
 	if reset {
-		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, db, tx) })
+		_, bw := blocksIO(db, logger)
+		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, db, tx, bw) })
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -930,9 +934,10 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	syncCfg.ReconWorkerCount = int(reconWorkers)
 
 	genesis := core.GenesisBlockByChainName(chain)
+	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, historyV3, dirs, getBlockReader(db, logger), nil, genesis, syncCfg, agg)
+		/*badBlockHalt=*/ false, historyV3, dirs, br, nil, genesis, syncCfg, agg)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, true, logger)
@@ -993,7 +998,8 @@ func stageTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	logger.Info("StageExec", "progress", execStage.BlockNumber)
 	logger.Info("StageTrie", "progress", s.BlockNumber)
-	cfg := stagedsync.StageTrieCfg(db, true /* checkRoot */, true /* saveHashesToDb */, false /* badBlockHalt */, dirs.Tmp, getBlockReader(db, logger), nil /* hd */, historyV3, agg)
+	br, _ := blocksIO(db, logger)
+	cfg := stagedsync.StageTrieCfg(db, true /* checkRoot */, true /* saveHashesToDb */, false /* badBlockHalt */, dirs.Tmp, br, nil /* hd */, historyV3, agg)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.IntermediateHashes, s.BlockNumber-unwind, s.BlockNumber)
 		if err := stagedsync.UnwindIntermediateHashesStage(u, s, tx, cfg, ctx, logger); err != nil {
@@ -1395,14 +1401,16 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*snapshot
 
 var openBlockReaderOnce sync.Once
 var _blockReaderSingleton services.FullBlockReader
+var _blockWriterSingleton *blockio.BlockWriter
 
-func getBlockReader(db kv.RoDB, logger log.Logger) (blockReader services.FullBlockReader) {
+func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter) {
 	openBlockReaderOnce.Do(func() {
 		sn, _ := allSnapshots(context.Background(), db, logger)
 		transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
 		_blockReaderSingleton = snapshotsync.NewBlockReader(sn, transactionsV3)
+		_blockWriterSingleton = blockio.NewBlockWriter(transactionsV3)
 	})
-	return _blockReaderSingleton
+	return _blockReaderSingleton, _blockWriterSingleton
 }
 
 var openDomainsOnce sync.Once
@@ -1513,7 +1521,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 
 	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, logger)
 
-	br := getBlockReader(db, logger)
+	br, _ := blocksIO(db, logger)
 	sentryControlServer, err := sentry.NewMultiClient(
 		db,
 		"",

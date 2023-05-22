@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -302,7 +303,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, tmpDir
 	return nil
 }
 
-func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, Bd *bodydownload.BodyDownload, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
+func StateStep(ctx context.Context, batch kv.RwTx, blockWriter *blockio.BlockWriter, stateSync *stagedsync.Sync, Bd *bodydownload.BodyDownload, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -325,11 +326,10 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, B
 		currentHash := headersChain[i].Hash()
 		// Prepare memory state for block execution
 		Bd.AddToPrefetch(currentHeader, currentBody)
-		rawdb.WriteHeader(batch, currentHeader)
-		if err = rawdb.WriteHeaderNumber(batch, currentHash, currentHeight); err != nil {
+		if err := blockWriter.WriteHeader(batch, currentHeader); err != nil {
 			return err
 		}
-		if err = rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
+		if err := blockWriter.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
 			return err
 		}
 	}
@@ -342,12 +342,10 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, B
 	height := header.Number.Uint64()
 	hash := header.Hash()
 	// Prepare memory state for block execution
-	rawdb.WriteHeader(batch, header)
-	if err = rawdb.WriteHeaderNumber(batch, hash, height); err != nil {
+	if err = blockWriter.WriteHeader(batch, header); err != nil {
 		return err
 	}
-
-	if err = rawdb.WriteCanonicalHash(batch, hash, height); err != nil {
+	if err = blockWriter.WriteCanonicalHash(batch, hash, height); err != nil {
 		return err
 	}
 
@@ -382,7 +380,7 @@ func NewDefaultStages(ctx context.Context,
 	logger log.Logger,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
-	blockReader := snapshotsync.NewBlockReader(snapshots, cfg.TransactionsV3)
+	blockReader, blockWriter := snapshotsync.NewBlockReader(snapshots, cfg.TransactionsV3), blockio.NewBlockWriter(cfg.TransactionsV3)
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events, logger)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
@@ -413,12 +411,13 @@ func NewDefaultStages(ctx context.Context,
 			p2pCfg.NoDiscovery,
 			snapshots,
 			blockReader,
+			blockWriter,
 			dirs.Tmp,
 			notifications,
 			forkValidator,
 		),
 		stagedsync.StageCumulativeIndexCfg(db),
-		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig),
+		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,
@@ -465,7 +464,7 @@ func NewDefaultStages(ctx context.Context,
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient,
 	dirs datadir.Dirs, notifications *shards.Notifications, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3,
 	logger log.Logger) (*stagedsync.Sync, error) {
-	blockReader := snapshotsync.NewBlockReader(snapshots, cfg.TransactionsV3)
+	blockReader, blockWriter := snapshotsync.NewBlockReader(snapshots, cfg.TransactionsV3), blockio.NewBlockWriter(cfg.TransactionsV3)
 
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,
@@ -481,11 +480,12 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				false,
 				snapshots,
 				blockReader,
+				blockWriter,
 				dirs.Tmp,
 				nil, nil,
 			),
 			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, snapshots, blockReader, cfg.HistoryV3, cfg.TransactionsV3),
-			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig),
+			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, dirs.Tmp, cfg.Prune, nil, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				db,

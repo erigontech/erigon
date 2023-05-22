@@ -11,6 +11,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -259,7 +261,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	if tb != nil {
 		tb.Cleanup(mock.Close)
 	}
-	blockReader := snapshotsync.NewBlockReader(mock.BlockSnapshots, mock.TransactionsV3)
+	blockReader, blockWriter := mock.NewBlocksIO()
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
@@ -322,7 +324,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			return err
 		}
 		// We start the mining step
-		if err := StateStep(ctx, batch, stateSync, mock.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
+		if err := StateStep(ctx, batch, blockWriter, stateSync, mock.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
@@ -392,12 +394,13 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				false,
 				mock.BlockSnapshots,
 				blockReader,
+				blockWriter,
 				dirs.Tmp,
 				mock.Notifications,
 				engineapi.NewForkValidatorMock(1),
 			),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
-			stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig),
+			stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig, blockWriter),
 			stagedsync.StageBodiesCfg(mock.DB,
 				mock.sentriesClient.Bd,
 				sendBodyRequest,
@@ -759,4 +762,8 @@ func (ms *MockSentry) CalcStateRoot(tx kv.Tx) libcommon.Hash {
 }
 func (ms *MockSentry) HistoryV3Components() *libstate.AggregatorV3 {
 	return ms.agg
+}
+
+func (ms *MockSentry) NewBlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
+	return snapshotsync.NewBlockReader(ms.BlockSnapshots, ms.TransactionsV3), blockio.NewBlockWriter(ms.TransactionsV3)
 }

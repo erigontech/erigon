@@ -6,6 +6,7 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -48,6 +49,7 @@ func NewStagedSync(ctx context.Context,
 	dirs := cfg.Dirs
 	blockReader := snapshotsync.NewBlockReader(snapshots, transactionsV3)
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events, logger)
+	blockWriter := blockio.NewBlockWriter(transactionsV3)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.
@@ -80,12 +82,13 @@ func NewStagedSync(ctx context.Context,
 				p2pCfg.NoDiscovery,
 				snapshots,
 				blockReader,
+				blockWriter,
 				dirs.Tmp,
 				notifications,
 				forkValidator,
 			),
 			stagedsync.StageCumulativeIndexCfg(db),
-			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig),
+			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 			stagedsync.StageBodiesCfg(
 				db,
 				controlServer.Bd,

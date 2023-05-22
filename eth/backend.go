@@ -33,6 +33,7 @@ import (
 
 	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -175,6 +176,7 @@ type Ethereum struct {
 	agg            *libstate.AggregatorV3
 	blockSnapshots *snapshotsync.RoSnapshots
 	blockReader    services.FullBlockReader
+	blockWriter    *blockio.BlockWriter
 	kvRPC          *remotedbserver.KvServer
 	logger         log.Logger
 }
@@ -298,11 +300,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		},
 		logger: logger,
 	}
-	blockReader, allSnapshots, agg, err := backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader, backend.notifications.Events, config.TransactionsV3)
+	blockReader, blockWriter, allSnapshots, agg, err := backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader, backend.notifications.Events, config.TransactionsV3)
 	if err != nil {
 		return nil, err
 	}
-	backend.agg, backend.blockSnapshots, backend.blockReader = agg, allSnapshots, blockReader
+	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
 
 	if config.HistoryV3 {
 		backend.chainDB, err = temporal.New(backend.chainDB, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
@@ -426,7 +428,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return err
 		}
 		// We start the mining step
-		if err := stages2.StateStep(ctx, batch, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
+		if err := stages2.StateStep(ctx, batch, backend.blockWriter, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
@@ -968,13 +970,14 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg, notifications *shards.Events, transactionsV3 bool) (services.FullBlockReader, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
+func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg, notifications *shards.Events, transactionsV3 bool) (services.FullBlockReader, *blockio.BlockWriter, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
 	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap, s.logger)
 	var err error
 	if !snConfig.NoDownloader {
 		allSnapshots.OptimisticalyReopenWithDB(s.chainDB)
 	}
 	blockReader := snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
+	blockWriter := blockio.NewBlockWriter(transactionsV3)
 
 	if !snConfig.NoDownloader {
 		if snConfig.DownloaderAddr != "" {
@@ -984,28 +987,28 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 			// start embedded Downloader
 			s.downloader, err = downloader3.New(ctx, downloaderCfg)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 			s.downloader.MainLoopInBackground(ctx, true)
 			bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("new server: %w", err)
+				return nil, nil, nil, nil, fmt.Errorf("new server: %w", err)
 			}
 
 			s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 		}
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 	}
 
 	dir.MustExist(dirs.SnapHistory)
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, s.chainDB, s.logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if err = agg.OpenFolder(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	agg.OnFreeze(func(frozenFileNames []string) {
 		notifications.OnNewSnapshot()
@@ -1017,7 +1020,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 		}
 	})
 
-	return blockReader, allSnapshots, agg, nil
+	return blockReader, blockWriter, allSnapshots, agg, nil
 }
 
 func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {

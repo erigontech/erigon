@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -384,14 +385,16 @@ type HeaderInserter struct {
 	highestTimestamp uint64
 	canonicalCache   *lru.Cache[uint64, common.Hash]
 	headerReader     services.HeaderAndCanonicalReader
+	headerWriter     *blockio.BlockWriter
 }
 
-func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64, headerReader services.HeaderAndCanonicalReader) *HeaderInserter {
+func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64, headerReader services.HeaderAndCanonicalReader, headerWriter *blockio.BlockWriter) *HeaderInserter {
 	hi := &HeaderInserter{
 		logPrefix:    logPrefix,
 		localTd:      localTd,
 		unwindPoint:  headerProgress,
 		headerReader: headerReader,
+		headerWriter: headerWriter,
 	}
 	hi.canonicalCache, _ = lru.New[uint64, common.Hash](1000)
 	return hi

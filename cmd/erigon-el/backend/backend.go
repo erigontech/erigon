@@ -16,6 +16,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
@@ -151,6 +152,7 @@ type Ethereum struct {
 	forkValidator           *engineapi.ForkValidator
 	downloader              *downloader3.Downloader
 	blockReader             services.FullBlockReader
+	blockWriter             *blockio.BlockWriter
 
 	agg    *libstate.AggregatorV3
 	logger log.Logger
@@ -265,23 +267,21 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	}
 	var (
 		allSnapshots *snapshotsync.RoSnapshots
-		agg          *libstate.AggregatorV3
 	)
-	backend.blockReader, allSnapshots, agg, err = backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader, config.TransactionsV3)
+	backend.blockReader, backend.blockWriter, allSnapshots, backend.agg, err = backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader, config.TransactionsV3)
 	if err != nil {
 		return nil, err
 	}
-	backend.agg = agg
 
 	if config.HistoryV3 {
-		backend.chainDB, err = temporal.New(backend.chainDB, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+		backend.chainDB, err = temporal.New(backend.chainDB, backend.agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 		if err != nil {
 			return nil, err
 		}
 		chainKv = backend.chainDB
 	}
 
-	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, agg, logger)
+	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, backend.agg, logger)
 	backend.notifications.StateChangesConsumer = kvRPC
 
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
@@ -388,7 +388,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			return err
 		}
 		// We start the mining step
-		if err := stages2.StateStep(ctx, batch, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
+		if err := stages2.StateStep(ctx, batch, backend.blockWriter, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
@@ -840,13 +840,14 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg, transactionsV3 bool) (services.FullBlockReader, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
+func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg, transactionsV3 bool) (services.FullBlockReader, *blockio.BlockWriter, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
 	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap, s.logger)
 	var err error
 	if !snConfig.NoDownloader {
 		allSnapshots.OptimisticalyReopenWithDB(s.chainDB)
 	}
 	blockReader := snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
+	blockWriter := blockio.NewBlockWriter(transactionsV3)
 
 	if !snConfig.NoDownloader {
 		if snConfig.DownloaderAddr != "" {
@@ -856,28 +857,28 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 			// start embedded Downloader
 			s.downloader, err = downloader3.New(ctx, downloaderCfg)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 			s.downloader.MainLoopInBackground(ctx, true)
 			bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("new server: %w", err)
+				return nil, nil, nil, nil, fmt.Errorf("new server: %w", err)
 			}
 
 			s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 		}
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 	}
 
 	dir.MustExist(dirs.SnapHistory)
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, s.chainDB, s.logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if err = agg.OpenFolder(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	agg.OnFreeze(func(frozenFileNames []string) {
 		events := s.notifications.Events
@@ -895,7 +896,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 		}
 	})
 
-	return blockReader, allSnapshots, agg, nil
+	return blockReader, blockWriter, allSnapshots, agg, nil
 }
 
 func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
@@ -936,7 +937,7 @@ func (s *Ethereum) Start() error {
 		}
 		maxReceiveSize := 500 * datasize.MB
 		server := grpc.NewServer(grpc.MaxRecvMsgSize(int(maxReceiveSize)))
-		execution.RegisterExecutionServer(server, eth1.NewEth1Execution(s.chainDB, s.blockReader, s.stagedSync))
+		execution.RegisterExecutionServer(server, eth1.NewEth1Execution(s.chainDB, s.blockReader, s.blockWriter, s.stagedSync))
 		s.logger.Info("Execution Module Server started!")
 		if err := server.Serve(lis); err != nil {
 			panic(err)
