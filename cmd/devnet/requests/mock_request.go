@@ -12,6 +12,6 @@ func PingErigonRpc(reqId int, logger log.Logger) error {
 	if res.Err != nil {
 		return fmt.Errorf("failed to ping erigon rpc url: %v", res.Err)
 	}
-	fmt.Printf("SUCCESS => OK\n")
+	logger.Info("SUCCESS => OK")
 	return nil
 }

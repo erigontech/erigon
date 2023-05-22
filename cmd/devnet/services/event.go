@@ -13,20 +13,20 @@ import (
 )
 
 func InitSubscriptions(methods []models.SubMethod, logger log.Logger) {
-	fmt.Printf("CONNECTING TO WEBSOCKETS AND SUBSCRIBING TO METHODS...\n")
+	logger.Info("CONNECTING TO WEBSOCKETS AND SUBSCRIBING TO METHODS...")
 	if err := subscribeAll(methods, logger); err != nil {
-		fmt.Printf("failed to subscribe to all methods: %v\n", err)
+		logger.Error("failed to subscribe to all methods", "error", err)
 		return
 	}
 
 	// Initializing subscription methods
-	fmt.Printf("INITIATE LISTENS ON SUBSCRIPTION CHANNELS")
+	logger.Info("INITIATE LISTENS ON SUBSCRIPTION CHANNELS")
 	models.NewHeadsChan = make(chan interface{})
 
 	go func() {
 		methodSub := (*models.MethodSubscriptionMap)[models.ETHNewHeads]
 		if methodSub == nil {
-			fmt.Printf("method subscription should not be nil")
+			logger.Error("method subscription should not be nil")
 			return
 		}
 
@@ -35,9 +35,9 @@ func InitSubscriptions(methods []models.SubMethod, logger log.Logger) {
 	}()
 }
 
-func SearchReservesForTransactionHash(hashes map[libcommon.Hash]bool) (*map[libcommon.Hash]string, error) {
-	fmt.Printf("Searching for transactions in reserved blocks...\n")
-	m, err := searchBlockForHashes(hashes)
+func SearchReservesForTransactionHash(hashes map[libcommon.Hash]bool, logger log.Logger) (*map[libcommon.Hash]string, error) {
+	logger.Info("Searching for transactions in reserved blocks...")
+	m, err := searchBlockForHashes(hashes, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search reserves for hashes: %v", err)
 	}
@@ -82,7 +82,7 @@ func subscribeToMethod(method models.SubMethod, logger log.Logger) (*models.Meth
 	return sub, nil
 }
 
-func searchBlockForHashes(hashmap map[libcommon.Hash]bool) (*map[libcommon.Hash]string, error) {
+func searchBlockForHashes(hashmap map[libcommon.Hash]bool, logger log.Logger) (*map[libcommon.Hash]string, error) {
 	if len(hashmap) == 0 {
 		return nil, fmt.Errorf("no hashes to search for")
 	}
@@ -101,13 +101,13 @@ func searchBlockForHashes(hashmap map[libcommon.Hash]bool) (*map[libcommon.Hash]
 		block := <-models.NewHeadsChan
 		blockCount++ // increment the number of blocks seen to check against the max number of blocks to iterate over
 		blockNum := block.(map[string]interface{})["number"].(string)
-		_, numFound, foundErr := txHashInBlock(methodSub.Client, hashmap, blockNum, txToBlock)
+		_, numFound, foundErr := txHashInBlock(methodSub.Client, hashmap, blockNum, txToBlock, logger)
 		if foundErr != nil {
 			return nil, fmt.Errorf("failed to find hash in block with number %q: %v", foundErr, blockNum)
 		}
 		toFind -= numFound // remove the amount of found txs from the amount we're looking for
 		if toFind == 0 {   // this means we have found all the txs we're looking for
-			fmt.Printf("All the transactions created have been mined\n")
+			logger.Info("All the transactions created have been included in blocks")
 			return &txToBlock, nil
 		}
 		if blockCount == models.MaxNumberOfBlockChecks {

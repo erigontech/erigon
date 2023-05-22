@@ -1,8 +1,6 @@
 package commands
 
 import (
-	"fmt"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
@@ -15,18 +13,18 @@ const (
 )
 
 func callGetBalance(addr string, blockNum models.BlockNumber, checkBal uint64, logger log.Logger) {
-	fmt.Printf("Getting balance for address: %q...\n", addr)
+	logger.Info("Getting balance", "addeess", addr)
 	address := libcommon.HexToAddress(addr)
 	bal, err := requests.GetBalance(models.ReqId, address, blockNum, logger)
 	if err != nil {
-		fmt.Printf("FAILURE => %v\n", err)
+		logger.Error("FAILURE", "error", err)
 		return
 	}
 
 	if checkBal > 0 && checkBal != bal {
-		fmt.Printf("FAILURE => Balance should be %d, got %d\n", checkBal, bal)
+		logger.Error("FAILURE => Balance mismatch", "expected", checkBal, "got", bal)
 		return
 	}
 
-	fmt.Printf("SUCCESS => Balance: %d\n", bal)
+	logger.Info("SUCCESS", "balance", bal)
 }
