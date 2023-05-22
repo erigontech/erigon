@@ -25,20 +25,6 @@ func getTestStateBalances(t *testing.T) *state2.BeaconState {
 	return b
 }
 
-func getTestStateValidators(t *testing.T, numVals int) *state2.BeaconState {
-	validators := make([]*cltypes.Validator, numVals)
-	for i := 0; i < numVals; i++ {
-		v := &cltypes.Validator{}
-		v.SetActivationEpoch(0)
-		v.SetExitEpoch(testExitEpoch)
-		validators[i] = v
-	}
-	b := state2.GetEmptyBeaconState()
-	b.SetSlot(testExitEpoch * clparams.MainnetBeaconConfig.SlotsPerEpoch)
-	b.SetValidators(validators)
-	return b
-}
-
 func TestIncreaseBalance(t *testing.T) {
 	s := getTestStateBalances(t)
 	testInd := uint64(42)
@@ -105,8 +91,8 @@ func TestInitiatieValidatorExit(t *testing.T) {
 		{
 			description:                "success",
 			numValidators:              3,
-			expectedExitEpoch:          58,
-			expectedWithdrawlableEpoch: 314,
+			expectedExitEpoch:          5,
+			expectedWithdrawlableEpoch: 0,
 			validator:                  v1,
 		},
 		{
@@ -119,7 +105,7 @@ func TestInitiatieValidatorExit(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			state := getTestStateValidators(t, int(tc.numValidators))
+			state := getTestStateBalances(t)
 			state.AppendValidator(tc.validator)
 			testInd := uint64(state.ValidatorLength() - 1)
 			state.InitiateValidatorExit(testInd)

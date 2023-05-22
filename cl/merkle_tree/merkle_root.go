@@ -24,7 +24,7 @@ func HashTreeRoot(schema ...interface{}) ([32]byte, error) {
 			binary.LittleEndian.PutUint64(leaves[pos:], *obj)
 		case []byte:
 			if len(obj) < length.Hash {
-				copy(leaves[pos:], obj[:])
+				copy(leaves[pos:], obj)
 			} else {
 				root, err := BytesRoot(obj)
 				if err != nil {

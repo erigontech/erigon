@@ -55,7 +55,7 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 	})
 	dst.version = b.version
 	// Now sync internals
-	copy(dst.leaves[:], b.leaves[:])
+	copy(dst.leaves, b.leaves)
 	dst.touchedLeaves = make(map[StateLeafIndex]bool)
 	for leafIndex, touchedVal := range b.touchedLeaves {
 		dst.touchedLeaves[leafIndex] = touchedVal

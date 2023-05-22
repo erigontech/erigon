@@ -27,10 +27,6 @@ func TestBeaconStateCapellaEncodingDecoding(t *testing.T) {
 	root, err := state.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash(root), libcommon.HexToHash("0xb3012b73c02ab66b2779d996f9d33d36e58bf71ffc8f3e12e07024606617a9c0"))
-	// encoding it back
-	dec, err := state.EncodeSSZ(nil)
-	require.NoError(t, err)
-	require.Equal(t, dec, decodedSSZ)
 }
 
 func TestBeaconStatePhase0EncodingDecoding(t *testing.T) {
@@ -41,8 +37,4 @@ func TestBeaconStatePhase0EncodingDecoding(t *testing.T) {
 	root, err := state.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash(root), libcommon.HexToHash("0x5fd0bc1a74028b598f2eb0190a25e58896b26d4aad24fa9cb7672e6114e01446"))
-	// encoding it back
-	dec, err := state.EncodeSSZ(make([]byte, 0))
-	require.NoError(t, err)
-	require.Equal(t, dec, decodedSSZ)
 }

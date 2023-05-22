@@ -179,9 +179,9 @@ func TestIntersectionOfSortedSets(t *testing.T) {
 func TestTransactionsSSZ(t *testing.T) {
 	// Create sample transactions
 	transactions := [][]byte{
-		[]byte{1, 2, 3},
-		[]byte{4, 5, 6},
-		[]byte{7, 8, 9},
+		{1, 2, 3},
+		{4, 5, 6},
+		{7, 8, 9},
 	}
 
 	// Test NewTransactionsSSZFromTransactions

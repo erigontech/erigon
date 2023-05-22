@@ -900,14 +900,14 @@ func (b *BeaconChainConfig) Eth1DataVotesLength() uint64 {
 // attestation list for the previous epoch, computed from the parameters in
 // BeaconChainConfig.
 func (b *BeaconChainConfig) PreviousEpochAttestationsLength() uint64 {
-	return uint64(b.SlotsPerEpoch * b.MaxAttestations)
+	return b.SlotsPerEpoch * b.MaxAttestations
 }
 
 // CurrentEpochAttestationsLength returns the maximum length of the pending
 // attestation list for the current epoch, computed from the parameters in
 // BeaconChainConfig.
 func (b *BeaconChainConfig) CurrentEpochAttestationsLength() uint64 {
-	return uint64(b.SlotsPerEpoch * b.MaxAttestations)
+	return b.SlotsPerEpoch * b.MaxAttestations
 }
 
 func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {

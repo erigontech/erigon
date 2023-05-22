@@ -28,7 +28,7 @@ func (d *DepositData) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (d *DepositData) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.Decode(buf[:], version, d.PubKey[:], d.WithdrawalCredentials[:], &d.Amount, d.Signature[:])
+	return ssz2.Decode(buf, version, d.PubKey[:], d.WithdrawalCredentials[:], &d.Amount, d.Signature[:])
 }
 
 func (d *DepositData) EncodingSizeSSZ() int {

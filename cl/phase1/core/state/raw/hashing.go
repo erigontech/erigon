@@ -16,7 +16,7 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	// 	fmt.Println(i/32, libcommon.BytesToHash(b.leaves[i:i+32]))
 	// }
 	// Pad to 32 of length
-	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves[:], out[:])
+	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves, out[:])
 	return
 }
 

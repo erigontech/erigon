@@ -53,7 +53,7 @@ func (h *hashList) Clone() clonable.Clonable {
 func (h *hashList) CopyTo(t IterableSSZ[libcommon.Hash]) {
 	tu := t.(*hashList)
 	tu.c = h.c
-	tu.l = h.c
+	tu.l = h.l
 	if len(h.u) > len(tu.u) {
 		tu.u = make([]byte, len(h.u))
 	}
