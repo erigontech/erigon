@@ -109,9 +109,9 @@ func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.
 		return nil, err
 	}
 
-	producers := make([]*valset.Validator, 0, len(span.SelectedProducers))
-	for _, producer := range span.SelectedProducers {
-		producers = append(producers, &producer)
+	producers := make([]*valset.Validator, len(span.SelectedProducers))
+	for i := range span.SelectedProducers {
+		producers[i] = &span.SelectedProducers[i]
 	}
 
 	return producers, nil
