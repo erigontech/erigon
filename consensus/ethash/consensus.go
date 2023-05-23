@@ -203,7 +203,7 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 		return fmt.Errorf("extra-data too long: %d > %d", len(header.Extra), params.MaximumExtraDataSize)
 	}
 	// Verify the header's timestamp
-	if !checkTimestamp {
+	if checkTimestamp {
 		unixNow := time.Now().Unix()
 		if header.Time > uint64(unixNow+allowedFutureBlockTimeSeconds) {
 			return consensus.ErrFutureBlock
@@ -259,7 +259,7 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 // stock Ethereum ethash engine.
 // See YP section 4.3.4. "Block Header Validity"
 func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, parent *types.Header, uncle bool, seal bool) error {
-	if err := VerifyHeaderBasics(chain, header, parent, uncle, false /*skipGasLimit*/); err != nil {
+	if err := VerifyHeaderBasics(chain, header, parent, !uncle /*checkTimestamp*/, false /*skipGasLimit*/); err != nil {
 		return err
 	}
 	// Verify the block's difficulty based on its timestamp and parent's difficulty
