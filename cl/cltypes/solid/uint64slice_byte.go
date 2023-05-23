@@ -157,9 +157,8 @@ func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
 }
 
 // EncodeSSZ encodes the slice in SSZ format. It appends the encoded data to the provided buffer and returns the result.
-func (arr *byteBasedUint64Slice) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	dst = append(buf, arr.u[:arr.l*8]...)
-	return
+func (arr *byteBasedUint64Slice) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, arr.u[:arr.l*8]...), nil
 }
 
 // DecodeSSZ decodes the slice from SSZ format. It takes a byte slice as input and updates the current slice.

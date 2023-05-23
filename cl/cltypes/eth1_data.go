@@ -26,12 +26,12 @@ func (e *Eth1Data) Equal(b *Eth1Data) bool {
 
 // MarshalSSZTo ssz marshals the Eth1Data object to a target array
 func (e *Eth1Data) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.Encode(buf, e.Root[:], e.DepositCount, e.BlockHash[:])
+	return ssz2.MarshalSSZ(buf, e.Root[:], e.DepositCount, e.BlockHash[:])
 
 }
 
 func (e *Eth1Data) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.Decode(buf, 0, e.Root[:], &e.DepositCount, e.BlockHash[:])
+	return ssz2.UnmarshalSSZ(buf, 0, e.Root[:], &e.DepositCount, e.BlockHash[:])
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the Eth1Data object

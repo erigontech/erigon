@@ -25,11 +25,11 @@ func (f *Fork) Copy() *Fork {
 }
 
 func (f *Fork) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.Encode(dst, f.PreviousVersion[:], f.CurrentVersion[:], f.Epoch)
+	return ssz2.MarshalSSZ(dst, f.PreviousVersion[:], f.CurrentVersion[:], f.Epoch)
 }
 
 func (f *Fork) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.Decode(buf, 0, f.PreviousVersion[:], f.CurrentVersion[:], &f.Epoch)
+	return ssz2.UnmarshalSSZ(buf, 0, f.PreviousVersion[:], f.CurrentVersion[:], &f.Epoch)
 
 }
 

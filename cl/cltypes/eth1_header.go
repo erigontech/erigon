@@ -73,7 +73,7 @@ func (e *Eth1Header) IsZero() bool {
 
 // EncodeSSZ encodes the header in SSZ format.
 func (h *Eth1Header) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.Encode(dst, h.getSchema()...)
+	return ssz2.MarshalSSZ(dst, h.getSchema()...)
 }
 
 // DecodeSSZ decodes given SSZ slice.
@@ -82,7 +82,7 @@ func (h *Eth1Header) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < h.EncodingSizeSSZ() {
 		return fmt.Errorf("[Eth1Header] err: %s", ssz.ErrLowBufferSize)
 	}
-	return ssz2.Decode(buf, version, h.getSchema()...)
+	return ssz2.UnmarshalSSZ(buf, version, h.getSchema()...)
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the Header object

@@ -160,12 +160,12 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	b.Transactions = &solid.TransactionsSSZ{}
 	b.Withdrawals = solid.NewStaticListSSZ[*types.Withdrawal](16, 44)
 	b.version = clparams.StateVersion(version)
-	return ssz2.Decode(buf, version, b.getSchema()...)
+	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
 }
 
 // EncodeSSZ encodes the block in SSZ format.
 func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.Encode(dst, b.getSchema()...)
+	return ssz2.MarshalSSZ(dst, b.getSchema()...)
 }
 
 // HashSSZ calculates the SSZ hash of the Eth1Block's payload header.

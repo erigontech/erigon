@@ -57,9 +57,7 @@ func (s *SyncCommittee) DecodeSSZ(buf []byte, _ int) error {
 }
 
 func (s *SyncCommittee) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	buf = append(buf, s[:]...)
-	return buf, nil
+	return append(dst, s[:]...), nil
 }
 
 func (s *SyncCommittee) Clone() clonable.Clonable {

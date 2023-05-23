@@ -11,13 +11,13 @@ type ProposerSlashing struct {
 }
 
 func (p *ProposerSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.Encode(dst, p.Header1, p.Header2)
+	return ssz2.MarshalSSZ(dst, p.Header1, p.Header2)
 }
 
 func (p *ProposerSlashing) DecodeSSZ(buf []byte, version int) error {
 	p.Header1 = new(SignedBeaconBlockHeader)
 	p.Header2 = new(SignedBeaconBlockHeader)
-	return ssz2.Decode(buf, version, p.Header1, p.Header2)
+	return ssz2.UnmarshalSSZ(buf, version, p.Header1, p.Header2)
 }
 
 func (p *ProposerSlashing) EncodingSizeSSZ() int {
@@ -34,13 +34,13 @@ type AttesterSlashing struct {
 }
 
 func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.Encode(dst, a.Attestation_1, a.Attestation_2)
+	return ssz2.MarshalSSZ(dst, a.Attestation_1, a.Attestation_2)
 }
 
 func (a *AttesterSlashing) DecodeSSZ(buf []byte, version int) error {
 	a.Attestation_1 = new(IndexedAttestation)
 	a.Attestation_2 = new(IndexedAttestation)
-	return ssz2.Decode(buf, version, a.Attestation_1, a.Attestation_2)
+	return ssz2.UnmarshalSSZ(buf, version, a.Attestation_1, a.Attestation_2)
 }
 
 func (a *AttesterSlashing) EncodingSizeSSZ() int {

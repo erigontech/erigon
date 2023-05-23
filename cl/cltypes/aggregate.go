@@ -17,12 +17,12 @@ type AggregateAndProof struct {
 }
 
 func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.Encode(dst, a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
+	return ssz2.MarshalSSZ(dst, a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
 func (a *AggregateAndProof) DecodeSSZ(buf []byte, version int) error {
 	a.Aggregate = new(solid.Attestation)
-	return ssz2.Decode(buf, version, &a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
+	return ssz2.UnmarshalSSZ(buf, version, &a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
 func (a *AggregateAndProof) EncodingSizeSSZ() int {
@@ -39,12 +39,12 @@ type SignedAggregateAndProof struct {
 }
 
 func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.Encode(dst, a.Message, a.Signature[:])
+	return ssz2.MarshalSSZ(dst, a.Message, a.Signature[:])
 }
 
 func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte, version int) error {
 	a.Message = new(AggregateAndProof)
-	return ssz2.Decode(buf, version, a.Message, a.Signature[:])
+	return ssz2.UnmarshalSSZ(buf, version, a.Message, a.Signature[:])
 }
 
 func (a *SignedAggregateAndProof) EncodingSizeSSZ() int {
@@ -82,7 +82,7 @@ func (*SyncAggregate) Static() bool {
 }
 
 func (agg *SyncAggregate) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.Decode(buf, version, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
+	return ssz2.UnmarshalSSZ(buf, version, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 }
 
 func (agg *SyncAggregate) EncodingSizeSSZ() int {

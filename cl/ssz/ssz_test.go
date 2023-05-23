@@ -23,5 +23,5 @@ func TestEncodeDecode(t *testing.T) {
 	d, err := bs.EncodeSSZ(nil)
 	require.NoError(t, err)
 	dec, _ := utils.DecompressSnappy(beaconState)
-	require.Equal(t, d, dec)
+	require.Equal(t, dec, d)
 }

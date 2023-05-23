@@ -47,7 +47,7 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 }
 
 func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.Encode(buf, b.getSchema()...)
+	return ssz2.MarshalSSZ(buf, b.getSchema()...)
 }
 
 // getSchema gives the schema for the current beacon state version according to ETH 2.0 specs.
@@ -74,7 +74,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
 		return fmt.Errorf("[BeaconState] err: %s", ssz.ErrLowBufferSize)
 	}
-	if err := ssz2.Decode(buf, version, b.getSchema()...); err != nil {
+	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err
 	}
 	// Capella

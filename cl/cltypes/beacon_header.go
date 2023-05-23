@@ -25,11 +25,11 @@ func (b *BeaconBlockHeader) Copy() *BeaconBlockHeader {
 	return &copied
 }
 func (b *BeaconBlockHeader) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.Encode(dst, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.Root[:], b.BodyRoot[:])
+	return ssz2.MarshalSSZ(dst, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.Root[:], b.BodyRoot[:])
 }
 
 func (b *BeaconBlockHeader) DecodeSSZ(buf []byte, v int) error {
-	return ssz2.Decode(buf, v, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.Root[:], b.BodyRoot[:])
+	return ssz2.UnmarshalSSZ(buf, v, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.Root[:], b.BodyRoot[:])
 }
 
 func (b *BeaconBlockHeader) HashSSZ() ([32]byte, error) {
@@ -58,12 +58,12 @@ func (b *SignedBeaconBlockHeader) Static() bool {
 }
 
 func (b *SignedBeaconBlockHeader) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.Encode(dst, b.Header, b.Signature[:])
+	return ssz2.MarshalSSZ(dst, b.Header, b.Signature[:])
 }
 
 func (b *SignedBeaconBlockHeader) DecodeSSZ(buf []byte, version int) error {
 	b.Header = new(BeaconBlockHeader)
-	return ssz2.Decode(buf, version, b.Header, b.Signature[:])
+	return ssz2.UnmarshalSSZ(buf, version, b.Header, b.Signature[:])
 
 }
 

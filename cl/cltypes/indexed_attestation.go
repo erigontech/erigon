@@ -20,7 +20,7 @@ func (i *IndexedAttestation) Static() bool {
 }
 
 func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	return ssz2.Encode(buf, i.AttestingIndices, i.Data, i.Signature[:])
+	return ssz2.MarshalSSZ(buf, i.AttestingIndices, i.Data, i.Signature[:])
 }
 
 // DecodeSSZ ssz unmarshals the IndexedAttestation object
@@ -28,7 +28,7 @@ func (i *IndexedAttestation) DecodeSSZ(buf []byte, version int) error {
 	i.Data = solid.NewAttestationData()
 	i.AttestingIndices = solid.NewUint64ListSSZ(2048)
 
-	return ssz2.Decode(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
+	return ssz2.UnmarshalSSZ(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the IndexedAttestation object

@@ -16,9 +16,9 @@ type Metadata struct {
 
 func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
 	if m.Syncnets == nil {
-		return ssz2.Encode(buf, m.SeqNumber, m.Attnets)
+		return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets)
 	}
-	return ssz2.Encode(buf, m.SeqNumber, m.Attnets, *m.Syncnets)
+	return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets, *m.Syncnets)
 }
 
 func (m *Metadata) EncodingSizeSSZ() (ret int) {
@@ -68,11 +68,11 @@ type BeaconBlocksByRangeRequest struct {
 }
 
 func (b *BeaconBlocksByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.Encode(buf, b.StartSlot, b.Count, b.Step)
+	return ssz2.MarshalSSZ(buf, b.StartSlot, b.Count, b.Step)
 }
 
 func (b *BeaconBlocksByRangeRequest) DecodeSSZ(buf []byte, v int) error {
-	return ssz2.Decode(buf, v, &b.StartSlot, &b.Count, &b.Step)
+	return ssz2.UnmarshalSSZ(buf, v, &b.StartSlot, &b.Count, &b.Step)
 }
 
 func (b *BeaconBlocksByRangeRequest) EncodingSizeSSZ() int {
@@ -96,11 +96,11 @@ type Status struct {
 }
 
 func (s *Status) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.Encode(buf, s.ForkDigest[:], s.FinalizedRoot[:], s.FinalizedEpoch, s.HeadRoot[:], s.HeadSlot)
+	return ssz2.MarshalSSZ(buf, s.ForkDigest[:], s.FinalizedRoot[:], s.FinalizedEpoch, s.HeadRoot[:], s.HeadSlot)
 }
 
 func (s *Status) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.Decode(buf, version, s.ForkDigest[:], s.FinalizedRoot[:], &s.FinalizedEpoch, s.HeadRoot[:], &s.HeadSlot)
+	return ssz2.UnmarshalSSZ(buf, version, s.ForkDigest[:], s.FinalizedRoot[:], &s.FinalizedEpoch, s.HeadRoot[:], &s.HeadSlot)
 }
 
 func (s *Status) EncodingSizeSSZ() int {

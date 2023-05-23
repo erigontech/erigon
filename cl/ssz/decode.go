@@ -33,7 +33,7 @@ The Decode function is used to decode an SSZ-encoded byte slice into the specifi
 types such as uint64, []byte, and objects that implement the SizedObjectSSZ interface.
 It handles both static (fixed size) and dynamic (variable size) objects based on their respective decoding methods and offsets.
 */
-func Decode(buf []byte, version int, schema ...interface{}) (err error) {
+func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 	position := 0
 	offsets := []int{}
 	dynamicObjs := []SizedObjectSSZ{}

@@ -14,11 +14,11 @@ type HistoricalSummary struct {
 }
 
 func (h *HistoricalSummary) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.Encode(h.BlockSummaryRoot[:], h.StateSummaryRoot[:])
+	return ssz2.MarshalSSZ(buf, h.BlockSummaryRoot[:], h.StateSummaryRoot[:])
 }
 
 func (h *HistoricalSummary) DecodeSSZ(buf []byte, _ int) error {
-	return ssz2.Decode(buf, 0, h.BlockSummaryRoot[:], h.StateSummaryRoot[:])
+	return ssz2.UnmarshalSSZ(buf, 0, h.BlockSummaryRoot[:], h.StateSummaryRoot[:])
 }
 
 func (h *HistoricalSummary) HashSSZ() ([32]byte, error) {

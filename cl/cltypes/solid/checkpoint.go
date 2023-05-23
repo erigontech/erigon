@@ -70,9 +70,7 @@ func (c Checkpoint) DecodeSSZ(buf []byte, _ int) error {
 
 // EncodeSSZ encodes the Checkpoint object into SSZ format.
 func (c Checkpoint) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	buf = append(buf, c[:]...)
-	return buf, nil
+	return append(dst, c[:]...), nil
 }
 
 // Clone returns a new Checkpoint object that is a copy of the current object.

@@ -26,7 +26,7 @@ func (b *KZGCommitment) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (b *KZGCommitment) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.Decode(buf, version, b[:])
+	return ssz2.UnmarshalSSZ(buf, version, b[:])
 }
 
 func (b *KZGCommitment) EncodingSizeSSZ() int {

@@ -96,7 +96,7 @@ func (b *BeaconBlock) Version() clparams.StateVersion {
 }
 
 func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.Encode(dst, b.getSchema()...)
+	return ssz2.MarshalSSZ(dst, b.getSchema()...)
 }
 
 func (b *BeaconBody) EncodingSizeSSZ() (size int) {
@@ -161,7 +161,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
 	}
 
-	return ssz2.Decode(buf, version, b.getSchema()...)
+	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
 }
 
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {
@@ -186,7 +186,7 @@ func (b *BeaconBody) getSchema() []interface{} {
 }
 
 func (b *BeaconBlock) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	return ssz2.Encode(buf, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+	return ssz2.MarshalSSZ(buf, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
 
 func (b *BeaconBlock) EncodingSizeSSZ() int {
@@ -198,7 +198,7 @@ func (b *BeaconBlock) EncodingSizeSSZ() int {
 
 func (b *BeaconBlock) DecodeSSZ(buf []byte, version int) error {
 	b.Body = new(BeaconBody)
-	return ssz2.Decode(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+	return ssz2.UnmarshalSSZ(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
 
 func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
@@ -206,7 +206,7 @@ func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
 }
 
 func (b *SignedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.Encode(buf, b.Block, b.Signature[:])
+	return ssz2.MarshalSSZ(buf, b.Block, b.Signature[:])
 }
 
 func (b *SignedBeaconBlock) EncodingSizeSSZ() int {
@@ -218,7 +218,7 @@ func (b *SignedBeaconBlock) EncodingSizeSSZ() int {
 
 func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
 	b.Block = new(BeaconBlock)
-	return ssz2.Decode(buf, s, b.Block, b.Signature[:])
+	return ssz2.UnmarshalSSZ(buf, s, b.Block, b.Signature[:])
 }
 
 func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {

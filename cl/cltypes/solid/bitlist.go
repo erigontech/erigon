@@ -145,9 +145,7 @@ func (arr *BitList) getBaseHash(xs []byte, depth uint8) error {
 // EncodeSSZ appends the underlying byte slice of the BitList to the destination byte slice.
 // It returns the resulting byte slice.
 func (u *BitList) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	buf = append(buf, u.u[:u.l]...)
-	return buf, nil
+	return append(dst, u.u[:u.l]...), nil
 }
 
 // DecodeSSZ replaces the underlying byte slice of the BitList with a copy of the input byte slice.

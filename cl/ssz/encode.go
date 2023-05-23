@@ -51,8 +51,7 @@ The Encode function is used to encode objects into an SSZ-encoded byte slice bas
 It supports encoding of various types such as uint64, []byte, and objects that implement the SizedObjectSSZ interface.
 It handles both static (fixed size) and dynamic (variable size) objects, including the calculation and placement of offsets for dynamic objects.
 */
-
-func Encode(buf []byte, schema ...interface{}) (dst []byte, err error) {
+func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 	dst = buf
 	currentOffset := 0
 	dynamicComponents := []SizedObjectSSZ{}
