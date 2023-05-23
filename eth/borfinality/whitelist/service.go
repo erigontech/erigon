@@ -25,20 +25,20 @@ type Service struct {
 	milestoneService
 }
 
-var Ws *Service
+var ws *Service
 
 func RegisterService(db kv.RwDB) error {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
-	Ws = NewService(tx)
+	ws = NewService(tx)
 
 	return nil
 }
 
 func GetWhitelistingService() *Service {
-	return Ws
+	return ws
 }
 
 func NewService(tx kv.RwTx) *Service {

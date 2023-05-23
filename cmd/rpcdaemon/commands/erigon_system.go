@@ -52,11 +52,6 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 		rpcBlockNum = *rpcBlockNumPtr
 	}
 
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		return 0, err
-	}
-
 	var blockNum uint64
 	switch rpcBlockNum {
 	case rpc.LatestBlockNumber:
@@ -72,7 +67,7 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 			return 0, err
 		}
 	case rpc.FinalizedBlockNumber:
-		if chainConfig.Bor != nil {
+		if borwhitelist.GetWhitelistingService() != nil {
 			num, err := borfinality.GetFinalizedBlockNumber(tx)
 			if err != nil {
 				return 0, err

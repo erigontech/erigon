@@ -526,7 +526,6 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		}
 		if !link.verified {
 			borFinality, borReorg := validateReorg(link.header)
-			fmt.Println(borFinality, "  -----  ", borReorg)
 			if err := hd.VerifyHeader(link.header); err != nil || !borFinality || borReorg != nil {
 				hd.badPoSHeaders[link.hash] = link.header.ParentHash
 				if errors.Is(err, consensus.ErrFutureBlock) {
