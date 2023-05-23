@@ -197,13 +197,13 @@ func (ethash *Ethash) VerifyUncle(chain consensus.ChainHeaderReader, header *typ
 	return ethash.verifyHeader(chain, uncle, ancestors[uncle.ParentHash], true, seal)
 }
 
-func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types.Header, uncle bool) error {
+func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types.Header, checkTimestamp, skipGasLimit bool) error {
 	// Ensure that the header's extra-data section is of a reasonable size
 	if uint64(len(header.Extra)) > params.MaximumExtraDataSize {
 		return fmt.Errorf("extra-data too long: %d > %d", len(header.Extra), params.MaximumExtraDataSize)
 	}
 	// Verify the header's timestamp
-	if !uncle {
+	if !checkTimestamp {
 		unixNow := time.Now().Unix()
 		if header.Time > uint64(unixNow+allowedFutureBlockTimeSeconds) {
 			return consensus.ErrFutureBlock
@@ -226,10 +226,12 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 		if header.BaseFee != nil {
 			return fmt.Errorf("invalid baseFee before fork: have %d, expected 'nil'", header.BaseFee)
 		}
-		if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
-			return err
+		if !skipGasLimit {
+			if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
+				return err
+			}
 		}
-	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
+	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header, skipGasLimit); err != nil {
 		// Verify the header's EIP-1559 attributes.
 		return err
 	}
@@ -257,7 +259,7 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 // stock Ethereum ethash engine.
 // See YP section 4.3.4. "Block Header Validity"
 func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, parent *types.Header, uncle bool, seal bool) error {
-	if err := VerifyHeaderBasics(chain, header, parent, uncle); err != nil {
+	if err := VerifyHeaderBasics(chain, header, parent, uncle, false /*skipGasLimit*/); err != nil {
 		return err
 	}
 	// Verify the block's difficulty based on its timestamp and parent's difficulty
