@@ -67,7 +67,16 @@ func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash libcommo
 }
 
 // StageLoop runs the continuous loop of staged sync
-func StageLoop(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, hd *headerdownload.HeaderDownload, notifications *shards.Notifications, waitForDone chan struct{}, loopMinTime time.Duration, logger log.Logger, blockSnapshots *snapshotsync.RoSnapshots, hook *Hook) {
+func StageLoop(ctx context.Context,
+	db kv.RwDB,
+	sync *stagedsync.Sync,
+	hd *headerdownload.HeaderDownload,
+	waitForDone chan struct{},
+	loopMinTime time.Duration,
+	logger log.Logger,
+	blockSnapshots *snapshotsync.RoSnapshots,
+	hook *Hook,
+) {
 	defer close(waitForDone)
 	initialCycle := true
 

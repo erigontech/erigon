@@ -1051,8 +1051,8 @@ func (s *Ethereum) Start() error {
 	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
-	notifyF := stages2.NotifyFunc(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, s.sentriesClient.UpdateHead)
-	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.notifications, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, nil, notifyF)
+	hook := stages2.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, s.sentriesClient.UpdateHead)
+	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, nil, hook)
 
 	return nil
 }
