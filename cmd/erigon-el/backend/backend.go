@@ -16,7 +16,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
@@ -60,6 +59,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
@@ -656,7 +656,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, backend.unsubscribeEthstat = backend.notifications.Events.AddHeaderSubscription()
-		if err := ethstats.New(stack, backend.sentryServers, chainKv, backend.engine, config.Ethstats, backend.networkID, ctx.Done(), headCh); err != nil {
+		if err := ethstats.New(stack, backend.sentryServers, chainKv, backend.blockReader, backend.engine, config.Ethstats, backend.networkID, ctx.Done(), headCh); err != nil {
 			return nil, err
 		}
 	}
