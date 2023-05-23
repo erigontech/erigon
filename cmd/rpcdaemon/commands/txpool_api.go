@@ -51,9 +51,9 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	baseFee := make(map[libcommon.Address][]types.Transaction, 8)
 	queued := make(map[libcommon.Address][]types.Transaction, 8)
 	for i := range reply.Txs {
-		txn, err := types.DecodeTransaction(reply.Txs[i].RlpTx)
+		txn, err := types.DecodeWrappedTransaction(reply.Txs[i].RlpTx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decoding transaction from: %x: %w", reply.Txs[i].RlpTx, err)
 		}
 		addr := gointerfaces.ConvertH160toAddress(reply.Txs[i].Sender)
 		switch reply.Txs[i].TxnType {

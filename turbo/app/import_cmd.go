@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -153,7 +154,8 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 			return fmt.Errorf("interrupted")
 		}
 
-		missing := missingBlocks(chainDB, blocks[:i])
+		br, _ := ethereum.BlockIO()
+		missing := missingBlocks(chainDB, blocks[:i], br)
 		if len(missing) == 0 {
 			logger.Info("Skipping batch as all blocks present", "batch", batch, "first", blocks[0].Hash(), "last", blocks[i-1].Hash())
 			continue
@@ -183,13 +185,11 @@ func ChainHasBlock(chainDB kv.RwDB, block *types.Block) bool {
 	return chainHasBlock
 }
 
-func missingBlocks(chainDB kv.RwDB, blocks []*types.Block) []*types.Block {
+func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.FullBlockReader) []*types.Block {
 	var headBlock *types.Block
 	chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
-		hash := rawdb.ReadHeadHeaderHash(tx)
-		number := rawdb.ReadHeaderNumber(tx, hash)
-		headBlock = rawdb.ReadBlock(tx, hash, *number)
-		return nil
+		headBlock, err = blockReader.CurrentBlock(tx)
+		return err
 	})
 
 	for i, block := range blocks {
@@ -220,8 +220,8 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logge
 
 	sentryControlServer.Hd.MarkAllVerified()
 
-	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainConfig(), ethereum.ChainDB(), ethereum.StagedSync(), ethereum.Notifications(),
-		initialCycle, sentryControlServer.UpdateHead, logger, nil)
+	hook := stages.NewHook(ethereum.SentryCtx(), ethereum.Notifications(), ethereum.StagedSync(), ethereum.ChainConfig(), logger, sentryControlServer.UpdateHead)
+	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainDB(), ethereum.StagedSync(), initialCycle, logger, nil, hook)
 	if err != nil {
 		return err
 	}

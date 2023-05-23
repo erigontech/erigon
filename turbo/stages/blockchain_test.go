@@ -490,7 +490,7 @@ func TestChainTxReorgs(t *testing.T) {
 			t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
 		}
 	}
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
 
 	// added tx
 	txs = types.Transactions{pastAdd, freshAdd, futureAdd}
@@ -793,7 +793,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		require.Equal(uint64(0), found.Minimum())
 	}
 
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
 
 	if pm.TxIndex.Enabled() {
 		b, err := rawdb.ReadBlockByNumber(tx, 1)

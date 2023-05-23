@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/log/v3"
 )
 
 //Variables Naming:
@@ -472,8 +473,9 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 }
 
 // TODO: need remove `gspec` param (move SystemContractCodeLookup feature somewhere)
-func NewTestDB(tb testing.TB, ctx context.Context, dirs datadir.Dirs, gspec *types.Genesis) (histV3 bool, db kv.RwDB, agg *state.AggregatorV3) {
+func NewTestDB(tb testing.TB, ctx context.Context, dirs datadir.Dirs, gspec *types.Genesis, logger log.Logger) (histV3, txsV3 bool, db kv.RwDB, agg *state.AggregatorV3) {
 	HistoryV3 := ethconfig.EnableHistoryV3InTest
+	TxsV3 := ethconfig.EnableTxsV3InTest
 
 	if tb != nil {
 		db = memdb.NewTestDB(tb)
@@ -482,13 +484,14 @@ func NewTestDB(tb testing.TB, ctx context.Context, dirs datadir.Dirs, gspec *typ
 	}
 	_ = db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
 		_, _ = kvcfg.HistoryV3.WriteOnce(tx, HistoryV3)
+		_, _ = kvcfg.TransactionsV3.WriteOnce(tx, TxsV3)
 		return nil
 	})
 
 	if HistoryV3 {
 		var err error
 		dir.MustExist(dirs.SnapHistory)
-		agg, err = state.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
+		agg, err = state.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
 		if err != nil {
 			panic(err)
 		}
@@ -506,5 +509,5 @@ func NewTestDB(tb testing.TB, ctx context.Context, dirs datadir.Dirs, gspec *typ
 			panic(err)
 		}
 	}
-	return HistoryV3, db, agg
+	return HistoryV3, TxsV3, db, agg
 }

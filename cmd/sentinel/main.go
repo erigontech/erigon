@@ -52,7 +52,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 		NetworkConfig: cfg.NetworkCfg,
 		BeaconConfig:  cfg.BeaconCfg,
 		NoDiscovery:   cfg.NoDiscovery,
-	}, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, nil)
+	}, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, nil, log.Root())
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return err

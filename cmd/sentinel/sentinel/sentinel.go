@@ -76,6 +76,7 @@ type Sentinel struct {
 	subManager           *GossipManager
 	metrics              bool
 	listenForPeersDoneCh chan struct{}
+	logger               log.Logger
 }
 
 func (s *Sentinel) createLocalNode(
@@ -88,7 +89,7 @@ func (s *Sentinel) createLocalNode(
 	if err != nil {
 		return nil, fmt.Errorf("could not open node's peer database: %w", err)
 	}
-	localNode := enode.NewLocalNode(db, privKey)
+	localNode := enode.NewLocalNode(db, privKey, s.logger)
 
 	ipEntry := enr.IP(ipAddr)
 	udpEntry := enr.UDP(udpPort)
@@ -231,12 +232,14 @@ func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
 	db kv.RoDB,
+	logger log.Logger,
 ) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx:     ctx,
 		cfg:     cfg,
 		db:      db,
 		metrics: true,
+		logger:  logger,
 	}
 
 	// Setup discovery
@@ -299,7 +302,7 @@ func (s *Sentinel) RecvGossip() <-chan *pubsub.Message {
 
 func (s *Sentinel) Start() error {
 	if s.started {
-		log.Warn("[Sentinel] already running")
+		s.logger.Warn("[Sentinel] already running")
 	}
 	var err error
 	s.listener, err = s.createListener()

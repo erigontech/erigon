@@ -160,11 +160,11 @@ func RegenerateIntermediateHashes(logPrefix string, db kv.RwTx, cfg TrieCfg, exp
 	clean2 := kv.ReadAhead(ctx, cfg.db, &atomic.Bool{}, kv.HashedStorage, nil, math.MaxUint32)
 	defer clean2()
 
-	accTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	accTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer accTrieCollector.Close()
 	accTrieCollectorFunc := accountTrieCollector(accTrieCollector)
 
-	stTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	stTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer stTrieCollector.Close()
 	stTrieCollectorFunc := storageTrieCollector(stTrieCollector)
 
@@ -342,6 +342,7 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 			ExtractStartKey: startkey,
 			Quit:            p.quitCh,
 		},
+		p.logger,
 	); err != nil {
 		return err
 	}
@@ -527,6 +528,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 			ExtractStartKey: startkey,
 			Quit:            p.quitCh,
 		},
+		p.logger,
 	); err != nil {
 		return err
 	}
@@ -598,11 +600,11 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 			return trie.EmptyRoot, err
 		}
 	}
-	accTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	accTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer accTrieCollector.Close()
 	accTrieCollectorFunc := accountTrieCollector(accTrieCollector)
 
-	stTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	stTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer stTrieCollector.Close()
 	stTrieCollectorFunc := storageTrieCollector(stTrieCollector)
 
@@ -690,11 +692,11 @@ func UnwindIntermediateHashesForTrieLoader(logPrefix string, rl *trie.RetainList
 }
 
 func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *StageState, db kv.RwTx, cfg TrieCfg, expectedRootHash libcommon.Hash, quit <-chan struct{}, logger log.Logger) error {
-	accTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	accTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer accTrieCollector.Close()
 	accTrieCollectorFunc := accountTrieCollector(accTrieCollector)
 
-	stTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	stTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer stTrieCollector.Close()
 	stTrieCollectorFunc := storageTrieCollector(stTrieCollector)
 

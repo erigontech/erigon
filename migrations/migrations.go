@@ -34,7 +34,6 @@ var migrations = map[kv.Label][]Migration{
 	kv.ChainDB: {
 		dbSchemaVersion5,
 		txsBeginEnd,
-		resetBlocks4,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},
@@ -43,7 +42,7 @@ var migrations = map[kv.Label][]Migration{
 type Callback func(tx kv.RwTx, progress []byte, isDone bool) error
 type Migration struct {
 	Name string
-	Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback) error
+	Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error
 }
 
 var (
@@ -228,7 +227,7 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
 			}
 
 			return nil
-		}); err != nil {
+		}, logger); err != nil {
 			return fmt.Errorf("migrator.Apply.Up: %s, %w", v.Name, err)
 		}
 

@@ -23,7 +23,7 @@ import (
 
 func TestEthSubscribe(t *testing.T) {
 	m, require := stages.Mock(t), require.New(t)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 7, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
@@ -53,7 +53,9 @@ func TestEthSubscribe(t *testing.T) {
 
 	initialCycle := true
 	highestSeenHeader := chain.TopBlock.NumberU64()
-	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead, logger, nil); err != nil {
+
+	hook := stages.NewHook(m.Ctx, m.Notifications, m.Sync, m.ChainConfig, m.Log, m.UpdateHead)
+	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, logger, nil, hook); err != nil {
 		t.Fatal(err)
 	}
 

@@ -28,14 +28,16 @@ type SentinelServer struct {
 	sentinel       *sentinel.Sentinel
 	gossipNotifier *gossipNotifier
 
-	mu sync.RWMutex
+	mu     sync.RWMutex
+	logger log.Logger
 }
 
-func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel) *SentinelServer {
+func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.Logger) *SentinelServer {
 	return &SentinelServer{
 		sentinel:       sentinel,
 		ctx:            ctx,
 		gossipNotifier: newGossipNotifier(),
+		logger:         logger,
 	}
 }
 
@@ -121,7 +123,7 @@ func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sen
 				},
 				BlobIndex: packet.blobIndex,
 			}); err != nil {
-				log.Warn("[Sentinel] Could not relay gossip packet", "reason", err)
+				s.logger.Warn("[Sentinel] Could not relay gossip packet", "reason", err)
 			}
 		}
 	}
@@ -256,7 +258,7 @@ func (s *SentinelServer) startServerBackgroundLoop() {
 			peers := s.sentinel.PeersList()
 			s.sentinel.Stop()
 			status := s.sentinel.Status()
-			s.sentinel, err = createSentinel(s.sentinel.Config(), s.sentinel.DB())
+			s.sentinel, err = createSentinel(s.sentinel.Config(), s.sentinel.DB(), s.logger)
 			if err != nil {
 				log.Warn("Could not coordinate sentinel", "err", err)
 				continue
@@ -274,7 +276,7 @@ func (s *SentinelServer) startServerBackgroundLoop() {
 
 func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
 	var err error
-	log.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.Topic)
+	s.logger.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.Topic)
 	data := pkt.GetData()
 
 	// If we use snappy codec then decompress it accordingly.

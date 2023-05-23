@@ -91,7 +91,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
 		HeadSlot:       state.FinalizedCheckpoint().Epoch() * cfg.BeaconCfg.SlotsPerEpoch,
 		HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
-	})
+	}, log.Root())
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 	}
