@@ -813,6 +813,7 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	br, bw := blocksIO(db, logger)
 	if reset {
+		_, bw := blocksIO(db, logger)
 		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, db, tx, bw) })
 	}
 
@@ -875,7 +876,8 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, blockRetire, bw, nil)
+	_, bw := blocksIO(db, logger)
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, blockRetire, bw, bw, nil)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {

@@ -11,20 +11,20 @@ import (
 // ExecuteAllMethods runs all the simulation tests for erigon devnet
 func ExecuteAllMethods(logger log.Logger) {
 	// test connection to JSON RPC
-	fmt.Printf("\nPINGING JSON RPC...\n")
+	logger.Info("PINGING JSON RPC...")
 	if err := pingErigonRpc(logger); err != nil {
 		return
 	}
-	fmt.Println()
+	logger.Info("")
 
 	// get balance of the receiver's account
 	callGetBalance(addr, models.Latest, 0, logger)
-	fmt.Println()
+	logger.Info("")
 
 	// confirm that the txpool is empty
-	fmt.Println("CONFIRMING TXPOOL IS EMPTY BEFORE SENDING TRANSACTION...")
+	logger.Info("CONFIRMING TXPOOL IS EMPTY BEFORE SENDING TRANSACTION...")
 	services.CheckTxPoolContent(0, 0, 0, logger)
-	fmt.Println()
+	logger.Info("")
 
 	/*
 	* Cannot run contract tx after running regular tx because contract tx simulates a new backend
@@ -42,7 +42,7 @@ func ExecuteAllMethods(logger log.Logger) {
 
 	_, err := callSendTxWithDynamicFee(recipientAddress, models.DevAddress, logger)
 	if err != nil {
-		fmt.Printf("callSendTxWithDynamicFee error: %v\n", err)
+		logger.Error("callSendTxWithDynamicFee", "error", err)
 		return
 	}
 	fmt.Println()
@@ -56,6 +56,6 @@ func ExecuteAllMethods(logger log.Logger) {
 	//}
 	//fmt.Println()
 
-	fmt.Print("SEND SIGNAL TO QUIT ALL RUNNING NODES")
+	logger.Info("SEND SIGNAL TO QUIT ALL RUNNING NODES")
 	models.QuitNodeChan <- true
 }

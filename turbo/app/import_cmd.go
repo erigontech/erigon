@@ -220,9 +220,8 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logge
 
 	sentryControlServer.Hd.MarkAllVerified()
 
-	notifyF := stages.NotifyFunc(ethereum.SentryCtx(), ethereum.Notifications(), ethereum.StagedSync(), ethereum.ChainConfig(), logger, sentryControlServer.UpdateHead)
-	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainConfig(), ethereum.ChainDB(), ethereum.StagedSync(), ethereum.Notifications(),
-		initialCycle, sentryControlServer.UpdateHead, logger, nil, notifyF)
+	hook := stages.NewHook(ethereum.SentryCtx(), ethereum.Notifications(), ethereum.StagedSync(), ethereum.ChainConfig(), logger, sentryControlServer.UpdateHead)
+	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainDB(), ethereum.StagedSync(), initialCycle, logger, nil, hook)
 	if err != nil {
 		return err
 	}

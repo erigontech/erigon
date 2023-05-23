@@ -54,8 +54,8 @@ func TestEthSubscribe(t *testing.T) {
 	initialCycle := true
 	highestSeenHeader := chain.TopBlock.NumberU64()
 
-	notifyF := stages.NotifyFunc(m.Ctx, m.Notifications, m.Sync, m.ChainConfig, logger, m.UpdateHead)
-	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead, logger, nil, notifyF); err != nil {
+	hook := stages.NewHook(m.Ctx, m.Notifications, m.Sync, m.ChainConfig, m.Log, m.UpdateHead)
+	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, logger, nil, hook); err != nil {
 		t.Fatal(err)
 	}
 

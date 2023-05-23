@@ -63,15 +63,15 @@ type FullBlockReader interface {
 /*
 type HeaderWriter interface {
 	WriteHeader(tx kv.RwTx, header *types.Header) error
-	WriteHeaderRaw(tx kv.StatelessRwTx, number uint64, hash common.Hash, headerRlp []byte, skipIndexing bool) error
-	WriteCanonicalHash(tx kv.RwTx, hash common.Hash, number uint64) error
-	WriteTd(db kv.Putter, hash common.Hash, number uint64, td *big.Int) error
+	WriteHeaderRaw(tx kv.StatelessRwTx, number uint64, hash libcommon.Hash, headerRlp []byte, skipIndexing bool) error
+	WriteCanonicalHash(tx kv.RwTx, hash libcommon.Hash, number uint64) error
+	WriteTd(db kv.Putter, hash libcommon.Hash, number uint64, td *big.Int) error
 	// [from,to)
 	FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir string, from, to uint64, ctx context.Context, logger log.Logger) error
 }
 type BlockWriter interface {
 	HeaderWriter
-	WriteRawBodyIfNotExists(tx kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnNum uint64, err error)
-	WriteBody(tx kv.RwTx, hash common.Hash, number uint64, body *types.Body) error
+	WriteRawBodyIfNotExists(tx kv.RwTx, hash libcommon.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnNum uint64, err error)
+	WriteBody(tx kv.RwTx, hash libcommon.Hash, number uint64, body *types.Body) error
 }
 */

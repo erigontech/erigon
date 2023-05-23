@@ -366,7 +366,6 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash l
 			}
 			return block, senders, nil
 		}
-
 		canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 		if err != nil {
 			return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)

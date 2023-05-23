@@ -301,6 +301,7 @@ func WriteHeader(db kv.RwTx, header *types.Header, txsV3 bool) error {
 		hash      = header.Hash()
 		number    = header.Number.Uint64()
 		headerKey = dbutils.HeaderKey(number, hash)
+		headerKey = dbutils.HeaderKey(number, hash)
 	)
 	if txsV3 {
 		id, err := db.IncrementSequence(kv.BlockID, 1)
