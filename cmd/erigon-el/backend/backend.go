@@ -405,8 +405,8 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 
 	var currentBlock *types.Block
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
-		currentBlock = backend.blockReader.CurrentBlock(tx)
-		return nil
+		currentBlock, err = backend.blockReader.CurrentBlock(tx)
+		return err
 	}); err != nil {
 		panic(err)
 	}
