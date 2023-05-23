@@ -22,6 +22,24 @@ type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
 }
 
+func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) *types.Block {
+	panic("not implemented")
+}
+func (r *RemoteBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
+	panic("not implemented")
+}
+func (r *RemoteBlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
+	hash, err := rawdb.ReadCanonicalHash(db, number)
+	if err != nil {
+		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+	}
+	if hash == (libcommon.Hash{}) {
+		return nil, nil
+	}
+	block, _, err := r.BlockWithSenders(ctx, db, hash, number)
+	return block, err
+}
+
 func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
 	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 	if err != nil {
@@ -341,6 +359,13 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash libcommon.Has
 
 func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error) {
 	if blockHeight >= r.sn.BlocksAvailable() {
+		if r.TransactionsV3 {
+			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+			if err != nil {
+				return nil, nil, err
+			}
+			return block, senders, nil
+		}
 		canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 		if err != nil {
 			return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
@@ -738,3 +763,26 @@ func (r *BlockReader) IterateBodies(f func(blockNum, baseTxNum, txAmount uint64)
 	return nil
 }
 func (r *BlockReader) TxsV3Enabled() bool { return r.TransactionsV3 }
+func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
+	hash, err := rawdb.ReadCanonicalHash(db, number)
+	if err != nil {
+		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+	}
+	if hash == (libcommon.Hash{}) {
+		return nil, nil
+	}
+	block, _, err := r.BlockWithSenders(ctx, db, hash, number)
+	return block, err
+}
+func (r *BlockReader) CurrentBlock(db kv.Tx) *types.Block {
+	headHash := rawdb.ReadHeadBlockHash(db)
+	headNumber := rawdb.ReadHeaderNumber(db, headHash)
+	if headNumber == nil {
+		return nil
+	}
+	block, _, _ := r.BlockWithSenders(context.Background(), db, headHash, *headNumber)
+	return block
+}
+func (r *BlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
+	return rawdb.RawTransactionsRange(tx, fromBlock, toBlock)
+}
