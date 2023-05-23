@@ -4,4 +4,4 @@ package ethconfig
 
 const EnableHistoryV3InTest = true
 const EnableHistoryV4InTest = true
-const EnableTransactionsV3InTest = false
+const EnableTxsV3InTest = false

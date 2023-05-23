@@ -232,8 +232,9 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	logger := log.New()
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	histV3, db, agg := temporal.NewTestDB(tb, ctx, dirs, gspec, logger)
+	histV3, txsV3, db, agg := temporal.NewTestDB(tb, ctx, dirs, gspec, logger)
 	cfg.HistoryV3 = histV3
+	cfg.TransactionsV3 = txsV3
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, logger)
 	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger)
