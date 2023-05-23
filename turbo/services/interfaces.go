@@ -15,7 +15,8 @@ type All struct {
 
 type BlockReader interface {
 	BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error)
-	CurrentBlock(db kv.Tx) *types.Block
+	BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error)
+	CurrentBlock(db kv.Tx) (*types.Block, error)
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
 	TxsV3Enabled() bool
 }

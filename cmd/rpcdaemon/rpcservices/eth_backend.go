@@ -45,7 +45,7 @@ func NewRemoteBackend(client remote.ETHBACKENDClient, db kv.RoDB, blockReader se
 	}
 }
 
-func (back *RemoteBackend) CurrentBlock(db kv.Tx) *types.Block {
+func (back *RemoteBackend) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	panic("not implemented")
 }
 func (back *RemoteBackend) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
@@ -60,6 +60,14 @@ func (back *RemoteBackend) BlockByNumber(ctx context.Context, db kv.Tx, number u
 		return nil, nil
 	}
 	block, _, err := back.BlockWithSenders(ctx, db, hash, number)
+	return block, err
+}
+func (r *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash libcommon.Hash) (*types.Block, error) {
+	number := rawdb.ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil, nil
+	}
+	block, _, err := r.BlockWithSenders(ctx, db, hash, *number)
 	return block, err
 }
 func (back *RemoteBackend) TxsV3Enabled() bool {
