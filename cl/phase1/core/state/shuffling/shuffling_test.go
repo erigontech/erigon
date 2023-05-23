@@ -26,7 +26,7 @@ func BenchmarkLambdaShuffledIndex(b *testing.B) {
 
 // Faster by ~40%, the effects of it will be felt mostly on computation of the proposer index.
 func BenchmarkErigonShuffledIndex(b *testing.B) {
-	s := state.GetEmptyBeaconState()
+	s := state.New(&clparams.MainnetBeaconConfig)
 	keccakOptimized := utils.OptimizedKeccak256NotThreadSafe()
 
 	seed := [32]byte{2, 35, 6}

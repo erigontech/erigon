@@ -9,9 +9,3 @@ const (
 	RandaoMixesLength       = 65536
 	SlashingsLength         = 8192
 )
-
-func ValidatorLimitForBalancesChunks() uint64 {
-	maxValidatorLimit := uint64(ValidatorRegistryLimit)
-	bytesInUint64 := uint64(8)
-	return (maxValidatorLimit*bytesInUint64 + 31) / 32 // round to nearest chunk
-}

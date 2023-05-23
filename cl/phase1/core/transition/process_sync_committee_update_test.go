@@ -19,7 +19,7 @@ func TestProcessSyncCommittee(t *testing.T) {
 	var pk [48]byte
 	copy(pk[:], pkBytes)
 	validatorNum := 10_000
-	state := state.GetEmptyBeaconState()
+	state := state.New(&clparams.MainnetBeaconConfig)
 	currentCommittee := &solid.SyncCommittee{}
 	nextCommittee := &solid.SyncCommittee{}
 	for i := 0; i < validatorNum; i++ {

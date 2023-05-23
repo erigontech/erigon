@@ -23,5 +23,4 @@ func TestBlockProcessingDeneb(t *testing.T) {
 	block := &cltypes.SignedBeaconBlock{}
 	require.NoError(t, utils.DecodeSSZSnappy(block, denebBlock, int(clparams.DenebVersion)))
 	require.NoError(t, TransitionState(state, block, true)) // All checks already made in transition state
-
 }

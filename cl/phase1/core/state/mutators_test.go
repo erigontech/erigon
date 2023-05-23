@@ -16,7 +16,7 @@ const (
 
 func getTestStateBalances(t *testing.T) *state2.BeaconState {
 	numVals := uint64(2048)
-	b := state2.GetEmptyBeaconState()
+	b := state2.New(&clparams.MainnetBeaconConfig)
 	for i := uint64(0); i < numVals; i++ {
 		v := &cltypes.Validator{}
 		v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
