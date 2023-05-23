@@ -60,6 +60,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
+const MockInsertAsInitialCycle = false
+
 type MockSentry struct {
 	proto_sentry.UnimplementedSentryServer
 	Ctx            context.Context
@@ -620,10 +622,10 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	}
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
-	initialCycle := false
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
+	initialCycle := MockInsertAsInitialCycle
 	hook := NewHook(ms.Ctx, ms.Notifications, ms.Sync, ms.ChainConfig, ms.Log, ms.UpdateHead)
 	if _, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, initialCycle, ms.Log, nil, hook); err != nil {
 		return err
