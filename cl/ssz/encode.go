@@ -54,7 +54,7 @@ It handles both static (fixed size) and dynamic (variable size) objects, includi
 func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 	defer func() {
 		if err2 := recover(); err2 != nil {
-			err = fmt.Errorf("panic while decoding: %v", err2)
+			err = fmt.Errorf("panic while encoding: %v", err2)
 		}
 	}()
 	dst = buf
