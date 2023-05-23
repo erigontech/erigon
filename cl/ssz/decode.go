@@ -3,6 +3,8 @@ package ssz2
 import (
 	"encoding/binary"
 	"fmt"
+
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 )
 
 /*
@@ -42,30 +44,42 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 	for i, element := range schema {
 		switch obj := element.(type) {
 		case *uint64:
+			if len(buf) < position+8 {
+				return ssz.ErrLowBufferSize
+			}
 			// If the element is a pointer to uint64, decode it from the buf using little-endian encoding
 			*obj = binary.LittleEndian.Uint64(buf[position:])
 			position += 8
 		case []byte:
+			if len(buf) < position+len(obj) {
+				return ssz.ErrLowBufferSize
+			}
 			// If the element is a byte slice, copy the corresponding data from the buf to the slice
 			copy(obj, buf[position:])
 			position += len(obj)
 		case SizedObjectSSZ:
 			// If the element implements the SizedObjectSSZ interface
 			if obj.Static() {
+				if len(buf) < position+obj.EncodingSizeSSZ() {
+					return ssz.ErrLowBufferSize
+				}
 				// If the object is static (fixed size), decode it from the buf and update the position
 				if err = obj.DecodeSSZ(buf[position:], version); err != nil {
 					return
 				}
 				position += obj.EncodingSizeSSZ()
 			} else {
+				if len(buf) < position+4 {
+					return ssz.ErrLowBufferSize
+				}
 				// If the object is dynamic (variable size), store the offset and the object in separate slices
 				offsets = append(offsets, int(binary.LittleEndian.Uint32(buf[position:])))
 				dynamicObjs = append(dynamicObjs, obj)
 				position += 4
 			}
 		default:
-			// If the element does not match any supported types, panic with an error message
-			panic(fmt.Sprintf("RTFM, bad schema component %d", i))
+			// If the element does not match any supported types, throw error
+			return fmt.Errorf("RTFM, bad schema component %d", i)
 		}
 	}
 
@@ -74,6 +88,12 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 		endOffset := len(buf)
 		if i != len(dynamicObjs)-1 {
 			endOffset = offsets[i+1]
+		}
+		if offsets[i] > endOffset {
+			return ssz.ErrBadOffset
+		}
+		if len(buf) < endOffset {
+			return ssz.ErrLowBufferSize
 		}
 		if err = obj.DecodeSSZ(buf[offsets[i]:endOffset], version); err != nil {
 			return

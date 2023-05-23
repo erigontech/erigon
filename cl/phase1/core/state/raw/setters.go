@@ -182,14 +182,6 @@ func (b *BeaconState) AddValidator(validator *cltypes.Validator, balance uint64)
 	b.markLeaf(BalancesLeafIndex)
 }
 
-func (b *BeaconState) SetBalances(balances []uint64) {
-	b.markLeaf(BalancesLeafIndex)
-	b.balances.Clear()
-	for _, v := range balances {
-		b.balances.Append(v)
-	}
-}
-
 func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {
 	b.markLeaf(RandaoMixesLeafIndex)
 	b.randaoMixes.Set(index, mix)
