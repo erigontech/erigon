@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -788,9 +787,9 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 	return link
 }
 
-func (hi *HeaderInserter) NewFeedHeaderFunc(db kv.StatelessRwTx, headerReader services.HeaderReader, chain []*types.Header, chainConfig *chain.Config) FeedHeaderFunc {
+func (hi *HeaderInserter) NewFeedHeaderFunc(db kv.StatelessRwTx, headerReader services.HeaderReader) FeedHeaderFunc {
 	return func(header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64) (*big.Int, error) {
-		return hi.FeedHeaderPoW(db, headerReader, header, headerRaw, hash, blockHeight, chain, chainConfig)
+		return hi.FeedHeaderPoW(db, headerReader, header, headerRaw, hash, blockHeight)
 	}
 }
 
@@ -847,7 +846,7 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 	return
 }
 
-func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader services.HeaderReader, header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64, chain []*types.Header, chainConfig *chain.Config) (td *big.Int, err error) {
+func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader services.HeaderReader, header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64) (td *big.Int, err error) {
 	if hash == hi.prevHash {
 		// Skip duplicates
 		return nil, nil
