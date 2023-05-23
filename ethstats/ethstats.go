@@ -511,7 +511,10 @@ func (s *Service) reportBlock(conn *connWrapper) error {
 	}
 	defer roTx.Rollback()
 
-	block := s.blockReader.CurrentBlock(roTx)
+	block, err := s.blockReader.CurrentBlock(roTx)
+	if err != nil {
+		return err
+	}
 	if block == nil {
 		return nil
 	}

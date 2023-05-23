@@ -22,8 +22,14 @@ type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
 }
 
-func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) *types.Block {
-	panic("not implemented")
+func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
+	headHash := rawdb.ReadHeadBlockHash(db)
+	headNumber := rawdb.ReadHeaderNumber(db, headHash)
+	if headNumber == nil {
+		return nil, nil
+	}
+	block, _, err := r.BlockWithSenders(context.Background(), db, headHash, *headNumber)
+	return block, err
 }
 func (r *RemoteBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	panic("not implemented")
@@ -39,7 +45,14 @@ func (r *RemoteBlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number 
 	block, _, err := r.BlockWithSenders(ctx, db, hash, number)
 	return block, err
 }
-
+func (r *RemoteBlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash libcommon.Hash) (*types.Block, error) {
+	number := rawdb.ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil, nil
+	}
+	block, _, err := r.BlockWithSenders(ctx, db, hash, *number)
+	return block, err
+}
 func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
 	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 	if err != nil {
@@ -781,14 +794,22 @@ func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64
 	block, _, err := r.BlockWithSenders(ctx, db, hash, number)
 	return block, err
 }
-func (r *BlockReader) CurrentBlock(db kv.Tx) *types.Block {
+func (r *BlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash libcommon.Hash) (*types.Block, error) {
+	number := rawdb.ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil, nil
+	}
+	block, _, err := r.BlockWithSenders(ctx, db, hash, *number)
+	return block, err
+}
+func (r *BlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
 	if headNumber == nil {
-		return nil
+		return nil, nil
 	}
-	block, _, _ := r.BlockWithSenders(context.Background(), db, headHash, *headNumber)
-	return block
+	block, _, err := r.BlockWithSenders(context.Background(), db, headHash, *headNumber)
+	return block, err
 }
 func (r *BlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	return rawdb.RawTransactionsRange(tx, fromBlock, toBlock)

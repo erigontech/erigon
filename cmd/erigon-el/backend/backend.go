@@ -187,10 +187,6 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		if err != nil {
 			return err
 		}
-		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
-		if err != nil {
-			return err
-		}
 
 		config.HistoryV3, err = kvcfg.HistoryV3.WriteOnce(tx, config.HistoryV3)
 		if err != nil {
@@ -201,14 +197,6 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		if err != nil {
 			return err
 		}
-
-		// if we are in the incorrect syncmode then we change it to the appropriate one
-		if !isCorrectSync {
-			logger.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
-			config.Sync.UseSnapshots = useSnapshots
-			config.Snapshot.Enabled = useSnapshots
-		}
-		logger.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String(), "history.v3", config.HistoryV3)
 
 		return nil
 	}); err != nil {
@@ -259,6 +247,19 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
+
+		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
+		if err != nil {
+			return err
+		}
+		// if we are in the incorrect syncmode then we change it to the appropriate one
+		if !isCorrectSync {
+			logger.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
+			config.Sync.UseSnapshots = useSnapshots
+			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
+		}
+		logger.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String(), "history.v3", config.HistoryV3)
+
 		return nil
 	}); err != nil {
 		panic(err)
@@ -404,8 +405,8 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 
 	var currentBlock *types.Block
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
-		currentBlock = backend.blockReader.CurrentBlock(tx)
-		return nil
+		currentBlock, err = backend.blockReader.CurrentBlock(tx)
+		return err
 	}); err != nil {
 		panic(err)
 	}
@@ -765,37 +766,52 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		newHeadCh, closeNewHeadCh := s.notifications.Events.AddHeaderSubscription()
 		defer closeNewHeadCh()
 
+		log.Info("Starting to mine", "etherbase", eb)
+
 		var works bool
-		var hasWork bool
+		hasWork := true // Start mining immediately
 		errc := make(chan error, 1)
 
 		for {
-			mineEvery.Reset(cfg.Recommit)
-			select {
-			case <-s.notifyMiningAboutNewTxs:
-				s.logger.Debug("Start mining new block based on txpool notif")
-				hasWork = true
-			case <-newHeadCh:
-				s.logger.Debug("Start mining new block based on new head channel")
-				hasWork = true
-			case <-mineEvery.C:
-				s.logger.Debug("Start mining new block based on miner.recommit")
-				hasWork = true
-			case err := <-errc:
-				works = false
-				hasWork = false
-				if errors.Is(err, libcommon.ErrStopped) {
+			// Only reset if some work was done previously as we'd like to rely
+			// on the `miner.recommit` as backup.
+			if hasWork {
+				mineEvery.Reset(cfg.Recommit)
+			}
+
+			// Only check for case if you're already mining (i.e. works = true) and
+			// waiting for error or you don't have any work yet (i.e. hasWork = false).
+			if works || !hasWork {
+				select {
+				case <-newHeadCh:
+					log.Debug("Start mining new block based on new head channel")
+					hasWork = true
+				case <-s.notifyMiningAboutNewTxs:
+					// Skip mining based on new tx notif for bor consensus
+					hasWork = s.chainConfig.Bor == nil
+					if hasWork {
+						log.Debug("Start mining new block based on txpool notif")
+					}
+				case <-mineEvery.C:
+					log.Debug("Start mining new block based on miner.recommit")
+					hasWork = true
+				case err := <-errc:
+					works = false
+					hasWork = false
+					if errors.Is(err, libcommon.ErrStopped) {
+						return
+					}
+					if err != nil {
+						log.Warn("mining", "err", err)
+					}
+				case <-quitCh:
 					return
 				}
-				if err != nil {
-					s.logger.Warn("mining", "err", err)
-				}
-			case <-quitCh:
-				return
 			}
 
 			if !works && hasWork {
 				works = true
+				hasWork = false
 				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir) }()
 			}
 		}
