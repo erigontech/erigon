@@ -84,8 +84,9 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 				position += 4
 			}
 		default:
-			// If the element does not match any supported types, throw error
-			return fmt.Errorf("RTFM, bad schema component %d", i)
+			// If the element does not match any supported types, throw panic, will be caught by anti-panic condom
+			// and we will have the trace.
+			panic(fmt.Errorf("RTFM, bad schema component %d", i))
 		}
 	}
 
