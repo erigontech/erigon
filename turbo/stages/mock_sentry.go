@@ -337,7 +337,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		}
 		return nil
 	}
-	forkValidator := engineapi.NewForkValidator(1, inMemoryExecution, dirs.Tmp)
+	br, _ := mock.NewBlocksIO()
+	forkValidator := engineapi.NewForkValidator(1, inMemoryExecution, dirs.Tmp, br)
 	networkID := uint64(1)
 	mock.sentriesClient, err = sentry.NewMultiClient(
 		mock.DB,
@@ -411,7 +412,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				mock.BlockSnapshots,
 				blockReader,
 				cfg.HistoryV3,
-				cfg.TransactionsV3,
+				blockWriter,
 			),
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockRetire, blockWriter, mock.sentriesClient.Hd),
 			stagedsync.StageExecuteBlocksCfg(
@@ -464,11 +465,11 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	mock.MinedBlocks = miner.MiningResultCh
 	mock.MiningSync = stagedsync.New(
 		stagedsync.MiningStages(mock.Ctx,
-			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, dirs.Tmp),
+			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, dirs.Tmp, br),
 			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, nil, mock.BlockSnapshots, cfg.TransactionsV3),
 			stagedsync.StageHashStateCfg(mock.DB, dirs, cfg.HistoryV3, mock.agg),
 			stagedsync.StageTrieCfg(mock.DB, false, true, false, dirs.Tmp, blockReader, mock.sentriesClient.Hd, cfg.HistoryV3, mock.agg),
-			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, miningCancel),
+			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, miningCancel, br),
 		),
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,
@@ -622,7 +623,8 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
-	if _, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, ms.Log, nil); err != nil {
+	notifyF := NotifyFunc(ms.Ctx, ms.Notifications, ms.Sync, ms.ChainConfig, ms.Log, ms.UpdateHead)
+	if _, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, ms.Log, nil, notifyF); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {
@@ -645,7 +647,9 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	}
 
 	initialCycle := false
-	headBlockHash, err := StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, ms.Log, nil)
+
+	notifyF := NotifyFunc(ms.Ctx, ms.Notifications, ms.Sync, ms.ChainConfig, ms.Log, ms.UpdateHead)
+	headBlockHash, err := StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, ms.Log, nil, notifyF)
 	if err != nil {
 		return err
 	}
@@ -658,7 +662,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
 	ms.SendForkChoiceRequest(&fc)
-	headBlockHash, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, ms.Log, nil)
+	headBlockHash, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, ms.Log, nil, notifyF)
 	if err != nil {
 		return err
 	}

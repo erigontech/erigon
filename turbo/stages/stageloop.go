@@ -79,6 +79,7 @@ func StageLoop(
 	loopMinTime time.Duration,
 	logger log.Logger,
 	blockSnapshots *snapshotsync.RoSnapshots,
+	notifyF NotifyF,
 ) {
 	defer close(waitForDone)
 	initialCycle := true
@@ -94,7 +95,7 @@ func StageLoop(
 		}
 
 		// Estimate the current top height seen from the peer
-		headBlockHash, err := StageLoopStep(ctx, chainConfig, db, sync, notifications, initialCycle, updateHead, logger, blockSnapshots)
+		headBlockHash, err := StageLoopStep(ctx, chainConfig, db, sync, notifications, initialCycle, updateHead, logger, blockSnapshots, notifyF)
 
 		SendPayloadStatus(hd, headBlockHash, err)
 
@@ -131,6 +132,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 	updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int),
 	logger log.Logger,
 	blockSnapshots *snapshotsync.RoSnapshots,
+	notifyF NotifyF,
 ) (headBlockHash libcommon.Hash, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -206,22 +208,59 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 	}
 
 	// -- send notifications START
-	//TODO: can this 2 headers be 1
-	var headHeader, currentHeder *types.Header
+	var head uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
-		// Update sentry status for peers to see our sync status
-		var headTd *big.Int
-		var head uint64
-		var headHash libcommon.Hash
-		var plainStateVersion uint64
+		headBlockHash = rawdb.ReadHeadBlockHash(tx)
 		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
 			return err
 		}
-		if headHash, err = rawdb.ReadCanonicalHash(tx, head); err != nil {
+		if err = notifyF(tx, finishProgressBefore); err != nil {
 			return err
 		}
+		return nil
+	}); err != nil {
+		return headBlockHash, err
+	}
+	if canRunCycleInOneTransaction && (head != finishProgressBefore || commitTime > 500*time.Millisecond) {
+		logger.Info("Commit cycle", "in", commitTime)
+	}
+	if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
+		logger.Info("Timings (slower than 50ms)", logCtx...)
+		if len(tableSizes) > 0 {
+			logger.Info("Tables", tableSizes...)
+		}
+	}
+	// -- send notifications END
+
+	// -- Prune+commit(sync)
+	if err := db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) }); err != nil {
+		return headBlockHash, err
+	}
+
+	return headBlockHash, nil
+}
+
+type NotifyF func(tx kv.Tx, finishProgressBefore uint64) (err error)
+
+func NotifyFunc(ctx context.Context, notifications *shards.Notifications, sync *stagedsync.Sync, chainConfig *chain.Config, logger log.Logger, updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int)) NotifyF {
+	return func(tx kv.Tx, finishProgressBefore uint64) (err error) {
+		// -- send notifications START
+		//TODO: can this 2 headers be 1
+		var headHeader, currentHeder *types.Header
+
+		// Update sentry status for peers to see our sync status
+		var headTd *big.Int
+		var plainStateVersion uint64
+		head, err := stages.GetStageProgress(tx, stages.Headers)
+		if err != nil {
+			return
+		}
+		headHash, err := rawdb.ReadCanonicalHash(tx, head)
+		if err != nil {
+			return
+		}
 		if headTd, err = rawdb.ReadTd(tx, headHash, head); err != nil {
-			return err
+			return
 		}
 		headHeader = rawdb.ReadHeader(tx, headHash, head)
 		currentHeder = rawdb.ReadCurrentHeader(tx)
@@ -229,19 +268,9 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 		// update the accumulator with a new plain state version so the cache can be notified that
 		// state has moved on
 		if plainStateVersion, err = rawdb.GetStateVersion(tx); err != nil {
-			return err
+			return
 		}
 		notifications.Accumulator.SetStateID(plainStateVersion)
-
-		if canRunCycleInOneTransaction && (head != finishProgressBefore || commitTime > 500*time.Millisecond) {
-			logger.Info("Commit cycle", "in", commitTime)
-		}
-		if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
-			logger.Info("Timings (slower than 50ms)", logCtx...)
-			if len(tableSizes) > 0 {
-				logger.Info("Tables", tableSizes...)
-			}
-		}
 
 		if headTd != nil && headHeader != nil {
 			headTd256, overflow := uint256.FromBig(headTd)
@@ -257,27 +286,17 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 			}
 		}
 
-		headBlockHash = rawdb.ReadHeadBlockHash(tx)
-		return nil
-	}); err != nil {
-		return headBlockHash, err
-	}
-	if notifications != nil && notifications.Accumulator != nil && currentHeder != nil {
-		pendingBaseFee := misc.CalcBaseFee(chainConfig, currentHeder)
-		if currentHeder.Number.Uint64() == 0 {
-			notifications.Accumulator.StartChange(0, currentHeder.Hash(), nil, false)
+		if notifications != nil && notifications.Accumulator != nil && currentHeder != nil {
+			pendingBaseFee := misc.CalcBaseFee(chainConfig, currentHeder)
+			if currentHeder.Number.Uint64() == 0 {
+				notifications.Accumulator.StartChange(0, currentHeder.Hash(), nil, false)
+			}
+
+			notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), currentHeder.GasLimit)
 		}
-
-		notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), currentHeder.GasLimit)
+		// -- send notifications END
+		return nil
 	}
-	// -- send notifications END
-
-	// -- Prune+commit(sync)
-	if err := db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) }); err != nil {
-		return headBlockHash, err
-	}
-
-	return headBlockHash, nil
 }
 
 func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, tmpDir string) (err error) {
@@ -429,7 +448,7 @@ func NewDefaultStages(ctx context.Context,
 			snapshots,
 			blockReader,
 			cfg.HistoryV3,
-			cfg.TransactionsV3,
+			blockWriter,
 		),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockRetire, blockWriter, controlServer.Hd),
 		stagedsync.StageExecuteBlocksCfg(
@@ -484,7 +503,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				dirs.Tmp,
 				nil, nil,
 			),
-			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, snapshots, blockReader, cfg.HistoryV3, cfg.TransactionsV3),
+			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, snapshots, blockReader, cfg.HistoryV3, blockWriter),
 			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, dirs.Tmp, cfg.Prune, nil, blockWriter, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(

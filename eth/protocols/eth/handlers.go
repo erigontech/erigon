@@ -133,7 +133,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 	return headers, nil
 }
 
-func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket) []rlp.RawValue { //nolint:unparam
+func AnswerGetBlockBodiesQuery(blockReader services.FullBlockReader, db kv.Tx, query GetBlockBodiesPacket) []rlp.RawValue { //nolint:unparam
 	// Gather blocks until the fetch or network limits is reached
 	var bytes int
 	bodies := make([]rlp.RawValue, 0, len(query))
@@ -147,26 +147,24 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket) []rlp.RawVa
 		if number == nil {
 			continue
 		}
-		canonicalHash, err := rawdb.ReadCanonicalHash(db, *number)
+		body, err := blockReader.BodyWithTransactions(context.Background(), db, hash, *number)
 		if err != nil {
 			break
 		}
-		var bodyRlP []byte
-		if canonicalHash == hash {
-			bodyRlP = rawdb.ReadBodyRLP(db, hash, *number)
-		} else {
-			bodyRlP = rawdb.NonCanonicalBodyRLP(db, hash, *number)
+		bodyRlp, err := rlp.EncodeToBytes(body)
+		if err != nil {
+			log.Error("ReadBodyRLP failed", "err", err)
 		}
-		if len(bodyRlP) == 0 {
+		if len(bodyRlp) == 0 {
 			continue
 		}
-		bodies = append(bodies, bodyRlP)
-		bytes += len(bodyRlP)
+		bodies = append(bodies, bodyRlp)
+		bytes += len(bodyRlp)
 	}
 	return bodies
 }
 
-func AnswerGetReceiptsQuery(db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
+func AnswerGetReceiptsQuery(br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
 		bytes    int
@@ -177,11 +175,19 @@ func AnswerGetReceiptsQuery(db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, 
 			lookups >= 2*maxReceiptsServe {
 			break
 		}
+		number := rawdb.ReadHeaderNumber(db, hash)
+		if number == nil {
+			return nil, nil
+		}
 		// Retrieve the requested block's receipts
-		results, err := rawdb.ReadReceiptsByHash(db, hash)
+		b, s, err := br.BlockWithSenders(context.Background(), db, hash, *number)
 		if err != nil {
 			return nil, err
 		}
+		if b == nil {
+			return nil, nil
+		}
+		results := rawdb.ReadReceipts(db, b, s)
 		if results == nil {
 			header, err := rawdb.ReadHeaderByHash(db, hash)
 			if err != nil {

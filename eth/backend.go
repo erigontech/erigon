@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
@@ -49,7 +50,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -58,7 +58,6 @@ import (
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
@@ -96,7 +95,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethstats"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -107,7 +105,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
@@ -211,7 +208,29 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	var currentBlock *types.Block
+	ctx, ctxCancel := context.WithCancel(context.Background())
+
+	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
+	backend := &Ethereum{
+		sentryCtx:            ctx,
+		sentryCancel:         ctxCancel,
+		config:               config,
+		chainDB:              chainKv,
+		networkID:            config.NetworkID,
+		etherbase:            config.Miner.Etherbase,
+		waitForStageLoopStop: make(chan struct{}),
+		waitForMiningStop:    make(chan struct{}),
+		notifications: &shards.Notifications{
+			Events:      shards.NewEvents(),
+			Accumulator: shards.NewAccumulator(),
+		},
+		logger: logger,
+	}
+	blockReader, blockWriter, allSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config.Snapshot, backend.notifications.Events, config.TransactionsV3, logger)
+	if err != nil {
+		return nil, err
+	}
+	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
@@ -231,80 +250,22 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
-
-		currentBlock = rawdb.ReadCurrentBlock(tx)
 		return nil
 	}); err != nil {
 		panic(err)
 	}
 
+	backend.chainConfig = chainConfig
+	backend.genesisBlock = genesis
+	backend.genesisHash = genesis.Hash()
+
 	config.Snapshot.Enabled = config.Sync.UseSnapshots
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
-	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-		if err = stagedsync.UpdateMetrics(tx); err != nil {
-			return err
-		}
-
-		config.Prune, err = prune.EnsureNotChanged(tx, config.Prune)
-		if err != nil {
-			return err
-		}
-		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
-		if err != nil {
-			return err
-		}
-
-		config.HistoryV3, err = kvcfg.HistoryV3.WriteOnce(tx, config.HistoryV3)
-		if err != nil {
-			return err
-		}
-
-		config.TransactionsV3, err = kvcfg.TransactionsV3.WriteOnce(tx, config.TransactionsV3)
-		if err != nil {
-			return err
-		}
-
-		// if we are in the incorrect syncmode then we change it to the appropriate one
-		if !isCorrectSync {
-			logger.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
-			config.Sync.UseSnapshots = useSnapshots
-			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
-		}
-		logger.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String(), "history.v3", config.HistoryV3)
-
-		return nil
-	}); err != nil {
+	if err := backend.setUpSnapDownloader(ctx, config.Downloader); err != nil {
 		return nil, err
 	}
-
-	ctx, ctxCancel := context.WithCancel(context.Background())
-
-	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
-	backend := &Ethereum{
-		sentryCtx:            ctx,
-		sentryCancel:         ctxCancel,
-		config:               config,
-		chainDB:              chainKv,
-		networkID:            config.NetworkID,
-		etherbase:            config.Miner.Etherbase,
-		chainConfig:          chainConfig,
-		genesisBlock:         genesis,
-		genesisHash:          genesis.Hash(),
-		waitForStageLoopStop: make(chan struct{}),
-		waitForMiningStop:    make(chan struct{}),
-		notifications: &shards.Notifications{
-			Events:      shards.NewEvents(),
-			Accumulator: shards.NewAccumulator(),
-		},
-		logger: logger,
-	}
-	blockReader, blockWriter, allSnapshots, agg, err := backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader, backend.notifications.Events, config.TransactionsV3)
-	if err != nil {
-		return nil, err
-	}
-	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
 
 	if config.HistoryV3 {
 		backend.chainDB, err = temporal.New(backend.chainDB, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
@@ -441,6 +402,14 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 		return nil
 	}
+	var currentBlock *types.Block
+	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
+		currentBlock = blockReader.CurrentBlock(tx)
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+
 	currentBlockNumber := uint64(0)
 	if currentBlock != nil {
 		currentBlockNumber = currentBlock.NumberU64()
@@ -460,7 +429,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress, config.HeimdallURL,
 		config.WithoutHeimdall, stack.DataDir(), false /* readonly */, logger)
-	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution, tmpdir)
+	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader)
 
 	backend.sentriesClient, err = sentry.NewMultiClient(
 		chainKv,
@@ -511,11 +480,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	// proof-of-work mining
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
-			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir),
+			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir, backend.blockReader),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool2, backend.txPool2DB, allSnapshots, config.TransactionsV3),
 			stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
-			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
+			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader),
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 		logger)
 
@@ -530,11 +499,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir),
+				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir, backend.blockReader),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool2, backend.txPool2DB, allSnapshots, config.TransactionsV3),
 				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
-				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
+				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader),
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 			logger)
 		// We start the mining step
@@ -738,7 +707,7 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, backend.unsubscribeEthstat = backend.notifications.Events.AddHeaderSubscription()
-		if err := ethstats.New(stack, backend.sentryServers, chainKv, backend.engine, config.Ethstats, backend.networkID, ctx.Done(), headCh); err != nil {
+		if err := ethstats.New(stack, backend.sentryServers, chainKv, backend.blockReader, backend.engine, config.Ethstats, backend.networkID, ctx.Done(), headCh); err != nil {
 			return err
 		}
 	}
@@ -970,56 +939,63 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg, notifications *shards.Events, transactionsV3 bool) (services.FullBlockReader, *blockio.BlockWriter, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
-	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap, s.logger)
+func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downloadercfg.Cfg) error {
+	var err error
+	if s.config.Snapshot.NoDownloader {
+		return nil
+	}
+	if s.config.Snapshot.DownloaderAddr != "" {
+		// connect to external Downloader
+		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
+	} else {
+		// start embedded Downloader
+		s.downloader, err = downloader3.New(ctx, downloaderCfg)
+		if err != nil {
+			return err
+		}
+		s.downloader.MainLoopInBackground(ctx, true)
+		bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
+		if err != nil {
+			return fmt.Errorf("new server: %w", err)
+		}
+
+		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
+	}
+	s.agg.OnFreeze(func(frozenFileNames []string) {
+		events := s.notifications.Events
+		events.OnNewSnapshot()
+		if s.downloaderClient != nil {
+			req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(frozenFileNames))}
+			for _, fName := range frozenFileNames {
+				req.Items = append(req.Items, &proto_downloader.DownloadItem{
+					Path: filepath.Join("history", fName),
+				})
+			}
+			if _, err := s.downloaderClient.Download(ctx, req); err != nil {
+				s.logger.Warn("[snapshots] notify downloader", "err", err)
+			}
+		}
+	})
+	return err
+}
+
+func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig ethconfig.Snapshot, notifications *shards.Events, transactionsV3 bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
+	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap, logger)
 	var err error
 	if !snConfig.NoDownloader {
-		allSnapshots.OptimisticalyReopenWithDB(s.chainDB)
+		allSnapshots.OptimisticalyReopenWithDB(db)
 	}
 	blockReader := snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
 	blockWriter := blockio.NewBlockWriter(transactionsV3)
 
-	if !snConfig.NoDownloader {
-		if snConfig.DownloaderAddr != "" {
-			// connect to external Downloader
-			s.downloaderClient, err = downloadergrpc.NewClient(ctx, snConfig.DownloaderAddr)
-		} else {
-			// start embedded Downloader
-			s.downloader, err = downloader3.New(ctx, downloaderCfg)
-			if err != nil {
-				return nil, nil, nil, nil, err
-			}
-			s.downloader.MainLoopInBackground(ctx, true)
-			bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
-			if err != nil {
-				return nil, nil, nil, nil, fmt.Errorf("new server: %w", err)
-			}
-
-			s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
-		}
-		if err != nil {
-			return nil, nil, nil, nil, err
-		}
-	}
-
 	dir.MustExist(dirs.SnapHistory)
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, s.chainDB, s.logger)
+	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	if err = agg.OpenFolder(); err != nil {
 		return nil, nil, nil, nil, err
 	}
-	agg.OnFreeze(func(frozenFileNames []string) {
-		notifications.OnNewSnapshot()
-		req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(frozenFileNames))}
-		for _, fName := range frozenFileNames {
-			req.Items = append(req.Items, &proto_downloader.DownloadItem{
-				Path: filepath.Join("history", fName),
-			})
-		}
-	})
-
 	return blockReader, blockWriter, allSnapshots, agg, nil
 }
 

@@ -768,8 +768,9 @@ func stageBodies(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	sn, agg := allSnapshots(ctx, db, logger)
 	defer sn.Close()
 	defer agg.Close()
-	chainConfig, historyV3, transactionsV3 := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), kvcfg.TransactionsV3.FromDB(db)
+	chainConfig, historyV3 := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	br, bw := blocksIO(db, logger)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		s := stage(sync, tx, nil, stages.Bodies)
@@ -780,8 +781,7 @@ func stageBodies(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 			}
 
 			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber)
-			br, _ := blocksIO(db, logger)
-			cfg := stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, sn, br, historyV3, transactionsV3)
+			cfg := stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, sn, br, historyV3, bw)
 			if err := stagedsync.UnwindBodiesStage(u, tx, cfg, ctx); err != nil {
 				return err
 			}
@@ -811,8 +811,8 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	must(sync.SetCurrentStage(stages.Senders))
 
+	br, bw := blocksIO(db, logger)
 	if reset {
-		_, bw := blocksIO(db, logger)
 		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, db, tx, bw) })
 	}
 
@@ -828,12 +828,16 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 			if err := common2.Stopped(ctx.Done()); err != nil {
 				return err
 			}
-			withoutSenders, _ := rawdb.ReadBlockByNumber(tx, i)
-			if withoutSenders == nil {
+			h, _ := br.HeaderByNumber(ctx, tx, i)
+			if h == nil {
 				break
 			}
+			withoutSenders, senders, err := br.BlockWithSenders(ctx, tx, h.Hash(), h.Number.Uint64())
+			if err != nil {
+				return err
+			}
+			withoutSenders.Body().SendersFromTxs() //remove senders info from txs
 			txs := withoutSenders.Transactions()
-			_, senders, _ := rawdb.CanonicalBlockByNumberWithSenders(tx, i)
 			if txs.Len() != len(senders) {
 				logger.Error("not equal amount of senders", "block", i, "db", len(senders), "expect", txs.Len())
 				return nil
@@ -861,9 +865,9 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	s := stage(sync, tx, nil, stages.Senders)
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	var br *snapshotsync.BlockRetire
+	var blockRetire *snapshotsync.BlockRetire
 	if sn.Cfg().Enabled {
-		br = snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), tmpdir, sn, db, nil, nil, logger)
+		blockRetire = snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), tmpdir, sn, db, nil, nil, logger)
 	}
 
 	pm, err := prune.Get(tx)
@@ -871,8 +875,7 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	_, bw := blocksIO(db, logger)
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, br, bw, nil)
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, blockRetire, bw, nil)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
@@ -1554,11 +1557,11 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	}()
 	miningSync := stagedsync.New(
 		stagedsync.MiningStages(ctx,
-			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp),
+			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp, br),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, nil, allSn, cfg.TransactionsV3),
 			stagedsync.StageHashStateCfg(db, dirs, historyV3, agg),
 			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, br, nil, historyV3, agg),
-			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel),
+			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel, br),
 		),
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,

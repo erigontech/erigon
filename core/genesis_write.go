@@ -29,6 +29,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
@@ -87,6 +88,7 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 }
 
 func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
+	var storedBlock *types.Block
 	if genesis != nil && genesis.Config == nil {
 		return params.AllProtocolChanges, nil, types.ErrGenesisNoConfig
 	}
@@ -131,9 +133,17 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 			return genesis.Config, block, &types.GenesisMismatchError{Stored: storedHash, New: hash}
 		}
 	}
-	storedBlock, err := rawdb.ReadBlockByHash(tx, storedHash)
+	transactionV3, err := kvcfg.TransactionsV3.Enabled(tx)
 	if err != nil {
-		return genesis.Config, nil, err
+		return nil, nil, err
+	}
+	blockReader := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()), transactionV3)
+	number := rawdb.ReadHeaderNumber(tx, storedHash)
+	if number != nil {
+		storedBlock, _, err = blockReader.BlockWithSenders(context.Background(), tx, storedHash, *number)
+		if err != nil {
+			return genesis.Config, nil, err
+		}
 	}
 	// Get the existing chain configuration.
 	newCfg := genesis.ConfigOrDefault(storedHash)
@@ -254,10 +264,7 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.In
 	}
 	blockWriter := blockio.NewBlockWriter(transactionV3)
 
-	if err := blockWriter.WriteHeader(tx, block.HeaderNoCopy()); err != nil {
-		return nil, nil, err
-	}
-	if err := blockWriter.WriteBody(tx, block.Hash(), block.NumberU64(), block.Body()); err != nil {
+	if err := blockWriter.WriteBlock(tx, block); err != nil {
 		return nil, nil, err
 	}
 	if err := blockWriter.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {

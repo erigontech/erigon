@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -222,7 +223,24 @@ func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
 	return b.cc
 }
 func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error) {
-	return rawdb.ReadReceiptsByHash(b.tx, hash)
+	number := rawdb.ReadHeaderNumber(b.tx, hash)
+	if number == nil {
+		return nil, nil
+	}
+	canonicalHash, err := rawdb.ReadCanonicalHash(b.tx, *number)
+	if err != nil {
+		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
+	}
+
+	block, s, err := b.baseApi._blockReader.BlockWithSenders(ctx, b.tx, hash, *number)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+	receipts := rawdb.ReadReceipts(b.tx, block, s)
+	return receipts, nil
 }
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 	return nil, nil

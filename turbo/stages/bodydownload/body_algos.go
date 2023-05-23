@@ -153,7 +153,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 				request = false
 			} else {
 				// Perhaps we already have this block
-				block := rawdb.ReadBlock(tx, hash, blockNum)
+				block, _, _ := bd.br.BlockWithSenders(context.Background(), tx, hash, blockNum)
 				if block != nil {
 					bd.addBodyToCache(blockNum, block.RawBody())
 					dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyInDb)

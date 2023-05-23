@@ -249,7 +249,7 @@ Loop:
 				// non-canonical case
 				continue
 			}
-			body = rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNumber)
+			body = rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNumber, false)
 			if body == nil {
 				logger.Warn(fmt.Sprintf("[%s] ReadCanonicalBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
 				continue

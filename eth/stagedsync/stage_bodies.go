@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -35,12 +36,13 @@ type BodiesCfg struct {
 	chanConfig      chain.Config
 	snapshots       *snapshotsync.RoSnapshots
 	blockReader     services.FullBlockReader
+	blockWriter     *blockio.BlockWriter
 	historyV3       bool
 	transactionsV3  bool
 }
 
-func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem), blockPropagator adapter.BlockPropagator, timeout int, chanConfig chain.Config, snapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, historyV3 bool, transactionsV3 bool) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, snapshots: snapshots, blockReader: blockReader, historyV3: historyV3, transactionsV3: transactionsV3}
+func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem), blockPropagator adapter.BlockPropagator, timeout int, chanConfig chain.Config, snapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, historyV3 bool, blockWriter *blockio.BlockWriter) BodiesCfg {
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, snapshots: snapshots, blockReader: blockReader, historyV3: historyV3, blockWriter: blockWriter}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -105,10 +107,12 @@ func BodiesForward(
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
+	// TxsV3 feature allow store non-canonical txs in kv.EthTx table. So, nothing to do in this case
+
 	// Property of blockchain: same block in different forks will have different hashes.
 	// Means - can mark all canonical blocks as non-canonical on unwind, and
 	// do opposite here - without storing any meta-info.
-	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery, cfg.transactionsV3, func(blockNum, lastTxnNum uint64) error {
+	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery, cfg.blockWriter.TxsV3Enabled(), func(blockNum, lastTxnNum uint64) error {
 		if cfg.historyV3 {
 			if err := rawdbv3.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
 				return err
@@ -130,7 +134,7 @@ func BodiesForward(
 	prevProgress := bodyProgress
 	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
-	cr := ChainReader{Cfg: cfg.chanConfig, Db: tx}
+	cr := ChainReader{Cfg: cfg.chanConfig, Db: tx, BlockReader: cfg.blockReader}
 
 	loopBody := func() (bool, error) {
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
@@ -205,7 +209,7 @@ func BodiesForward(
 			}
 
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
+			ok, lastTxnNum, err := cfg.blockWriter.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
 			if err != nil {
 				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
@@ -340,7 +344,7 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 	defer logEvery.Stop()
 
 	badBlock := u.BadBlock != (libcommon.Hash{})
-	if err := rawdb.MakeBodiesNonCanonical(tx, u.UnwindPoint+1, badBlock /* deleteBodies */, ctx, u.LogPrefix(), logEvery); err != nil {
+	if err := rawdb.MakeBodiesNonCanonical(tx, u.UnwindPoint+1, badBlock /* deleteBodies */, ctx, u.LogPrefix(), logEvery, cfg.blockWriter.TxsV3Enabled()); err != nil {
 		return err
 	}
 	if cfg.historyV3 {

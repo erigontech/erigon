@@ -206,7 +206,7 @@ func ReadLogs(tx kv.Tx, from uint64, isUnwind bool) ([]*remote.SubscribeLogsRepl
 		if block == nil || blockNum != prevBlockNum {
 			logIndex = 0
 			prevBlockNum = blockNum
-			if block, err = rawdb.ReadBlockByNumber(tx, blockNum); err != nil {
+			if block, err = rawdb.ReadBlockByNumber(tx, blockNum, false); err != nil {
 				return nil, err
 			}
 		}

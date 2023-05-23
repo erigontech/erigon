@@ -22,9 +22,6 @@ import (
 	"io"
 	"os"
 	"runtime"
-
-	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/turbo/debug"
 )
 
 // Fatalf formats a message to standard error and exits the program.
@@ -45,12 +42,4 @@ func Fatalf(format string, args ...interface{}) {
 	}
 	fmt.Fprintf(w, "Fatal: "+format+"\n", args...)
 	os.Exit(1)
-}
-
-func StartNode(stack *node.Node) {
-	if err := stack.Start(); err != nil {
-		Fatalf("Error starting protocol stack: %v", err)
-	}
-
-	go debug.ListenSignals(stack)
 }

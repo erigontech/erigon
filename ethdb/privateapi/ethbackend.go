@@ -787,11 +787,14 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByHashV1(ctx context.Context, r
 
 	for hashIdx, hash := range request.Hashes {
 		h := gointerfaces.ConvertH256ToHash(hash)
-		block, err := rawdb.ReadBlockByHash(tx, h)
+		number := rawdb.ReadHeaderNumber(tx, h)
+		if number == nil {
+			continue
+		}
+		block, _, err := s.blockReader.BlockWithSenders(ctx, tx, h, *number)
 		if err != nil {
 			return nil, err
 		}
-
 		body, err := extractPayloadBodyFromBlock(block)
 		if err != nil {
 			return nil, err
@@ -821,7 +824,10 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByRangeV1(ctx context.Context, 
 			break
 		}
 
-		block := rawdb.ReadBlock(tx, hash, request.Start+i)
+		block, _, err := s.blockReader.BlockWithSenders(ctx, tx, hash, request.Start+i)
+		if err != nil {
+			return nil, err
+		}
 		body, err := extractPayloadBodyFromBlock(block)
 		if err != nil {
 			return nil, err

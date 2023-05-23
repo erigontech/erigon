@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -19,17 +18,28 @@ import (
 
 // BlockReader can read blocks from db and snapshots
 type BlockWriter struct {
+	// adding Auto-Increment BlockID
+	// allow store non-canonical Txs/Senders
 	txsV3 bool
 }
 
 func NewBlockWriter(txsV3 bool) *BlockWriter { return &BlockWriter{txsV3: txsV3} }
 
 func (w *BlockWriter) TxsV3Enabled() bool { return w.txsV3 }
+func (w *BlockWriter) WriteBlock(tx kv.RwTx, block *types.Block) error {
+	if err := rawdb.WriteHeader(tx, block.HeaderNoCopy(), w.txsV3); err != nil {
+		return err
+	}
+	if err := rawdb.WriteBody(tx, block.Hash(), block.NumberU64(), block.Body(), w.txsV3); err != nil {
+		return err
+	}
+	return nil
+}
 func (w *BlockWriter) WriteHeader(tx kv.RwTx, header *types.Header) error {
-	return rawdb.WriteHeader(tx, header)
+	return rawdb.WriteHeader(tx, header, w.txsV3)
 }
 func (w *BlockWriter) WriteHeaderRaw(tx kv.StatelessRwTx, number uint64, hash common.Hash, headerRlp []byte, skipIndexing bool) error {
-	return rawdb.WriteHeaderRaw(tx, number, hash, headerRlp, skipIndexing)
+	return rawdb.WriteHeaderRaw(tx, number, hash, headerRlp, skipIndexing, w.txsV3)
 }
 func (w *BlockWriter) WriteCanonicalHash(tx kv.RwTx, hash common.Hash, number uint64) error {
 	return rawdb.WriteCanonicalHash(tx, hash, number)
@@ -43,10 +53,14 @@ func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir
 	binary.BigEndian.PutUint64(startKey, from)
 	endKey := dbutils.HeaderKey(to, common.Hash{}) // etl.Tranform uses ExractEndKey as exclusive bound, therefore +1
 
+	fromTable := kv.BlockID
+	if !w.txsV3 {
+		fromTable = kv.Headers
+	}
 	return etl.Transform(
 		logPrefix,
 		tx,
-		kv.Headers,
+		fromTable,
 		kv.HeaderNumber,
 		tmpDir,
 		extractHeaders,
@@ -60,7 +74,7 @@ func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir
 	)
 }
 
-func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
+func extractHeaders(k []byte, _ []byte, next etl.ExtractNextFunc) error {
 	// We only want to extract entries composed by Block Number + Header Hash
 	if len(k) != 40 {
 		return nil
@@ -69,33 +83,28 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 }
 
 func (w *BlockWriter) WriteRawBodyIfNotExists(tx kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnNum uint64, err error) {
-	return rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
+	return rawdb.WriteRawBodyIfNotExists(tx, hash, number, body, w.txsV3)
 }
 func (w *BlockWriter) WriteBody(tx kv.RwTx, hash common.Hash, number uint64, body *types.Body) error {
-	return rawdb.WriteBody(tx, hash, number, body)
+	return rawdb.WriteBody(tx, hash, number, body, w.txsV3)
 }
 func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error {
+	if w.txsV3 {
+		panic("txsV3 doesn't allow TruncateBodies")
+	}
 	fromB := hexutility.EncodeTs(from)
 	if err := tx.ForEach(kv.BlockBody, fromB, func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
 		return err
 	}
-	ethtx := kv.EthTx
-	transactionV3, err := kvcfg.TransactionsV3.Enabled(tx)
-	if err != nil {
-		panic(err)
-	}
-	if transactionV3 {
-		ethtx = kv.EthTxV3
-	}
 
 	if err := backup.ClearTables(context.Background(), db, tx,
 		kv.NonCanonicalTxs,
-		ethtx,
+		kv.EthTx,
 		kv.MaxTxNum,
 	); err != nil {
 		return err
 	}
-	if err := rawdb.ResetSequence(tx, ethtx, 0); err != nil {
+	if err := rawdb.ResetSequence(tx, kv.EthTx, 0); err != nil {
 		return err
 	}
 

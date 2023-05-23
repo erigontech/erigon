@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -25,7 +26,7 @@ import (
 
 var ErrTxsBeginEndNoMigration = fmt.Errorf("in this Erigon version DB format was changed: added additional first/last system-txs to blocks. There is no DB migration for this change. Please re-sync or switch to earlier version")
 
-var txsBeginEnd = Migration{
+var TxsBeginEnd = Migration{
 	Name: "txs_begin_end",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		logEvery := time.NewTicker(10 * time.Second)
@@ -89,7 +90,7 @@ var txsBeginEnd = Migration{
 				continue
 			}
 
-			txs, err := rawdb.CanonicalTransactions(tx, b.BaseTxId, b.TxAmount)
+			txs, err := canonicalTransactions(tx, b.BaseTxId, b.TxAmount)
 			if err != nil {
 				return err
 			}
@@ -114,7 +115,7 @@ var txsBeginEnd = Migration{
 
 			if assert.Enable {
 				newBlock, baseTxId, txAmount := rawdb.ReadBody(tx, canonicalHash, blockNum)
-				newBlock.Transactions, err = rawdb.CanonicalTransactions(tx, baseTxId, txAmount)
+				newBlock.Transactions, err = canonicalTransactions(tx, baseTxId, txAmount)
 				for i, oldTx := range oldBlock.Transactions {
 					newTx := newBlock.Transactions[i]
 					if oldTx.GetNonce() != newTx.GetNonce() {
@@ -226,7 +227,7 @@ var txsBeginEnd = Migration{
 	},
 }
 
-func writeRawBodyDeprecated(db kv.RwTx, hash common2.Hash, number uint64, body *types.RawBody) error {
+func writeRawBodyDeprecated(db kv.RwTx, hash common2.Hash, number uint64, body *types.RawBody, m *stages2.MockSentry) error {
 	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions)))
 	if err != nil {
 		return err
@@ -239,7 +240,7 @@ func writeRawBodyDeprecated(db kv.RwTx, hash common2.Hash, number uint64, body *
 	if err = rawdb.WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
-	if err = rawdb.WriteRawTransactions(db, body.Transactions, baseTxId, &hash); err != nil {
+	if err = rawdb.WriteRawTransactions(db, body.Transactions, baseTxId, &hash, m.TransactionsV3); err != nil {
 		return fmt.Errorf("failed to WriteRawTransactions: %w, blockNum=%d", err, number)
 	}
 	return nil
@@ -277,7 +278,7 @@ func readCanonicalBodyWithTransactionsDeprecated(db kv.Getter, hash common2.Hash
 	}
 	body := new(types.Body)
 	body.Uncles = bodyForStorage.Uncles
-	body.Transactions, err = rawdb.CanonicalTransactions(db, bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
+	body.Transactions, err = canonicalTransactions(db, bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
 	if err != nil {
 		log.Error("failed ReadTransactionByHash", "hash", hash, "block", number, "err", err)
 		return nil
@@ -285,7 +286,7 @@ func readCanonicalBodyWithTransactionsDeprecated(db kv.Getter, hash common2.Hash
 	return body
 }
 
-func makeBodiesNonCanonicalDeprecated(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+func MakeBodiesNonCanonicalDeprecated(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
 	for blockNum := from; ; blockNum++ {
 		h, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -353,4 +354,27 @@ func makeBodiesNonCanonicalDeprecated(tx kv.RwTx, from uint64, ctx context.Conte
 	}
 
 	return nil
+}
+
+func canonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
+	if amount == 0 {
+		return []types.Transaction{}, nil
+	}
+	txIdKey := make([]byte, 8)
+	txs := make([]types.Transaction, amount)
+	binary.BigEndian.PutUint64(txIdKey, baseTxId)
+	i := uint32(0)
+
+	if err := db.ForAmount(kv.EthTx, txIdKey, amount, func(k, v []byte) error {
+		var decodeErr error
+		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v); decodeErr != nil {
+			return decodeErr
+		}
+		i++
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	txs = txs[:i] // user may request big "amount", but db can return small "amount". Return as much as we found.
+	return txs, nil
 }

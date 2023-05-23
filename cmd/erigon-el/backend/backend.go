@@ -17,6 +17,10 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/core/state/historyv2read"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
@@ -60,11 +64,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state/historyv2read"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -154,8 +154,9 @@ type Ethereum struct {
 	blockReader             services.FullBlockReader
 	blockWriter             *blockio.BlockWriter
 
-	agg    *libstate.AggregatorV3
-	logger log.Logger
+	agg            *libstate.AggregatorV3
+	blockSnapshots *snapshotsync.RoSnapshots
+	logger         log.Logger
 }
 
 // New creates a new Ethereum object (including the
@@ -177,37 +178,6 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	if err != nil {
 		return nil, err
 	}
-
-	var currentBlock *types.Block
-
-	// Check if we have an already initialized chain and fall back to
-	// that if so. Otherwise we need to generate a new genesis spec.
-	var chainConfig *chain.Config
-	var genesis *types.Block
-	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-		h, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			panic(err)
-		}
-		genesisSpec := config.Genesis
-		if h != (libcommon.Hash{}) { // fallback to db content
-			genesisSpec = nil
-		}
-		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime, tmpdir, logger)
-		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
-			return genesisErr
-		}
-
-		currentBlock = rawdb.ReadCurrentBlock(tx)
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	config.Snapshot.Enabled = config.Sync.UseSnapshots
-
-	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
-
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
 		if err = stagedsync.UpdateMetrics(tx); err != nil {
 			return err
@@ -244,7 +214,6 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	}); err != nil {
 		return nil, err
 	}
-
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
@@ -255,8 +224,6 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		chainDB:              chainKv,
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
-		chainConfig:          chainConfig,
-		genesisHash:          genesis.Hash(),
 		waitForStageLoopStop: make(chan struct{}),
 		waitForMiningStop:    make(chan struct{}),
 		notifications: &shards.Notifications{
@@ -268,10 +235,40 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	var (
 		allSnapshots *snapshotsync.RoSnapshots
 	)
-	backend.blockReader, backend.blockWriter, allSnapshots, backend.agg, err = backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader, config.TransactionsV3)
+	blockReader, blockWriter, allSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config.Snapshot, backend.notifications.Events, config.TransactionsV3, logger)
 	if err != nil {
 		return nil, err
 	}
+	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
+
+	// Check if we have an already initialized chain and fall back to
+	// that if so. Otherwise we need to generate a new genesis spec.
+	var chainConfig *chain.Config
+	var genesis *types.Block
+	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
+		h, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			panic(err)
+		}
+		genesisSpec := config.Genesis
+		if h != (libcommon.Hash{}) { // fallback to db content
+			genesisSpec = nil
+		}
+		var genesisErr error
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime, tmpdir, logger)
+		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
+			return genesisErr
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	config.Snapshot.Enabled = config.Sync.UseSnapshots
+
+	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
+
+	backend.genesisHash = genesis.Hash()
+	backend.chainConfig = chainConfig
 
 	if config.HistoryV3 {
 		backend.chainDB, err = temporal.New(backend.chainDB, backend.agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
@@ -279,6 +276,9 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			return nil, err
 		}
 		chainKv = backend.chainDB
+	}
+	if err := backend.setUpSnapDownloader(ctx, config.Downloader); err != nil {
+		return nil, err
 	}
 
 	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, backend.agg, logger)
@@ -401,6 +401,15 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		}
 		return nil
 	}
+
+	var currentBlock *types.Block
+	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
+		currentBlock = backend.blockReader.CurrentBlock(tx)
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+
 	currentBlockNumber := uint64(0)
 	if currentBlock != nil {
 		currentBlockNumber = currentBlock.NumberU64()
@@ -420,7 +429,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	}
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
 		config.HeimdallgRPCAddress, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), false /* readonly */, logger)
-	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution, tmpdir)
+	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader)
 
 	if err != nil {
 		return nil, err
@@ -475,11 +484,11 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	// proof-of-work mining
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
-			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir),
+			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir, backend.blockReader),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool2, backend.txPool2DB, allSnapshots, config.TransactionsV3),
 			stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, backend.blockReader, nil, config.HistoryV3, backend.agg),
-			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
+			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader),
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder, logger)
 
 	var ethashApi *ethash.API
@@ -493,11 +502,11 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir),
+				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir, backend.blockReader),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool2, backend.txPool2DB, allSnapshots, config.TransactionsV3),
 				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, backend.blockReader, nil, config.HistoryV3, backend.agg),
-				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
+				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader),
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder, logger)
 		// We start the mining step
 		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir); err != nil {
@@ -646,7 +655,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
 		headCh, backend.unsubscribeEthstat = backend.notifications.Events.AddHeaderSubscription()
-		if err := ethstats.New(stack, backend.sentryServers, chainKv, backend.engine, config.Ethstats, backend.networkID, ctx.Done(), headCh); err != nil {
+		if err := ethstats.New(stack, backend.sentryServers, chainKv, backend.blockReader, backend.engine, config.Ethstats, backend.networkID, ctx.Done(), headCh); err != nil {
 			return nil, err
 		}
 	}
@@ -840,47 +849,29 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg, transactionsV3 bool) (services.FullBlockReader, *blockio.BlockWriter, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
-	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap, s.logger)
+func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downloadercfg.Cfg) error {
 	var err error
-	if !snConfig.NoDownloader {
-		allSnapshots.OptimisticalyReopenWithDB(s.chainDB)
+	if s.config.Snapshot.NoDownloader {
+		return nil
 	}
-	blockReader := snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
-	blockWriter := blockio.NewBlockWriter(transactionsV3)
-
-	if !snConfig.NoDownloader {
-		if snConfig.DownloaderAddr != "" {
-			// connect to external Downloader
-			s.downloaderClient, err = downloadergrpc.NewClient(ctx, snConfig.DownloaderAddr)
-		} else {
-			// start embedded Downloader
-			s.downloader, err = downloader3.New(ctx, downloaderCfg)
-			if err != nil {
-				return nil, nil, nil, nil, err
-			}
-			s.downloader.MainLoopInBackground(ctx, true)
-			bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
-			if err != nil {
-				return nil, nil, nil, nil, fmt.Errorf("new server: %w", err)
-			}
-
-			s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
-		}
+	if s.config.Snapshot.DownloaderAddr != "" {
+		// connect to external Downloader
+		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
+	} else {
+		// start embedded Downloader
+		s.downloader, err = downloader3.New(ctx, downloaderCfg)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return err
 		}
-	}
+		s.downloader.MainLoopInBackground(ctx, true)
+		bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
+		if err != nil {
+			return fmt.Errorf("new server: %w", err)
+		}
 
-	dir.MustExist(dirs.SnapHistory)
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, s.chainDB, s.logger)
-	if err != nil {
-		return nil, nil, nil, nil, err
+		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
-	if err = agg.OpenFolder(); err != nil {
-		return nil, nil, nil, nil, err
-	}
-	agg.OnFreeze(func(frozenFileNames []string) {
+	s.agg.OnFreeze(func(frozenFileNames []string) {
 		events := s.notifications.Events
 		events.OnNewSnapshot()
 		if s.downloaderClient != nil {
@@ -895,7 +886,26 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 			}
 		}
 	})
+	return err
+}
 
+func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig ethconfig.Snapshot, notifications *shards.Events, transactionsV3 bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
+	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap, logger)
+	var err error
+	if !snConfig.NoDownloader {
+		allSnapshots.OptimisticalyReopenWithDB(db)
+	}
+	blockReader := snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
+	blockWriter := blockio.NewBlockWriter(transactionsV3)
+
+	dir.MustExist(dirs.SnapHistory)
+	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if err = agg.OpenFolder(); err != nil {
+		return nil, nil, nil, nil, err
+	}
 	return blockReader, blockWriter, allSnapshots, agg, nil
 }
 
