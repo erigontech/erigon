@@ -32,9 +32,11 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 
 	"github.com/holiman/uint256"
