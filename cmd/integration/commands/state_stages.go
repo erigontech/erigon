@@ -351,7 +351,11 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			break
 		}
 
-		nextBlock, _, err := rawdb.CanonicalBlockByNumberWithSenders(tx, execAtBlock+1)
+		hash, err := rawdb.ReadCanonicalHash(tx, execAtBlock+1)
+		if err != nil {
+			return fmt.Errorf("failed ReadCanonicalHash: %w", err)
+		}
+		nextBlock, _, err := br.BlockWithSenders(context.Background(), tx, hash, execAtBlock+1)
 		if err != nil {
 			panic(err)
 		}

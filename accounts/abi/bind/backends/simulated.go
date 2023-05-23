@@ -326,7 +326,7 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash libcomm
 	if err != nil {
 		return nil, false, err
 	}
-	if body != nil {
+	if body == nil {
 		return nil, false, ethereum.NotFound
 	}
 	for _, txn = range body.Transactions {
