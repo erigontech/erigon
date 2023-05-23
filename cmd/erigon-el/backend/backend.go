@@ -154,8 +154,9 @@ type Ethereum struct {
 	blockReader             services.FullBlockReader
 	blockWriter             *blockio.BlockWriter
 
-	agg    *libstate.AggregatorV3
-	logger log.Logger
+	agg            *libstate.AggregatorV3
+	blockSnapshots *snapshotsync.RoSnapshots
+	logger         log.Logger
 }
 
 // New creates a new Ethereum object (including the
@@ -177,8 +178,56 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	if err != nil {
 		return nil, err
 	}
+	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
+		if err = stagedsync.UpdateMetrics(tx); err != nil {
+			return err
+		}
 
-	var currentBlock *types.Block
+		config.Prune, err = prune.EnsureNotChanged(tx, config.Prune)
+		if err != nil {
+			return err
+		}
+
+		config.HistoryV3, err = kvcfg.HistoryV3.WriteOnce(tx, config.HistoryV3)
+		if err != nil {
+			return err
+		}
+
+		config.TransactionsV3, err = kvcfg.TransactionsV3.WriteOnce(tx, config.TransactionsV3)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	ctx, ctxCancel := context.WithCancel(context.Background())
+
+	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
+	backend := &Ethereum{
+		sentryCtx:            ctx,
+		sentryCancel:         ctxCancel,
+		config:               config,
+		chainDB:              chainKv,
+		networkID:            config.NetworkID,
+		etherbase:            config.Miner.Etherbase,
+		waitForStageLoopStop: make(chan struct{}),
+		waitForMiningStop:    make(chan struct{}),
+		notifications: &shards.Notifications{
+			Events:      shards.NewEvents(),
+			Accumulator: shards.NewAccumulator(),
+		},
+		logger: logger,
+	}
+	var (
+		allSnapshots *snapshotsync.RoSnapshots
+	)
+	blockReader, blockWriter, allSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config.Snapshot, backend.notifications.Events, config.TransactionsV3, logger)
+	if err != nil {
+		return nil, err
+	}
+	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
@@ -199,7 +248,18 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			return genesisErr
 		}
 
-		currentBlock = rawdb.ReadCurrentBlock(tx)
+		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
+		if err != nil {
+			return err
+		}
+		// if we are in the incorrect syncmode then we change it to the appropriate one
+		if !isCorrectSync {
+			logger.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
+			config.Sync.UseSnapshots = useSnapshots
+			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
+		}
+		logger.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String(), "history.v3", config.HistoryV3)
+
 		return nil
 	}); err != nil {
 		panic(err)
@@ -208,70 +268,8 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
-	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-		if err = stagedsync.UpdateMetrics(tx); err != nil {
-			return err
-		}
-
-		config.Prune, err = prune.EnsureNotChanged(tx, config.Prune)
-		if err != nil {
-			return err
-		}
-		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
-		if err != nil {
-			return err
-		}
-
-		config.HistoryV3, err = kvcfg.HistoryV3.WriteOnce(tx, config.HistoryV3)
-		if err != nil {
-			return err
-		}
-
-		config.TransactionsV3, err = kvcfg.TransactionsV3.WriteOnce(tx, config.TransactionsV3)
-		if err != nil {
-			return err
-		}
-
-		// if we are in the incorrect syncmode then we change it to the appropriate one
-		if !isCorrectSync {
-			logger.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
-			config.Sync.UseSnapshots = useSnapshots
-			config.Snapshot.Enabled = useSnapshots
-		}
-		logger.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String(), "history.v3", config.HistoryV3)
-
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-
-	ctx, ctxCancel := context.WithCancel(context.Background())
-
-	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
-	backend := &Ethereum{
-		sentryCtx:            ctx,
-		sentryCancel:         ctxCancel,
-		config:               config,
-		chainDB:              chainKv,
-		networkID:            config.NetworkID,
-		etherbase:            config.Miner.Etherbase,
-		chainConfig:          chainConfig,
-		genesisHash:          genesis.Hash(),
-		waitForStageLoopStop: make(chan struct{}),
-		waitForMiningStop:    make(chan struct{}),
-		notifications: &shards.Notifications{
-			Events:      shards.NewEvents(),
-			Accumulator: shards.NewAccumulator(),
-		},
-		logger: logger,
-	}
-	var (
-		allSnapshots *snapshotsync.RoSnapshots
-	)
-	backend.blockReader, backend.blockWriter, allSnapshots, backend.agg, err = backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader, config.TransactionsV3)
-	if err != nil {
-		return nil, err
-	}
+	backend.genesisHash = genesis.Hash()
+	backend.chainConfig = chainConfig
 
 	if config.HistoryV3 {
 		backend.chainDB, err = temporal.New(backend.chainDB, backend.agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
@@ -279,6 +277,9 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			return nil, err
 		}
 		chainKv = backend.chainDB
+	}
+	if err := backend.setUpSnapDownloader(ctx, config.Downloader); err != nil {
+		return nil, err
 	}
 
 	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, backend.agg, logger)
@@ -401,6 +402,15 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		}
 		return nil
 	}
+
+	var currentBlock *types.Block
+	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
+		currentBlock, err = backend.blockReader.CurrentBlock(tx)
+		return err
+	}); err != nil {
+		panic(err)
+	}
+
 	currentBlockNumber := uint64(0)
 	if currentBlock != nil {
 		currentBlockNumber = currentBlock.NumberU64()
@@ -420,7 +430,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	}
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
 		config.HeimdallgRPCAddress, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), false /* readonly */, logger)
-	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution, tmpdir)
+	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader)
 
 	if err != nil {
 		return nil, err
@@ -855,47 +865,29 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg, transactionsV3 bool) (services.FullBlockReader, *blockio.BlockWriter, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
-	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap, s.logger)
+func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downloadercfg.Cfg) error {
 	var err error
-	if !snConfig.NoDownloader {
-		allSnapshots.OptimisticalyReopenWithDB(s.chainDB)
+	if s.config.Snapshot.NoDownloader {
+		return nil
 	}
-	blockReader := snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
-	blockWriter := blockio.NewBlockWriter(transactionsV3)
-
-	if !snConfig.NoDownloader {
-		if snConfig.DownloaderAddr != "" {
-			// connect to external Downloader
-			s.downloaderClient, err = downloadergrpc.NewClient(ctx, snConfig.DownloaderAddr)
-		} else {
-			// start embedded Downloader
-			s.downloader, err = downloader3.New(ctx, downloaderCfg)
-			if err != nil {
-				return nil, nil, nil, nil, err
-			}
-			s.downloader.MainLoopInBackground(ctx, true)
-			bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
-			if err != nil {
-				return nil, nil, nil, nil, fmt.Errorf("new server: %w", err)
-			}
-
-			s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
-		}
+	if s.config.Snapshot.DownloaderAddr != "" {
+		// connect to external Downloader
+		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
+	} else {
+		// start embedded Downloader
+		s.downloader, err = downloader3.New(ctx, downloaderCfg)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return err
 		}
-	}
+		s.downloader.MainLoopInBackground(ctx, true)
+		bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
+		if err != nil {
+			return fmt.Errorf("new server: %w", err)
+		}
 
-	dir.MustExist(dirs.SnapHistory)
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, s.chainDB, s.logger)
-	if err != nil {
-		return nil, nil, nil, nil, err
+		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
-	if err = agg.OpenFolder(); err != nil {
-		return nil, nil, nil, nil, err
-	}
-	agg.OnFreeze(func(frozenFileNames []string) {
+	s.agg.OnFreeze(func(frozenFileNames []string) {
 		events := s.notifications.Events
 		events.OnNewSnapshot()
 		if s.downloaderClient != nil {
@@ -910,7 +902,26 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 			}
 		}
 	})
+	return err
+}
 
+func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig ethconfig.Snapshot, notifications *shards.Events, transactionsV3 bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
+	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap, logger)
+	var err error
+	if !snConfig.NoDownloader {
+		allSnapshots.OptimisticalyReopenWithDB(db)
+	}
+	blockReader := snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
+	blockWriter := blockio.NewBlockWriter(transactionsV3)
+
+	dir.MustExist(dirs.SnapHistory)
+	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if err = agg.OpenFolder(); err != nil {
+		return nil, nil, nil, nil, err
+	}
 	return blockReader, blockWriter, allSnapshots, agg, nil
 }
 

@@ -131,7 +131,7 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 				Version:   "1.0",
 			})
 		case "clique":
-			list = append(list, clique.NewCliqueAPI(db, engine))
+			list = append(list, clique.NewCliqueAPI(db, engine, blockReader))
 		}
 	}
 

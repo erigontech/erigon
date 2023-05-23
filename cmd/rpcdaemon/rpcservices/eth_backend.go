@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
@@ -44,6 +45,31 @@ func NewRemoteBackend(client remote.ETHBACKENDClient, db kv.RoDB, blockReader se
 	}
 }
 
+func (back *RemoteBackend) CurrentBlock(db kv.Tx) (*types.Block, error) {
+	panic("not implemented")
+}
+func (back *RemoteBackend) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
+	panic("not implemented")
+}
+func (back *RemoteBackend) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
+	hash, err := rawdb.ReadCanonicalHash(db, number)
+	if err != nil {
+		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+	}
+	if hash == (libcommon.Hash{}) {
+		return nil, nil
+	}
+	block, _, err := back.BlockWithSenders(ctx, db, hash, number)
+	return block, err
+}
+func (r *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash libcommon.Hash) (*types.Block, error) {
+	number := rawdb.ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil, nil
+	}
+	block, _, err := r.BlockWithSenders(ctx, db, hash, *number)
+	return block, err
+}
 func (back *RemoteBackend) TxsV3Enabled() bool {
 	panic("not implemented")
 }
