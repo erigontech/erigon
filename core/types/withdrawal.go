@@ -84,13 +84,12 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 	return rlp.EncodeInt(obj.Amount, w, b[:])
 }
 
-func (obj *Withdrawal) EncodeSSZ() []byte {
-	buf := make([]byte, obj.EncodingSizeSSZ())
-	ssz.MarshalUint64SSZ(buf, obj.Index)
-	ssz.MarshalUint64SSZ(buf[8:], obj.Validator)
-	copy(buf[16:], obj.Address[:])
-	ssz.MarshalUint64SSZ(buf[36:], obj.Amount)
-	return buf
+func (obj *Withdrawal) EncodeSSZ(buf []byte) ([]byte, error) {
+	buf = append(buf, ssz.Uint64SSZ(obj.Index)...)
+	buf = append(buf, ssz.Uint64SSZ(obj.Validator)...)
+	buf = append(buf, obj.Address[:]...)
+	buf = append(buf, ssz.Uint64SSZ(obj.Amount)...)
+	return buf, nil
 }
 
 func (obj *Withdrawal) DecodeSSZ(buf []byte, _ int) error {
@@ -110,14 +109,7 @@ func (obj *Withdrawal) EncodingSizeSSZ() int {
 }
 
 func (obj *Withdrawal) HashSSZ() ([32]byte, error) { // the [32]byte is temporary
-	var addressLeaf [32]byte
-	copy(addressLeaf[:], obj.Address[:])
-	return merkle_tree.ArraysRoot([][32]byte{
-		merkle_tree.Uint64Root(obj.Index),
-		merkle_tree.Uint64Root(obj.Validator),
-		addressLeaf,
-		merkle_tree.Uint64Root(obj.Amount),
-	}, 4)
+	return merkle_tree.HashTreeRoot(obj.Index, obj.Validator, obj.Address[:], obj.Amount)
 }
 
 func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
@@ -170,27 +162,4 @@ func (s Withdrawals) Len() int { return len(s) }
 // constructed by decoding or via public API in this package.
 func (s Withdrawals) EncodeIndex(i int, w *bytes.Buffer) {
 	rlp.Encode(w, s[i])
-}
-
-// HashSSZ hash a serie of withdrawals together given certain limit (16 for ETH1).
-func (obj Withdrawals) HashSSZ(limit uint64) ([32]byte, error) { // the [32]byte is temporary
-	leaves := make([][32]byte, len(obj))
-	var err error
-	// Compute trees of each withdrawal.
-	for i, withdrawal := range obj {
-		leaves[i], err = withdrawal.HashSSZ()
-		if err != nil {
-			return [32]byte{}, err
-		}
-	}
-	// Compute merklized base root.
-	baseRoot, err := merkle_tree.MerkleizeVector(leaves, limit)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	// Mix with length
-	return merkle_tree.ArraysRoot([][32]byte{
-		baseRoot,
-		merkle_tree.Uint64Root(uint64(len(obj))),
-	}, 2)
 }

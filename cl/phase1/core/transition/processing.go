@@ -3,6 +3,7 @@ package transition
 import (
 	"encoding/binary"
 	"fmt"
+
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -105,11 +106,12 @@ func ProcessEth1Data(state *state2.BeaconState, eth1Data *cltypes.Eth1Data) erro
 
 	// Count how many times body.Eth1Data appears in the votes.
 	numVotes := 0
-	for i := 0; i < len(newVotes); i++ {
-		if eth1Data.Equal(newVotes[i]) {
+	newVotes.Range(func(index int, value *cltypes.Eth1Data, length int) bool {
+		if eth1Data.Equal(value) {
 			numVotes += 1
 		}
-	}
+		return true
+	})
 
 	if uint64(numVotes*2) > state.BeaconConfig().EpochsPerEth1VotingPeriod*state.BeaconConfig().SlotsPerEpoch {
 		state.SetEth1Data(eth1Data)

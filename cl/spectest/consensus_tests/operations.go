@@ -39,7 +39,7 @@ func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 	if err := spectest.ReadSszOld(root, att, c.Version(), attestationFileName); err != nil {
 		return err
 	}
-	if err := transition2.ProcessAttestations(preState, cltypes.AttestionListFrom(att), true); err != nil {
+	if err := transition2.ProcessAttestations(preState, solid.NewDynamicListSSZFromList([]*solid.Attestation{att}, 128), true); err != nil {
 		if expectedError {
 			return nil
 		}

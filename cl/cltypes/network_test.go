@@ -20,15 +20,6 @@ var testPing = &cltypes.Ping{
 	Id: 420,
 }
 
-var testSingleRoot = &cltypes.SingleRoot{
-	Root: libcommon.HexToHash("96"),
-}
-
-var testLcRangeRequest = &cltypes.LightClientUpdatesByRangeRequest{
-	Period: 69,
-	Count:  666,
-}
-
 var testBlockRangeRequest = &cltypes.BeaconBlocksByRangeRequest{
 	StartSlot: 999,
 	Count:     666,
@@ -53,8 +44,6 @@ func TestMarshalNetworkTypes(t *testing.T) {
 	cases := []ssz.EncodableSSZ{
 		testMetadata,
 		testPing,
-		testSingleRoot,
-		testLcRangeRequest,
 		testBlockRangeRequest,
 		testStatus,
 	}
@@ -62,8 +51,6 @@ func TestMarshalNetworkTypes(t *testing.T) {
 	unmarshalDestinations := []ssz.EncodableSSZ{
 		&cltypes.Metadata{},
 		&cltypes.Ping{},
-		&cltypes.SingleRoot{},
-		&cltypes.LightClientUpdatesByRangeRequest{},
 		&cltypes.BeaconBlocksByRangeRequest{},
 		&cltypes.Status{},
 	}

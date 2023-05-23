@@ -20,8 +20,3 @@ func (b *BeaconState) AddValidator(validator *cltypes.Validator, balance uint64)
 	// change in validator set means cache purging
 	b.totalActiveBalanceCache = nil
 }
-
-func (b *BeaconState) SetBalances(balances []uint64) {
-	b.BeaconState.SetBalances(balances)
-	b._refreshActiveBalances()
-}

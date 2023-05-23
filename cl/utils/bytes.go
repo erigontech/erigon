@@ -84,16 +84,6 @@ func DecodeSSZSnappy(dst ssz.Unmarshaler, src []byte, version int) error {
 	return nil
 }
 
-// Check if it is sorted and check if there are duplicates. O(N) complexity.
-func IsSliceSortedSet(vals []uint64) bool {
-	for i := 0; i < len(vals)-1; i++ {
-		if vals[i] >= vals[i+1] {
-			return false
-		}
-	}
-	return true
-}
-
 // getBitlistLength return the amount of bits in given bitlist.
 func GetBitlistLength(b []byte) int {
 	if len(b) == 0 {

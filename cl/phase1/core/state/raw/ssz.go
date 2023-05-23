@@ -3,9 +3,8 @@ package raw
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/state_encoding"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
@@ -48,214 +47,26 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 }
 
 func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
-	var (
-		dst = buf
-		err error
-	)
-	// Sanity checks
-	if len(b.historicalRoots) > state_encoding.HistoricalRootsLength {
-		return nil, fmt.Errorf("too many historical roots")
-	}
+	return ssz2.MarshalSSZ(buf, b.getSchema()...)
+}
 
-	if len(b.historicalSummaries) > state_encoding.HistoricalRootsLength {
-		return nil, fmt.Errorf("too many summaries")
-	}
-
-	if len(b.eth1DataVotes) > int(b.beaconConfig.Eth1DataVotesLength()) {
-		return nil, fmt.Errorf("too many votes")
-	}
-
-	if len(b.validators) > state_encoding.ValidatorRegistryLimit {
-		return nil, fmt.Errorf("too many validators")
-	}
-
-	if b.balances.Length() > state_encoding.ValidatorRegistryLimit {
-		return nil, fmt.Errorf("too many balances")
-	}
-
-	maxEpochAttestations := int(b.beaconConfig.SlotsPerEpoch * b.beaconConfig.MaxAttestations)
-	if b.version != clparams.Phase0Version && b.previousEpochParticipation.Length() > state_encoding.ValidatorRegistryLimit || (b.currentEpochParticipation.Length()) > state_encoding.ValidatorRegistryLimit {
-		return nil, fmt.Errorf("too many participations")
-	}
-
-	if b.version == clparams.Phase0Version && len(b.previousEpochAttestations) > maxEpochAttestations || len(b.currentEpochAttestations) > maxEpochAttestations {
-		return nil, fmt.Errorf("too many participations")
-	}
-
-	if b.inactivityScores.Length() > state_encoding.ValidatorRegistryLimit {
-		return nil, fmt.Errorf("too many inactivities scores")
-	}
-	// Start encoding
-	offset := b.baseOffsetSSZ()
-
-	dst = append(dst, ssz.Uint64SSZ(b.genesisTime)...)
-	dst = append(dst, b.genesisValidatorsRoot[:]...)
-	dst = append(dst, ssz.Uint64SSZ(b.slot)...)
-
-	if dst, err = b.fork.EncodeSSZ(dst); err != nil {
-		return nil, err
-	}
-	if dst, err = b.latestBlockHeader.EncodeSSZ(dst); err != nil {
-		return nil, err
-	}
-
-	for _, blockRoot := range &b.blockRoots {
-		dst = append(dst, blockRoot[:]...)
-	}
-
-	for _, stateRoot := range &b.stateRoots {
-		dst = append(dst, stateRoot[:]...)
-	}
-
-	// Historical roots offset
-	dst = append(dst, ssz.OffsetSSZ(offset)...)
-	offset += uint32(len(b.historicalRoots) * 32)
-
-	if dst, err = b.eth1Data.EncodeSSZ(dst); err != nil {
-		return nil, err
-	}
-
-	// votes offset
-	dst = append(dst, ssz.OffsetSSZ(offset)...)
-	offset += uint32(len(b.eth1DataVotes)) * 72
-
-	dst = append(dst, ssz.Uint64SSZ(b.eth1DepositIndex)...)
-
-	// validators offset
-	dst = append(dst, ssz.OffsetSSZ(offset)...)
-	offset += uint32(len(b.validators)) * 121
-
-	// balances offset
-	dst = append(dst, ssz.OffsetSSZ(offset)...)
-	offset += uint32(b.balances.Length()) * 8
-
-	for _, mix := range &b.randaoMixes {
-		dst = append(dst, mix[:]...)
-	}
-
-	for _, slashing := range &b.slashings {
-		dst = append(dst, ssz.Uint64SSZ(slashing)...)
-	}
-
-	// prev participation offset
-	dst = append(dst, ssz.OffsetSSZ(offset)...)
-	// Gotta account for phase0 format (we used to store the attestations).
+// getSchema gives the schema for the current beacon state version according to ETH 2.0 specs.
+func (b *BeaconState) getSchema() []interface{} {
+	s := []interface{}{&b.genesisTime, b.genesisValidatorsRoot[:], &b.slot, b.fork, b.latestBlockHeader, b.blockRoots, b.stateRoots, b.historicalRoots,
+		b.eth1Data, b.eth1DataVotes, &b.eth1DepositIndex, b.validators, b.balances, b.randaoMixes, b.slashings}
 	if b.version == clparams.Phase0Version {
-		for _, attestation := range b.previousEpochAttestations {
-			offset += uint32(attestation.EncodingSizeSSZ()) + 4
-		}
-	} else {
-		offset += uint32(b.previousEpochParticipation.Length())
+		return append(s, b.previousEpochAttestations, b.currentEpochAttestations, &b.justificationBits, b.previousJustifiedCheckpoint, b.currentJustifiedCheckpoint,
+			b.finalizedCheckpoint)
 	}
-	// current participation offset
-	dst = append(dst, ssz.OffsetSSZ(offset)...)
-	// Gotta account for phase0 format (we used to store the attestations).
-	if b.version == clparams.Phase0Version {
-		for _, attestation := range b.currentEpochAttestations {
-			offset += uint32(attestation.EncodingSizeSSZ()) + 4
-		}
-	} else {
-		offset += uint32(b.currentEpochParticipation.Length())
-	}
-
-	dst = append(dst, b.justificationBits.Byte())
-
-	// Checkpoints
-	if dst, err = b.previousJustifiedCheckpoint.EncodeSSZ(dst); err != nil {
-		return nil, err
-	}
-
-	if dst, err = b.currentJustifiedCheckpoint.EncodeSSZ(dst); err != nil {
-		return nil, err
-	}
-	if dst, err = b.finalizedCheckpoint.EncodeSSZ(dst); err != nil {
-		return nil, err
-	}
-	if b.version >= clparams.AltairVersion {
-
-		// Inactivity scores offset
-		dst = append(dst, ssz.OffsetSSZ(offset)...)
-		offset += uint32(b.inactivityScores.Length()) * 8
-
-		// Sync commitees
-		if dst, err = b.currentSyncCommittee.EncodeSSZ(dst); err != nil {
-			return nil, err
-		}
-		if dst, err = b.nextSyncCommittee.EncodeSSZ(dst); err != nil {
-			return nil, err
-		}
-
-		// Offset (24) 'LatestExecutionPayloadHeader'
-		dst = append(dst, ssz.OffsetSSZ(offset)...)
-		if b.version >= clparams.BellatrixVersion {
-			offset += uint32(b.latestExecutionPayloadHeader.EncodingSizeSSZ())
-		}
-	}
-
-	if b.version >= clparams.CapellaVersion {
-		dst = append(dst, ssz.Uint64SSZ(b.nextWithdrawalIndex)...)
-		dst = append(dst, ssz.Uint64SSZ(b.nextWithdrawalValidatorIndex)...)
-		dst = append(dst, ssz.OffsetSSZ(offset)...)
-	}
-	// Write historical roots (offset 1)
-	for _, root := range b.historicalRoots {
-		dst = append(dst, root[:]...)
-	}
-	// Write votes (offset 2)
-	for _, vote := range b.eth1DataVotes {
-		if dst, err = vote.EncodeSSZ(dst); err != nil {
-			return nil, err
-		}
-	}
-	// Write validators (offset 3)
-	for _, validator := range b.validators {
-		if dst, err = validator.EncodeSSZ(dst); err != nil {
-			return nil, err
-		}
-	}
-	// Write balances (offset 4)
-	b.balances.Range(func(index int, value uint64, length int) bool {
-		dst = append(dst, ssz.Uint64SSZ(value)...)
-		return true
-	})
-
-	// Write participations (offset 4 & 5)
-	if b.version == clparams.Phase0Version {
-		if dst, err = ssz.EncodeDynamicList(dst, b.previousEpochAttestations); err != nil {
-			return nil, err
-		}
-		if dst, err = ssz.EncodeDynamicList(dst, b.currentEpochAttestations); err != nil {
-			return nil, err
-		}
-	} else {
-		dst = b.previousEpochParticipation.EncodeSSZ(dst)
-		dst = b.currentEpochParticipation.EncodeSSZ(dst)
-	}
-	if b.version >= clparams.AltairVersion {
-		// write inactivity scores (offset 6)
-		b.inactivityScores.Range(func(index int, value uint64, length int) bool {
-			dst = append(dst, ssz.Uint64SSZ(value)...)
-			return true
-		})
-	}
-
-	// write execution header (offset 7)
+	s = append(s, b.previousEpochParticipation, b.currentEpochParticipation, &b.justificationBits, b.previousJustifiedCheckpoint, b.currentJustifiedCheckpoint,
+		b.finalizedCheckpoint, b.inactivityScores, b.currentSyncCommittee, b.nextSyncCommittee)
 	if b.version >= clparams.BellatrixVersion {
-		if dst, err = b.latestExecutionPayloadHeader.EncodeSSZ(dst); err != nil {
-			return nil, err
-		}
+		s = append(s, b.latestExecutionPayloadHeader)
 	}
-
 	if b.version >= clparams.CapellaVersion {
-		for _, summary := range b.historicalSummaries {
-			if dst, err = summary.EncodeSSZ(dst); err != nil {
-				return nil, err
-			}
-		}
+		s = append(s, &b.nextWithdrawalIndex, &b.nextWithdrawalValidatorIndex, b.historicalSummaries)
 	}
-
-	return dst, nil
-
+	return s
 }
 
 func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
@@ -263,193 +74,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
 		return fmt.Errorf("[BeaconState] err: %s", ssz.ErrLowBufferSize)
 	}
-	// Direct unmarshalling for first 3 fields
-	b.genesisTime = ssz.UnmarshalUint64SSZ(buf)
-	copy(b.genesisValidatorsRoot[:], buf[8:])
-	b.slot = ssz.UnmarshalUint64SSZ(buf[40:])
-	// Fork data
-	b.fork = new(cltypes.Fork)
-	if err := b.fork.DecodeSSZ(buf[48:], version); err != nil {
-		return err
-	}
-	pos := 64
-	// Latest block header
-	b.latestBlockHeader = new(cltypes.BeaconBlockHeader)
-	if err := b.latestBlockHeader.DecodeSSZ(buf[64:], version); err != nil {
-		return err
-	}
-	pos += b.latestBlockHeader.EncodingSizeSSZ()
-	// Decode block roots
-	for i := range b.blockRoots {
-		copy(b.blockRoots[i][:], buf[pos:])
-		pos += length.Hash
-	}
-	// Decode state roots
-	for i := range b.stateRoots {
-		copy(b.stateRoots[i][:], buf[pos:])
-		pos += 32
-	}
-	// Read historical roots offset
-	historicalRootsOffset := ssz.DecodeOffset(buf[pos:])
-	pos += 4
-	// Decode eth1 data
-	b.eth1Data = new(cltypes.Eth1Data)
-	if err := b.eth1Data.DecodeSSZ(buf[pos:], version); err != nil {
-		return err
-	}
-	pos += b.eth1Data.EncodingSizeSSZ()
-	// Read votes offset
-	votesOffset := ssz.DecodeOffset(buf[pos:])
-	pos += 4
-	// Decode deposit index
-	b.eth1DepositIndex = ssz.UnmarshalUint64SSZ(buf[pos:])
-	pos += 8
-	// Read validators offset
-	validatorsOffset := ssz.DecodeOffset(buf[pos:])
-	pos += 4
-	// Read balances offset
-	balancesOffset := ssz.DecodeOffset(buf[pos:])
-	pos += 4
-	// Decode randao mixes
-	for i := range b.randaoMixes {
-		copy(b.randaoMixes[i][:], buf[pos:])
-		pos += 32
-	}
-	// Decode slashings
-	for i := range b.slashings {
-		b.slashings[i] = ssz.UnmarshalUint64SSZ(buf[pos:])
-		pos += 8
-	}
-	// partecipation offsets
-	previousEpochParticipationOffset := ssz.DecodeOffset(buf[pos:])
-	pos += 4
-	currentEpochParticipationOffset := ssz.DecodeOffset(buf[pos:])
-	pos += 4
-
-	// just take that one smol byte
-	b.justificationBits.FromByte(buf[pos])
-	pos++
-	// Decode checkpoints
-	b.previousJustifiedCheckpoint = solid.NewCheckpoint()
-	b.currentJustifiedCheckpoint = solid.NewCheckpoint()
-	b.finalizedCheckpoint = solid.NewCheckpoint()
-	if err := b.previousJustifiedCheckpoint.DecodeSSZ(buf[pos:], version); err != nil {
-		return err
-	}
-	pos += b.previousJustifiedCheckpoint.EncodingSizeSSZ()
-	if err := b.currentJustifiedCheckpoint.DecodeSSZ(buf[pos:], version); err != nil {
-		return err
-	}
-	pos += b.currentJustifiedCheckpoint.EncodingSizeSSZ()
-	if err := b.finalizedCheckpoint.DecodeSSZ(buf[pos:], version); err != nil {
-		return err
-	}
-	pos += b.finalizedCheckpoint.EncodingSizeSSZ()
-	// Offset for inactivity scores
-	var inactivityScoresOffset uint32
-	// Decode sync committees
-	if b.version >= clparams.AltairVersion {
-		inactivityScoresOffset = ssz.DecodeOffset(buf[pos:])
-		pos += 4
-		b.currentSyncCommittee = new(cltypes.SyncCommittee)
-		b.nextSyncCommittee = new(cltypes.SyncCommittee)
-		if err := b.currentSyncCommittee.DecodeSSZ(buf[pos:], version); err != nil {
-			return err
-		}
-		pos += b.currentSyncCommittee.EncodingSizeSSZ()
-		if err := b.nextSyncCommittee.DecodeSSZ(buf[pos:], version); err != nil {
-			return err
-		}
-		pos += b.nextSyncCommittee.EncodingSizeSSZ()
-	}
-
-	var executionPayloadOffset uint32
-	// Execution Payload header offset
-	if b.version >= clparams.BellatrixVersion {
-		executionPayloadOffset = ssz.DecodeOffset(buf[pos:])
-		pos += 4
-	}
-	var historicalSummariesOffset uint32
-	if b.version >= clparams.CapellaVersion {
-		b.nextWithdrawalIndex = ssz.UnmarshalUint64SSZ(buf[pos:])
-		pos += 8
-		b.nextWithdrawalValidatorIndex = ssz.UnmarshalUint64SSZ(buf[pos:])
-		pos += 8
-		historicalSummariesOffset = ssz.DecodeOffset(buf[pos:])
-		// pos += 4
-	}
-	// Now decode all the lists.
-	var err error
-	if b.historicalRoots, err = ssz.DecodeHashList(buf, historicalRootsOffset, votesOffset, state_encoding.HistoricalRootsLength); err != nil {
-		return err
-	}
-	if b.eth1DataVotes, err = ssz.DecodeStaticList[*cltypes.Eth1Data](buf, votesOffset, validatorsOffset, 72, b.beaconConfig.Eth1DataVotesLength(), version); err != nil {
-		return err
-	}
-	if b.validators, err = ssz.DecodeStaticList[*cltypes.Validator](buf, validatorsOffset, balancesOffset, 121, state_encoding.ValidatorRegistryLimit, version); err != nil {
-		return err
-	}
-	rawBalances, err := ssz.DecodeNumbersList(buf, balancesOffset, previousEpochParticipationOffset, state_encoding.ValidatorRegistryLimit)
-	if err != nil {
-		return err
-	}
-
-	b.SetBalances(rawBalances)
-	if b.version == clparams.Phase0Version {
-		maxAttestations := b.beaconConfig.SlotsPerEpoch * b.beaconConfig.MaxAttestations
-		if b.previousEpochAttestations, err = ssz.DecodeDynamicList[*cltypes.PendingAttestation](buf, previousEpochParticipationOffset, currentEpochParticipationOffset, maxAttestations, version); err != nil {
-			return err
-		}
-		if b.currentEpochAttestations, err = ssz.DecodeDynamicList[*cltypes.PendingAttestation](buf, currentEpochParticipationOffset, uint32(len(buf)), maxAttestations, version); err != nil {
-			return err
-		}
-		return b.init()
-	} else {
-		var previousEpochParticipation, currentEpochParticipation []byte
-		if previousEpochParticipation, err = ssz.DecodeString(buf, uint64(previousEpochParticipationOffset), uint64(currentEpochParticipationOffset), state_encoding.ValidatorRegistryLimit); err != nil {
-			return err
-		}
-		if currentEpochParticipation, err = ssz.DecodeString(buf, uint64(currentEpochParticipationOffset), uint64(inactivityScoresOffset), state_encoding.ValidatorRegistryLimit); err != nil {
-			return err
-		}
-		previousEpochParticipationCopy := make([]byte, len(previousEpochParticipation))
-		copy(previousEpochParticipationCopy, previousEpochParticipation)
-
-		currentEpochParticipationCopy := make([]byte, len(currentEpochParticipation))
-		copy(currentEpochParticipationCopy, currentEpochParticipation)
-
-		b.previousEpochParticipation = solid.BitlistFromBytes(previousEpochParticipationCopy, state_encoding.ValidatorRegistryLimit)
-		b.currentEpochParticipation = solid.BitlistFromBytes(currentEpochParticipationCopy, state_encoding.ValidatorRegistryLimit)
-	}
-
-	endOffset := uint32(len(buf))
-	if executionPayloadOffset != 0 {
-		endOffset = executionPayloadOffset
-	}
-	inactivityScores, err := ssz.DecodeNumbersList(buf, inactivityScoresOffset, endOffset, state_encoding.ValidatorRegistryLimit)
-	if err != nil {
-		return err
-	}
-
-	b.SetInactivityScores(inactivityScores)
-	if b.version == clparams.AltairVersion {
-		return b.init()
-	}
-	endOffset = uint32(len(buf))
-	if historicalSummariesOffset != 0 {
-		endOffset = historicalSummariesOffset
-	}
-	if len(buf) < int(endOffset) || executionPayloadOffset > endOffset {
-		return fmt.Errorf("[BeaconState] err: %s", ssz.ErrLowBufferSize)
-	}
-	b.latestExecutionPayloadHeader = new(cltypes.Eth1Header)
-	if err := b.latestExecutionPayloadHeader.DecodeSSZ(buf[executionPayloadOffset:endOffset], int(b.version)); err != nil {
-		return err
-	}
-	if b.version == clparams.BellatrixVersion {
-		return b.init()
-	}
-	if b.historicalSummaries, err = ssz.DecodeStaticList[*cltypes.HistoricalSummary](buf, historicalSummariesOffset, uint32(len(buf)), 64, state_encoding.HistoricalRootsLength, version); err != nil {
+	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err
 	}
 	// Capella
@@ -458,24 +83,38 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 
 // SSZ size of the Beacon State
 func (b *BeaconState) EncodingSizeSSZ() (size int) {
-	size = int(b.baseOffsetSSZ()) + (len(b.historicalRoots) * 32)
-	size += len(b.eth1DataVotes) * 72
-	size += len(b.validators) * 121
+	if b.historicalRoots == nil {
+		b.historicalRoots = solid.NewHashList(int(b.beaconConfig.HistoricalRootsLimit))
+	}
+	size = int(b.baseOffsetSSZ()) + b.historicalRoots.EncodingSizeSSZ()
+	if b.eth1DataVotes == nil {
+		b.eth1DataVotes = solid.NewStaticListSSZ[*cltypes.Eth1Data](int(b.beaconConfig.Eth1DataVotesLength()), 72)
+	}
+	size += b.eth1DataVotes.EncodingSizeSSZ()
+	if b.validators == nil {
+		b.validators = cltypes.NewValidatorSet(int(b.beaconConfig.ValidatorRegistryLimit))
+	}
+	size += b.validators.EncodingSizeSSZ()
 	size += b.balances.Length() * 8
+	if b.previousEpochAttestations == nil {
+		b.previousEpochAttestations = solid.NewDynamicListSSZ[*solid.PendingAttestation](int(b.BeaconConfig().PreviousEpochAttestationsLength()))
+	}
+	if b.currentEpochAttestations == nil {
+		b.currentEpochAttestations = solid.NewDynamicListSSZ[*solid.PendingAttestation](int(b.BeaconConfig().CurrentEpochAttestationsLength()))
+	}
 	if b.version == clparams.Phase0Version {
-		for _, pendingAttestation := range b.previousEpochAttestations {
-			size += pendingAttestation.EncodingSizeSSZ()
-		}
-		for _, pendingAttestation := range b.currentEpochAttestations {
-			size += pendingAttestation.EncodingSizeSSZ()
-		}
+		size += b.previousEpochAttestations.EncodingSizeSSZ()
+		size += b.currentEpochAttestations.EncodingSizeSSZ()
 	} else {
 		size += b.previousEpochParticipation.Length()
 		size += b.currentEpochParticipation.Length()
 	}
 
 	size += b.inactivityScores.Length() * 8
-	size += len(b.historicalSummaries) * 64
+	if b.historicalSummaries == nil {
+		b.historicalSummaries = solid.NewStaticListSSZ[*cltypes.HistoricalSummary](int(b.beaconConfig.HistoricalRootsLimit), 64)
+	}
+	size += b.historicalSummaries.EncodingSizeSSZ()
 	return
 }
 

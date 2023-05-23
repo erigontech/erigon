@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
@@ -66,7 +67,8 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, tx kv.RwTx, ctx context.Cont
 		if finalizedRoot == (libcommon.Hash{}) {
 			continue
 		}
-		block, eth1Number, eth1Hash, err := rawdb.ReadBeaconBlock(tx, finalizedRoot, slot)
+		// TODO(Giulio2002): proper versioning
+		block, eth1Number, eth1Hash, err := rawdb.ReadBeaconBlock(tx, finalizedRoot, slot, clparams.Phase0Version)
 		if err != nil {
 			return err
 		}

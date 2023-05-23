@@ -2,9 +2,11 @@ package transition_test
 
 import (
 	"encoding/binary"
+	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
-	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -17,9 +19,9 @@ func TestProcessSyncCommittee(t *testing.T) {
 	var pk [48]byte
 	copy(pk[:], pkBytes)
 	validatorNum := 10_000
-	state := state.GetEmptyBeaconState()
-	currentCommittee := &cltypes.SyncCommittee{}
-	nextCommittee := &cltypes.SyncCommittee{}
+	state := state.New(&clparams.MainnetBeaconConfig)
+	currentCommittee := &solid.SyncCommittee{}
+	nextCommittee := &solid.SyncCommittee{}
 	for i := 0; i < validatorNum; i++ {
 		var pubKey [48]byte
 		binary.BigEndian.PutUint64(pubKey[:], uint64(i))
@@ -28,11 +30,6 @@ func TestProcessSyncCommittee(t *testing.T) {
 		v.SetPublicKey(pk)
 		v.SetEffectiveBalance(2000000000)
 		state.AddValidator(v, 2000000000)
-		if len(currentCommittee.PubKeys) != cltypes.SyncCommitteeSize {
-			currentCommittee.PubKeys = append(currentCommittee.PubKeys, [48]byte{})
-		} else if len(nextCommittee.PubKeys) != cltypes.SyncCommitteeSize {
-			nextCommittee.PubKeys = append(currentCommittee.PubKeys, [48]byte{})
-		}
 	}
 	state.SetCurrentSyncCommittee(currentCommittee)
 	state.SetNextSyncCommittee(nextCommittee)
