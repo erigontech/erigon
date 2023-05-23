@@ -89,6 +89,34 @@ func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon
 	return span.ValidatorSet.Validators, nil
 }
 
+func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
+	// Use signer as validator in case of bor devent
+	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
+		validators := []*valset.Validator{
+			{
+				ID:               1,
+				Address:          signer,
+				VotingPower:      1000,
+				ProposerPriority: 1,
+			},
+		}
+
+		return validators, nil
+	}
+
+	span, err := getSpanForBlock(blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	producers := make([]*valset.Validator, 0, len(span.SelectedProducers))
+	for _, producer := range span.SelectedProducers {
+		producers = append(producers, &producer)
+	}
+
+	return producers, nil
+}
+
 func (c *ChainSpanner) CommitSpan(heimdallSpan HeimdallSpan, syscall consensus.SystemCall) error {
 
 	// method
