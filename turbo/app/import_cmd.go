@@ -188,8 +188,8 @@ func ChainHasBlock(chainDB kv.RwDB, block *types.Block) bool {
 func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.FullBlockReader) []*types.Block {
 	var headBlock *types.Block
 	chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
-		headBlock = blockReader.CurrentBlock(tx)
-		return nil
+		headBlock, err = blockReader.CurrentBlock(tx)
+		return err
 	})
 
 	for i, block := range blocks {
