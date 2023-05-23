@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -227,24 +226,6 @@ var TxsBeginEnd = Migration{
 	},
 }
 
-func writeRawBodyDeprecated(db kv.RwTx, hash common2.Hash, number uint64, body *types.RawBody, m *stages2.MockSentry) error {
-	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions)))
-	if err != nil {
-		return err
-	}
-	data := types.BodyForStorage{
-		BaseTxId: baseTxId,
-		TxAmount: uint32(len(body.Transactions)),
-		Uncles:   body.Uncles,
-	}
-	if err = rawdb.WriteBodyForStorage(db, hash, number, &data); err != nil {
-		return fmt.Errorf("failed to write body: %w", err)
-	}
-	if err = rawdb.WriteRawTransactions(db, body.Transactions, baseTxId, &hash, m.TransactionsV3); err != nil {
-		return fmt.Errorf("failed to WriteRawTransactions: %w, blockNum=%d", err, number)
-	}
-	return nil
-}
 func writeTransactionsNewDeprecated(db kv.RwTx, txs []types.Transaction, baseTxId uint64) error {
 	txId := baseTxId
 	buf := bytes.NewBuffer(nil)

@@ -314,7 +314,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 		var cc *chain.Config
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+			genesisBlock, err := blockReader.BlockByNumber(ctx, tx, 0)
 			if err != nil {
 				return err
 			}

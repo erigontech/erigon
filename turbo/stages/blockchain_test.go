@@ -488,7 +488,6 @@ func TestChainTxReorgs(t *testing.T) {
 			t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
 		}
 	}
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
 
 	// added tx
 	txs = types.Transactions{pastAdd, freshAdd, futureAdd}

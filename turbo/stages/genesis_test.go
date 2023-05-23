@@ -26,9 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
@@ -141,7 +139,9 @@ func TestSetupGenesis(t *testing.T) {
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			db := memdb.NewTestDB(t)
+			m := stages.Mock(t)
+			db := m.DB
+			blockReader, _ := m.NewBlocksIO()
 			config, genesis, err := test.fn(db)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {
@@ -164,7 +164,7 @@ func TestSetupGenesis(t *testing.T) {
 			} else if err == nil {
 				if dbErr := db.View(context.Background(), func(tx kv.Tx) error {
 					// Check database content.
-					stored := rawdb.ReadBlock(tx, test.wantHash, 0)
+					stored, _, _ := blockReader.BlockWithSenders(m.Ctx, tx, test.wantHash, 0)
 					if stored.Hash() != test.wantHash {
 						t.Errorf("%s: block in DB has hash %s, want %s", test.name, stored.Hash(), test.wantHash)
 					}
