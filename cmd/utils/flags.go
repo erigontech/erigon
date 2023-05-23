@@ -936,7 +936,6 @@ func NewP2PConfig(
 		NoDiscovery:     nodiscover,
 		PrivateKey:      serverKey,
 		Name:            nodeName,
-		Log:             log.New(),
 		NodeDatabase:    enodeDBPath,
 		AllowedPorts:    allowedPorts,
 		TmpDir:          dirs.Tmp,

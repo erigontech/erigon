@@ -296,6 +296,7 @@ func NewMultiClient(
 		1024*1024, /* linkLimit */
 		engine,
 		blockReader,
+		logger,
 	)
 	if chainConfig.TerminalTotalDifficultyPassed {
 		hd.SetPOSSync(true)

@@ -82,8 +82,9 @@ type TransitionConfiguration struct {
 
 // BlobsBundleV1 holds the blobs of an execution payload
 type BlobsBundleV1 struct {
-	KZGs  []types.KZGCommitment `json:"kzgs"  gencodec:"required"`
-	Blobs []types.Blob          `json:"blobs" gencodec:"required"`
+	KZGs   []types.KZGCommitment `json:"kzgs"   gencodec:"required"`
+	Blobs  []types.Blob          `json:"blobs"  gencodec:"required"`
+	Proofs []types.KZGProof      `json:"proofs" gencodec:"required"`
 }
 
 type ExecutionPayloadBodyV1 struct {
@@ -95,6 +96,7 @@ type ExecutionPayloadBodyV1 struct {
 type EngineAPI interface {
 	NewPayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	NewPayloadV2(context.Context, *ExecutionPayload) (map[string]interface{}, error)
+	NewPayloadV3(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
 	ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutility.Bytes) (*ExecutionPayload, error)
@@ -244,6 +246,12 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_newpayloadv2
 func (e *EngineImpl) NewPayloadV2(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
 	return e.newPayload(2, ctx, payload)
+}
+
+// NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & excess data gas.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv3
+func (e *EngineImpl) NewPayloadV3(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
+	return e.newPayload(3, ctx, payload)
 }
 
 func (e *EngineImpl) newPayload(version uint32, ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {

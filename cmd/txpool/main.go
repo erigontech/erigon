@@ -172,7 +172,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 			ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 		}
 	*/
-	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil)
+	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil, logger)
 
 	grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil, logger)
 	if err != nil {

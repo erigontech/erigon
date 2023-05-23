@@ -23,10 +23,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
-func newTestServer() *Server {
-	server := NewServer(50, false /* traceRequests */, true)
+func newTestServer(logger log.Logger) *Server {
+	server := NewServer(50, false /* traceRequests */, true, logger)
 	server.idgen = sequentialIDGenerator()
 	if err := server.RegisterName("test", new(testService)); err != nil {
 		panic(err)
@@ -111,7 +113,7 @@ func (s *testService) ReturnError() error {
 }
 
 func (s *testService) CallMeBack(ctx context.Context, method string, args []interface{}) (interface{}, error) {
-	c, ok := ClientFromContext(ctx)
+	c, ok := ClientFromContext(ctx, log.New())
 	if !ok {
 		return nil, errors.New("no client")
 	}
@@ -121,7 +123,7 @@ func (s *testService) CallMeBack(ctx context.Context, method string, args []inte
 }
 
 func (s *testService) CallMeBackLater(ctx context.Context, method string, args []interface{}) error {
-	c, ok := ClientFromContext(ctx)
+	c, ok := ClientFromContext(ctx, log.New())
 	if !ok {
 		return errors.New("no client")
 	}

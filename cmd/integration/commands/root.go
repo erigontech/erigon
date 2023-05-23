@@ -91,7 +91,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB
 			return nil, err
 		}
 		if h3 {
-			_, agg := allSnapshots(context.Background(), db)
+			_, agg := allSnapshots(context.Background(), db, logger)
 			tdb, err := temporal.New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chain])
 			if err != nil {
 				return nil, err

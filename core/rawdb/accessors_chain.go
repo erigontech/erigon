@@ -320,23 +320,38 @@ func ReadHeadersByNumber(db kv.Tx, number uint64) ([]*types.Header, error) {
 
 // WriteHeader stores a block header into the database and also stores the hash-
 // to-number mapping.
-func WriteHeader(db kv.Putter, header *types.Header) {
+func WriteHeader(db kv.RwTx, header *types.Header) error {
 	var (
-		hash    = header.Hash()
-		number  = header.Number.Uint64()
-		encoded = hexutility.EncodeTs(number)
+		hash      = header.Hash()
+		number    = header.Number.Uint64()
+		encoded   = hexutility.EncodeTs(number)
+		headerKey = dbutils.HeaderKey(number, hash)
 	)
 	if err := db.Put(kv.HeaderNumber, hash[:], encoded); err != nil {
-		log.Crit("Failed to store hash to number mapping", "err", err)
+		return fmt.Errorf("HeaderNumber mapping: %w", err)
 	}
+
 	// Write the encoded header
 	data, err := rlp.EncodeToBytes(header)
 	if err != nil {
-		log.Crit("Failed to RLP encode header", "err", err)
+		return fmt.Errorf("WriteHeader: %w", err)
 	}
-	if err := db.Put(kv.Headers, dbutils.HeaderKey(number, hash), data); err != nil {
-		log.Crit("Failed to store header", "err", err)
+	if err := db.Put(kv.Headers, headerKey, data); err != nil {
+		return fmt.Errorf("WriteHeader: %w", err)
 	}
+	return nil
+}
+func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash libcommon.Hash, headerRlp []byte, skipIndexing bool) error {
+	if err := db.Put(kv.Headers, dbutils.HeaderKey(number, hash), headerRlp); err != nil {
+		return err
+	}
+	if skipIndexing {
+		return nil
+	}
+	if err := db.Put(kv.HeaderNumber, hash[:], hexutility.EncodeTs(number)); err != nil {
+		return err
+	}
+	return nil
 }
 
 // deleteHeader - dangerous, use DeleteAncientBlocks/TruncateBlocks methods
@@ -1225,8 +1240,7 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 	if err := WriteBody(db, block.Hash(), block.NumberU64(), block.Body()); err != nil {
 		return err
 	}
-	WriteHeader(db, block.Header())
-	return nil
+	return WriteHeader(db, block.Header())
 }
 
 // DeleteAncientBlocks - delete [1, to) old blocks after moving it to snapshots.

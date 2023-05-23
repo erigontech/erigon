@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -22,10 +23,26 @@ import (
 func ClearDevDB(dataDir string, logger log.Logger) error {
 	logger.Info("Deleting ./dev folders")
 
-	if err := os.RemoveAll(dataDir); err != nil {
-		return err
+	nodeNumber := 1
+	for {
+		nodeDataDir := filepath.Join(dataDir, fmt.Sprintf("%d", nodeNumber))
+		fileInfo, err := os.Stat(nodeDataDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				break
+			}
+			return err
+		}
+		if fileInfo.IsDir() {
+			if err := os.RemoveAll(dataDir); err != nil {
+				return err
+			}
+			logger.Info("SUCCESS => Deleted", "datadir", nodeDataDir)
+		} else {
+			break
+		}
+		nodeNumber++
 	}
-	logger.Info("SUCCESS => Deleted", "datadir", dataDir)
 	return nil
 }
 

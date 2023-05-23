@@ -27,7 +27,7 @@ var ErrTxsBeginEndNoMigration = fmt.Errorf("in this Erigon version DB format was
 
 var txsBeginEnd = Migration{
 	Name: "txs_begin_end",
-	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback) (err error) {
+	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 		logEvery := time.NewTicker(10 * time.Second)
 		defer logEvery.Stop()
 
@@ -39,7 +39,7 @@ var txsBeginEnd = Migration{
 			}
 			if progress != nil {
 				latestBlock = binary.BigEndian.Uint64(progress)
-				log.Info("[database version migration] Continue migration", "from_block", latestBlock)
+				logger.Info("[database version migration] Continue migration", "from_block", latestBlock)
 			} else {
 				latestBlock = bodiesProgress + 1 // include block 0
 			}
@@ -63,7 +63,7 @@ var txsBeginEnd = Migration{
 			case <-logEvery.C:
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				log.Info("[database version migration] Adding system-txs",
+				logger.Info("[database version migration] Adding system-txs",
 					"progress", fmt.Sprintf("%.2f%%", 100-100*float64(blockNum)/float64(latestBlock)), "block_num", blockNum,
 					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			default:
