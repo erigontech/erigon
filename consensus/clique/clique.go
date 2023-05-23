@@ -30,6 +30,7 @@ import (
 
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -536,7 +537,7 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}
 }
 
-func NewCliqueAPI(db kv.RoDB, engine consensus.EngineReader) rpc.API {
+func NewCliqueAPI(db kv.RoDB, engine consensus.EngineReader, blockReader services.FullBlockReader) rpc.API {
 	var c *Clique
 	if casted, ok := engine.(*Clique); ok {
 		c = casted
@@ -545,7 +546,7 @@ func NewCliqueAPI(db kv.RoDB, engine consensus.EngineReader) rpc.API {
 	return rpc.API{
 		Namespace: "clique",
 		Version:   "1.0",
-		Service:   &API{db: db, clique: c},
+		Service:   &API{db: db, clique: c, blockReader: blockReader},
 		Public:    false,
 	}
 }
