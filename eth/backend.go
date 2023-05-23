@@ -1099,6 +1099,9 @@ func (s *Ethereum) SentryCtx() context.Context {
 func (s *Ethereum) SentryControlServer() *sentry.MultiClient {
 	return s.sentriesClient
 }
+func (s *Ethereum) BlockIO() (services.FullBlockReader, *blockio.BlockWriter) {
+	return s.blockReader, s.blockWriter
+}
 
 // RemoveContents is like os.RemoveAll, but preserve dir itself
 func RemoveContents(dir string) error {
