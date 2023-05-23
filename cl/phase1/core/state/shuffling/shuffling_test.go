@@ -45,5 +45,5 @@ func TestShuffling(t *testing.T) {
 	s := raw.GetTestState()
 	idx, err := shuffling.ComputeProposerIndex(s, []uint64{1, 2, 3, 4, 5, 6, 7, 8}, [32]byte{1})
 	require.NoError(t, err)
-	require.Equal(t, idx, 2)
+	require.Equal(t, idx, uint64(2))
 }
