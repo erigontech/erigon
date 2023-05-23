@@ -95,7 +95,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	hash := block.Hash()
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txIndex, *gasBailOut, types.MakeSigner(chainConfig, blockNumber), chainConfig)
+	traces, _, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txIndex, *gasBailOut, types.MakeSigner(chainConfig, blockNumber), chainConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +189,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	txnIndex := -1 // all tx indices
-	traces, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txnIndex, *gasBailOut /* gasBailOut */, types.MakeSigner(cfg, blockNum), cfg)
+	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txnIndex, *gasBailOut /* gasBailOut */, types.MakeSigner(cfg, blockNum), cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -207,24 +207,10 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		}
 	}
 
-	reader, err := rpchelper.CreateHistoryStateReader(tx, blockNum, txnIndex, api.historyV3(tx), cfg.ChainName)
+	rewards, err := api.engine().CalculateRewards(cfg, block.Header(), block.Uncles(), syscall)
 	if err != nil {
 		return nil, err
 	}
-	stateDb := state.New(reader)
-	if err != nil {
-		return nil, err
-	}
-	engine := api.engine()
-	header := block.Header()
-	excessDataGas, err := api.excessDataGas(tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg, stateDb, header, engine, true /* constCall */, excessDataGas)
-	}
-	rewards, err := engine.CalculateRewards(cfg, header, block.Uncles(), syscall)
 
 	for _, r := range rewards {
 		var tr ParityTrace
@@ -455,7 +441,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 			isPos = header.Difficulty.Cmp(common.Big0) == 0 || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
 		}
 		txs := block.Transactions()
-		t, tErr := api.callManyTransactions(ctx, dbtx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut, types.MakeSigner(chainConfig, b), chainConfig)
+		t, _, tErr := api.callManyTransactions(ctx, dbtx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut, types.MakeSigner(chainConfig, b), chainConfig)
 		if tErr != nil {
 			if first {
 				first = false
@@ -973,30 +959,30 @@ func (api *TraceAPIImpl) callManyTransactions(
 	gasBailOut bool,
 	signer *types.Signer,
 	cfg *chain.Config,
-) ([]*TraceCallResult, error) {
+) ([]*TraceCallResult, consensus.SystemCall, error) {
 	blockNumber := block.NumberU64()
 	parentNo := parentNumber(blockNumber)
 	rules := cfg.Rules(blockNumber, block.Time())
 	header := block.Header()
 	excessDataGas, err := api.excessDataGas(dbtx, blockNumber)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	txs := block.Transactions()
 	callParams := make([]TraceCallParam, 0, len(txs))
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNumber, txIndex, api.historyV3(dbtx), cfg.ChainName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	stateDb := state.New(reader)
+	initialState := state.New(reader)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	engine := api.engine()
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), block.Transactions(), block.Uncles(), cfg, stateDb, excessDataGas)
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), block.Transactions(), block.Uncles(), cfg, initialState, excessDataGas)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	msgs := make([]types.Message, len(txs))
 	for i, tx := range txs {
@@ -1009,13 +995,13 @@ func (api *TraceAPIImpl) callManyTransactions(
 
 		msg, err := tx.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
-			return nil, fmt.Errorf("convert tx into msg: %w", err)
+			return nil, nil, fmt.Errorf("convert tx into msg: %w", err)
 		}
 
 		// gnosis might have a fee free account here
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, cfg, stateDb, header, engine, true /* constCall */, excessDataGas)
+				return core.SysCallContract(contract, data, cfg, initialState, header, engine, true /* constCall */, excessDataGas)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
@@ -1025,17 +1011,21 @@ func (api *TraceAPIImpl) callManyTransactions(
 
 	parentHash := block.ParentHash()
 
-	traces, cmErr := api.doCallMany(ctx, dbtx, msgs, callParams, &rpc.BlockNumberOrHash{
+	traces, finalState, cmErr := api.doCallMany(ctx, dbtx, msgs, callParams, &rpc.BlockNumberOrHash{
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
 	}, header, gasBailOut /* gasBailout */, txIndex)
 
 	if cmErr != nil {
-		return nil, cmErr
+		return nil, nil, cmErr
 	}
 
-	return traces, nil
+	syscall := func(contract common.Address, data []byte) ([]byte, error) {
+		return core.SysCallContract(contract, data, cfg, finalState, header, engine, true /* constCall */, excessDataGas)
+	}
+
+	return traces, syscall, nil
 }
 
 // TraceFilterRequest represents the arguments for trace_filter
