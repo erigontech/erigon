@@ -14,7 +14,7 @@ import (
 
 func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 	currentBlockNum := rawdb.ReadCurrentHeader(tx)
-	s := whitelist.Service{}
+	s := whitelist.GetWhitelistingService()
 
 	doExist, number, hash := s.GetWhitelistedMilestone()
 	if doExist && number <= currentBlockNum.Number.Uint64() {
@@ -52,6 +52,6 @@ func CurrentFinalizedBlock(tx kv.Tx, number uint64) *types.Block {
 	if err != nil || hash == (common.Hash{}) {
 		return nil
 	}
-	
+
 	return rawdb.ReadBlock(tx, hash, number)
 }

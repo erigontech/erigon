@@ -1,6 +1,7 @@
 package whitelist
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -22,6 +23,22 @@ var (
 type Service struct {
 	checkpointService
 	milestoneService
+}
+
+var Ws *Service
+
+func RegisterService(db kv.RwDB) error {
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	Ws = NewService(tx)
+
+	return nil
+}
+
+func GetWhitelistingService() *Service {
+	return Ws
 }
 
 func NewService(tx kv.RwTx) *Service {

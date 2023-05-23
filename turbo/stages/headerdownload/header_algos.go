@@ -525,7 +525,9 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			return true, false, 0, lastTime, nil
 		}
 		if !link.verified {
-			if err := hd.VerifyHeader(link.header); err != nil {
+			borFinality, borReorg := validateReorg(link.header)
+			fmt.Println(borFinality, "  -----  ", borReorg)
+			if err := hd.VerifyHeader(link.header); err != nil || !borFinality || borReorg != nil {
 				hd.badPoSHeaders[link.hash] = link.header.ParentHash
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
@@ -877,13 +879,6 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	td = new(big.Int).Add(parentTd, header.Difficulty)
 	// Now we can decide wether this header will create a change in the canonical head
 	if td.Cmp(hi.localTd) > 0 {
-		finality, err := ValidateReorg(header, chain, chainConfig)
-		if err != nil {
-			return nil, err
-		}
-		if !finality {
-			return nil, fmt.Errorf("incoming header doesn't conform to the bor finality")
-		}
 		hi.newCanonical = true
 		forkingPoint, err := hi.ForkingPoint(db, header, parent)
 		if err != nil {
@@ -1379,11 +1374,11 @@ func DecodeTips(encodings []string) (map[libcommon.Hash]HeaderRecord, error) {
 
 // ValidateReorg calls the chain validator service to check if the reorg is valid or not
 // This function is specific to Bor chain
-func ValidateReorg(current *types.Header, chain []*types.Header, config *chain.Config) (bool, error) {
+func validateReorg(current *types.Header) (bool, error) {
 	// Call the bor chain validator service
-	s := whitelist.Service{}
-	if config.Bor != nil {
-		return s.IsValidChain(current, chain)
+	s := whitelist.GetWhitelistingService()
+	if s != nil {
+		return s.IsValidChain(current, nil)
 	}
 
 	return true, nil

@@ -20,11 +20,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth"
-	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/rlp"
 	turboNode "github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
 const (
@@ -207,18 +205,6 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block) []*types.Block {
 }
 
 func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack) error {
-	tx, err := ethereum.ChainDB().BeginRo(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Check the validity of incoming chain - only in case of bor consensus
-	currentHead := rawdb.ReadCurrentHeader(tx)
-	if isValid, _ := headerdownload.ValidateReorg(currentHead, chain.Headers, ethereum.ChainConfig()); !isValid {
-		return whitelist.ErrMismatch
-	}
-
 	sentryControlServer := ethereum.SentryControlServer()
 	initialCycle := false
 
@@ -229,7 +215,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack) error {
 
 	sentryControlServer.Hd.MarkAllVerified()
 
-	_, err = stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainConfig(), ethereum.ChainDB(), ethereum.StagedSync(), ethereum.Notifications(), initialCycle, sentryControlServer.UpdateHead)
+	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainConfig(), ethereum.ChainDB(), ethereum.StagedSync(), ethereum.Notifications(), initialCycle, sentryControlServer.UpdateHead)
 	if err != nil {
 		return err
 	}
