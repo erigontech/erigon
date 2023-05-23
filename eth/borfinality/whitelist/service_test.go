@@ -82,12 +82,8 @@ func TestWhitelistedCheckpoint(t *testing.T) {
 	require.Equal(t, hash, libcommon.Hash{1}, "expected the 1 hash but got", hash)
 	require.NotEqual(t, hash, libcommon.Hash{}, "expected the hash to be different from zero hash")
 
-	c1 := s.checkpointService.(*checkpoint)
-	fmt.Println("!!!-0", c1.doExist)
 	s.PurgeWhitelistedCheckpoint()
-	fmt.Println("!!!-1", c1.doExist)
 	doExist, number, hash = s.GetWhitelistedCheckpoint()
-	fmt.Println("!!!-2", c1.doExist)
 	//Validating the values received from the db, not memory
 	require.Equal(t, doExist, true, "expected true ascheckpoint exist at this point")
 	require.Equal(t, number, uint64(12), "expected number to be 11 but got", number)
