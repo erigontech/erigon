@@ -1,12 +1,11 @@
-package stagedsync
+package stagedsync_test
 
 import (
-	"context"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -23,12 +22,14 @@ import (
 
 func TestSenders(t *testing.T) {
 	logger := log.New()
-	ctx := context.Background()
-	db, tx := memdb.NewTestTx(t)
 	require := require.New(t)
-	//allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger)
 
-	bw := blockio.NewBlockWriter(false)
+	m := stages2.Mock(t)
+	db := m.DB
+	tx, err := db.BeginRw(m.Ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	br, bw := m.NewBlocksIO()
 
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
@@ -110,7 +111,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.HexToHash("02"), 2))
 
-	err := bw.WriteBody(tx, libcommon.HexToHash("03"), 3, &types.Body{
+	err = bw.WriteBody(tx, libcommon.HexToHash("03"), 3, &types.Body{
 		Transactions: []types.Transaction{}, Uncles: []*types.Header{{GasLimit: 3}},
 	})
 	require.NoError(err)
@@ -119,19 +120,19 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	br := snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil, logger)
-	cfg := StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, br, bw, nil)
-	err = SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx, log.New())
+	blockRetire := snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil, logger)
+	cfg := stagedsync.StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, blockRetire, bw, nil)
+	err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 3, m.Ctx, log.New())
 	require.NoError(err)
 
 	{
-		found := rawdb.ReadCanonicalBodyWithTransactions(tx, libcommon.HexToHash("01"), 1)
+		found, _ := br.BodyWithTransactions(m.Ctx, tx, libcommon.HexToHash("01"), 1)
 		assert.NotNil(t, found)
 		assert.Equal(t, 2, len(found.Transactions))
-		found = rawdb.ReadCanonicalBodyWithTransactions(tx, libcommon.HexToHash("02"), 2)
+		found, _ = br.BodyWithTransactions(m.Ctx, tx, libcommon.HexToHash("02"), 2)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 3, len(found.Transactions))
-		found = rawdb.ReadCanonicalBodyWithTransactions(tx, libcommon.HexToHash("03"), 3)
+		found, _ = br.BodyWithTransactions(m.Ctx, tx, libcommon.HexToHash("03"), 3)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 0, len(found.Transactions))
 		assert.NotNil(t, 2, len(found.Uncles))
