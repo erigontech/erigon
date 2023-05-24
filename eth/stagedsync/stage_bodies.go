@@ -204,6 +204,9 @@ func BodiesForward(
 				return true, nil
 			}
 
+			// TODO(eip-4844): Check that the block's excess_data_gas field was computed correctly
+			// based on the parent's value and the count of blobs
+
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
 			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
 			if err != nil {
