@@ -876,8 +876,7 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	_, bw := blocksIO(db, logger)
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, blockRetire, bw, bw, nil)
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, blockRetire, bw, nil)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
@@ -1528,7 +1527,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 
 	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, logger)
 
-	br, _ := blocksIO(db, logger)
+	blockReader, _ := blocksIO(db, logger)
 	sentryControlServer, err := sentry.NewMultiClient(
 		db,
 		"",
@@ -1538,7 +1537,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		1,
 		nil,
 		ethconfig.Defaults.Sync,
-		br,
+		blockReader,
 		false,
 		nil,
 		ethconfig.Defaults.DropUselessPeers,
@@ -1559,11 +1558,11 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	}()
 	miningSync := stagedsync.New(
 		stagedsync.MiningStages(ctx,
-			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp, br),
+			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp, blockReader),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, nil, allSn, cfg.TransactionsV3),
 			stagedsync.StageHashStateCfg(db, dirs, historyV3, agg),
-			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, br, nil, historyV3, agg),
-			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel, br),
+			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, blockReader, nil, historyV3, agg),
+			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel, blockReader),
 		),
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,
