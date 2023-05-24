@@ -85,7 +85,7 @@ func borVerify(ctx context.Context, borHandler *BorHandler, config *config, star
 		}
 	} else {
 		// in case of milestone(isCheckpoint==false) get the hash of endBlock
-		block, err := requests.GetBlockByNumber(models.ReqId, end, false)
+		block, err := requests.GetBlockByNumber(models.ReqId, end, false, config.logger)
 		if err != nil {
 			log.Debug("Failed to get end block hash while whitelisting milestone", "number", end, "err", err)
 			return hash, errEndBlock
@@ -130,7 +130,7 @@ func borVerify(ctx context.Context, borHandler *BorHandler, config *config, star
 	}
 
 	// fetch the end block hash
-	block, err := requests.GetBlockByNumber(models.ReqId, end, false)
+	block, err := requests.GetBlockByNumber(models.ReqId, end, false, config.logger)
 	if err != nil {
 		log.Debug("Failed to get end block hash while whitelisting", "err", err)
 		return hash, errEndBlock
@@ -162,7 +162,7 @@ func rewind(config *config, head uint64, rewindTo uint64) {
 	log.Warn("Rewinding chain because it doesn't match the received milestone", "to", rewindTo)
 
 	// fetch the end block hash
-	block, err := requests.GetBlockByNumber(models.ReqId, head, false)
+	block, err := requests.GetBlockByNumber(models.ReqId, head, false, config.logger)
 	if err != nil {
 		log.Debug("Failed to get end block hash while rewinding/unwinding", "err", err)
 		return

@@ -17,14 +17,16 @@ type config struct {
 	engine     consensus.Engine
 	stagedSync *stagedsync.Sync
 	db         kv.RwDB
+	logger     log.Logger
 	closeCh    chan struct{}
 }
 
-func Whitelist(engine consensus.Engine, stagedsync *stagedsync.Sync, db kv.RwDB, closeCh chan struct{}) {
+func Whitelist(engine consensus.Engine, stagedsync *stagedsync.Sync, db kv.RwDB, logger log.Logger, closeCh chan struct{}) {
 	config := &config{
 		engine:     engine,
 		stagedSync: stagedsync,
 		db:         db,
+		logger:     logger,
 		closeCh:    closeCh,
 	}
 
