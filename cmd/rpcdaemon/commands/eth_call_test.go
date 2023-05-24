@@ -243,7 +243,8 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
-	latestBlock := br.CurrentBlock(tx)
+	latestBlock, err := br.CurrentBlock(tx)
+	require.NoError(t, err)
 	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
 
 	if err != nil {
@@ -323,7 +324,8 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
-	latestBlock := br.CurrentBlock(tx)
+	latestBlock, err := br.CurrentBlock(tx)
+	require.NoError(t, err)
 
 	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
 

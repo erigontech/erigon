@@ -26,7 +26,6 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/gballet/go-verkle"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -34,8 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -733,8 +730,9 @@ func WriteRawBody(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.Ra
 			return false, 0, err
 		}
 		blockID = binary.BigEndian.Uint64(blockIDBytes)
+	} else {
+		baseTxnID, err = db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions))+2)
 	}
-	baseTxnID, err = db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions))+2)
 	if err != nil {
 		return false, 0, err
 	}

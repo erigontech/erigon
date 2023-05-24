@@ -247,9 +247,9 @@ func TestStorageRangeAt(t *testing.T) {
 	})
 	t.Run("block latest, addr 1", func(t *testing.T) {
 		var latestBlock *types.Block
-		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-			latestBlock = br.CurrentBlock(tx)
-			return nil
+		err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
+			latestBlock, err = br.CurrentBlock(tx)
+			return err
 		})
 		require.NoError(t, err)
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
