@@ -8,15 +8,63 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-/*
-{pubkey: '0x227a72a5b99042650eaa52ed66ebf50d31595dba2cbc3da3810378c6fa92c25b93fa0e652a1ac298549cceb6c40d6fc2',
-withdrawal_credentials: '0x401ef8ad032de7a3b8a50ae67cd823b0944d2260cd0d018e710eebf8e832b021',
-effective_balance: 13619341603830475769, slashed: true, activation_eligibility_epoch: 2719404809456332213,
-activation_epoch: 8707665390408467486, exit_epoch: 6929014573432656651, withdrawable_epoch: 3085466968797960434}
-*/
+func TestSignedVoluntaryExit(t *testing.T) {
+	// Create a sample SignedVoluntaryExit
+	voluntaryExit := &cltypes.VoluntaryExit{
+		Epoch:          5,
+		ValidatorIndex: 10,
+	}
+	signature := [96]byte{1, 2, 3}
+
+	signedExit := &cltypes.SignedVoluntaryExit{
+		VolunaryExit: voluntaryExit,
+		Signature:    signature,
+	}
+
+	// Encode SignedVoluntaryExit to SSZ
+	encodedExit, err := signedExit.EncodeSSZ(nil)
+	assert.NoError(t, err, "Failed to encode SignedVoluntaryExit")
+
+	// Decode SSZ to a new SignedVoluntaryExit object
+	decodedExit := &cltypes.SignedVoluntaryExit{}
+	err = decodedExit.DecodeSSZ(encodedExit, 0)
+	assert.NoError(t, err, "Failed to decode SSZ to SignedVoluntaryExit")
+
+	// Compare the original and decoded SignedVoluntaryExit
+	assert.Equal(t, signedExit.VolunaryExit.Epoch, decodedExit.VolunaryExit.Epoch, "Decoded SignedVoluntaryExit has incorrect epoch")
+	assert.Equal(t, signedExit.VolunaryExit.ValidatorIndex, decodedExit.VolunaryExit.ValidatorIndex, "Decoded SignedVoluntaryExit has incorrect validator index")
+	assert.Equal(t, signedExit.Signature, decodedExit.Signature, "Decoded SignedVoluntaryExit has incorrect signature")
+}
+
+func TestDepositData(t *testing.T) {
+	// Create a sample DepositData
+	depositData := &cltypes.DepositData{
+		PubKey:                [48]byte{1, 2, 3},
+		WithdrawalCredentials: [32]byte{4, 5, 6},
+		Amount:                100,
+		Signature:             [96]byte{7, 8, 9},
+		Root:                  [32]byte{10, 11, 12},
+	}
+
+	// Encode DepositData to SSZ
+	encodedData, err := depositData.EncodeSSZ(nil)
+	assert.NoError(t, err, "Failed to encode DepositData")
+
+	// Decode SSZ to a new DepositData object
+	decodedData := &cltypes.DepositData{}
+	err = decodedData.DecodeSSZ(encodedData, 0)
+	assert.NoError(t, err, "Failed to decode SSZ to DepositData")
+
+	// Compare the original and decoded DepositData
+	assert.Equal(t, depositData.PubKey, decodedData.PubKey, "Decoded DepositData has incorrect public key")
+	assert.Equal(t, depositData.WithdrawalCredentials, decodedData.WithdrawalCredentials, "Decoded DepositData has incorrect withdrawal credentials")
+	assert.Equal(t, depositData.Amount, decodedData.Amount, "Decoded DepositData has incorrect amount")
+	assert.Equal(t, depositData.Signature, decodedData.Signature, "Decoded DepositData has incorrect signature")
+}
 
 func hex2BlsPublicKey(s string) (k [48]byte) {
 	bytesKey, err := hex.DecodeString(s)
@@ -73,4 +121,10 @@ func TestValidatorNonSlashed(t *testing.T) {
 	root, err := decodedValidator.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(root), testValidatorRoot2)
+	att, miss := decodedValidator.DutiesAttested()
+	assert.Equal(t, att, uint64(0))
+	assert.Equal(t, miss, uint64(3))
+
+	assert.False(t, decodedValidator.IsSlashable(1))
+
 }

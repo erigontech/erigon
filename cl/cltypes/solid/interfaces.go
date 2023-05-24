@@ -1,28 +1,29 @@
 package solid
 
-type Uint64Slice interface {
+import (
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+)
+
+type IterableSSZ[T any] interface {
 	Clear()
-	CopyTo(Uint64Slice)
-	Range(fn func(index int, value uint64, length int) bool)
-	Pop() uint64
-	Append(v uint64)
-	Get(index int) uint64
-	Set(index int, v uint64)
+	CopyTo(IterableSSZ[T])
+	Range(fn func(index int, value T, length int) bool)
+	Get(index int) T
+	Set(index int, v T)
 	Length() int
 	Cap() int
-	HashSSZTo(xs []byte) error
+
+	Pop() T
+	Append(v T)
+
+	ssz2.Sized
+	ssz.EncodableSSZ
+	ssz.HashableSSZ
 }
 
-type BitList interface {
-	Clear()
-	CopyTo(BitList)
-	Range(fn func(index int, value byte, length int) bool)
-	Pop() byte
-	Append(v byte)
-	Get(index int) byte
-	Set(index int, v byte)
-	Length() int
-	Cap() int
-	EncodeSSZ(dst []byte) []byte
-	HashSSZTo(xs []byte) error
-}
+type Uint64VectorSSZ IterableSSZ[uint64]
+type Uint64ListSSZ IterableSSZ[uint64]
+type HashListSSZ IterableSSZ[common.Hash]
+type HashVectorSSZ IterableSSZ[common.Hash]

@@ -1,10 +1,12 @@
 package consensus_tests
 
 import (
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 	"io/fs"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -26,7 +28,7 @@ func (b *ShufflingCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err 
 		return err
 	}
 
-	s := state.GetEmptyBeaconState()
+	s := state.New(&clparams.MainnetBeaconConfig)
 	keccakOptimized := utils.OptimizedKeccak256NotThreadSafe()
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(s.BeaconConfig(), meta.Seed)
 	for idx, v := range meta.Mapping {

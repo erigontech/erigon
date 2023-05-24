@@ -35,7 +35,7 @@ func (b *BeaconState) SlashValidator(slashedInd uint64, whistleblowerInd *uint64
 	}
 
 	newWithdrawableEpoch := utils.Max64(currentWithdrawableEpoch, epoch+b.BeaconConfig().EpochsPerSlashingsVector)
-	if err := b.SetValidatorWithdrawableEpoch(int(slashedInd), newWithdrawableEpoch); err != nil {
+	if err := b.SetWithdrawableEpochForValidatorAtIndex(int(slashedInd), newWithdrawableEpoch); err != nil {
 		return err
 	}
 

@@ -31,14 +31,16 @@ import (
 // VerifyEip1559Header verifies some header attributes which were changed in EIP-1559,
 // - gas limit check
 // - basefee check
-func VerifyEip1559Header(config *chain.Config, parent, header *types.Header) error {
-	// Verify that the gas limit remains within allowed bounds
-	parentGasLimit := parent.GasLimit
-	if !config.IsLondon(parent.Number.Uint64()) {
-		parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
-	}
-	if err := VerifyGaslimit(parentGasLimit, header.GasLimit); err != nil {
-		return err
+func VerifyEip1559Header(config *chain.Config, parent, header *types.Header, skipGasLimit bool) error {
+	if !skipGasLimit {
+		// Verify that the gas limit remains within allowed bounds
+		parentGasLimit := parent.GasLimit
+		if !config.IsLondon(parent.Number.Uint64()) {
+			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
+		}
+		if err := VerifyGaslimit(parentGasLimit, header.GasLimit); err != nil {
+			return err
+		}
 	}
 	// Verify the header is not malformed
 	if header.BaseFee == nil {

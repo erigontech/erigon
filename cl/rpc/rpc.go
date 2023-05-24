@@ -17,6 +17,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
@@ -136,9 +137,12 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, co
 
 // SendBeaconBlocksByRootReq retrieves blocks by root from beacon chain.
 func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(ctx context.Context, roots [][32]byte) ([]*cltypes.SignedBeaconBlock, string, error) {
-	var req cltypes.BeaconBlocksByRootRequest = roots
+	var req solid.HashListSSZ = solid.NewHashList(69696969)
+	for _, root := range roots {
+		req.Append(root)
+	}
 	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, &req); err != nil {
+	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
 		return nil, "", err
 	}
 	data := common.CopyBytes(buffer.Bytes())

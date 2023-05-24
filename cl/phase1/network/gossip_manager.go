@@ -94,7 +94,7 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 			l["at"] = "block process"
 			return err
 		}
-		block.Block.Body.Attestations.ForEach(func(a *solid.Attestation, idx, total int) bool {
+		block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
 			if err = g.forkChoice.OnAttestation(a, true); err != nil {
 				return false
 			}

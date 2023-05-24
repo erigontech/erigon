@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -20,10 +21,6 @@ func EncodeNumber(n uint64) []byte {
 	return ret
 }
 
-func DecodeNumber(n []byte) uint64 {
-	return uint64(binary.BigEndian.Uint32(n))
-}
-
 // WriteBeaconState writes beacon state for specific block to database.
 func WriteBeaconState(tx kv.Putter, state *state.BeaconState) error {
 	data, err := utils.EncodeSSZSnappy(state)
@@ -34,45 +31,8 @@ func WriteBeaconState(tx kv.Putter, state *state.BeaconState) error {
 	return tx.Put(kv.BeaconState, EncodeNumber(state.Slot()), data)
 }
 
-func EncodeAttestationsForStorage(attestations *cltypes.AttestationList) ([]byte, error) {
-	encoded, err := attestations.EncodeSSZ(nil)
-	if err != nil {
-		return nil, err
-	}
-	return utils.CompressSnappy(encoded), nil
-}
-
-func DecodeAttestationsForStorage(buf []byte) (*cltypes.AttestationList, error) {
-	var err error
-	if buf, err = utils.DecompressSnappy(buf); err != nil {
-		return nil, err
-	}
-
-	ret := &cltypes.AttestationList{}
-	return ret, ret.DecodeSSZ(buf, 0)
-}
-
-func WriteAttestations(tx kv.RwTx, slot uint64, blockRoot libcommon.Hash, attestations *cltypes.AttestationList) error {
-	data, err := EncodeAttestationsForStorage(attestations)
-	if err != nil {
-		return err
-	}
-	return tx.Put(kv.Attestetations, append(EncodeNumber(slot), blockRoot[:]...), data)
-}
-
-func ReadAttestations(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64) (*cltypes.AttestationList, error) {
-	attestationsEncoded, err := tx.GetOne(kv.Attestetations, append(EncodeNumber(slot), blockRoot[:]...))
-	if err != nil {
-		return nil, err
-	}
-	return DecodeAttestationsForStorage(attestationsEncoded)
-}
-
 func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error {
-	var (
-		block     = signedBlock.Block
-		blockBody = block.Body
-	)
+	block := signedBlock.Block
 
 	blockRoot, err := block.HashSSZ()
 	if err != nil {
@@ -81,14 +41,11 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error 
 	// database key is is [slot + block root]
 	slotBytes := EncodeNumber(block.Slot)
 	key := append(slotBytes, blockRoot[:]...)
-	value, err := signedBlock.EncodeForStorage()
+	value, err := signedBlock.EncodeSSZ(nil)
 	if err != nil {
 		return err
 	}
 
-	if err := WriteAttestations(tx, block.Slot, blockRoot, blockBody.Attestations); err != nil {
-		return err
-	}
 	// Write block hashes
 	// We write the block indexing
 	if err := tx.Put(kv.RootSlotIndex, blockRoot[:], slotBytes); err != nil {
@@ -98,38 +55,31 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error 
 		return err
 	}
 	// Finally write the beacon block
-	return tx.Put(kv.BeaconBlocks, key, value)
+	return tx.Put(kv.BeaconBlocks, key, utils.CompressSnappy(value))
 }
 
-func ReadBeaconBlock(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64) (*cltypes.SignedBeaconBlock, uint64, libcommon.Hash, error) {
-	signedBlock, eth1Number, eth1Hash, _, err := ReadBeaconBlockForStorage(tx, blockRoot, slot)
-	if err != nil {
-		return nil, 0, libcommon.Hash{}, err
-	}
-	if signedBlock == nil {
-		return nil, 0, libcommon.Hash{}, err
-	}
-
-	attestations, err := ReadAttestations(tx, blockRoot, slot)
-	if err != nil {
-		return nil, 0, libcommon.Hash{}, err
-	}
-	signedBlock.Block.Body.Attestations = attestations
-	return signedBlock, eth1Number, eth1Hash, err
-}
-
-func ReadBeaconBlockForStorage(tx kv.Getter, blockRoot libcommon.Hash, slot uint64) (block *cltypes.SignedBeaconBlock, eth1Number uint64, eth1Hash libcommon.Hash, eth2Hash libcommon.Hash, err error) {
+func ReadBeaconBlock(tx kv.RwTx, blockRoot libcommon.Hash, slot uint64, version clparams.StateVersion) (*cltypes.SignedBeaconBlock, uint64, libcommon.Hash, error) {
 	encodedBeaconBlock, err := tx.GetOne(kv.BeaconBlocks, append(EncodeNumber(slot), blockRoot[:]...))
 	if err != nil {
-		return nil, 0, libcommon.Hash{}, libcommon.Hash{}, err
+		return nil, 0, libcommon.Hash{}, err
 	}
 	if len(encodedBeaconBlock) == 0 {
-		return nil, 0, libcommon.Hash{}, libcommon.Hash{}, nil
+		return nil, 0, libcommon.Hash{}, nil
 	}
-	if len(encodedBeaconBlock) == 0 {
-		return nil, 0, libcommon.Hash{}, libcommon.Hash{}, nil
+	if encodedBeaconBlock, err = utils.DecompressSnappy(encodedBeaconBlock); err != nil {
+		return nil, 0, libcommon.Hash{}, err
 	}
-	return cltypes.DecodeBeaconBlockForStorage(encodedBeaconBlock)
+	signedBlock := new(cltypes.SignedBeaconBlock)
+	if err := signedBlock.DecodeSSZ(encodedBeaconBlock, int(version)); err != nil {
+		return nil, 0, libcommon.Hash{}, err
+	}
+	var eth1Number uint64
+	var eth1Hash libcommon.Hash
+	if signedBlock.Block.Body.ExecutionPayload != nil {
+		eth1Number = signedBlock.Block.Body.ExecutionPayload.BlockNumber
+		eth1Hash = signedBlock.Block.Body.ExecutionPayload.BlockHash
+	}
+	return signedBlock, eth1Number, eth1Hash, err
 }
 
 func WriteFinalizedBlockRoot(tx kv.Putter, slot uint64, blockRoot libcommon.Hash) error {
