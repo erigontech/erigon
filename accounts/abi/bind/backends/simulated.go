@@ -321,8 +321,11 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash libcomm
 	if blockNumber == nil {
 		return nil, false, ethereum.NotFound
 	}
-
-	body, err := b.BlockReader().BodyWithTransactions(context.Background(), tx, txHash, *blockNumber)
+	blockHash, err := rawdb.ReadCanonicalHash(tx, *blockNumber)
+	if err != nil {
+		return nil, false, err
+	}
+	body, err := b.BlockReader().BodyWithTransactions(ctx, tx, blockHash, *blockNumber)
 	if err != nil {
 		return nil, false, err
 	}
