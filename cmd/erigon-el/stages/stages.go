@@ -100,7 +100,7 @@ func NewStagedSync(ctx context.Context,
 				snapshots,
 				blockReader,
 				cfg.HistoryV3,
-				cfg.TransactionsV3,
+				blockWriter,
 			),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockRetire, blockWriter, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(
