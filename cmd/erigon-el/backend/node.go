@@ -33,7 +33,7 @@ func (eri *ErigonNode) Serve() error {
 }
 
 func (eri *ErigonNode) run() {
-	utils.StartNode(eri.stack)
+	node.StartNode(eri.stack)
 	// we don't have accounts locally and we don't do mining
 	// so these parts are ignored
 	// see cmd/geth/daemon.go#startNode for full implementation
