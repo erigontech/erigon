@@ -121,14 +121,15 @@ func TestBodyStorage(t *testing.T) {
 	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry != nil {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
-	require.NoError(bw.WriteHeader(tx, header))
 	require.NoError(bw.WriteBody(tx, hash, 0, body))
+	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 0))
 	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(types.Transactions(body.Transactions)) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, body)
 	}
-	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
+	if entry := rawdb.ReadBodyRLP(tx, hash, 0); entry == nil {
+		//if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
 		t.Fatalf("Stored body RLP not found")
 	} else {
 		bodyRlp, err := rlp.EncodeToBytes(entry)
