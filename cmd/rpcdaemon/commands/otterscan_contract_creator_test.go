@@ -6,14 +6,13 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGetContractCreator(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	api := NewOtterscanAPI(NewBaseApi(nil, nil, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB)
 
 	addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")

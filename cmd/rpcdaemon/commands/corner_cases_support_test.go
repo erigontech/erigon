@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -21,7 +20,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	require := require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(
 		NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs),

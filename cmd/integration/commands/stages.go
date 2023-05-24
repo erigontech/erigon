@@ -1059,7 +1059,7 @@ func stageHashState(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageHashStateCfg(db, dirs, historyV3, agg)
+	cfg := stagedsync.StageHashStateCfg(db, dirs, historyV3)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.HashState, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindHashStateStage(u, s, tx, cfg, ctx, logger)
@@ -1560,7 +1560,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp, blockReader),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, nil, allSn, cfg.TransactionsV3),
-			stagedsync.StageHashStateCfg(db, dirs, historyV3, agg),
+			stagedsync.StageHashStateCfg(db, dirs, historyV3),
 			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, blockReader, nil, historyV3, agg),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel, blockReader),
 		),
