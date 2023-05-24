@@ -49,7 +49,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -826,7 +825,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		require.Equal(uint64(0), found.Minimum())
 	}
 
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 
 	if pm.TxIndex.Enabled() {
 		b, err := br.BlockByNumber(m.Ctx, tx, 1)

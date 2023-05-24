@@ -208,10 +208,8 @@ func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPref
 	}
 }
 
-func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3, from, to uint64, storage bool, load func(k []byte, v []byte) error) error {
+func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, from, to uint64, storage bool, load func(k []byte, v []byte) error) error {
 	nonEmptyMarker := []byte{1}
-
-	agg.SetTx(p.tx)
 
 	txnFrom, err := rawdbv3.TxNums.Min(p.tx, from+1)
 	if err != nil {
@@ -364,7 +362,7 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 	return nil
 }
 
-func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, unwindFrom, unwindTo uint64, storage bool, load func(k []byte, v []byte)) error {
+func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, unwindFrom, unwindTo uint64, storage bool, load func(k []byte, v []byte)) error {
 	txnFrom, err := rawdbv3.TxNums.Min(p.tx, unwindTo)
 	if err != nil {
 		return err
@@ -555,7 +553,6 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 	p := NewHashPromoter(db, cfg.tmpDir, quit, logPrefix, logger)
 	rl := trie.NewRetainList(0)
 	if cfg.historyV3 {
-		cfg.agg.SetTx(db)
 		collect := func(k, v []byte) error {
 			if len(k) == 32 {
 				rl.AddKeyWithMarker(k, len(v) == 0)
@@ -582,10 +579,10 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 			rl.AddKeyWithMarker(compositeKey, len(v) == 0)
 			return nil
 		}
-		if err := p.PromoteOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, to, false, collect); err != nil {
+		if err := p.PromoteOnHistoryV3(logPrefix, s.BlockNumber, to, false, collect); err != nil {
 			return trie.EmptyRoot, err
 		}
-		if err := p.PromoteOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, to, true, collect); err != nil {
+		if err := p.PromoteOnHistoryV3(logPrefix, s.BlockNumber, to, true, collect); err != nil {
 			return trie.EmptyRoot, err
 		}
 	} else {
@@ -665,14 +662,13 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx kv.RwTx, cf
 func UnwindIntermediateHashesForTrieLoader(logPrefix string, rl *trie.RetainList, u *UnwindState, s *StageState, db kv.RwTx, cfg TrieCfg, accTrieCollectorFunc trie.HashCollector2, stTrieCollectorFunc trie.StorageHashCollector2, quit <-chan struct{}, logger log.Logger) (*trie.FlatDBTrieLoader, error) {
 	p := NewHashPromoter(db, cfg.tmpDir, quit, logPrefix, logger)
 	if cfg.historyV3 {
-		cfg.agg.SetTx(db)
 		collect := func(k, v []byte) {
 			rl.AddKeyWithMarker(k, len(v) == 0)
 		}
-		if err := p.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, collect); err != nil {
+		if err := p.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, false, collect); err != nil {
 			return nil, err
 		}
-		if err := p.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, true, collect); err != nil {
+		if err := p.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, true, collect); err != nil {
 			return nil, err
 		}
 	} else {
