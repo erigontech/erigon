@@ -127,15 +127,18 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 	var currentBlockB *types.Block
 
 	err = canonicalMock.DB.View(context.Background(), func(tx kv.Tx) error {
-		currentBlockB = blockReader.CurrentBlock(tx)
-		return nil
+		currentBlockB, err = blockReader.CurrentBlock(tx)
+		return err
 	})
 	require.NoError(t, err)
 
 	blockChainB = makeBlockChain(currentBlockB, n, canonicalMock, forkSeed)
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		currentBlock := blockReader.CurrentBlock(tx)
+		currentBlock, err := blockReader.CurrentBlock(tx)
+		if err != nil {
+			return err
+		}
 		tdPre, err = rawdb.ReadTd(tx, currentBlock.Hash(), currentBlock.NumberU64())
 		if err != nil {
 			t.Fatalf("Failed to read TD for current block: %v", err)
@@ -306,6 +309,7 @@ func testReorgShort(t *testing.T) {
 }
 
 func testReorg(t *testing.T, first, second []int64, td int64) {
+	require := require.New(t)
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
 	br, _ := m.NewBlocksIO()
@@ -329,11 +333,12 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 		t.Fatalf("failed to insert difficult chain: %v", err)
 	}
 	tx, err := m.DB.BeginRo(context.Background())
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 
 	// Check that the chain is valid number and link wise
-	prev := br.CurrentBlock(tx)
+	prev, err := br.CurrentBlock(tx)
+	require.NoError(err)
 	block, err := br.BlockByNumber(m.Ctx, tx, rawdb.ReadCurrentHeader(tx).Number.Uint64()-1)
 	if err != nil {
 		t.Fatal(err)
@@ -351,9 +356,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	// Make sure the chain total difficulty is the correct one
 	want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
 	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(err)
 	if have.Cmp(want) != 0 {
 		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 	}
@@ -1106,14 +1109,22 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 		}
 
 		if err := m2.DB.View(m2.Ctx, func(tx kv.Tx) error {
-			b, h := br.CurrentBlock(tx), rawdb.ReadCurrentHeader(tx)
+			b, err := br.CurrentBlock(tx)
+			if err != nil {
+				return err
+			}
+			h := rawdb.ReadCurrentHeader(tx)
 			if b.Hash() != h.Hash() {
 				t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
 			}
 			if err := m2.InsertChain(forks[i]); err != nil {
 				t.Fatalf(" fork %d: failed to insert into chain: %v", i, err)
 			}
-			b, h = br.CurrentBlock(tx), rawdb.ReadCurrentHeader(tx)
+			b, err = br.CurrentBlock(tx)
+			if err != nil {
+				return err
+			}
+			h = rawdb.ReadCurrentHeader(tx)
 			if b.Hash() != h.Hash() {
 				t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
 			}
@@ -1225,7 +1236,10 @@ func TestLowDiffLongChain(t *testing.T) {
 
 	br, _ := m.NewBlocksIO()
 	if err := m2.DB.View(context.Background(), func(tx kv.Tx) error {
-		head := br.CurrentBlock(tx)
+		head, err := br.CurrentBlock(tx)
+		if err != nil {
+			return err
+		}
 		if got := fork.TopBlock.Hash(); got != head.Hash() {
 			t.Fatalf("head wrong, expected %x got %x", head.Hash(), got)
 		}
@@ -2195,5 +2209,9 @@ func current(m *stages.MockSentry) *types.Block {
 	}
 	defer tx.Rollback()
 	br, _ := m.NewBlocksIO()
-	return br.CurrentBlock(tx)
+	b, err := br.CurrentBlock(tx)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
