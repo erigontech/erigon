@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -88,23 +87,15 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 	if err := tx.ForEach(kv.BlockBody, fromB, func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
 		return err
 	}
-	ethtx := kv.EthTx
-	transactionV3, err := kvcfg.TransactionsV3.Enabled(tx)
-	if err != nil {
-		panic(err)
-	}
-	if transactionV3 {
-		ethtx = kv.EthTxV3
-	}
 
 	if err := backup.ClearTables(context.Background(), db, tx,
 		kv.NonCanonicalTxs,
-		ethtx,
+		kv.EthTx,
 		kv.MaxTxNum,
 	); err != nil {
 		return err
 	}
-	if err := rawdb.ResetSequence(tx, ethtx, 0); err != nil {
+	if err := rawdb.ResetSequence(tx, kv.EthTx, 0); err != nil {
 		return err
 	}
 

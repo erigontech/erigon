@@ -751,7 +751,7 @@ func WriteSenders(db kv.Putter, hash libcommon.Hash, number uint64, senders []li
 	return nil
 }
 
-// deleteBody removes all block body data associated with a hash.
+// DeleteBody removes all block body data associated with a hash.
 func DeleteBody(db kv.Deleter, hash libcommon.Hash, number uint64) {
 	if err := db.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, hash)); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
