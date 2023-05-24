@@ -1,15 +1,14 @@
-package stagedsync
+package stagedsync_test
 
 import (
 	"bytes"
-	"context"
 	"testing"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -17,15 +16,21 @@ import (
 )
 
 func TestBodiesUnwind(t *testing.T) {
-	require, ctx := require.New(t), context.Background()
-	_, tx := memdb.NewTestTx(t)
+	require := require.New(t)
+	m := stages2.Mock(t)
+	db := m.DB
+	tx, err := db.BeginRw(m.Ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	ctx := m.Ctx
+
 	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, CommonTx: types.CommonTx{ChainID: u256.N1, Value: u256.N1, Gas: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
-	err := txn.MarshalBinary(buf)
+	err = txn.MarshalBinary(buf)
 	require.NoError(err)
 	rlpTxn := buf.Bytes()
 
-	logEvery := time.NewTicker(logInterval)
+	logEvery := time.NewTicker(time.Second)
 	defer logEvery.Stop()
 
 	b := &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn, rlpTxn}}
@@ -41,14 +46,14 @@ func TestBodiesUnwind(t *testing.T) {
 
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(5*(3+2), int(n)) // from 0, 5 block with 3 txn in each
+		require.Equal(2+5*(3+2), int(n)) // genesis 2 system txs + from 1, 5 block with 3 txn in each
 	}
 	{
 		err = rawdb.MakeBodiesCanonical(tx, 5+1, ctx, "test", logEvery, false, nil) // block 5 already canonical, start from next one
 		require.NoError(err)
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(10*(3+2), int(n))
+		require.Equal(2+10*(3+2), int(n))
 
 		_, _, err = rawdb.WriteRawBody(tx, libcommon.Hash{11}, 11, b)
 		require.NoError(err)
@@ -57,7 +62,7 @@ func TestBodiesUnwind(t *testing.T) {
 
 		n, err = tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(11*(3+2), int(n))
+		require.Equal(2+11*(3+2), int(n))
 	}
 
 	{
@@ -67,12 +72,12 @@ func TestBodiesUnwind(t *testing.T) {
 
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(5*(3+2), int(n)) // from 0, 5 block with 3 txn in each
+		require.Equal(2+5*(3+2), int(n)) // from 0, 5 block with 3 txn in each
 
 		err = rawdb.MakeBodiesCanonical(tx, 5+1, ctx, "test", logEvery, false, nil) // block 5 already canonical, start from next one
 		require.NoError(err)
 		n, err = tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(11*(3+2), int(n))
+		require.Equal(2+11*(3+2), int(n))
 	}
 }
