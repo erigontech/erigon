@@ -12,8 +12,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/migrations"
-	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
@@ -23,7 +23,7 @@ import (
 )
 
 func TestTxsBeginEnd(t *testing.T) {
-	require := require.New(t)
+	require, tmpDir, db := require.New(t), t.TempDir(), memdb.NewTestDB(t)
 	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, CommonTx: types.CommonTx{ChainID: u256.N1, Value: u256.N1, Gas: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
 	err := txn.MarshalBinary(buf)
@@ -32,14 +32,11 @@ func TestTxsBeginEnd(t *testing.T) {
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
-	m := stages2.Mock(t)
-	db := m.DB
-	_, bw := m.NewBlocksIO()
 	b := &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn, rlpTxn}}
 	err = db.Update(context.Background(), func(tx kv.RwTx) error {
 		for i := uint64(0); i < 10; i++ {
 			hash := libcommon.Hash{byte(i)}
-			_, _, err = bw.WriteRawBodyIfNotExists(tx, hash, i, b)
+			err = writeRawBodyDeprecated(tx, hash, i, b)
 			require.NoError(err)
 			err = rawdb.WriteCanonicalHash(tx, hash, i)
 			require.NoError(err)
@@ -52,7 +49,7 @@ func TestTxsBeginEnd(t *testing.T) {
 		for i := uint64(7); i < 10; i++ {
 			require.NoError(err)
 			hash := libcommon.Hash{0xa, byte(i)}
-			_, _, err = bw.WriteRawBodyIfNotExists(tx, hash, i, b)
+			err = writeRawBodyDeprecated(tx, hash, i, b)
 			require.NoError(err)
 			err = rawdb.WriteCanonicalHash(tx, hash, i)
 			require.NoError(err)
@@ -67,7 +64,7 @@ func TestTxsBeginEnd(t *testing.T) {
 	migrator := migrations.NewMigrator(kv.ChainDB)
 	migrator.Migrations = []migrations.Migration{migrations.TxsBeginEnd}
 	logger := log.New()
-	err = migrator.Apply(db, m.Dirs.Tmp, logger)
+	err = migrator.Apply(db, tmpDir, logger)
 	require.NoError(err)
 
 	err = db.View(context.Background(), func(tx kv.Tx) error {
