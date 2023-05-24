@@ -27,10 +27,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
@@ -42,18 +39,14 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-func blocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
-	const txsV3 = true
-	br := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()), txsV3)
-	bw := blockio.NewBlockWriter(txsV3)
-	return br, bw
-}
-
 // Tests block header storage and retrieval operations.
 func TestHeaderStorage(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
-	ctx := context.Background()
-	br, bw := blocksIO()
+	m := stages.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	ctx := m.Ctx
+	br, bw := m.NewBlocksIO()
 
 	// Create a test header to move around the database and make sure it's really new
 	header := &types.Header{Number: big.NewInt(42), Extra: []byte("test header")}
@@ -88,10 +81,13 @@ func TestHeaderStorage(t *testing.T) {
 
 // Tests block body storage and retrieval operations.
 func TestBodyStorage(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	m := stages.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	ctx := m.Ctx
+	br, bw := m.NewBlocksIO()
 	require := require.New(t)
-	br, bw := blocksIO()
-	ctx := context.Background()
 
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
@@ -115,20 +111,20 @@ func TestBodyStorage(t *testing.T) {
 	// Create a test body to move around the database and make sure it's really new
 	hasher := sha3.NewLegacyKeccak256()
 	_ = rlp.Encode(hasher, body)
-	header := &types.Header{Number: big.NewInt(0)}
-	hash := header.Hash()
+	hash := libcommon.BytesToHash(hasher.Sum(nil))
 
 	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry != nil {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
-	require.NoError(bw.WriteBody(tx, hash, 0, body))
 	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 0))
+	require.NoError(bw.WriteBody(tx, hash, 0, body))
 	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(types.Transactions(body.Transactions)) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, body)
 	}
-	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
+	if entry := rawdb.ReadBodyRLP(tx, hash, 0, br.TxsV3Enabled()); entry == nil {
+		//if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
 		t.Fatalf("Stored body RLP not found")
 	} else {
 		bodyRlp, err := rlp.EncodeToBytes(entry)
@@ -151,9 +147,12 @@ func TestBodyStorage(t *testing.T) {
 
 // Tests block storage and retrieval operations.
 func TestBlockStorage(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
-	br, bw := blocksIO()
-	ctx := context.Background()
+	m := stages.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	ctx := m.Ctx
+	br, bw := m.NewBlocksIO()
 
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
@@ -174,7 +173,7 @@ func TestBlockStorage(t *testing.T) {
 	}
 
 	// Write and verify the block in the database
-	err := bw.WriteBlock(tx, block)
+	err = bw.WriteBlock(tx, block)
 	if err != nil {
 		t.Fatalf("Could not write block: %v", err)
 	}
@@ -224,7 +223,13 @@ func TestBlockStorage(t *testing.T) {
 
 // Tests that partial block contents don't get reassembled into full blocks.
 func TestPartialBlockStorage(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	m := stages.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	ctx := m.Ctx
+	br, bw := m.NewBlocksIO()
+
 	block := types.NewBlockWithHeader(&types.Header{
 		Extra:       []byte("test block"),
 		UncleHash:   types.EmptyUncleHash,
@@ -232,9 +237,6 @@ func TestPartialBlockStorage(t *testing.T) {
 		ReceiptHash: types.EmptyRootHash,
 	})
 	header := block.Header() // Not identical to struct literal above, due to other fields
-
-	br, bw := blocksIO()
-	ctx := context.Background()
 
 	// Store a header and check that it's not recognized as a block
 	bw.WriteHeader(tx, header)
@@ -267,8 +269,11 @@ func TestPartialBlockStorage(t *testing.T) {
 
 // Tests block total difficulty storage and retrieval operations.
 func TestTdStorage(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
-	bw := blockio.NewBlockWriter(false)
+	m := stages.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	_, bw := m.NewBlocksIO()
 
 	// Create a test TD to move around the database and make sure it's really new
 	hash, td := libcommon.Hash{}, big.NewInt(314)
@@ -309,8 +314,11 @@ func TestTdStorage(t *testing.T) {
 
 // Tests that canonical numbers can be mapped to hashes and retrieved.
 func TestCanonicalMappingStorage(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
-	_, bw := blocksIO()
+	m := stages.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	_, bw := m.NewBlocksIO()
 
 	// Create a test canonical number and assinged hash to move around
 	hash, number := libcommon.Hash{0: 0xff}, uint64(314)
@@ -350,7 +358,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 }
 
 // Tests that head headers and head blocks can be assigned, individually.
-func TestHeadStorage(t *testing.T) {
+func TestHeadStorage2(t *testing.T) {
 	_, db := memdb.NewTestTx(t)
 
 	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header")})
@@ -376,12 +384,38 @@ func TestHeadStorage(t *testing.T) {
 	}
 }
 
+// Tests that head headers and head blocks can be assigned, individually.
+func TestHeadStorage(t *testing.T) {
+	m := stages.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header"), Number: libcommon.Big1})
+	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full"), Number: libcommon.Big1})
+
+	// Assign separate entries for the head header and block
+	rawdb.WriteHeadHeaderHash(tx, blockHead.Hash())
+	rawdb.WriteHeadBlockHash(tx, blockFull.Hash())
+
+	// Check that both heads are present, and different (i.e. two heads maintained)
+	if entry := rawdb.ReadHeadHeaderHash(tx); entry != blockHead.Hash() {
+		t.Fatalf("Head header hash mismatch: have %v, want %v", entry, blockHead.Hash())
+	}
+	if entry := rawdb.ReadHeadBlockHash(tx); entry != blockFull.Hash() {
+		t.Fatalf("Head block hash mismatch: have %v, want %v", entry, blockFull.Hash())
+	}
+}
+
 // Tests that receipts associated with a single block can be stored and retrieved.
 func TestBlockReceiptStorage(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	m := stages.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	br, bw := m.NewBlocksIO()
 	require := require.New(t)
-	br, bw := blocksIO()
-	ctx := context.Background()
+	ctx := m.Ctx
 
 	// Create a live block since we need metadata to reconstruct the receipt
 	tx1 := types.NewTransaction(1, libcommon.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
@@ -473,9 +507,12 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 // Tests block storage and retrieval operations with withdrawals.
 func TestBlockWithdrawalsStorage(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	m := stages.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	br, bw := m.NewBlocksIO()
 	require := require.New(t)
-	br, bw := blocksIO()
 	ctx := context.Background()
 
 	// create fake withdrawals
@@ -523,7 +560,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	}
 
 	// Write and verify the block in the database
-	err := bw.WriteBlock(tx, wBlock)
+	err = bw.WriteBlock(tx, wBlock)
 	if err != nil {
 		t.Fatalf("Could not write block: %v", err)
 	}
