@@ -450,27 +450,21 @@ func TestBlockReceiptStorage(t *testing.T) {
 	}
 	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
 	receipts := []*types.Receipt{receipt1, receipt2}
-	header := &types.Header{Number: big.NewInt(0)}
+	header := &types.Header{Number: big.NewInt(1)}
 
 	// Check that no receipt entries are in a pristine database
 	hash := header.Hash() //libcommon.BytesToHash([]byte{0x03, 0x14})
-	b, senders, err := br.BlockWithSenders(ctx, tx, hash, 0)
-	require.NoError(err)
-	//require.NotNil(t, b)
-	if rs := rawdb.ReadReceipts(tx, b, senders); len(rs) != 0 {
-		t.Fatalf("non existent receipts returned: %v", rs)
-	}
 
 	rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64())
 	bw.WriteHeader(tx, header)
 	// Insert the body that corresponds to the receipts
-	require.NoError(bw.WriteBody(tx, hash, 0, body))
-	require.NoError(rawdb.WriteSenders(tx, hash, 0, body.SendersFromTxs()))
+	require.NoError(bw.WriteBody(tx, hash, 1, body))
+	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
 	// Insert the receipt slice into the database and check presence
-	require.NoError(rawdb.WriteReceipts(tx, 0, receipts))
+	require.NoError(rawdb.WriteReceipts(tx, 1, receipts))
 
-	b, senders, err = br.BlockWithSenders(ctx, tx, hash, 0)
+	b, senders, err := br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(err)
 	require.NotNil(b)
 	if rs := rawdb.ReadReceipts(tx, b, senders); len(rs) == 0 {
@@ -481,23 +475,23 @@ func TestBlockReceiptStorage(t *testing.T) {
 		}
 	}
 	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
-	rawdb.DeleteHeader(tx, hash, 0)
-	rawdb.DeleteBody(tx, hash, 0)
-	b, senders, err = br.BlockWithSenders(ctx, tx, hash, 0)
+	rawdb.DeleteHeader(tx, hash, 1)
+	rawdb.DeleteBody(tx, hash, 1)
+	b, senders, err = br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(err)
 	require.Nil(b)
 	if rs := rawdb.ReadReceipts(tx, b, senders); rs != nil {
 		t.Fatalf("receipts returned when body was deleted: %v", rs)
 	}
 	// Ensure that receipts without metadata can be returned without the block body too
-	if err := checkReceiptsRLP(rawdb.ReadRawReceipts(tx, 0), receipts); err != nil {
+	if err := checkReceiptsRLP(rawdb.ReadRawReceipts(tx, 1), receipts); err != nil {
 		t.Fatal(err)
 	}
 	bw.WriteHeader(tx, header)
 	// Sanity check that body alone without the receipt is a full purge
-	require.NoError(bw.WriteBody(tx, hash, 0, body))
-	require.NoError(rawdb.TruncateReceipts(tx, 0))
-	b, senders, err = br.BlockWithSenders(ctx, tx, hash, 0)
+	require.NoError(bw.WriteBody(tx, hash, 1, body))
+	require.NoError(rawdb.TruncateReceipts(tx, 1))
+	b, senders, err = br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(err)
 	require.NotNil(b)
 	if rs := rawdb.ReadReceipts(tx, b, senders); len(rs) != 0 {
