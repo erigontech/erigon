@@ -22,7 +22,6 @@ func TestBodiesUnwind(t *testing.T) {
 	tx, err := db.BeginRw(m.Ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	ctx := m.Ctx
 	br, bw := m.NewBlocksIO()
 
 	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, CommonTx: types.CommonTx{ChainID: u256.N1, Value: u256.N1, Gas: 1, Nonce: 1}}
