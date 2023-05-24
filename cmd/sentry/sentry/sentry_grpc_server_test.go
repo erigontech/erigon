@@ -7,22 +7,24 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/p2p"
 )
 
-func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash libcommon.Hash) *GrpcServer {
+func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash libcommon.Hash) *GrpcServer {
 	s := &GrpcServer{
 		ctx: context.Background(),
 	}
@@ -54,7 +56,7 @@ func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash libcommon
 
 // Tests that peers are correctly accepted (or rejected) based on the advertised
 // fork IDs in the protocol handshake.
-func TestForkIDSplit66(t *testing.T) { testForkIDSplit(t, eth.ETH66) }
+func TestForkIDSplit66(t *testing.T) { testForkIDSplit(t, direct.ETH66) }
 
 func testForkIDSplit(t *testing.T, protocol uint) {
 	var (
@@ -70,11 +72,11 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		dbNoFork  = memdb.NewTestDB(t)
 		dbProFork = memdb.NewTestDB(t)
 
-		gspecNoFork  = &core.Genesis{Config: configNoFork}
-		gspecProFork = &core.Genesis{Config: configProFork}
+		gspecNoFork  = &types.Genesis{Config: configNoFork}
+		gspecProFork = &types.Genesis{Config: configProFork}
 
-		genesisNoFork  = gspecNoFork.MustCommit(dbNoFork, "")
-		genesisProFork = gspecProFork.MustCommit(dbProFork, "")
+		genesisNoFork  = core.MustCommitGenesis(gspecNoFork, dbNoFork, "")
+		genesisProFork = core.MustCommitGenesis(gspecProFork, dbProFork, "")
 	)
 
 	var s1, s2 *GrpcServer
@@ -161,8 +163,8 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 
 	configNoFork := &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
 	dbNoFork := memdb.NewTestDB(t)
-	gspecNoFork := &core.Genesis{Config: configNoFork}
-	genesisNoFork := gspecNoFork.MustCommit(dbNoFork, "")
+	gspecNoFork := &types.Genesis{Config: configNoFork}
+	genesisNoFork := core.MustCommitGenesis(gspecNoFork, dbNoFork, "")
 	ss := &GrpcServer{p2p: &p2p.Config{}}
 
 	_, err := ss.SetStatus(context.Background(), &proto_sentry.StatusData{

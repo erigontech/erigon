@@ -1,9 +1,12 @@
 package cltypes
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 // Change to EL engine
@@ -14,37 +17,29 @@ type BLSToExecutionChange struct {
 }
 
 func (b *BLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {
-	dst := buf
-	dst = append(dst, ssz.Uint64SSZ(b.ValidatorIndex)...)
-	dst = append(dst, b.From[:]...)
-	dst = append(dst, b.To[:]...)
-	return dst, nil
+	return ssz2.MarshalSSZ(buf, b.ValidatorIndex, b.From[:], b.To[:])
 }
 
 func (b *BLSToExecutionChange) HashSSZ() ([32]byte, error) {
-	leaves := make([][32]byte, 3)
-	var err error
-	leaves[0] = merkle_tree.Uint64Root(b.ValidatorIndex)
-	leaves[1], err = merkle_tree.PublicKeyRoot(b.From)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	copy(leaves[2][:], b.To[:])
-	return merkle_tree.ArraysRoot(leaves, 4)
+	return merkle_tree.HashTreeRoot(b.ValidatorIndex, b.From[:], b.To[:])
 }
 
-func (b *BLSToExecutionChange) DecodeSSZ(buf []byte) error {
+func (b *BLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
+		return fmt.Errorf("[BLSToExecutionChange] err: %s", ssz.ErrLowBufferSize)
 	}
 	b.ValidatorIndex = ssz.UnmarshalUint64SSZ(buf)
 	copy(b.From[:], buf[8:])
 	copy(b.To[:], buf[56:])
-	return nil
+	return ssz2.UnmarshalSSZ(buf, version, &b.ValidatorIndex, b.From[:], b.To[:])
 }
 
 func (*BLSToExecutionChange) EncodingSizeSSZ() int {
 	return 76
+}
+
+func (*BLSToExecutionChange) Static() bool {
+	return true
 }
 
 type SignedBLSToExecutionChange struct {
@@ -53,41 +48,16 @@ type SignedBLSToExecutionChange struct {
 }
 
 func (s *SignedBLSToExecutionChange) EncodeSSZ(buf []byte) ([]byte, error) {
-	dst := buf
-	var err error
-	if dst, err = s.Message.EncodeSSZ(dst); err != nil {
-		return nil, err
-	}
-	dst = append(dst, s.Signature[:]...)
-	return dst, nil
+	return ssz2.MarshalSSZ(buf, s.Message, s.Signature[:])
 }
 
-func (s *SignedBLSToExecutionChange) DecodeSSZ(buf []byte) error {
-	if len(buf) < s.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
-	}
+func (s *SignedBLSToExecutionChange) DecodeSSZ(buf []byte, version int) error {
 	s.Message = new(BLSToExecutionChange)
-	if err := s.Message.DecodeSSZ(buf); err != nil {
-		return err
-	}
-	copy(s.Signature[:], buf[s.Message.EncodingSizeSSZ():])
-	return nil
-}
-
-func (s *SignedBLSToExecutionChange) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return s.DecodeSSZ(buf)
+	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
 }
 
 func (s *SignedBLSToExecutionChange) HashSSZ() ([32]byte, error) {
-	messageRoot, err := s.Message.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
-	}
-	signatureRoot, err := merkle_tree.SignatureRoot(s.Signature)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return merkle_tree.ArraysRoot([][32]byte{messageRoot, signatureRoot}, 2)
+	return merkle_tree.HashTreeRoot(s.Message, s.Signature[:])
 }
 
 func (s *SignedBLSToExecutionChange) EncodingSizeSSZ() int {

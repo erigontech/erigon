@@ -5,7 +5,9 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -27,12 +29,12 @@ func (api *OtterscanAPIImpl) TraceTransaction(ctx context.Context, hash common.H
 }
 
 type TraceEntry struct {
-	Type  string         `json:"type"`
-	Depth int            `json:"depth"`
-	From  common.Address `json:"from"`
-	To    common.Address `json:"to"`
-	Value *hexutil.Big   `json:"value"`
-	Input hexutil.Bytes  `json:"input"`
+	Type  string           `json:"type"`
+	Depth int              `json:"depth"`
+	From  common.Address   `json:"from"`
+	To    common.Address   `json:"to"`
+	Value *hexutil.Big     `json:"value"`
+	Input hexutility.Bytes `json:"input"`
 }
 
 type TransactionTracer struct {

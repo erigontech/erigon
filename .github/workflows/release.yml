@@ -45,9 +45,12 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
 
+      - run: echo ${{ steps.prepare.outputs.tag_name }}
+
       - name: Run GoReleaser
         run: |
           make release
+          docker images
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.prepare.outputs.tag_name }}

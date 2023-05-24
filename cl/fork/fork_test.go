@@ -27,5 +27,5 @@ func TestMainnetFork(t *testing.T) {
 	require.NoError(t, err)
 	_, err = ComputeForkId(&beaconCfg, &genesisCfg)
 	require.NoError(t, err)
-	require.Equal(t, digest, [4]byte{74, 38, 197, 139})
+	require.Equal(t, [4]byte{0xbb, 0xa4, 0xda, 0x96}, digest)
 }

@@ -20,6 +20,7 @@ import (
 	"io"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -189,7 +190,7 @@ Logs:
 }
 
 type logMarshaling struct {
-	Data        hexutil.Bytes
+	Data        hexutility.Bytes
 	BlockNumber hexutil.Uint64
 	TxIndex     hexutil.Uint
 	Index       hexutil.Uint

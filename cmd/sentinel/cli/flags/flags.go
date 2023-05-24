@@ -18,11 +18,6 @@ var (
 		Usage: "sets lightclient tcp port",
 		Value: 4001,
 	}
-	Verbosity = cli.UintFlag{
-		Name:  "verbosity",
-		Usage: "specify lightclient verbosity level 0=silent, 1=err, 2=warn, 3=info, 4=debug, 5=details",
-		Value: 3,
-	}
 	SentinelServerPort = cli.IntFlag{
 		Name:  "sentinel.port",
 		Usage: "sets the lightclient server port",
@@ -63,11 +58,6 @@ var (
 		Usage: "chaindata of database",
 		Value: "",
 	}
-	ELEnabledFlag = cli.BoolFlag{
-		Name:  "el.enabled",
-		Usage: "enables EL support",
-		Value: false,
-	}
 	BeaconDBModeFlag = cli.StringFlag{
 		Name:  "beacon-db-mode",
 		Usage: "level of storing on beacon chain, minimal(only 500k blocks stored), full (all blocks stored), light (no blocks stored)",
@@ -91,5 +81,10 @@ var (
 	TransitionChainFlag = cli.BoolFlag{
 		Name:  "transition-chain",
 		Usage: "enable chain transition",
+	}
+	InitSyncFlag = cli.BoolFlag{
+		Value: false,
+		Name:  "initial-sync",
+		Usage: "use initial-sync",
 	}
 )

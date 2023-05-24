@@ -25,11 +25,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	librlp "github.com/ledgerwatch/erigon-lib/rlp"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
@@ -131,16 +134,30 @@ func printCurrentBlockNumber(chaindata string) {
 	})
 }
 
+func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
+	var transactionsV3 bool
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		transactionsV3, _ = kvcfg.TransactionsV3.Enabled(tx)
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	br := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()), transactionsV3)
+	bw := blockio.NewBlockWriter(transactionsV3)
+	return br, bw
+}
+
 func printTxHashes(chaindata string, block uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
+	br, _ := blocksIO(db)
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		for b := block; b < block+1; b++ {
 			hash, e := rawdb.ReadCanonicalHash(tx, b)
 			if e != nil {
 				return e
 			}
-			block := rawdb.ReadBlock(tx, hash, b)
+			block, _, _ := br.BlockWithSenders(context.Background(), tx, hash, b)
 			if block == nil {
 				break
 			}
@@ -528,8 +545,10 @@ func extractBodies(datadir string) error {
 		Enabled:    true,
 		KeepBlocks: true,
 		Produce:    false,
-	}, filepath.Join(datadir, "snapshots"))
+	}, filepath.Join(datadir, "snapshots"), log.New())
 	snaps.ReopenFolder()
+
+	/* method Iterate was removed, need re-implement
 	snaps.Bodies.View(func(sns []*snapshotsync.BodySegment) error {
 		for _, sn := range sns {
 			var firstBlockNum, firstBaseTxNum, firstAmount uint64
@@ -562,13 +581,14 @@ func extractBodies(datadir string) error {
 		}
 		return nil
 	})
-	if _, err := snaps.ViewTxs(snaps.BlocksAvailable(), func(sn *snapshotsync.TxnSegment) error {
-		lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
-		fmt.Printf("txTxnID = %d\n", lastTxnID)
-		return nil
-	}); err != nil {
+	*/
+	br := snapshotsync.NewBlockReader(snaps, false)
+	lastTxnID, _, err := br.LastTxNumInSnapshot(snaps.BlocksAvailable())
+	if err != nil {
 		return err
 	}
+	fmt.Printf("txTxnID = %d\n", lastTxnID)
+
 	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
 	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
@@ -979,7 +999,7 @@ func scanTxs(chaindata string) error {
 			return err
 		}
 		var tr types.Transaction
-		if tr, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(v), 0)); err != nil {
+		if tr, err = types.DecodeTransaction(v); err != nil {
 			return err
 		}
 		if _, ok := trTypes[tr.Type()]; !ok {
@@ -1375,7 +1395,7 @@ func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
 
-	_ = logging.GetLogger("hack")
+	logging.SetupLogger("hack")
 
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)

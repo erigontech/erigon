@@ -18,6 +18,12 @@ import (
 func SetupLogsAccess(ctx *cli.Context) {
 	dirPath := ctx.String(logging.LogDirPathFlag.Name)
 	if dirPath == "" {
+		datadir := ctx.String("datadir")
+		if datadir != "" {
+			dirPath = filepath.Join(datadir, "logs")
+		}
+	}
+	if dirPath == "" {
 		return
 	}
 	http.HandleFunc("/debug/metrics/logs/list", func(w http.ResponseWriter, r *http.Request) {

@@ -16,13 +16,14 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
+	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -72,6 +73,7 @@ type EthBackendServer struct {
 	lock       sync.Mutex // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
 	logsFilter *LogsFilterAggregator
 	hd         *headerdownload.HeaderDownload
+	logger     log.Logger
 }
 
 type EthBackend interface {
@@ -83,25 +85,26 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.BlockAndTxnReader,
-	config *chain.Config, builderFunc builder.BlockBuilderFunc, hd *headerdownload.HeaderDownload, proposing bool,
+	config *chain.Config, builderFunc builder.BlockBuilderFunc, hd *headerdownload.HeaderDownload, proposing bool, logger log.Logger,
 ) *EthBackendServer {
 	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		builders:    make(map[uint64]*builder.BlockBuilder),
 		builderFunc: builderFunc, proposing: proposing, logsFilter: NewLogsFilterAggregator(events), hd: hd,
+		logger: logger,
 	}
 
 	ch, clean := s.events.AddLogsSubscription()
 	go func() {
 		var err error
 		defer clean()
-		log.Info("new subscription to logs established")
+		logger.Info("new subscription to logs established")
 		defer func() {
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
-					log.Warn("subscription to logs closed", "reason", err)
+					logger.Warn("subscription to logs closed", "reason", err)
 				}
 			} else {
-				log.Warn("subscription to logs closed")
+				logger.Warn("subscription to logs closed")
 			}
 		}()
 		for {
@@ -150,19 +153,19 @@ func (s *EthBackendServer) NetPeerCount(_ context.Context, _ *remote.NetPeerCoun
 }
 
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) (err error) {
-	log.Debug("Establishing event subscription channel with the RPC daemon ...")
+	s.logger.Debug("Establishing event subscription channel with the RPC daemon ...")
 	ch, clean := s.events.AddHeaderSubscription()
 	defer clean()
 	newSnCh, newSnClean := s.events.AddNewSnapshotSubscription()
 	defer newSnClean()
-	log.Info("new subscription to newHeaders established")
+	s.logger.Info("new subscription to newHeaders established")
 	defer func() {
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Warn("subscription to newHeaders closed", "reason", err)
+				s.logger.Warn("subscription to newHeaders closed", "reason", err)
 			}
 		} else {
-			log.Warn("subscription to newHeaders closed")
+			s.logger.Warn("subscription to newHeaders closed")
 		}
 	}()
 	_ = subscribeServer.Send(&remote.SubscribeReply{Type: remote.Event_NEW_SNAPSHOT})
@@ -190,8 +193,7 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 }
 
 func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.ProtocolVersionRequest) (*remote.ProtocolVersionReply, error) {
-	// Hardcoding to avoid import cycle
-	return &remote.ProtocolVersionReply{Id: 66}, nil
+	return &remote.ProtocolVersionReply{Id: direct.ETH66}, nil
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
@@ -296,8 +298,58 @@ func (s *EthBackendServer) checkWithdrawalsPresence(time uint64, withdrawals []*
 	return nil
 }
 
-func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, in *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
-	return nil, fmt.Errorf("EngineGetBlobsBundleV1: not implemented yet")
+func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
+	// TODO: get the latest update on this function (it was replaced)
+	if !s.proposing {
+		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
+	}
+
+	if s.config.TerminalTotalDifficulty == nil {
+		return nil, fmt.Errorf("not a proof-of-stake chain")
+	}
+
+	s.logger.Debug("[GetBlobsBundleV1] acquiring lock")
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.logger.Debug("[GetBlobsBundleV1] lock acquired")
+
+	builder, ok := s.builders[req.PayloadId]
+	if !ok {
+		s.logger.Warn("Payload not stored", "payloadId", req.PayloadId)
+		return nil, &UnknownPayloadErr
+	}
+
+	block, err := builder.Stop()
+	if err != nil {
+		s.logger.Error("Failed to build PoS block", "err", err)
+		return nil, err
+	}
+
+	blobsBundle := &types2.BlobsBundleV1{
+		BlockHash: gointerfaces.ConvertHashToH256(block.Block.Header().Hash()),
+	}
+	for i, tx := range block.Block.Transactions() {
+		if tx.Type() != types.BlobTxType {
+			continue
+		}
+		blobtx, ok := tx.(*types.BlobTxWrapper)
+		if !ok {
+			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobtx)
+		}
+		versionedHashes, kzgs, blobs, proofs := blobtx.GetDataHashes(), blobtx.Commitments, blobtx.Blobs, blobtx.Proofs
+		lenCheck := len(versionedHashes)
+		if lenCheck != len(kzgs) || lenCheck != len(blobs) || lenCheck != len(blobtx.Proofs) {
+			return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d) / proofs (%d)"+
+				" / versioned hashes (%d)", i, block.Block.Hash(), len(blobs), len(kzgs), len(proofs), lenCheck)
+		}
+		for _, blob := range blobs {
+			blobsBundle.Blobs = append(blobsBundle.Blobs, blob[:])
+		}
+		for _, kzg := range kzgs {
+			blobsBundle.Kzgs = append(blobsBundle.Kzgs, kzg[:])
+		}
+	}
+	return blobsBundle, nil
 }
 
 // EngineNewPayload validates and possibly executes payload
@@ -315,8 +367,8 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 		Time:        req.Timestamp,
 		MixDigest:   gointerfaces.ConvertH256ToHash(req.PrevRandao),
 		UncleHash:   types.EmptyUncleHash,
-		Difficulty:  serenity.SerenityDifficulty,
-		Nonce:       serenity.SerenityNonce,
+		Difficulty:  merge.ProofOfStakeDifficulty,
+		Nonce:       merge.ProofOfStakeNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
 		TxHash:      types.DeriveSha(types.BinaryTransactions(req.Transactions)),
 	}
@@ -334,9 +386,17 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 		return nil, err
 	}
 
+	if req.Version >= 3 {
+		header.ExcessDataGas = gointerfaces.ConvertH256ToUint256Int(req.ExcessDataGas).ToBig()
+	}
+
+	if !s.config.IsCancun(header.Time) && header.ExcessDataGas != nil || s.config.IsCancun(header.Time) && header.ExcessDataGas == nil {
+		return nil, &rpc.InvalidParamsError{Message: "excess data gas setting doesn't match sharding state"}
+	}
+
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 	if header.Hash() != blockHash {
-		log.Error("[NewPayload] invalid block hash", "stated", libcommon.Hash(blockHash), "actual", header.Hash())
+		s.logger.Error("[NewPayload] invalid block hash", "stated", libcommon.Hash(blockHash), "actual", header.Hash())
 		return &remote.EnginePayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			ValidationError: "invalid block hash",
@@ -345,7 +405,7 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 
 	for _, txn := range req.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(txn) {
-			log.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
+			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
 			return &remote.EnginePayloadStatus{
 				Status:          remote.EngineStatus_INVALID,
 				ValidationError: "typed txn marshalled as RLP string",
@@ -355,7 +415,7 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 
 	transactions, err := types.DecodeTransactions(req.Transactions)
 	if err != nil {
-		log.Warn("[NewPayload] failed to decode transactions", "err", err)
+		s.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
 		return &remote.EnginePayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			ValidationError: err.Error(),
@@ -374,11 +434,11 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	log.Debug("[NewPayload] sending block", "height", header.Number, "hash", libcommon.Hash(blockHash))
+	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", libcommon.Hash(blockHash))
 	s.hd.BeaconRequestList.AddPayloadRequest(block)
 
 	payloadStatus := <-s.hd.PayloadStatusCh
-	log.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
+	s.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
@@ -440,12 +500,12 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash libcommon.H
 	}
 
 	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
-		log.Warn(fmt.Sprintf("[%s] Beacon Chain request before TTD", prefix), "hash", blockHash)
+		s.logger.Warn(fmt.Sprintf("[%s] Beacon Chain request before TTD", prefix), "hash", blockHash)
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: libcommon.Hash{}}, nil
 	}
 
 	if !s.hd.POSSync() {
-		log.Info(fmt.Sprintf("[%s] Still in PoW sync", prefix), "hash", blockHash)
+		s.logger.Info(fmt.Sprintf("[%s] Still in PoW sync", prefix), "hash", blockHash)
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
@@ -458,7 +518,7 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash libcommon.H
 	}
 
 	if newPayload && parent != nil && blockNumber != parent.Number.Uint64()+1 {
-		log.Warn(fmt.Sprintf("[%s] Invalid block number", prefix), "headerNumber", blockNumber, "parentNumber", parent.Number.Uint64())
+		s.logger.Warn(fmt.Sprintf("[%s] Invalid block number", prefix), "headerNumber", blockNumber, "parentNumber", parent.Number.Uint64())
 		s.hd.ReportBadHeaderPoS(blockHash, parent.Hash())
 		return &engineapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
@@ -469,11 +529,11 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash libcommon.H
 	// Check if we already determined if the hash is attributed to a previously received invalid header.
 	bad, lastValidHash := s.hd.IsBadHeaderPoS(blockHash)
 	if bad {
-		log.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash)
+		s.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash)
 	} else if newPayload {
 		bad, lastValidHash = s.hd.IsBadHeaderPoS(parentHash)
 		if bad {
-			log.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash, "parentHash", parentHash)
+			s.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash, "parentHash", parentHash)
 		}
 	}
 	if bad {
@@ -488,12 +548,12 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash libcommon.H
 		}
 
 		if parent == nil && s.hd.PosStatus() != headerdownload.Idle {
-			log.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
+			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 		}
 	} else {
 		if header == nil && s.hd.PosStatus() != headerdownload.Idle {
-			log.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
+			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 		}
 		// Following code ensures we skip the fork choice state update if if forkchoiceState.headBlockHash references an ancestor of the head of canonical chain
@@ -512,7 +572,7 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash libcommon.H
 
 	// If another payload is already commissioned then we just reply with syncing
 	if s.stageLoopIsBusy() {
-		log.Debug(fmt.Sprintf("[%s] stage loop is busy", prefix))
+		s.logger.Debug(fmt.Sprintf("[%s] stage loop is busy", prefix))
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
@@ -542,10 +602,10 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
-	log.Debug("[GetPayload] acquiring lock")
+	s.logger.Debug("[GetPayload] acquiring lock")
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	log.Debug("[GetPayload] lock acquired")
+	s.logger.Debug("[GetPayload] lock acquired")
 
 	builder, ok := s.builders[req.PayloadId]
 	if !ok {
@@ -555,7 +615,7 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 
 	blockWithReceipts, err := builder.Stop()
 	if err != nil {
-		log.Error("Failed to build PoS block", "err", err)
+		s.logger.Error("Failed to build PoS block", "err", err)
 		return nil, err
 	}
 	block := blockWithReceipts.Block
@@ -590,6 +650,13 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		payload.Withdrawals = ConvertWithdrawalsToRpc(block.Withdrawals())
 	}
 
+	if block.ExcessDataGas() != nil {
+		payload.Version = 3
+		var excessDataGas uint256.Int
+		excessDataGas.SetFromBig(block.Header().ExcessDataGas)
+		payload.ExcessDataGas = gointerfaces.ConvertUint256IntToH256(&excessDataGas)
+	}
+
 	blockValue := blockValue(blockWithReceipts, baseFee)
 	return &remote.EngineGetPayloadResponse{
 		ExecutionPayload: payload,
@@ -615,12 +682,12 @@ func (s *EthBackendServer) EngineForkChoiceUpdated(ctx context.Context, req *rem
 	defer s.lock.Unlock()
 
 	if status == nil {
-		log.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
+		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
 		s.hd.BeaconRequestList.AddForkChoiceRequest(&forkChoice)
 
 		statusDeref := <-s.hd.PayloadStatusCh
 		status = &statusDeref
-		log.Debug("[ForkChoiceUpdated] got reply", "payloadStatus", status)
+		s.logger.Debug("[ForkChoiceUpdated] got reply", "payloadStatus", status)
 
 		if status.CriticalError != nil {
 			return nil, status.CriticalError
@@ -655,7 +722,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdated(ctx context.Context, req *rem
 		// In the case of such an event, client software MUST return
 		// {payloadStatus: {status: VALID, latestValidHash: forkchoiceState.headBlockHash, validationError: null}, payloadId: null}.
 
-		log.Warn("Skipping payload building because forkchoiceState.headBlockHash is not the head of the canonical chain",
+		s.logger.Warn("Skipping payload building because forkchoiceState.headBlockHash is not the head of the canonical chain",
 			"forkChoice.HeadBlockHash", forkChoice.HeadBlockHash, "headHeader.Hash", headHeader.Hash())
 		return &remote.EngineForkChoiceUpdatedResponse{PayloadStatus: convertPayloadStatus(status)}, nil
 	}
@@ -680,6 +747,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdated(ctx context.Context, req *rem
 
 	// First check if we're already building a block with the requested parameters
 	if reflect.DeepEqual(s.lastParameters, &param) {
+		s.logger.Info("[ForkChoiceUpdated] duplicate build request")
 		return &remote.EngineForkChoiceUpdatedResponse{
 			PayloadStatus: &remote.EnginePayloadStatus{
 				Status:          remote.EngineStatus_VALID,
@@ -697,7 +765,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdated(ctx context.Context, req *rem
 	s.lastParameters = &param
 
 	s.builders[s.payloadId] = builder.NewBlockBuilder(s.builderFunc, &param)
-	log.Debug("BlockBuilder added", "payload", s.payloadId)
+	s.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", s.payloadId)
 
 	return &remote.EngineForkChoiceUpdatedResponse{
 		PayloadStatus: &remote.EnginePayloadStatus{
@@ -713,6 +781,7 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByHashV1(ctx context.Context, r
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 
 	bodies := make([]*types2.ExecutionPayloadBodyV1, len(request.Hashes))
 
@@ -738,6 +807,7 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByRangeV1(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 
 	bodies := make([]*types2.ExecutionPayloadBodyV1, 0, request.Count)
 

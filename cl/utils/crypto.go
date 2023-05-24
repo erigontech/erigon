@@ -14,10 +14,9 @@
 package utils
 
 import (
+	"crypto/sha256"
 	"hash"
 	"sync"
-
-	"github.com/minio/sha256-simd"
 )
 
 type HashFunc func(data []byte, extras ...[]byte) [32]byte
@@ -53,6 +52,22 @@ func OptimizedKeccak256() HashFunc {
 	return func(data []byte, extras ...[]byte) [32]byte {
 		h.Reset()
 		var b [32]byte
+		h.Write(data)
+		for _, extra := range extras {
+			h.Write(extra)
+		}
+		h.Sum(b[:0])
+		return b
+	}
+}
+
+// Optimized Keccak256, avoid pool.put/pool.get, meant for intensive operations.
+// this version is not thread safe
+func OptimizedKeccak256NotThreadSafe() HashFunc {
+	h := sha256.New()
+	var b [32]byte
+	return func(data []byte, extras ...[]byte) [32]byte {
+		h.Reset()
 		h.Write(data)
 		for _, extra := range extras {
 			h.Write(extra)

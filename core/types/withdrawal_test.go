@@ -36,9 +36,10 @@ var testWithdrawal = &Withdrawal{
 
 func TestWithdrawalSSZ(t *testing.T) {
 	withdrawal := &Withdrawal{}
-	require.NoError(t, withdrawal.DecodeSSZ(testWithdrawalEncodedSSZ))
+	require.NoError(t, withdrawal.DecodeSSZ(testWithdrawalEncodedSSZ, 0))
 	require.Equal(t, withdrawal, testWithdrawal)
-	require.Equal(t, withdrawal.EncodeSSZ(), testWithdrawalEncodedSSZ)
+	a, _ := withdrawal.EncodeSSZ(nil)
+	require.Equal(t, a, testWithdrawalEncodedSSZ)
 	hashSSZ, err := withdrawal.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash(hashSSZ), testWithdrawalsSSZHash)

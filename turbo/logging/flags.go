@@ -41,7 +41,7 @@ var (
 	LogDirVerbosityFlag = cli.StringFlag{
 		Name:  "log.dir.verbosity",
 		Usage: "Set the log verbosity for logs stored to disk",
-		Value: log.LvlDebug.String(),
+		Value: log.LvlInfo.String(),
 	}
 )
 

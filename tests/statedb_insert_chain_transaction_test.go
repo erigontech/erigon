@@ -77,7 +77,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainStateReader(tx))
+	st := state.New(m.NewStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -145,7 +145,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainStateReader(tx))
+	st := state.New(m.NewStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -207,7 +207,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainStateReader(tx))
+	st := state.New(m.NewStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -269,7 +269,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainStateReader(tx))
+	st := state.New(m.NewStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -331,7 +331,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainStateReader(tx))
+	st := state.New(m.NewStateReader(tx))
 	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
@@ -372,7 +372,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -395,7 +395,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -413,7 +413,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -459,7 +459,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -477,7 +477,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -543,7 +543,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -562,7 +562,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -632,7 +632,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -650,7 +650,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		st := state.New(state.NewPlainStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
@@ -686,7 +686,7 @@ type initialData struct {
 	keys         []*ecdsa.PrivateKey
 	addresses    []libcommon.Address
 	transactOpts []*bind.TransactOpts
-	genesisSpec  *core.Genesis
+	genesisSpec  *types.Genesis
 }
 
 func getGenesis(funds ...*big.Int) initialData {
@@ -702,7 +702,7 @@ func getGenesis(funds ...*big.Int) initialData {
 
 	addresses := make([]libcommon.Address, 0, len(keys))
 	transactOpts := make([]*bind.TransactOpts, 0, len(keys))
-	allocs := core.GenesisAlloc{}
+	allocs := types.GenesisAlloc{}
 	for _, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		addresses = append(addresses, addr)
@@ -712,14 +712,14 @@ func getGenesis(funds ...*big.Int) initialData {
 		}
 		transactOpts = append(transactOpts, to)
 
-		allocs[addr] = core.GenesisAccount{Balance: accountFunds}
+		allocs[addr] = types.GenesisAccount{Balance: accountFunds}
 	}
 
 	return initialData{
 		keys:         keys,
 		addresses:    addresses,
 		transactOpts: transactOpts,
-		genesisSpec: &core.Genesis{
+		genesisSpec: &types.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
@@ -738,7 +738,7 @@ type tx struct {
 	key  *ecdsa.PrivateKey
 }
 
-func genBlocks(t *testing.T, gspec *core.Genesis, txs map[int]tx) (*stages.MockSentry, *core.ChainPack, error) {
+func genBlocks(t *testing.T, gspec *types.Genesis, txs map[int]tx) (*stages.MockSentry, *core.ChainPack, error) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := stages.MockWithGenesis(t, gspec, key, false)
 

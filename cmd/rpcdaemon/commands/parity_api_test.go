@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -51,7 +52,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
 	}
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 	offset := common.Hex2Bytes("29")
-	b := hexutil.Bytes(offset)
+	b := hexutility.Bytes(offset)
 	result, err := api.ListStorageKeys(context.Background(), addr, 5, &b, latestBlock)
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)
@@ -72,7 +73,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T
 	}
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 	offset := common.Hex2Bytes("30")
-	b := hexutil.Bytes(offset)
+	b := hexutility.Bytes(offset)
 	result, err := api.ListStorageKeys(context.Background(), addr, 2, &b, latestBlock)
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)
@@ -89,7 +90,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_EmptyResponse(t *testing.T) {
 	api := NewParityAPIImpl(m.DB)
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 	offset := common.Hex2Bytes("ff")
-	b := hexutil.Bytes(offset)
+	b := hexutility.Bytes(offset)
 	result, err := api.ListStorageKeys(context.Background(), addr, 2, &b, latestBlock)
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)

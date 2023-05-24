@@ -40,9 +40,14 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+)
+
+var (
+	blockTo    int
+	traceBlock int
 )
 
 func init() {
@@ -81,12 +86,17 @@ var erigon4Cmd = &cobra.Command{
 	Use:   "erigon4",
 	Short: "Experimental command to re-execute blocks from beginning using erigon2 state representation and history/domain",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := logging.GetLoggerCmd("erigon4", cmd)
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "erigon4"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return err
+		}
 		return Erigon4(genesis, chainConfig, logger)
 	},
 }
 
-func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logger) error {
+func Erigon4(genesis *types.Genesis, chainConfig *chain2.Config, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -139,10 +149,9 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		blockRootMismatchExpected = true
 	}
 	mode := libstate.ParseCommitmentMode(commitmentMode)
-
 	logger.Info("aggregator commitment trie", "variant", trieVariant, "mode", mode.String())
 
-	agg, err3 := libstate.NewAggregator(aggPath, dirs.Tmp, stepSize, mode, trieVariant)
+	agg, err3 := libstate.NewAggregator(aggPath, dirs.Tmp, stepSize, mode, trieVariant, logger)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -173,12 +182,12 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 
 	interrupt := false
 	if startTxNum == 0 {
-		genBlock, genesisIbs, err := genesis.ToBlock("")
+		genBlock, genesisIbs, err := core.GenesisToBlock(genesis, "")
 		if err != nil {
 			return err
 		}
 		agg.SetTxNum(0)
-		if err = genesisIbs.CommitBlock(&chain2.Rules{}, &WriterWrapper23{w: agg}); err != nil {
+		if err = genesisIbs.CommitBlock(&chain2.Rules{}, &StateWriterV4{w: agg}); err != nil {
 			return fmt.Errorf("cannot write state: %w", err)
 		}
 
@@ -227,15 +236,15 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 	}()
 
 	var blockReader services.FullBlockReader
-	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
+	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), logger)
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	//transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
 	transactionsV3 := false
-	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, transactionsV3)
-	engine := initConsensusEngine(chainConfig, allSnapshots)
+	blockReader = snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
+	engine := initConsensusEngine(chainConfig, allSnapshots, logger)
 
 	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 		h, err := blockReader.Header(ctx, historyTx, hash, number)
@@ -244,8 +253,8 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		}
 		return h
 	}
-	readWrapper := &ReaderWrapper23{ac: agg.MakeContext(), roTx: rwTx}
-	writeWrapper := &WriterWrapper23{w: agg}
+	readWrapper := &StateReaderV4{ac: agg.MakeContext(), roTx: rwTx}
+	writeWrapper := &StateWriterV4{w: agg}
 
 	commitFn := func(txn uint64) error {
 		if db == nil || rwTx == nil {
@@ -256,9 +265,9 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 			return fmt.Errorf("retrieving spaceDirty: %w", err)
 		}
 		if spaceDirty >= dirtySpaceThreshold {
-			log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+			logger.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
 		}
-		log.Info("database commitment", "block", blockNum, "txNum", txn, "uptime", time.Since(started))
+		logger.Info("database commitment", "block", blockNum, "txNum", txn, "uptime", time.Since(started))
 		if err := agg.Flush(ctx); err != nil {
 			return err
 		}
@@ -294,7 +303,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 			return err
 		}
 		if b == nil {
-			log.Info("history: block is nil", "block", blockNum)
+			logger.Info("history: block is nil", "block", blockNum)
 			break
 		}
 		agg.SetTx(rwTx)
@@ -302,7 +311,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		agg.SetBlockNum(blockNum)
 
 		if txNum, _, err = processBlock23(startTxNum, trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, b, vmConfig); err != nil {
-			log.Error("processing error", "block", blockNum, "err", err)
+			logger.Error("processing error", "block", blockNum, "err", err)
 			return fmt.Errorf("processing block %d: %w", blockNum, err)
 		}
 
@@ -311,16 +320,16 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		case interrupt = <-interruptCh:
 			// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
 			if err := agg.Flush(ctx); err != nil {
-				log.Error("aggregator flush", "err", err)
+				logger.Error("aggregator flush", "err", err)
 			}
 
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", agg.Stats().TxCount))
+			logger.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", agg.Stats().TxCount))
 			if err := commitFn(txNum); err != nil {
-				log.Error("db commit", "err", err)
+				logger.Error("db commit", "err", err)
 			}
 		case <-mergedRoots:
 			if err := commitFn(txNum); err != nil {
-				log.Error("db commit on merge", "err", err)
+				logger.Error("db commit on merge", "err", err)
 			}
 		default:
 		}
@@ -375,14 +384,14 @@ func (s *stat23) delta(aStats libstate.FilesStats, blockNum, txNum uint64) *stat
 	return s
 }
 
-func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *ReaderWrapper23, ww *WriterWrapper23, chainConfig *chain2.Config,
+func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *StateReaderV4, ww *StateWriterV4, chainConfig *chain2.Config,
 	engine consensus.Engine, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config,
 ) (uint64, types.Receipts, error) {
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 
 	header := block.Header()
 	vmConfig.Debug = true
-	gp := new(core.GasPool).AddGas(block.GasLimit())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 	usedGas := new(uint64)
 	var receipts types.Receipts
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
@@ -390,7 +399,6 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	ww.w.SetTxNum(txNum)
 
 	rw.blockNum = block.NumberU64()
-	ww.blockNum = block.NumberU64()
 
 	daoFork := txNum >= startTxNum && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	if daoFork {
@@ -412,14 +420,14 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	}
 
 	getHashFn := core.GetHashFn(header, getHeader)
-
+	excessDataGas := header.ParentExcessDataGas(getHeader)
 	for i, tx := range block.Transactions() {
 		if txNum >= startTxNum {
 			ibs := state.New(rw)
-			ibs.Prepare(tx.Hash(), block.Hash(), i)
+			ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			vmConfig.Tracer = ct
-			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig)
+			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, excessDataGas)
 			if err != nil {
 				return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}
@@ -476,7 +484,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 		}
 
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, _, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil); err != nil {
+		if _, _, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil); err != nil {
 			return 0, nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 
@@ -514,18 +522,17 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 }
 
 // Implements StateReader and StateWriter
-type ReaderWrapper23 struct {
+type StateReaderV4 struct {
 	roTx     kv.Tx
 	ac       *libstate.AggregatorContext
 	blockNum uint64
 }
 
-type WriterWrapper23 struct {
-	blockNum uint64
-	w        *libstate.Aggregator
+type StateWriterV4 struct {
+	w *libstate.Aggregator
 }
 
-func (rw *ReaderWrapper23) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
+func (rw *StateReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	enc, err := rw.ac.ReadAccountData(address.Bytes(), rw.roTx)
 	if err != nil {
 		return nil, err
@@ -540,7 +547,7 @@ func (rw *ReaderWrapper23) ReadAccountData(address libcommon.Address) (*accounts
 	return &a, nil
 }
 
-func (rw *ReaderWrapper23) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
+func (rw *StateReaderV4) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	enc, err := rw.ac.ReadAccountStorage(address.Bytes(), key.Bytes(), rw.roTx)
 	if err != nil {
 		return nil, err
@@ -554,19 +561,19 @@ func (rw *ReaderWrapper23) ReadAccountStorage(address libcommon.Address, incarna
 	return enc, nil
 }
 
-func (rw *ReaderWrapper23) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
+func (rw *StateReaderV4) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
 	return rw.ac.ReadAccountCode(address.Bytes(), rw.roTx)
 }
 
-func (rw *ReaderWrapper23) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
+func (rw *StateReaderV4) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
 	return rw.ac.ReadAccountCodeSize(address.Bytes(), rw.roTx)
 }
 
-func (rw *ReaderWrapper23) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
+func (rw *StateReaderV4) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	return 0, nil
 }
 
-func (ww *WriterWrapper23) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
+func (ww *StateWriterV4) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
 	value := accounts.SerialiseV3(account)
 	if err := ww.w.UpdateAccountData(address.Bytes(), value); err != nil {
 		return err
@@ -574,33 +581,32 @@ func (ww *WriterWrapper23) UpdateAccountData(address libcommon.Address, original
 	return nil
 }
 
-func (ww *WriterWrapper23) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
+func (ww *StateWriterV4) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	if err := ww.w.UpdateAccountCode(address.Bytes(), code); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper23) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
+func (ww *StateWriterV4) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
 	if err := ww.w.DeleteAccount(address.Bytes()); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper23) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
+func (ww *StateWriterV4) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	if err := ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value.Bytes()); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper23) CreateContract(address libcommon.Address) error {
+func (ww *StateWriterV4) CreateContract(address libcommon.Address) error {
 	return nil
 }
 
-func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots) (engine consensus.Engine) {
-	l := log.New()
+func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots, logger log.Logger) (engine consensus.Engine) {
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}
@@ -608,14 +614,12 @@ func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots)
 	if cc.Clique != nil {
 		consensusConfig = params.CliqueSnapshot
 	} else if cc.Aura != nil {
-		config.Aura.Etherbase = config.Miner.Etherbase
 		consensusConfig = &config.Aura
-	} else if cc.Parlia != nil {
-		consensusConfig = &config.Parlia
 	} else if cc.Bor != nil {
 		consensusConfig = &config.Bor
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress, config.HeimdallURL, config.WithoutHeimdall, datadirCli, snapshots, true /* readonly */)
+	return ethconsensusconfig.CreateConsensusEngine(cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress,
+		config.HeimdallURL, config.WithoutHeimdall, datadirCli, true /* readonly */, logger)
 }

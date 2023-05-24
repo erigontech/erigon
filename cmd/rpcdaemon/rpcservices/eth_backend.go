@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
@@ -44,6 +45,34 @@ func NewRemoteBackend(client remote.ETHBACKENDClient, db kv.RoDB, blockReader se
 	}
 }
 
+func (back *RemoteBackend) CurrentBlock(db kv.Tx) (*types.Block, error) {
+	panic("not implemented")
+}
+func (back *RemoteBackend) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
+	panic("not implemented")
+}
+func (back *RemoteBackend) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
+	hash, err := rawdb.ReadCanonicalHash(db, number)
+	if err != nil {
+		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+	}
+	if hash == (libcommon.Hash{}) {
+		return nil, nil
+	}
+	block, _, err := back.BlockWithSenders(ctx, db, hash, number)
+	return block, err
+}
+func (r *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash libcommon.Hash) (*types.Block, error) {
+	number := rawdb.ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil, nil
+	}
+	block, _, err := r.BlockWithSenders(ctx, db, hash, *number)
+	return block, err
+}
+func (back *RemoteBackend) TxsV3Enabled() bool {
+	panic("not implemented")
+}
 func (back *RemoteBackend) EnsureVersionCompatibility() bool {
 	versionReply, err := back.remoteEthBackend.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
@@ -220,6 +249,12 @@ func (back *RemoteBackend) EngineGetPayloadBodiesByRangeV1(ctx context.Context, 
 	return back.remoteEthBackend.EngineGetPayloadBodiesByRangeV1(ctx, request)
 }
 
+func (back *RemoteBackend) EngineGetBlobsBundleV1(ctx context.Context, payloadId uint64) (*types2.BlobsBundleV1, error) {
+	return back.remoteEthBackend.EngineGetBlobsBundleV1(ctx, &remote.EngineGetBlobsBundleRequest{
+		PayloadId: payloadId,
+	})
+}
+
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {
 	nodes, err := back.remoteEthBackend.NodeInfo(ctx, &remote.NodesInfoRequest{Limit: limit})
 	if err != nil {
@@ -312,7 +347,7 @@ func (back *RemoteBackend) PendingBlock(ctx context.Context) (*types.Block, erro
 	var block types.Block
 	err = rlp.Decode(bytes.NewReader(blockRlp.BlockRlp), &block)
 	if err != nil {
-		return nil, fmt.Errorf("decoding block from %x: %w", blockRlp, err)
+		return nil, fmt.Errorf("decoding block from %x: %w", blockRlp.BlockRlp, err)
 	}
 
 	return &block, nil

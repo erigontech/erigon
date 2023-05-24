@@ -76,11 +76,19 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
+	var edg *big.Int
+	if n := block.Number().Uint64(); n > 0 {
+		if parentHeader, err := api._blockReader.Header(ctx, tx, block.ParentHash(), n-1); err != nil {
+			return nil, err
+		} else {
+			edg = parentHeader.ExcessDataGas
+		}
+	}
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
 
-		transaction := marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true)
+		transaction := marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, edg)
 		transaction["nonce"] = txn.GetNonce()
 		transaction["value"] = txn.GetValue()
 		transaction["data"] = txn.GetData()

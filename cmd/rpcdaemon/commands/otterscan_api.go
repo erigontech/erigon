@@ -8,14 +8,16 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -49,7 +51,7 @@ type OtterscanAPI interface {
 	GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error)
 	HasCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error)
 	TraceTransaction(ctx context.Context, hash common.Hash) ([]*TraceEntry, error)
-	GetTransactionError(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
+	GetTransactionError(ctx context.Context, hash common.Hash) (hexutility.Bytes, error)
 	GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error)
 	GetContractCreator(ctx context.Context, addr common.Address) (*ContractCreatorData, error)
 }
@@ -140,7 +142,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash commo
 	}
 	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
-	result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()), true, false /* gasBailout */)
+	result, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas()), true, false /* gasBailout */)
 	if err != nil {
 		return nil, fmt.Errorf("tracing failed: %v", err)
 	}
@@ -267,15 +269,15 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	if err != nil {
 		return nil, err
 	}
-	itTo, err := tx.IndexRange(temporal.TracesToIdx, addr[:], int(fromTxNum), -1, order.Desc, -1)
+	itTo, err := tx.IndexRange(temporal.TracesToIdx, addr[:], int(fromTxNum), -1, order.Desc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(temporal.TracesFromIdx, addr[:], int(fromTxNum), -1, order.Desc, -1)
+	itFrom, err := tx.IndexRange(temporal.TracesFromIdx, addr[:], int(fromTxNum), -1, order.Desc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
-	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, -1)
+	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
 	txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
 
 	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)
@@ -285,6 +287,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	receipts := make([]map[string]interface{}, 0, pageSize)
 	resultCount := uint16(0)
 
+	var excessDataGas *big.Int
 	for txNumsIter.HasNext() {
 		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
 		if err != nil {
@@ -304,6 +307,13 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 			}
 			blockHash = header.Hash()
 			exec.changeBlock(header)
+			if blockNum > 0 {
+				if parentHeader, err := api._blockReader.Header(ctx, tx, header.ParentHash, blockNum-1); err != nil {
+					return nil, err
+				} else {
+					excessDataGas = parentHeader.ExcessDataGas
+				}
+			}
 		}
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
@@ -325,7 +335,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 			TransactionIndex: uint(txIndex),
 			BlockNumber:      header.Number, BlockHash: blockHash, Logs: rawLogs,
 		}
-		mReceipt := marshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
+		mReceipt := marshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true, excessDataGas)
 		mReceipt["timestamp"] = header.Time
 		receipts = append(receipts, mReceipt)
 
@@ -575,10 +585,19 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
+
+	var edg *big.Int
+	if n := b.Number().Uint64(); n > 0 {
+		if parentHeader, err := api._blockReader.Header(ctx, tx, b.ParentHash(), n-1); err != nil {
+			return nil, err
+		} else {
+			edg = parentHeader.ExcessDataGas
+		}
+	}
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := b.Transactions()[receipt.TransactionIndex]
-		marshalledRcpt := marshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true)
+		marshalledRcpt := marshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true, edg)
 		marshalledRcpt["logs"] = nil
 		marshalledRcpt["logsBloom"] = nil
 		result = append(result, marshalledRcpt)

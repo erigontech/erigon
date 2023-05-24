@@ -12,37 +12,6 @@ import (
 
 var pyRecord, _ = hex.DecodeString("f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f")
 
-func TestIsPeerWhiteListed(t *testing.T) {
-	testCases := []struct {
-		whitelist   []peer.ID
-		peer        peer.ID
-		expectedRes bool
-	}{
-		{
-			whitelist:   []peer.ID{peer.ID("peer1"), peer.ID("peer2"), peer.ID("peer3"), peer.ID("peer4"), peer.ID("peer5")},
-			peer:        peer.ID("peer1"),
-			expectedRes: true,
-		},
-		{
-			whitelist:   []peer.ID{peer.ID("peer1"), peer.ID("peer2"), peer.ID("peer4"), peer.ID("peer5"), peer.ID("peer6")},
-			peer:        peer.ID("peer3"),
-			expectedRes: false,
-		},
-		{
-			whitelist:   []peer.ID{},
-			peer:        peer.ID(""),
-			expectedRes: false,
-		},
-	}
-
-	for _, testCase := range testCases {
-		got := isPeerWhitelisted(testCase.peer, testCase.whitelist)
-		if got != testCase.expectedRes {
-			t.Errorf("expected: %v, got: %v", testCase.expectedRes, got)
-		}
-	}
-}
-
 func TestMultiAddressBuilderWithID(t *testing.T) {
 	testCases := []struct {
 		ipAddr      string

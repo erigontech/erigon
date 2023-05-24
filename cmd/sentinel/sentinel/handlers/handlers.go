@@ -29,7 +29,7 @@ import (
 type ConsensusHandlers struct {
 	handlers      map[protocol.ID]network.StreamHandler
 	host          host.Host
-	peers         *peers.Peers
+	peers         *peers.Manager
 	metadata      *cltypes.Metadata
 	beaconConfig  *clparams.BeaconChainConfig
 	genesisConfig *clparams.GenesisConfig
@@ -44,7 +44,7 @@ const (
 )
 
 func NewConsensusHandlers(ctx context.Context, db kv.RoDB, host host.Host,
-	peers *peers.Peers, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata) *ConsensusHandlers {
+	peers *peers.Manager, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		peers:         peers,
 		host:          host,

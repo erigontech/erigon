@@ -23,7 +23,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
-
 	"github.com/ledgerwatch/erigon/turbo/stages"
 
 	"github.com/ledgerwatch/log/v3"
@@ -52,9 +51,9 @@ func TestGenerateChain(t *testing.T) {
 	log.Root().SetHandler(log.DiscardHandler())
 
 	// Ensure that key1 has some funds in the genesis block.
-	gspec := &core.Genesis{
+	gspec := &types.Genesis{
 		Config: &chain.Config{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
-		Alloc:  core.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
+		Alloc:  types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
 	m := stages.MockWithGenesis(t, gspec, key1, false)
 
@@ -106,9 +105,9 @@ func TestGenerateChain(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainStateReader(tx))
-	if big.NewInt(5).Cmp(current(m.DB).Number()) != 0 {
-		t.Errorf("wrong block number: %d", current(m.DB).Number())
+	st := state.New(m.NewStateReader(tx))
+	if big.NewInt(5).Cmp(current(m).Number()) != 0 {
+		t.Errorf("wrong block number: %d", current(m).Number())
 	}
 	if !uint256.NewInt(989000).Eq(st.GetBalance(addr1)) {
 		t.Errorf("wrong balance of addr1: %s", st.GetBalance(addr1))

@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type ChainEventNotifier interface {
@@ -28,52 +29,52 @@ func MiningStages(
 		{
 			ID:          stages.MiningCreateBlock,
 			Description: "Mining: construct new block from tx pool",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnMiningCreateBlockStage(s, tx, createBlockCfg, ctx.Done())
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+				return SpawnMiningCreateBlockStage(s, tx, createBlockCfg, ctx.Done(), logger)
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
 			ID:          stages.MiningExecution,
 			Description: "Mining: construct new block from tx pool",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnMiningExecStage(s, tx, execCfg, ctx.Done())
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+				return SpawnMiningExecStage(s, tx, execCfg, ctx.Done(), logger)
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnHashStateStage(s, tx, hashStateCfg, ctx, quiet)
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+				return SpawnHashStateStage(s, tx, hashStateCfg, ctx, logger)
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				stateRoot, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx, quiet)
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+				stateRoot, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx, logger)
 				if err != nil {
 					return err
 				}
 				createBlockCfg.miner.MiningBlock.Header.Root = stateRoot
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
 			ID:          stages.MiningFinish,
 			Description: "Mining: create and propagate valid block",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnMiningFinishStage(s, tx, finish, ctx.Done())
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+				return SpawnMiningFinishStage(s, tx, finish, ctx.Done(), logger)
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 	}
 }

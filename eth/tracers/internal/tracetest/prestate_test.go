@@ -25,9 +25,9 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
@@ -50,7 +50,7 @@ type account struct {
 
 // testcase defines a single test to check the stateDiff tracer against.
 type testcase struct {
-	Genesis      *core.Genesis   `json:"genesis"`
+	Genesis      *types.Genesis  `json:"genesis"`
 	Context      *callContext    `json:"context"`
 	Input        string          `json:"input"`
 	TracerConfig json.RawMessage `json:"tracerConfig"`
@@ -112,10 +112,13 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 					Difficulty:  (*big.Int)(test.Context.Difficulty),
 					GasLimit:    uint64(test.Context.GasLimit),
 				}
-				_, dbTx    = memdb.NewTestTx(t)
-				rules      = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
-				statedb, _ = tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
+				rules = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 			)
+			m := stages.Mock(t)
+			dbTx, err := m.DB.BeginRw(m.Ctx)
+			require.NoError(t, err)
+			defer dbTx.Rollback()
+			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
 			if test.Genesis.BaseFee != nil {
 				context.BaseFee, _ = uint256.FromBig(test.Genesis.BaseFee)
 			}
@@ -128,7 +131,7 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
-			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()))
+			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddDataGas(tx.GetDataGas()))
 			if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}

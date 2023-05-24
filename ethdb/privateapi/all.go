@@ -17,8 +17,8 @@ import (
 
 func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txPoolServer txpool_proto.TxpoolServer,
 	miningServer txpool_proto.MiningServer, addr string, rateLimit uint32, creds credentials.TransportCredentials,
-	healthCheck bool) (*grpc.Server, error) {
-	log.Info("Starting private RPC server", "on", addr)
+	healthCheck bool, logger log.Logger) (*grpc.Server, error) {
+	logger.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
@@ -43,7 +43,7 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 			defer healthServer.Shutdown()
 		}
 		if err := grpcServer.Serve(lis); err != nil {
-			log.Error("private RPC server fail", "err", err)
+			logger.Error("private RPC server fail", "err", err)
 		}
 	}()
 

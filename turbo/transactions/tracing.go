@@ -6,13 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
-	ethereum "github.com/ledgerwatch/erigon"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
+	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/core"
@@ -53,18 +57,27 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		return h
 	}
 	header := block.HeaderNoCopy()
-	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
+	parentHeader, err := headerReader.HeaderByHash(ctx, dbtx, header.ParentHash)
+	if err != nil {
+		// TODO(eip-4844): Do we need to propagate this error?
+		log.Error("Can't get parent block's header:", err)
+	}
+	var excessDataGas *big.Int
+	if parentHeader != nil {
+		excessDataGas = parentHeader.ExcessDataGas
+	}
+	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, excessDataGas)
 
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, block.NumberU64())
 	if historyV3 {
 		rules := cfg.Rules(BlockContext.BlockNumber, BlockContext.Time)
 		txn := block.Transactions()[txIndex]
-		statedb.Prepare(txn.Hash(), block.Hash(), txIndex)
+		statedb.SetTxContext(txn.Hash(), block.Hash(), txIndex)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */)
+				return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */, excessDataGas)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
@@ -77,7 +90,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
 
-	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, nil, header, block.Transactions(), block.Uncles(), cfg, statedb)
+	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, block.Transactions(), block.Uncles(), cfg, statedb, excessDataGas)
 
 	for idx, txn := range block.Transactions() {
 		select {
@@ -85,13 +98,13 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		case <-ctx.Done():
 			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, ctx.Err()
 		}
-		statedb.Prepare(txn.Hash(), block.Hash(), idx)
+		statedb.SetTxContext(txn.Hash(), block.Hash(), idx)
 
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */)
+				return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */, excessDataGas)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
@@ -102,7 +115,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		}
 		vmenv.Reset(TxContext, statedb)
 		// Not yet the searched for transaction, execute on top of the current state
-		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(txn.GetGas()), true /* refunds */, false /* gasBailout */); err != nil {
+		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(txn.GetGas()).AddDataGas(txn.GetDataGas()), true /* refunds */, false /* gasBailout */); err != nil {
 			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, fmt.Errorf("transaction %x failed: %w", txn.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state
@@ -192,7 +205,7 @@ func TraceTx(
 		callmsg := prepareCallMessage(message)
 		result, err = statefull.ApplyBorMessage(*vmenv, callmsg)
 	} else {
-		result, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
+		result, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()).AddDataGas(message.DataGas()), refunds, false /* gasBailout */)
 	}
 
 	if err != nil {

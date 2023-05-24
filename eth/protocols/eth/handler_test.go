@@ -21,10 +21,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -113,7 +115,7 @@ func TestGetBlockReceipts(t *testing.T) {
 
 	m.ReceiveWg.Add(1)
 	// Send the hash request and verify the response
-	for _, err = range m.Send(&sentry.InboundMessage{Id: eth.ToProto[eth.ETH66][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentry.InboundMessage{Id: eth.ToProto[direct.ETH66][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
@@ -132,9 +134,9 @@ func TestGetBlockReceipts(t *testing.T) {
 // newTestBackend creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
 func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *stages.MockSentry {
-	m := stages.MockWithGenesis(t, &core.Genesis{
+	m := stages.MockWithGenesis(t, &types.Genesis{
 		Config: params.TestChainConfig,
-		Alloc:  core.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
+		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}, testKey, false)
 	if blocks > 0 {
 		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator, true)

@@ -4,11 +4,10 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 )
 
-func (api *OtterscanAPIImpl) GetTransactionError(ctx context.Context, hash common.Hash) (hexutil.Bytes, error) {
+func (api *OtterscanAPIImpl) GetTransactionError(ctx context.Context, hash common.Hash) (hexutility.Bytes, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err

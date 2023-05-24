@@ -4,6 +4,8 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
@@ -22,23 +24,25 @@ type BlockContext struct {
 	GetHash GetHashFunc
 
 	// Block information
-	Coinbase    libcommon.Address // Provides information for COINBASE
-	GasLimit    uint64            // Provides information for GASLIMIT
-	MaxGasLimit bool              // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
-	BlockNumber uint64            // Provides information for NUMBER
-	Time        uint64            // Provides information for TIME
-	Difficulty  *big.Int          // Provides information for DIFFICULTY
-	BaseFee     *uint256.Int      // Provides information for BASEFEE
-	PrevRanDao  *libcommon.Hash   // Provides information for PREVRANDAO
+	Coinbase      libcommon.Address // Provides information for COINBASE
+	GasLimit      uint64            // Provides information for GASLIMIT
+	MaxGasLimit   bool              // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
+	BlockNumber   uint64            // Provides information for NUMBER
+	Time          uint64            // Provides information for TIME
+	Difficulty    *big.Int          // Provides information for DIFFICULTY
+	BaseFee       *uint256.Int      // Provides information for BASEFEE
+	PrevRanDao    *libcommon.Hash   // Provides information for PREVRANDAO
+	ExcessDataGas *big.Int          // Provides information for handling data blobs
 }
 
 // TxContext provides the EVM with information about a transaction.
 // All fields can change between transactions.
 type TxContext struct {
 	// Message information
-	TxHash   libcommon.Hash
-	Origin   libcommon.Address // Provides information for ORIGIN
-	GasPrice *uint256.Int      // Provides information for GASPRICE
+	TxHash     libcommon.Hash
+	Origin     libcommon.Address // Provides information for ORIGIN
+	GasPrice   *uint256.Int      // Provides information for GASPRICE
+	DataHashes []libcommon.Hash  // Provides versioned data hashes for DATAHASH
 }
 
 type (
@@ -75,6 +79,9 @@ type IntraBlockState interface {
 	GetState(address libcommon.Address, slot *libcommon.Hash, outValue *uint256.Int)
 	SetState(libcommon.Address, *libcommon.Hash, uint256.Int)
 
+	GetTransientState(addr libcommon.Address, key libcommon.Hash) uint256.Int
+	SetTransientState(addr libcommon.Address, key libcommon.Hash, value uint256.Int)
+
 	Selfdestruct(libcommon.Address) bool
 	HasSelfdestructed(libcommon.Address) bool
 
@@ -85,7 +92,9 @@ type IntraBlockState interface {
 	// is defined according to EIP161 (balance = nonce = code = 0).
 	Empty(libcommon.Address) bool
 
-	PrepareAccessList(sender libcommon.Address, dest *libcommon.Address, precompiles []libcommon.Address, txAccesses types2.AccessList)
+	Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dest *libcommon.Address,
+		precompiles []libcommon.Address, txAccesses types2.AccessList)
+
 	AddressInAccessList(addr libcommon.Address) bool
 	SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressOk bool, slotOk bool)
 	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform

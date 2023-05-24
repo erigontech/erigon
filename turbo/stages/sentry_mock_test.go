@@ -8,6 +8,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -57,7 +58,7 @@ func TestHeaderStep(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle := true
-	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
+	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -95,7 +96,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 		initialCycle := true
-		if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
+		if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, log.New(), nil, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -163,7 +164,7 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle := true
-	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
+	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -216,7 +217,7 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle = false
-	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
+	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -259,7 +260,7 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	// This is unwind step
-	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
+	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -296,7 +297,7 @@ func TestReorg(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle = false
-	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
+	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -392,7 +393,7 @@ func TestAnchorReplace(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle := true
-	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
+	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -496,7 +497,8 @@ func TestAnchorReplace2(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	initialCycle := true
-	if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
+	hook := stages.NewHook(m.Ctx, m.Notifications, m.Sync, m.ChainConfig, m.Log, m.UpdateHead)
+	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, hook); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -513,7 +515,7 @@ func TestForkchoiceToGenesis(t *testing.T) {
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 
 	initialCycle := false
-	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -535,7 +537,7 @@ func TestBogusForkchoice(t *testing.T) {
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 
 	initialCycle := false
-	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -550,7 +552,7 @@ func TestBogusForkchoice(t *testing.T) {
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -570,7 +572,7 @@ func TestPoSDownloader(t *testing.T) {
 	m.SendPayloadRequest(chain.TopBlock)
 
 	initialCycle := false
-	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -590,12 +592,12 @@ func TestPoSDownloader(t *testing.T) {
 	m.ReceiveWg.Wait()
 
 	// First cycle: save the downloaded header
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
 	// Second cycle: process the previous beacon request
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -606,7 +608,7 @@ func TestPoSDownloader(t *testing.T) {
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 	assert.Equal(t, chain.TopBlock.Hash(), headBlockHash)
@@ -638,7 +640,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	m.SendPayloadRequest(payloadMessage)
 
 	initialCycle := false
-	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -657,7 +659,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	}
 	m.ReceiveWg.Wait()
 
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(t, err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 
@@ -668,7 +670,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 		FinalizedBlockHash: invalidTip.Hash(),
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
-	_, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	_, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(t, err)
 
 	bad, lastValidHash := m.HeaderDownload().IsBadHeaderPoS(invalidTip.Hash())
@@ -676,7 +678,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	assert.Equal(t, lastValidHash, lastValidHeader.Hash())
 }
 
-func TestPOSWrontTrieRootReorgs(t *testing.T) {
+func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	t.Skip("Need some fixes for memory mutation to support DupSort")
 	//defer log.Root().SetHandler(log.Root().GetHandler())
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
@@ -724,7 +726,7 @@ func TestPOSWrontTrieRootReorgs(t *testing.T) {
 	//------------------------------------------
 	m.SendPayloadRequest(chain0.TopBlock)
 	initialCycle := false
-	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 	payloadStatus0 := m.ReceivePayloadStatus()
@@ -735,7 +737,7 @@ func TestPOSWrontTrieRootReorgs(t *testing.T) {
 		FinalizedBlockHash: chain0.TopBlock.Hash(),
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 	assert.Equal(t, chain0.TopBlock.Hash(), headBlockHash)
@@ -745,7 +747,7 @@ func TestPOSWrontTrieRootReorgs(t *testing.T) {
 
 	//------------------------------------------
 	m.SendPayloadRequest(chain1.TopBlock)
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 	payloadStatus1 := m.ReceivePayloadStatus()
@@ -756,7 +758,7 @@ func TestPOSWrontTrieRootReorgs(t *testing.T) {
 		FinalizedBlockHash: chain1.TopBlock.Hash(),
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 	assert.Equal(t, chain1.TopBlock.Hash(), headBlockHash)
@@ -766,7 +768,7 @@ func TestPOSWrontTrieRootReorgs(t *testing.T) {
 
 	//------------------------------------------
 	m.SendPayloadRequest(chain2.TopBlock)
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 	payloadStatus2 := m.ReceivePayloadStatus()
@@ -777,7 +779,7 @@ func TestPOSWrontTrieRootReorgs(t *testing.T) {
 		FinalizedBlockHash: chain2.TopBlock.Hash(),
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 	assert.Equal(t, chain2.TopBlock.Hash(), headBlockHash)
@@ -788,13 +790,13 @@ func TestPOSWrontTrieRootReorgs(t *testing.T) {
 	//------------------------------------------
 	preTop3 := chain3.Blocks[chain3.Length()-2]
 	m.SendPayloadRequest(preTop3)
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 	payloadStatus3 := m.ReceivePayloadStatus()
 	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus3.Status)
 	m.SendPayloadRequest(chain3.TopBlock)
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 	payloadStatus3 = m.ReceivePayloadStatus()
@@ -805,7 +807,7 @@ func TestPOSWrontTrieRootReorgs(t *testing.T) {
 		FinalizedBlockHash: chain3.TopBlock.Hash(),
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
-	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, m.Log, nil, nil)
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 	assert.Equal(t, chain3.TopBlock.Hash(), headBlockHash)

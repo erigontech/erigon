@@ -6,6 +6,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -17,12 +18,17 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestSenders(t *testing.T) {
+	logger := log.New()
 	ctx := context.Background()
 	db, tx := memdb.NewTestTx(t)
 	require := require.New(t)
+	//allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger)
+
+	bw := blockio.NewBlockWriter(false)
 
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
@@ -35,7 +41,7 @@ func TestSenders(t *testing.T) {
 
 	// prepare tx so it works with our test
 	signer1 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64())
-	require.NoError(rawdb.WriteBody(tx, libcommon.HexToHash("01"), 1, &types.Body{
+	require.NoError(bw.WriteBody(tx, libcommon.HexToHash("01"), 1, &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(&types.AccessListTx{
 				LegacyTx: types.LegacyTx{
@@ -64,7 +70,7 @@ func TestSenders(t *testing.T) {
 	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.HexToHash("01"), 1))
 
 	signer2 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64())
-	require.NoError(rawdb.WriteBody(tx, libcommon.HexToHash("02"), 2, &types.Body{
+	require.NoError(bw.WriteBody(tx, libcommon.HexToHash("02"), 2, &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(&types.AccessListTx{
 				LegacyTx: types.LegacyTx{
@@ -101,18 +107,22 @@ func TestSenders(t *testing.T) {
 			}, *signer2),
 		},
 	}))
+
 	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.HexToHash("02"), 2))
 
-	require.NoError(rawdb.WriteBody(tx, libcommon.HexToHash("03"), 3, &types.Body{
+	err := bw.WriteBody(tx, libcommon.HexToHash("03"), 3, &types.Body{
 		Transactions: []types.Transaction{}, Uncles: []*types.Header{{GasLimit: 3}},
-	}))
+	})
+	require.NoError(err)
+
 	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.HexToHash("03"), 3))
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil), nil)
-	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx, false /* quiet */)
-	assert.NoError(t, err)
+	br := snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil, logger)
+	cfg := StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, br, bw, nil)
+	err = SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx, log.New())
+	require.NoError(err)
 
 	{
 		found := rawdb.ReadCanonicalBodyWithTransactions(tx, libcommon.HexToHash("01"), 1)

@@ -79,10 +79,23 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		return err
 	}
 
+	if config == nil {
+		config = &tracers.TraceConfig{}
+	}
+
 	if config.BorTraceEnabled == nil {
 		config.BorTraceEnabled = newBoolPtr(false)
 	}
 
+	var excessDataGas *big.Int
+	parentBlock, err := api.blockByHashWithSenders(tx, block.ParentHash())
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+	if parentBlock != nil {
+		excessDataGas = parentBlock.ExcessDataGas()
+	}
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		stream.WriteNil()
@@ -115,12 +128,12 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			stream.WriteNil()
 			return ctx.Err()
 		}
-		ibs.Prepare(txn.Hash(), block.Hash(), idx)
+		ibs.SetTxContext(txn.Hash(), block.Hash(), idx)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *chainConfig, ibs, block.Header(), engine, true /* constCall */)
+				return core.SysCallContract(contract, data, chainConfig, ibs, block.Header(), engine, true /* constCall */, excessDataGas)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
@@ -229,7 +242,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		var borTx types.Transaction
 		borTx, _, _, _, err = rawdb.ReadBorTransaction(tx, hash)
 		if err != nil {
-			stream.WriteNil()
 			return err
 		}
 
@@ -322,6 +334,10 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		overrideBlockHash  map[uint64]common.Hash
 		baseFee            uint256.Int
 	)
+
+	if config == nil {
+		config = &tracers.TraceConfig{}
+	}
 
 	overrideBlockHash = make(map[uint64]common.Hash)
 	tx, err := api.db.BeginRo(ctx)
@@ -433,9 +449,9 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
-	gp := new(core.GasPool).AddGas(math.MaxUint64)
+	gp := new(core.GasPool).AddGas(math.MaxUint64).AddDataGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
-		st.Prepare(txn.Hash(), block.Hash(), idx)
+		st.SetTxContext(txn.Hash(), block.Hash(), idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			stream.WriteNil()
@@ -478,7 +494,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			}
 			txCtx = core.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState().(*state.IntraBlockState)
-			ibs.Prepare(common.Hash{}, parent.Hash(), txn_index)
+			ibs.SetTxContext(common.Hash{}, parent.Hash(), txn_index)
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 
 			if err != nil {

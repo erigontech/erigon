@@ -150,7 +150,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
-	gp := new(core.GasPool).AddGas(math.MaxUint64)
+	gp := new(core.GasPool).AddGas(math.MaxUint64).AddDataGas(math.MaxUint64)
 
 	results := []map[string]interface{}{}
 

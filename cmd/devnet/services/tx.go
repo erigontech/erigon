@@ -1,28 +1,31 @@
 package services
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/log/v3"
 )
 
-func CheckTxPoolContent(expectedPendingSize, expectedQueuedSize int) {
-	pendingSize, queuedSize, err := requests.TxpoolContent(models.ReqId)
+func CheckTxPoolContent(expectedPendingSize, expectedQueuedSize, expectedBaseFeeSize int, logger log.Logger) {
+	pendingSize, queuedSize, baseFeeSize, err := requests.TxpoolContent(models.ReqId, logger)
 	if err != nil {
-		fmt.Printf("FAILURE => error getting txpool content: %v\n", err)
+		logger.Error("FAILURE getting txpool content", "error", err)
 		return
 	}
 
 	if pendingSize != expectedPendingSize {
-		fmt.Printf("FAILURE => %v\n", fmt.Errorf("expected %d transaction(s) in pending pool, got %d", expectedPendingSize, pendingSize))
+		logger.Error("FAILURE mismatched pending subpool size", "expected", expectedPendingSize, "got", pendingSize)
 		return
 	}
 
 	if queuedSize != expectedQueuedSize {
-		fmt.Printf("FAILURE => %v\n", fmt.Errorf("expected %d transaction(s) in queued pool, got %d", expectedQueuedSize, queuedSize))
+		logger.Error("FAILURE mismatched queued subpool size", "expected", expectedQueuedSize, "got", queuedSize)
 		return
 	}
 
-	fmt.Printf("SUCCESS => %d transaction(s) in the pending pool and %d transaction(s) in the queued pool\n", pendingSize, queuedSize)
+	if baseFeeSize != expectedBaseFeeSize {
+		logger.Error("FAILURE mismatched basefee subpool size", "expected", expectedBaseFeeSize, "got", baseFeeSize)
+	}
+
+	logger.Info("SUCCESS => subpool sizes", "pending", pendingSize, "queued", queuedSize, "basefee", baseFeeSize)
 }

@@ -26,21 +26,23 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
@@ -63,16 +65,16 @@ func (t *StateTest) UnmarshalJSON(in []byte) error {
 
 type stJSON struct {
 	Env  stEnv                    `json:"env"`
-	Pre  core.GenesisAlloc        `json:"pre"`
+	Pre  types.GenesisAlloc       `json:"pre"`
 	Tx   stTransactionMarshaling  `json:"transaction"`
-	Out  hexutil.Bytes            `json:"out"`
+	Out  hexutility.Bytes         `json:"out"`
 	Post map[string][]stPostState `json:"post"`
 }
 
 type stPostState struct {
 	Root            common.UnprefixedHash `json:"hash"`
 	Logs            common.UnprefixedHash `json:"logs"`
-	Tx              hexutil.Bytes         `json:"txbytes"`
+	Tx              hexutility.Bytes      `json:"txbytes"`
 	ExpectException string                `json:"expectException"`
 	Indexes         struct {
 		Data  int `json:"data"`
@@ -81,26 +83,13 @@ type stPostState struct {
 	}
 }
 
-type stTransaction struct {
-	GasPrice             *big.Int             `json:"gasPrice"`
-	MaxFeePerGas         *big.Int             `json:"maxFeePerGas"`
-	MaxPriorityFeePerGas *big.Int             `json:"maxPriorityFeePerGas"`
-	Nonce                uint64               `json:"nonce"`
-	To                   string               `json:"to"`
-	Data                 []string             `json:"data"`
-	AccessLists          []*types2.AccessList `json:"accessLists,omitempty"`
-	GasLimit             []uint64             `json:"gasLimit"`
-	Value                []string             `json:"value"`
-	PrivateKey           []byte               `json:"secretKey"`
-}
-
 type stTransactionMarshaling struct {
 	GasPrice             *math.HexOrDecimal256 `json:"gasPrice"`
 	MaxFeePerGas         *math.HexOrDecimal256 `json:"maxFeePerGas"`
 	MaxPriorityFeePerGas *math.HexOrDecimal256 `json:"maxPriorityFeePerGas"`
 	Nonce                math.HexOrDecimal64   `json:"nonce"`
 	GasLimit             []math.HexOrDecimal64 `json:"gasLimit"`
-	PrivateKey           hexutil.Bytes         `json:"secretKey"`
+	PrivateKey           hexutility.Bytes      `json:"secretKey"`
 	To                   string                `json:"to"`
 	Data                 []string              `json:"data"`
 	Value                []string              `json:"value"`
@@ -191,7 +180,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := t.genesis(config).ToBlock("")
+	block, _, err := core.GenesisToBlock(t.genesis(config), "")
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -234,7 +223,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
 	header := block.Header()
-	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase)
+	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase, nil /*excessDataGas*/)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = new(uint256.Int)
@@ -249,7 +238,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	// Execute the message.
 	snapshot := statedb.Snapshot()
 	gaspool := new(core.GasPool)
-	gaspool.AddGas(block.GasLimit())
+	gaspool.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 	if _, err = core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */); err != nil {
 		statedb.RevertToSnapshot(snapshot)
 	}
@@ -308,7 +297,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	return statedb, root, nil
 }
 
-func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	r := state.NewPlainStateReader(tx)
 	statedb := state.New(r)
 	for addr, a := range accounts {
@@ -346,8 +335,8 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts core.GenesisAlloc, bl
 	return statedb, nil
 }
 
-func (t *StateTest) genesis(config *chain.Config) *core.Genesis {
-	return &core.Genesis{
+func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
+	return &types.Genesis{
 		Config:     config,
 		Coinbase:   t.json.Env.Coinbase,
 		Difficulty: t.json.Env.Difficulty,
@@ -467,7 +456,9 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 		data,
 		accessList,
 		false, /* checkNonce */
-		false /* isFree */)
+		false, /* isFree */
+		uint256.NewInt(tipCap.Uint64()),
+	)
 
 	return msg, nil
 }

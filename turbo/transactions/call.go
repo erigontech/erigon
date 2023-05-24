@@ -3,6 +3,7 @@ package transactions
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -93,7 +94,7 @@ func DoCall(
 		evm.Cancel()
 	}()
 
-	gp := new(core.GasPool).AddGas(msg.Gas())
+	gp := new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas())
 	result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, err
@@ -107,7 +108,15 @@ func DoCall(
 }
 
 func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) evmtypes.BlockContext {
-	return core.NewEVMBlockContext(header, MakeHeaderGetter(requireCanonical, tx, headerReader), engine, nil /* author */)
+	var excessDataGas *big.Int
+	parentHeader, err := headerReader.HeaderByHash(context.Background(), tx, header.ParentHash)
+	if err != nil {
+		// TODO(eip-4844): Do we need to propagate this error?
+		log.Error("Can't get parent block's header:", err)
+	} else if parentHeader != nil {
+		excessDataGas = parentHeader.ExcessDataGas
+	}
+	return core.NewEVMBlockContext(header, MakeHeaderGetter(requireCanonical, tx, headerReader), engine, nil /* author */, excessDataGas)
 }
 
 func MakeHeaderGetter(requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) func(uint64) libcommon.Hash {
@@ -163,7 +172,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 		timedOut = true
 	}()
 
-	gp := new(core.GasPool).AddGas(r.message.Gas())
+	gp := new(core.GasPool).AddGas(r.message.Gas()).AddDataGas(r.message.DataGas())
 
 	result, err := core.ApplyMessage(r.evm, r.message, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {

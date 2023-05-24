@@ -24,7 +24,7 @@ func TestEth1DataMarshalUnmarmashal(t *testing.T) {
 	marshalled, _ := testEth1Data.EncodeSSZ(nil)
 	assert.Equal(t, marshalled, expectedTestEth1DataMarshalled)
 	testData2 := &cltypes.Eth1Data{}
-	require.NoError(t, testData2.DecodeSSZ(marshalled))
+	require.NoError(t, testData2.DecodeSSZ(marshalled, 0))
 	require.Equal(t, testData2, testEth1Data)
 }
 

@@ -104,6 +104,7 @@ const (
 	CHAINID     OpCode = 0x46
 	SELFBALANCE OpCode = 0x47
 	BASEFEE     OpCode = 0x48
+	DATAHASH    OpCode = 0x49
 )
 
 // 0x50 range - 'storage' and execution.
@@ -214,6 +215,12 @@ const (
 	SELFDESTRUCT OpCode = 0xff
 )
 
+// 0xb0 range.
+const (
+	TLOAD  OpCode = 0xb3
+	TSTORE OpCode = 0xb4
+)
+
 // Since the opcodes aren't all in order we can't use a regular slice.
 var opCodeToString = map[OpCode]string{
 	// 0x0 range - arithmetic ops.
@@ -277,6 +284,7 @@ var opCodeToString = map[OpCode]string{
 	CHAINID:     "CHAINID",
 	SELFBALANCE: "SELFBALANCE",
 	BASEFEE:     "BASEFEE",
+	DATAHASH:    "DATAHASH",
 
 	// 0x50 range - 'storage' and execution.
 	POP: "POP",
@@ -368,6 +376,10 @@ var opCodeToString = map[OpCode]string{
 	LOG3:   "LOG3",
 	LOG4:   "LOG4",
 
+	// 0xb0 range.
+	TLOAD:  "TLOAD",
+	TSTORE: "TSTORE",
+
 	// 0xf0 range.
 	CREATE:       "CREATE",
 	CALL:         "CALL",
@@ -428,6 +440,7 @@ var stringToOp = map[string]OpCode{
 	"CALLDATACOPY":   CALLDATACOPY,
 	"CHAINID":        CHAINID,
 	"BASEFEE":        BASEFEE,
+	"DATAHASH":       DATAHASH,
 	"DELEGATECALL":   DELEGATECALL,
 	"STATICCALL":     STATICCALL,
 	"CODESIZE":       CODESIZE,
@@ -458,6 +471,8 @@ var stringToOp = map[string]OpCode{
 	"GAS":            GAS,
 	"JUMPDEST":       JUMPDEST,
 	"PUSH0":          PUSH0,
+	"TLOAD":          TLOAD,
+	"TSTORE":         TSTORE,
 	"PUSH1":          PUSH1,
 	"PUSH2":          PUSH2,
 	"PUSH3":          PUSH3,

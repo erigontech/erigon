@@ -5,10 +5,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -16,7 +18,7 @@ import (
 )
 
 func TestCheckPeerStatusCompatibility(t *testing.T) {
-	var version uint = eth.ETH66
+	var version uint = direct.ETH66
 	networkID := params.MainnetChainConfig.ChainID.Uint64()
 	goodReply := eth.StatusPacket{
 		ProtocolVersion: uint32(version),
@@ -52,14 +54,14 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 	})
 	t.Run("version mismatch min", func(t *testing.T) {
 		reply := goodReply
-		reply.ProtocolVersion = eth.ETH66 - 1
+		reply.ProtocolVersion = direct.ETH66 - 1
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
 		assert.NotNil(t, err)
 		assert.Contains(t, err.Error(), "version is less")
 	})
 	t.Run("version mismatch max", func(t *testing.T) {
 		reply := goodReply
-		reply.ProtocolVersion = eth.ETH66 + 1
+		reply.ProtocolVersion = direct.ETH66 + 1
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
 		assert.NotNil(t, err)
 		assert.Contains(t, err.Error(), "version is more")

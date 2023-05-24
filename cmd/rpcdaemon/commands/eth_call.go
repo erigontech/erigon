@@ -7,16 +7,17 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -37,7 +38,7 @@ import (
 var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
-func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Bytes, error) {
+func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutility.Bytes, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -127,9 +128,9 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	// Binary search the gas requirement, as it may be higher than the amount used
 	var (
-		lo  = params.TxGas - 1
-		hi  uint64
-		cap uint64
+		lo     = params.TxGas - 1
+		hi     uint64
+		gasCap uint64
 	)
 	// Use zero address if sender unspecified.
 	if args.From == nil {
@@ -217,7 +218,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", api.GasCap)
 		hi = api.GasCap
 	}
-	cap = hi
+	gasCap = hi
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
@@ -286,7 +287,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	// Reject the transaction as invalid if it still fails at the highest allowance
-	if hi == cap {
+	if hi == gasCap {
 		failed, result, err := executable(hi)
 		if err != nil {
 			return 0, err
@@ -299,7 +300,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 				return 0, result.Err
 			}
 			// Otherwise, the specified gas cap is too low
-			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
+			return 0, fmt.Errorf("gas required exceeds allowance (%d)", gasCap)
 		}
 	}
 	return hexutil.Uint64(hi), nil
@@ -349,18 +350,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
 	}
 
-	if len(storageKeys) != 0 {
-		return nil, fmt.Errorf(NotImplemented, "eth_getProof with storageKeys")
-	}
-
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return nil, err
-	}
-
 	rl := trie.NewRetainList(0)
-	rl.AddKey(addrHash[:])
-
 	var loader *trie.FlatDBTrieLoader
 	if blockNr < latestBlock {
 		if latestBlock-blockNr > maxGetProofRewindBlockCount {
@@ -372,13 +362,13 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr}
 		stageState := &stagedsync.StageState{BlockNumber: latestBlock}
 
-		hashStageCfg := stagedsync.StageHashStateCfg(nil, api.dirs, api.historyV3(batch), api._agg)
-		if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx); err != nil {
+		hashStageCfg := stagedsync.StageHashStateCfg(nil, api.dirs, api.historyV3(batch))
+		if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx, api.logger); err != nil {
 			return nil, err
 		}
 
 		interHashStageCfg := stagedsync.StageTrieCfg(nil, false, false, false, api.dirs.Tmp, api._blockReader, nil, api.historyV3(batch), api._agg)
-		loader, err = stagedsync.UnwindIntermediateHashesForTrieLoader("eth_getProof", rl, unwindState, stageState, batch, interHashStageCfg, nil, nil, ctx.Done())
+		loader, err = stagedsync.UnwindIntermediateHashesForTrieLoader("eth_getProof", rl, unwindState, stageState, batch, interHashStageCfg, nil, nil, ctx.Done(), api.logger)
 		if err != nil {
 			return nil, err
 		}
@@ -387,11 +377,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		loader = trie.NewFlatDBTrieLoader("eth_getProof", rl, nil, nil, false)
 	}
 
-	var accProof accounts.AccProofResult
-	accProof.Address = address
-
-	// Fill in the Account fields here to reduce the code changes
-	// needed in turbo/trie/hashbuilder.go
 	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
 	if err != nil {
 		return nil, err
@@ -400,14 +385,15 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	if err != nil {
 		return nil, err
 	}
-	if a != nil {
-		accProof.Balance = (*hexutil.Big)(a.Balance.ToBig())
-		accProof.CodeHash = a.CodeHash
-		accProof.Nonce = hexutil.Uint64(a.Nonce)
-		accProof.StorageHash = a.Root
+	if a == nil {
+		a = &accounts.Account{}
+	}
+	pr, err := trie.NewProofRetainer(address, a, storageKeys, rl)
+	if err != nil {
+		return nil, err
 	}
 
-	loader.SetProofReturn(&accProof)
+	loader.SetProofRetainer(pr)
 	root, err := loader.CalcTrieRoot(tx, nil)
 	if err != nil {
 		return nil, err
@@ -416,7 +402,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	if root != header.Root {
 		return nil, fmt.Errorf("mismatch in expected state root computed %v vs %v indicates bug in proof implementation", root, header.Root)
 	}
-	return &accProof, nil
+	return pr.ProofResult()
 }
 
 func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {
@@ -557,7 +543,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		txCtx := core.NewEVMTxContext(msg)
 
 		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
-		gp := new(core.GasPool).AddGas(msg.Gas())
+		gp := new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas())
 		res, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			return nil, err

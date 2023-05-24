@@ -2,16 +2,15 @@ package state
 
 import (
 	"bytes"
-	"container/heap"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -30,6 +29,8 @@ import (
 const CodeSizeTable = "CodeSize"
 const StorageTable = "Storage"
 
+var ExecTxsDone = metrics.NewCounter(`exec_txs_done`)
+
 type StateV3 struct {
 	lock           sync.RWMutex
 	sizeEstimate   int
@@ -39,23 +40,17 @@ type StateV3 struct {
 	chIncs         map[string][]byte
 	chContractCode map[string][]byte
 
-	receiveWork  *sync.Cond
 	triggers     map[uint64]*exec22.TxTask
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.Mutex
 
-	queue     exec22.TxTaskQueue
-	queueLock sync.Mutex
-
-	txsDone  atomic.Uint64
-	finished atomic.Bool
-
 	tmpdir              string
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
+	logger              log.Logger
 }
 
-func NewStateV3(tmpdir string) *StateV3 {
+func NewStateV3(tmpdir string, logger log.Logger) *StateV3 {
 	rs := &StateV3{
 		tmpdir:         tmpdir,
 		triggers:       map[uint64]*exec22.TxTask{},
@@ -68,8 +63,8 @@ func NewStateV3(tmpdir string) *StateV3 {
 
 		applyPrevAccountBuf: make([]byte, 256),
 		addrIncBuf:          make([]byte, 20+8),
+		logger:              logger,
 	}
-	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
 }
 
@@ -145,7 +140,7 @@ func (rs *StateV3) get(table string, key []byte) (v []byte, ok bool) {
 }
 
 func (rs *StateV3) flushMap(ctx context.Context, rwTx kv.RwTx, table string, m map[string][]byte, logPrefix string, logEvery *time.Ticker) error {
-	collector := etl.NewCollector(logPrefix, "", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collector := etl.NewCollector(logPrefix, "", etl.NewSortableBuffer(etl.BufferOptimalSize), rs.logger)
 	defer collector.Close()
 
 	var count int
@@ -159,7 +154,7 @@ func (rs *StateV3) flushMap(ctx context.Context, rwTx kv.RwTx, table string, m m
 		default:
 		case <-logEvery.C:
 			progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, float64(total)/1_000_000)
-			log.Info("Write to db", "progress", progress, "current table", table)
+			rs.logger.Info("Write to db", "progress", progress, "current table", table)
 			rwTx.CollectMetrics()
 		}
 	}
@@ -188,7 +183,7 @@ func (rs *StateV3) flushBtree(ctx context.Context, rwTx kv.RwTx, table string, m
 
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_prefix", hex.EncodeToString([]byte(iter.Key())[:4]))
+			rs.logger.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_prefix", hex.EncodeToString([]byte(iter.Key())[:4]))
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
@@ -226,25 +221,32 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	return nil
 }
 
-func (rs *StateV3) QueueLen() int {
-	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
-	return rs.queue.Len()
+func (rs *StateV3) ReTry(txTask *exec22.TxTask, in *exec22.QueueWithRetry) {
+	rs.resetTxTask(txTask)
+	in.ReTry(txTask)
 }
+func (rs *StateV3) AddWork(ctx context.Context, txTask *exec22.TxTask, in *exec22.QueueWithRetry) {
+	rs.resetTxTask(txTask)
+	in.Add(ctx, txTask)
+}
+func (rs *StateV3) resetTxTask(txTask *exec22.TxTask) {
+	txTask.BalanceIncreaseSet = nil
+	returnReadList(txTask.ReadLists)
+	txTask.ReadLists = nil
+	returnWriteList(txTask.WriteLists)
+	txTask.WriteLists = nil
+	txTask.Logs = nil
+	txTask.TraceFroms = nil
+	txTask.TraceTos = nil
 
-func (rs *StateV3) Schedule() (*exec22.TxTask, bool) {
-	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
-	for !rs.finished.Load() && rs.queue.Len() == 0 {
-		rs.receiveWork.Wait()
-	}
-	if rs.finished.Load() {
-		return nil, false
-	}
-	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(*exec22.TxTask), true
-	}
-	return nil, false
+	/*
+		txTask.ReadLists = nil
+		txTask.WriteLists = nil
+		txTask.AccountPrevs = nil
+		txTask.AccountDels = nil
+		txTask.StoragePrevs = nil
+		txTask.CodePrevs = nil
+	*/
 }
 
 func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
@@ -269,15 +271,13 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 	return !deferral
 }
 
-func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
-	rs.txsDone.Add(1)
+func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *exec22.QueueWithRetry) (count int) {
+	ExecTxsDone.Inc()
 
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
-	count := uint64(0)
 	if triggered, ok := rs.triggers[txNum]; ok {
-		rs.queuePush(triggered)
-		rs.receiveWork.Signal()
+		in.ReTry(triggered)
 		count++
 		delete(rs.triggers, txNum)
 	}
@@ -288,43 +288,6 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 		}
 	}
 	return count
-}
-
-func (rs *StateV3) queuePush(t *exec22.TxTask) int {
-	rs.queueLock.Lock()
-	heap.Push(&rs.queue, t)
-	l := len(rs.queue)
-	rs.queueLock.Unlock()
-	return l
-}
-
-func (rs *StateV3) AddWork(txTask *exec22.TxTask) (queueLen int) {
-	txTask.BalanceIncreaseSet = nil
-	returnReadList(txTask.ReadLists)
-	txTask.ReadLists = nil
-	returnWriteList(txTask.WriteLists)
-	txTask.WriteLists = nil
-	txTask.ResultsSize = 0
-	txTask.Logs = nil
-	txTask.TraceFroms = nil
-	txTask.TraceTos = nil
-
-	/*
-		txTask.ReadLists = nil
-		txTask.WriteLists = nil
-		txTask.AccountPrevs = nil
-		txTask.AccountDels = nil
-		txTask.StoragePrevs = nil
-		txTask.CodePrevs = nil
-	*/
-	queueLen = rs.queuePush(txTask)
-	rs.receiveWork.Signal()
-	return queueLen
-}
-
-func (rs *StateV3) Finish() {
-	rs.finished.Store(true)
-	rs.receiveWork.Broadcast()
 }
 
 func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
@@ -567,7 +530,6 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 				}
 				currentInc = acc.Incarnation
 				// Fetch the code hash
-				recoverCodeHashPlain(&acc, tx, k)
 				var address common.Address
 				copy(address[:], k)
 
@@ -640,13 +602,13 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	return nil
 }
 
-func (rs *StateV3) DoneCount() uint64 { return rs.txsDone.Load() }
+func (rs *StateV3) DoneCount() uint64 { return ExecTxsDone.Get() }
 
-func (rs *StateV3) SizeEstimate() uint64 {
+func (rs *StateV3) SizeEstimate() (r uint64) {
 	rs.lock.RLock()
-	r := rs.sizeEstimate
+	r = uint64(rs.sizeEstimate)
 	rs.lock.RUnlock()
-	return uint64(r) * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
+	return r * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
 }
 
 func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
@@ -712,7 +674,8 @@ func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.
 	return true
 }
 
-type StateWriterV3 struct {
+// StateWriterBufferedV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
+type StateWriterBufferedV3 struct {
 	rs           *StateV3
 	txNum        uint64
 	writeLists   map[string]*exec22.KvList
@@ -722,18 +685,18 @@ type StateWriterV3 struct {
 	codePrevs    map[string]uint64
 }
 
-func NewStateWriterV3(rs *StateV3) *StateWriterV3 {
-	return &StateWriterV3{
+func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
+	return &StateWriterBufferedV3{
 		rs:         rs,
 		writeLists: newWriteList(),
 	}
 }
 
-func (w *StateWriterV3) SetTxNum(txNum uint64) {
+func (w *StateWriterBufferedV3) SetTxNum(txNum uint64) {
 	w.txNum = txNum
 }
 
-func (w *StateWriterV3) ResetWriteSet() {
+func (w *StateWriterBufferedV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
 	w.accountPrevs = nil
 	w.accountDels = nil
@@ -741,15 +704,15 @@ func (w *StateWriterV3) ResetWriteSet() {
 	w.codePrevs = nil
 }
 
-func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
+func (w *StateWriterBufferedV3) WriteSet() map[string]*exec22.KvList {
 	return w.writeLists
 }
 
-func (w *StateWriterV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
+func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
 
-func (w *StateWriterV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	addressBytes := address.Bytes()
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
@@ -767,7 +730,7 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 	return nil
 }
 
-func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	addressBytes, codeHashBytes := address.Bytes(), codeHash.Bytes()
 	w.writeLists[kv.Code].Keys = append(w.writeLists[kv.Code].Keys, string(codeHashBytes))
 	w.writeLists[kv.Code].Vals = append(w.writeLists[kv.Code].Vals, code)
@@ -784,7 +747,7 @@ func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation ui
 	return nil
 }
 
-func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *accounts.Account) error {
 	addressBytes := address.Bytes()
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, string(addressBytes))
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, nil)
@@ -803,7 +766,7 @@ func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts
 	return nil
 }
 
-func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	if *original == *value {
 		return nil
 	}
@@ -819,7 +782,7 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	return nil
 }
 
-func (w *StateWriterV3) CreateContract(address common.Address) error {
+func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 	return nil
 }
 

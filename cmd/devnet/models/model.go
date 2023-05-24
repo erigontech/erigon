@@ -66,7 +66,7 @@ const (
 	// TorrentPortParam is the port parameter for the second node
 	TorrentPortParam = "42070"
 	// PrivateApiParamMine is the private.api.addr parameter for the mining node
-	PrivateApiParamMine = "localhost:9090"
+	PrivateApiParamMine = "localhost:9092"
 	// PrivateApiParamNoMine is the private.api.addr parameter for the non-mining node
 	PrivateApiParamNoMine = "localhost:9091"
 	// HttpApiParam is the http.api default parameter for rpcdaemon
@@ -116,6 +116,8 @@ const (
 	ETHGetBlock RPCMethod = "eth_getBlock"
 	// ETHGetLogs represents the eth_getLogs method
 	ETHGetLogs RPCMethod = "eth_getLogs"
+	// ETHBlockNumber represents the eth_blockNumber method
+	ETHBlockNumber RPCMethod = "eth_blockNumber"
 	// AdminNodeInfo represents the admin_nodeInfo method
 	AdminNodeInfo RPCMethod = "admin_nodeInfo"
 	// TxpoolContent represents the txpool_content method

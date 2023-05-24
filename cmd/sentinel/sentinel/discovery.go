@@ -20,6 +20,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
@@ -30,17 +31,24 @@ import (
 	"github.com/prysmaticlabs/go-bitfield"
 )
 
-func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo, skipHandshake bool) error {
+func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, skipHandshake bool) (err error) {
 	if info.ID == s.host.ID() {
 		return nil
 	}
-	if s.peers.IsBadPeer(info.ID) {
-		return fmt.Errorf("refused to connect to bad peer")
+	s.peers.WithPeer(info.ID, func(peer *peers.Peer) {
+		if peer.IsBad() {
+			err = fmt.Errorf("refused to connect to bad peer")
+		}
+	})
+	if err != nil {
+		return err
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
 	if err := s.host.Connect(ctxWithTimeout, info); err != nil {
-		s.peers.DisconnectPeer(info.ID)
+		s.peers.WithPeer(info.ID, func(peer *peers.Peer) {
+			peer.Disconnect(err.Error())
+		})
 		return err
 	}
 	return nil
@@ -53,7 +61,7 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	}
 	for _, peerInfo := range addrInfos {
 		go func(peerInfo peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, peerInfo, true); err != nil {
+			if err := s.ConnectWithPeer(s.ctx, peerInfo, true); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
@@ -62,6 +70,7 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 }
 
 func (s *Sentinel) listenForPeers() {
+	s.listenForPeersDoneCh = make(chan struct{}, 3)
 	enodes := []*enode.Node{}
 	for _, node := range s.cfg.NetworkConfig.StaticPeers {
 		newNode, err := enode.Parse(enode.ValidSchemes, node)
@@ -71,16 +80,27 @@ func (s *Sentinel) listenForPeers() {
 			log.Warn("Could not connect to static peer", "peer", node, "reason", err)
 		}
 	}
-
+	log.Info("Static peers", "len", len(enodes))
+	if s.cfg.NoDiscovery {
+		return
+	}
 	multiAddresses := convertToMultiAddr(enodes)
-	s.connectWithAllPeers(multiAddresses)
+	if err := s.connectWithAllPeers(multiAddresses); err != nil {
+		log.Warn("Could not connect to static peers", "reason", err)
+
+	}
 
 	iterator := s.listener.RandomNodes()
 	defer iterator.Close()
 	for {
-
-		if s.ctx.Err() != nil {
+		if err := s.ctx.Err(); err != nil {
+			log.Debug("Stopping Ethereum 2.0 peer discovery", "err", err)
 			break
+		}
+		select {
+		case <-s.listenForPeersDoneCh:
+			return
+		default:
 		}
 		if s.HasTooManyPeers() {
 			log.Trace("[Sentinel] Not looking for peers, at peer limit")
@@ -89,7 +109,7 @@ func (s *Sentinel) listenForPeers() {
 		}
 		exists := iterator.Next()
 		if !exists {
-			break
+			continue
 		}
 		node := iterator.Node()
 		peerInfo, _, err := convertToAddrInfo(node)
@@ -104,7 +124,7 @@ func (s *Sentinel) listenForPeers() {
 		}
 
 		go func(peerInfo *peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, *peerInfo, false); err != nil {
+			if err := s.ConnectWithPeer(s.ctx, *peerInfo, false); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
@@ -144,7 +164,9 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 		invalid := !s.handshaker.ValidatePeer(peerId)
 		if invalid {
 			log.Trace("Handshake was unsuccessful")
-			s.peers.DisconnectPeer(peerId)
+			s.peers.WithPeer(peerId, func(peer *peers.Peer) {
+				peer.Disconnect("invalid peer", "bad handshake")
+			})
 		}
 	}()
 }
