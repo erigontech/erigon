@@ -316,7 +316,7 @@ func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m 
 	// block-by-block, so we can only validate imported headers after
 	// all blocks have been processed by BlockChain, as they may not
 	// be part of the longest chain until last block is imported.
-	for b := br.CurrentBlock(tx); b != nil && b.NumberU64() != 0; {
+	for b, _ := br.CurrentBlock(tx); b != nil && b.NumberU64() != 0; {
 		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
 			return fmt.Errorf("imported block header validation failed: %w", err)
 		}
