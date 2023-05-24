@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"testing"
 	"time"
 
@@ -107,4 +108,44 @@ func TestTxsBeginEnd(t *testing.T) {
 	})
 	require.NoError(err)
 
+}
+
+func writeRawBodyDeprecated(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.RawBody) error {
+	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions)))
+	if err != nil {
+		return err
+	}
+	data := types.BodyForStorage{
+		BaseTxId: baseTxId,
+		TxAmount: uint32(len(body.Transactions)),
+		Uncles:   body.Uncles,
+	}
+	if err = rawdb.WriteBodyForStorage(db, hash, number, &data); err != nil {
+		return fmt.Errorf("failed to write body: %w", err)
+	}
+	if err = writeRawTransactionsDeprecated(db, body.Transactions, baseTxId, &hash); err != nil {
+		return fmt.Errorf("failed to WriteRawTransactions: %w, blockNum=%d", err, number)
+	}
+	return nil
+}
+
+func writeRawTransactionsDeprecated(tx kv.RwTx, txs [][]byte, baseTxId uint64, blockHash *libcommon.Hash) error {
+	txId := baseTxId
+	for _, txn := range txs {
+		txIdKey := make([]byte, 8)
+		binary.BigEndian.PutUint64(txIdKey, txId)
+		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
+		if blockHash != nil {
+			if err := tx.Append(kv.EthTx, txIdKey, txn); err != nil {
+				return fmt.Errorf("txId=%d, baseTxId=%d, %w", txId, baseTxId, err)
+			}
+		} else {
+			key := append(txIdKey, blockHash.Bytes()...)
+			if err := tx.Append(kv.EthTxV3, key, txn); err != nil {
+				return fmt.Errorf("txId=%d, baseTxId=%d, %w", txId, baseTxId, err)
+			}
+		}
+		txId++
+	}
+	return nil
 }
