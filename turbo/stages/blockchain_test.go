@@ -510,7 +510,7 @@ func TestChainTxReorgs(t *testing.T) {
 	// shared tx
 	txs = types.Transactions{postponed, swapped}
 	for i, txn := range txs {
-		if bn, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn != nil {
+		if bn, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn == nil {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
 		if m.HistoryV3 {
