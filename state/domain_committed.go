@@ -78,32 +78,30 @@ type ValueMerger func(prev, current []byte) (merged []byte, err error)
 
 type UpdateTree struct {
 	tree   *btree.BTreeG[*CommitmentItem]
-	mode   CommitmentMode
 	keccak hash.Hash
 }
 
-func NewUpdateTree(mode CommitmentMode) *UpdateTree {
+func NewUpdateTree() *UpdateTree {
 	return &UpdateTree{
-		tree:   btree.NewG[*CommitmentItem](32, commitmentItemLess),
-		mode:   mode,
+		tree:   btree.NewG[*CommitmentItem](64, commitmentItemLess),
 		keccak: sha3.NewLegacyKeccak256(),
 	}
+}
+
+func (t *UpdateTree) Get(key []byte) (*CommitmentItem, bool) {
+	item, found := t.tree.Get(&CommitmentItem{plainKey: common.Copy(key), hashedKey: t.hashAndNibblizeKey(key)})
+	return item, found
 }
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *CommitmentItem, val []byte)) {
-	if t.mode == CommitmentModeDisabled {
-		return
-	}
 	c := &CommitmentItem{plainKey: common.Copy(key), hashedKey: t.hashAndNibblizeKey(key)}
-	if t.mode > CommitmentModeDirect {
-		fn(c, val)
-	}
+	fn(c, val)
 	t.tree.ReplaceOrInsert(c)
 }
 
-func (t *UpdateTree) TouchAccountKey(c *CommitmentItem, val []byte) {
+func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = commitment.DeleteUpdate
 		return
@@ -113,6 +111,8 @@ func (t *UpdateTree) TouchAccountKey(c *CommitmentItem, val []byte) {
 	if found && item.update.Flags&commitment.CodeUpdate != 0 {
 		c.update.Flags |= commitment.CodeUpdate
 		copy(c.update.CodeHashOrStorage[:], item.update.CodeHashOrStorage[:])
+		c.update.CodeValue = common.Copy(item.update.CodeValue)
+		c.update.ValLength = length.Hash
 	}
 }
 
@@ -126,23 +126,27 @@ func (t *UpdateTree) UpdatePrefix(prefix, val []byte, fn func(c *CommitmentItem,
 	})
 }
 
-func (t *UpdateTree) TouchStorageKey(c *CommitmentItem, val []byte) {
+func (t *UpdateTree) TouchStorage(c *CommitmentItem, val []byte) {
 	c.update.ValLength = len(val)
 	if len(val) == 0 {
 		c.update.Flags = commitment.DeleteUpdate
 	} else {
 		c.update.Flags = commitment.StorageUpdate
 		copy(c.update.CodeHashOrStorage[:], val)
+		c.update.CodeValue = make([]byte, 0)
 	}
 }
 
-func (t *UpdateTree) TouchCodeKey(c *CommitmentItem, val []byte) {
+func (t *UpdateTree) TouchCode(c *CommitmentItem, val []byte) {
 	c.update.Flags = commitment.CodeUpdate
 	item, found := t.tree.Get(c)
 	if !found {
 		t.keccak.Reset()
 		t.keccak.Write(val)
 		copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
+		c.update.CodeValue = common.Copy(val)
+		c.update.ValLength = length.Hash
+
 		return
 	}
 	if item.update.Flags&commitment.BalanceUpdate != 0 {
@@ -159,11 +163,24 @@ func (t *UpdateTree) TouchCodeKey(c *CommitmentItem, val []byte) {
 		t.keccak.Reset()
 		t.keccak.Write(val)
 		copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
+		c.update.CodeValue = common.Copy(val)
+		c.update.ValLength = length.Hash
 	}
+}
+func (t *UpdateTree) ListItems() []CommitmentItem {
+	updates := make([]CommitmentItem, t.tree.Len())
+
+	j := 0
+	t.tree.Ascend(func(item *CommitmentItem) bool {
+		updates[j] = *item
+		j++
+		return true
+	})
+	return updates
 }
 
 // Returns list of both plain and hashed keys. If .mode is CommitmentModeUpdate, updates also returned.
-func (t *UpdateTree) List() ([][]byte, [][]byte, []commitment.Update) {
+func (t *UpdateTree) List(clear bool) ([][]byte, [][]byte, []commitment.Update) {
 	plainKeys := make([][]byte, t.tree.Len())
 	hashedKeys := make([][]byte, t.tree.Len())
 	updates := make([]commitment.Update, t.tree.Len())
@@ -176,8 +193,9 @@ func (t *UpdateTree) List() ([][]byte, [][]byte, []commitment.Update) {
 		j++
 		return true
 	})
-
-	t.tree.Clear(true)
+	if clear {
+		t.tree.Clear(true)
+	}
 	return plainKeys, hashedKeys, updates
 }
 
@@ -208,6 +226,7 @@ type DomainCommitted struct {
 	*Domain
 	trace        bool
 	updates      *UpdateTree
+	mode         CommitmentMode
 	patriciaTrie commitment.Trie
 	branchMerger *commitment.BranchMerger
 	prevState    []byte
@@ -231,13 +250,14 @@ func (d *DomainCommitted) Hasher() hash.Hash {
 func NewCommittedDomain(d *Domain, mode CommitmentMode, trieVariant commitment.TrieVariant) *DomainCommitted {
 	return &DomainCommitted{
 		Domain:       d,
-		updates:      NewUpdateTree(mode),
+		mode:         mode,
+		updates:      NewUpdateTree(),
 		patriciaTrie: commitment.InitializeTrie(trieVariant),
 		branchMerger: commitment.NewHexBranchMerger(8192),
 	}
 }
 
-func (d *DomainCommitted) SetCommitmentMode(m CommitmentMode) { d.updates.mode = m }
+func (d *DomainCommitted) SetCommitmentMode(m CommitmentMode) { d.mode = m }
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
@@ -246,21 +266,33 @@ func (d *DomainCommitted) TouchPlainKey(key, val []byte, fn func(c *CommitmentIt
 }
 
 func (d *DomainCommitted) TouchAccount(c *CommitmentItem, val []byte) {
-	d.updates.TouchAccountKey(c, val)
+	d.updates.TouchAccount(c, val)
 }
 
 func (d *DomainCommitted) TouchStorage(c *CommitmentItem, val []byte) {
-	d.updates.TouchStorageKey(c, val)
+	d.updates.TouchStorage(c, val)
 }
 
 func (d *DomainCommitted) TouchCode(c *CommitmentItem, val []byte) {
-	d.updates.TouchCodeKey(c, val)
+	d.updates.TouchCode(c, val)
 }
 
 type CommitmentItem struct {
 	plainKey  []byte
 	hashedKey []byte
 	update    commitment.Update
+}
+
+func (ci *CommitmentItem) PlainKey() []byte {
+	return ci.plainKey
+}
+
+func (ci *CommitmentItem) HashedKey() []byte {
+	return ci.hashedKey
+}
+
+func (ci *CommitmentItem) Update() commitment.Update {
+	return ci.update
 }
 
 func commitmentItemLess(i, j *CommitmentItem) bool {
@@ -607,7 +639,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
 	defer func(s time.Time) { d.comTook = time.Since(s) }(time.Now())
 
-	touchedKeys, hashedKeys, updates := d.updates.List()
+	touchedKeys, hashedKeys, updates := d.updates.List(true)
 	d.comKeys = uint64(len(touchedKeys))
 
 	if len(touchedKeys) == 0 {
@@ -621,7 +653,7 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 	// data accessing functions should be set once before
 	d.patriciaTrie.SetTrace(trace)
 
-	switch d.updates.mode {
+	switch d.mode {
 	case CommitmentModeDirect:
 		rootHash, branchNodeUpdates, err = d.patriciaTrie.ReviewKeys(touchedKeys, hashedKeys)
 		if err != nil {
@@ -635,7 +667,7 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 	case CommitmentModeDisabled:
 		return nil, nil, nil
 	default:
-		return nil, nil, fmt.Errorf("invalid commitment mode: %d", d.updates.mode)
+		return nil, nil, fmt.Errorf("invalid commitment mode: %d", d.mode)
 	}
 	return rootHash, branchNodeUpdates, err
 }

@@ -10,8 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 
@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 )
 
 type KVList struct {
@@ -124,7 +123,7 @@ func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 }
 
 func (sd *SharedDomains) put(table string, key, val []byte) {
-	sd.puts(table, string(key), val)
+	sd.puts(table, hex.EncodeToString(key), val)
 }
 
 func (sd *SharedDomains) puts(table string, key string, val []byte) {
@@ -166,7 +165,8 @@ func (sd *SharedDomains) Get(table string, key []byte) (v []byte, ok bool) {
 }
 
 func (sd *SharedDomains) get(table string, key []byte) (v []byte, ok bool) {
-	keyS := *(*string)(unsafe.Pointer(&key))
+	//keyS := *(*string)(unsafe.Pointer(&key))
+	keyS := hex.EncodeToString(key)
 	switch table {
 	case kv.AccountDomain:
 		v, ok = sd.account.Get(keyS)
@@ -322,15 +322,15 @@ func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []b
 	return sd.Account.PutWithPrev(addr, nil, account, prevAccount)
 }
 
-func (sd *SharedDomains) UpdateAccountCode(addr []byte, codeHash, _ []byte) error {
-	sd.Commitment.TouchPlainKey(addr, codeHash, sd.Commitment.TouchCode)
+func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, codeHash []byte) error {
+	sd.Commitment.TouchPlainKey(addr, code, sd.Commitment.TouchCode)
 	prevCode, _ := sd.LatestCode(addr)
 
-	sd.put(kv.CodeDomain, addr, codeHash)
-	if len(codeHash) == 0 {
+	sd.put(kv.CodeDomain, addr, code)
+	if len(code) == 0 {
 		return sd.Code.DeleteWithPrev(addr, nil, prevCode)
 	}
-	return sd.Code.PutWithPrev(addr, nil, codeHash, prevCode)
+	return sd.Code.PutWithPrev(addr, nil, code, prevCode)
 }
 
 func (sd *SharedDomains) UpdateCommitmentData(prefix []byte, data []byte) error {
@@ -433,7 +433,7 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 			continue
 		}
 		if trace {
-			fmt.Printf("computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
+			fmt.Printf("sd computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
 		}
 		if err = sd.UpdateCommitmentData(prefix, merged); err != nil {
 			return nil, err
@@ -445,6 +445,9 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 		if err := sd.Commitment.storeCommitmentState(sd.blockNum.Load()); err != nil {
 			return nil, err
 		}
+	}
+	if trace {
+		fmt.Printf("rootHash %x\n", rootHash)
 	}
 
 	return rootHash, nil

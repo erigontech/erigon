@@ -1887,8 +1887,9 @@ type Update struct {
 	Flags             UpdateFlags
 	Balance           uint256.Int
 	Nonce             uint64
-	CodeHashOrStorage [length.Hash]byte
 	ValLength         int
+	CodeHashOrStorage [length.Hash]byte
+	CodeValue         []byte
 }
 
 func (u *Update) Reset() {

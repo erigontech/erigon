@@ -1657,7 +1657,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	return v, b, err
 }
 
-func (sd *DomainContext) IterateStoragePrefix(prefix []byte, it func(k, v []byte)) error {
+func (sd *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
 	sd.d.stats.FilesQueries.Add(1)
 
 	var cp CursorHeap
