@@ -10,6 +10,7 @@ import (
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
 
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -24,7 +25,6 @@ import (
 )
 
 const CodeSizeTable = "CodeSize"
-const StorageTable = "Storage"
 
 var ExecTxsDone = metrics.NewCounter(`exec_txs_done`)
 
@@ -123,26 +123,77 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *exec22.
 
 func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDomains) error {
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
-	//domains.Lock()
-	//defer domains.Unlock()
+
+	skipUpdates := false
+
+	for k, update := range txTask.UpdatesList {
+		if skipUpdates {
+			continue
+		}
+		upd := update
+		key := txTask.UpdatesKey[k]
+		if upd.Flags == commitment.DeleteUpdate {
+
+			prev, err := domains.LatestAccount(key)
+			if err != nil {
+				return fmt.Errorf("latest account %x: %w", key, err)
+			}
+			if err := domains.DeleteAccount(key, prev); err != nil {
+				return fmt.Errorf("delete account %x: %w", key, err)
+			}
+			fmt.Printf("apply - delete account %x\n", key)
+		} else {
+			if upd.Flags&commitment.BalanceUpdate != 0 || upd.Flags&commitment.NonceUpdate != 0 {
+				prev, err := domains.LatestAccount(key)
+				if err != nil {
+					return fmt.Errorf("latest account %x: %w", key, err)
+				}
+				old := accounts.NewAccount()
+				if len(prev) > 0 {
+					accounts.DeserialiseV3(&old, prev)
+				}
+
+				if upd.Flags&commitment.BalanceUpdate != 0 {
+					old.Balance.Set(&upd.Balance)
+				}
+				if upd.Flags&commitment.NonceUpdate != 0 {
+					old.Nonce = upd.Nonce
+				}
+
+				acc := UpdateToAccount(upd)
+				fmt.Printf("apply - update account %x b %v n %d\n", key, upd.Balance.Uint64(), upd.Nonce)
+				if err := domains.UpdateAccountData(key, accounts.SerialiseV3(acc), prev); err != nil {
+					return err
+				}
+			}
+			if upd.Flags&commitment.CodeUpdate != 0 {
+				fmt.Printf("apply - update code %x h %x v %x\n", key, upd.CodeHashOrStorage[:], upd.CodeValue[:])
+				if err := domains.UpdateAccountCode(key, upd.CodeValue, nil); err != nil {
+					return err
+				}
+			}
+			if upd.Flags&commitment.StorageUpdate != 0 {
+				prev, err := domains.LatestStorage(key[:length.Addr], key[length.Addr:])
+				if err != nil {
+					return fmt.Errorf("latest code %x: %w", key, err)
+				}
+				fmt.Printf("apply - storage %x h %x\n", key, upd.CodeHashOrStorage[:upd.ValLength])
+				err = domains.WriteAccountStorage(key[:length.Addr], key[length.Addr:], upd.CodeHashOrStorage[:upd.ValLength], prev)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if !skipUpdates {
+		return nil
+	}
 
 	// TODO do we really need to use BIS when we store all updates encoded inside
 	//  	  writeLists? one exception - block rewards, but they're changing writelist aswell..
 	var acc accounts.Account
 
-	// TODO - same stuff.
-	for addrS, original := range txTask.AccountDels {
-		continue
-		addr := []byte(addrS)
-
-		prev := rs.applyPrevAccountBuf[:accounts.SerialiseV3Len(original)]
-		accounts.SerialiseV3To(original, prev)
-		if err := domains.DeleteAccount(addr, prev); err != nil {
-			return err
-		}
-	}
 	for addr, increase := range txTask.BalanceIncreaseSet {
-		//continue
 		increase := increase
 		addrBytes := addr.Bytes()
 		enc0, err := domains.LatestAccount(addrBytes)
@@ -247,6 +298,8 @@ func (rs *StateV3) ApplyState4(txTask *exec22.TxTask, agg *libstate.AggregatorV3
 	}
 	returnReadList(txTask.ReadLists)
 	returnWriteList(txTask.WriteLists)
+	txTask.UpdatesList = txTask.UpdatesList[:0]
+	txTask.UpdatesKey = txTask.UpdatesKey[:0]
 
 	txTask.ReadLists, txTask.WriteLists = nil, nil
 	return nil
@@ -379,6 +432,7 @@ func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
 // StateWriterBufferedV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
 type StateWriterBufferedV3 struct {
 	rs           *StateV3
+	upd          *Update4ReadWriter
 	trace        bool
 	writeLists   map[string]*exec22.KvList
 	accountPrevs map[string][]byte
@@ -411,6 +465,10 @@ func (w *StateWriterBufferedV3) WriteSet() map[string]*exec22.KvList {
 	return w.writeLists
 }
 
+func (w *StateWriterBufferedV3) Updates() ([][]byte, []commitment.Update) {
+	return w.upd.Updates()
+}
+
 func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
@@ -422,6 +480,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	//account.EncodeForStorage(value)
 	value := accounts.SerialiseV3(account)
 	w.writeLists[kv.AccountDomain].Push(addr, value)
+	w.upd.UpdateAccountData(address, original, account)
 
 	if w.trace {
 		fmt.Printf("[v3_buff] account [%v]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", addr, &account.Balance, account.Nonce, account.Root, account.CodeHash)
@@ -442,6 +501,7 @@ func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarn
 	addr := hex.EncodeToString(address.Bytes())
 	w.writeLists[kv.CodeDomain].Push(addr, code)
 
+	w.upd.UpdateAccountCode(address, incarnation, codeHash, code)
 	if len(code) > 0 {
 		if w.trace {
 			fmt.Printf("[v3_buff] code [%v] => [%x] value: %x\n", addr, codeHash, code)
@@ -458,6 +518,7 @@ func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarn
 func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *accounts.Account) error {
 	addr := hex.EncodeToString(address.Bytes())
 	w.writeLists[kv.AccountDomain].Push(addr, nil)
+	w.upd.DeleteAccount(address, original)
 	if w.trace {
 		fmt.Printf("[v3_buff] account [%x] deleted\n", address)
 	}
@@ -477,7 +538,8 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 	composite := dbutils.PlainGenerateCompositeStorageKey(address[:], incarnation, key.Bytes())
 	compositeS := hex.EncodeToString(composite)
 
-	w.writeLists[StorageTable].Push(compositeS, value.Bytes())
+	w.writeLists[kv.StorageDomain].Push(compositeS, value.Bytes())
+	w.upd.WriteAccountStorage(address, incarnation, key, original, value)
 	//w.rs.domains.WriteAccountStorage(address.Bytes(), key.Bytes(), value.Bytes(), original.Bytes())
 	if w.trace {
 		fmt.Printf("[v3_buff] storage [%x] [%x] => [%x]\n", address, key.Bytes(), value.Bytes())
@@ -498,6 +560,7 @@ type StateReaderV3 struct {
 	trace     bool
 	rs        *StateV3
 	composite []byte
+	upd       *Update4ReadWriter
 
 	discardReadList bool
 	readLists       map[string]*exec22.KvList
@@ -511,6 +574,13 @@ func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
 	}
 }
 
+func (r *StateReaderV3) SetUpd(rd *Update4ReadWriter) {
+	r.upd = rd
+}
+func (r *StateWriterBufferedV3) SetUpd(rd *Update4ReadWriter) {
+	r.upd = rd
+}
+
 func (r *StateReaderV3) DiscardReadList()                   { r.discardReadList = true }
 func (r *StateReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum }
 func (r *StateReaderV3) SetTx(tx kv.Tx)                     { r.tx = tx }
@@ -520,30 +590,49 @@ func (r *StateReaderV3) ResetReadSet()                      { r.readLists = newR
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
-	enc, err := r.rs.domains.LatestAccount(addr)
+
+	a, err := r.upd.ReadAccountData(address)
 	if err != nil {
 		return nil, err
 	}
+	if a == nil {
+		acc := accounts.NewAccount()
+		enc, err := r.rs.domains.LatestAccount(addr)
+		if err != nil {
+			return nil, err
+		}
+		if !r.discardReadList {
+			// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
+			r.readLists[kv.AccountDomain].Push(string(addr), enc)
+		}
+		if len(enc) == 0 {
+			return nil, nil
+		}
+		if err := accounts.DeserialiseV3(&acc, enc); err != nil {
+			return nil, err
+		}
+		a = &acc
+	}
 	if !r.discardReadList {
 		// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
-		r.readLists[kv.AccountDomain].Push(string(addr), enc)
-	}
-	if len(enc) == 0 {
-		return nil, nil
-	}
-	var a accounts.Account
-	if err := accounts.DeserialiseV3(&a, enc); err != nil {
-		return nil, err
+		r.readLists[kv.AccountDomain].Push(string(addr), accounts.SerialiseV3(a))
 	}
 	if r.trace {
-		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, a.Nonce, &a.Balance, a.CodeHash, r.txNum)
+		if a == nil {
+			fmt.Printf("ReadAccountData [%x] => nil, txNum: %d\n", address, r.txNum)
+		} else {
+			fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, a.Nonce, &a.Balance, a.CodeHash, r.txNum)
+		}
 	}
-	return &a, nil
+	return a, nil
 }
 
 func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc, err := r.rs.domains.LatestStorage(address.Bytes(), key.Bytes())
+	enc, err := r.upd.ReadAccountStorage(address, incarnation, key)
+	if enc == nil {
+		enc, err = r.rs.domains.LatestStorage(address.Bytes(), key.Bytes())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -563,7 +652,10 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 
 func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	addr := address.Bytes()
-	enc, err := r.rs.domains.LatestCode(addr)
+	enc, err := r.upd.ReadAccountCode(address, incarnation, codeHash)
+	if enc == nil {
+		enc, err = r.rs.domains.LatestCode(addr)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -578,7 +670,10 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 }
 
 func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	enc, err := r.rs.domains.LatestCode(address.Bytes())
+	enc, err := r.upd.ReadAccountCode(address, incarnation, codeHash)
+	if enc == nil {
+		enc, err = r.rs.domains.LatestCode(address.Bytes())
+	}
 	if err != nil {
 		return 0, err
 	}

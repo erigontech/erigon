@@ -72,6 +72,9 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
 	}
+	io := state.NewUpdate4ReadWriter()
+	w.stateReader.SetUpd(io)
+	w.stateWriter.SetUpd(io)
 	w.getHeader = func(hash libcommon.Hash, number uint64) *types.Header {
 		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
 		if err != nil {
@@ -125,10 +128,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		rw.chain = ChainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
 	}
 	txTask.Error = nil
+
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateWriter.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
+
 	rw.ibs.Reset()
 	ibs := rw.ibs
 
@@ -136,65 +141,64 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	daoForkTx := rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	header := txTask.Header
-	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
-		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
-		// Genesis block
-		_, ibs, err = core.GenesisToBlock(rw.genesis, "")
-		if err != nil {
-			panic(err)
+
+	switch {
+	case txTask.TxIndex == -1:
+		if txTask.BlockNum == 0 {
+			// Genesis block
+			// fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
+			_, ibs, err = core.GenesisToBlock(rw.genesis, "")
+			if err != nil {
+				panic(err)
+			}
+			// For Genesis, rules should be empty, so that empty accounts can be included
+			rules = &chain.Rules{}
+			break
 		}
-		// For Genesis, rules should be empty, so that empty accounts can be included
-		rules = &chain.Rules{}
-		//rh, err := rw.rs.Commitment(txTask.TxNum, true)
-		//if err != nil {
-		//	panic(err)
-		//}
-		//if !bytes.Equal(rh, txTask.BlockRoot.Bytes()) {
-		//	panic("invalid root hash for genesis block: " + hex.EncodeToString(rh) + " != " + hex.EncodeToString(txTask.BlockRoot.Bytes()))
-		//}
-	} else if daoForkTx {
-		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
-		misc.ApplyDAOHardFork(ibs)
-		ibs.SoftFinalise()
-		//if err := ibs.FinalizeTx(rules, rw.stateWriter); err != nil {
-		//	txTask.Error = err
-		//}
-	} else if txTask.TxIndex == -1 {
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, txTask.Txs, txTask.Uncles, syscall)
-	} else if txTask.Final {
-		if txTask.BlockNum > 0 {
-			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
-			// End of block transaction in a block
-			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
+	case txTask.Final:
+		if txTask.BlockNum == 0 {
+			break
+		}
+
+		//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+		// End of block transaction in a block
+		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
+		}
+
+		_, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall)
+		if err != nil {
+			txTask.Error = err
+		} else {
+			if rw.callTracer != nil {
+				//rw.callTracer.AddCoinbase(txTask.Coinbase, txTask.Uncles)
+				txTask.TraceTos = rw.callTracer.Tos()
 			}
 
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall); err != nil {
-				//fmt.Printf("error=%v\n", err)
+			if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
 				txTask.Error = err
-			} else {
-				//rw.callTracer.AddCoinbase(txTask.Coinbase, txTask.Uncles)
-				//txTask.TraceTos = rw.callTracer.Tos()
-				txTask.TraceTos = map[libcommon.Address]struct{}{}
-				txTask.TraceTos[txTask.Coinbase] = struct{}{}
-				for _, uncle := range txTask.Uncles {
-					txTask.TraceTos[uncle.Coinbase] = struct{}{}
-				}
-				if err := ibs.FinalizeTx(txTask.Rules, noop); err != nil {
-					txTask.Error = fmt.Errorf("commit block: %w", err)
-				}
+			}
+			txTask.TraceTos = map[libcommon.Address]struct{}{}
+			txTask.TraceTos[txTask.Coinbase] = struct{}{}
+			for _, uncle := range txTask.Uncles {
+				txTask.TraceTos[uncle.Coinbase] = struct{}{}
 			}
 		}
-	} else {
+	case daoForkTx:
+		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
+		misc.ApplyDAOHardFork(ibs)
+	default:
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		txHash := txTask.Tx.Hash()
 		rw.taskGasPool.Reset(txTask.Tx.GetGas())
 		rw.callTracer.Reset()
+
 		vmConfig := vm.Config{Debug: true, Tracer: rw.callTracer, SkipAnalysis: txTask.SkipAnalysis}
 		ibs.SetTxContext(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
@@ -205,41 +209,42 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */, nil /*excessDataGas*/)
 		}
 		rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
-		vmenv := rw.evm
 
 		// MA applytx
+		vmenv := rw.evm
 		applyRes, err := core.ApplyMessage(vmenv, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			txTask.Error = err
-			//fmt.Printf("error=%v\n", err)
 		} else {
-			// Update the state with pending changes
-			if err = ibs.FinalizeTx(rules, rw.stateWriter); err != nil {
-				txTask.Error = err
-				return
-			}
+			ibs.FinalizeTx(rules, rw.stateWriter)
 			txTask.UsedGas = applyRes.UsedGas
 			txTask.Logs = ibs.GetLogs(txHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
 		}
+
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
-	if txTask.Error == nil {
-		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		for addr, bal := range txTask.BalanceIncreaseSet {
-			fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
-		}
-		if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
-			panic(err)
-		}
-		//ibs.SoftFinalise()
-		txTask.ReadLists = rw.stateReader.ReadSet()
-		txTask.WriteLists = rw.stateWriter.WriteSet()
-		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
-	} else {
+	if txTask.Error != nil {
 		fmt.Printf("[ERR] %v\n", txTask.Error)
+		return
 	}
+
+	//if !txTask.Final {
+	//	if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
+	//		panic(err)
+	//	}
+	//
+	//}
+	txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
+	for addr, bal := range txTask.BalanceIncreaseSet {
+		fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
+	}
+	txTask.ReadLists = rw.stateReader.ReadSet()
+	txTask.WriteLists = rw.stateWriter.WriteSet()
+	txTask.UpdatesKey, txTask.UpdatesList = rw.stateWriter.Updates()
+
+	txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
 }
 
 type ChainReader struct {

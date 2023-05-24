@@ -452,7 +452,8 @@ func (sdb *IntraBlockState) GetTransientState(addr libcommon.Address, key libcom
 
 func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject *stateObject) {
 	// Prefer 'live' objects.
-	if obj := sdb.stateObjects[addr]; obj != nil {
+	if obj, ok := sdb.stateObjects[addr]; obj != nil && ok {
+		fmt.Printf("getStateObject: %x %v n=%d\n", addr, obj.data.Balance.Uint64(), obj.data.Nonce)
 		return obj
 	}
 
@@ -663,6 +664,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
+		fmt.Printf("FinalizeTx: %x, balance=%d %T\n", addr, so.data.Balance.Uint64(), stateWriter)
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true); err != nil {
 			return err
 		}

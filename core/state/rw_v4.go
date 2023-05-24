@@ -8,6 +8,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -299,4 +300,110 @@ func (m *MultiStateReader) ReadAccountIncarnation(address common.Address) (uint6
 		}
 	}
 	return so, nil
+}
+
+type Update4ReadWriter struct {
+	updates *state.UpdateTree
+	writes  []commitment.Update
+	reads   []commitment.Update
+}
+
+func (w *Update4ReadWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
+	w.updates.TouchPlainKey(address.Bytes(), accounts.SerialiseV3(account), w.updates.TouchAccount)
+	return nil
+}
+
+func (w *Update4ReadWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	//addressBytes, codeHashBytes := address.Bytes(), codeHash.Bytes()
+	//fmt.Printf("code [%x] => [%x] CodeHash: %x, txNum: %d\n", address, code, codeHash, w.txNum)
+	w.updates.TouchPlainKey(address.Bytes(), code, w.updates.TouchCode)
+	return nil
+}
+
+func (w *Update4ReadWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+	addressBytes := address.Bytes()
+	w.updates.TouchPlainKey(addressBytes, nil, w.updates.TouchAccount)
+	return nil
+}
+
+func (w *Update4ReadWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	if original.Eq(value) {
+		return nil
+	}
+	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
+	w.updates.TouchPlainKey(address.Bytes(), value.Bytes(), w.updates.TouchStorage)
+	return nil
+}
+
+func (w *Update4ReadWriter) Updates() (pk [][]byte, upd []commitment.Update) {
+	pk, _, updates := w.updates.List(true)
+	return pk, updates
+}
+
+func NewUpdate4ReadWriter() *Update4ReadWriter {
+	return &Update4ReadWriter{updates: state.NewUpdateTree()}
+}
+
+func (w *Update4ReadWriter) CreateContract(address common.Address) error { return nil }
+
+func UpdateToAccount(u commitment.Update) *accounts.Account {
+	acc := accounts.NewAccount()
+	acc.Initialised = true
+	acc.Balance.Set(&u.Balance)
+	acc.Nonce = u.Nonce
+	if u.ValLength > 0 {
+		acc.CodeHash = common.BytesToHash(u.CodeHashOrStorage[:u.ValLength])
+	}
+	return &acc
+}
+
+func (w *Update4ReadWriter) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	ci, found := w.updates.Get(address.Bytes())
+	if !found {
+		return nil, nil
+	}
+
+	upd := ci.Update()
+	w.reads = append(w.reads, upd)
+	return UpdateToAccount(upd), nil
+}
+
+func (w *Update4ReadWriter) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	ci, found := w.updates.Get(common.Append(address.Bytes(), key.Bytes()))
+	if !found {
+		return nil, nil
+	}
+	upd := ci.Update()
+	w.reads = append(w.reads, upd)
+
+	if upd.ValLength > 0 {
+		return upd.CodeHashOrStorage[:upd.ValLength], nil
+	}
+	return nil, nil
+}
+
+func (w *Update4ReadWriter) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	ci, found := w.updates.Get(address.Bytes())
+	if !found {
+		return nil, nil
+	}
+	upd := ci.Update()
+	w.reads = append(w.reads, upd)
+	if upd.ValLength > 0 {
+		return upd.CodeHashOrStorage[:upd.ValLength], nil
+	}
+	return nil, nil
+}
+
+func (w *Update4ReadWriter) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	c, err := w.ReadAccountCode(address, incarnation, codeHash)
+	if err != nil {
+		return 0, err
+	}
+	return len(c), nil
+}
+
+func (w *Update4ReadWriter) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	return 0, nil
 }
