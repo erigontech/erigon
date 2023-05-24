@@ -108,7 +108,7 @@ func (b *testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber)
 	defer tx.Rollback()
 
 	if number == rpc.LatestBlockNumber {
-		return b.blockReader.CurrentBlock(tx), nil
+		return b.blockReader.CurrentBlock(tx)
 	}
 	hash, err := rawdb.ReadCanonicalHash(tx, uint64(number))
 	if err != nil {
