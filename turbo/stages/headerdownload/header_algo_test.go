@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
@@ -55,11 +54,11 @@ func TestInserter1(t *testing.T) {
 	}
 	h2Hash := h2.Hash()
 	data1, _ := rlp.EncodeToBytes(&h1)
-	if _, err = hi.FeedHeaderPoW(tx, snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3), &h1, data1, h1Hash, 1); err != nil {
+	if _, err = hi.FeedHeaderPoW(tx, br, &h1, data1, h1Hash, 1); err != nil {
 		t.Errorf("feed empty header 1: %v", err)
 	}
 	data2, _ := rlp.EncodeToBytes(&h2)
-	if _, err = hi.FeedHeaderPoW(tx, snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3), &h2, data2, h2Hash, 2); err != nil {
+	if _, err = hi.FeedHeaderPoW(tx, br, &h2, data2, h2Hash, 2); err != nil {
 		t.Errorf("feed empty header 2: %v", err)
 	}
 }
