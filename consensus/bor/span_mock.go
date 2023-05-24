@@ -51,6 +51,21 @@ func (mr *MockSpannerMockRecorder) CommitSpan(arg0, arg1 interface{}) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitSpan", reflect.TypeOf((*MockSpanner)(nil).CommitSpan), arg0, arg1)
 }
 
+// GetCurrentProducers mocks base method.
+func (m *MockSpanner) GetCurrentProducers(arg0 uint64, arg1 common.Address, arg2 func(uint64) (*span.HeimdallSpan, error)) ([]*valset.Validator, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCurrentProducers", arg0, arg1, arg2)
+	ret0, _ := ret[0].([]*valset.Validator)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCurrentProducers indicates an expected call of GetCurrentProducers.
+func (mr *MockSpannerMockRecorder) GetCurrentProducers(arg0, arg1, arg2 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentProducers", reflect.TypeOf((*MockSpanner)(nil).GetCurrentProducers), arg0, arg1, arg2)
+}
+
 // GetCurrentSpan mocks base method.
 func (m *MockSpanner) GetCurrentSpan(arg0 consensus.SystemCall) (*span.Span, error) {
 	m.ctrl.T.Helper()
