@@ -96,9 +96,9 @@ type state struct {
 }
 
 func NewHexPatriciaHashed(accountKeyLen int,
-	branchFn func(prefix []byte) ([]byte, error),
-	accountFn func(plainKey []byte, cell *Cell) error,
-	storageFn func(plainKey []byte, cell *Cell) error,
+	 branchFn func(prefix []byte) ([]byte, error),
+	 accountFn func(plainKey []byte, cell *Cell) error,
+	 storageFn func(plainKey []byte, cell *Cell) error,
 ) *HexPatriciaHashed {
 	return &HexPatriciaHashed{
 		keccak:        sha3.NewLegacyKeccak256().(keccakState),
@@ -1344,9 +1344,9 @@ func (hph *HexPatriciaHashed) Reset() {
 }
 
 func (hph *HexPatriciaHashed) ResetFns(
-	branchFn func(prefix []byte) ([]byte, error),
-	accountFn func(plainKey []byte, cell *Cell) error,
-	storageFn func(plainKey []byte, cell *Cell) error,
+	 branchFn func(prefix []byte) ([]byte, error),
+	 accountFn func(plainKey []byte, cell *Cell) error,
+	 storageFn func(plainKey []byte, cell *Cell) error,
 ) {
 	hph.branchFn = branchFn
 	hph.accountFn = accountFn
@@ -1793,7 +1793,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 				if hph.trace {
 					fmt.Printf(" codeHash=%x", update.CodeHashOrStorage)
 				}
-				copy(cell.CodeHash[:], update.CodeHashOrStorage[:])
+				copy(cell.CodeHash[:], update.CodeHashOrStorage[:update.ValLength])
 			}
 			if hph.trace {
 				fmt.Printf("\n")

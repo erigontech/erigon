@@ -159,6 +159,7 @@ func (t *UpdateTree) TouchCode(c *CommitmentItem, val []byte) {
 	}
 	if item.update.Flags == commitment.DeleteUpdate && len(val) == 0 {
 		c.update.Flags = commitment.DeleteUpdate
+		c.update.CodeValue = c.update.CodeValue[:0]
 	} else {
 		t.keccak.Reset()
 		t.keccak.Write(val)
