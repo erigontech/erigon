@@ -27,10 +27,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
@@ -42,13 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
-
-func blocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
-	const txsV3 = true
-	br := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()), txsV3)
-	bw := blockio.NewBlockWriter(txsV3)
-	return br, bw
-}
 
 // Tests block header storage and retrieval operations.
 func TestHeaderStorage(t *testing.T) {
@@ -160,8 +149,6 @@ func TestBlockStorage(t *testing.T) {
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	br, bw := m.NewBlocksIO()
-	ctx := context.Background()
-	br, bw := blocksIO()
 	ctx := context.Background()
 
 	// Create a test block to move around the database and make sure it's really new
@@ -283,7 +270,6 @@ func TestTdStorage(t *testing.T) {
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	_, bw := m.NewBlocksIO()
-	bw := blockio.NewBlockWriter(false)
 
 	// Create a test TD to move around the database and make sure it's really new
 	hash, td := libcommon.Hash{}, big.NewInt(314)
@@ -328,7 +314,6 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	_, bw := m.NewBlocksIO()
-	_, bw := blocksIO()
 
 	// Create a test canonical number and assinged hash to move around
 	hash, number := libcommon.Hash{0: 0xff}, uint64(314)
