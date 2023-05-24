@@ -22,6 +22,7 @@ func TestBodiesUnwind(t *testing.T) {
 	tx, err := db.BeginRw(m.Ctx)
 	require.NoError(err)
 	defer tx.Rollback()
+	ctx := m.Ctx
 	br, bw := m.NewBlocksIO()
 
 	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, CommonTx: types.CommonTx{ChainID: u256.N1, Value: u256.N1, Gas: 1, Nonce: 1}}
@@ -46,14 +47,14 @@ func TestBodiesUnwind(t *testing.T) {
 
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(5*(3+2), int(n)) // from 0, 5 block with 3 txn in each
+		require.Equal(2+5*(3+2), int(n)) // genesis 2 system txs + from 1, 5 block with 3 txn in each
 	}
 	{
 		err = rawdb.MakeBodiesCanonical(tx, 5+1, m.Ctx, "test", logEvery, br.TxsV3Enabled(), nil) // block 5 already canonical, start from next one
 		require.NoError(err)
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(10*(3+2), int(n))
+		require.Equal(2+10*(3+2), int(n))
 
 		_, _, err = bw.WriteRawBodyIfNotExists(tx, libcommon.Hash{11}, 11, b)
 		require.NoError(err)
@@ -62,7 +63,7 @@ func TestBodiesUnwind(t *testing.T) {
 
 		n, err = tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(11*(3+2), int(n))
+		require.Equal(2+11*(3+2), int(n))
 	}
 
 	{
@@ -72,12 +73,12 @@ func TestBodiesUnwind(t *testing.T) {
 
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(5*(3+2), int(n)) // from 0, 5 block with 3 txn in each
+		require.Equal(2+5*(3+2), int(n)) // from 0, 5 block with 3 txn in each
 
 		err = rawdb.MakeBodiesCanonical(tx, 5+1, m.Ctx, "test", logEvery, br.TxsV3Enabled(), nil) // block 5 already canonical, start from next one
 		require.NoError(err)
 		n, err = tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(11*(3+2), int(n))
+		require.Equal(2+11*(3+2), int(n))
 	}
 }

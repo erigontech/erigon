@@ -482,13 +482,13 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 
 	// Verify the validator list match the local contract
 	if isSprintStart(number+1, c.config.CalculateSprint(number)) {
-		newValidators, err := c.spanner.GetCurrentValidators(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
+		producerSet, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
 
 		if err != nil {
 			return err
 		}
 
-		sort.Sort(valset.ValidatorsByAddress(newValidators))
+		sort.Sort(valset.ValidatorsByAddress(producerSet))
 
 		headerVals, err := valset.ParseValidators(header.Extra[extraVanity : len(header.Extra)-extraSeal])
 
@@ -496,11 +496,11 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 			return err
 		}
 
-		if len(newValidators) != len(headerVals) {
+		if len(producerSet) != len(headerVals) {
 			return errInvalidSpanValidators
 		}
 
-		for i, val := range newValidators {
+		for i, val := range producerSet {
 			if !bytes.Equal(val.HeaderBytes(), headerVals[i].HeaderBytes()) {
 				return errInvalidSpanValidators
 			}
