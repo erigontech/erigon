@@ -283,7 +283,7 @@ func NewMultiClient(
 	networkID uint64,
 	sentries []direct.SentryClient,
 	syncCfg ethconfig.Sync,
-	blockReader services.HeaderAndCanonicalReader,
+	blockReader services.FullBlockReader,
 	logPeerInfo bool,
 	forkValidator *engineapi.ForkValidator,
 	dropUselessPeers bool,
@@ -305,7 +305,7 @@ func NewMultiClient(
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
-	bd := bodydownload.NewBodyDownload(engine, int(syncCfg.BodyCacheLimit))
+	bd := bodydownload.NewBodyDownload(engine, int(syncCfg.BodyCacheLimit), blockReader)
 
 	cs := &MultiClient{
 		nodeName:                          nodeName,
