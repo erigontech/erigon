@@ -84,7 +84,7 @@ func wrapStreamHandler(fn func(s network.Stream) error) func(s network.Stream) {
 		}
 		err = s.Close()
 		if err != nil {
-			log.Error("[pubsubhandler] close stream", "err", err)
+			log.Warn("[pubsubhandler] close stream", "err", err)
 		}
 	}
 }
