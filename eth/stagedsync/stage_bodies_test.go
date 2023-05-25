@@ -2,6 +2,7 @@ package stagedsync_test
 
 import (
 	"bytes"
+	"math/big"
 	"testing"
 	"time"
 
@@ -19,6 +20,9 @@ func TestBodiesUnwind(t *testing.T) {
 	require := require.New(t)
 	m := stages2.Mock(t)
 	db := m.DB
+	if m.TransactionsV3 {
+		t.Skip("txsV3 do not update txs/bodies info by re-org")
+	}
 	tx, err := db.BeginRw(m.Ctx)
 	require.NoError(err)
 	defer tx.Rollback()
@@ -34,10 +38,15 @@ func TestBodiesUnwind(t *testing.T) {
 	defer logEvery.Stop()
 
 	b := &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn, rlpTxn}}
+	h := &types.Header{}
 	for i := uint64(1); i <= 10; i++ {
-		_, _, err = bw.WriteRawBodyIfNotExists(tx, libcommon.Hash{byte(i)}, i, b)
+		h.Number = big.NewInt(int64(i))
+		hash := h.Hash()
+		err = bw.WriteHeader(tx, h)
 		require.NoError(err)
-		err = rawdb.WriteCanonicalHash(tx, libcommon.Hash{byte(i)}, i)
+		err = rawdb.WriteCanonicalHash(tx, hash, i)
+		require.NoError(err)
+		_, _, err = bw.WriteRawBodyIfNotExists(tx, hash, i, b)
 		require.NoError(err)
 	}
 	{

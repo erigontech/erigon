@@ -731,6 +731,9 @@ func WriteRawBody(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.Ra
 		if err != nil {
 			return false, 0, err
 		}
+		if blockIDBytes == nil {
+			return false, 0, fmt.Errorf("WriteBody called before WriteHeader: %d, %x", number, hash)
+		}
 		blockID = binary.BigEndian.Uint64(blockIDBytes)
 	} else {
 		baseTxnID, err = db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions))+2)
@@ -809,6 +812,9 @@ func DeleteBody(db kv.Deleter, hash libcommon.Hash, number uint64) {
 
 // MakeBodiesCanonical - move all txs of non-canonical blocks from NonCanonicalTxs table to EthTx table
 func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker, txsV3 bool, cb func(blockNum uint64, lastTxnNum uint64) error) error {
+	if txsV3 {
+		return nil
+	}
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -875,6 +881,9 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 
 // MakeBodiesNonCanonical - move all txs of canonical blocks to NonCanonicalTxs bucket
 func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx context.Context, logPrefix string, logEvery *time.Ticker, txsV3 bool) error {
+	if txsV3 {
+		return nil
+	}
 	var firstMovedTxnID uint64
 	var firstMovedTxnIDIsSet bool
 	for blockNum := from; ; blockNum++ {
@@ -908,26 +917,22 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx cont
 			}
 		}
 
-		if txsV3 {
-
-		} else {
-			// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
-			i := uint64(0)
-			if err := tx.ForAmount(kv.EthTx, hexutility.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
-				if !deleteBodies {
-					id := newBaseId + 1 + i
-					if err := tx.Put(kv.NonCanonicalTxs, hexutility.EncodeTs(id), v); err != nil {
-						return err
-					}
-				}
-				if err := tx.Delete(kv.EthTx, k); err != nil {
+		// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
+		i := uint64(0)
+		if err := tx.ForAmount(kv.EthTx, hexutility.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
+			if !deleteBodies {
+				id := newBaseId + 1 + i
+				if err := tx.Put(kv.NonCanonicalTxs, hexutility.EncodeTs(id), v); err != nil {
 					return err
 				}
-				i++
-				return nil
-			}); err != nil {
+			}
+			if err := tx.Delete(kv.EthTx, k); err != nil {
 				return err
 			}
+			i++
+			return nil
+		}); err != nil {
+			return err
 		}
 
 		if deleteBodies {
@@ -966,6 +971,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx cont
 			return err
 		}
 	}
+
 	return nil
 }
 

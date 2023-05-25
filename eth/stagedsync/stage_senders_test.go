@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/assert"
@@ -42,7 +43,10 @@ func TestSenders(t *testing.T) {
 
 	// prepare tx so it works with our test
 	signer1 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64())
-	require.NoError(bw.WriteBody(tx, libcommon.HexToHash("01"), 1, &types.Body{
+	header := &types.Header{Number: libcommon.Big1}
+	hash := header.Hash()
+	require.NoError(bw.WriteHeader(tx, header))
+	require.NoError(bw.WriteBody(tx, hash, 1, &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(&types.AccessListTx{
 				LegacyTx: types.LegacyTx{
@@ -68,10 +72,13 @@ func TestSenders(t *testing.T) {
 			}, *signer1),
 		},
 	}))
-	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.HexToHash("01"), 1))
+	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 1))
 
 	signer2 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64())
-	require.NoError(bw.WriteBody(tx, libcommon.HexToHash("02"), 2, &types.Body{
+	header.Number = libcommon.Big2
+	hash = header.Hash()
+	require.NoError(bw.WriteHeader(tx, header))
+	require.NoError(bw.WriteBody(tx, hash, 2, &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(&types.AccessListTx{
 				LegacyTx: types.LegacyTx{
@@ -109,14 +116,17 @@ func TestSenders(t *testing.T) {
 		},
 	}))
 
-	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.HexToHash("02"), 2))
+	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 2))
 
-	err = bw.WriteBody(tx, libcommon.HexToHash("03"), 3, &types.Body{
+	header.Number = libcommon.Big3
+	hash = header.Hash()
+	require.NoError(bw.WriteHeader(tx, header))
+	err = bw.WriteBody(tx, hash, 3, &types.Body{
 		Transactions: []types.Transaction{}, Uncles: []*types.Header{{GasLimit: 3}},
 	})
 	require.NoError(err)
 
-	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.HexToHash("03"), 3))
+	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 3))
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
@@ -126,38 +136,43 @@ func TestSenders(t *testing.T) {
 	require.NoError(err)
 
 	{
-		found, _ := br.BodyWithTransactions(m.Ctx, tx, libcommon.HexToHash("01"), 1)
+		header.Number = libcommon.Big1
+		hash = header.Hash()
+		found, senders, _ := br.BlockWithSenders(m.Ctx, tx, hash, 1)
 		assert.NotNil(t, found)
-		assert.Equal(t, 2, len(found.Transactions))
-		found, _ = br.BodyWithTransactions(m.Ctx, tx, libcommon.HexToHash("02"), 2)
+		assert.Equal(t, 2, len(found.Body().Transactions))
+		assert.Equal(t, 2, len(senders))
+		header.Number = libcommon.Big2
+		hash = header.Hash()
+		found, senders, _ = br.BlockWithSenders(m.Ctx, tx, hash, 2)
 		assert.NotNil(t, found)
-		assert.NotNil(t, 3, len(found.Transactions))
-		found, _ = br.BodyWithTransactions(m.Ctx, tx, libcommon.HexToHash("03"), 3)
+		assert.NotNil(t, 3, len(found.Body().Transactions))
+		assert.Equal(t, 3, len(senders))
+		header.Number = libcommon.Big3
+		hash = header.Hash()
+		found, senders, _ = br.BlockWithSenders(m.Ctx, tx, hash, 3)
 		assert.NotNil(t, found)
-		assert.NotNil(t, 0, len(found.Transactions))
-		assert.NotNil(t, 2, len(found.Uncles))
+		assert.NotNil(t, 0, len(found.Body().Transactions))
+		assert.NotNil(t, 2, len(found.Body().Uncles))
+		assert.Equal(t, 0, len(senders))
 	}
 
 	{
-		senders, err := rawdb.ReadSenders(tx, libcommon.HexToHash("01"), 1)
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(senders))
-		senders, err = rawdb.ReadSenders(tx, libcommon.HexToHash("02"), 2)
-		assert.NoError(t, err)
-		assert.Equal(t, 3, len(senders))
-		senders, err = rawdb.ReadSenders(tx, libcommon.HexToHash("03"), 3)
-		assert.NoError(t, err)
-		assert.Equal(t, 0, len(senders))
-	}
-	{
-		txs, err := rawdb.CanonicalTransactions(tx, 1, 2)
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(txs))
-		txs, err = rawdb.CanonicalTransactions(tx, 5, 3)
-		assert.NoError(t, err)
-		assert.Equal(t, 3, len(txs))
-		txs, err = rawdb.CanonicalTransactions(tx, 5, 1024)
-		assert.NoError(t, err)
-		assert.Equal(t, 3, len(txs))
+		if br.TxsV3Enabled() {
+			c, _ := tx.Cursor(kv.EthTx)
+			cnt, _ := c.Count()
+			assert.Equal(t, 5, int(cnt))
+		} else {
+			txs, err := rawdb.CanonicalTransactions(tx, 1, 2)
+			assert.NoError(t, err)
+			assert.Equal(t, 2, len(txs))
+			txs, err = rawdb.CanonicalTransactions(tx, 5, 3)
+			assert.NoError(t, err)
+			assert.Equal(t, 3, len(txs))
+			txs, err = rawdb.CanonicalTransactions(tx, 5, 1024)
+			assert.NoError(t, err)
+			assert.Equal(t, 3, len(txs))
+		}
+
 	}
 }
