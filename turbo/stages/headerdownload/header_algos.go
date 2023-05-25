@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
+	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -391,11 +392,17 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 	var req *HeaderRequest
 	hd.anchorTree.Ascend(func(anchor *Anchor) bool {
 		if anchor.nextRetryTime.After(currentTime) {
+			// We are not ready to retry this anchor yet
+			fmt.Println("Not ready to retry added", anchor.blockHeight, anchor.nextRetryTime.Sub(currentTime))
+			dataflow.HeaderDownloadStates.AddChange(anchor.blockHeight-1, dataflow.HeaderRetryNotReady)
 			return true
 		}
 		if anchor.timeouts >= 10 {
 			// Ancestors of this anchor seem to be unavailable, invalidate and move on
 			hd.invalidateAnchor(anchor, "suspected unavailability")
+			// Add header invalidate
+			fmt.Println("Invalidating anchor added", anchor.blockHeight, anchor.parentHash)
+			dataflow.HeaderDownloadStates.AddChange(anchor.blockHeight-1, dataflow.HeaderInvalidated)
 			penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
 			return true
 		}
@@ -407,6 +414,9 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 			Skip:    0,
 			Reverse: true,
 		}
+		// Add header requested
+		fmt.Println("Requesting anchor added", anchor.blockHeight, anchor.parentHash)
+		dataflow.HeaderDownloadStates.AddChange(anchor.blockHeight-1, dataflow.HeaderRequested)
 		return false
 	})
 	return req, penalties

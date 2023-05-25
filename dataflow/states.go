@@ -9,6 +9,7 @@ import (
 )
 
 var BlockBodyDownloadStates *States = NewStates(64 * 1024)
+var HeaderDownloadStates *States = NewStates(64 * 1024)
 
 const (
 	BlockBodyCleared byte = iota
@@ -20,6 +21,12 @@ const (
 	BlockBodyEmpty   // Identified as empty and no need to be requested
 	BlockBodyPrefetched
 	BlockBodyInDb
+)
+
+const (
+	HeaderInvalidated byte = iota
+	HeaderRequested
+	HeaderRetryNotReady
 )
 
 type SnapshotItem struct {
