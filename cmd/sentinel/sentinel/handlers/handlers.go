@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -55,13 +56,13 @@ func NewConsensusHandlers(ctx context.Context, db kv.RoDB, host host.Host,
 		ctx:           ctx,
 	}
 	c.handlers = map[protocol.ID]network.StreamHandler{
-		protocol.ID(communication.PingProtocolV1):                c.pingHandler,
-		protocol.ID(communication.GoodbyeProtocolV1):             c.goodbyeHandler,
-		protocol.ID(communication.StatusProtocolV1):              c.statusHandler,
-		protocol.ID(communication.MetadataProtocolV1):            c.metadataV1Handler,
-		protocol.ID(communication.MetadataProtocolV2):            c.metadataV2Handler,
-		protocol.ID(communication.BeaconBlocksByRangeProtocolV1): c.blocksByRangeHandler,
-		protocol.ID(communication.BeaconBlocksByRootProtocolV1):  c.beaconBlocksByRootHandler,
+		protocol.ID(communication.PingProtocolV1):                wrapStreamHandler(c.pingHandler),
+		protocol.ID(communication.GoodbyeProtocolV1):             wrapStreamHandler(c.goodbyeHandler),
+		protocol.ID(communication.StatusProtocolV1):              wrapStreamHandler(c.statusHandler),
+		protocol.ID(communication.MetadataProtocolV1):            wrapStreamHandler(c.metadataV1Handler),
+		protocol.ID(communication.MetadataProtocolV2):            wrapStreamHandler(c.metadataV2Handler),
+		protocol.ID(communication.BeaconBlocksByRangeProtocolV1): wrapStreamHandler(c.blocksByRangeHandler),
+		protocol.ID(communication.BeaconBlocksByRootProtocolV1):  wrapStreamHandler(c.beaconBlocksByRootHandler),
 	}
 	return c
 }
@@ -69,5 +70,20 @@ func NewConsensusHandlers(ctx context.Context, db kv.RoDB, host host.Host,
 func (c *ConsensusHandlers) Start() {
 	for id, handler := range c.handlers {
 		c.host.SetStreamHandler(id, handler)
+	}
+}
+
+func wrapStreamHandler(fn func(s network.Stream) error) func(s network.Stream) {
+	return func(s network.Stream) {
+		err := fn(s)
+		if err != nil {
+			log.Error("[pubsubhandler] stream handler", "err", err)
+			// TODO: maybe we should log this
+			_ = s.Reset()
+		}
+		err = s.Close()
+		if err != nil {
+			log.Error("[pubsubhandler] close stream", "err", err)
+		}
 	}
 }
