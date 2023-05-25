@@ -67,6 +67,7 @@ require (
 	github.com/pion/stun v0.4.0
 	github.com/prometheus/client_golang v1.15.1
 	github.com/prometheus/common v0.42.0
+	github.com/protolambda/go-kzg v0.0.0-20221224134646-c91cee5e954e
 	github.com/protolambda/ztyp v0.2.2
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
 	github.com/prysmaticlabs/gohashtree v0.0.3-alpha.0.20230510131438-bf992328364a
@@ -226,7 +227,6 @@ require (
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/prometheus/procfs v0.9.0 // indirect
-	github.com/protolambda/go-kzg v0.0.0-20221224134646-c91cee5e954e // indirect
 	github.com/quic-go/qpack v0.4.0 // indirect
 	github.com/quic-go/qtls-go1-19 v0.3.2 // indirect
 	github.com/quic-go/qtls-go1-20 v0.2.2 // indirect
