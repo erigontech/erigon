@@ -118,14 +118,12 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 // txnLookupTransform - [startKey, endKey)
 func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
 	bigNum := new(big.Int)
-	txsV3Enabled := cfg.blockReader.TxsV3Enabled()
-	if txsV3Enabled {
-		panic("implement me. need iterate by kv.BlockID instead of kv.HeaderCanonical")
-	}
-
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
-		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum, false)
+		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
+		if err != nil {
+			return err
+		}
 		if body == nil {
 			return fmt.Errorf("transform: empty block body %d, hash %x", blocknum, v)
 		}
@@ -266,12 +264,12 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 
 // deleteTxLookupRange - [blockFrom, blockTo)
 func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) error {
-	if cfg.blockReader.TxsV3Enabled() {
-		panic("implement me")
-	}
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
-		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum, false)
+		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
+		if err != nil {
+			return err
+		}
 		if body == nil {
 			log.Debug("TxLookup pruning, empty block body", "height", blocknum)
 			return nil

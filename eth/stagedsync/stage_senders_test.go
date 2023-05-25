@@ -121,7 +121,7 @@ func TestSenders(t *testing.T) {
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
 	blockRetire := snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil, logger)
-	cfg := stagedsync.StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, blockRetire, bw, nil)
+	cfg := stagedsync.StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, blockRetire, bw, br, nil)
 	err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 3, m.Ctx, log.New())
 	require.NoError(err)
 

@@ -112,18 +112,20 @@ func TestBodyStorage(t *testing.T) {
 	hasher := sha3.NewLegacyKeccak256()
 	_ = rlp.Encode(hasher, body)
 	hash := libcommon.BytesToHash(hasher.Sum(nil))
+	header := &types.Header{Number: libcommon.Big1}
 
-	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry != nil {
+	if entry, _ := br.BodyWithTransactions(ctx, tx, header.Hash(), 1); entry != nil {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
-	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 0))
-	require.NoError(bw.WriteBody(tx, hash, 0, body))
-	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
+	require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), 1))
+	require.NoError(bw.WriteHeader(tx, header))
+	require.NoError(bw.WriteBody(tx, header.Hash(), 1, body))
+	if entry, _ := br.BodyWithTransactions(ctx, tx, header.Hash(), 1); entry == nil {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(types.Transactions(body.Transactions)) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, body)
 	}
-	if entry := rawdb.ReadBodyRLP(tx, hash, 0, br.TxsV3Enabled()); entry == nil {
+	if entry := rawdb.ReadBodyRLP(tx, header.Hash(), 1, br.TxsV3Enabled()); entry == nil {
 		//if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
 		t.Fatalf("Stored body RLP not found")
 	} else {
@@ -139,8 +141,8 @@ func TestBodyStorage(t *testing.T) {
 		}
 	}
 	// Delete the body and verify the execution
-	rawdb.DeleteBody(tx, hash, 0)
-	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry != nil {
+	rawdb.DeleteBody(tx, hash, 1)
+	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 1); entry != nil {
 		t.Fatalf("Deleted body returned: %v", entry)
 	}
 }
@@ -549,6 +551,9 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	// Write withdrawals to block
 	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals)
 
+	if err := bw.WriteHeader(tx, wBlock.HeaderNoCopy()); err != nil {
+		t.Fatalf("Could not write body: %v", err)
+	}
 	if err := bw.WriteBody(tx, wBlock.Hash(), wBlock.NumberU64(), wBlock.Body()); err != nil {
 		t.Fatalf("Could not write body: %v", err)
 	}
