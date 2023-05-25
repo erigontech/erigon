@@ -332,7 +332,7 @@ func (w *Update4ReadWriter) WriteAccountStorage(address common.Address, incarnat
 		return nil
 	}
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
-	w.updates.TouchPlainKey(address.Bytes(), value.Bytes(), w.updates.TouchStorage)
+	w.updates.TouchPlainKey(common.Append(address[:], key[:]), value.Bytes(), w.updates.TouchStorage)
 	return nil
 }
 

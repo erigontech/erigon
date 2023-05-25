@@ -168,7 +168,7 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 			}
 			if upd.Flags&commitment.CodeUpdate != 0 {
 				fmt.Printf("apply - update code %x h %x v %x\n", key, upd.CodeHashOrStorage[:], upd.CodeValue[:])
-				if err := domains.UpdateAccountCode(key, upd.CodeValue, nil); err != nil {
+				if err := domains.UpdateAccountCode(key, upd.CodeValue, upd.CodeHashOrStorage[:]); err != nil {
 					return err
 				}
 			}
