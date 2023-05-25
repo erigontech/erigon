@@ -13,8 +13,13 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -46,6 +51,19 @@ var stateRootCmd = &cobra.Command{
 		}
 		return StateRoot(genesis, logger, block, datadirCli)
 	},
+}
+
+func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
+	var transactionsV3 bool
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		transactionsV3, _ = kvcfg.TransactionsV3.Enabled(tx)
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	br := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()), transactionsV3)
+	bw := blockio.NewBlockWriter(transactionsV3)
+	return br, bw
 }
 
 func StateRoot(genesis *types.Genesis, logger log.Logger, blockNum uint64, datadir string) error {
@@ -82,6 +100,8 @@ func StateRoot(genesis *types.Genesis, logger log.Logger, blockNum uint64, datad
 		return err2
 	}
 	defer db.Close()
+	blockReader, _ := blocksIO(db)
+
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}
 
@@ -122,7 +142,7 @@ func StateRoot(genesis *types.Genesis, logger log.Logger, blockNum uint64, datad
 			return err
 		}
 		var b *types.Block
-		b, _, err = rawdb.ReadBlockWithSenders(historyTx, blockHash, block)
+		b, _, err = blockReader.BlockWithSenders(ctx, historyTx, blockHash, block)
 		if err != nil {
 			return err
 		}
@@ -139,7 +159,8 @@ func StateRoot(genesis *types.Genesis, logger log.Logger, blockNum uint64, datad
 		r := state.NewPlainStateReader(tx)
 		intraBlockState := state.New(r)
 		getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
-			return rawdb.ReadHeader(historyTx, hash, number)
+			h, _ := blockReader.Header(ctx, historyTx, hash, number)
+			return h
 		}
 		if _, err = runBlock(ethash.NewFullFaker(), intraBlockState, noOpWriter, w, chainConfig, getHeader, b, vmConfig, false); err != nil {
 			return fmt.Errorf("block %d: %w", block, err)

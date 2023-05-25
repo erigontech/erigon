@@ -92,12 +92,14 @@ func NewSimulatedBackendWithConfig(alloc types.GenesisAlloc, config *chain.Confi
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
 	m := stages.MockWithGenesisEngine(nil, &genesis, engine, false)
+	br, _ := m.NewBlocksIO()
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
 		getHeader: func(hash libcommon.Hash, number uint64) (h *types.Header) {
-			if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-				h = rawdb.ReadHeader(tx, hash, number)
+			var err error
+			if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+				h, err = br.Header(context.Background(), tx, hash, number)
 				return nil
 			}); err != nil {
 				panic(err)
@@ -265,8 +267,33 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash libcom
 		return nil, err
 	}
 	defer tx.Rollback()
-	receipt, _, _, _, err := rawdb.ReadReceipt(tx, txHash)
-	return receipt, err
+	// Retrieve the context of the receipt based on the transaction hash
+	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	if err != nil {
+		return nil, err
+	}
+	if blockNumber == nil {
+		return nil, nil
+	}
+	blockHash, err := rawdb.ReadCanonicalHash(tx, *blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if blockHash == (libcommon.Hash{}) {
+		return nil, nil
+	}
+	block, senders, err := b.BlockReader().BlockWithSenders(b.m.Ctx, tx, blockHash, *blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	// Read all the receipts from the block and return the one with the matching hash
+	receipts := rawdb.ReadReceipts(tx, block, senders)
+	for _, receipt := range receipts {
+		if receipt.TxHash == txHash {
+			return receipt, nil
+		}
+	}
+	return nil, nil
 }
 
 // TransactionByHash checks the pool of pending transactions in addition to the
@@ -327,10 +354,15 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash libcommon.Hash)
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(tx, hash)
+	number := rawdb.ReadHeaderNumber(tx, hash)
+	if number == nil {
+		return nil, nil
+	}
+	block, _, err := b.BlockReader().BlockWithSenders(ctx, tx, hash, *number)
 	if err != nil {
 		return nil, err
 	}
+
 	if block != nil {
 		return block, nil
 	}
@@ -349,7 +381,7 @@ func (b *SimulatedBackend) BlockByNumber(ctx context.Context, number *big.Int) (
 
 // blockByNumberNoLock retrieves a block from the database by number, caching it
 // (associated with its hash) if found without Lock.
-func (b *SimulatedBackend) blockByNumberNoLock(_ context.Context, number *big.Int) (*types.Block, error) {
+func (b *SimulatedBackend) blockByNumberNoLock(ctx context.Context, number *big.Int) (*types.Block, error) {
 	if number == nil || number.Cmp(b.prependBlock.Number()) == 0 {
 		return b.prependBlock, nil
 	}
@@ -364,7 +396,10 @@ func (b *SimulatedBackend) blockByNumberNoLock(_ context.Context, number *big.In
 	if err != nil {
 		return nil, err
 	}
-	block := rawdb.ReadBlock(tx, hash, number.Uint64())
+	block, _, err := b.BlockReader().BlockWithSenders(ctx, tx, hash, number.Uint64())
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, errBlockDoesNotExist
 	}
@@ -390,7 +425,10 @@ func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash libcommon.Hash
 	if number == nil {
 		return nil, errBlockDoesNotExist
 	}
-	header := rawdb.ReadHeader(tx, hash, *number)
+	header, err := b.BlockReader().Header(ctx, tx, hash, *number)
+	if err != nil {
+		return nil, err
+	}
 	if header == nil {
 		return nil, errBlockDoesNotExist
 	}
@@ -416,7 +454,10 @@ func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, number *big.Int) 
 	if err != nil {
 		return nil, err
 	}
-	header := rawdb.ReadHeader(tx, hash, number.Uint64())
+	header, err := b.BlockReader().Header(ctx, tx, hash, number.Uint64())
+	if err != nil {
+		return nil, err
+	}
 	return header, nil
 }
 
@@ -434,7 +475,11 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash libco
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(tx, blockHash)
+	blockNum := rawdb.ReadHeaderNumber(tx, blockHash)
+	if blockNum == nil {
+		return 0, nil
+	}
+	block, _, err := b.BlockReader().BlockWithSenders(ctx, tx, blockHash, *blockNum)
 	if err != nil {
 		return 0, err
 	}
@@ -464,7 +509,11 @@ func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash lib
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(tx, blockHash)
+	blockNum := rawdb.ReadHeaderNumber(tx, blockHash)
+	if blockNum == nil {
+		return nil, nil
+	}
+	block, _, err := b.BlockReader().BlockWithSenders(ctx, tx, blockHash, *blockNum)
 	if err != nil {
 		return nil, err
 	}

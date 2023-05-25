@@ -48,7 +48,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := rawdb.ReadBlockByHash(tx, latestBlockHash)
+	latestBlock, err := br.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
@@ -124,7 +124,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := rawdb.ReadBlockByHash(tx, latestBlockHash)
+	latestBlock, err := br.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
@@ -169,7 +169,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := rawdb.ReadBlockByHash(tx, latestBlockHash)
+	latestBlock, err := br.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
@@ -210,7 +210,7 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 		tx.Rollback()
 		t.Errorf("failed reading block by hash: %s", err)
 	}
-	bodyWithTx, err := rawdb.ReadBodyWithTransactions(tx, blockHash, header.Number.Uint64())
+	bodyWithTx, err := br.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed getting body with transactions: %s", err)
@@ -246,7 +246,7 @@ func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
 		tx.Rollback()
 		t.Errorf("failed reading block by hash: %s", err)
 	}
-	bodyWithTx, err := rawdb.ReadBodyWithTransactions(tx, blockHash, header.Number.Uint64())
+	bodyWithTx, err := br.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed getting body with transactions: %s", err)
@@ -281,7 +281,7 @@ func TestGetBlockTransactionCountByNumber(t *testing.T) {
 		tx.Rollback()
 		t.Errorf("failed reading block by hash: %s", err)
 	}
-	bodyWithTx, err := rawdb.ReadBodyWithTransactions(tx, blockHash, header.Number.Uint64())
+	bodyWithTx, err := br.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed getting body with transactions: %s", err)
@@ -317,7 +317,7 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 		tx.Rollback()
 		t.Errorf("failed reading block by hash: %s", err)
 	}
-	bodyWithTx, err := rawdb.ReadBodyWithTransactions(tx, blockHash, header.Number.Uint64())
+	bodyWithTx, err := br.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed getting body with transactions: %s", err)
