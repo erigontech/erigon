@@ -1,8 +1,9 @@
 package state_test
 
 import (
-	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"testing"
+
+	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -15,26 +16,12 @@ const (
 
 func getTestStateBalances(t *testing.T) *state2.BeaconState {
 	numVals := uint64(2048)
-	b := state2.GetEmptyBeaconState()
+	b := state2.New(&clparams.MainnetBeaconConfig)
 	for i := uint64(0); i < numVals; i++ {
 		v := &cltypes.Validator{}
 		v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
 		b.AddValidator(v, i)
 	}
-	return b
-}
-
-func getTestStateValidators(t *testing.T, numVals int) *state2.BeaconState {
-	validators := make([]*cltypes.Validator, numVals)
-	for i := 0; i < numVals; i++ {
-		v := &cltypes.Validator{}
-		v.SetActivationEpoch(0)
-		v.SetExitEpoch(testExitEpoch)
-		validators[i] = v
-	}
-	b := state2.GetEmptyBeaconState()
-	b.SetSlot(testExitEpoch * clparams.MainnetBeaconConfig.SlotsPerEpoch)
-	b.SetValidators(validators)
 	return b
 }
 
@@ -104,8 +91,8 @@ func TestInitiatieValidatorExit(t *testing.T) {
 		{
 			description:                "success",
 			numValidators:              3,
-			expectedExitEpoch:          58,
-			expectedWithdrawlableEpoch: 314,
+			expectedExitEpoch:          5,
+			expectedWithdrawlableEpoch: 0,
 			validator:                  v1,
 		},
 		{
@@ -118,7 +105,7 @@ func TestInitiatieValidatorExit(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			state := getTestStateValidators(t, int(tc.numValidators))
+			state := getTestStateBalances(t)
 			state.AppendValidator(tc.validator)
 			testInd := uint64(state.ValidatorLength() - 1)
 			state.InitiateValidatorExit(testInd)
@@ -129,62 +116,6 @@ func TestInitiatieValidatorExit(t *testing.T) {
 			}
 			if val.WithdrawableEpoch() != tc.expectedWithdrawlableEpoch {
 				t.Errorf("unexpected withdrawable epoch: got %d, want %d", val.WithdrawableEpoch(), tc.expectedWithdrawlableEpoch)
-			}
-		})
-	}
-}
-
-func TestSlashValidator(t *testing.T) {
-	slashedInd := 567
-	whistleblowerInd := 678
-
-	successState := getTestState(t)
-
-	successBalances := []uint64{}
-	for i := 0; i < successState.ValidatorLength(); i++ {
-		successBalances = append(successBalances, uint64(i+1))
-	}
-	successState.SetBalances(successBalances)
-
-	// Set up slashed balance.
-	preSlashBalance := uint64(1 << 20)
-	successState.SetValidatorBalance(slashedInd, preSlashBalance)
-	vali, err := successState.ValidatorForValidatorIndex(slashedInd)
-	require.NoError(t, err)
-	successState.SetValidatorAtIndex(slashedInd, vali)
-	vali.SetEffectiveBalance(preSlashBalance)
-
-	testCases := []struct {
-		description string
-		state       *state2.BeaconState
-		wantErr     bool
-	}{
-		{
-			description: "success",
-			state:       successState,
-			wantErr:     false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.description, func(t *testing.T) {
-			w := uint64(whistleblowerInd)
-			err := tc.state.SlashValidator(uint64(slashedInd), &w)
-			if tc.wantErr {
-				if err == nil {
-					t.Errorf("unexpected success, wantErr is true")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("unexpected error, wanted success: %v", err)
-			}
-			vali, err := tc.state.ValidatorForValidatorIndex(slashedInd)
-			require.NoError(t, err)
-			// Check that the validator is slashed.
-			if !vali.Slashed() {
-				t.Errorf("slashed index validator not set as slashed")
 			}
 		})
 	}

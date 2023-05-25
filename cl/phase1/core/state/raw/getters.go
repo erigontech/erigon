@@ -52,23 +52,19 @@ func (b *BeaconState) LatestBlockHeader() cltypes.BeaconBlockHeader {
 	return *b.latestBlockHeader
 }
 
-func (b *BeaconState) BlockRoots() [blockRootsLength]libcommon.Hash {
+func (b *BeaconState) BlockRoots() solid.HashVectorSSZ {
 	return b.blockRoots
 }
 
-func (b *BeaconState) StateRoots() [stateRootsLength]libcommon.Hash {
+func (b *BeaconState) StateRoots() solid.HashVectorSSZ {
 	return b.stateRoots
-}
-
-func (b *BeaconState) HistoricalRoots() []libcommon.Hash {
-	return b.historicalRoots
 }
 
 func (b *BeaconState) Eth1Data() *cltypes.Eth1Data {
 	return b.eth1Data
 }
 
-func (b *BeaconState) Eth1DataVotes() []*cltypes.Eth1Data {
+func (b *BeaconState) Eth1DataVotes() *solid.ListSSZ[*cltypes.Eth1Data] {
 	return b.eth1DataVotes
 }
 
@@ -77,26 +73,24 @@ func (b *BeaconState) Eth1DepositIndex() uint64 {
 }
 
 func (b *BeaconState) ValidatorLength() int {
-	return len(b.validators)
+	return b.validators.Length()
 }
+
 func (b *BeaconState) AppendValidator(in *cltypes.Validator) {
-	b.validators = append(b.validators, in)
+	b.validators.Append(in)
 }
 
 func (b *BeaconState) ForEachValidator(fn func(v *cltypes.Validator, idx int, total int) bool) {
-	for idx, v := range b.validators {
-		ok := fn(v, idx, len(b.validators))
-		if !ok {
-			break
-		}
-	}
+	b.validators.Range(func(index int, value *cltypes.Validator, length int) bool {
+		return fn(value, index, length)
+	})
 }
 
 func (b *BeaconState) ValidatorForValidatorIndex(index int) (*cltypes.Validator, error) {
-	if index >= len(b.validators) {
+	if index >= b.validators.Length() {
 		return nil, ErrInvalidValidatorIndex
 	}
-	return b.validators[index], nil
+	return b.validators.Get(index), nil
 }
 
 func (b *BeaconState) ForEachBalance(fn func(v uint64, idx int, total int) bool) {
@@ -113,66 +107,61 @@ func (b *BeaconState) ValidatorBalance(index int) (uint64, error) {
 }
 
 func (b *BeaconState) ValidatorExitEpoch(index int) (uint64, error) {
-	if index >= len(b.validators) {
+	if index >= b.validators.Length() {
 		return 0, ErrInvalidValidatorIndex
 	}
-	return b.validators[index].ExitEpoch(), nil
+	return b.validators.Get(index).ExitEpoch(), nil
 }
 
 func (b *BeaconState) ValidatorWithdrawableEpoch(index int) (uint64, error) {
-	if index >= len(b.validators) {
+	if index >= b.validators.Length() {
 		return 0, ErrInvalidValidatorIndex
 	}
-	return b.validators[index].WithdrawableEpoch(), nil
+	return b.validators.Get(index).WithdrawableEpoch(), nil
 }
 
 func (b *BeaconState) ValidatorEffectiveBalance(index int) (uint64, error) {
-	if index >= len(b.validators) {
+	if index >= b.validators.Length() {
 		return 0, ErrInvalidValidatorIndex
 	}
-	return b.validators[index].EffectiveBalance(), nil
+	return b.validators.Get(index).EffectiveBalance(), nil
 }
 
-func (b *BeaconState) ValidatorMinCurrentInclusionDelayAttestation(index int) (*cltypes.PendingAttestation, error) {
-	if index >= len(b.validators) {
+func (b *BeaconState) ValidatorMinCurrentInclusionDelayAttestation(index int) (*solid.PendingAttestation, error) {
+	if index >= b.validators.Length() {
 		return nil, ErrInvalidValidatorIndex
 	}
-	return b.validators[index].MinCurrentInclusionDelayAttestation, nil
+	return b.validators.Get(index).MinCurrentInclusionDelayAttestation, nil
 }
 
-func (b *BeaconState) ValidatorMinPreviousInclusionDelayAttestation(index int) (*cltypes.PendingAttestation, error) {
-	if index >= len(b.validators) {
+func (b *BeaconState) ValidatorMinPreviousInclusionDelayAttestation(index int) (*solid.PendingAttestation, error) {
+	if index >= b.validators.Length() {
 		return nil, ErrInvalidValidatorIndex
 	}
-	return b.validators[index].MinPreviousInclusionDelayAttestation, nil
+	return b.validators.Get(index).MinPreviousInclusionDelayAttestation, nil
 }
 
-func (b *BeaconState) RandaoMixes() [randoMixesLength]libcommon.Hash {
+func (b *BeaconState) RandaoMixes() solid.HashVectorSSZ {
 	return b.randaoMixes
 }
 
 func (b *BeaconState) GetRandaoMixes(epoch uint64) [32]byte {
-	return b.randaoMixes[epoch%b.beaconConfig.EpochsPerHistoricalVector]
+	return b.randaoMixes.Get(int(epoch % b.beaconConfig.EpochsPerHistoricalVector))
 }
 
-func (b *BeaconState) ForEachSlashingSegment(fn func(v uint64, idx int, total int) bool) {
-	for idx, v := range &b.slashings {
-		ok := fn(v, idx, len(b.slashings))
-		if !ok {
-			break
-		}
-	}
+func (b *BeaconState) GetRandaoMix(index int) [32]byte {
+	return b.randaoMixes.Get(index)
 }
 
-func (b *BeaconState) Slashings() [slashingsLength]uint64 {
-	return b.slashings
+func (b *BeaconState) ForEachSlashingSegment(fn func(idx int, v uint64, total int) bool) {
+	b.slashings.Range(fn)
 }
 
 func (b *BeaconState) SlashingSegmentAt(pos int) uint64 {
-	return b.slashings[pos]
+	return b.slashings.Get(pos)
 }
 
-func (b *BeaconState) EpochParticipation(currentEpoch bool) solid.BitList {
+func (b *BeaconState) EpochParticipation(currentEpoch bool) *solid.BitList {
 	if currentEpoch {
 		return b.currentEpochParticipation
 	}
@@ -209,11 +198,11 @@ func (b *BeaconState) FinalizedCheckpoint() solid.Checkpoint {
 	return b.finalizedCheckpoint
 }
 
-func (b *BeaconState) CurrentSyncCommittee() *cltypes.SyncCommittee {
+func (b *BeaconState) CurrentSyncCommittee() *solid.SyncCommittee {
 	return b.currentSyncCommittee
 }
 
-func (b *BeaconState) NextSyncCommittee() *cltypes.SyncCommittee {
+func (b *BeaconState) NextSyncCommittee() *solid.SyncCommittee {
 	return b.nextSyncCommittee
 }
 
@@ -225,25 +214,24 @@ func (b *BeaconState) NextWithdrawalIndex() uint64 {
 	return b.nextWithdrawalIndex
 }
 
-func (b *BeaconState) CurrentEpochAttestations() []*cltypes.PendingAttestation {
+func (b *BeaconState) CurrentEpochAttestations() *solid.ListSSZ[*solid.PendingAttestation] {
 	return b.currentEpochAttestations
 }
+
 func (b *BeaconState) CurrentEpochAttestationsLength() int {
-	return len(b.currentEpochAttestations)
+	return b.currentEpochAttestations.Len()
 }
-func (b *BeaconState) PreviousEpochAttestations() []*cltypes.PendingAttestation {
+
+func (b *BeaconState) PreviousEpochAttestations() *solid.ListSSZ[*solid.PendingAttestation] {
 	return b.previousEpochAttestations
 }
+
 func (b *BeaconState) PreviousEpochAttestationsLength() int {
-	return len(b.previousEpochAttestations)
+	return b.previousEpochAttestations.Len()
 }
 
 func (b *BeaconState) NextWithdrawalValidatorIndex() uint64 {
 	return b.nextWithdrawalValidatorIndex
-}
-
-func (b *BeaconState) HistoricalSummaries() []*cltypes.HistoricalSummary {
-	return b.historicalSummaries
 }
 
 // more compluicated ones
@@ -256,7 +244,7 @@ func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (libcommon.Hash, error) {
 	if b.Slot() > slot+b.BeaconConfig().SlotsPerHistoricalRoot {
 		return libcommon.Hash{}, fmt.Errorf("GetBlockRootAtSlot: slot too much far behind")
 	}
-	return b.blockRoots[slot%b.BeaconConfig().SlotsPerHistoricalRoot], nil
+	return b.blockRoots.Get(int(slot % b.BeaconConfig().SlotsPerHistoricalRoot)), nil
 }
 
 // GetDomain

@@ -5,6 +5,8 @@ import (
 
 	"github.com/prysmaticlabs/gohashtree"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -33,46 +35,24 @@ func MerkleizeVector(elements [][32]byte, length uint64) ([32]byte, error) {
 	return elements[0], nil
 }
 
-// ArraysRootWithLimit calculates the root hash of an array of hashes by first vectorizing the input array using the MerkleizeVector function, then calculating the root hash of the vectorized array using the Keccak256 function and the root hash of the length of the input array.
-func ArraysRootWithLimit(input [][32]byte, limit uint64) ([32]byte, error) {
-	base, err := MerkleizeVector(input, limit)
-	if err != nil {
-		return [32]byte{}, err
+// MerkleizeVector uses our optimized routine to hash a list of 32-byte
+// elements.
+func MerkleizeVectorFlat(in []byte, limit uint64) ([32]byte, error) {
+	elements := make([]byte, len(in))
+	copy(elements, in)
+	for i := uint8(0); i < getDepth(limit); i++ {
+		// Sequential
+		layerLen := len(elements)
+		if layerLen%64 == 32 {
+			elements = append(elements, ZeroHashes[i][:]...)
+		}
+		outputLen := len(elements) / 2
+		if err := HashByteSlice(elements, elements); err != nil {
+			return [32]byte{}, err
+		}
+		elements = elements[:outputLen]
 	}
-
-	lengthRoot := Uint64Root(uint64(len(input)))
-	return utils.Keccak256(base[:], lengthRoot[:]), nil
-}
-
-// ArraysRoot calculates the root hash of an array of hashes by first making a copy of the input array, then calculating the Merkle root of the copy using the MerkleRootFromLeaves function.
-func ArraysRoot(input [][32]byte, length uint64) ([32]byte, error) {
-	for uint64(len(input)) != length {
-		input = append(input, [32]byte{})
-	}
-
-	res, err := MerkleRootFromLeaves(input)
-	if err != nil {
-		return [32]byte{}, err
-	}
-
-	return res, nil
-}
-
-// Uint64ListRootWithLimit calculates the root hash of an array of uint64 values by first packing the input array into chunks using the PackUint64IntoChunks function,
-// then vectorizing the chunks using the MerkleizeVector function, then calculating the
-// root hash of the vectorized array using the Keccak256 function and
-// the root hash of the length of the input array.
-func Uint64ListRootWithLimit(list []uint64, limit uint64) ([32]byte, error) {
-	var err error
-	roots := PackUint64IntoChunks(list)
-
-	base, err := MerkleizeVector(roots, limit)
-	if err != nil {
-		return [32]byte{}, err
-	}
-
-	lengthRoot := Uint64Root(uint64(len(list)))
-	return utils.Keccak256(base[:], lengthRoot[:]), nil
+	return common.BytesToHash(elements[:length.Hash]), nil
 }
 
 // BitlistRootWithLimit computes the HashSSZ merkleization of
@@ -91,20 +71,6 @@ func BitlistRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
 	}
 
 	lengthRoot := Uint64Root(size)
-	return utils.Keccak256(base[:], lengthRoot[:]), nil
-}
-
-// BitlistRootWithLimitForState computes the HashSSZ merkleization of
-// participation roots.
-func BitlistRootWithLimitForState(bits []byte, limit uint64) ([32]byte, error) {
-	roots := packBits(bits)
-
-	base, err := MerkleizeVector(roots, (limit+31)/32)
-	if err != nil {
-		return [32]byte{}, err
-	}
-
-	lengthRoot := Uint64Root(uint64(len(bits)))
 	return utils.Keccak256(base[:], lengthRoot[:]), nil
 }
 

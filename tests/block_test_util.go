@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -49,6 +50,7 @@ import (
 // A BlockTest checks handling of entire blocks.
 type BlockTest struct {
 	json btJSON
+	br   services.FullBlockReader
 }
 
 // UnmarshalJSON implements json.Unmarshaler interface.
@@ -135,11 +137,11 @@ func (bt *BlockTest) Run(t *testing.T, _ bool) error {
 	if libcommon.Hash(bt.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
 	}
-	newDB := state.New(state.NewPlainStateReader(tx))
+	newDB := state.New(m.NewStateReader(tx))
 	if err = bt.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %w", err)
 	}
-	return bt.validateImportedHeaders(tx, validBlocks)
+	return bt.validateImportedHeaders(tx, validBlocks, m)
 }
 
 func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
@@ -302,7 +304,8 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	return nil
 }
 
-func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock) error {
+func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *stages.MockSentry) error {
+	br, _ := m.NewBlocksIO()
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
 	bmap := make(map[libcommon.Hash]btBlock, len(bt.json.Blocks))
 	for _, b := range validBlocks {
@@ -313,11 +316,15 @@ func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock) er
 	// block-by-block, so we can only validate imported headers after
 	// all blocks have been processed by BlockChain, as they may not
 	// be part of the longest chain until last block is imported.
-	for b := rawdb.ReadCurrentBlock(tx); b != nil && b.NumberU64() != 0; {
+	for b, _ := br.CurrentBlock(tx); b != nil && b.NumberU64() != 0; {
 		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
 			return fmt.Errorf("imported block header validation failed: %w", err)
 		}
-		b, _ = rawdb.ReadBlockByHash(tx, b.ParentHash())
+		number := rawdb.ReadHeaderNumber(tx, b.ParentHash())
+		if number == nil {
+			break
+		}
+		b, _, _ = br.BlockWithSenders(m.Ctx, tx, b.ParentHash(), *number)
 	}
 	return nil
 }

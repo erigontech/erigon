@@ -4,6 +4,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -22,12 +23,13 @@ func (b *BeaconState) UpgradeToAltair() error {
 	// Change version
 	b.SetVersion(clparams.AltairVersion)
 	// Fill in previous epoch participation from the pre state's pending attestations
-	for _, attestation := range b.PreviousEpochAttestations() {
-		flags, err := b.GetAttestationParticipationFlagIndicies(attestation.Data, attestation.InclusionDelay)
+	if err := solid.RangeErr[*solid.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, i2 int) error {
+		attestationData := pa.AttestantionData()
+		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay())
 		if err != nil {
 			return err
 		}
-		indices, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
+		indices, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits(), false)
 		if err != nil {
 			return err
 		}
@@ -36,7 +38,11 @@ func (b *BeaconState) UpgradeToAltair() error {
 				b.AddPreviousEpochParticipationAt(int(index), flagIndex)
 			}
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
+
 	b.ResetPreviousEpochAttestations()
 	// Process sync committees
 	var err error

@@ -351,7 +351,11 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			break
 		}
 
-		nextBlock, _, err := rawdb.CanonicalBlockByNumberWithSenders(tx, execAtBlock+1)
+		hash, err := rawdb.ReadCanonicalHash(tx, execAtBlock+1)
+		if err != nil {
+			return fmt.Errorf("failed ReadCanonicalHash: %w", err)
+		}
+		nextBlock, _, err := br.BlockWithSenders(context.Background(), tx, hash, execAtBlock+1)
 		if err != nil {
 			panic(err)
 		}
@@ -361,7 +365,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			miner.MiningConfig.ExtraData = nextBlock.Extra()
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
-					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp),
+					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp, br),
 					quit, logger)
 				if err != nil {
 					return err
@@ -481,7 +485,7 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger) e
 	to := execStage.BlockNumber - unwind
 	_ = sync.SetCurrentStage(stages.HashState)
 	u := &stagedsync.UnwindState{ID: stages.HashState, UnwindPoint: to}
-	if err = stagedsync.UnwindHashStateStage(u, stage(sync, tx, nil, stages.HashState), tx, stagedsync.StageHashStateCfg(db, dirs, historyV3, agg), ctx, logger); err != nil {
+	if err = stagedsync.UnwindHashStateStage(u, stage(sync, tx, nil, stages.HashState), tx, stagedsync.StageHashStateCfg(db, dirs, historyV3), ctx, logger); err != nil {
 		return err
 	}
 	_ = sync.SetCurrentStage(stages.IntermediateHashes)

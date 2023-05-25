@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -17,6 +18,7 @@ type MiningFinishCfg struct {
 	engine      consensus.Engine
 	sealCancel  chan struct{}
 	miningState MiningState
+	blockReader services.FullBlockReader
 }
 
 func StageMiningFinishCfg(
@@ -25,6 +27,7 @@ func StageMiningFinishCfg(
 	engine consensus.Engine,
 	miningState MiningState,
 	sealCancel chan struct{},
+	blockReader services.FullBlockReader,
 ) MiningFinishCfg {
 	return MiningFinishCfg{
 		db:          db,
@@ -32,6 +35,7 @@ func StageMiningFinishCfg(
 		engine:      engine,
 		miningState: miningState,
 		sealCancel:  sealCancel,
+		blockReader: blockReader,
 	}
 }
 
@@ -87,7 +91,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	default:
 		logger.Trace("None in-flight sealing task.")
 	}
-	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx}
+	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader}
 	if err := cfg.engine.Seal(chain, block, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
 		logger.Warn("Block sealing failed", "err", err)
 	}

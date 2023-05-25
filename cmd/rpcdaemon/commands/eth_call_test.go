@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
@@ -39,7 +38,7 @@ import (
 func TestEstimateGas(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
@@ -58,7 +57,7 @@ func TestEstimateGas(t *testing.T) {
 func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 	var from = libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
@@ -78,7 +77,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	ethCallBlockNumber := rpc.BlockNumber(2)
 
 	m, bankAddress, contractAddress := chainWithDeployedContract(t)
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 
 	doPrune(t, m.DB, pruneTo)
 
@@ -103,7 +102,7 @@ func TestGetProof(t *testing.T) {
 	maxGetProofRewindBlockCount = 1 // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 
 	m, bankAddr, contractAddr := chainWithDeployedContract(t)
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 
 	if m.HistoryV3 {
 		t.Skip("not supported by Erigon3")
@@ -233,7 +232,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -271,7 +270,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("failed at beginning tx")
@@ -313,7 +312,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -352,7 +351,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -403,7 +402,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")

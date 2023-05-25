@@ -71,7 +71,7 @@ func WriteCanonicalHash(db kv.Putter, hash libcommon.Hash, number uint64) error 
 func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, deleteHeaders bool) error {
 	if err := tx.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(blockFrom), func(k, v []byte) error {
 		if deleteHeaders {
-			deleteHeader(tx, libcommon.BytesToHash(v), blockFrom)
+			DeleteHeader(tx, libcommon.BytesToHash(v), blockFrom)
 		}
 		return tx.Delete(kv.HeaderCanonical, k)
 	}); err != nil {
@@ -354,8 +354,8 @@ func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash libcommon.Hash, hea
 	return nil
 }
 
-// deleteHeader - dangerous, use DeleteAncientBlocks/TruncateBlocks methods
-func deleteHeader(db kv.Deleter, hash libcommon.Hash, number uint64) {
+// DeleteHeader - dangerous, use DeleteAncientBlocks/TruncateBlocks methods
+func DeleteHeader(db kv.Deleter, hash libcommon.Hash, number uint64) {
 	if err := db.Delete(kv.Headers, dbutils.HeaderKey(number, hash)); err != nil {
 		log.Crit("Failed to delete header", "err", err)
 	}
@@ -751,8 +751,8 @@ func WriteSenders(db kv.Putter, hash libcommon.Hash, number uint64, senders []li
 	return nil
 }
 
-// deleteBody removes all block body data associated with a hash.
-func deleteBody(db kv.Deleter, hash libcommon.Hash, number uint64) {
+// DeleteBody removes all block body data associated with a hash.
+func DeleteBody(db kv.Deleter, hash libcommon.Hash, number uint64) {
 	if err := db.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, hash)); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
 	}
@@ -884,7 +884,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx cont
 		}
 
 		if deleteBodies {
-			deleteBody(tx, h, blockNum)
+			DeleteBody(tx, h, blockNum)
 		} else {
 			bodyForStorage.BaseTxId = newBaseId
 			if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {

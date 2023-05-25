@@ -3,10 +3,10 @@ package forkchoice
 import (
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing) error {
@@ -42,7 +42,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	if !valid {
 		return fmt.Errorf("invalid indexed attestation 2")
 	}
-	for _, index := range utils.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices) {
+	for _, index := range solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices) {
 		f.equivocatingIndicies[index] = struct{}{}
 	}
 	// add attestation indicies to equivocating indicies.

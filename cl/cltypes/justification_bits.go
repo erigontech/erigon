@@ -1,6 +1,9 @@
 package cltypes
 
-import "github.com/ledgerwatch/erigon/cl/utils"
+import (
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
+	"github.com/ledgerwatch/erigon/cl/utils"
+)
 
 const JustificationBitsLength = 4
 
@@ -16,11 +19,33 @@ func (j JustificationBits) Byte() (out byte) {
 	return
 }
 
-func (j *JustificationBits) FromByte(b byte) {
-	j[0] = b&1 > 0
-	j[1] = b&2 > 0
-	j[2] = b&4 > 0
-	j[3] = b&8 > 0
+func (j *JustificationBits) DecodeSSZ(b []byte, _ int) error {
+	j[0] = b[0]&1 > 0
+	j[1] = b[0]&2 > 0
+	j[2] = b[0]&4 > 0
+	j[3] = b[0]&8 > 0
+	return nil
+}
+
+func (j *JustificationBits) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, j.Byte()), nil
+}
+
+func (j *JustificationBits) Clone() clonable.Clonable {
+	return &JustificationBits{}
+}
+
+func (*JustificationBits) EncodingSizeSSZ() int {
+	return 1
+}
+
+func (*JustificationBits) Static() bool {
+	return true
+}
+
+func (j *JustificationBits) HashSSZ() (out [32]byte, err error) {
+	out[0] = j.Byte()
+	return
 }
 
 // CheckRange checks if bits in certain range are all enabled.

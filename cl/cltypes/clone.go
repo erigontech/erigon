@@ -8,8 +8,8 @@ func (*SignedBeaconBlock) Clone() clonable.Clonable {
 	return &SignedBeaconBlock{}
 }
 
-func (*PendingAttestation) Clone() clonable.Clonable {
-	return &PendingAttestation{}
+func (*IndexedAttestation) Clone() clonable.Clonable {
+	return &IndexedAttestation{}
 }
 
 func (*BeaconBody) Clone() clonable.Clonable {
@@ -18,10 +18,6 @@ func (*BeaconBody) Clone() clonable.Clonable {
 
 func (*Eth1Block) Clone() clonable.Clonable {
 	return &Eth1Block{}
-}
-
-func (*BeaconBlocksByRootRequest) Clone() clonable.Clonable {
-	return &BeaconBlocksByRootRequest{}
 }
 
 func (*Eth1Data) Clone() clonable.Clonable {
@@ -100,23 +96,8 @@ func (*SignedBeaconBlockHeader) Clone() clonable.Clonable {
 	return &SignedBeaconBlockHeader{}
 }
 
-func (*SyncCommittee) Clone() clonable.Clonable {
-	return &SyncCommittee{}
-}
 func (*Fork) Clone() clonable.Clonable {
 	return &Fork{}
-}
-
-func (*BlobSideCar) Clone() clonable.Clonable {
-	return &BlobSideCar{}
-}
-
-func (*SignedBlobSideCar) Clone() clonable.Clonable {
-	return &SignedBlobSideCar{}
-}
-
-func (*BlobIdentifier) Clone() clonable.Clonable {
-	return &BlobIdentifier{}
 }
 
 func (*KZGCommitment) Clone() clonable.Clonable {

@@ -3,8 +3,8 @@ package solid_test
 import (
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,13 +20,8 @@ func TestUint64SliceBasic(t *testing.T) {
 	assert.EqualValues(t, 2, slice.Get(1))
 	assert.EqualValues(t, 1, slice.Get(2))
 
-	out := [32]byte{}
-	err := slice.HashSSZTo(out[:])
+	out, err := slice.HashListSSZ()
 	require.NoError(t, err)
-
-	nums := []uint64{3, 2, 1}
-	root, err := merkle_tree.Uint64ListRootWithLimit(nums, 2)
-	require.NoError(t, err)
-	require.EqualValues(t, root, out)
+	require.EqualValues(t, common.HexToHash("eb8cec5eaec74a32e8b9b56cc42f7627cef722f81081ead786c97a4df1c8be5d"), out)
 
 }

@@ -16,14 +16,13 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func TestEthSubscribe(t *testing.T) {
 	m, require := stages.Mock(t), require.New(t)
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 7, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)

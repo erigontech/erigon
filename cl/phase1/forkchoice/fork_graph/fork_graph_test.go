@@ -2,9 +2,10 @@ package fork_graph_test
 
 import (
 	_ "embed"
+	"testing"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
-	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"

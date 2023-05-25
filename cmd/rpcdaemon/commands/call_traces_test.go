@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -54,7 +53,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 	}
 
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	api := NewTraceAPI(
 		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs),
 		m.DB, &httpcfg.HttpCfg{})
@@ -103,7 +102,7 @@ func TestCallTraceUnwind(t *testing.T) {
 	}
 
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, &httpcfg.HttpCfg{})
 
 	if err = m.InsertChain(chainA); err != nil {
@@ -166,7 +165,7 @@ func TestFilterNoAddresses(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
@@ -192,7 +191,7 @@ func TestFilterNoAddresses(t *testing.T) {
 func TestFilterAddressIntersection(t *testing.T) {
 	m := stages.Mock(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, &httpcfg.HttpCfg{})
 
 	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}

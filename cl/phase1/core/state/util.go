@@ -29,7 +29,7 @@ func GetIndexedAttestation(attestation *solid.Attestation, attestingIndicies []u
 		return attestingIndicies[i] < attestingIndicies[j]
 	})
 	return &cltypes.IndexedAttestation{
-		AttestingIndices: attestingIndicies,
+		AttestingIndices: solid.NewUint64ListSSZFromSlice(2048, attestingIndicies),
 		Data:             attestation.AttestantionData(),
 		Signature:        attestation.Signature(),
 	}
@@ -52,13 +52,15 @@ func ValidatorFromDeposit(conf *clparams.BeaconChainConfig, deposit *cltypes.Dep
 
 // Check whether a validator is fully withdrawable at the given epoch.
 func isFullyWithdrawableValidator(conf *clparams.BeaconChainConfig, validator *cltypes.Validator, balance uint64, epoch uint64) bool {
-	return validator.WithdrawalCredentials()[0] == conf.ETH1AddressWithdrawalPrefixByte &&
+	withdrawalCredentials := validator.WithdrawalCredentials()
+	return withdrawalCredentials[0] == conf.ETH1AddressWithdrawalPrefixByte &&
 		validator.WithdrawableEpoch() <= epoch && balance > 0
 }
 
 // Check whether a validator is partially withdrawable.
 func isPartiallyWithdrawableValidator(conf *clparams.BeaconChainConfig, validator *cltypes.Validator, balance uint64) bool {
-	return validator.WithdrawalCredentials()[0] == conf.ETH1AddressWithdrawalPrefixByte &&
+	withdrawalCredentials := validator.WithdrawalCredentials()
+	return withdrawalCredentials[0] == conf.ETH1AddressWithdrawalPrefixByte &&
 		validator.EffectiveBalance() == conf.MaxEffectiveBalance && balance > conf.MaxEffectiveBalance
 }
 

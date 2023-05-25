@@ -33,6 +33,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -47,7 +49,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -89,24 +90,27 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 	// Copy old chain up to #i into a new db
 	canonicalMock := newCanonical(t, i)
 	var err error
+	blockReader, _ := m.NewBlocksIO()
+	ctx := context.Background()
+
 	// Assert the chains have the same header/block at #i
 	var hash1, hash2 libcommon.Hash
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		if hash1, err = rawdb.ReadCanonicalHash(tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash: %v", err)
 		}
-		if block1 := rawdb.ReadBlock(tx, hash1, uint64(i)); block1 == nil {
+		if block1, _, _ := blockReader.BlockWithSenders(ctx, tx, hash1, uint64(i)); block1 == nil {
 			t.Fatalf("Did not find canonical block")
 		}
 		return nil
 	})
 	require.NoError(t, err)
 
-	canonicalMock.DB.View(context.Background(), func(tx kv.Tx) error {
+	canonicalMock.DB.View(ctx, func(tx kv.Tx) error {
 		if hash2, err = rawdb.ReadCanonicalHash(tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash 2: %v", err)
 		}
-		if block2 := rawdb.ReadBlock(tx, hash2, uint64(i)); block2 == nil {
+		if block2, _, _ := blockReader.BlockWithSenders(ctx, tx, hash2, uint64(i)); block2 == nil {
 			t.Fatalf("Did not find canonical block 2")
 		}
 		return nil
@@ -122,23 +126,19 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 	var currentBlockB *types.Block
 
 	err = canonicalMock.DB.View(context.Background(), func(tx kv.Tx) error {
-		currentBlockB, err = rawdb.ReadBlockByHash(tx, rawdb.ReadHeadBlockHash(tx))
-		if err != nil {
-			t.Fatalf("Failed to read current bock: %v", err)
-		}
-		return nil
+		currentBlockB, err = blockReader.CurrentBlock(tx)
+		return err
 	})
 	require.NoError(t, err)
 
 	blockChainB = makeBlockChain(currentBlockB, n, canonicalMock, forkSeed)
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		currentBlockHash := rawdb.ReadHeadBlockHash(tx)
-		currentBlock, err1 := rawdb.ReadBlockByHash(tx, currentBlockHash)
-		if err1 != nil {
-			t.Fatalf("Failed to read current bock: %v", err1)
+		currentBlock, err := blockReader.CurrentBlock(tx)
+		if err != nil {
+			return err
 		}
-		tdPre, err = rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
+		tdPre, err = rawdb.ReadTd(tx, currentBlock.Hash(), currentBlock.NumberU64())
 		if err != nil {
 			t.Fatalf("Failed to read TD for current block: %v", err)
 		}
@@ -151,10 +151,8 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 	}
 	currentBlockHash := blockChainB.TopBlock.Hash()
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		currentBlock, err1 := rawdb.ReadBlockByHash(tx, currentBlockHash)
-		if err1 != nil {
-			t.Fatalf("Failed to read last header: %v", err1)
-		}
+		number := rawdb.ReadHeaderNumber(tx, currentBlockHash)
+		currentBlock, _, _ := blockReader.BlockWithSenders(ctx, tx, currentBlockHash, *number)
 		tdPost, err = rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
 		if err != nil {
 			t.Fatalf("Failed to read TD for current header: %v", err)
@@ -175,7 +173,7 @@ func TestLastBlock(t *testing.T) {
 	m := newCanonical(t, 0)
 	var err error
 
-	chain := makeBlockChain(current(m.DB), 1, m, 0)
+	chain := makeBlockChain(current(m), 1, m, 0)
 	if err = m.InsertChain(chain); err != nil {
 		t.Fatalf("Failed to insert block: %v", err)
 	}
@@ -274,7 +272,7 @@ func testBrokenChain(t *testing.T) {
 	m := newCanonical(t, 10)
 
 	// Create a forked chain, and try to insert with a missing link
-	chain := makeBlockChain(current(m.DB), 5, m, forkSeed)
+	chain := makeBlockChain(current(m), 5, m, forkSeed)
 	brokenChain := chain.Slice(1, chain.Length())
 
 	if err := m.InsertChain(brokenChain); err == nil {
@@ -310,16 +308,18 @@ func testReorgShort(t *testing.T) {
 }
 
 func testReorg(t *testing.T, first, second []int64, td int64) {
+	require := require.New(t)
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
+	br, _ := m.NewBlocksIO()
 	// Insert an easy and a difficult chain afterwards
-	easyChain, err := core.GenerateChain(m.ChainConfig, current(m.DB), m.Engine, m.DB, len(first), func(i int, b *core.BlockGen) {
+	easyChain, err := core.GenerateChain(m.ChainConfig, current(m), m.Engine, m.DB, len(first), func(i int, b *core.BlockGen) {
 		b.OffsetTime(first[i])
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	diffChain, err := core.GenerateChain(m.ChainConfig, current(m.DB), m.Engine, m.DB, len(second), func(i int, b *core.BlockGen) {
+	diffChain, err := core.GenerateChain(m.ChainConfig, current(m), m.Engine, m.DB, len(second), func(i int, b *core.BlockGen) {
 		b.OffsetTime(second[i])
 	}, false /* intermediateHashes */)
 	if err != nil {
@@ -332,12 +332,13 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 		t.Fatalf("failed to insert difficult chain: %v", err)
 	}
 	tx, err := m.DB.BeginRo(context.Background())
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 
 	// Check that the chain is valid number and link wise
-	prev := rawdb.ReadCurrentBlock(tx)
-	block, err := rawdb.ReadBlockByNumber(tx, rawdb.ReadCurrentHeader(tx).Number.Uint64()-1)
+	prev, err := br.CurrentBlock(tx)
+	require.NoError(err)
+	block, err := br.BlockByNumber(m.Ctx, tx, rawdb.ReadCurrentHeader(tx).Number.Uint64()-1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +347,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 			t.Errorf("parent block hash mismatch: have %x, want %x", prev.ParentHash(), block.Hash())
 		}
 		prev = block
-		block, err = rawdb.ReadBlockByNumber(tx, block.NumberU64()-1)
+		block, err = br.BlockByNumber(m.Ctx, tx, block.NumberU64()-1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -354,9 +355,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	// Make sure the chain total difficulty is the correct one
 	want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
 	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(err)
 	if have.Cmp(want) != 0 {
 		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 	}
@@ -372,7 +371,7 @@ func testBadHashes(t *testing.T) {
 	var err error
 
 	// Create a chain, ban a hash and try to import
-	chain := makeBlockChain(current(m.DB), 3, m, 10)
+	chain := makeBlockChain(current(m), 3, m, 10)
 
 	core.BadHashes[chain.Headers[2].Hash()] = true
 	defer func() { delete(core.BadHashes, chain.Headers[2].Hash()) }()
@@ -480,17 +479,17 @@ func TestChainTxReorgs(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
+	br, _ := m.NewBlocksIO()
 	// removed tx
 	txs := types.Transactions{pastDrop, freshDrop}
 	for i, txn := range txs {
-		if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn != nil {
+		if bn, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn != nil {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
-		if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt != nil {
+		if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), br); rcpt != nil {
 			t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
 		}
 	}
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
 
 	// added tx
 	txs = types.Transactions{pastAdd, freshAdd, futureAdd}
@@ -502,7 +501,7 @@ func TestChainTxReorgs(t *testing.T) {
 		if m.HistoryV3 {
 			// m.HistoryV3 doesn't store
 		} else {
-			if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
+			if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), br); rcpt == nil {
 				t.Errorf("add %d: expected receipt to be found", i)
 			}
 		}
@@ -510,17 +509,48 @@ func TestChainTxReorgs(t *testing.T) {
 	// shared tx
 	txs = types.Transactions{postponed, swapped}
 	for i, txn := range txs {
-		if txn, _, _, _, _ := rawdb.ReadTransactionByHash(tx, txn.Hash()); txn == nil {
-			t.Errorf("share %d: expected tx to be found", i)
+		if bn, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn == nil {
+			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
 		if m.HistoryV3 {
 			// m.HistoryV3 doesn't store
 		} else {
-			if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
+			if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), br); rcpt == nil {
 				t.Errorf("share %d: expected receipt to be found", i)
 			}
 		}
 	}
+}
+
+func readReceipt(db kv.Tx, txHash libcommon.Hash, br services.FullBlockReader) (*types.Receipt, libcommon.Hash, uint64, uint64, error) {
+	// Retrieve the context of the receipt based on the transaction hash
+	blockNumber, err := rawdb.ReadTxLookupEntry(db, txHash)
+	if err != nil {
+		return nil, libcommon.Hash{}, 0, 0, err
+	}
+	if blockNumber == nil {
+		return nil, libcommon.Hash{}, 0, 0, nil
+	}
+	blockHash, err := rawdb.ReadCanonicalHash(db, *blockNumber)
+	if err != nil {
+		return nil, libcommon.Hash{}, 0, 0, err
+	}
+	if blockHash == (libcommon.Hash{}) {
+		return nil, libcommon.Hash{}, 0, 0, nil
+	}
+	b, senders, err := br.BlockWithSenders(context.Background(), db, blockHash, *blockNumber)
+	if err != nil {
+		return nil, libcommon.Hash{}, 0, 0, err
+	}
+	// Read all the receipts from the block and return the one with the matching hash
+	receipts := rawdb.ReadReceipts(db, b, senders)
+	for receiptIndex, receipt := range receipts {
+		if receipt.TxHash == txHash {
+			return receipt, blockHash, *blockNumber, uint64(receiptIndex), nil
+		}
+	}
+	log.Error("Receipt not found", "number", blockNumber, "hash", blockHash, "txhash", txHash)
+	return nil, libcommon.Hash{}, 0, 0, nil
 }
 
 // Tests if the canonical block can be fetched from the database during chain insertion.
@@ -538,6 +568,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
+	br, _ := m.NewBlocksIO()
 	for _, block := range chain.Blocks {
 		// try to retrieve a block by its canonical hash and see if the block data can be retrieved.
 		ch, err := rawdb.ReadCanonicalHash(tx, block.NumberU64())
@@ -552,7 +583,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 			t.Errorf("unknown canonical hash, want %s, got %s", block.Hash().Hex(), ch.Hex())
 			return
 		}
-		fb := rawdb.ReadBlock(tx, ch, block.NumberU64())
+		fb, _ := br.Header(m.Ctx, tx, ch, block.NumberU64())
 		if fb == nil {
 			t.Errorf("unable to retrieve block %d for canonical hash: %s", block.NumberU64(), ch.Hex())
 			return
@@ -627,13 +658,14 @@ func TestEIP155Transition(t *testing.T) {
 	if chainErr = m.InsertChain(chain); chainErr != nil {
 		t.Fatal(chainErr)
 	}
+	br, _ := m.NewBlocksIO()
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-		block, _ := rawdb.ReadBlockByNumber(tx, 1)
+		block, _ := br.BlockByNumber(m.Ctx, tx, 1)
 		if block.Transactions()[0].Protected() {
 			t.Error("Expected block[0].txs[0] to not be replay protected")
 		}
 
-		block, _ = rawdb.ReadBlockByNumber(tx, 3)
+		block, _ = br.BlockByNumber(m.Ctx, tx, 3)
 		if block.Transactions()[0].Protected() {
 			t.Error("Expected block[3].txs[0] to not be replay protected")
 		}
@@ -793,10 +825,10 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		require.Equal(uint64(0), found.Minimum())
 	}
 
-	br := snapshotsync.NewBlockReader(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 
 	if pm.TxIndex.Enabled() {
-		b, err := rawdb.ReadBlockByNumber(tx, 1)
+		b, err := br.BlockByNumber(m.Ctx, tx, 1)
 		require.NoError(err)
 		for _, txn := range b.Transactions() {
 			found, err := rawdb.ReadTxLookupEntry(tx, txn.Hash())
@@ -804,7 +836,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			require.Nil(found)
 		}
 	} else {
-		b, err := rawdb.ReadBlockByNumber(tx, 1)
+		b, err := br.BlockByNumber(m.Ctx, tx, 1)
 		require.NoError(err)
 		for _, txn := range b.Transactions() {
 			foundBlockNum, found, err := br.TxnLookup(context.Background(), tx, txn.Hash())
@@ -1067,6 +1099,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 		}
 		forks[i] = fork.Slice(i, i+1)
 	}
+	br, _ := m.NewBlocksIO()
 	// Import the canonical and fork chain side by side, verifying the current block
 	// and current header consistency
 	for i := 0; i < chain.Length(); i++ {
@@ -1075,14 +1108,22 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 		}
 
 		if err := m2.DB.View(m2.Ctx, func(tx kv.Tx) error {
-			b, h := rawdb.ReadCurrentBlock(tx), rawdb.ReadCurrentHeader(tx)
+			b, err := br.CurrentBlock(tx)
+			if err != nil {
+				return err
+			}
+			h := rawdb.ReadCurrentHeader(tx)
 			if b.Hash() != h.Hash() {
 				t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
 			}
 			if err := m2.InsertChain(forks[i]); err != nil {
 				t.Fatalf(" fork %d: failed to insert into chain: %v", i, err)
 			}
-			b, h = rawdb.ReadCurrentBlock(tx), rawdb.ReadCurrentHeader(tx)
+			b, err = br.CurrentBlock(tx)
+			if err != nil {
+				return err
+			}
+			h = rawdb.ReadCurrentHeader(tx)
 			if b.Hash() != h.Hash() {
 				t.Errorf(" fork %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
 			}
@@ -1192,8 +1233,12 @@ func TestLowDiffLongChain(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
+	br, _ := m.NewBlocksIO()
 	if err := m2.DB.View(context.Background(), func(tx kv.Tx) error {
-		head := rawdb.ReadCurrentBlock(tx)
+		head, err := br.CurrentBlock(tx)
+		if err != nil {
+			return err
+		}
 		if got := fork.TopBlock.Hash(); got != head.Hash() {
 			t.Fatalf("head wrong, expected %x got %x", head.Hash(), got)
 		}
@@ -1201,11 +1246,12 @@ func TestLowDiffLongChain(t *testing.T) {
 		// Sanity check that all the canonical numbers are present
 		header := rawdb.ReadCurrentHeader(tx)
 		for number := head.NumberU64(); number > 0; number-- {
-			if hash := rawdb.ReadHeaderByNumber(tx, number).Hash(); hash != header.Hash() {
+			hh, _ := br.HeaderByNumber(m.Ctx, tx, number)
+			if hash := hh.Hash(); hash != header.Hash() {
 				t.Fatalf("header %d: canonical hash mismatch: have %x, want %x", number, hash, header.Hash())
 			}
 
-			header = rawdb.ReadHeader(tx, header.ParentHash, number-1)
+			header, _ = br.Header(m.Ctx, tx, header.ParentHash, number-1)
 		}
 		return nil
 	}); err != nil {
@@ -1984,7 +2030,8 @@ func TestEIP2718Transition(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	block, _ := rawdb.ReadBlockByNumber(tx, 1)
+	br, _ := m.NewBlocksIO()
+	block, _ := br.BlockByNumber(m.Ctx, tx, 1)
 
 	// Expected gas is intrinsic + 2 * pc + hot load + cold load, since only one load is in the access list
 	expected := params.TxGas + params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas +
@@ -2154,11 +2201,16 @@ func TestEIP1559Transition(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func current(kv kv.RwDB) *types.Block {
-	tx, err := kv.BeginRo(context.Background())
+func current(m *stages.MockSentry) *types.Block {
+	tx, err := m.DB.BeginRo(context.Background())
 	if err != nil {
 		panic(err)
 	}
 	defer tx.Rollback()
-	return rawdb.ReadCurrentBlock(tx)
+	br, _ := m.NewBlocksIO()
+	b, err := br.CurrentBlock(tx)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }

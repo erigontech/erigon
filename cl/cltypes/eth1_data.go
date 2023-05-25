@@ -1,20 +1,18 @@
 package cltypes
 
 import (
-	"fmt"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 	"github.com/ledgerwatch/erigon/common"
 )
 
 type Eth1Data struct {
 	Root         libcommon.Hash
-	BlockHash    libcommon.Hash
 	DepositCount uint64
+	BlockHash    libcommon.Hash
 }
 
 func (e *Eth1Data) Copy() *Eth1Data {
@@ -27,26 +25,13 @@ func (e *Eth1Data) Equal(b *Eth1Data) bool {
 }
 
 // MarshalSSZTo ssz marshals the Eth1Data object to a target array
-func (e *Eth1Data) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	dst = buf
-	dst = append(dst, e.Root[:]...)
-	dst = append(dst, ssz.Uint64SSZ(e.DepositCount)...)
-	dst = append(dst, e.BlockHash[:]...)
-	return
+func (e *Eth1Data) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, e.Root[:], e.DepositCount, e.BlockHash[:])
+
 }
 
 func (e *Eth1Data) DecodeSSZ(buf []byte, _ int) error {
-	var err error
-	size := uint64(len(buf))
-	if size < 72 {
-		return fmt.Errorf("[Eth1Data] err: %s", ssz.ErrLowBufferSize)
-	}
-
-	copy(e.Root[:], buf[0:32])
-	e.DepositCount = ssz.UnmarshalUint64SSZ(buf[32:40])
-	copy(e.BlockHash[:], buf[40:72])
-
-	return err
+	return ssz2.UnmarshalSSZ(buf, 0, e.Root[:], &e.DepositCount, e.BlockHash[:])
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the Eth1Data object
@@ -56,10 +41,9 @@ func (e *Eth1Data) EncodingSizeSSZ() int {
 
 // HashSSZ ssz hashes the Eth1Data object
 func (e *Eth1Data) HashSSZ() ([32]byte, error) {
-	leaves := [][32]byte{
-		e.Root,
-		merkle_tree.Uint64Root(e.DepositCount),
-		e.BlockHash,
-	}
-	return merkle_tree.ArraysRoot(leaves, 4)
+	return merkle_tree.HashTreeRoot(e.Root[:], e.DepositCount, e.BlockHash[:])
+}
+
+func (e *Eth1Data) Static() bool {
+	return true
 }

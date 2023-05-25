@@ -54,8 +54,7 @@ func ComputeShuffledIndexPreInputs(conf *clparams.BeaconChainConfig, seed [32]by
 	return ret
 }
 
-func GetSeed(beaconConfig *clparams.BeaconChainConfig, mixes []common.Hash, epoch uint64, domain [4]byte) common.Hash {
-	mix := mixes[(epoch+beaconConfig.EpochsPerHistoricalVector-beaconConfig.MinSeedLookahead-1)%beaconConfig.EpochsPerHistoricalVector]
+func GetSeed(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, epoch uint64, domain [4]byte) common.Hash {
 	epochByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(epochByteArray, epoch)
 	input := append(domain[:], epochByteArray...)
@@ -63,12 +62,12 @@ func GetSeed(beaconConfig *clparams.BeaconChainConfig, mixes []common.Hash, epoc
 	return utils.Keccak256(input)
 }
 
-func ComputeShuffledIndicies(beaconConfig *clparams.BeaconChainConfig, mixes []common.Hash, indicies []uint64, slot uint64) []uint64 {
+func ComputeShuffledIndicies(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, indicies []uint64, slot uint64) []uint64 {
 	shuffledIndicies := make([]uint64, len(indicies))
 	copy(shuffledIndicies, indicies)
 	hashFunc := utils.OptimizedKeccak256NotThreadSafe()
 	epoch := slot / beaconConfig.SlotsPerEpoch
-	seed := GetSeed(beaconConfig, mixes, epoch, beaconConfig.DomainBeaconAttester)
+	seed := GetSeed(beaconConfig, mix, epoch, beaconConfig.DomainBeaconAttester)
 	eth2ShuffleHashFunc := func(data []byte) []byte {
 		hashed := hashFunc(data)
 		return hashed[:]

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 	shuffling2 "github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
@@ -60,9 +61,12 @@ func (b *BeaconState) _updateProposerIndex() (err error) {
 	epoch := Epoch(b.BeaconState)
 
 	hash := sha256.New()
+	beaconConfig := b.BeaconConfig()
+	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
-	randao := b.RandaoMixes()
-	input := shuffling2.GetSeed(b.BeaconConfig(), randao[:], epoch, b.BeaconConfig().DomainBeaconProposer)
+	mix := b.GetRandaoMix(int(mixPosition))
+	input := shuffling2.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
 
@@ -95,12 +99,13 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 		return err
 	}
 
-	for _, attestation := range b.PreviousEpochAttestations() {
-		slotRoot, err := b.GetBlockRootAtSlot(attestation.Data.Slot())
+	if err := solid.RangeErr[*solid.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, _ int) error {
+		attestationData := pa.AttestantionData()
+		slotRoot, err := b.GetBlockRootAtSlot(attestationData.Slot())
 		if err != nil {
 			return err
 		}
-		indicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
+		indicies, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits(), false)
 		if err != nil {
 			return err
 		}
@@ -109,26 +114,29 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 			if err != nil {
 				return err
 			}
-			if previousMinAttestationDelay == nil || previousMinAttestationDelay.InclusionDelay > attestation.InclusionDelay {
-				if err := b.SetValidatorMinPreviousInclusionDelayAttestation(int(index), attestation); err != nil {
+			if previousMinAttestationDelay == nil || previousMinAttestationDelay.InclusionDelay() > pa.InclusionDelay() {
+				if err := b.SetValidatorMinPreviousInclusionDelayAttestation(int(index), pa); err != nil {
 					return err
 				}
 			}
 			if err := b.SetValidatorIsPreviousMatchingSourceAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestation.Data.Target().BlockRoot() != previousEpochRoot {
+			if attestationData.Target().BlockRoot() != previousEpochRoot {
 				continue
 			}
 			if err := b.SetValidatorIsPreviousMatchingTargetAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestation.Data.BeaconBlockRoot() == slotRoot {
+			if attestationData.BeaconBlockRoot() == slotRoot {
 				if err := b.SetValidatorIsPreviousMatchingHeadAttester(int(index), true); err != nil {
 					return err
 				}
 			}
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	// Current Pending attestations
 	if b.CurrentEpochAttestationsLength() == 0 {
@@ -138,15 +146,16 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 	if err != nil {
 		return err
 	}
-	for _, attestation := range b.CurrentEpochAttestations() {
-		slotRoot, err := b.GetBlockRootAtSlot(attestation.Data.Slot())
+	return solid.RangeErr[*solid.PendingAttestation](b.CurrentEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, _ int) error {
+		attestationData := pa.AttestantionData()
+		slotRoot, err := b.GetBlockRootAtSlot(attestationData.Slot())
 		if err != nil {
 			return err
 		}
 		if err != nil {
 			return err
 		}
-		indicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
+		indicies, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits(), false)
 		if err != nil {
 			return err
 		}
@@ -155,27 +164,27 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 			if err != nil {
 				return err
 			}
-			if currentMinAttestationDelay == nil || currentMinAttestationDelay.InclusionDelay > attestation.InclusionDelay {
-				if err := b.SetValidatorMinCurrentInclusionDelayAttestation(int(index), attestation); err != nil {
+			if currentMinAttestationDelay == nil || currentMinAttestationDelay.InclusionDelay() > pa.InclusionDelay() {
+				if err := b.SetValidatorMinCurrentInclusionDelayAttestation(int(index), pa); err != nil {
 					return err
 				}
 			}
 			if err := b.SetValidatorIsCurrentMatchingSourceAttester(int(index), true); err != nil {
 				return err
 			}
-			if attestation.Data.Target().BlockRoot() == currentEpochRoot {
+			if attestationData.Target().BlockRoot() == currentEpochRoot {
 				if err := b.SetValidatorIsCurrentMatchingTargetAttester(int(index), true); err != nil {
 					return err
 				}
 			}
-			if attestation.Data.BeaconBlockRoot() == slotRoot {
+			if attestationData.BeaconBlockRoot() == slotRoot {
 				if err := b.SetValidatorIsCurrentMatchingHeadAttester(int(index), true); err != nil {
 					return err
 				}
 			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func (b *BeaconState) _refreshActiveBalances() {

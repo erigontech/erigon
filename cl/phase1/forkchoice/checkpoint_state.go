@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 const randaoMixesLength = 65536
@@ -38,7 +37,7 @@ type shuffledSet struct {
 // We only keep in memory a fraction of the beacon state
 type checkpointState struct {
 	beaconConfig      *clparams.BeaconChainConfig
-	randaoMixes       []libcommon.Hash
+	randaoMixes       solid.HashVectorSSZ
 	shuffledSetsCache map[uint64]*shuffledSet // Map each epoch to its shuffled index
 	// public keys list
 	validators []*checkpointValidator
@@ -48,13 +47,7 @@ type checkpointState struct {
 	activeBalance, epoch  uint64 // current active balance and epoch
 }
 
-func copyMixes(mixes []libcommon.Hash) (ret []libcommon.Hash) {
-	ret = make([]libcommon.Hash, len(mixes))
-	copy(ret, mixes)
-	return
-}
-
-func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet []*cltypes.Validator, randaoMixes []libcommon.Hash,
+func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet []*cltypes.Validator, randaoMixes solid.HashVectorSSZ,
 	genesisValidatorsRoot libcommon.Hash, fork *cltypes.Fork, activeBalance, epoch uint64) *checkpointState {
 	validators := make([]*checkpointValidator, len(validatorSet))
 	for i := range validatorSet {
@@ -66,9 +59,11 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet [
 			slashed:         validatorSet[i].Slashed(),
 		}
 	}
+	mixes := solid.NewHashVector(randaoMixesLength)
+	randaoMixes.CopyTo(mixes)
 	return &checkpointState{
 		beaconConfig:          beaconConfig,
-		randaoMixes:           copyMixes(randaoMixes),
+		randaoMixes:           mixes,
 		validators:            validators,
 		genesisValidatorsRoot: genesisValidatorsRoot,
 		fork:                  fork,
@@ -86,13 +81,20 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationDat
 	// Compute shuffled indicies
 	var shuffledIndicies []uint64
 	var lenIndicies uint64
+
+	beaconConfig := c.beaconConfig
+
+	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+		beaconConfig.EpochsPerHistoricalVector
+	// Input for the seed hash.
+
 	if shuffledIndicesCached, ok := c.shuffledSetsCache[epoch]; ok {
 		shuffledIndicies = shuffledIndicesCached.set
 		lenIndicies = shuffledIndicesCached.lenActive
 	} else {
 		activeIndicies := c.getActiveIndicies(epoch)
 		lenIndicies = uint64(len(activeIndicies))
-		shuffledIndicies = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes, activeIndicies, slot)
+		shuffledIndicies = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes.Get(int(mixPosition)), activeIndicies, slot)
 		c.shuffledSetsCache[epoch] = &shuffledSet{set: shuffledIndicies, lenActive: uint64(len(activeIndicies))}
 	}
 	committeesPerSlot := c.committeeCount(epoch, lenIndicies)
@@ -148,15 +150,16 @@ func (c *checkpointState) getDomain(domainType [4]byte, epoch uint64) ([]byte, e
 // isValidIndexedAttestation verifies indexed attestation
 func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
-	if len(inds) == 0 || !utils.IsSliceSortedSet(inds) {
+	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
 		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 
 	pks := [][]byte{}
-	for _, v := range inds {
+	inds.Range(func(_ int, v uint64, _ int) bool {
 		publicKey := c.validators[v].publicKey
 		pks = append(pks, publicKey[:])
-	}
+		return true
+	})
 
 	domain, err := c.getDomain(c.beaconConfig.DomainBeaconAttester, att.Data.Target().Epoch())
 	if err != nil {

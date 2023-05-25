@@ -2,6 +2,7 @@ package transition
 
 import (
 	"errors"
+
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	"github.com/Giulio2002/bls"
@@ -19,7 +20,7 @@ func processSyncAggregate(s *state2.BeaconState, sync *cltypes.SyncAggregate) ([
 	if currentSyncCommittee == nil {
 		return nil, errors.New("nil current sync committee in s")
 	}
-	committeeKeys := currentSyncCommittee.PubKeys
+	committeeKeys := currentSyncCommittee.GetCommittee()
 	if len(sync.SyncCommiteeBits)*8 > len(committeeKeys) {
 		return nil, errors.New("bits length exceeds committee length")
 	}
@@ -46,7 +47,7 @@ func processSyncAggregate(s *state2.BeaconState, sync *cltypes.SyncAggregate) ([
 				return nil, errors.New("validator public key does not exist in state")
 			}
 			if syncAggregateBits[i]&byte(bit) > 0 {
-				votedKeys = append(votedKeys, currentSyncCommittee.PubKeys[currPubKeyIndex][:])
+				votedKeys = append(votedKeys, committeeKeys[currPubKeyIndex][:])
 				if err := state2.IncreaseBalance(s.BeaconState, vIdx, participantReward); err != nil {
 					return nil, err
 				}
