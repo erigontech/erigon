@@ -1233,7 +1233,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 
 		_, expectedCount, err := DumpTxs(ctx, chainDB, blockFrom, blockTo, workers, lvl, logger, func(v []byte) error {
 			return sn.AddWord(v)
-		})
+		}, ethconfig.EnableTxsV3InTest)
 		if err != nil {
 			return fmt.Errorf("DumpTxs: %w", err)
 		}
@@ -1324,7 +1324,7 @@ func hasIdxFile(sn *snaptype.FileInfo, logger log.Logger) bool {
 
 // DumpTxs - [from, to)
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
-func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) (firstTxID, expectedCount uint64, err error) {
+func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error, txsV3 bool) (firstTxID, expectedCount uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	warmupCtx, cancel := context.WithCancel(ctx)
@@ -1429,13 +1429,21 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers
 		} else {
 			prevTxID = body.BaseTxId
 		}
-		binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
+		if txsV3 {
+			binary.BigEndian.PutUint64(numBuf, blockNum)
+		} else {
+			binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
+		}
 		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount-2, func(tk, tv []byte) error {
-			id := binary.BigEndian.Uint64(tk)
-			if prevTxID != 0 && id != prevTxID+1 {
-				panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
+			if txsV3 {
+
+			} else {
+				id := binary.BigEndian.Uint64(tk)
+				if prevTxID != 0 && id != prevTxID+1 {
+					panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
+				}
+				prevTxID = id
 			}
-			prevTxID = id
 			parseCtx.WithSender(len(senders) == 0)
 			valueBuf, err = parse(tv, valueBuf, senders, j)
 			if err != nil {
