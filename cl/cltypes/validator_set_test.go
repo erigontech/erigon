@@ -10,8 +10,8 @@ import (
 func TestValidatorSet(t *testing.T) {
 	// Create sample data
 	capacity := 10
-	validator1 := &Validator{} // Create a validator object
-	validator2 := &Validator{} // Create another validator object
+	validator1 := NewValidator() // Create a validator object
+	validator2 := NewValidator() // Create another validator object
 
 	// Create ValidatorSet
 	validatorSet := NewValidatorSet(capacity)

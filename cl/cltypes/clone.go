@@ -33,7 +33,7 @@ func (*HistoricalSummary) Clone() clonable.Clonable {
 }
 
 func (*Validator) Clone() clonable.Clonable {
-	return &Validator{}
+	return NewValidator()
 }
 
 func (*DepositData) Clone() clonable.Clonable {

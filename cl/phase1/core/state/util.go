@@ -39,7 +39,7 @@ func ValidatorFromDeposit(conf *clparams.BeaconChainConfig, deposit *cltypes.Dep
 	amount := deposit.Data.Amount
 	effectiveBalance := utils.Min64(amount-amount%conf.EffectiveBalanceIncrement, conf.MaxEffectiveBalance)
 
-	validator := &cltypes.Validator{}
+	validator := cltypes.NewValidator()
 	validator.SetPublicKey(deposit.Data.PubKey)
 	validator.SetWithdrawalCredentials(deposit.Data.WithdrawalCredentials)
 	validator.SetActivationEligibilityEpoch(conf.FarFutureEpoch)

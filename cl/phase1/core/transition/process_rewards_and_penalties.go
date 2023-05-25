@@ -111,7 +111,22 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 			return err
 		}
 		// we can use a multiplier to account for all attesting
-		attested, missed := currentValidator.DutiesAttested()
+		var attested, missed uint64
+		if currentValidator.Slashed() {
+			attested, missed = 0, 3
+		} else {
+			if currentValidator.IsPreviousMatchingSourceAttester {
+				attested++
+			}
+			if currentValidator.IsPreviousMatchingTargetAttester {
+				attested++
+			}
+			if currentValidator.IsPreviousMatchingHeadAttester {
+				attested++
+			}
+			missed = 3 - attested
+		}
+
 		// If we attested then we reward the validator.
 		if state2.InactivityLeaking(s.BeaconState) {
 			if err := state2.IncreaseBalance(s.BeaconState, index, baseReward*attested); err != nil {

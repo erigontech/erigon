@@ -142,23 +142,6 @@ type Validator struct {
 	MinPreviousInclusionDelayAttestation *solid.PendingAttestation
 }
 
-// DutiesAttested returns how many of its duties the validator attested and missed
-func (v *Validator) DutiesAttested() (attested, missed uint64) {
-	if v.Slashed() {
-		return 0, 3
-	}
-	if v.IsPreviousMatchingSourceAttester {
-		attested++
-	}
-	if v.IsPreviousMatchingTargetAttester {
-		attested++
-	}
-	if v.IsPreviousMatchingHeadAttester {
-		attested++
-	}
-	missed = 3 - attested
-	return
-}
 func (v *Validator) IsSlashable(epoch uint64) bool {
 	return !v.Slashed() && (v.ActivationEpoch() <= epoch) && (epoch < v.WithdrawableEpoch())
 }
@@ -185,5 +168,11 @@ func (v *Validator) Active(epoch uint64) bool {
 }
 
 func (v *Validator) CopyTo(target *Validator) {
-	v.Validator.CopyTo(&target.Validator)
+	v.Validator.CopyTo(target.Validator)
+}
+
+func NewValidator() *Validator {
+	return &Validator{
+		Validator: solid.NewValidator(),
+	}
 }

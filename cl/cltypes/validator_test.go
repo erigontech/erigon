@@ -121,9 +121,6 @@ func TestValidatorNonSlashed(t *testing.T) {
 	root, err := decodedValidator.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(root), testValidatorRoot2)
-	att, miss := decodedValidator.DutiesAttested()
-	assert.Equal(t, att, uint64(0))
-	assert.Equal(t, miss, uint64(3))
 
 	assert.False(t, decodedValidator.IsSlashable(1))
 

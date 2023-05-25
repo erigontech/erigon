@@ -79,7 +79,7 @@ func (v *ValidatorSet) CopyTo(t solid.IterableSSZ[*Validator]) {
 	o.c = v.c
 	for idx := 0; idx < v.l; idx++ {
 		if idx >= len(o.validators) {
-			o.validators = append(o.validators, &Validator{})
+			o.validators = append(o.validators, NewValidator())
 		}
 		v.validators[idx].CopyTo(o.validators[idx])
 	}
