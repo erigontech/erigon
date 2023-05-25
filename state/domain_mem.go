@@ -293,6 +293,7 @@ func (sd *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error
 		return fmt.Errorf("accountFn: failed to read latest code: %w", err)
 	}
 	if len(code) > 0 {
+		fmt.Printf("accountFn: code %x - %x\n", plainKey, code)
 		sd.Commitment.updates.keccak.Reset()
 		sd.Commitment.updates.keccak.Write(code)
 		copy(cell.CodeHash[:], sd.Commitment.updates.keccak.Sum(nil))

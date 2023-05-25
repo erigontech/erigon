@@ -135,7 +135,7 @@ var (
 	EmptyCodeHash, _ = hex.DecodeString("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")
 )
 
-func (cell *Cell) fillEmpty() {
+func (cell *Cell) reset() {
 	cell.apl = 0
 	cell.spl = 0
 	cell.downHashedLen = 0
@@ -890,7 +890,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	}
 	row := hph.activeRows
 	for i := 0; i < 16; i++ {
-		hph.grid[row][i].fillEmpty()
+		hph.grid[row][i].reset()
 	}
 	hph.touchMap[row] = 0
 	hph.afterMap[row] = 0
@@ -1275,7 +1275,7 @@ func (hph *HexPatriciaHashed) ReviewKeys(plainKeys, hashedKeys [][]byte) (rootHa
 		}
 
 		// Update the cell
-		stagedCell.fillEmpty()
+		stagedCell.reset()
 		if len(plainKey) == hph.accountKeyLen {
 			if err := hph.accountFn(plainKey, stagedCell); err != nil {
 				return nil, nil, fmt.Errorf("accountFn for key %x failed: %w", plainKey, err)
@@ -1536,7 +1536,7 @@ func (c *Cell) decodeBytes(buf []byte) error {
 	if len(buf) < 1 {
 		return fmt.Errorf("invalid buffer size to contain Cell (at least 1 byte expected)")
 	}
-	c.fillEmpty()
+	c.reset()
 
 	var pos int
 	flags := buf[pos]
@@ -1774,7 +1774,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 			}
 		} else {
 			cell := hph.updateCell(plainKey, hashedKey)
-			if hph.trace {
+			if hph.trace && len(plainKey) == hph.accountKeyLen {
 				fmt.Printf("accountFn updated key %x =>", plainKey)
 			}
 			if update.Flags&BalanceUpdate != 0 {
@@ -1801,7 +1801,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 			if update.Flags&StorageUpdate != 0 {
 				cell.setStorage(update.CodeHashOrStorage[:update.ValLength])
 				if hph.trace {
-					fmt.Printf("\rstorageFn filled key %x => %x\n", plainKey, update.CodeHashOrStorage[:update.ValLength])
+					fmt.Printf("\rstorage set %x => %x\n", plainKey, update.CodeHashOrStorage[:update.ValLength])
 				}
 			}
 		}
@@ -1922,6 +1922,7 @@ func (u *Update) DecodeForStorage(enc []byte) {
 	pos++
 	if codeHashBytes > 0 {
 		copy(u.CodeHashOrStorage[:], enc[pos:pos+codeHashBytes])
+		u.ValLength = length.Hash
 		u.Flags |= CodeUpdate
 	}
 }

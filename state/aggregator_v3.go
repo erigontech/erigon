@@ -2013,6 +2013,7 @@ func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
 }
 
 // --- Domain part START ---
+// Deprecated
 func (ac *AggregatorV3Context) branchFn(prefix []byte) ([]byte, error) {
 	stateValue, ok, err := ac.CommitmentLatest(prefix, ac.a.rwTx)
 	if err != nil {

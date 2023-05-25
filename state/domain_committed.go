@@ -97,8 +97,12 @@ func (t *UpdateTree) Get(key []byte) (*CommitmentItem, bool) {
 // (different behaviour for Code, Account and Storage key modifications).
 func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *CommitmentItem, val []byte)) {
 	c := &CommitmentItem{plainKey: common.Copy(key), hashedKey: t.hashAndNibblizeKey(key)}
-	fn(c, val)
-	t.tree.ReplaceOrInsert(c)
+	item, found := t.tree.Get(c)
+	if !found {
+		item = c
+	}
+	fn(item, val)
+	t.tree.ReplaceOrInsert(item)
 }
 
 func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
@@ -106,13 +110,21 @@ func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
 		c.update.Flags = commitment.DeleteUpdate
 		return
 	}
-	c.update.DecodeForStorage(val)
-	item, found := t.tree.Get(&CommitmentItem{hashedKey: c.hashedKey})
-	if found && item.update.Flags&commitment.CodeUpdate != 0 {
-		c.update.Flags |= commitment.CodeUpdate
-		copy(c.update.CodeHashOrStorage[:], item.update.CodeHashOrStorage[:])
-		c.update.CodeValue = common.Copy(item.update.CodeValue)
+
+	nonce, balance, chash := DecodeAccountBytes(val)
+	if c.update.Nonce != nonce {
+		c.update.Nonce = nonce
+		c.update.Flags |= commitment.NonceUpdate
+	}
+	if !c.update.Balance.Eq(balance) {
+		c.update.Balance.Set(balance)
+		c.update.Flags |= commitment.BalanceUpdate
+	}
+	if len(chash) > 0 && !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
+		copy(c.update.CodeHashOrStorage[:], chash)
 		c.update.ValLength = length.Hash
+		fmt.Printf("replaced code %x -> %x \n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
+		c.update.Flags |= commitment.CodeUpdate
 	}
 }
 
@@ -131,43 +143,22 @@ func (t *UpdateTree) TouchStorage(c *CommitmentItem, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = commitment.DeleteUpdate
 	} else {
-		c.update.Flags = commitment.StorageUpdate
+		c.update.Flags |= commitment.StorageUpdate
 		copy(c.update.CodeHashOrStorage[:], val)
-		c.update.CodeValue = make([]byte, 0)
+		//c.update.CodeValue = make([]byte, 0)
 	}
 }
 
 func (t *UpdateTree) TouchCode(c *CommitmentItem, val []byte) {
-	c.update.Flags = commitment.CodeUpdate
-	item, found := t.tree.Get(c)
-	if !found {
-		t.keccak.Reset()
-		t.keccak.Write(val)
-		copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
-		c.update.CodeValue = common.Copy(val)
-		c.update.ValLength = length.Hash
+	t.keccak.Reset()
+	t.keccak.Write(val)
 
-		return
-	}
-	if item.update.Flags&commitment.BalanceUpdate != 0 {
-		c.update.Flags |= commitment.BalanceUpdate
-		c.update.Balance.Set(&item.update.Balance)
-	}
-	if item.update.Flags&commitment.NonceUpdate != 0 {
-		c.update.Flags |= commitment.NonceUpdate
-		c.update.Nonce = item.update.Nonce
-	}
-	if item.update.Flags == commitment.DeleteUpdate && len(val) == 0 {
-		c.update.Flags = commitment.DeleteUpdate
-		c.update.CodeValue = c.update.CodeValue[:0]
-	} else {
-		t.keccak.Reset()
-		t.keccak.Write(val)
-		copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
-		c.update.CodeValue = common.Copy(val)
-		c.update.ValLength = length.Hash
-	}
+	copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
+	c.update.ValLength = length.Hash
+	c.update.CodeValue = common.Copy(val)
+	c.update.Flags |= commitment.CodeUpdate
 }
+
 func (t *UpdateTree) ListItems() []CommitmentItem {
 	updates := make([]CommitmentItem, t.tree.Len())
 
