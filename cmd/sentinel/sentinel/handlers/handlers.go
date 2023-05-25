@@ -80,6 +80,7 @@ func wrapStreamHandler(fn func(s network.Stream) error) func(s network.Stream) {
 			log.Error("[pubsubhandler] stream handler", "err", err)
 			// TODO: maybe we should log this
 			_ = s.Reset()
+			return
 		}
 		err = s.Close()
 		if err != nil {
