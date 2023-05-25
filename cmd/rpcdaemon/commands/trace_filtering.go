@@ -1022,7 +1022,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg, finalState, header, engine, true /* constCall */, excessDataGas)
+		return core.SysCallContract(contract, data, cfg, finalState, header, engine, false /* constCall */, excessDataGas)
 	}
 
 	return traces, syscall, nil
