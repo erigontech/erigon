@@ -48,7 +48,7 @@ type SendersCfg struct {
 	blockWriter     *blockio.BlockWriter
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire, blockWriter *blockio.BlockWriter, hd *headerdownload.HeaderDownload) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire, blockWriter *blockio.BlockWriter, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -66,6 +66,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpd
 		blockRetire:     br,
 		hd:              hd,
 
+		blockReader: blockReader,
 		blockWriter: blockWriter,
 	}
 }
@@ -189,7 +190,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 				k := make([]byte, 4)
 				binary.BigEndian.PutUint32(k, uint32(j.index))
 				index := int(binary.BigEndian.Uint32(k))
-				if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), j.senders); err != nil {
+				if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, j.blockHash), j.senders); err != nil {
 					errCh <- senderRecoveryError{err: j.err}
 					return
 				}

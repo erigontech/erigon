@@ -211,9 +211,10 @@ func TestStorageRangeAt(t *testing.T) {
 		m.DB, 0)
 	t.Run("invalid addr", func(t *testing.T) {
 		var block4 *types.Block
-		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-			block4, _ = rawdb.ReadBlockByNumber(tx, 4)
-			return nil
+		var err error
+		err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+			block4, err = br.BlockByNumber(m.Ctx, tx, 4)
+			return err
 		})
 		require.NoError(t, err)
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
@@ -225,7 +226,7 @@ func TestStorageRangeAt(t *testing.T) {
 	t.Run("block 4, addr 1", func(t *testing.T) {
 		var block4 *types.Block
 		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-			block4, _ = rawdb.ReadBlockByNumber(tx, 4)
+			block4, _ = br.BlockByNumber(m.Ctx, tx, 4)
 			return nil
 		})
 		require.NoError(t, err)
@@ -245,9 +246,9 @@ func TestStorageRangeAt(t *testing.T) {
 	})
 	t.Run("block latest, addr 1", func(t *testing.T) {
 		var latestBlock *types.Block
-		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-			latestBlock = rawdb.ReadCurrentBlock(tx)
-			return nil
+		err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
+			latestBlock, err = br.CurrentBlock(tx)
+			return err
 		})
 		require.NoError(t, err)
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
