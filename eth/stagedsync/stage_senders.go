@@ -190,7 +190,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 				k := make([]byte, 4)
 				binary.BigEndian.PutUint32(k, uint32(j.index))
 				index := int(binary.BigEndian.Uint32(k))
-				if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), j.senders); err != nil {
+				if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, j.blockHash), j.senders); err != nil {
 					errCh <- senderRecoveryError{err: j.err}
 					return
 				}
