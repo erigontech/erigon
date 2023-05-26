@@ -91,7 +91,7 @@ func wrapStreamHandler(name string, fn func(s network.Stream) error) func(s netw
 		}
 		err = s.Close()
 		if err != nil {
-			if !(strings.Contains(name, "goodbye") && (strings.Contains(err.Error(), "stream shut down") || strings.Contains(err.Error(), "stream reset"))) {
+			if !(strings.Contains(name, "goodbye") && (strings.Contains(err.Error(), "session shut down") || strings.Contains(err.Error(), "stream reset"))) {
 				log.Warn("[pubsubhandler] close stream", "name", name, "err", err)
 			}
 		}
