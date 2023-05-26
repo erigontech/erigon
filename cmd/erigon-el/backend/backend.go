@@ -16,6 +16,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
@@ -85,7 +86,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
@@ -162,6 +162,7 @@ type Ethereum struct {
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
+	config.Snapshot.Enabled = config.Sync.UseSnapshots
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(libcommon.Big0) <= 0 {
 		logger.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
@@ -197,6 +198,18 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		if err != nil {
 			return err
 		}
+
+		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
+		if err != nil {
+			return err
+		}
+		// if we are in the incorrect syncmode then we change it to the appropriate one
+		if !isCorrectSync {
+			logger.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
+			config.Sync.UseSnapshots = useSnapshots
+			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(config.Genesis.Config.ChainName) && useSnapshots
+		}
+		logger.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String(), "history.v3", config.HistoryV3)
 
 		return nil
 	}); err != nil {
@@ -248,23 +261,10 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			return genesisErr
 		}
 
-		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
-		if err != nil {
-			return err
-		}
-		// if we are in the incorrect syncmode then we change it to the appropriate one
-		if !isCorrectSync {
-			logger.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
-			config.Sync.UseSnapshots = useSnapshots
-			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
-		}
-		logger.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String(), "history.v3", config.HistoryV3)
-
 		return nil
 	}); err != nil {
 		panic(err)
 	}
-	config.Snapshot.Enabled = config.Sync.UseSnapshots
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
@@ -486,7 +486,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir, backend.blockReader),
-			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool2, backend.txPool2DB, allSnapshots, config.TransactionsV3),
+			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool2, backend.txPool2DB, blockReader),
 			stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, backend.blockReader, nil, config.HistoryV3, backend.agg),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader),
@@ -504,7 +504,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir, backend.blockReader),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool2, backend.txPool2DB, allSnapshots, config.TransactionsV3),
+				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool2, backend.txPool2DB, blockReader),
 				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, backend.blockReader, nil, config.HistoryV3, backend.agg),
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader),
@@ -623,7 +623,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	}
 
 	backend.stagedSync, err = stages3.NewStagedSync(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config,
-		backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine, config.TransactionsV3, logger)
+		backend.sentriesClient, backend.notifications, backend.downloaderClient, backend.agg, backend.forkValidator, backend.engine, logger, backend.blockReader, backend.blockWriter)
 	if err != nil {
 		return nil, err
 	}

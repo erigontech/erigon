@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -78,7 +79,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	// ----------------------------------------------------------------
 
 	historyV3 := false
-	blockReader := snapshotsync.NewBlockReader(nil, false)
+	blockReader := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()), false)
 	cfg := StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
 	_, err := RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx, log.New())
 	assert.Nil(t, err)

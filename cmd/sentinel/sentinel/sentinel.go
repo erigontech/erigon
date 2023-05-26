@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"math"
 	"net"
-
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"

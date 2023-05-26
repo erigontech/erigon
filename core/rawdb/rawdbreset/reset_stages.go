@@ -88,7 +88,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 	}
 
 	if snapshots != nil && snapshots.Cfg().Enabled && snapshots.BlocksAvailable() > 0 {
-		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, dirs, snapshots, br, cc, engine, agg, logger); err != nil {
+		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, dirs, snapshots, br, agg, logger); err != nil {
 			return err
 		}
 		_ = stages.SaveStageProgress(tx, stages.Snapshots, snapshots.BlocksAvailable())
