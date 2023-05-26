@@ -1000,20 +1000,20 @@ type BlockRetire struct {
 	working               atomic.Bool
 	needSaveFilesListInDB atomic.Bool
 
-	workers   int
-	tmpDir    string
-	snapshots services.BlockSnapshots
-	db        kv.RoDB
+	workers int
+	tmpDir  string
+	db      kv.RoDB
 
-	downloader proto_downloader.DownloaderClient
-	notifier   DBEventNotifier
-	logger     log.Logger
+	downloader  proto_downloader.DownloaderClient
+	notifier    DBEventNotifier
+	logger      log.Logger
+	blockReader services.FullBlockReader
 }
 
-func NewBlockRetire(workers int, tmpDir string, snapshots services.BlockSnapshots, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier, logger log.Logger) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, db: db, downloader: downloader, notifier: notifier, logger: logger}
+func NewBlockRetire(workers int, tmpDir string, blockReader services.FullBlockReader, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier, logger log.Logger) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, blockReader: blockReader, db: db, downloader: downloader, notifier: notifier, logger: logger}
 }
-func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots.(*RoSnapshots) }
+func (br *BlockRetire) Snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
 func (br *BlockRetire) NeedSaveFilesListInDB() bool {
 	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
@@ -1066,18 +1066,19 @@ func CanDeleteTo(curBlockNum uint64, snapshots services.BlockSnapshots) (blockTo
 func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl) error {
 	chainConfig := fromdb.ChainConfig(br.db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	return retireBlocks(ctx, blockFrom, blockTo, *chainID, br.tmpDir, br.snapshots.(*RoSnapshots), br.db, br.workers, br.downloader, lvl, br.notifier, br.logger)
+	return retireBlocks(ctx, blockFrom, blockTo, *chainID, br.tmpDir, br.blockReader.Snapshots().(*RoSnapshots), br.db, br.workers, br.downloader, lvl, br.notifier, br.logger)
 }
 
 func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
-	if br.snapshots.(*RoSnapshots).cfg.KeepBlocks {
+	blockSnapshots := br.blockReader.Snapshots().(*RoSnapshots)
+	if blockSnapshots.cfg.KeepBlocks {
 		return nil
 	}
 	currentProgress, err := stages.GetStageProgress(tx, stages.Senders)
 	if err != nil {
 		return err
 	}
-	canDeleteTo := CanDeleteTo(currentProgress, br.snapshots)
+	canDeleteTo := CanDeleteTo(currentProgress, blockSnapshots)
 	if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, limit); err != nil {
 		return nil
 	}
