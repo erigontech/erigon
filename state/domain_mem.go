@@ -324,11 +324,11 @@ func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []b
 }
 
 func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, codeHash []byte) error {
+	sd.Commitment.TouchPlainKey(addr, code, sd.Commitment.TouchCode)
 	prevCode, _ := sd.LatestCode(addr)
 	if bytes.Equal(prevCode, code) {
 		return nil
 	}
-	sd.Commitment.TouchPlainKey(addr, code, sd.Commitment.TouchCode)
 	sd.put(kv.CodeDomain, addr, code)
 	if len(code) == 0 {
 		return sd.Code.DeleteWithPrev(addr, nil, prevCode)

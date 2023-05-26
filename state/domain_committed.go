@@ -118,11 +118,11 @@ func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
 		c.update.Balance.Set(balance)
 		c.update.Flags |= commitment.BalanceUpdate
 	}
-	if !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
+	if len(chash) > 0 && !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
 		fmt.Printf("replaced code %x -> %x without CodeFLag\n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
 		copy(c.update.CodeHashOrStorage[:], chash)
 		c.update.ValLength = length.Hash
-		//c.update.Flags |= commitment.CodeUpdate
+		c.update.Flags |= commitment.CodeUpdate
 	}
 }
 

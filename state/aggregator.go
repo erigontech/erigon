@@ -1302,11 +1302,9 @@ func DecodeAccountBytes(enc []byte) (nonce uint64, balance *uint256.Int, hash []
 		codeHashBytes := int(enc[pos])
 		pos++
 
-		hash = make([]byte, length.Hash)
 		if codeHashBytes > 0 {
+			hash = make([]byte, length.Hash)
 			copy(hash, enc[pos:pos+codeHashBytes])
-		} else {
-			copy(hash, commitment.EmptyCodeHash)
 		}
 	}
 	return
