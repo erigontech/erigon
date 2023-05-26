@@ -445,8 +445,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	var currentBlock *types.Block
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
-		currentBlock = rawdb.ReadCurrentBlock(tx)
-		//currentBlock, err = blockReader.CurrentBlock(tx)
+		currentBlock, err = blockReader.CurrentBlock(tx)
 		return err
 	}); err != nil {
 		panic(err)
