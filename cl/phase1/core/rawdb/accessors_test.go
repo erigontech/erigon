@@ -3,6 +3,7 @@ package rawdb_test
 import (
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -10,32 +11,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var emptyBlock = &cltypes.Eth1Block{}
-
 func TestBeaconBlock(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
-	signedBeaconBlock := &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{
-			Body: &cltypes.BeaconBody{
-				Eth1Data:         &cltypes.Eth1Data{},
-				Graffiti:         make([]byte, 32),
-				SyncAggregate:    &cltypes.SyncAggregate{},
-				Attestations:     new(cltypes.AttestationList),
-				ExecutionPayload: emptyBlock,
-			},
-		},
-	}
+	signedBeaconBlock := new(cltypes.SignedBeaconBlock)
+	require.NoError(t, signedBeaconBlock.DecodeSSZ(rawdb.SSZTestBeaconBlock, int(clparams.BellatrixVersion)))
 
 	root, err := signedBeaconBlock.Block.HashSSZ()
 	require.NoError(t, err)
 
 	require.NoError(t, rawdb.WriteBeaconBlock(tx, signedBeaconBlock))
-	newBlock, _, _, err := rawdb.ReadBeaconBlock(tx, root, signedBeaconBlock.Block.Slot)
+	newBlock, _, _, err := rawdb.ReadBeaconBlock(tx, root, signedBeaconBlock.Block.Slot, clparams.BellatrixVersion)
 	require.NoError(t, err)
-	newBlock.Block.Body.ExecutionPayload = emptyBlock
 	newRoot, err := newBlock.HashSSZ()
 	require.NoError(t, err)
-	signedBeaconBlock.Block.Body.ExecutionPayload = emptyBlock
 	root, err = signedBeaconBlock.HashSSZ()
 	require.NoError(t, err)
 

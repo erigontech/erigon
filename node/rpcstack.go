@@ -56,7 +56,7 @@ type rpcHandler struct {
 }
 
 type httpServer struct {
-	log      log.Logger
+	logger   log.Logger
 	timeouts rpccfg.HTTPTimeouts
 	mux      http.ServeMux // registered handlers go here
 
@@ -82,7 +82,7 @@ type httpServer struct {
 }
 
 func newHTTPServer(logger log.Logger, timeouts rpccfg.HTTPTimeouts) *httpServer {
-	h := &httpServer{log: logger, timeouts: timeouts, handlerNames: make(map[string]string)}
+	h := &httpServer{logger: logger, timeouts: timeouts, handlerNames: make(map[string]string)}
 
 	h.httpHandler.Store((*rpcHandler)(nil))
 	h.wsHandler.Store((*rpcHandler)(nil))
@@ -150,14 +150,14 @@ func (h *httpServer) start() error {
 		if h.wsConfig.prefix != "" {
 			url += h.wsConfig.prefix
 		}
-		h.log.Info("WebSocket enabled", "url", url)
+		h.logger.Info("WebSocket enabled", "url", url)
 	}
 	// if server is websocket only, return after logging
 	if !h.rpcAllowed() {
 		return nil
 	}
 	// Log http endpoint.
-	h.log.Info("HTTP server started",
+	h.logger.Info("HTTP server started",
 		"endpoint", listener.Addr(),
 		"prefix", h.httpConfig.prefix,
 		"cors", strings.Join(h.httpConfig.CorsAllowedOrigins, ","),
@@ -176,7 +176,7 @@ func (h *httpServer) start() error {
 	for _, path := range paths {
 		name := h.handlerNames[path]
 		if !logged[name] {
-			h.log.Info(name+" enabled", "url", "http://"+listener.Addr().String()+path)
+			h.logger.Info(name+" enabled", "url", "http://"+listener.Addr().String()+path)
 			logged[name] = true
 		}
 	}
@@ -248,7 +248,7 @@ func (h *httpServer) doStop() {
 	}
 	h.server.Shutdown(context.Background()) //nolint:errcheck
 	h.listener.Close()
-	h.log.Info("HTTP server stopped", "endpoint", h.listener.Addr())
+	h.logger.Info("HTTP server stopped", "endpoint", h.listener.Addr())
 
 	// Clear out everything to allow re-configuring it later.
 	h.host, h.port, h.endpoint = "", 0, ""
@@ -265,9 +265,9 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig, allowList rpc.
 	}
 
 	// Create RPC server and handler.
-	srv := rpc.NewServer(50, false /* traceRequests */, true)
+	srv := rpc.NewServer(50, false /* traceRequests */, true, h.logger)
 	srv.SetAllowList(allowList)
-	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false, h.log); err != nil {
+	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false, h.logger); err != nil {
 		return err
 	}
 	h.httpConfig = config
@@ -298,14 +298,14 @@ func (h *httpServer) enableWS(apis []rpc.API, config wsConfig, allowList rpc.All
 	}
 
 	// Create RPC server and handler.
-	srv := rpc.NewServer(50, false /* traceRequests */, true)
+	srv := rpc.NewServer(50, false /* traceRequests */, true, h.logger)
 	srv.SetAllowList(allowList)
-	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false, h.log); err != nil {
+	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false, h.logger); err != nil {
 		return err
 	}
 	h.wsConfig = config
 	h.wsHandler.Store(&rpcHandler{
-		Handler: srv.WebsocketHandler(config.Origins, nil, false, h.log),
+		Handler: srv.WebsocketHandler(config.Origins, nil, false, h.logger),
 		server:  srv,
 	})
 	return nil

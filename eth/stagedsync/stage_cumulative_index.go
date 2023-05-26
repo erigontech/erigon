@@ -29,7 +29,7 @@ func StageCumulativeIndexCfg(db kv.RwDB) CumulativeIndexCfg {
 	}
 }
 
-func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx, ctx context.Context) error {
+func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx, ctx context.Context, logger log.Logger) error {
 	useExternalTx := tx != nil
 
 	if !useExternalTx {
@@ -105,11 +105,11 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Wrote Cumulative Index", s.LogPrefix()),
+			logger.Info(fmt.Sprintf("[%s] Wrote Cumulative Index", s.LogPrefix()),
 				"gasUsed", cumulativeGasUsed.String(), "now", currentBlockNumber, "blk/sec", float64(currentBlockNumber-prevProgress)/float64(logInterval/time.Second))
 			prevProgress = currentBlockNumber
 		default:
-			log.Trace("RequestQueueTime (header) ticked")
+			logger.Trace("RequestQueueTime (header) ticked")
 		}
 		// Cleanup timer
 	}

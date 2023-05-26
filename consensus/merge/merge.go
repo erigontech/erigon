@@ -237,7 +237,11 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		return errInvalidUncleHash
 	}
 
-	if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
+	skipGasLimit := false
+	if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
+		skipGasLimit = auraEngine.HasGasLimitContract()
+	}
+	if err := misc.VerifyEip1559Header(chain.Config(), parent, header, skipGasLimit); err != nil {
 		return err
 	}
 

@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -9,6 +10,7 @@ import (
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -69,9 +71,10 @@ type MiningCreateBlockCfg struct {
 	txPool2DB              kv.RoDB
 	tmpdir                 string
 	blockBuilderParameters *core.BlockBuilderParameters
+	blockReader            services.FullBlockReader
 }
 
-func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig chain.Config, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, blockBuilderParameters *core.BlockBuilderParameters, tmpdir string) MiningCreateBlockCfg {
+func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig chain.Config, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, blockBuilderParameters *core.BlockBuilderParameters, tmpdir string, blockReader services.FullBlockReader) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
 		db:                     db,
 		miner:                  miner,
@@ -81,6 +84,7 @@ func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig chain.
 		txPool2DB:              txPool2DB,
 		tmpdir:                 tmpdir,
 		blockBuilderParameters: blockBuilderParameters,
+		blockReader:            blockReader,
 	}
 }
 
@@ -127,14 +131,14 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	if err != nil {
 		return err
 	}
-	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx}
+	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader}
 	var GetBlocksFromHash = func(hash libcommon.Hash, n int) (blocks []*types.Block) {
 		number := rawdb.ReadHeaderNumber(tx, hash)
 		if number == nil {
 			return nil
 		}
 		for i := 0; i < n; i++ {
-			block := rawdb.ReadBlock(tx, hash, *number)
+			block, _, _ := cfg.blockReader.BlockWithSenders(context.Background(), tx, hash, *number)
 			if block == nil {
 				break
 			}

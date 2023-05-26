@@ -5,10 +5,11 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/log/v3"
 )
 
-func AdminNodeInfo(reqId int) (p2p.NodeInfo, error) {
-	reqGen := initialiseRequestGenerator(reqId)
+func AdminNodeInfo(reqId int, logger log.Logger) (p2p.NodeInfo, error) {
+	reqGen := initialiseRequestGenerator(reqId, logger)
 	var b models.AdminNodeInfoResponse
 
 	if res := reqGen.Erigon(models.AdminNodeInfo, reqGen.GetAdminNodeInfo(), &b); res.Err != nil {

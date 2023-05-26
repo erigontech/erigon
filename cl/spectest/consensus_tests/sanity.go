@@ -1,10 +1,11 @@
 package consensus_tests
 
 import (
-	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 	"io/fs"
 	"os"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/spectest"

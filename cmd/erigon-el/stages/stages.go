@@ -6,6 +6,7 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -46,8 +47,9 @@ func NewStagedSync(ctx context.Context,
 	logger log.Logger,
 ) (*stagedsync.Sync, error) {
 	dirs := cfg.Dirs
-	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots, transactionsV3)
+	blockReader := snapshotsync.NewBlockReader(snapshots, transactionsV3)
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events, logger)
+	blockWriter := blockio.NewBlockWriter(transactionsV3)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.
@@ -80,12 +82,13 @@ func NewStagedSync(ctx context.Context,
 				p2pCfg.NoDiscovery,
 				snapshots,
 				blockReader,
+				blockWriter,
 				dirs.Tmp,
 				notifications,
 				forkValidator,
 			),
 			stagedsync.StageCumulativeIndexCfg(db),
-			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig),
+			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 			stagedsync.StageBodiesCfg(
 				db,
 				controlServer.Bd,
@@ -97,9 +100,9 @@ func NewStagedSync(ctx context.Context,
 				snapshots,
 				blockReader,
 				cfg.HistoryV3,
-				cfg.TransactionsV3,
+				blockWriter,
 			),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockRetire, controlServer.Hd),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockRetire, blockWriter, blockReader, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
@@ -119,12 +122,12 @@ func NewStagedSync(ctx context.Context,
 				cfg.Sync,
 				agg,
 			),
-			stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3, agg),
+			stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
 			stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg),
 			stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
-			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, snapshots, controlServer.ChainConfig.Bor),
+			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, snapshots, controlServer.ChainConfig.Bor, blockReader),
 			stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
 			runInTestMode),
 		stagedsync.DefaultUnwindOrder,

@@ -2,9 +2,10 @@ package transition_test
 
 import (
 	_ "embed"
+	"testing"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	transition2 "github.com/ledgerwatch/erigon/cl/phase1/core/transition"
-	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -28,64 +29,64 @@ func runEpochTransitionConsensusTest(t *testing.T, sszSnappyTest, sszSnappyExpec
 	require.Equal(t, expectedRoot, haveRoot)
 }
 
-//go:embed test_data/rewards_penalty_test_expected.ssz_snappy
+//go:embed test_data/epoch_processing/rewards_penalty_test_expected.ssz_snappy
 var expectedRewardsPenaltyState []byte
 
-//go:embed test_data/rewards_penalty_test_state.ssz_snappy
+//go:embed test_data/epoch_processing/rewards_penalty_test_state.ssz_snappy
 var startingRewardsPenaltyState []byte
 
-//go:embed test_data/registry_updates_test_expected.ssz_snappy
+//go:embed test_data/epoch_processing/registry_updates_test_expected.ssz_snappy
 var expectedRegistryUpdatesState []byte
 
-//go:embed test_data/registry_updates_test_state.ssz_snappy
+//go:embed test_data/epoch_processing/registry_updates_test_state.ssz_snappy
 var startingRegistryUpdatesState []byte
 
-//go:embed test_data/effective_balances_expected.ssz_snappy
+//go:embed test_data/epoch_processing/effective_balances_expected.ssz_snappy
 var expectedEffectiveBalancesState []byte
 
-//go:embed test_data/effective_balances_test_state.ssz_snappy
+//go:embed test_data/epoch_processing/effective_balances_test_state.ssz_snappy
 var startingEffectiveBalancesState []byte
 
-//go:embed test_data/historical_roots_expected_test.ssz_snappy
+//go:embed test_data/epoch_processing/historical_roots_expected_test.ssz_snappy
 var expectedHistoricalRootsState []byte
 
-//go:embed test_data/historical_roots_state_test.ssz_snappy
+//go:embed test_data/epoch_processing/historical_roots_state_test.ssz_snappy
 var startingHistoricalRootsState []byte
 
-//go:embed test_data/participation_flag_updates_expected_test.ssz_snappy
+//go:embed test_data/epoch_processing/participation_flag_updates_expected_test.ssz_snappy
 var expectedParticipationFlagState []byte
 
-//go:embed test_data/participation_flag_updates_state_test.ssz_snappy
+//go:embed test_data/epoch_processing/participation_flag_updates_state_test.ssz_snappy
 var startingParticipationFlagState []byte
 
-//go:embed test_data/slashings_expected_test.ssz_snappy
+//go:embed test_data/epoch_processing/slashings_expected_test.ssz_snappy
 var expectedSlashingsState []byte
 
-//go:embed test_data/slashings_state_test.ssz_snappy
+//go:embed test_data/epoch_processing/slashings_state_test.ssz_snappy
 var startingSlashingsState []byte
 
-//go:embed test_data/justification_and_finality_expected_test.ssz_snappy
+//go:embed test_data/epoch_processing/justification_and_finality_expected_test.ssz_snappy
 var expectedJustificationAndFinalityState []byte
 
-//go:embed test_data/justification_and_finality_state_test.ssz_snappy
+//go:embed test_data/epoch_processing/justification_and_finality_state_test.ssz_snappy
 var startingJustificationAndFinalityState []byte
 
-//go:embed test_data/eth1_data_reset_expected_test.ssz_snappy
+//go:embed test_data/epoch_processing/eth1_data_reset_expected_test.ssz_snappy
 var expectedEth1DataResetState []byte
 
-//go:embed test_data/eth1_data_reset_state_test.ssz_snappy
+//go:embed test_data/epoch_processing/eth1_data_reset_state_test.ssz_snappy
 var startingEth1DataResetState []byte
 
-//go:embed test_data/randao_mixes_reset_expected_test.ssz_snappy
+//go:embed test_data/epoch_processing/randao_mixes_reset_expected_test.ssz_snappy
 var expectedRandaoMixesResetState []byte
 
-//go:embed test_data/randao_mixes_reset_state_test.ssz_snappy
+//go:embed test_data/epoch_processing/randao_mixes_reset_state_test.ssz_snappy
 var startingRandaoMixesResetState []byte
 
-//go:embed test_data/slashings_reset_expected_test.ssz_snappy
+//go:embed test_data/epoch_processing/slashings_reset_expected_test.ssz_snappy
 var expectedSlashingsResetState []byte
 
-//go:embed test_data/slashings_reset_state_test.ssz_snappy
+//go:embed test_data/epoch_processing/slashings_reset_state_test.ssz_snappy
 var startingSlashingsResetState []byte
 
 func TestProcessRewardsAndPenalties(t *testing.T) {
@@ -152,10 +153,10 @@ func TestSlashingsReset(t *testing.T) {
 	})
 }
 
-//go:embed test_data/inactivity_scores_expected_test.ssz_snappy
+//go:embed test_data/epoch_processing/inactivity_scores_expected_test.ssz_snappy
 var expectedInactivityScoresState []byte
 
-//go:embed test_data/inactivity_scores_state_test.ssz_snappy
+//go:embed test_data/epoch_processing/inactivity_scores_state_test.ssz_snappy
 var startingInactivityScoresState []byte
 
 func TestInactivityScores(t *testing.T) {

@@ -14,6 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -23,13 +25,17 @@ import (
 type Eth1Execution struct {
 	execution.UnimplementedExecutionServer
 
-	db kv.RwDB
-	mu sync.Mutex
+	db          kv.RwDB
+	blockReader services.FullBlockReader
+	blockWriter *blockio.BlockWriter
+	mu          sync.Mutex
 }
 
-func NewEth1Execution(db kv.RwDB) *Eth1Execution {
+func NewEth1Execution(db kv.RwDB, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter) *Eth1Execution {
 	return &Eth1Execution{
-		db: db,
+		db:          db,
+		blockReader: blockReader,
+		blockWriter: blockWriter,
 	}
 }
 
@@ -47,7 +53,9 @@ func (e *Eth1Execution) InsertHeaders(ctx context.Context, req *execution.Insert
 		if err != nil {
 			return nil, err
 		}
-		rawdb.WriteHeader(tx, h)
+		if err := e.blockWriter.WriteHeader(tx, h); err != nil {
+			return nil, err
+		}
 	}
 	return &execution.EmptyMessage{}, tx.Commit()
 }
@@ -80,7 +88,7 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 				Amount:    withdrawal.Amount,
 			})
 		}
-		if _, _, err := rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
+		if _, _, err := e.blockWriter.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
 			body.BlockNumber, &types.RawBody{
 				Transactions: body.Transactions,
 				Uncles:       uncles,
@@ -119,12 +127,21 @@ func (e *Eth1Execution) GetHeader(ctx context.Context, req *execution.GetSegment
 	var header *types.Header
 	if req.BlockHash != nil && req.BlockNumber != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		header = rawdb.ReadHeader(tx, blockHash, *req.BlockNumber)
+		header, err = e.blockReader.Header(ctx, tx, blockHash, *req.BlockNumber)
+		if err != nil {
+			return nil, err
+		}
 	} else if req.BlockHash != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		header, err = rawdb.ReadHeaderByHash(tx, blockHash)
+		header, err = e.blockReader.HeaderByHash(ctx, tx, blockHash)
+		if err != nil {
+			return nil, err
+		}
 	} else if req.BlockNumber != nil {
-		header = rawdb.ReadHeaderByNumber(tx, *req.BlockNumber)
+		header, err = e.blockReader.HeaderByNumber(ctx, tx, *req.BlockNumber)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -152,14 +169,28 @@ func (e *Eth1Execution) GetBody(ctx context.Context, req *execution.GetSegmentRe
 	var body *types.Body
 	if req.BlockHash != nil && req.BlockNumber != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		body = rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, *req.BlockNumber)
+		if ok, err := rawdb.IsCanonicalHash(tx, blockHash); err != nil {
+			return nil, err
+		} else if ok {
+			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, *req.BlockNumber)
+			if err != nil {
+				return nil, err
+			}
+		}
 	} else if req.BlockHash != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		blockNumber := rawdb.ReadHeaderNumber(tx, blockHash)
-		if blockNumber == nil {
-			return nil, nil
+		if ok, err := rawdb.IsCanonicalHash(tx, blockHash); err != nil {
+			return nil, err
+		} else if ok {
+			blockNumber := rawdb.ReadHeaderNumber(tx, blockHash)
+			if blockNumber == nil {
+				return nil, nil
+			}
+			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, *req.BlockNumber)
+			if err != nil {
+				return nil, err
+			}
 		}
-		body = rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, *blockNumber)
 	}
 	if err != nil {
 		return nil, err

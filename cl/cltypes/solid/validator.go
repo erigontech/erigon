@@ -20,8 +20,13 @@ import (
 // total: 121
 const validatorSize = 48 + 32 + 8 + 1 + 8 + 8 + 8 + 8
 
+// The Validator type represents an Ethereum 2.0 validator.
+// It is stored as a flat buffer, which is a serialized representation of the struct.
+// A flat buffer enables efficient read and write operations, as well as memory storage, without the need for serialization or deserialization.
 type Validator [validatorSize]byte
 
+// NewValidatorFromParameters creates a new Validator object from the provided parameters.
+// It is represented as a flat buffer.
 func NewValidatorFromParameters(
 	PublicKey [48]byte,
 	WithdrawalCredentials [32]byte,
@@ -43,7 +48,6 @@ func NewValidatorFromParameters(
 	v.SetWithdrawableEpoch(WithdrawableEpoch)
 	return v
 }
-
 func (v *Validator) CopyTo(dst *Validator) {
 	copy(dst[:], v[:])
 }

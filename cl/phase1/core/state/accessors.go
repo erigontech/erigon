@@ -51,7 +51,7 @@ func GetTotalBalance(b *raw.BeaconState, validatorSet []uint64) (uint64, error) 
 
 // GetTotalSlashingAmount return the sum of all slashings.
 func GetTotalSlashingAmount(b *raw.BeaconState) (t uint64) {
-	b.ForEachSlashingSegment(func(v uint64, idx, total int) bool {
+	b.ForEachSlashingSegment(func(idx int, v uint64, total int) bool {
 		t += v
 		return true
 	})
@@ -107,18 +107,21 @@ func EligibleValidatorsIndicies(b *raw.BeaconState) (eligibleValidators []uint64
 
 func IsValidIndexedAttestation(b *raw.BeaconState, att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
-	if len(inds) == 0 || !utils.IsSliceSortedSet(inds) {
+	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
 		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 
 	pks := [][]byte{}
-	for _, v := range inds {
+	if err := solid.RangeErr[uint64](inds, func(_ int, v uint64, _ int) error {
 		val, err := b.ValidatorForValidatorIndex(int(v))
 		if err != nil {
-			return false, err
+			return err
 		}
 		pk := val.PublicKey()
 		pks = append(pks, pk[:])
+		return nil
+	}); err != nil {
+		return false, err
 	}
 
 	domain, err := b.GetDomain(b.BeaconConfig().DomainBeaconAttester, att.Data.Target().Epoch())
@@ -143,7 +146,7 @@ func IsValidIndexedAttestation(b *raw.BeaconState, att *cltypes.IndexedAttestati
 
 // getUnslashedParticipatingIndices returns set of currently unslashed participating indexes
 func GetUnslashedParticipatingIndices(b *raw.BeaconState, flagIndex int, epoch uint64) (validatorSet []uint64, err error) {
-	var participation solid.BitList
+	var participation *solid.BitList
 	// Must be either previous or current epoch
 	switch epoch {
 	case Epoch(b):

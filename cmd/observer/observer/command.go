@@ -219,7 +219,7 @@ func (command *Command) withErigonLogPath() {
 	command.command.Flags().StringVar(&command.flags.ErigonLogPath, flag.Name, flag.Value, flag.Usage)
 }
 
-func (command *Command) ExecuteContext(ctx context.Context, runFunc func(ctx context.Context, flags CommandFlags) error) error {
+func (command *Command) ExecuteContext(ctx context.Context, runFunc func(ctx context.Context, flags CommandFlags, logger log.Logger) error) error {
 	command.command.PersistentPostRun = func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	}
@@ -231,7 +231,7 @@ func (command *Command) ExecuteContext(ctx context.Context, runFunc func(ctx con
 			return err
 		}
 		defer debug.Exit()
-		err = runFunc(cmd.Context(), command.flags)
+		err = runFunc(cmd.Context(), command.flags, logger)
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}

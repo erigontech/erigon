@@ -106,8 +106,8 @@ func TestGenerateChain(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
-	if big.NewInt(5).Cmp(current(m.DB).Number()) != 0 {
-		t.Errorf("wrong block number: %d", current(m.DB).Number())
+	if big.NewInt(5).Cmp(current(m).Number()) != 0 {
+		t.Errorf("wrong block number: %d", current(m).Number())
 	}
 	if !uint256.NewInt(989000).Eq(st.GetBalance(addr1)) {
 		t.Errorf("wrong balance of addr1: %s", st.GetBalance(addr1))

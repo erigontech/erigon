@@ -1,7 +1,8 @@
-package cltypes
+package solid
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
@@ -9,6 +10,14 @@ import (
 type TransactionsSSZ struct {
 	underlying [][]byte       // underlying tranaction list
 	root       libcommon.Hash // root
+}
+
+func (*TransactionsSSZ) Clone() clonable.Clonable {
+	return &TransactionsSSZ{}
+}
+
+func (*TransactionsSSZ) Static() bool {
+	return false
 }
 
 func (t *TransactionsSSZ) DecodeSSZ(buf []byte, _ int) error {
@@ -64,7 +73,7 @@ func (t *TransactionsSSZ) HashSSZ() ([32]byte, error) {
 	return t.root, err
 }
 
-func (t *TransactionsSSZ) EncodingSize() (size int) {
+func (t *TransactionsSSZ) EncodingSizeSSZ() (size int) {
 	if t == nil {
 		return 0
 	}

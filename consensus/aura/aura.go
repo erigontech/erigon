@@ -493,7 +493,11 @@ func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 		log.Error("consensus.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
 		return consensus.ErrUnknownAncestor
 	}
-	return ethash.VerifyHeaderBasics(chain, header, parent, false)
+	return ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/, c.HasGasLimitContract() /*skipGasLimit*/)
+}
+
+func (c *AuRa) HasGasLimitContract() bool {
+	return len(c.cfg.BlockRewardContractTransitions) != 0
 }
 
 // nolint

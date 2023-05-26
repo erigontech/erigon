@@ -27,8 +27,10 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/gofrs/flock"
@@ -367,4 +369,12 @@ func OpenDatabase(config *nodecfg.Config, label kv.Label, logger log.Logger) (kv
 // ResolvePath returns the absolute path of a resource in the instance directory.
 func (n *Node) ResolvePath(x string) string {
 	return n.config.ResolvePath(x)
+}
+
+func StartNode(stack *Node) {
+	if err := stack.Start(); err != nil {
+		utils.Fatalf("Error starting protocol stack: %v", err)
+	}
+
+	go debug.ListenSignals(stack)
 }

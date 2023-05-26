@@ -172,11 +172,11 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 		}
 		// Compute proposer reward.
 		proposerReward := (baseReward / beaconConfig.ProposerRewardQuotient)
-		if err = state2.IncreaseBalance(s.BeaconState, attestation.ProposerIndex, proposerReward); err != nil {
+		if err = state2.IncreaseBalance(s.BeaconState, attestation.ProposerIndex(), proposerReward); err != nil {
 			return false
 		}
 		maxAttesterReward := baseReward - proposerReward
-		if err = state2.IncreaseBalance(s.BeaconState, uint64(index), maxAttesterReward/attestation.InclusionDelay); err != nil {
+		if err = state2.IncreaseBalance(s.BeaconState, uint64(index), maxAttesterReward/attestation.InclusionDelay()); err != nil {
 			return false
 		}
 		return true

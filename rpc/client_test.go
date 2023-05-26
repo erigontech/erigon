@@ -35,9 +35,10 @@ import (
 )
 
 func TestClientRequest(t *testing.T) {
-	server := newTestServer()
+	logger := log.New()
+	server := newTestServer(logger)
 	defer server.Stop()
-	client := DialInProc(server)
+	client := DialInProc(server, logger)
 	defer client.Close()
 
 	var resp echoResult
@@ -50,9 +51,10 @@ func TestClientRequest(t *testing.T) {
 }
 
 func TestClientResponseType(t *testing.T) {
-	server := newTestServer()
+	logger := log.New()
+	server := newTestServer(logger)
 	defer server.Stop()
-	client := DialInProc(server)
+	client := DialInProc(server, logger)
 	defer client.Close()
 
 	if err := client.Call(nil, "test_echo", "hello", 10, &echoArgs{"world"}); err != nil {
@@ -68,9 +70,10 @@ func TestClientResponseType(t *testing.T) {
 
 // This test checks that server-returned errors with code and data come out of Client.Call.
 func TestClientErrorData(t *testing.T) {
-	server := newTestServer()
+	logger := log.New()
+	server := newTestServer(logger)
 	defer server.Stop()
-	client := DialInProc(server)
+	client := DialInProc(server, logger)
 	defer client.Close()
 
 	var resp interface{}
@@ -94,9 +97,10 @@ func TestClientErrorData(t *testing.T) {
 }
 
 func TestClientBatchRequest(t *testing.T) {
-	server := newTestServer()
+	logger := log.New()
+	server := newTestServer(logger)
 	defer server.Stop()
-	client := DialInProc(server)
+	client := DialInProc(server, logger)
 	defer client.Close()
 
 	batch := []BatchElem{
@@ -143,9 +147,10 @@ func TestClientBatchRequest(t *testing.T) {
 }
 
 func TestClientNotify(t *testing.T) {
-	server := newTestServer()
+	logger := log.New()
+	server := newTestServer(logger)
 	defer server.Stop()
-	client := DialInProc(server)
+	client := DialInProc(server, logger)
 	defer client.Close()
 
 	if err := client.Notify(context.Background(), "test_echo", "hello", 10, &echoArgs{"world"}); err != nil {
@@ -154,18 +159,18 @@ func TestClientNotify(t *testing.T) {
 }
 
 // func TestClientCancelInproc(t *testing.T) { testClientCancel("inproc", t) }
-func TestClientCancelWebsocket(t *testing.T) { testClientCancel("ws", t) }
-func TestClientCancelHTTP(t *testing.T)      { testClientCancel("http", t) }
+func TestClientCancelWebsocket(t *testing.T) { testClientCancel("ws", t, log.New()) }
+func TestClientCancelHTTP(t *testing.T)      { testClientCancel("http", t, log.New()) }
 
 // This test checks that requests made through CallContext can be canceled by canceling
 // the context.
-func testClientCancel(transport string, t *testing.T) {
+func testClientCancel(transport string, t *testing.T, logger log.Logger) {
 	// These tests take a lot of time, run them all at once.
 	// You probably want to run with -parallel 1 or comment out
 	// the call to t.Parallel if you enable the logging.
 	t.Parallel()
 
-	server := newTestServer()
+	server := newTestServer(logger)
 	defer server.Stop()
 
 	// What we want to achieve is that the context gets canceled
@@ -243,9 +248,10 @@ func testClientCancel(transport string, t *testing.T) {
 }
 
 func TestClientSubscribeInvalidArg(t *testing.T) {
-	server := newTestServer()
+	logger := log.New()
+	server := newTestServer(logger)
 	defer server.Stop()
-	client := DialInProc(server)
+	client := DialInProc(server, logger)
 	defer client.Close()
 
 	check := func(shouldPanic bool, arg interface{}) {
@@ -271,9 +277,10 @@ func TestClientSubscribeInvalidArg(t *testing.T) {
 }
 
 func TestClientSubscribe(t *testing.T) {
-	server := newTestServer()
+	logger := log.New()
+	server := newTestServer(logger)
 	defer server.Stop()
-	client := DialInProc(server)
+	client := DialInProc(server, logger)
 	defer client.Close()
 
 	nc := make(chan int)
@@ -303,7 +310,8 @@ func TestClientSubscribe(t *testing.T) {
 
 // In this test, the connection drops while Subscribe is waiting for a response.
 func TestClientSubscribeClose(t *testing.T) {
-	server := newTestServer()
+	logger := log.New()
+	server := newTestServer(logger)
 	service := &notificationTestService{
 		gotHangSubscriptionReq:  make(chan struct{}),
 		unblockHangSubscription: make(chan struct{}),
@@ -313,7 +321,7 @@ func TestClientSubscribeClose(t *testing.T) {
 	}
 
 	defer server.Stop()
-	client := DialInProc(server)
+	client := DialInProc(server, logger)
 	defer client.Close()
 
 	var (
@@ -347,11 +355,12 @@ func TestClientSubscribeClose(t *testing.T) {
 // This test reproduces https://github.com/ledgerwatch/erigon/issues/17837 where the
 // client hangs during shutdown when Unsubscribe races with Client.Close.
 func TestClientCloseUnsubscribeRace(t *testing.T) {
-	server := newTestServer()
+	logger := log.New()
+	server := newTestServer(logger)
 	defer server.Stop()
 
 	for i := 0; i < 20; i++ {
-		client := DialInProc(server)
+		client := DialInProc(server, logger)
 		nc := make(chan int)
 		sub, err := client.Subscribe(context.Background(), "nftest", nc, "someSubscription", 3, 1)
 		if err != nil {
@@ -370,11 +379,12 @@ func TestClientCloseUnsubscribeRace(t *testing.T) {
 // This test checks that Client doesn't lock up when a single subscriber
 // doesn't read subscription events.
 func TestClientNotificationStorm(t *testing.T) {
-	server := newTestServer()
+	logger := log.New()
+	server := newTestServer(logger)
 	defer server.Stop()
 
 	doTest := func(count int, wantError bool) {
-		client := DialInProc(server)
+		client := DialInProc(server, logger)
 		defer client.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -422,8 +432,9 @@ func TestClientNotificationStorm(t *testing.T) {
 }
 
 func TestClientSetHeader(t *testing.T) {
+	logger := log.New()
 	var gotHeader bool
-	srv := newTestServer()
+	srv := newTestServer(logger)
 	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("test") == "ok" {
 			gotHeader = true
@@ -433,7 +444,7 @@ func TestClientSetHeader(t *testing.T) {
 	defer httpsrv.Close()
 	defer srv.Stop()
 
-	client, err := Dial(httpsrv.URL)
+	client, err := Dial(httpsrv.URL, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +469,8 @@ func TestClientSetHeader(t *testing.T) {
 }
 
 func TestClientHTTP(t *testing.T) {
-	server := newTestServer()
+	logger := log.New()
+	server := newTestServer(logger)
 	defer server.Stop()
 
 	client, hs := httpTestClient(server, "http", nil)
@@ -504,7 +516,7 @@ func TestClientHTTP(t *testing.T) {
 func TestClientReconnect(t *testing.T) {
 	logger := log.New()
 	startServer := func(addr string) (*Server, net.Listener) {
-		srv := newTestServer()
+		srv := newTestServer(logger)
 		l, err := net.Listen("tcp", addr)
 		if err != nil {
 			t.Fatal("can't listen:", err)
@@ -518,7 +530,7 @@ func TestClientReconnect(t *testing.T) {
 
 	// Start a server and corresponding client.
 	s1, l1 := startServer("127.0.0.1:0")
-	client, err := DialContext(ctx, "ws://"+l1.Addr().String())
+	client, err := DialContext(ctx, "ws://"+l1.Addr().String(), logger)
 	if err != nil {
 		t.Fatal("can't dial", err)
 	}
@@ -588,7 +600,7 @@ func httpTestClient(srv *Server, transport string, fl *flakeyListener) (*Client,
 	}
 	// Connect the client.
 	hs.Start()
-	client, err := Dial(transport + "://" + hs.Listener.Addr().String())
+	client, err := Dial(transport+"://"+hs.Listener.Addr().String(), logger)
 	if err != nil {
 		panic(err)
 	}

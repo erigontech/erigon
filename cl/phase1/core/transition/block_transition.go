@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -79,7 +80,7 @@ func processBlock(state *state2.BeaconState, signedBlock *cltypes.SignedBeaconBl
 		c.PutSince()
 	}
 
-	if version >= clparams.DenebVersion {
+	if version >= clparams.DenebVersion && fullValidation {
 		c = h.Tag("process_step", "blob_kzg_commitments")
 		verified, err := VerifyKzgCommitmentsAgainstTransactions(block.Body.ExecutionPayload.Transactions, block.Body.BlobKzgCommitments)
 		if err != nil {
@@ -96,26 +97,34 @@ func processBlock(state *state2.BeaconState, signedBlock *cltypes.SignedBeaconBl
 }
 
 func processOperations(state *state2.BeaconState, blockBody *cltypes.BeaconBody, fullValidation bool) error {
-	if len(blockBody.Deposits) != int(maximumDeposits(state)) {
+	if blockBody.Deposits.Len() != int(maximumDeposits(state)) {
 		return errors.New("outstanding deposits do not match maximum deposits")
 	}
 	h := methelp.NewHistTimer("beacon_process_block_operations")
 
 	// Process each proposer slashing
+	var err error
 	c := h.Tag("operation", "proposer_slashings")
-	for _, slashing := range blockBody.ProposerSlashings {
-		if err := ProcessProposerSlashing(state, slashing); err != nil {
+	if err := solid.RangeErr[*cltypes.ProposerSlashing](blockBody.ProposerSlashings, func(index int, slashing *cltypes.ProposerSlashing, length int) error {
+		if err = ProcessProposerSlashing(state, slashing); err != nil {
 			return fmt.Errorf("ProcessProposerSlashing: %s", err)
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	c.PutSince()
-	// Process each attester slashing
+
 	c = h.Tag("operation", "attester_slashings")
-	for _, slashing := range blockBody.AttesterSlashings {
-		if err := ProcessAttesterSlashing(state, slashing); err != nil {
+	if err := solid.RangeErr[*cltypes.AttesterSlashing](blockBody.AttesterSlashings, func(index int, slashing *cltypes.AttesterSlashing, length int) error {
+		if err = ProcessAttesterSlashing(state, slashing); err != nil {
 			return fmt.Errorf("ProcessAttesterSlashing: %s", err)
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
+
 	c.PutSince()
 
 	// Process each attestations
@@ -130,28 +139,39 @@ func processOperations(state *state2.BeaconState, blockBody *cltypes.BeaconBody,
 
 	// Process each deposit
 	c = h.Tag("operation", "deposit")
-	for _, dep := range blockBody.Deposits {
-		if err := ProcessDeposit(state, dep, fullValidation); err != nil {
+	if err := solid.RangeErr[*cltypes.Deposit](blockBody.Deposits, func(index int, deposit *cltypes.Deposit, length int) error {
+		if err = ProcessDeposit(state, deposit, fullValidation); err != nil {
 			return fmt.Errorf("ProcessDeposit: %s", err)
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	c.PutSince()
 
 	// Process each voluntary exit.
 	c = h.Tag("operation", "voluntary_exit")
-	for _, exit := range blockBody.VoluntaryExits {
-		if err := ProcessVoluntaryExit(state, exit, fullValidation); err != nil {
+	if err := solid.RangeErr[*cltypes.SignedVoluntaryExit](blockBody.VoluntaryExits, func(index int, exit *cltypes.SignedVoluntaryExit, length int) error {
+		if err = ProcessVoluntaryExit(state, exit, fullValidation); err != nil {
 			return fmt.Errorf("ProcessVoluntaryExit: %s", err)
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	c.PutSince()
-
+	if state.Version() < clparams.CapellaVersion {
+		return nil
+	}
 	// Process each execution change. this will only have entries after the capella fork.
 	c = h.Tag("operation", "execution_change")
-	for _, addressChange := range blockBody.ExecutionChanges {
+	if err := solid.RangeErr[*cltypes.SignedBLSToExecutionChange](blockBody.ExecutionChanges, func(index int, addressChange *cltypes.SignedBLSToExecutionChange, length int) error {
 		if err := ProcessBlsToExecutionChange(state, addressChange, fullValidation); err != nil {
-			return err
+			return fmt.Errorf("ProcessBlsToExecutionChange: %s", err)
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	c.PutSince()
 	return nil

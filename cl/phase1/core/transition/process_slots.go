@@ -2,16 +2,15 @@ package transition
 
 import (
 	"fmt"
-	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/state_encoding"
 	"time"
+
+	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	"github.com/Giulio2002/bls"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -160,11 +159,11 @@ func ProcessHistoricalRootsUpdate(s *state2.BeaconState) error {
 	}
 
 	// Compute historical root batch.
-	blockRootsLeaf, err := merkle_tree.ArraysRoot(utils.PreparateRootsForHashing(blockRoots[:]), state_encoding.BlockRootsLength)
+	blockRootsLeaf, err := blockRoots.HashSSZ()
 	if err != nil {
 		return err
 	}
-	stateRootsLeaf, err := merkle_tree.ArraysRoot(utils.PreparateRootsForHashing(stateRoots[:]), state_encoding.StateRootsLength)
+	stateRootsLeaf, err := stateRoots.HashSSZ()
 	if err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -57,7 +58,7 @@ func txPeekBlobVersionedHashes(txBytes []byte) []libcommon.Hash {
 	return versionedHashes
 }
 
-func VerifyKzgCommitmentsAgainstTransactions(transactions *cltypes.TransactionsSSZ, kzgCommitments []*cltypes.KZGCommitment) (bool, error) {
+func VerifyKzgCommitmentsAgainstTransactions(transactions *solid.TransactionsSSZ, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) (bool, error) {
 	allVersionedHashes := []libcommon.Hash{}
 	transactions.ForEach(func(tx []byte, idx, total int) bool {
 		if tx[0] != types.BlobTxType {
@@ -69,13 +70,19 @@ func VerifyKzgCommitmentsAgainstTransactions(transactions *cltypes.TransactionsS
 	})
 
 	commitmentVersionedHash := []libcommon.Hash{}
-	for _, commitment := range kzgCommitments {
-		versionedHash, err := kzgCommitmentToVersionedHash(commitment)
+	var err error
+	var versionedHash libcommon.Hash
+	kzgCommitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
+		versionedHash, err = kzgCommitmentToVersionedHash(value)
 		if err != nil {
-			return false, err
+			return false
 		}
 
 		commitmentVersionedHash = append(commitmentVersionedHash, versionedHash)
+		return true
+	})
+	if err != nil {
+		return false, err
 	}
 
 	return reflect.DeepEqual(allVersionedHashes, commitmentVersionedHash), nil

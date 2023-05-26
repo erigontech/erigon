@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -30,14 +31,16 @@ type Eth1Execution struct {
 	db                kv.RwDB
 	executionPipeline *stagedsync.Sync
 	blockReader       services.FullBlockReader
+	blockWriter       *blockio.BlockWriter
 	mu                sync.Mutex
 }
 
-func NewEth1Execution(db kv.RwDB, blockReader services.FullBlockReader, executionPipeline *stagedsync.Sync) *Eth1Execution {
+func NewEth1Execution(db kv.RwDB, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, executionPipeline *stagedsync.Sync) *Eth1Execution {
 	return &Eth1Execution{
 		db:                db,
 		executionPipeline: executionPipeline,
 		blockReader:       blockReader,
+		blockWriter:       blockWriter,
 	}
 }
 
@@ -55,7 +58,9 @@ func (e *Eth1Execution) InsertHeaders(ctx context.Context, req *execution.Insert
 		if err != nil {
 			return nil, err
 		}
-		rawdb.WriteHeader(tx, h)
+		if err := e.blockWriter.WriteHeader(tx, h); err != nil {
+			return nil, err
+		}
 	}
 	return &execution.EmptyMessage{}, tx.Commit()
 }
@@ -79,7 +84,7 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 			uncles = append(uncles, h)
 		}
 		// Withdrawals processing
-		if _, _, err := rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
+		if _, _, err := e.blockWriter.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
 			body.BlockNumber, &types.RawBody{
 				Transactions: body.Transactions,
 				Uncles:       uncles,

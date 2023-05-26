@@ -51,7 +51,7 @@ func main() {
 	)
 	flag.Parse()
 
-	logging.SetupLogger("bootnode")
+	logger := logging.SetupLogger("bootnode")
 
 	natm, err := nat.Parse(*natdesc)
 	if err != nil {
@@ -108,7 +108,7 @@ func main() {
 	realaddr := conn.LocalAddr().(*net.UDPAddr)
 	if natm != nil {
 		if !realaddr.IP.IsLoopback() && natm.SupportsMapping() {
-			go nat.Map(natm, nil, "udp", realaddr.Port, realaddr.Port, "ethereum discovery")
+			go nat.Map(natm, nil, "udp", realaddr.Port, realaddr.Port, "ethereum discovery", logger)
 		}
 		if ext, err := natm.ExternalIP(); err == nil {
 			realaddr = &net.UDPAddr{IP: ext, Port: realaddr.Port}
@@ -121,7 +121,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	ln := enode.NewLocalNode(db, nodeKey)
+	ln := enode.NewLocalNode(db, nodeKey, logger)
 	cfg := discover.Config{
 		PrivateKey:  nodeKey,
 		NetRestrict: restrictList,

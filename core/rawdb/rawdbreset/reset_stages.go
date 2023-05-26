@@ -6,13 +6,13 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/backup"
@@ -52,9 +52,9 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) er
 }
 
 func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3,
-	br services.FullBlockReader, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine, logger log.Logger) error {
+	br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine, logger log.Logger) error {
 	// keep Genesis
-	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
+	if err := bw.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.Bodies, 1); err != nil {
@@ -71,7 +71,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 	if err := rawdb.TruncateCanonicalHash(tx, 1, false); err != nil {
 		return err
 	}
-	if err := rawdb.TruncateTd(tx, 1); err != nil {
+	if err := bw.TruncateTd(tx, 1); err != nil {
 		return err
 	}
 	hash, err := rawdb.ReadCanonicalHash(tx, 0)
@@ -83,29 +83,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 	}
 
 	// ensure no garbage records left (it may happen if db is inconsistent)
-	if err := tx.ForEach(kv.BlockBody, hexutility.EncodeTs(2), func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
-		return err
-	}
-	ethtx := kv.EthTx
-	transactionV3, err := kvcfg.TransactionsV3.Enabled(tx)
-	if err != nil {
-		panic(err)
-	}
-	if transactionV3 {
-		ethtx = kv.EthTxV3
-	}
-
-	if err := backup.ClearTables(context.Background(), db, tx,
-		kv.NonCanonicalTxs,
-		ethtx,
-		kv.MaxTxNum,
-	); err != nil {
-		return err
-	}
-	if err := rawdb.ResetSequence(tx, ethtx, 0); err != nil {
-		return err
-	}
-	if err := rawdb.ResetSequence(tx, kv.NonCanonicalTxs, 0); err != nil {
+	if err := bw.TruncateBodies(db, tx, 2); err != nil {
 		return err
 	}
 
@@ -121,8 +99,8 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 
 	return nil
 }
-func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
-	if err := backup.ClearTables(ctx, db, tx, kv.Senders); err != nil {
+func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx, bw *blockio.BlockWriter) error {
+	if err := bw.ResetSenders(ctx, db, tx); err != nil {
 		return nil
 	}
 	return clearStageProgress(tx, stages.Senders)
