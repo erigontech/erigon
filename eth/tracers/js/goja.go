@@ -608,7 +608,7 @@ func (mo *memoryObj) GetBytes() goja.Value {
 	for _, b := range mo.memory.Data() {
 		bytes = append(bytes, b)
 	}
-	return mo.vm.NewArray(bytes)
+	return mo.vm.NewArray(bytes...)
 }
 
 func (mo *memoryObj) Length() int {
@@ -652,14 +652,12 @@ func (s *stackObj) peek(idx int) (*big.Int, error) {
 	return s.stack.Back(idx).ToBig(), nil
 }
 
-func (s *stackObj) GetBytes() goja.Value {
-	var bytes []interface{}
-	for _, v := range s.stack.Data {
-		for _, b := range v.Bytes() {
-			bytes = append(bytes, b)
-		}
+func (s *stackObj) GetBytesArr() goja.Value {
+	var bytesArr []interface{}
+	for i := len(s.stack.Data) - 1; i >= 0; i-- {
+		bytesArr = append(bytesArr, s.stack.Data[i].Bytes())
 	}
-	return s.vm.NewArray(bytes)
+	return s.vm.NewArray(bytesArr...)
 }
 
 func (s *stackObj) Length() int {
@@ -669,7 +667,7 @@ func (s *stackObj) Length() int {
 func (s *stackObj) setupObject() *goja.Object {
 	o := s.vm.NewObject()
 	o.Set("peek", s.vm.ToValue(s.Peek))
-	o.Set("getBytes", s.vm.ToValue(s.GetBytes))
+	o.Set("getBytesArr", s.vm.ToValue(s.GetBytesArr))
 	o.Set("length", s.vm.ToValue(s.Length))
 	return o
 }
