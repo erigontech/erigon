@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -44,23 +43,17 @@ type SnapshotsCfg struct {
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        services.FullBlockReader
 	dbEventNotifier    snapshotsync.DBEventNotifier
-	engine             consensus.Engine
 
 	historyV3 bool
 	agg       *state.AggregatorV3
 }
 
-func StageSnapshotsCfg(
-	db kv.RwDB,
-	chainConfig chain.Config,
-	dirs datadir.Dirs,
+func StageSnapshotsCfg(db kv.RwDB,
+	chainConfig chain.Config, dirs datadir.Dirs,
 	blockRetire *snapshotsync.BlockRetire,
 	snapshotDownloader proto_downloader.DownloaderClient,
-	blockReader services.FullBlockReader,
-	dbEventNotifier snapshotsync.DBEventNotifier,
-	engine consensus.Engine,
-	historyV3 bool,
-	agg *state.AggregatorV3,
+	blockReader services.FullBlockReader, dbEventNotifier snapshotsync.DBEventNotifier,
+	historyV3 bool, agg *state.AggregatorV3,
 ) SnapshotsCfg {
 	return SnapshotsCfg{
 		db:                 db,
@@ -72,7 +65,6 @@ func StageSnapshotsCfg(
 		dbEventNotifier:    dbEventNotifier,
 		historyV3:          historyV3,
 		agg:                agg,
-		engine:             engine,
 	}
 }
 
