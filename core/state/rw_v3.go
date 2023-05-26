@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -167,6 +168,9 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 				}
 			}
 			if upd.Flags&commitment.CodeUpdate != 0 {
+				if len(upd.CodeValue[:]) == 0 && !bytes.Equal(upd.CodeHashOrStorage[:], emptyCodeHash) {
+					continue
+				}
 				fmt.Printf("apply - update code %x h %x v %x\n", key, upd.CodeHashOrStorage[:], upd.CodeValue[:])
 				if err := domains.UpdateAccountCode(key, upd.CodeValue, upd.CodeHashOrStorage[:]); err != nil {
 					return err
