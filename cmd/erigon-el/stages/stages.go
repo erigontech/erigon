@@ -7,9 +7,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -32,24 +32,22 @@ func ExecutionStages(ctx context.Context, sm prune.Mode, snapshots stagedsync.Sn
 	return defaultStages
 }
 
-func NewStagedSync(ctx context.Context,
+func NewStagedSync(
+	ctx context.Context,
 	db kv.RwDB,
 	p2pCfg p2p.Config,
 	cfg *ethconfig.Config,
 	controlServer *sentry.MultiClient,
 	notifications *shards.Notifications,
 	snapDownloader proto_downloader.DownloaderClient,
-	snapshots *snapshotsync.RoSnapshots,
 	agg *state.AggregatorV3,
 	forkValidator *engineapi.ForkValidator,
-	engine consensus.Engine,
-	transactionsV3 bool,
 	logger log.Logger,
+	blockReader services.FullBlockReader,
+	blockWriter *blockio.BlockWriter,
 ) (*stagedsync.Sync, error) {
 	dirs := cfg.Dirs
-	blockReader := snapshotsync.NewBlockReader(snapshots, transactionsV3)
-	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events, logger)
-	blockWriter := blockio.NewBlockWriter(transactionsV3)
+	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, blockReader, db, snapDownloader, notifications.Events, logger)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.
@@ -57,51 +55,11 @@ func NewStagedSync(ctx context.Context,
 
 	return stagedsync.New(
 		ExecutionStages(ctx, cfg.Prune,
-			stagedsync.StageSnapshotsCfg(
-				db,
-				*controlServer.ChainConfig,
-				dirs,
-				snapshots,
-				blockRetire,
-				snapDownloader,
-				blockReader,
-				notifications.Events,
-				engine,
-				cfg.HistoryV3,
-				agg,
-			),
-			stagedsync.StageHeadersCfg(
-				db,
-				controlServer.Hd,
-				controlServer.Bd,
-				*controlServer.ChainConfig,
-				controlServer.SendHeaderRequest,
-				controlServer.PropagateNewBlockHashes,
-				controlServer.Penalize,
-				cfg.BatchSize,
-				p2pCfg.NoDiscovery,
-				snapshots,
-				blockReader,
-				blockWriter,
-				dirs.Tmp,
-				notifications,
-				forkValidator,
-			),
+			stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, dirs, blockRetire, snapDownloader, blockReader, notifications.Events, cfg.HistoryV3, agg),
+			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications, forkValidator),
 			stagedsync.StageCumulativeIndexCfg(db),
 			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
-			stagedsync.StageBodiesCfg(
-				db,
-				controlServer.Bd,
-				controlServer.SendBodyRequest,
-				controlServer.Penalize,
-				controlServer.BroadcastNewBlock,
-				cfg.Sync.BodyDownloadTimeoutSeconds,
-				*controlServer.ChainConfig,
-				snapshots,
-				blockReader,
-				cfg.HistoryV3,
-				blockWriter,
-			),
+			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockRetire, blockWriter, blockReader, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
@@ -127,7 +85,7 @@ func NewStagedSync(ctx context.Context,
 			stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
-			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, snapshots, controlServer.ChainConfig.Bor, blockReader),
+			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 			stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
 			runInTestMode),
 		stagedsync.DefaultUnwindOrder,

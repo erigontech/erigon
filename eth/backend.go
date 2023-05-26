@@ -254,7 +254,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		},
 		logger: logger,
 	}
-	blockReader, blockWriter, allSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config.Snapshot, backend.notifications.Events, config.TransactionsV3, logger)
+	blockReader, blockWriter, allSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config.Snapshot, config.TransactionsV3, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +445,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	var currentBlock *types.Block
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
-		currentBlock, err = blockReader.CurrentBlock(tx)
+		currentBlock = rawdb.ReadCurrentBlock(tx)
+		//currentBlock, err = blockReader.CurrentBlock(tx)
 		return err
 	}); err != nil {
 		panic(err)
@@ -522,7 +523,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir, backend.blockReader),
-			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool2, backend.txPool2DB, allSnapshots, config.TransactionsV3),
+			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool2, backend.txPool2DB, blockReader),
 			stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader),
@@ -541,7 +542,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir, backend.blockReader),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool2, backend.txPool2DB, allSnapshots, config.TransactionsV3),
+				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool2, backend.txPool2DB, blockReader),
 				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader),
@@ -713,14 +714,14 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	return backend, nil
 }
-func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
-	ethBackendRPC, miningRPC, stateDiffClient := backend.ethBackendRPC, backend.miningRPC, backend.stateChangesClient
-	blockReader := backend.blockReader
-	ctx := backend.sentryCtx
-	chainKv := backend.chainDB
+func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
+	ethBackendRPC, miningRPC, stateDiffClient := s.ethBackendRPC, s.miningRPC, s.stateChangesClient
+	blockReader := s.blockReader
+	ctx := s.sentryCtx
+	chainKv := s.chainDB
 	var err error
 
-	backend.sentriesClient.Hd.StartPoSDownloader(backend.sentryCtx, backend.sentriesClient.SendHeaderRequest, backend.sentriesClient.Penalize)
+	s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
 
 	emptyBadHash := config.BadBlockHash == libcommon.Hash{}
 	if !emptyBadHash {
@@ -735,7 +736,7 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 
 		if badBlockHeader != nil {
 			unwindPoint := badBlockHeader.Number.Uint64() - 1
-			backend.stagedSync.UnwindTo(unwindPoint, config.BadBlockHash)
+			s.stagedSync.UnwindTo(unwindPoint, config.BadBlockHash)
 		}
 	}
 
@@ -747,34 +748,34 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 	if config.Ethstats != "" {
 		var headCh chan [][]byte
-		headCh, backend.unsubscribeEthstat = backend.notifications.Events.AddHeaderSubscription()
-		if err := ethstats.New(stack, backend.sentryServers, chainKv, backend.blockReader, backend.engine, config.Ethstats, backend.networkID, ctx.Done(), headCh); err != nil {
+		headCh, s.unsubscribeEthstat = s.notifications.Events.AddHeaderSubscription()
+		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, s.engine, config.Ethstats, s.networkID, ctx.Done(), headCh); err != nil {
 			return err
 		}
 	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
 	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, ethBackendRPC,
-		backend.txPool2GrpcServer, miningRPC, stateDiffClient, backend.logger)
+		s.txPool2GrpcServer, miningRPC, stateDiffClient, s.logger)
 	if err != nil {
 		return err
 	}
 
 	var borDb kv.RoDB
-	if casted, ok := backend.engine.(*bor.Bor); ok {
+	if casted, ok := s.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, backend.logger)
-	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, backend.logger)
+	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
+	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
 	go func() {
-		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList, backend.logger); err != nil {
-			backend.logger.Error(err.Error())
+		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList, s.logger); err != nil {
+			s.logger.Error(err.Error())
 			return
 		}
 	}()
 
 	// Register the backend on the node
-	stack.RegisterLifecycle(backend)
+	stack.RegisterLifecycle(s)
 	return nil
 }
 
@@ -1035,7 +1036,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 	return err
 }
 
-func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig ethconfig.Snapshot, notifications *shards.Events, transactionsV3 bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
+func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig ethconfig.Snapshot, transactionsV3 bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
 	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap, logger)
 	var err error
 	if !snConfig.NoDownloader {

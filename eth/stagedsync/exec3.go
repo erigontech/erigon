@@ -27,6 +27,7 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
@@ -155,7 +156,7 @@ func ExecV3(ctx context.Context,
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
-	blockSnapshots := blockReader.(WithSnapshots).Snapshots()
+	blockSnapshots := blockReader.Snapshots().(*snapshotsync.RoSnapshots)
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
@@ -1334,7 +1335,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	chainConfig *chain.Config, genesis *types.Genesis) (err error) {
 	startTime := time.Now()
 	defer agg.EnableMadvNormal().DisableReadAhead()
-	blockSnapshots := blockReader.(WithSnapshots).Snapshots()
+	blockSnapshots := blockReader.Snapshots().(*snapshotsync.RoSnapshots)
 	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
 
 	// force merge snapshots before reconstitution, to allign domains progress

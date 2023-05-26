@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
@@ -49,7 +48,6 @@ type HeadersCfg struct {
 	noP2PDiscovery    bool
 	tmpdir            string
 
-	snapshots     *snapshotsync.RoSnapshots
 	blockReader   services.FullBlockReader
 	blockWriter   *blockio.BlockWriter
 	forkValidator *engineapi.ForkValidator
@@ -66,7 +64,6 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
-	snapshots *snapshotsync.RoSnapshots,
 	blockReader services.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
 	tmpdir string,
@@ -83,7 +80,6 @@ func StageHeadersCfg(
 		batchSize:         batchSize,
 		tmpdir:            tmpdir,
 		noP2PDiscovery:    noP2PDiscovery,
-		snapshots:         snapshots,
 		blockReader:       blockReader,
 		blockWriter:       blockWriter,
 		forkValidator:     forkValidator,
@@ -110,8 +106,8 @@ func SpawnStageHeaders(
 		}
 		defer tx.Rollback()
 	}
-	if initialCycle && cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
-		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+	if initialCycle && cfg.blockReader != nil && cfg.blockReader.Snapshots() != nil && cfg.blockReader.Snapshots().Cfg().Enabled {
+		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader.Snapshots().BlocksAvailable(), cfg.blockReader); err != nil {
 			return err
 		}
 	}

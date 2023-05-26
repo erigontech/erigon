@@ -45,7 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 const (
@@ -60,10 +59,6 @@ type HasChangeSetWriter interface {
 }
 
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
-
-type WithSnapshots interface {
-	Snapshots() *snapshotsync.RoSnapshots
-}
 
 type headerDownloader interface {
 	ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash)

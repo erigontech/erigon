@@ -43,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
@@ -999,20 +1000,20 @@ type BlockRetire struct {
 	working               atomic.Bool
 	needSaveFilesListInDB atomic.Bool
 
-	workers   int
-	tmpDir    string
-	snapshots *RoSnapshots
-	db        kv.RoDB
+	workers int
+	tmpDir  string
+	db      kv.RoDB
 
-	downloader proto_downloader.DownloaderClient
-	notifier   DBEventNotifier
-	logger     log.Logger
+	downloader  proto_downloader.DownloaderClient
+	notifier    DBEventNotifier
+	logger      log.Logger
+	blockReader services.FullBlockReader
 }
 
-func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier, logger log.Logger) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, db: db, downloader: downloader, notifier: notifier, logger: logger}
+func NewBlockRetire(workers int, tmpDir string, br services.FullBlockReader, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier, logger log.Logger) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, blockReader: br, db: db, downloader: downloader, notifier: notifier, logger: logger}
 }
-func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots }
+func (br *BlockRetire) Snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
 func (br *BlockRetire) NeedSaveFilesListInDB() bool {
 	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
@@ -1054,7 +1055,7 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	}
 	return blockFrom, blockTo, blockTo-blockFrom >= 1_000
 }
-func CanDeleteTo(curBlockNum uint64, snapshots *RoSnapshots) (blockTo uint64) {
+func CanDeleteTo(curBlockNum uint64, snapshots services.BlockSnapshots) (blockTo uint64) {
 	if curBlockNum+999 < params.FullImmutabilityThreshold {
 		// To prevent overflow of uint64 below
 		return snapshots.BlocksAvailable() + 1
@@ -1065,18 +1066,18 @@ func CanDeleteTo(curBlockNum uint64, snapshots *RoSnapshots) (blockTo uint64) {
 func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl) error {
 	chainConfig := fromdb.ChainConfig(br.db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	return retireBlocks(ctx, blockFrom, blockTo, *chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier, br.logger)
+	return retireBlocks(ctx, blockFrom, blockTo, *chainID, br.tmpDir, br.blockReader, br.db, br.workers, br.downloader, lvl, br.notifier, br.logger)
 }
 
 func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
-	if br.snapshots.cfg.KeepBlocks {
+	if br.blockReader.Snapshots().(*RoSnapshots).cfg.KeepBlocks {
 		return nil
 	}
 	currentProgress, err := stages.GetStageProgress(tx, stages.Senders)
 	if err != nil {
 		return err
 	}
-	canDeleteTo := CanDeleteTo(currentProgress, br.snapshots)
+	canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.Snapshots())
 	if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, limit); err != nil {
 		return nil
 	}
@@ -1111,11 +1112,13 @@ type DBEventNotifier interface {
 	OnNewSnapshot()
 }
 
-func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, downloader proto_downloader.DownloaderClient,
+func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string,
+	blockReader services.FullBlockReader, db kv.RoDB, workers int, downloader proto_downloader.DownloaderClient,
 	lvl log.Lvl, notifier DBEventNotifier, logger log.Logger) error {
 	logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
+	snapshots := blockReader.Snapshots().(*RoSnapshots)
 	// in future we will do it in background
-	if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2SegmentSize, tmpDir, snapshots.Dir(), db, workers, lvl, logger); err != nil {
+	if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2SegmentSize, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
 	if err := snapshots.ReopenFolder(); err != nil {
@@ -1155,20 +1158,20 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	return nil
 }
 
-func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger) error {
+func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	if blocksPerFile == 0 {
 		return nil
 	}
 	chainConfig := fromdb.ChainConfig(chainDB)
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
-		if err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, chainDB, *chainConfig, workers, lvl, logger); err != nil {
+		if err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, chainDB, *chainConfig, workers, lvl, logger, blockReader); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger) error {
+func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	chainId, _ := uint256.FromBig(chainConfig.ChainID)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -1233,7 +1236,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 
 		_, expectedCount, err := DumpTxs(ctx, chainDB, blockFrom, blockTo, workers, lvl, logger, func(v []byte) error {
 			return sn.AddWord(v)
-		}, ethconfig.EnableTxsV3InTest)
+		}, blockReader.TxsV3Enabled())
 		if err != nil {
 			return fmt.Errorf("DumpTxs: %w", err)
 		}
