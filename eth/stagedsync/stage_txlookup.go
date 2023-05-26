@@ -25,7 +25,6 @@ type TxLookupCfg struct {
 	db          kv.RwDB
 	prune       prune.Mode
 	tmpdir      string
-	snapshots   *snapshotsync.RoSnapshots
 	borConfig   *chain.BorConfig
 	blockReader services.FullBlockReader
 }
@@ -34,7 +33,6 @@ func StageTxLookupCfg(
 	db kv.RwDB,
 	prune prune.Mode,
 	tmpdir string,
-	snapshots *snapshotsync.RoSnapshots,
 	borConfig *chain.BorConfig,
 	blockReader services.FullBlockReader,
 ) TxLookupCfg {
@@ -42,7 +40,6 @@ func StageTxLookupCfg(
 		db:          db,
 		prune:       prune,
 		tmpdir:      tmpdir,
-		snapshots:   snapshots,
 		borConfig:   borConfig,
 		blockReader: blockReader,
 	}
@@ -79,10 +76,12 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 			}
 		}
 	}
-	if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
-		if cfg.snapshots.BlocksAvailable() > startBlock {
+
+	snapshots := cfg.blockReader.Snapshots()
+	if snapshots.Cfg().Enabled {
+		if snapshots.BlocksAvailable() > startBlock {
 			// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
-			startBlock = cfg.snapshots.BlocksAvailable()
+			startBlock = snapshots.BlocksAvailable()
 			if err = s.UpdatePrune(tx, startBlock); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
 				return err
 			}
@@ -190,8 +189,9 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	// end key needs to be s.BlockNumber + 1 and not s.BlockNumber, because
 	// the keys in BlockBody table always have hash after the block number
 	blockFrom, blockTo := u.UnwindPoint+1, s.BlockNumber+1
-	if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
-		smallestInDB := cfg.snapshots.BlocksAvailable()
+	snapshots := cfg.blockReader.Snapshots()
+	if snapshots.Cfg().Enabled {
+		smallestInDB := snapshots.BlocksAvailable()
 		blockFrom, blockTo = cmp.Max(blockFrom, smallestInDB), cmp.Max(blockTo, smallestInDB)
 	}
 	// etl.Transform uses ExtractEndKey as exclusive bound, therefore blockTo + 1
@@ -229,11 +229,12 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	var pruneBor bool
 
 	// Forward stage doesn't write anything before PruneTo point
+	blockSnapshots := cfg.blockReader.Snapshots()
 	if cfg.prune.TxIndex.Enabled() {
 		blockTo = cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 		pruneBor = true
-	} else if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
-		blockTo = snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.snapshots)
+	} else if blockSnapshots != nil && blockSnapshots.Cfg().Enabled {
+		blockTo = snapshotsync.CanDeleteTo(s.ForwardProgress, blockSnapshots)
 	}
 
 	if !initialCycle { // limit time for pruning

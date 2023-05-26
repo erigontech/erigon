@@ -62,15 +62,18 @@ func (back *RemoteBackend) BlockByNumber(ctx context.Context, db kv.Tx, number u
 	block, _, err := back.BlockWithSenders(ctx, db, hash, number)
 	return block, err
 }
-func (r *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash libcommon.Hash) (*types.Block, error) {
+func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash libcommon.Hash) (*types.Block, error) {
 	number := rawdb.ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil, nil
 	}
-	block, _, err := r.BlockWithSenders(ctx, db, hash, *number)
+	block, _, err := back.BlockWithSenders(ctx, db, hash, *number)
 	return block, err
 }
 func (back *RemoteBackend) TxsV3Enabled() bool {
+	panic("not implemented")
+}
+func (back *RemoteBackend) Snapshots() services.BlockSnapshots {
 	panic("not implemented")
 }
 func (back *RemoteBackend) EnsureVersionCompatibility() bool {
