@@ -176,7 +176,7 @@ func (v *ValidatorSet) Set(idx int, val Validator) {
 	copy(v.buffer[idx*validatorSize:(idx*validatorSize)+validatorSize], val)
 }
 
-func (v *ValidatorSet) GetPhase0(idx int) *Phase0Data {
+func (v *ValidatorSet) getPhase0(idx int) *Phase0Data {
 	if idx >= v.l {
 		panic("ValidatorSet -- Get: out of bounds")
 	}
@@ -192,4 +192,68 @@ func (v *ValidatorSet) Range(fn func(int, Validator, int) bool) {
 			return
 		}
 	}
+}
+
+func (v *ValidatorSet) IsCurrentMatchingSourceAttester(idx int) bool {
+	return v.getPhase0(idx).IsCurrentMatchingSourceAttester
+}
+
+func (v *ValidatorSet) IsCurrentMatchingTargetAttester(idx int) bool {
+	return v.getPhase0(idx).IsCurrentMatchingTargetAttester
+}
+
+func (v *ValidatorSet) IsCurrentMatchingHeadAttester(idx int) bool {
+	return v.getPhase0(idx).IsCurrentMatchingHeadAttester
+}
+
+func (v *ValidatorSet) IsPreviousMatchingSourceAttester(idx int) bool {
+	return v.getPhase0(idx).IsPreviousMatchingSourceAttester
+}
+
+func (v *ValidatorSet) IsPreviousMatchingTargetAttester(idx int) bool {
+	return v.getPhase0(idx).IsPreviousMatchingTargetAttester
+}
+
+func (v *ValidatorSet) IsPreviousMatchingHeadAttester(idx int) bool {
+	return v.getPhase0(idx).IsPreviousMatchingHeadAttester
+}
+
+func (v *ValidatorSet) MinCurrentInclusionDelayAttestation(idx int) *PendingAttestation {
+	return v.getPhase0(idx).MinCurrentInclusionDelayAttestation
+}
+
+func (v *ValidatorSet) MinPreviousInclusionDelayAttestation(idx int) *PendingAttestation {
+	return v.getPhase0(idx).MinPreviousInclusionDelayAttestation
+}
+
+func (v *ValidatorSet) SetIsCurrentMatchingSourceAttester(idx int, val bool) {
+	v.getPhase0(idx).IsCurrentMatchingSourceAttester = val
+}
+
+func (v *ValidatorSet) SetIsCurrentMatchingTargetAttester(idx int, val bool) {
+	v.getPhase0(idx).IsCurrentMatchingTargetAttester = val
+}
+
+func (v *ValidatorSet) SetIsCurrentMatchingHeadAttester(idx int, val bool) {
+	v.getPhase0(idx).IsCurrentMatchingHeadAttester = val
+}
+
+func (v *ValidatorSet) SetIsPreviousMatchingSourceAttester(idx int, val bool) {
+	v.getPhase0(idx).IsPreviousMatchingSourceAttester = val
+}
+
+func (v *ValidatorSet) SetIsPreviousMatchingTargetAttester(idx int, val bool) {
+	v.getPhase0(idx).IsPreviousMatchingTargetAttester = val
+}
+
+func (v *ValidatorSet) SetIsPreviousMatchingHeadAttester(idx int, val bool) {
+	v.getPhase0(idx).IsPreviousMatchingHeadAttester = val
+}
+
+func (v *ValidatorSet) SetMinCurrentInclusionDelayAttestation(idx int, val *PendingAttestation) {
+	v.getPhase0(idx).MinCurrentInclusionDelayAttestation = val
+}
+
+func (v *ValidatorSet) SetMinPreviousInclusionDelayAttestation(idx int, val *PendingAttestation) {
+	v.getPhase0(idx).MinPreviousInclusionDelayAttestation = val
 }

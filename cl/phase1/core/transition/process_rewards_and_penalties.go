@@ -85,14 +85,24 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 		if validator.Slashed() {
 			return true
 		}
-		phase0Data := s.Phase0DataForValidatorIndex(idx)
-		if phase0Data.IsPreviousMatchingSourceAttester {
+		var previousMatchingSourceAttester, previousMatchingTargetAttester, previousMatchingHeadAttester bool
+
+		if previousMatchingSourceAttester, err = s.ValidatorIsPreviousMatchingSourceAttester(idx); err != nil {
+			return false
+		}
+		if previousMatchingTargetAttester, err = s.ValidatorIsPreviousMatchingTargetAttester(idx); err != nil {
+			return false
+		}
+		if previousMatchingHeadAttester, err = s.ValidatorIsPreviousMatchingHeadAttester(idx); err != nil {
+			return false
+		}
+		if previousMatchingSourceAttester {
 			unslashedMatchingSourceBalanceIncrements += validator.EffectiveBalance()
 		}
-		if phase0Data.IsPreviousMatchingTargetAttester {
+		if previousMatchingTargetAttester {
 			unslashedMatchingTargetBalanceIncrements += validator.EffectiveBalance()
 		}
-		if phase0Data.IsPreviousMatchingHeadAttester {
+		if previousMatchingHeadAttester {
 			unslashedMatchingHeadBalanceIncrements += validator.EffectiveBalance()
 		}
 		return true
@@ -111,20 +121,30 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 		if err != nil {
 			return err
 		}
-		phase0Data := s.Phase0DataForValidatorIndex(int(index))
+		var previousMatchingSourceAttester, previousMatchingTargetAttester, previousMatchingHeadAttester bool
+
+		if previousMatchingSourceAttester, err = s.ValidatorIsPreviousMatchingSourceAttester(int(index)); err != nil {
+			return err
+		}
+		if previousMatchingTargetAttester, err = s.ValidatorIsPreviousMatchingTargetAttester(int(index)); err != nil {
+			return err
+		}
+		if previousMatchingHeadAttester, err = s.ValidatorIsPreviousMatchingHeadAttester(int(index)); err != nil {
+			return err
+		}
 
 		// we can use a multiplier to account for all attesting
 		var attested, missed uint64
 		if currentValidator.Slashed() {
 			attested, missed = 0, 3
 		} else {
-			if phase0Data.IsPreviousMatchingSourceAttester {
+			if previousMatchingSourceAttester {
 				attested++
 			}
-			if phase0Data.IsPreviousMatchingTargetAttester {
+			if previousMatchingTargetAttester {
 				attested++
 			}
-			if phase0Data.IsPreviousMatchingHeadAttester {
+			if previousMatchingHeadAttester {
 				attested++
 			}
 			missed = 3 - attested
@@ -136,19 +156,19 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 				return err
 			}
 		} else {
-			if !currentValidator.Slashed() && phase0Data.IsPreviousMatchingSourceAttester {
+			if !currentValidator.Slashed() && previousMatchingSourceAttester {
 				rewardNumerator := baseReward * unslashedMatchingSourceBalanceIncrements
 				if err := state2.IncreaseBalance(s.BeaconState, index, rewardNumerator/rewardDenominator); err != nil {
 					return err
 				}
 			}
-			if !currentValidator.Slashed() && phase0Data.IsPreviousMatchingTargetAttester {
+			if !currentValidator.Slashed() && previousMatchingTargetAttester {
 				rewardNumerator := baseReward * unslashedMatchingTargetBalanceIncrements
 				if err := state2.IncreaseBalance(s.BeaconState, index, rewardNumerator/rewardDenominator); err != nil {
 					return err
 				}
 			}
-			if !currentValidator.Slashed() && phase0Data.IsPreviousMatchingHeadAttester {
+			if !currentValidator.Slashed() && previousMatchingHeadAttester {
 				rewardNumerator := baseReward * unslashedMatchingHeadBalanceIncrements
 				if err := state2.IncreaseBalance(s.BeaconState, index, rewardNumerator/rewardDenominator); err != nil {
 					return err
@@ -162,7 +182,7 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 			if state2.DecreaseBalance(s.BeaconState, index, beaconConfig.BaseRewardsPerEpoch*baseReward-proposerReward); err != nil {
 				return err
 			}
-			if currentValidator.Slashed() || !phase0Data.IsPreviousMatchingTargetAttester {
+			if currentValidator.Slashed() || !previousMatchingTargetAttester {
 				// Increase penalities linearly if network is leaking.
 				if state2.DecreaseBalance(s.BeaconState, index, currentValidator.EffectiveBalance()*state2.FinalityDelay(s.BeaconState)/beaconConfig.InactivityPenaltyQuotient); err != nil {
 					return err
@@ -179,12 +199,17 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 	// Lastly process late attestations
 
 	s.ForEachValidator(func(validator solid.Validator, index, total int) bool {
-		phase0Data := s.Phase0DataForValidatorIndex(index)
-
-		if validator.Slashed() || !phase0Data.IsPreviousMatchingSourceAttester {
+		var previousMatchingSourceAttester bool
+		var attestation *solid.PendingAttestation
+		if previousMatchingSourceAttester, err = s.ValidatorIsPreviousMatchingSourceAttester(index); err != nil {
+			return false
+		}
+		if validator.Slashed() || !previousMatchingSourceAttester {
 			return true
 		}
-		attestation := phase0Data.MinPreviousInclusionDelayAttestation
+		if attestation, err = s.ValidatorMinPreviousInclusionDelayAttestation(index); err != nil {
+			return false
+		}
 		var baseReward uint64
 		baseReward, err = s.BaseReward(uint64(index))
 		if err != nil {

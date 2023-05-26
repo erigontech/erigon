@@ -131,18 +131,56 @@ func (b *BeaconState) ValidatorMinCurrentInclusionDelayAttestation(index int) (*
 	if index >= b.validators.Length() {
 		return nil, ErrInvalidValidatorIndex
 	}
-	return b.validators.GetPhase0(index).MinCurrentInclusionDelayAttestation, nil
+	return b.validators.MinCurrentInclusionDelayAttestation(index), nil
 }
 
 func (b *BeaconState) ValidatorMinPreviousInclusionDelayAttestation(index int) (*solid.PendingAttestation, error) {
 	if index >= b.validators.Length() {
 		return nil, ErrInvalidValidatorIndex
 	}
-	return b.validators.GetPhase0(index).MinPreviousInclusionDelayAttestation, nil
+	return b.validators.MinPreviousInclusionDelayAttestation(index), nil
 }
 
-func (b *BeaconState) Phase0DataForValidatorIndex(idx int) *solid.Phase0Data {
-	return b.validators.GetPhase0(idx)
+func (b *BeaconState) ValidatorIsCurrentMatchingSourceAttester(idx int) (bool, error) {
+	if idx >= b.validators.Length() {
+		return false, ErrInvalidValidatorIndex
+	}
+	return b.validators.IsCurrentMatchingSourceAttester(idx), nil
+}
+
+func (b *BeaconState) ValidatorIsCurrentMatchingTargetAttester(idx int) (bool, error) {
+	if idx >= b.validators.Length() {
+		return false, ErrInvalidValidatorIndex
+	}
+	return b.validators.IsCurrentMatchingTargetAttester(idx), nil
+}
+
+func (b *BeaconState) ValidatorIsCurrentMatchingHeadAttester(idx int) (bool, error) {
+	if idx >= b.validators.Length() {
+		return false, ErrInvalidValidatorIndex
+	}
+	return b.validators.IsCurrentMatchingHeadAttester(idx), nil
+}
+
+func (b *BeaconState) ValidatorIsPreviousMatchingSourceAttester(idx int) (bool, error) {
+	if idx >= b.validators.Length() {
+		return false, ErrInvalidValidatorIndex
+	}
+	return b.validators.IsPreviousMatchingSourceAttester(idx), nil
+}
+
+func (b *BeaconState) ValidatorIsPreviousMatchingTargetAttester(idx int) (bool, error) {
+	if idx >= b.validators.Length() {
+		return false, ErrInvalidValidatorIndex
+	}
+	return b.validators.IsPreviousMatchingTargetAttester(idx), nil
+}
+
+func (b *BeaconState) ValidatorIsPreviousMatchingHeadAttester(idx int) (bool, error) {
+	if idx >= b.validators.Length() {
+		return false, ErrInvalidValidatorIndex
+	}
+	return b.validators.IsPreviousMatchingHeadAttester(idx), nil
 }
 
 func (b *BeaconState) RandaoMixes() solid.HashVectorSSZ {
