@@ -186,14 +186,15 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = blocksAvailable
 	}
 
-	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, snapshots, cfg.blockReader, cfg.chainConfig, cfg.engine, cfg.agg, logger); err != nil {
+	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, snapshots, cfg.blockReader, cfg.agg, logger); err != nil {
 		return err
 	}
 	return nil
 }
 
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, sn *snapshotsync.RoSnapshots,
-	blockReader services.FullBlockReader, chainConfig chain.Config, engine consensus.Engine, agg *state.AggregatorV3,
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
+	dirs datadir.Dirs, sn *snapshotsync.RoSnapshots,
+	blockReader services.FullBlockReader, agg *state.AggregatorV3,
 	logger log.Logger) error {
 	blocksAvailable := sn.BlocksAvailable()
 	logEvery := time.NewTicker(logInterval)
