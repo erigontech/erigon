@@ -45,7 +45,7 @@ func (p *Peer) Forgive() {
 
 func (p *Peer) MarkUsed() {
 	p.useCount++
-	log.Debug("[Sentinel Peers] peer used", "peer-id", p.pid, "uses", p.useCount)
+	log.Trace("[Sentinel Peers] peer used", "peer-id", p.pid, "uses", p.useCount)
 	p.lastRequest = time.Now()
 }
 
