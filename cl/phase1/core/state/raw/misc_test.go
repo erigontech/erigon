@@ -1,12 +1,11 @@
 package raw
 
 import (
+	_ "embed"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/require"
-
-	_ "embed"
 )
 
 func TestGetters(t *testing.T) {
