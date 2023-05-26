@@ -1,6 +1,7 @@
 package shuffling_test
 
 import (
+	_ "embed"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -8,8 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 	"github.com/ledgerwatch/erigon/common/eth2shuffle"
 	"github.com/stretchr/testify/require"
-
-	_ "embed"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/utils"

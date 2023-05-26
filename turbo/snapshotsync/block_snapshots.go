@@ -1010,8 +1010,8 @@ type BlockRetire struct {
 	blockReader services.FullBlockReader
 }
 
-func NewBlockRetire(workers int, tmpDir string, br services.FullBlockReader, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier, logger log.Logger) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, blockReader: br, db: db, downloader: downloader, notifier: notifier, logger: logger}
+func NewBlockRetire(workers int, tmpDir string, blockReader services.FullBlockReader, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier, logger log.Logger) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, blockReader: blockReader, db: db, downloader: downloader, notifier: notifier, logger: logger}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
 func (br *BlockRetire) NeedSaveFilesListInDB() bool {
@@ -1078,7 +1078,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	if err != nil {
 		return err
 	}
-	canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.Snapshots())
+	canDeleteTo := CanDeleteTo(currentProgress, blockSnapshots)
 	if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, limit); err != nil {
 		return nil
 	}
