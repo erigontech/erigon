@@ -1,19 +1,18 @@
 /*
-   Copyright 2021 Erigon contributors
+Copyright 2021 Erigon contributors
 
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-       http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
-
 package state
 
 import (
@@ -89,18 +88,17 @@ func NewUpdateTree() *UpdateTree {
 }
 
 func (t *UpdateTree) Get(key []byte) (*CommitmentItem, bool) {
-	item, found := t.tree.Get(&CommitmentItem{plainKey: common.Copy(key), hashedKey: t.hashAndNibblizeKey(key)})
-	return item, found
+	c := &CommitmentItem{plainKey: common.Copy(key), hashedKey: t.hashAndNibblizeKey(key)}
+	if t.tree.Has(c) {
+		return t.tree.Get(c)
+	}
+	return c, false
 }
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *CommitmentItem, val []byte)) {
-	c := &CommitmentItem{plainKey: common.Copy(key), hashedKey: t.hashAndNibblizeKey(key)}
-	item, found := t.tree.Get(c)
-	if !found {
-		item = c
-	}
+	item, _ := t.Get(key)
 	fn(item, val)
 	t.tree.ReplaceOrInsert(item)
 }
@@ -120,11 +118,11 @@ func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
 		c.update.Balance.Set(balance)
 		c.update.Flags |= commitment.BalanceUpdate
 	}
-	if len(chash) > 0 && !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
+	if !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
+		fmt.Printf("replaced code %x -> %x without CodeFLag\n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
 		copy(c.update.CodeHashOrStorage[:], chash)
 		c.update.ValLength = length.Hash
-		fmt.Printf("replaced code %x -> %x \n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
-		c.update.Flags |= commitment.CodeUpdate
+		//c.update.Flags |= commitment.CodeUpdate
 	}
 }
 
@@ -152,7 +150,6 @@ func (t *UpdateTree) TouchStorage(c *CommitmentItem, val []byte) {
 func (t *UpdateTree) TouchCode(c *CommitmentItem, val []byte) {
 	t.keccak.Reset()
 	t.keccak.Write(val)
-
 	copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
 	c.update.ValLength = length.Hash
 	c.update.CodeValue = common.Copy(val)
