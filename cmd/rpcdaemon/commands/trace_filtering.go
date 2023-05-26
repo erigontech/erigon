@@ -188,8 +188,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	if err != nil {
 		return nil, err
 	}
-	txnIndex := -1 // all tx indices
-	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txnIndex, *gasBailOut /* gasBailOut */, types.MakeSigner(cfg, blockNum), cfg)
+	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut /* gasBailOut */, types.MakeSigner(cfg, blockNum), cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -931,25 +930,6 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 	}
 }
 
-func parentNumber(blockNumber uint64) rpc.BlockNumber {
-	if blockNumber > 0 {
-		return rpc.BlockNumber(blockNumber - 1)
-	} else {
-		return 0
-	}
-}
-
-func (api *TraceAPIImpl) excessDataGas(dbtx kv.Tx, blockNumber uint64) (*big.Int, error) {
-	parentBlock, err := api.blockByRPCNumber(parentNumber(blockNumber), dbtx)
-	if err != nil {
-		return nil, err
-	}
-	if parentBlock != nil {
-		return parentBlock.ExcessDataGas(), nil
-	}
-	return nil, nil
-}
-
 func (api *TraceAPIImpl) callManyTransactions(
 	ctx context.Context,
 	dbtx kv.Tx,
@@ -961,12 +941,20 @@ func (api *TraceAPIImpl) callManyTransactions(
 	cfg *chain.Config,
 ) ([]*TraceCallResult, consensus.SystemCall, error) {
 	blockNumber := block.NumberU64()
-	parentNo := parentNumber(blockNumber)
+	pNo := blockNumber
+	if pNo > 0 {
+		pNo -= 1
+	}
+	parentNo := rpc.BlockNumber(pNo)
 	rules := cfg.Rules(blockNumber, block.Time())
 	header := block.Header()
-	excessDataGas, err := api.excessDataGas(dbtx, blockNumber)
+	parentBlock, err := api.blockByRPCNumber(parentNo, dbtx)
 	if err != nil {
 		return nil, nil, err
+	}
+	var excessDataGas *big.Int
+	if parentBlock != nil {
+		excessDataGas = parentBlock.ExcessDataGas()
 	}
 	txs := block.Transactions()
 	callParams := make([]TraceCallParam, 0, len(txs))
@@ -1022,7 +1010,8 @@ func (api *TraceAPIImpl) callManyTransactions(
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg, finalState, header, engine, false /* constCall */, excessDataGas)
+		constCall := false // this syscall is used for calculating rewards, which is not constant
+		return core.SysCallContract(contract, data, cfg, finalState, header, engine, constCall, excessDataGas)
 	}
 
 	return traces, syscall, nil
