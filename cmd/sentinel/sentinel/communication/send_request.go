@@ -19,14 +19,14 @@ var NoRequestHandlers = map[string]bool{
 	MetadataProtocolV2: true,
 }
 
-func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topic string, peerId peer.ID) ([]byte, bool, error) {
+func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topic string, peerId peer.ID) ([]byte, byte, error) {
 
 	respRetryTicker := time.NewTimer(30 * time.Millisecond)
 	defer respRetryTicker.Stop()
 
 	stream, err := writeRequestRaw(host, ctx, data, peerId, topic)
 	if err != nil {
-		return nil, false, err
+		return nil, 189, err
 	}
 	defer stream.Close()
 
@@ -72,16 +72,16 @@ func writeRequestRaw(host host.Host, ctx context.Context, data []byte, peerId pe
 	return stream, stream.CloseWrite()
 }
 
-func verifyResponse(stream network.Stream, peerId peer.ID) ([]byte, bool, error) {
+func verifyResponse(stream network.Stream, peerId peer.ID) ([]byte, byte, error) {
 	code := make([]byte, 1)
 	_, err := stream.Read(code)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to read code byte peer=%s, err=%s", peerId, err)
+		return nil, 189, fmt.Errorf("failed to read code byte peer=%s, err=%s", peerId, err)
 	}
 
 	message, err := io.ReadAll(stream)
 	if err != nil {
-		return nil, false, err
+		return nil, 189, err
 	}
-	return message, code[0] != 0, nil
+	return message, code[0], nil
 }

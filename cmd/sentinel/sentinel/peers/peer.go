@@ -28,6 +28,9 @@ type Peer struct {
 	m *Manager
 }
 
+func (p *Peer) ID() peer.ID {
+	return p.pid
+}
 func (p *Peer) Penalize() {
 	log.Debug("[Sentinel Peers] peer penalized", "peer-id", p.pid)
 	p.Penalties++

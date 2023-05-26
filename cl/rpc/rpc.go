@@ -61,7 +61,9 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 		return nil, "", err
 	}
 	if message.Error {
-		log.Debug("received range req error", "err", string(message.Data))
+		rd := snappy.NewReader(bytes.NewBuffer(message.Data))
+		errBytes, _ := io.ReadAll(rd)
+		log.Debug("received range req error", "err", string(errBytes))
 		return nil, message.Peer.Pid, nil
 	}
 
