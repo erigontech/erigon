@@ -82,9 +82,9 @@ type TransitionConfiguration struct {
 
 // BlobsBundleV1 holds the blobs of an execution payload
 type BlobsBundleV1 struct {
-	KZGs   []types.KZGCommitment `json:"kzgs"   gencodec:"required"`
-	Blobs  []types.Blob          `json:"blobs"  gencodec:"required"`
-	Proofs []types.KZGProof      `json:"proofs" gencodec:"required"`
+	Commitments []types.KZGCommitment `json:"commitments"   gencodec:"required"`
+	Blobs       []types.Blob          `json:"blobs"  gencodec:"required"`
+	Proofs      []types.KZGProof      `json:"proofs" gencodec:"required"`
 }
 
 type ExecutionPayloadBodyV1 struct {
@@ -402,27 +402,27 @@ func (e *EngineImpl) GetPayloadV3(ctx context.Context, payloadID hexutility.Byte
 	blockValue := gointerfaces.ConvertH256ToUint256Int(response.BlockValue).ToBig()
 	bbpl := response.BlobsBundle
 
-	kzgs := bbpl.GetKzgs()
+	commitments := bbpl.GetCommitments()
 	blobs := bbpl.GetBlobs()
 	proofs := bbpl.GetProofs()
-	if len(kzgs) != len(blobs) {
-		return nil, fmt.Errorf("should have same number of kzgs and blobs, got %v vs %v", len(kzgs), len(blobs))
+	if len(commitments) != len(blobs) {
+		return nil, fmt.Errorf("should have same number of commitments and blobs, got %v vs %v", len(commitments), len(blobs))
 	}
-	if len(proofs) != len(kzgs) {
-		return nil, fmt.Errorf("should have same number of kzgs and proofs, got %v vs %v", len(kzgs), len(proofs))
+	if len(proofs) != len(commitments) {
+		return nil, fmt.Errorf("should have same number of commitments and proofs, got %v vs %v", len(commitments), len(proofs))
 	}
-	replyKzgs := make([]types.KZGCommitment, len(kzgs))
+	replyCommitments := make([]types.KZGCommitment, len(commitments))
 	replyBlobs := make([]types.Blob, len(blobs))
 	replyProofs := make([]types.KZGProof, len(proofs))
-	for i := range kzgs {
-		copy(replyKzgs[i][:], kzgs[i])
+	for i := range commitments {
+		copy(replyCommitments[i][:], commitments[i])
 		copy(replyBlobs[i][:], blobs[i])
 		copy(replyProofs[i][:], proofs[i])
 	}
 	bb := &BlobsBundleV1{
-		KZGs:   replyKzgs,
-		Blobs:  replyBlobs,
-		Proofs: replyProofs,
+		Commitments: replyCommitments,
+		Blobs:       replyBlobs,
+		Proofs:      replyProofs,
 	}
 
 	return &GetPayloadV3Response{

@@ -662,17 +662,17 @@ func (s *EthBackendServer) EngineGetPayloadWithBlobs(ctx context.Context, req *r
 		if !ok {
 			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobtx)
 		}
-		versionedHashes, kzgs, blobs, proofs := blobtx.GetDataHashes(), blobtx.Commitments, blobtx.Blobs, blobtx.Proofs
+		versionedHashes, commitments, blobs, proofs := blobtx.GetDataHashes(), blobtx.Commitments, blobtx.Blobs, blobtx.Proofs
 		lenCheck := len(versionedHashes)
-		if lenCheck != len(kzgs) || lenCheck != len(blobs) || lenCheck != len(blobtx.Proofs) {
-			return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d) / proofs (%d)"+
-				" / versioned hashes (%d)", i, block.Block.Hash(), len(blobs), len(kzgs), len(proofs), lenCheck)
+		if lenCheck != len(commitments) || lenCheck != len(blobs) || lenCheck != len(blobtx.Proofs) {
+			return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / commitments (%d) / proofs (%d)"+
+				" / versioned hashes (%d)", i, block.Block.Hash(), len(blobs), len(commitments), len(proofs), lenCheck)
 		}
 		for _, blob := range blobs {
 			bb.Blobs = append(bb.Blobs, blob[:])
 		}
-		for _, kzg := range kzgs {
-			bb.Kzgs = append(bb.Kzgs, kzg[:])
+		for _, commitment := range commitments {
+			bb.Commitments = append(bb.Commitments, commitment[:])
 		}
 		for _, proof := range proofs {
 			bb.Proofs = append(bb.Proofs, proof[:])
