@@ -150,8 +150,9 @@ func TestBodyStorage(t *testing.T) {
 // Tests block storage and retrieval operations.
 func TestBlockStorage(t *testing.T) {
 	m := stages.Mock(t)
+	require := require.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 	ctx := m.Ctx
 	br, bw := m.NewBlocksIO()
@@ -215,12 +216,18 @@ func TestBlockStorage(t *testing.T) {
 	}
 
 	// write again and delete it as old one
-	if err := bw.WriteBlock(tx, block); err != nil {
-		t.Fatalf("Could not write block: %v", err)
-	}
-	if err := rawdb.DeleteAncientBlocks(tx, 0, 1); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(bw.WriteBlock(tx, block))
+
+	// prune: [1: N)
+	require.NoError(bw.Prune(ctx, tx, 0, 1))
+	entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NotNil(entry)
+	require.NoError(bw.Prune(ctx, tx, 1, 1))
+	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NotNil(entry)
+	require.NoError(bw.Prune(ctx, tx, 2, 1))
+	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.Nil(entry)
 }
 
 // Tests that partial block contents don't get reassembled into full blocks.
@@ -504,11 +511,11 @@ func TestBlockReceiptStorage(t *testing.T) {
 // Tests block storage and retrieval operations with withdrawals.
 func TestBlockWithdrawalsStorage(t *testing.T) {
 	m := stages.Mock(t)
+	require := require.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 	br, bw := m.NewBlocksIO()
-	require := require.New(t)
 	ctx := context.Background()
 
 	// create fake withdrawals
@@ -625,9 +632,16 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	if err := bw.WriteBlock(tx, block); err != nil {
 		t.Fatalf("Could not write block: %v", err)
 	}
-	if err := rawdb.DeleteAncientBlocks(tx, 0, 1); err != nil {
-		t.Fatal(err)
-	}
+	// prune: [1: N)
+	require.NoError(bw.Prune(ctx, tx, 0, 1))
+	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NotNil(entry)
+	require.NoError(bw.Prune(ctx, tx, 1, 1))
+	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NotNil(entry)
+	require.NoError(bw.Prune(ctx, tx, 2, 1))
+	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.Nil(entry)
 }
 
 // Tests pre-shanghai body to make sure withdrawals doesn't panic
