@@ -123,7 +123,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if !initialCycle || cfg.blockReader == nil {
 		return nil
 	}
-	snapshots := cfg.blockReader.Snapshots()
+	snapshots := cfg.blockReader.Snapshots().(*snapshotsync.RoSnapshots)
 	if snapshots == nil || !snapshots.Cfg().Enabled {
 		return nil
 	}
@@ -327,7 +327,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx kv.RwTx) error {
-	snapshots := cfg.blockReader.Snapshots()
+	snapshots := cfg.blockReader.Snapshots().(*snapshotsync.RoSnapshots)
 	if snapshots.Cfg().NoDownloader {
 		if err := snapshots.ReopenFolder(); err != nil {
 			return err

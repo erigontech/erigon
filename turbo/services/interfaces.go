@@ -6,8 +6,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 type All struct {
@@ -61,7 +61,12 @@ type FullBlockReader interface {
 	CanonicalReader
 
 	TxsV3Enabled() bool
-	Snapshots() *snapshotsync.RoSnapshots
+	Snapshots() BlockSnapshots
+}
+
+type BlockSnapshots interface {
+	Cfg() ethconfig.Snapshot
+	BlocksAvailable() uint64
 }
 
 /*

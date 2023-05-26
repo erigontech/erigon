@@ -73,6 +73,9 @@ func (r *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash libcommo
 func (back *RemoteBackend) TxsV3Enabled() bool {
 	panic("not implemented")
 }
+func (back *RemoteBackend) Snapshots() services.BlockSnapshots {
+	panic("not implemented")
+}
 func (back *RemoteBackend) EnsureVersionCompatibility() bool {
 	versionReply, err := back.remoteEthBackend.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
