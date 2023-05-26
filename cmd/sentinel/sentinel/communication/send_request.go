@@ -46,7 +46,7 @@ func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topi
 	select {
 	case <-ctx.Done():
 		stream.Reset()
-		return nil, 0, ctx.Err()
+		return nil, 189, ctx.Err()
 	case ans := <-ch:
 		if ans.err != nil {
 			ans.code = 189
