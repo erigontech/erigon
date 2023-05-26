@@ -392,7 +392,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	nExported := uint64(0)
 
 	it := allBlocks.Iterator()
-	isPos := false
 	for it.HasNext() {
 		b := it.Next()
 		// Extract transactions from block
@@ -435,12 +434,8 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 
 		blockHash := block.Hash()
 		blockNumber := block.NumberU64()
-		if !isPos && chainConfig.TerminalTotalDifficulty != nil {
-			header := block.Header()
-			isPos = header.Difficulty.Cmp(common.Big0) == 0 || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
-		}
 		txs := block.Transactions()
-		t, _, tErr := api.callManyTransactions(ctx, dbtx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut, types.MakeSigner(chainConfig, b), chainConfig)
+		t, syscall, tErr := api.callManyTransactions(ctx, dbtx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut, types.MakeSigner(chainConfig, b), chainConfig)
 		if tErr != nil {
 			if first {
 				first = false
@@ -490,86 +485,46 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 			}
 		}
 
-		// if we are in POS
-		// we dont check for uncles or block rewards
-		if isPos {
-			continue
+		rewards, err := api.engine().CalculateRewards(chainConfig, block.Header(), block.Uncles(), syscall)
+		if err != nil {
+			return err
 		}
 
-		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
-		if _, ok := toAddresses[block.Coinbase()]; ok || includeAll {
-			nSeen++
-			var tr ParityTrace
-			var rewardAction = &RewardTraceAction{}
-			rewardAction.Author = block.Coinbase()
-			rewardAction.RewardType = "block" // nolint: goconst
-			rewardAction.Value.ToInt().Set(minerReward.ToBig())
-			tr.Action = rewardAction
-			tr.BlockHash = &common.Hash{}
-			copy(tr.BlockHash[:], block.Hash().Bytes())
-			tr.BlockNumber = new(uint64)
-			*tr.BlockNumber = block.NumberU64()
-			tr.Type = "reward" // nolint: goconst
-			tr.TraceAddress = []int{}
-			b, err := json.Marshal(tr)
-			if err != nil {
-				if first {
-					first = false
-				} else {
-					stream.WriteMore()
-				}
-				stream.WriteObjectStart()
-				rpc.HandleError(err, stream)
-				stream.WriteObjectEnd()
-				continue
-			}
-			if nSeen > after && nExported < count {
-				if first {
-					first = false
-				} else {
-					stream.WriteMore()
-				}
-				stream.Write(b)
-				nExported++
-			}
-		}
-		for i, uncle := range block.Uncles() {
-			if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
-				if i < len(uncleRewards) {
-					nSeen++
-					var tr ParityTrace
-					rewardAction := &RewardTraceAction{}
-					rewardAction.Author = uncle.Coinbase
-					rewardAction.RewardType = "uncle" // nolint: goconst
-					rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
-					tr.Action = rewardAction
-					tr.BlockHash = &common.Hash{}
-					copy(tr.BlockHash[:], block.Hash().Bytes())
-					tr.BlockNumber = new(uint64)
-					*tr.BlockNumber = block.NumberU64()
-					tr.Type = "reward" // nolint: goconst
-					tr.TraceAddress = []int{}
-					b, err := json.Marshal(tr)
-					if err != nil {
-						if first {
-							first = false
-						} else {
-							stream.WriteMore()
-						}
-						stream.WriteObjectStart()
-						rpc.HandleError(err, stream)
-						stream.WriteObjectEnd()
-						continue
+		for _, r := range rewards {
+			if _, ok := toAddresses[r.Beneficiary]; ok || includeAll {
+				nSeen++
+				var tr ParityTrace
+				rewardAction := &RewardTraceAction{}
+				rewardAction.Author = r.Beneficiary
+				rewardAction.RewardType = rewardKindToString(r.Kind)
+				rewardAction.Value.ToInt().Set(r.Amount.ToBig())
+				tr.Action = rewardAction
+				tr.BlockHash = &common.Hash{}
+				copy(tr.BlockHash[:], block.Hash().Bytes())
+				tr.BlockNumber = new(uint64)
+				*tr.BlockNumber = block.NumberU64()
+				tr.Type = "reward" // nolint: goconst
+				tr.TraceAddress = []int{}
+				b, err := json.Marshal(tr)
+				if err != nil {
+					if first {
+						first = false
+					} else {
+						stream.WriteMore()
 					}
-					if nSeen > after && nExported < count {
-						if first {
-							first = false
-						} else {
-							stream.WriteMore()
-						}
-						stream.Write(b)
-						nExported++
+					stream.WriteObjectStart()
+					rpc.HandleError(err, stream)
+					stream.WriteObjectEnd()
+					continue
+				}
+				if nSeen > after && nExported < count {
+					if first {
+						first = false
+					} else {
+						stream.WriteMore()
 					}
+					stream.Write(b)
+					nExported++
 				}
 			}
 		}
@@ -679,6 +634,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)
 		}
 		if isFnalTxn {
+			// TODO(yperbasis) proper rewards for Gnosis
+
 			// if we are in POS
 			// we dont check for uncles or block rewards
 			if isPos {
@@ -999,7 +956,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 
 	parentHash := block.ParentHash()
 
-	traces, finalState, cmErr := api.doCallMany(ctx, dbtx, msgs, callParams, &rpc.BlockNumberOrHash{
+	traces, lastState, cmErr := api.doCallMany(ctx, dbtx, msgs, callParams, &rpc.BlockNumberOrHash{
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
@@ -1011,7 +968,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
 		constCall := false // this syscall is used for calculating rewards, which is not constant
-		return core.SysCallContract(contract, data, cfg, finalState, header, engine, constCall, excessDataGas)
+		return core.SysCallContract(contract, data, cfg, lastState, header, engine, constCall, excessDataGas)
 	}
 
 	return traces, syscall, nil
