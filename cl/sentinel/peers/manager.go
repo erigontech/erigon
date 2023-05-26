@@ -55,8 +55,8 @@ func (m *Manager) GetPeer(id peer.ID) (peer *Peer) {
 			pid:       id,
 			working:   make(chan struct{}, 1),
 			m:         m,
-			Penalties: 0,
-			Banned:    false,
+			penalties: 0,
+			banned:    false,
 		}
 		m.peers.Add(id, p)
 	}
