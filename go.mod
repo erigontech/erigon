@@ -275,3 +275,5 @@ require (
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
 
 replace github.com/VictoriaMetrics/metrics => github.com/greyireland/metrics v0.0.5
+
+replace github.com/ledgerwatch/erigon-lib => /Users/manav/polygon/manav-erigon-lib
