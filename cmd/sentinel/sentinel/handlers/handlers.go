@@ -69,7 +69,7 @@ func NewConsensusHandlers(ctx context.Context, db kv.RoDB, host host.Host,
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}
 	for k, v := range hm {
-		c.handlers[protocol.ID(k)] = wrapStreamHandler(k, v)
+		c.handlers[protocol.ID(k)] = c.wrapStreamHandler(k, v)
 	}
 	return c
 }
@@ -80,19 +80,30 @@ func (c *ConsensusHandlers) Start() {
 	}
 }
 
-func wrapStreamHandler(name string, fn func(s network.Stream) error) func(s network.Stream) {
+func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Stream) error) func(s network.Stream) {
 	return func(s network.Stream) {
-		err := fn(s)
+		l := log.Ctx{
+			"name": name,
+		}
+		rawVer, err := c.host.Peerstore().Get(s.Conn().RemotePeer(), "AgentVersion")
+		if err == nil {
+			if str, ok := rawVer.(string); ok {
+				l["agent"] = str
+			}
+		}
+		err = fn(s)
 		if err != nil {
-			log.Error("[pubsubhandler] stream handler", "name", name, "err", err)
+			l["err"] = err
+			log.Error("[pubsubhandler] stream handler", l)
 			// TODO: maybe we should log this
 			_ = s.Reset()
 			return
 		}
 		err = s.Close()
 		if err != nil {
+			l["err"] = err
 			if !(strings.Contains(name, "goodbye") && (strings.Contains(err.Error(), "session shut down") || strings.Contains(err.Error(), "stream reset"))) {
-				log.Warn("[pubsubhandler] close stream", "name", name, "err", err)
+				log.Warn("[pubsubhandler] close stream", l)
 			}
 		}
 	}
