@@ -372,8 +372,21 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash libcommon.Has
 }
 
 func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error) {
+	return r.blockWithSenders(ctx, tx, hash, blockHeight, false)
+}
+func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []libcommon.Address, err error) {
 	if blockHeight >= r.sn.BlocksAvailable() {
 		if r.TransactionsV3 {
+			if forceCanonical {
+				canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+				if err != nil {
+					return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
+				}
+				if canonicalHash != hash {
+					return nil, nil, nil
+				}
+			}
+
 			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight, r.TransactionsV3)
 			if err != nil {
 				return nil, nil, err
@@ -390,6 +403,9 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash l
 				return nil, nil, err
 			}
 			return block, senders, nil
+		}
+		if forceCanonical {
+			return nil, nil, err
 		}
 		return rawdb.NonCanonicalBlockWithSenders(tx, hash, blockHeight)
 	}
@@ -809,7 +825,7 @@ func (r *BlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	if headNumber == nil {
 		return nil, nil
 	}
-	block, _, err := r.BlockWithSenders(context.Background(), db, headHash, *headNumber)
+	block, _, err := r.blockWithSenders(context.Background(), db, headHash, *headNumber, true)
 	return block, err
 }
 func (r *BlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
