@@ -158,38 +158,35 @@ func processAttestationPhase0(s *state2.BeaconState, attestation *solid.Attestat
 	}
 	// Basically we flag all validators we are currently attesting. will be important for rewards/finalization processing.
 	for _, index := range indicies {
-		validator, err := s.ValidatorForValidatorIndex(int(index))
-		if err != nil {
-			return nil, err
-		}
+		phase0Data := s.Phase0DataForValidatorIndex(int(index))
 		// NOTE: does not affect state root.
 		// We need to set it to currents or previouses depending on which attestation we process.
 		if isCurrentAttestation {
-			if validator.MinCurrentInclusionDelayAttestation == nil ||
-				validator.MinCurrentInclusionDelayAttestation.InclusionDelay() > pendingAttestation.InclusionDelay() {
-				validator.MinCurrentInclusionDelayAttestation = pendingAttestation
+			if phase0Data.MinCurrentInclusionDelayAttestation == nil ||
+				phase0Data.MinCurrentInclusionDelayAttestation.InclusionDelay() > pendingAttestation.InclusionDelay() {
+				phase0Data.MinCurrentInclusionDelayAttestation = pendingAttestation
 			}
-			validator.IsCurrentMatchingSourceAttester = true
+			phase0Data.IsCurrentMatchingSourceAttester = true
 			if attestation.AttestantionData().Target().BlockRoot() == epochRoot {
-				validator.IsCurrentMatchingTargetAttester = true
+				phase0Data.IsCurrentMatchingTargetAttester = true
 			} else {
 				continue
 			}
 			if attestation.AttestantionData().BeaconBlockRoot() == slotRoot {
-				validator.IsCurrentMatchingHeadAttester = true
+				phase0Data.IsCurrentMatchingHeadAttester = true
 			}
 		} else {
-			if validator.MinPreviousInclusionDelayAttestation == nil ||
-				validator.MinPreviousInclusionDelayAttestation.InclusionDelay() > pendingAttestation.InclusionDelay() {
-				validator.MinPreviousInclusionDelayAttestation = pendingAttestation
+			if phase0Data.MinPreviousInclusionDelayAttestation == nil ||
+				phase0Data.MinPreviousInclusionDelayAttestation.InclusionDelay() > pendingAttestation.InclusionDelay() {
+				phase0Data.MinPreviousInclusionDelayAttestation = pendingAttestation
 			}
-			validator.IsPreviousMatchingSourceAttester = true
+			phase0Data.IsPreviousMatchingSourceAttester = true
 			if attestation.AttestantionData().Target().BlockRoot() != epochRoot {
 				continue
 			}
-			validator.IsPreviousMatchingTargetAttester = true
+			phase0Data.IsPreviousMatchingTargetAttester = true
 			if attestation.AttestantionData().BeaconBlockRoot() == slotRoot {
-				validator.IsPreviousMatchingHeadAttester = true
+				phase0Data.IsPreviousMatchingHeadAttester = true
 			}
 		}
 	}

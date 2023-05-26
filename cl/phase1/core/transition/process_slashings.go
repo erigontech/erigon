@@ -2,7 +2,7 @@ package transition
 
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
@@ -21,7 +21,7 @@ func processSlashings(s *state2.BeaconState, slashingMultiplier uint64) error {
 	beaconConfig := s.BeaconConfig()
 	// Apply penalties to validators who have been slashed and reached the withdrawable epoch
 	var err error
-	s.ForEachValidator(func(validator *cltypes.Validator, i, total int) bool {
+	s.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 		if !validator.Slashed() || epoch+beaconConfig.EpochsPerSlashingsVector/2 != validator.WithdrawableEpoch() {
 			return true
 		}

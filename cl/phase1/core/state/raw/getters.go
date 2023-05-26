@@ -76,17 +76,17 @@ func (b *BeaconState) ValidatorLength() int {
 	return b.validators.Length()
 }
 
-func (b *BeaconState) AppendValidator(in *cltypes.Validator) {
+func (b *BeaconState) AppendValidator(in solid.Validator) {
 	b.validators.Append(in)
 }
 
-func (b *BeaconState) ForEachValidator(fn func(v *cltypes.Validator, idx int, total int) bool) {
-	b.validators.Range(func(index int, value *cltypes.Validator, length int) bool {
+func (b *BeaconState) ForEachValidator(fn func(v solid.Validator, idx int, total int) bool) {
+	b.validators.Range(func(index int, value solid.Validator, length int) bool {
 		return fn(value, index, length)
 	})
 }
 
-func (b *BeaconState) ValidatorForValidatorIndex(index int) (*cltypes.Validator, error) {
+func (b *BeaconState) ValidatorForValidatorIndex(index int) (solid.Validator, error) {
 	if index >= b.validators.Length() {
 		return nil, ErrInvalidValidatorIndex
 	}
@@ -131,14 +131,18 @@ func (b *BeaconState) ValidatorMinCurrentInclusionDelayAttestation(index int) (*
 	if index >= b.validators.Length() {
 		return nil, ErrInvalidValidatorIndex
 	}
-	return b.validators.Get(index).MinCurrentInclusionDelayAttestation, nil
+	return b.validators.GetPhase0(index).MinCurrentInclusionDelayAttestation, nil
 }
 
 func (b *BeaconState) ValidatorMinPreviousInclusionDelayAttestation(index int) (*solid.PendingAttestation, error) {
 	if index >= b.validators.Length() {
 		return nil, ErrInvalidValidatorIndex
 	}
-	return b.validators.Get(index).MinPreviousInclusionDelayAttestation, nil
+	return b.validators.GetPhase0(index).MinPreviousInclusionDelayAttestation, nil
+}
+
+func (b *BeaconState) Phase0DataForValidatorIndex(idx int) *solid.Phase0Data {
+	return b.validators.GetPhase0(idx)
 }
 
 func (b *BeaconState) RandaoMixes() solid.HashVectorSSZ {

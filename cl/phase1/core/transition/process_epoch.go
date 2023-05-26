@@ -2,7 +2,7 @@ package transition
 
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
@@ -53,17 +53,19 @@ func ProcessParticipationRecordUpdates(state *state.BeaconState) error {
 	state.SetPreviousEpochAttestations(state.CurrentEpochAttestations())
 	state.ResetCurrentEpochAttestations()
 	// Also mark all current attesters as previous
-	state.ForEachValidator(func(validator *cltypes.Validator, idx, total int) bool {
+	state.ForEachValidator(func(_ solid.Validator, idx, total int) bool {
+		phase0Data := state.Phase0DataForValidatorIndex(idx)
+
 		// Previous sources/target/head
-		validator.IsPreviousMatchingSourceAttester = validator.IsCurrentMatchingSourceAttester
-		validator.IsPreviousMatchingTargetAttester = validator.IsCurrentMatchingTargetAttester
-		validator.IsPreviousMatchingHeadAttester = validator.IsCurrentMatchingHeadAttester
-		validator.MinPreviousInclusionDelayAttestation = validator.MinCurrentInclusionDelayAttestation
+		phase0Data.IsPreviousMatchingSourceAttester = phase0Data.IsCurrentMatchingSourceAttester
+		phase0Data.IsPreviousMatchingTargetAttester = phase0Data.IsCurrentMatchingTargetAttester
+		phase0Data.IsPreviousMatchingHeadAttester = phase0Data.IsCurrentMatchingHeadAttester
+		phase0Data.MinPreviousInclusionDelayAttestation = phase0Data.MinCurrentInclusionDelayAttestation
 		// Current sources/target/head
-		validator.MinCurrentInclusionDelayAttestation = nil
-		validator.IsCurrentMatchingSourceAttester = false
-		validator.IsCurrentMatchingTargetAttester = false
-		validator.IsCurrentMatchingHeadAttester = false
+		phase0Data.MinCurrentInclusionDelayAttestation = nil
+		phase0Data.IsCurrentMatchingSourceAttester = false
+		phase0Data.IsCurrentMatchingTargetAttester = false
+		phase0Data.IsCurrentMatchingHeadAttester = false
 		return true
 	})
 	return nil

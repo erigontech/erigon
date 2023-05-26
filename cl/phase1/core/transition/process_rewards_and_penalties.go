@@ -2,7 +2,7 @@ package transition
 
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
@@ -18,7 +18,7 @@ func processRewardsAndPenaltiesPostAltair(s *state2.BeaconState) (err error) {
 	// Make buffer for flag indexes total balances.
 	flagsTotalBalances := make([]uint64, len(weights))
 	// Compute all total balances for each enable unslashed validator indicies with all flags on.
-	s.ForEachValidator(func(validator *cltypes.Validator, validatorIndex, total int) bool {
+	s.ForEachValidator(func(validator solid.Validator, validatorIndex, total int) bool {
 		for i := range weights {
 			if state2.IsUnslashedParticipatingIndex(s.BeaconState, previousEpoch, uint64(validatorIndex), i) {
 				flagsTotalBalances[i] += validator.EffectiveBalance()
@@ -81,17 +81,18 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 	// Make buffer for flag indexes totTargetal balances.
 	var unslashedMatchingSourceBalanceIncrements, unslashedMatchingTargetBalanceIncrements, unslashedMatchingHeadBalanceIncrements uint64
 	// Compute all total balances for each enable unslashed validator indicies with all flags on.
-	s.ForEachValidator(func(validator *cltypes.Validator, idx, total int) bool {
+	s.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
 		if validator.Slashed() {
 			return true
 		}
-		if validator.IsPreviousMatchingSourceAttester {
+		phase0Data := s.Phase0DataForValidatorIndex(idx)
+		if phase0Data.IsPreviousMatchingSourceAttester {
 			unslashedMatchingSourceBalanceIncrements += validator.EffectiveBalance()
 		}
-		if validator.IsPreviousMatchingTargetAttester {
+		if phase0Data.IsPreviousMatchingTargetAttester {
 			unslashedMatchingTargetBalanceIncrements += validator.EffectiveBalance()
 		}
-		if validator.IsPreviousMatchingHeadAttester {
+		if phase0Data.IsPreviousMatchingHeadAttester {
 			unslashedMatchingHeadBalanceIncrements += validator.EffectiveBalance()
 		}
 		return true
@@ -110,18 +111,20 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 		if err != nil {
 			return err
 		}
+		phase0Data := s.Phase0DataForValidatorIndex(int(index))
+
 		// we can use a multiplier to account for all attesting
 		var attested, missed uint64
 		if currentValidator.Slashed() {
 			attested, missed = 0, 3
 		} else {
-			if currentValidator.IsPreviousMatchingSourceAttester {
+			if phase0Data.IsPreviousMatchingSourceAttester {
 				attested++
 			}
-			if currentValidator.IsPreviousMatchingTargetAttester {
+			if phase0Data.IsPreviousMatchingTargetAttester {
 				attested++
 			}
-			if currentValidator.IsPreviousMatchingHeadAttester {
+			if phase0Data.IsPreviousMatchingHeadAttester {
 				attested++
 			}
 			missed = 3 - attested
@@ -133,19 +136,19 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 				return err
 			}
 		} else {
-			if !currentValidator.Slashed() && currentValidator.IsPreviousMatchingSourceAttester {
+			if !currentValidator.Slashed() && phase0Data.IsPreviousMatchingSourceAttester {
 				rewardNumerator := baseReward * unslashedMatchingSourceBalanceIncrements
 				if err := state2.IncreaseBalance(s.BeaconState, index, rewardNumerator/rewardDenominator); err != nil {
 					return err
 				}
 			}
-			if !currentValidator.Slashed() && currentValidator.IsPreviousMatchingTargetAttester {
+			if !currentValidator.Slashed() && phase0Data.IsPreviousMatchingTargetAttester {
 				rewardNumerator := baseReward * unslashedMatchingTargetBalanceIncrements
 				if err := state2.IncreaseBalance(s.BeaconState, index, rewardNumerator/rewardDenominator); err != nil {
 					return err
 				}
 			}
-			if !currentValidator.Slashed() && currentValidator.IsPreviousMatchingHeadAttester {
+			if !currentValidator.Slashed() && phase0Data.IsPreviousMatchingHeadAttester {
 				rewardNumerator := baseReward * unslashedMatchingHeadBalanceIncrements
 				if err := state2.IncreaseBalance(s.BeaconState, index, rewardNumerator/rewardDenominator); err != nil {
 					return err
@@ -159,7 +162,7 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 			if state2.DecreaseBalance(s.BeaconState, index, beaconConfig.BaseRewardsPerEpoch*baseReward-proposerReward); err != nil {
 				return err
 			}
-			if currentValidator.Slashed() || !currentValidator.IsPreviousMatchingTargetAttester {
+			if currentValidator.Slashed() || !phase0Data.IsPreviousMatchingTargetAttester {
 				// Increase penalities linearly if network is leaking.
 				if state2.DecreaseBalance(s.BeaconState, index, currentValidator.EffectiveBalance()*state2.FinalityDelay(s.BeaconState)/beaconConfig.InactivityPenaltyQuotient); err != nil {
 					return err
@@ -175,11 +178,13 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 	}
 	// Lastly process late attestations
 
-	s.ForEachValidator(func(validator *cltypes.Validator, index, total int) bool {
-		if validator.Slashed() || !validator.IsPreviousMatchingSourceAttester {
+	s.ForEachValidator(func(validator solid.Validator, index, total int) bool {
+		phase0Data := s.Phase0DataForValidatorIndex(index)
+
+		if validator.Slashed() || !phase0Data.IsPreviousMatchingSourceAttester {
 			return true
 		}
-		attestation := validator.MinPreviousInclusionDelayAttestation
+		attestation := phase0Data.MinPreviousInclusionDelayAttestation
 		var baseReward uint64
 		baseReward, err = s.BaseReward(uint64(index))
 		if err != nil {

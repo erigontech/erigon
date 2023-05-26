@@ -44,6 +44,7 @@ func NewValidatorSet(c int) *ValidatorSet {
 
 func (v *ValidatorSet) expandBuffer(size int) {
 	if size <= cap(v.buffer) {
+		v.buffer = v.buffer[:size]
 		return
 	}
 	buffer := make([]byte, size, int(float64(size)*validatorSetCapacityMultiplier))
@@ -56,10 +57,7 @@ func (v *ValidatorSet) Append(val Validator) {
 	// we are overflowing the buffer? append.
 	if offset >= len(v.buffer) {
 		v.expandBuffer(offset + validatorSize)
-		v.buffer = append(v.buffer, val...)
 		v.phase0Data = append(v.phase0Data, nil)
-		v.l++
-		return
 	}
 	copy(v.buffer[offset:], val)
 	v.phase0Data[v.l] = nil // initialize to empty.
@@ -95,6 +93,8 @@ func (v *ValidatorSet) CopyTo(set2 IterableSSZ[Validator]) {
 		t.expandBuffer(offset)
 		t.buffer = append(t.buffer, make([]byte, len(v.buffer)-len(t.buffer))...)
 	}
+	// skip copying (unsupported for phase0)
+	t.phase0Data = make([]*Phase0Data, t.l)
 	copy(t.buffer, v.buffer)
 }
 
@@ -110,7 +110,7 @@ func (v *ValidatorSet) DecodeSSZ(buf []byte, _ int) error {
 }
 
 func (v *ValidatorSet) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, v.buffer[:v.l*validatorSize]...), nil
+	return append(buf, v.buffer[:v.EncodingSizeSSZ()]...), nil
 }
 
 func (v *ValidatorSet) EncodingSizeSSZ() int {
@@ -135,13 +135,23 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	// generate root list
 	v.makeBuf(v.l * length.Hash)
 	validatorLeaves := v.buf
+	hashBuffer := make([]byte, 8*32)
+	depth := getDepth(uint64(v.c))
+	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
+
+	if v.l == 0 {
+		return utils.Keccak256(merkle_tree.ZeroHashes[depth][:], lengthRoot[:]), nil
+	}
 	for i := 0; i < v.l; i++ {
 		validator := v.Get(i)
-		if err := validator.CopyHashBufferTo(validatorLeaves[i*length.Hash:]); err != nil {
+		if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
+			return [32]byte{}, err
+		}
+		hashBuffer = hashBuffer[:(8 * 32)]
+		if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, validatorLeaves[i*length.Hash:]); err != nil {
 			return [32]byte{}, err
 		}
 	}
-	depth := getDepth(uint64(v.c))
 	offset := length.Hash * v.l
 	elements := common.Copy(validatorLeaves[:offset])
 	for i := uint8(0); i < depth; i++ {
@@ -156,7 +166,6 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 		}
 		elements = v.buf
 	}
-	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
 	return utils.Keccak256(elements[:length.Hash], lengthRoot[:]), nil
 }
 

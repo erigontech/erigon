@@ -68,14 +68,15 @@ func ProcessJustificationBitsAndFinality(s *state2.BeaconState) error {
 	}
 	var previousTargetBalance, currentTargetBalance uint64
 	if s.Version() == clparams.Phase0Version {
-		s.ForEachValidator(func(validator *cltypes.Validator, idx, total int) bool {
+		s.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
 			if validator.Slashed() {
 				return true
 			}
-			if validator.IsCurrentMatchingTargetAttester {
+			phase0Data := s.Phase0DataForValidatorIndex(idx)
+			if phase0Data.IsCurrentMatchingTargetAttester {
 				currentTargetBalance += validator.EffectiveBalance()
 			}
-			if validator.IsPreviousMatchingTargetAttester {
+			if phase0Data.IsPreviousMatchingTargetAttester {
 				previousTargetBalance += validator.EffectiveBalance()
 			}
 			return true
@@ -83,7 +84,7 @@ func ProcessJustificationBitsAndFinality(s *state2.BeaconState) error {
 	} else {
 		// Use bitlists to determine finality.
 		previousParticipation, currentParticipation := s.EpochParticipation(false), s.EpochParticipation(true)
-		s.ForEachValidator(func(validator *cltypes.Validator, i, total int) bool {
+		s.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 			if validator.Slashed() {
 				return true
 			}

@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -191,7 +190,7 @@ func (b *BeaconState) _refreshActiveBalances() {
 	epoch := Epoch(b.BeaconState)
 	b.totalActiveBalanceCache = new(uint64)
 	*b.totalActiveBalanceCache = 0
-	b.ForEachValidator(func(validator *cltypes.Validator, idx, total int) bool {
+	b.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
 		if validator.Active(epoch) {
 			*b.totalActiveBalanceCache += validator.EffectiveBalance()
 		}
@@ -217,7 +216,7 @@ func (b *BeaconState) initBeaconState() error {
 
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
 
-	b.ForEachValidator(func(validator *cltypes.Validator, i, total int) bool {
+	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 		b.publicKeyIndicies[validator.PublicKey()] = uint64(i)
 		return true
 	})

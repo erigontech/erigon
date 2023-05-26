@@ -2,6 +2,8 @@ package caplin1
 
 import (
 	"context"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -11,7 +13,6 @@ import (
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/log/v3"
 
@@ -28,7 +29,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 		return err
 	}
 	bls.SetEnabledCaching(true)
-	state.ForEachValidator(func(v *cltypes.Validator, idx, total int) bool {
+	state.ForEachValidator(func(v solid.Validator, idx, total int) bool {
 		pk := v.PublicKey()
 		if err := bls.LoadPublicKeyIntoCache(pk[:], false); err != nil {
 			panic(err)

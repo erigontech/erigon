@@ -38,7 +38,7 @@ func TestValidator(t *testing.T) {
 	assert.Equal(t, withdrawableEpoch, validator.WithdrawableEpoch())
 
 	// Testing the SSZ encoding/decoding
-	encoded := validator.EncodeSSZ(nil)
+	encoded, _ := validator.EncodeSSZ(nil)
 	newValidator := NewValidator()
 	err := newValidator.DecodeSSZ(encoded, 0)
 	assert.NoError(t, err)

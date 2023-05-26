@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
@@ -52,14 +54,25 @@ func NewValidatorFromParameters(
 	v.SetWithdrawableEpoch(WithdrawableEpoch)
 	return v
 }
+
 func (v Validator) CopyTo(dst Validator) {
 	copy(dst[:], v[:])
 }
 
-func (v Validator) EncodeSSZ(dst []byte) []byte {
-	buf := dst
-	buf = append(buf, v[:]...)
-	return buf
+func (v Validator) HashSSZ() ([32]byte, error) {
+	hashBuffer := make([]byte, 8*32)
+	if err := v.CopyHashBufferTo(hashBuffer); err != nil {
+		return [32]byte{}, err
+	}
+	hashBuffer = hashBuffer[:(8 * 32)]
+	if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, hashBuffer); err != nil {
+		return [32]byte{}, err
+	}
+	return common.BytesToHash(hashBuffer[:length.Hash]), nil
+}
+
+func (v Validator) EncodeSSZ(dst []byte) ([]byte, error) {
+	return append(dst, v[:]...), nil
 }
 
 func (v Validator) DecodeSSZ(buf []byte, _ int) error {
@@ -68,6 +81,10 @@ func (v Validator) DecodeSSZ(buf []byte, _ int) error {
 	}
 	copy(v[:], buf)
 	return nil
+}
+
+func (v Validator) Clone() clonable.Clonable {
+	return NewValidator()
 }
 
 func (v Validator) EncodingSizeSSZ() int {
@@ -117,9 +134,7 @@ func (v Validator) CopyHashBufferTo(o []byte) error {
 	copy(o[160:192], v[97:105])
 	copy(o[192:224], v[105:113])
 	copy(o[224:256], v[113:121])
-
 	return nil
-
 }
 
 func (v Validator) SetPublicKey(o [48]byte) {
