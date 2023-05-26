@@ -195,7 +195,6 @@ MainLoop:
 				break
 			}
 			if peersCount < minPeersForDownload {
-				log.Debug("lost too many peers, restarting sync...")
 				continue MainLoop
 			}
 		}

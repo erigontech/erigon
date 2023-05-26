@@ -176,7 +176,6 @@ func (s *SentinelServer) SendRequest(pctx context.Context, req *sentinelrpc.Requ
 				Pid: peer.ID().String(),
 			},
 		}
-		fmt.Println("error", ans.Error, isError)
 		select {
 		case doneCh <- ans:
 			peer.MarkReplied()
