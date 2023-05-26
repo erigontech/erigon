@@ -60,6 +60,9 @@ func (a *ApiHandler) init() {
 			})
 		})
 		r.Route("/v2", func(r chi.Router) {
+			r.Route("/beacon", func(r chi.Router) {
+				r.Post("/blocks/{slot}", nil)
+			})
 			r.Route("/validator", func(r chi.Router) {
 				r.Post("/blocks/{slot}", nil)
 			})
