@@ -65,7 +65,7 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 	return block.Header(), nil
 }
 
-func (r *RemoteBlockReader) Snapshots() *RoSnapshots { return nil }
+func (r *RemoteBlockReader) Snapshots() *RoSnapshots { panic("not implemented") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash libcommon.Hash) (*types.Header, error) {
 	blockNum := rawdb.ReadHeaderNumber(tx, hash)

@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 type All struct {
@@ -18,7 +19,6 @@ type BlockReader interface {
 	BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error)
 	CurrentBlock(db kv.Tx) (*types.Block, error)
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
-	TxsV3Enabled() bool
 }
 
 type HeaderReader interface {
@@ -59,6 +59,9 @@ type FullBlockReader interface {
 	HeaderReader
 	TxnReader
 	CanonicalReader
+
+	TxsV3Enabled() bool
+	Snapshots() *snapshotsync.RoSnapshots
 }
 
 /*
