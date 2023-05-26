@@ -26,7 +26,12 @@ const (
 const (
 	HeaderInvalidated byte = iota
 	HeaderRequested
+	HeaderSkeletonRequested
 	HeaderRetryNotReady
+	HeaderEmpty
+	HeaderBad
+	HeaderEvicted
+	HeaderInserted
 )
 
 type SnapshotItem struct {
