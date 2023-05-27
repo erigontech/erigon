@@ -26,7 +26,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 	}
 	defer tx.Rollback()
 
-	block, err := api.blockByHashWithSenders(tx, hash)
+	block, err := api.blockByHashWithSenders(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 		return &n, err
 	}
 
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
-	block, err := api.blockWithSenders(tx, hash, *number)
+	block, err := api.blockWithSenders(ctx, tx, hash, *number)
 	if err != nil {
 		return nil, err
 	}

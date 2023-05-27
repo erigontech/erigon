@@ -178,10 +178,15 @@ func AnswerGetReceiptsQuery(db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, 
 			break
 		}
 		// Retrieve the requested block's receipts
-		results, err := rawdb.ReadReceiptsByHash(db, hash)
+		number := rawdb.ReadHeaderNumber(db, hash)
+		if number == nil {
+			return nil, nil
+		}
+		block, senders, err := rawdb.ReadBlockWithSenders(db, hash, *number)
 		if err != nil {
 			return nil, err
 		}
+		results := rawdb.ReadReceipts(db, block, senders)
 		if results == nil {
 			header, err := rawdb.ReadHeaderByHash(db, hash)
 			if err != nil {
