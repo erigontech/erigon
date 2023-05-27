@@ -93,18 +93,14 @@ func TestGetBlockReceipts(t *testing.T) {
 	br, _ := m.NewBlocksIO()
 	err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
-			header := rawdb.ReadHeaderByNumber(tx, i)
+			hash, err := rawdb.ReadCanonicalHash(tx, i)
+			require.NoError(t, err)
+			hashes = append(hashes, hash)
 
-			hashes = append(hashes, header.Hash())
-			b, s, err := br.BlockWithSenders(m.Ctx, tx, header.Hash(), header.Number.Uint64())
-			if err != nil {
-				return err
-			}
-			if b == nil {
-				return nil
-			}
+			block, senders, err := br.BlockWithSenders(m.Ctx, tx, hash, i)
+			require.NoError(t, err)
 			// If known, encode and queue for response packet
-			r := rawdb.ReadReceipts(tx, b, s)
+			r := rawdb.ReadReceipts(tx, block, senders)
 			encoded, err := rlp.EncodeToBytes(r)
 			require.NoError(t, err)
 			receipts = append(receipts, encoded)
