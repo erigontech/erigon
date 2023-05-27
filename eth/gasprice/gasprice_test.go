@@ -47,30 +47,14 @@ type testBackend struct {
 	blockReader services.FullBlockReader
 }
 
-func (b *testBackend) GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error) {
+func (b *testBackend) GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error) {
 	tx, err := b.db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	if number == nil {
-		return nil, nil
-	}
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, *number)
-	if err != nil {
-		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-	}
-
-	block, s, err := b.blockReader.BlockWithSenders(ctx, tx, hash, *number)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil
-	}
-	receipts := rawdb.ReadReceipts(tx, block, s)
+	receipts := rawdb.ReadReceipts(tx, block, nil)
 	return receipts, nil
 }
 
