@@ -258,7 +258,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			if len(rewardPercentiles) != 0 {
 				fees.block, fees.err = oracle.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNumber))
 				if fees.block != nil && fees.err == nil {
-					fees.receipts, fees.err = oracle.backend.GetReceipts(ctx, fees.block.Hash())
+					fees.receipts, fees.err = oracle.backend.GetReceipts(ctx, fees.block)
 				}
 			} else {
 				fees.header, fees.err = oracle.backend.HeaderByNumber(ctx, rpc.BlockNumber(blockNumber))
