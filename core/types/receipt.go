@@ -463,6 +463,8 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 	if len(senders) != len(txs) {
 		return fmt.Errorf("transaction and senders count mismatch, tx count = %d, senders count = %d", len(txs), len(senders))
 	}
+
+	blockNumber := new(big.Int).SetUint64(number)
 	for i := 0; i < len(r); i++ {
 		// The transaction type and hash can be retrieved from the transaction itself
 		r[i].Type = txs[i].Type()
@@ -470,7 +472,7 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 
 		// block location fields
 		r[i].BlockHash = hash
-		r[i].BlockNumber = new(big.Int).SetUint64(number)
+		r[i].BlockNumber = blockNumber
 		r[i].TransactionIndex = uint(i)
 
 		// The contract address can be derived from the transaction itself
