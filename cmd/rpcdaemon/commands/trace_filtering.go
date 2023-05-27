@@ -67,7 +67,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		}
 		blockNumber = *blockNumPtr
 	}
-	block, err := api.blockByNumberWithSenders(tx, blockNumber)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	}
 
 	// Extract transactions from block
-	block, bErr := api.blockByNumberWithSenders(tx, blockNumber)
+	block, bErr := api.blockByNumberWithSenders(ctx, tx, blockNumber)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -176,7 +176,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	bn := hexutil.Uint64(blockNum)
 
 	// Extract transactions from block
-	block, bErr := api.blockByNumberWithSenders(tx, blockNum)
+	block, bErr := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -408,7 +408,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 			continue
 		}
 
-		block, bErr := api.blockWithSenders(dbtx, hash, b)
+		block, bErr := api.blockWithSenders(ctx, dbtx, hash, b)
 		if bErr != nil {
 			if first {
 				first = false
@@ -905,7 +905,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	parentNo := rpc.BlockNumber(pNo)
 	rules := cfg.Rules(blockNumber, block.Time())
 	header := block.Header()
-	parentBlock, err := api.blockByRPCNumber(parentNo, dbtx)
+	parentBlock, err := api.blockByRPCNumber(ctx, parentNo, dbtx)
 	if err != nil {
 		return nil, nil, err
 	}
