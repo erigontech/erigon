@@ -35,9 +35,12 @@ type Peer struct {
 }
 
 func (p *Peer) do(fn func(p *Peer)) {
+	if fn == nil {
+		return
+	}
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	fn(p)
-	p.mu.Unlock()
 }
 
 func (p *Peer) UserAgent() string {

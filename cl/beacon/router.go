@@ -15,18 +15,17 @@ type ApiHandler struct {
 func (a *ApiHandler) init() {
 	r := chi.NewRouter()
 	a.mux = r
-
 	// This is the set of apis for validation + otterscan
 	// otterscn specific ones are commented as such
 	r.Route("/eth", func(r chi.Router) {
 		r.Route("/v1", func(r chi.Router) {
 			r.Get("/events", nil)
 			r.Route("/beacon", func(r chi.Router) {
-				r.Get("/headers/{tag}", nil) // otterscan
+				r.Get("/headers/{tag}", nil)      // otterscan
+				r.Get("/blocks/{slot}/root", nil) //otterscan
 				r.Get("/genesis", nil)
 				r.Post("/binded_blocks", nil)
 				r.Post("/blocks", nil)
-				r.Get("/blocks/{slot}/root", nil) //otterscan
 				r.Route("/pool", func(r chi.Router) {
 					r.Post("/attestations", nil)
 					r.Post("/sync_committees", nil)
@@ -68,7 +67,6 @@ func (a *ApiHandler) init() {
 			})
 		})
 	})
-
 }
 
 func (a *ApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
