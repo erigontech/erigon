@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
@@ -34,15 +33,20 @@ type BodiesCfg struct {
 	blockPropagator adapter.BlockPropagator
 	timeout         int
 	chanConfig      chain.Config
-	snapshots       *snapshotsync.RoSnapshots
 	blockReader     services.FullBlockReader
 	blockWriter     *blockio.BlockWriter
 	historyV3       bool
 	transactionsV3  bool
 }
 
-func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem), blockPropagator adapter.BlockPropagator, timeout int, chanConfig chain.Config, snapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, historyV3 bool, blockWriter *blockio.BlockWriter) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, snapshots: snapshots, blockReader: blockReader, historyV3: historyV3, blockWriter: blockWriter}
+func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
+	bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem),
+	blockPropagator adapter.BlockPropagator, timeout int,
+	chanConfig chain.Config,
+	blockReader services.FullBlockReader,
+	historyV3 bool,
+	blockWriter *blockio.BlockWriter) BodiesCfg {
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, blockReader: blockReader, historyV3: historyV3, blockWriter: blockWriter}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -57,8 +61,8 @@ func BodiesForward(
 	logger log.Logger,
 ) error {
 	var doUpdate bool
-	if cfg.snapshots != nil && s.BlockNumber < cfg.snapshots.BlocksAvailable() {
-		s.BlockNumber = cfg.snapshots.BlocksAvailable()
+	if cfg.blockReader != nil && cfg.blockReader.Snapshots() != nil && s.BlockNumber < cfg.blockReader.Snapshots().BlocksAvailable() {
+		s.BlockNumber = cfg.blockReader.Snapshots().BlocksAvailable()
 		doUpdate = true
 	}
 
