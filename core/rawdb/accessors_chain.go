@@ -410,12 +410,9 @@ func CanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]type
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
-	txIdKey := make([]byte, 8)
 	txs := make([]types.Transaction, amount)
-	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
-
-	if err := db.ForAmount(kv.EthTx, txIdKey, amount, func(k, v []byte) error {
+	if err := db.ForAmount(kv.EthTx, hexutility.EncodeTs(baseTxId), amount, func(k, v []byte) error {
 		var decodeErr error
 		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v); decodeErr != nil {
 			return decodeErr
@@ -432,12 +429,9 @@ func TxsV3(db kv.Getter, blockID uint64, amount uint32) ([]types.Transaction, er
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
-	key := make([]byte, 8)
 	txs := make([]types.Transaction, amount)
-	binary.BigEndian.PutUint64(key, blockID)
 	i := uint32(0)
-
-	if err := db.ForAmount(kv.EthTx, key, amount, func(k, v []byte) error {
+	if err := db.ForAmount(kv.EthTx, hexutility.EncodeTs(blockID), amount, func(k, v []byte) error {
 		var decodeErr error
 		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v); decodeErr != nil {
 			return decodeErr
@@ -455,12 +449,9 @@ func NonCanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]t
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
-	txIdKey := make([]byte, 8)
 	txs := make([]types.Transaction, amount)
-	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
-
-	if err := db.ForAmount(kv.NonCanonicalTxs, txIdKey, amount, func(k, v []byte) error {
+	if err := db.ForAmount(kv.NonCanonicalTxs, hexutility.EncodeTs(baseTxId), amount, func(k, v []byte) error {
 		var decodeErr error
 		if txs[i], decodeErr = types.DecodeTransaction(v); decodeErr != nil {
 			return decodeErr

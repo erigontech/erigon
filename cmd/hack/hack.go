@@ -114,11 +114,7 @@ func testBlockHashes(chaindata string, block int, stateRoot libcommon.Hash) {
 }
 
 func getCurrentBlockNumber(tx kv.Tx) *uint64 {
-	hash := rawdb.ReadHeadBlockHash(tx)
-	if hash == (libcommon.Hash{}) {
-		return nil
-	}
-	return rawdb.ReadHeaderNumber(tx, hash)
+	return rawdb.ReadCurrentBlockNumber(tx)
 }
 
 func printCurrentBlockNumber(chaindata string) {

@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -227,11 +226,6 @@ func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, hash libcommon.
 	if number == nil {
 		return nil, nil
 	}
-	canonicalHash, err := rawdb.ReadCanonicalHash(b.tx, *number)
-	if err != nil {
-		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-	}
-
 	block, s, err := b.baseApi._blockReader.BlockWithSenders(ctx, b.tx, hash, *number)
 	if err != nil {
 		return nil, err
