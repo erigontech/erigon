@@ -9,19 +9,19 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
+const (
+	IsCurrentMatchingSourceAttesterBit  = 0x0
+	IsPreviousMatchingSourceAttesterBit = 0x1
+	IsCurrentMatchingTargetAttesterBit  = 0x2
+	IsPreviousMatchingTargetAttesterBit = 0x3
+	IsCurrentMatchingHeadAttesterBit    = 0x4
+	IsPreviousMatchingHeadAttesterBit   = 0x5
+)
+
 const validatorSetCapacityMultiplier = 1.05 // allocate 5% to the validator set when re-allocation is needed.
 
 // This is all stuff used by phase0 state transition. It makes many operations faster.
 type Phase0Data struct {
-	// Source attesters
-	IsCurrentMatchingSourceAttester  bool
-	IsPreviousMatchingSourceAttester bool
-	// Target Attesters
-	IsCurrentMatchingTargetAttester  bool
-	IsPreviousMatchingTargetAttester bool
-	// Head attesters
-	IsCurrentMatchingHeadAttester  bool
-	IsPreviousMatchingHeadAttester bool
 	// MinInclusionDelay
 	MinCurrentInclusionDelayAttestation  *PendingAttestation
 	MinPreviousInclusionDelayAttestation *PendingAttestation
@@ -31,7 +31,9 @@ type ValidatorSet struct {
 	buffer []byte
 	l, c   int
 
-	phase0Data []*Phase0Data
+	// We have phase0 data below
+	phase0Data   []Phase0Data
+	attesterBits []byte
 
 	hashBuf
 }
@@ -57,10 +59,11 @@ func (v *ValidatorSet) Append(val Validator) {
 	// we are overflowing the buffer? append.
 	if offset >= len(v.buffer) {
 		v.expandBuffer(offset + validatorSize)
-		v.phase0Data = append(v.phase0Data, nil)
+		v.phase0Data = append(v.phase0Data, Phase0Data{})
 	}
 	copy(v.buffer[offset:], val)
-	v.phase0Data[v.l] = nil // initialize to empty.
+	v.phase0Data[v.l] = Phase0Data{} // initialize to empty.
+	v.attesterBits = append(v.attesterBits, 0x0)
 	v.l++
 }
 
@@ -78,6 +81,7 @@ func (v *ValidatorSet) Pop() Validator {
 
 func (v *ValidatorSet) Clear() {
 	v.l = 0
+	v.attesterBits = v.attesterBits[:0]
 }
 
 func (v *ValidatorSet) Clone() clonable.Clonable {
@@ -92,10 +96,13 @@ func (v *ValidatorSet) CopyTo(set2 IterableSSZ[Validator]) {
 	if offset > len(t.buffer) {
 		t.expandBuffer(offset)
 		t.buffer = append(t.buffer, make([]byte, len(v.buffer)-len(t.buffer))...)
+		t.attesterBits = make([]byte, len(v.attesterBits))
 	}
 	// skip copying (unsupported for phase0)
-	t.phase0Data = make([]*Phase0Data, t.l)
+	t.phase0Data = make([]Phase0Data, t.l)
 	copy(t.buffer, v.buffer)
+	copy(t.attesterBits, v.attesterBits)
+	t.attesterBits = t.attesterBits[:v.l]
 }
 
 func (v *ValidatorSet) DecodeSSZ(buf []byte, _ int) error {
@@ -105,7 +112,8 @@ func (v *ValidatorSet) DecodeSSZ(buf []byte, _ int) error {
 	v.expandBuffer(len(buf))
 	copy(v.buffer, buf)
 	v.l = len(buf) / validatorSize
-	v.phase0Data = make([]*Phase0Data, v.l)
+	v.phase0Data = make([]Phase0Data, v.l)
+	v.attesterBits = make([]byte, v.l)
 	return nil
 }
 
@@ -178,12 +186,27 @@ func (v *ValidatorSet) Set(idx int, val Validator) {
 
 func (v *ValidatorSet) getPhase0(idx int) *Phase0Data {
 	if idx >= v.l {
-		panic("ValidatorSet -- Get: out of bounds")
+		panic("ValidatorSet -- getPhase0: out of bounds")
 	}
-	if v.phase0Data[idx] == nil {
-		v.phase0Data[idx] = &Phase0Data{}
+	return &v.phase0Data[idx]
+}
+
+func (v *ValidatorSet) getAttesterBit(idx int, bit int) bool {
+	if idx >= v.l {
+		panic("ValidatorSet -- getBit: out of bounds")
 	}
-	return v.phase0Data[idx]
+	return (v.attesterBits[idx] & (1 << bit)) > 0
+}
+
+func (v *ValidatorSet) setAttesterBit(idx int, bit int, val bool) {
+	if idx >= v.l {
+		panic("ValidatorSet -- getBit: out of bounds")
+	}
+	if val {
+		v.attesterBits[idx] = ((1 << bit) | v.attesterBits[idx])
+		return
+	}
+	v.attesterBits[idx] &= ^(1 << bit)
 }
 
 func (v *ValidatorSet) Range(fn func(int, Validator, int) bool) {
@@ -195,27 +218,27 @@ func (v *ValidatorSet) Range(fn func(int, Validator, int) bool) {
 }
 
 func (v *ValidatorSet) IsCurrentMatchingSourceAttester(idx int) bool {
-	return v.getPhase0(idx).IsCurrentMatchingSourceAttester
+	return v.getAttesterBit(idx, IsCurrentMatchingSourceAttesterBit)
 }
 
 func (v *ValidatorSet) IsCurrentMatchingTargetAttester(idx int) bool {
-	return v.getPhase0(idx).IsCurrentMatchingTargetAttester
+	return v.getAttesterBit(idx, IsCurrentMatchingTargetAttesterBit)
 }
 
 func (v *ValidatorSet) IsCurrentMatchingHeadAttester(idx int) bool {
-	return v.getPhase0(idx).IsCurrentMatchingHeadAttester
+	return v.getAttesterBit(idx, IsCurrentMatchingTargetAttesterBit)
 }
 
 func (v *ValidatorSet) IsPreviousMatchingSourceAttester(idx int) bool {
-	return v.getPhase0(idx).IsPreviousMatchingSourceAttester
+	return v.getAttesterBit(idx, IsPreviousMatchingSourceAttesterBit)
 }
 
 func (v *ValidatorSet) IsPreviousMatchingTargetAttester(idx int) bool {
-	return v.getPhase0(idx).IsPreviousMatchingTargetAttester
+	return v.getAttesterBit(idx, IsPreviousMatchingTargetAttesterBit)
 }
 
 func (v *ValidatorSet) IsPreviousMatchingHeadAttester(idx int) bool {
-	return v.getPhase0(idx).IsPreviousMatchingHeadAttester
+	return v.getAttesterBit(idx, IsPreviousMatchingHeadAttesterBit)
 }
 
 func (v *ValidatorSet) MinCurrentInclusionDelayAttestation(idx int) *PendingAttestation {
@@ -227,27 +250,27 @@ func (v *ValidatorSet) MinPreviousInclusionDelayAttestation(idx int) *PendingAtt
 }
 
 func (v *ValidatorSet) SetIsCurrentMatchingSourceAttester(idx int, val bool) {
-	v.getPhase0(idx).IsCurrentMatchingSourceAttester = val
+	v.setAttesterBit(idx, IsCurrentMatchingSourceAttesterBit, val)
 }
 
 func (v *ValidatorSet) SetIsCurrentMatchingTargetAttester(idx int, val bool) {
-	v.getPhase0(idx).IsCurrentMatchingTargetAttester = val
+	v.setAttesterBit(idx, IsCurrentMatchingTargetAttesterBit, val)
 }
 
 func (v *ValidatorSet) SetIsCurrentMatchingHeadAttester(idx int, val bool) {
-	v.getPhase0(idx).IsCurrentMatchingHeadAttester = val
+	v.setAttesterBit(idx, IsCurrentMatchingHeadAttesterBit, val)
 }
 
 func (v *ValidatorSet) SetIsPreviousMatchingSourceAttester(idx int, val bool) {
-	v.getPhase0(idx).IsPreviousMatchingSourceAttester = val
+	v.setAttesterBit(idx, IsPreviousMatchingSourceAttesterBit, val)
 }
 
 func (v *ValidatorSet) SetIsPreviousMatchingTargetAttester(idx int, val bool) {
-	v.getPhase0(idx).IsPreviousMatchingTargetAttester = val
+	v.setAttesterBit(idx, IsPreviousMatchingTargetAttesterBit, val)
 }
 
 func (v *ValidatorSet) SetIsPreviousMatchingHeadAttester(idx int, val bool) {
-	v.getPhase0(idx).IsPreviousMatchingHeadAttester = val
+	v.setAttesterBit(idx, IsPreviousMatchingHeadAttesterBit, val)
 }
 
 func (v *ValidatorSet) SetMinCurrentInclusionDelayAttestation(idx int, val *PendingAttestation) {

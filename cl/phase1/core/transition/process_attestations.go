@@ -208,7 +208,7 @@ func processAttestationPhase0(s *state2.BeaconState, attestation *solid.Attestat
 				return nil, err
 			}
 			if attestation.AttestantionData().BeaconBlockRoot() == slotRoot {
-				if err := s.SetValidatorIsPreviousMatchingTargetAttester(int(index), true); err != nil {
+				if err := s.SetValidatorIsPreviousMatchingHeadAttester(int(index), true); err != nil {
 					return nil, err
 				}
 			}
