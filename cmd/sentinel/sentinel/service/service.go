@@ -155,38 +155,46 @@ func (s *SentinelServer) SendRequest(pctx context.Context, req *sentinelrpc.Requ
 	defer cn()
 	doneCh := make(chan *sentinelrpc.ResponseData)
 	// Try finding the data to our peers
+	uniquePeers := map[peer.ID]struct{}{}
+	requestPeer := func(peer *peers.Peer) {
+		peer.MarkUsed()
+		data, isError, err := communication.SendRequestRawToPeer(ctx, s.sentinel.Host(), req.Data, req.Topic, peer.ID())
+		if err != nil {
+			return
+		}
+		if isError > 3 {
+			peer.Disconnect(fmt.Sprintf("invalid response, starting byte %d", isError))
+			peer.Penalize()
+		}
+		if isError != 0 {
+			return
+		}
+		ans := &sentinelrpc.ResponseData{
+			Data:  data,
+			Error: isError != 0,
+			Peer: &sentinelrpc.Peer{
+				Pid: peer.ID().String(),
+			},
+		}
+		select {
+		case doneCh <- ans:
+			peer.MarkReplied()
+			retryReqInterval.Stop()
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
 	go func() {
 		for {
 			pid, err := s.sentinel.RandomPeer(req.Topic)
 			if err != nil {
 				continue
 			}
-			go s.sentinel.Peers().WithPeer(pid, func(peer *peers.Peer) {
-				peer.MarkUsed()
-				data, isError, err := communication.SendRequestRawToPeer(ctx, s.sentinel.Host(), req.Data, req.Topic, pid)
-				if err != nil {
-					//peer.Penalize()
-					return
-				}
-				if isError {
-					peer.Disconnect("invalid response, non 0 starting byte")
-				}
-				ans := &sentinelrpc.ResponseData{
-					Data:  data,
-					Error: isError,
-					Peer: &sentinelrpc.Peer{
-						Pid: pid.String(),
-					},
-				}
-				select {
-				case doneCh <- ans:
-					peer.MarkReplied()
-					retryReqInterval.Stop()
-					return
-				case <-ctx.Done():
-					return
-				}
-			})
+			if _, ok := uniquePeers[pid]; !ok {
+				go s.sentinel.Peers().WithPeer(pid, requestPeer)
+				uniquePeers[pid] = struct{}{}
+			}
 			select {
 			case <-retryReqInterval.C:
 			case <-ctx.Done():

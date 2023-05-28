@@ -4,6 +4,7 @@ import (
 	"context"
 	"runtime"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 
@@ -85,6 +86,12 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 			"alloc/sys", libcommon.ByteCount(m.Alloc)+"/"+libcommon.ByteCount(m.Sys),
 			"numGC", m.NumGC,
 		)
+
+		peers := metrics.GetOrCreateGauge("caplin_peer_count", func() float64 {
+			return float64(count.Amount)
+		})
+
+		peers.Get()
 
 		if err := g.forkChoice.OnBlock(block, true, true); err != nil {
 			// if we are within a quarter of an epoch within chain tip we ban it

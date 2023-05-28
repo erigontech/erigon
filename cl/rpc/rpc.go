@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
@@ -53,6 +54,9 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beac
 func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 	// Prepare output slice.
 	responsePacket := []*cltypes.SignedBeaconBlock{}
+
+	ctx, cn := context.WithTimeout(ctx, time.Second*time.Duration(5+10*count))
+	defer cn()
 	message, err := b.sentinel.SendRequest(ctx, &sentinel.RequestData{
 		Data:  reqData,
 		Topic: topic,
@@ -61,7 +65,9 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 		return nil, "", err
 	}
 	if message.Error {
-		log.Debug("received range req error", "err", string(message.Data))
+		rd := snappy.NewReader(bytes.NewBuffer(message.Data))
+		errBytes, _ := io.ReadAll(rd)
+		log.Debug("received range req error", "err", string(errBytes))
 		return nil, message.Peer.Pid, nil
 	}
 
