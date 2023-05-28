@@ -96,7 +96,7 @@ func EligibleValidatorsIndicies(b *raw.BeaconState) (eligibleValidators []uint64
 	eligibleValidators = make([]uint64, 0, b.ValidatorLength())
 	previousEpoch := PreviousEpoch(b)
 
-	b.ForEachValidator(func(validator *cltypes.Validator, i, total int) bool {
+	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 		if validator.Active(previousEpoch) || (validator.Slashed() && previousEpoch+1 < validator.WithdrawableEpoch()) {
 			eligibleValidators = append(eligibleValidators, uint64(i))
 		}
@@ -157,7 +157,7 @@ func GetUnslashedParticipatingIndices(b *raw.BeaconState, flagIndex int, epoch u
 		return nil, fmt.Errorf("getUnslashedParticipatingIndices: only epoch and previous epoch can be used")
 	}
 	// Iterate over all validators and include the active ones that have flag_index enabled and are not slashed.
-	b.ForEachValidator(func(validator *cltypes.Validator, i, total int) bool {
+	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 		if !validator.Active(epoch) ||
 			!cltypes.ParticipationFlags(participation.Get(i)).HasFlag(flagIndex) ||
 			validator.Slashed() {
@@ -170,13 +170,13 @@ func GetUnslashedParticipatingIndices(b *raw.BeaconState, flagIndex int, epoch u
 }
 
 // Implementation of is_eligible_for_activation_queue. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation_queue
-func IsValidatorEligibleForActivationQueue(b *raw.BeaconState, validator *cltypes.Validator) bool {
+func IsValidatorEligibleForActivationQueue(b *raw.BeaconState, validator solid.Validator) bool {
 	return validator.ActivationEligibilityEpoch() == b.BeaconConfig().FarFutureEpoch &&
 		validator.EffectiveBalance() == b.BeaconConfig().MaxEffectiveBalance
 }
 
 // Implementation of is_eligible_for_activation. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation
-func IsValidatorEligibleForActivation(b *raw.BeaconState, validator *cltypes.Validator) bool {
+func IsValidatorEligibleForActivation(b *raw.BeaconState, validator solid.Validator) bool {
 	return validator.ActivationEligibilityEpoch() <= b.FinalizedCheckpoint().Epoch() &&
 		validator.ActivationEpoch() == b.BeaconConfig().FarFutureEpoch
 }

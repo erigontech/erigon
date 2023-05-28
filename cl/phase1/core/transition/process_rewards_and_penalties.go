@@ -2,7 +2,7 @@ package transition
 
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
@@ -18,7 +18,7 @@ func processRewardsAndPenaltiesPostAltair(s *state2.BeaconState) (err error) {
 	// Make buffer for flag indexes total balances.
 	flagsTotalBalances := make([]uint64, len(weights))
 	// Compute all total balances for each enable unslashed validator indicies with all flags on.
-	s.ForEachValidator(func(validator *cltypes.Validator, validatorIndex, total int) bool {
+	s.ForEachValidator(func(validator solid.Validator, validatorIndex, total int) bool {
 		for i := range weights {
 			if state2.IsUnslashedParticipatingIndex(s.BeaconState, previousEpoch, uint64(validatorIndex), i) {
 				flagsTotalBalances[i] += validator.EffectiveBalance()
@@ -81,17 +81,28 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 	// Make buffer for flag indexes totTargetal balances.
 	var unslashedMatchingSourceBalanceIncrements, unslashedMatchingTargetBalanceIncrements, unslashedMatchingHeadBalanceIncrements uint64
 	// Compute all total balances for each enable unslashed validator indicies with all flags on.
-	s.ForEachValidator(func(validator *cltypes.Validator, idx, total int) bool {
+	s.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
 		if validator.Slashed() {
 			return true
 		}
-		if validator.IsPreviousMatchingSourceAttester {
+		var previousMatchingSourceAttester, previousMatchingTargetAttester, previousMatchingHeadAttester bool
+
+		if previousMatchingSourceAttester, err = s.ValidatorIsPreviousMatchingSourceAttester(idx); err != nil {
+			return false
+		}
+		if previousMatchingTargetAttester, err = s.ValidatorIsPreviousMatchingTargetAttester(idx); err != nil {
+			return false
+		}
+		if previousMatchingHeadAttester, err = s.ValidatorIsPreviousMatchingHeadAttester(idx); err != nil {
+			return false
+		}
+		if previousMatchingSourceAttester {
 			unslashedMatchingSourceBalanceIncrements += validator.EffectiveBalance()
 		}
-		if validator.IsPreviousMatchingTargetAttester {
+		if previousMatchingTargetAttester {
 			unslashedMatchingTargetBalanceIncrements += validator.EffectiveBalance()
 		}
-		if validator.IsPreviousMatchingHeadAttester {
+		if previousMatchingHeadAttester {
 			unslashedMatchingHeadBalanceIncrements += validator.EffectiveBalance()
 		}
 		return true
@@ -110,27 +121,54 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 		if err != nil {
 			return err
 		}
+		var previousMatchingSourceAttester, previousMatchingTargetAttester, previousMatchingHeadAttester bool
+
+		if previousMatchingSourceAttester, err = s.ValidatorIsPreviousMatchingSourceAttester(int(index)); err != nil {
+			return err
+		}
+		if previousMatchingTargetAttester, err = s.ValidatorIsPreviousMatchingTargetAttester(int(index)); err != nil {
+			return err
+		}
+		if previousMatchingHeadAttester, err = s.ValidatorIsPreviousMatchingHeadAttester(int(index)); err != nil {
+			return err
+		}
+
 		// we can use a multiplier to account for all attesting
-		attested, missed := currentValidator.DutiesAttested()
+		var attested, missed uint64
+		if currentValidator.Slashed() {
+			attested, missed = 0, 3
+		} else {
+			if previousMatchingSourceAttester {
+				attested++
+			}
+			if previousMatchingTargetAttester {
+				attested++
+			}
+			if previousMatchingHeadAttester {
+				attested++
+			}
+			missed = 3 - attested
+		}
+
 		// If we attested then we reward the validator.
 		if state2.InactivityLeaking(s.BeaconState) {
 			if err := state2.IncreaseBalance(s.BeaconState, index, baseReward*attested); err != nil {
 				return err
 			}
 		} else {
-			if !currentValidator.Slashed() && currentValidator.IsPreviousMatchingSourceAttester {
+			if !currentValidator.Slashed() && previousMatchingSourceAttester {
 				rewardNumerator := baseReward * unslashedMatchingSourceBalanceIncrements
 				if err := state2.IncreaseBalance(s.BeaconState, index, rewardNumerator/rewardDenominator); err != nil {
 					return err
 				}
 			}
-			if !currentValidator.Slashed() && currentValidator.IsPreviousMatchingTargetAttester {
+			if !currentValidator.Slashed() && previousMatchingTargetAttester {
 				rewardNumerator := baseReward * unslashedMatchingTargetBalanceIncrements
 				if err := state2.IncreaseBalance(s.BeaconState, index, rewardNumerator/rewardDenominator); err != nil {
 					return err
 				}
 			}
-			if !currentValidator.Slashed() && currentValidator.IsPreviousMatchingHeadAttester {
+			if !currentValidator.Slashed() && previousMatchingHeadAttester {
 				rewardNumerator := baseReward * unslashedMatchingHeadBalanceIncrements
 				if err := state2.IncreaseBalance(s.BeaconState, index, rewardNumerator/rewardDenominator); err != nil {
 					return err
@@ -144,7 +182,7 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 			if state2.DecreaseBalance(s.BeaconState, index, beaconConfig.BaseRewardsPerEpoch*baseReward-proposerReward); err != nil {
 				return err
 			}
-			if currentValidator.Slashed() || !currentValidator.IsPreviousMatchingTargetAttester {
+			if currentValidator.Slashed() || !previousMatchingTargetAttester {
 				// Increase penalities linearly if network is leaking.
 				if state2.DecreaseBalance(s.BeaconState, index, currentValidator.EffectiveBalance()*state2.FinalityDelay(s.BeaconState)/beaconConfig.InactivityPenaltyQuotient); err != nil {
 					return err
@@ -160,11 +198,18 @@ func processRewardsAndPenaltiesPhase0(s *state2.BeaconState) (err error) {
 	}
 	// Lastly process late attestations
 
-	s.ForEachValidator(func(validator *cltypes.Validator, index, total int) bool {
-		if validator.Slashed() || !validator.IsPreviousMatchingSourceAttester {
+	s.ForEachValidator(func(validator solid.Validator, index, total int) bool {
+		var previousMatchingSourceAttester bool
+		var attestation *solid.PendingAttestation
+		if previousMatchingSourceAttester, err = s.ValidatorIsPreviousMatchingSourceAttester(index); err != nil {
+			return false
+		}
+		if validator.Slashed() || !previousMatchingSourceAttester {
 			return true
 		}
-		attestation := validator.MinPreviousInclusionDelayAttestation
+		if attestation, err = s.ValidatorMinPreviousInclusionDelayAttestation(index); err != nil {
+			return false
+		}
 		var baseReward uint64
 		baseReward, err = s.BaseReward(uint64(index))
 		if err != nil {

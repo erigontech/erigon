@@ -3,10 +3,10 @@ package state_test
 import (
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,7 +18,7 @@ func getTestStateBalances(t *testing.T) *state2.BeaconState {
 	numVals := uint64(2048)
 	b := state2.New(&clparams.MainnetBeaconConfig)
 	for i := uint64(0); i < numVals; i++ {
-		v := &cltypes.Validator{}
+		v := solid.NewValidator()
 		v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
 		b.AddValidator(v, i)
 	}
@@ -74,10 +74,10 @@ func TestDecreaseBalance(t *testing.T) {
 
 func TestInitiatieValidatorExit(t *testing.T) {
 
-	v1 := &cltypes.Validator{}
+	v1 := solid.NewValidator()
 	v1.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
 	v1.SetActivationEpoch(0)
-	v2 := &cltypes.Validator{}
+	v2 := solid.NewValidator()
 	v2.SetExitEpoch(testExitEpoch)
 	v2.SetWithdrawableEpoch(testExitEpoch + clparams.MainnetBeaconConfig.MinValidatorWithdrawabilityDelay)
 	v2.SetActivationEpoch(0)
@@ -86,7 +86,7 @@ func TestInitiatieValidatorExit(t *testing.T) {
 		numValidators              uint64
 		expectedExitEpoch          uint64
 		expectedWithdrawlableEpoch uint64
-		validator                  *cltypes.Validator
+		validator                  solid.Validator
 	}{
 		{
 			description:                "success",

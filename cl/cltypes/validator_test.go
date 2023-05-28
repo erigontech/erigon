@@ -103,8 +103,8 @@ var testValidatorRoot1 = common.HexToHash("83e755dbe8b552c628677bcad4d5f28b29f9a
 var testValidatorRoot2 = common.HexToHash("0bcf6f6b165f8ba4a0b59fad23195a83097cdfc62eca06d6219d5699f057aa14")
 
 func TestValidatorSlashed(t *testing.T) {
-	encoded := testValidator1.EncodeSSZ([]byte{0x2})
-	decodedValidator := &cltypes.Validator{}
+	encoded, _ := testValidator1.EncodeSSZ([]byte{0x2})
+	decodedValidator := solid.NewValidator()
 	require.NoError(t, decodedValidator.DecodeSSZ(encoded[1:], 0))
 	root, err := decodedValidator.HashSSZ()
 	require.NoError(t, err)
@@ -113,17 +113,14 @@ func TestValidatorSlashed(t *testing.T) {
 
 func TestValidatorNonSlashed(t *testing.T) {
 	encoded, _ := utils.DecompressSnappy(testValidator2Snappified)
-	decodedValidator := &cltypes.Validator{}
+	decodedValidator := solid.NewValidator()
 	require.NoError(t, decodedValidator.DecodeSSZ(encoded, 0))
 	encoded2, _ := decodedValidator.EncodeSSZ(nil)
 	require.EqualValues(t, encoded2, encoded)
-	require.EqualValues(t, decodedValidator.Validator, *testValidator2)
+	require.EqualValues(t, decodedValidator, testValidator2)
 	root, err := decodedValidator.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(root), testValidatorRoot2)
-	att, miss := decodedValidator.DutiesAttested()
-	assert.Equal(t, att, uint64(0))
-	assert.Equal(t, miss, uint64(3))
 
 	assert.False(t, decodedValidator.IsSlashable(1))
 

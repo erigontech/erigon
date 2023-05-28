@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -92,8 +91,8 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	}
 	mixes := baseState.RandaoMixes()
 	// TODO: make this copy smarter when validators is a smarter struct
-	validators := make([]*cltypes.Validator, baseState.ValidatorLength())
-	baseState.ForEachValidator(func(v *cltypes.Validator, idx, total int) bool {
+	validators := make([]solid.Validator, baseState.ValidatorLength())
+	baseState.ForEachValidator(func(v solid.Validator, idx, total int) bool {
 		validators[idx] = v
 		return true
 	})

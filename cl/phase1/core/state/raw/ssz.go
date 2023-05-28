@@ -92,7 +92,7 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	}
 	size += b.eth1DataVotes.EncodingSizeSSZ()
 	if b.validators == nil {
-		b.validators = cltypes.NewValidatorSet(int(b.beaconConfig.ValidatorRegistryLimit))
+		b.validators = solid.NewValidatorSet(int(b.beaconConfig.ValidatorRegistryLimit))
 	}
 	size += b.validators.EncodingSizeSSZ()
 	size += b.balances.Length() * 8

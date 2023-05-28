@@ -1,11 +1,12 @@
 package transition
 
 import (
-	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"sort"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
 // computeActivationExitEpoch is Implementation of compute_activation_exit_epoch. Defined in https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#compute_activation_exit_epoch.
@@ -21,7 +22,7 @@ func ProcessRegistryUpdates(s *state2.BeaconState) error {
 	activationQueue := make([]uint64, 0)
 	// Process activation eligibility and ejections.
 	var err error
-	s.ForEachValidator(func(validator *cltypes.Validator, validatorIndex, total int) bool {
+	s.ForEachValidator(func(validator solid.Validator, validatorIndex, total int) bool {
 		if state2.IsValidatorEligibleForActivationQueue(s.BeaconState, validator) {
 			s.SetActivationEligibilityEpochForValidatorAtIndex(validatorIndex, currentEpoch+1)
 		}
