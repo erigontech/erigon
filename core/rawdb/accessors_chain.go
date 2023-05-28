@@ -1053,29 +1053,6 @@ func ReadReceipts(db kv.Tx, block *types.Block, senders []libcommon.Address) typ
 	return receipts
 }
 
-func ReadReceiptsByHash(db kv.Tx, hash libcommon.Hash) (types.Receipts, error) {
-	number := ReadHeaderNumber(db, hash)
-	if number == nil {
-		return nil, nil
-	}
-	canonicalHash, err := ReadCanonicalHash(db, *number)
-	if err != nil {
-		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-	}
-	b, s, err := ReadBlockWithSenders(db, hash, *number)
-	if err != nil {
-		return nil, err
-	}
-	if b == nil {
-		return nil, nil
-	}
-	receipts := ReadReceipts(db, b, s)
-	if receipts == nil {
-		return nil, nil
-	}
-	return receipts, nil
-}
-
 // WriteReceipts stores all the transaction receipts belonging to a block.
 func WriteReceipts(tx kv.Putter, number uint64, receipts types.Receipts) error {
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))

@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -65,7 +66,7 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 	return block.Header(), nil
 }
 
-func (r *RemoteBlockReader) Snapshots() *RoSnapshots { return nil }
+func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots { panic("not implemented") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash libcommon.Hash) (*types.Header, error) {
 	blockNum := rawdb.ReadHeaderNumber(tx, hash)
@@ -192,11 +193,11 @@ type BlockReader struct {
 	TransactionsV3 bool
 }
 
-func NewBlockReader(snapshots *RoSnapshots, transactionsV3 bool) *BlockReader {
-	return &BlockReader{sn: snapshots, TransactionsV3: transactionsV3}
+func NewBlockReader(snapshots services.BlockSnapshots, transactionsV3 bool) *BlockReader {
+	return &BlockReader{sn: snapshots.(*RoSnapshots), TransactionsV3: transactionsV3}
 }
 
-func (r *BlockReader) Snapshots() *RoSnapshots { return r.sn }
+func (r *BlockReader) Snapshots() services.BlockSnapshots { return r.sn }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
 	h = rawdb.ReadHeaderByNumber(tx, blockHeight)
@@ -371,8 +372,21 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash libcommon.Has
 }
 
 func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error) {
+	return r.blockWithSenders(ctx, tx, hash, blockHeight, false)
+}
+func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []libcommon.Address, err error) {
 	if blockHeight >= r.sn.BlocksAvailable() {
 		if r.TransactionsV3 {
+			if forceCanonical {
+				canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+				if err != nil {
+					return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
+				}
+				if canonicalHash != hash {
+					return nil, nil, nil
+				}
+			}
+
 			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
 			if err != nil {
 				return nil, nil, err
@@ -389,6 +403,9 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash l
 				return nil, nil, err
 			}
 			return block, senders, nil
+		}
+		if forceCanonical {
+			return nil, nil, err
 		}
 		return rawdb.NonCanonicalBlockWithSenders(tx, hash, blockHeight)
 	}
@@ -801,7 +818,7 @@ func (r *BlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	if headNumber == nil {
 		return nil, nil
 	}
-	block, _, err := r.BlockWithSenders(context.Background(), db, headHash, *headNumber)
+	block, _, err := r.blockWithSenders(context.Background(), db, headHash, *headNumber, true)
 	return block, err
 }
 func (r *BlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {

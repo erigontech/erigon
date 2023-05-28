@@ -40,7 +40,7 @@ type OracleBackend interface {
 	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
 	ChainConfig() *chain.Config
 
-	GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error)
+	GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 }
 

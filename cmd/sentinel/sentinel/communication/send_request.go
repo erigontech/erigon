@@ -6,8 +6,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -19,42 +17,42 @@ var NoRequestHandlers = map[string]bool{
 	MetadataProtocolV2: true,
 }
 
-func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topic string, peerId peer.ID) ([]byte, bool, error) {
+type response struct {
+	data []byte
+	code byte
+	err  error
+}
 
-	respRetryTicker := time.NewTimer(30 * time.Millisecond)
-	defer respRetryTicker.Stop()
+func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topic string, peerId peer.ID) ([]byte, byte, error) {
 
-	stream, err := writeRequestRaw(host, ctx, data, peerId, topic)
+	nctx, cn := context.WithTimeout(ctx, 5*time.Second)
+	defer cn()
+	stream, err := writeRequestRaw(host, nctx, data, peerId, topic)
 	if err != nil {
-		return nil, false, err
+		return nil, 189, err
 	}
 	defer stream.Close()
 
-	//log.Trace("[Sentinel Req] sent request", "topic", topic, "peer", peerId)
-
-	respRetryTimer := time.NewTimer(clparams.RespTimeout)
-	defer respRetryTimer.Stop()
-
-	resp, foundErrRequest, err := verifyResponse(stream, peerId)
-
-Loop:
-	for err != nil {
+	ch := make(chan response)
+	go func() {
+		res := verifyResponse(stream, peerId)
 		select {
 		case <-ctx.Done():
-			log.Warn("[Sentinel Resp] context timeout")
-			break Loop
-		case <-respRetryTimer.C:
-			log.Trace("[Sentinel Resp] timeout", "topic", topic, "peer", peerId)
-			break Loop
-		case <-respRetryTicker.C:
-			resp, foundErrRequest, err = verifyResponse(stream, peerId)
-			if err == network.ErrReset {
-				break Loop
-			}
+			return
+		default:
 		}
+		ch <- res
+	}()
+	select {
+	case <-ctx.Done():
+		stream.Reset()
+		return nil, 189, ctx.Err()
+	case ans := <-ch:
+		if ans.err != nil {
+			ans.code = 189
+		}
+		return ans.data, ans.code, ans.err
 	}
-
-	return resp, foundErrRequest, err
 }
 
 func writeRequestRaw(host host.Host, ctx context.Context, data []byte, peerId peer.ID, topic string) (network.Stream, error) {
@@ -72,16 +70,16 @@ func writeRequestRaw(host host.Host, ctx context.Context, data []byte, peerId pe
 	return stream, stream.CloseWrite()
 }
 
-func verifyResponse(stream network.Stream, peerId peer.ID) ([]byte, bool, error) {
+func verifyResponse(stream network.Stream, peerId peer.ID) (resp response) {
 	code := make([]byte, 1)
-	_, err := stream.Read(code)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to read code byte peer=%s, err=%s", peerId, err)
+	_, resp.err = stream.Read(code)
+	if resp.err != nil {
+		return
 	}
-
-	message, err := io.ReadAll(stream)
-	if err != nil {
-		return nil, false, err
+	resp.code = code[0]
+	resp.data, resp.err = io.ReadAll(stream)
+	if resp.err != nil {
+		return
 	}
-	return message, code[0] != 0, nil
+	return
 }

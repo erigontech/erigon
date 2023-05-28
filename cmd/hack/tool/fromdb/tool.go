@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
@@ -22,6 +23,19 @@ func PruneMode(db kv.RoDB) (pm prune.Mode) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		var err error
 		pm, err = prune.Get(tx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	return
+}
+func TxsV3(db kv.RoDB) (enabled bool) {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		enabled, err = kvcfg.HistoryV3.Enabled(tx)
 		if err != nil {
 			return err
 		}

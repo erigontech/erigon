@@ -14,18 +14,27 @@
 package handlers
 
 import (
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
-func (c *ConsensusHandlers) blocksByRangeHandler(stream network.Stream) {
+func (c *ConsensusHandlers) blocksByRangeHandler(stream network.Stream) error {
 	log.Trace("Got block by range handler call")
-	stream.Write([]byte{0x3})
-	stream.Close()
+	return ssz_snappy.EncodeAndWrite(stream, &emptyString{}, ResourceUnavaiablePrefix)
 }
 
-func (c *ConsensusHandlers) beaconBlocksByRootHandler(stream network.Stream) {
+func (c *ConsensusHandlers) beaconBlocksByRootHandler(stream network.Stream) error {
 	log.Trace("Got beacon block by root handler call")
-	stream.Write([]byte{0x3})
-	stream.Close()
+	return ssz_snappy.EncodeAndWrite(stream, &emptyString{}, ResourceUnavaiablePrefix)
+}
+
+type emptyString struct{}
+
+func (e *emptyString) EncodeSSZ(xs []byte) ([]byte, error) {
+	return append(xs, 0), nil
+}
+
+func (e *emptyString) EncodingSizeSSZ() int {
+	return 1
 }

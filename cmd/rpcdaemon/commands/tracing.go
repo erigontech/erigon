@@ -52,9 +52,9 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		hashOk   bool
 	)
 	if number, numberOk = blockNrOrHash.Number(); numberOk {
-		block, err = api.blockByRPCNumber(number, tx)
+		block, err = api.blockByRPCNumber(ctx, number, tx)
 	} else if hash, hashOk = blockNrOrHash.Hash(); hashOk {
-		block, err = api.blockByHashWithSenders(tx, hash)
+		block, err = api.blockByHashWithSenders(ctx, tx, hash)
 	} else {
 		return fmt.Errorf("invalid arguments; neither block nor hash specified")
 	}
@@ -88,7 +88,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	var excessDataGas *big.Int
-	parentBlock, err := api.blockByHashWithSenders(tx, block.ParentHash())
+	parentBlock, err := api.blockByHashWithSenders(ctx, tx, block.ParentHash())
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -220,7 +220,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		}
 		blockNum = *blockNumPtr
 	}
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -380,7 +380,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		return err
 	}
 
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		stream.WriteNil()
 		return err

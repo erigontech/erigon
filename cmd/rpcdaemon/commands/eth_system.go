@@ -5,7 +5,6 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -216,13 +215,13 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 	return header, nil
 }
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	return b.baseApi.blockByRPCNumber(number, b.tx)
+	return b.baseApi.blockByRPCNumber(ctx, number, b.tx)
 }
 func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
 	return b.cc
 }
-func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error) {
-	return rawdb.ReadReceiptsByHash(b.tx, hash)
+func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error) {
+	return rawdb.ReadReceipts(b.tx, block, nil), nil
 }
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 	return nil, nil
