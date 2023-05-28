@@ -167,7 +167,7 @@ func TestBeaconState_SetValidatorMinCurrentInclusionDelayAttestation(t *testing.
 
 	err := state.SetValidatorMinCurrentInclusionDelayAttestation(index, value)
 	assert.NoError(t, err)
-	assert.Equal(t, value, state.validators.GetPhase0(index).MinCurrentInclusionDelayAttestation)
+	assert.Equal(t, value, state.validators.MinCurrentInclusionDelayAttestation(index))
 }
 
 func TestBeaconState_SetValidatorIsCurrentMatchingSourceAttester(t *testing.T) {
@@ -176,7 +176,7 @@ func TestBeaconState_SetValidatorIsCurrentMatchingSourceAttester(t *testing.T) {
 	value := true
 	err := state.SetValidatorIsCurrentMatchingSourceAttester(index, value)
 	assert.NoError(t, err)
-	assert.Equal(t, value, state.validators.GetPhase0(index).IsCurrentMatchingSourceAttester)
+	assert.Equal(t, value, state.validators.IsCurrentMatchingSourceAttester(index))
 }
 
 func TestBeaconState_SetValidatorIsCurrentMatchingTargetAttester(t *testing.T) {
@@ -185,7 +185,7 @@ func TestBeaconState_SetValidatorIsCurrentMatchingTargetAttester(t *testing.T) {
 	value := true
 	err := state.SetValidatorIsCurrentMatchingTargetAttester(index, value)
 	assert.NoError(t, err)
-	assert.Equal(t, value, state.validators.GetPhase0(index).IsCurrentMatchingTargetAttester)
+	assert.Equal(t, value, state.validators.IsCurrentMatchingTargetAttester(index))
 }
 
 func TestBeaconState_SetValidatorIsCurrentMatchingHeadAttester(t *testing.T) {
@@ -194,7 +194,7 @@ func TestBeaconState_SetValidatorIsCurrentMatchingHeadAttester(t *testing.T) {
 	value := true
 	err := state.SetValidatorIsCurrentMatchingHeadAttester(index, value)
 	assert.NoError(t, err)
-	assert.Equal(t, value, state.validators.GetPhase0(index).IsCurrentMatchingHeadAttester)
+	assert.Equal(t, value, state.validators.IsCurrentMatchingHeadAttester(index))
 }
 
 func TestBeaconState_SetValidatorMinPreviousInclusionDelayAttestation(t *testing.T) {
@@ -203,7 +203,7 @@ func TestBeaconState_SetValidatorMinPreviousInclusionDelayAttestation(t *testing
 	value := solid.NewPendingAttestionFromParameters(nil, solid.NewAttestationData(), 123, 3)
 	err := state.SetValidatorMinPreviousInclusionDelayAttestation(index, value)
 	assert.NoError(t, err)
-	assert.Equal(t, value, state.validators.GetPhase0(index).MinPreviousInclusionDelayAttestation)
+	assert.Equal(t, value, state.validators.MinPreviousInclusionDelayAttestation(index))
 }
 
 func TestBeaconState_SetValidatorIsPreviousMatchingSourceAttester(t *testing.T) {
@@ -212,7 +212,7 @@ func TestBeaconState_SetValidatorIsPreviousMatchingSourceAttester(t *testing.T) 
 	value := true
 	err := state.SetValidatorIsPreviousMatchingSourceAttester(index, value)
 	assert.NoError(t, err)
-	assert.Equal(t, value, state.validators.GetPhase0(index).IsPreviousMatchingSourceAttester)
+	assert.Equal(t, value, state.validators.IsPreviousMatchingSourceAttester(index))
 }
 
 func TestBeaconState_SetValidatorIsPreviousMatchingTargetAttester(t *testing.T) {
@@ -221,7 +221,7 @@ func TestBeaconState_SetValidatorIsPreviousMatchingTargetAttester(t *testing.T) 
 	value := true
 	err := state.SetValidatorIsPreviousMatchingTargetAttester(index, value)
 	assert.NoError(t, err)
-	assert.Equal(t, value, state.validators.GetPhase0(index).IsPreviousMatchingTargetAttester)
+	assert.Equal(t, value, state.validators.IsPreviousMatchingTargetAttester(index))
 }
 
 func TestBeaconState_SetNextWithdrawalValidatorIndex(t *testing.T) {
@@ -294,7 +294,7 @@ func TestBeaconState_SetValidatorIsPreviousMatchingHeadAttester(t *testing.T) {
 	value := true
 	err := state.SetValidatorIsPreviousMatchingHeadAttester(index, value)
 	assert.NoError(t, err)
-	assert.Equal(t, value, state.validators.GetPhase0(index).IsPreviousMatchingHeadAttester)
+	assert.Equal(t, value, state.validators.IsPreviousMatchingHeadAttester(index))
 }
 
 func TestBeaconState_SetValidatorBalance(t *testing.T) {

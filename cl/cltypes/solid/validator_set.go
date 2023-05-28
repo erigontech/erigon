@@ -226,7 +226,7 @@ func (v *ValidatorSet) IsCurrentMatchingTargetAttester(idx int) bool {
 }
 
 func (v *ValidatorSet) IsCurrentMatchingHeadAttester(idx int) bool {
-	return v.getAttesterBit(idx, IsCurrentMatchingTargetAttesterBit)
+	return v.getAttesterBit(idx, IsCurrentMatchingHeadAttesterBit)
 }
 
 func (v *ValidatorSet) IsPreviousMatchingSourceAttester(idx int) bool {
