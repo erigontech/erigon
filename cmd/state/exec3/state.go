@@ -232,12 +232,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		fmt.Printf("[ERR] %v\n", txTask.Error)
 		return
 	}
-	//
-	//if !txTask.Final {
-	//if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
-	//	panic(err)
-	//}
-	//
+
+	//if txTask.Final {
+	//	if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
+	//		panic(err)
+	//	}
 	//}
 	txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
 	for addr, bal := range txTask.BalanceIncreaseSet {

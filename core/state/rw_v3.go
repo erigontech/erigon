@@ -122,6 +122,16 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *exec22.
 	return count
 }
 
+func (rs *StateV3) flushUpdates(txTask *exec22.TxTask, domains *libstate.SharedDomains) error {
+	if len(txTask.UpdatesList) == 0 {
+		return nil
+	}
+	if err := domains.AddUpdates(txTask.UpdatesKey, txTask.UpdatesList); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDomains) error {
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 
@@ -289,6 +299,7 @@ func (rs *StateV3) Commitment(txNum uint64, saveState bool) ([]byte, error) {
 	//defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	rs.domains.SetTxNum(txNum)
+
 	return rs.domains.Commit(saveState, false)
 }
 
@@ -301,7 +312,8 @@ func (rs *StateV3) ApplyState4(txTask *exec22.TxTask, agg *libstate.AggregatorV3
 
 	agg.SetTxNum(txTask.TxNum)
 	rs.domains.SetTxNum(txTask.TxNum)
-	if err := rs.applyState(txTask, rs.domains); err != nil {
+
+	if err := rs.flushUpdates(txTask, rs.domains); err != nil {
 		return err
 	}
 	returnReadList(txTask.ReadLists)
@@ -452,7 +464,6 @@ type StateWriterBufferedV3 struct {
 func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
 	return &StateWriterBufferedV3{
 		rs:         rs,
-		trace:      true,
 		writeLists: newWriteList(),
 	}
 }
@@ -475,10 +486,6 @@ func (w *StateWriterBufferedV3) WriteSet() map[string]*exec22.KvList {
 
 func (w *StateWriterBufferedV3) Updates() ([][]byte, []commitment.Update) {
 	return w.upd.Updates()
-}
-
-func (w *StateWriterBufferedV3) Commit() ([]byte, error) {
-	return w.upd.CommitmentUpdates()
 }
 
 func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
