@@ -27,6 +27,9 @@
     "backupMultiplier": {
       "0": 5
     },
+    "stateSyncConfirmationDelay": {
+      "354000000": 128
+    },
     "validatorContract": "0x0000000000000000000000000000000000001000",
     "stateReceiverContract": "0x0000000000000000000000000000000000001001",
     "blockAlloc": {
@@ -39,6 +42,7 @@
     },
     "jaipurBlock": 0,
     "delhiBlock":0,
-    "calcuttaBlock": 30
+    "calcuttaBlock": 30,
+    "indoreBlock": 0
   }
 }
