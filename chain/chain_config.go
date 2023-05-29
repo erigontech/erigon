@@ -413,6 +413,9 @@ type BorConfig struct {
 	CalcuttaBlock *big.Int `json:"calcuttaBlock"` // Calcutta switch block (nil = no fork, 0 = already on calcutta)
 	JaipurBlock   *big.Int `json:"jaipurBlock"`   // Jaipur switch block (nil = no fork, 0 = already on jaipur)
 	DelhiBlock    *big.Int `json:"delhiBlock"`    // Delhi switch block (nil = no fork, 0 = already on delhi)
+
+	IndoreBlock                *big.Int          `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on indore)
+	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
 }
 
 // String implements the stringer interface, returning the consensus engine details.
@@ -421,11 +424,11 @@ func (b *BorConfig) String() string {
 }
 
 func (c *BorConfig) CalculateProducerDelay(number uint64) uint64 {
-	return c.sprintSize(c.ProducerDelay, number)
+	return borKeyValueConfigHelper(c.ProducerDelay, number)
 }
 
 func (c *BorConfig) CalculateSprint(number uint64) uint64 {
-	return c.sprintSize(c.Sprint, number)
+	return borKeyValueConfigHelper(c.Sprint, number)
 }
 
 func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
@@ -452,6 +455,14 @@ func (c *BorConfig) IsOnCalcutta(number *big.Int) bool {
 	return numEqual(c.CalcuttaBlock, number)
 }
 
+func (c *BorConfig) IsIndore(number uint64) bool {
+	return isForked(c.IndoreBlock, number)
+}
+
+func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
+	return borKeyValueConfigHelper(c.StateSyncConfirmationDelay, number)
+}
+
 func (c *BorConfig) calcConfig(field map[string]uint64, number uint64) uint64 {
 	keys := sortMapKeys(field)
 	for i := 0; i < len(keys)-1; i++ {
@@ -464,7 +475,7 @@ func (c *BorConfig) calcConfig(field map[string]uint64, number uint64) uint64 {
 	return field[keys[len(keys)-1]]
 }
 
-func (c *BorConfig) sprintSize(field map[string]uint64, number uint64) uint64 {
+func borKeyValueConfigHelper(field map[string]uint64, number uint64) uint64 {
 	keys := sortMapKeys(field)
 	for i := 0; i < len(keys)-1; i++ {
 		valUint, _ := strconv.ParseUint(keys[i], 10, 64)
