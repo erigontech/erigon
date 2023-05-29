@@ -1901,7 +1901,44 @@ func (u *Update) Reset() {
 }
 
 func (u *Update) DecodeForStorage(enc []byte) {
-	u.Reset()
+	//u.Reset()
+
+	//balance := new(uint256.Int)
+	//
+	//if len(enc) > 0 {
+	//	pos := 0
+	//	nonceBytes := int(enc[pos])
+	//	pos++
+	//	if nonceBytes > 0 {
+	//		nonce := bytesToUint64(enc[pos : pos+nonceBytes])
+	//		if u.Nonce != nonce {
+	//			u.Flags |= NonceUpdate
+	//		}
+	//		u.Nonce = nonce
+	//		pos += nonceBytes
+	//	}
+	//	balanceBytes := int(enc[pos])
+	//	pos++
+	//	if balanceBytes > 0 {
+	//		balance.SetBytes(enc[pos : pos+balanceBytes])
+	//		if u.Balance.Cmp(balance) != 0 {
+	//			u.Flags |= BalanceUpdate
+	//		}
+	//		u.Balance.Set(balance)
+	//		pos += balanceBytes
+	//	}
+	//	codeHashBytes := int(enc[pos])
+	//	pos++
+	//
+	//	if codeHashBytes > 0 {
+	//		if !bytes.Equal(u.CodeHashOrStorage[:], enc[pos:pos+codeHashBytes]) {
+	//			u.Flags |= CodeUpdate
+	//		copy(u.CodeHashOrStorage[:], enc[pos:pos+codeHashBytes])
+	//		u.ValLength = length.Hash
+	//		}
+	//	}
+	//}
+	//return
 
 	pos := 0
 	nonceBytes := int(enc[pos])

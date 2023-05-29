@@ -88,9 +88,61 @@ func NewUpdateTree() *UpdateTree {
 }
 
 func (t *UpdateTree) Get(key []byte) (*CommitmentItem, bool) {
+	c := &CommitmentItem{plainKey: common.Copy(key),
+		hashedKey: t.hashAndNibblizeKey(key),
+		update:    commitment.Update{}}
+	copy(c.update.CodeHashOrStorage[:], commitment.EmptyCodeHash)
+	if t.tree.Has(c) {
+		return t.tree.Get(c)
+	}
+	return c, false
+}
+
+func (t *UpdateTree) GetWithDomain(key []byte, domain *SharedDomains) (*CommitmentItem, bool) {
 	c := &CommitmentItem{plainKey: common.Copy(key), hashedKey: t.hashAndNibblizeKey(key)}
 	if t.tree.Has(c) {
 		return t.tree.Get(c)
+	}
+
+	switch len(key) {
+	case length.Addr:
+		enc, err := domain.LatestAccount(key)
+		if err != nil {
+			return nil, false
+		}
+		nonce, balance, chash := DecodeAccountBytes(enc)
+		if c.update.Nonce != nonce {
+			c.update.Nonce = nonce
+			c.update.Flags |= commitment.NonceUpdate
+		}
+		if !c.update.Balance.Eq(balance) {
+			c.update.Balance.Set(balance)
+			c.update.Flags |= commitment.BalanceUpdate
+		}
+		if !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
+			fmt.Printf("replaced code %x -> %x without CodeFLag\n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
+			copy(c.update.CodeHashOrStorage[:], chash)
+			c.update.ValLength = length.Hash
+			//if !bytes.Equal(chash, commitment.Empty {
+			//c.update.Flags |= commitment.CodeUpdate
+			//}
+		}
+		code, err := domain.LatestCode(key)
+		if err != nil {
+			return nil, false
+		}
+		c.update.ValLength = length.Hash
+		c.update.CodeValue = common.Copy(code)
+
+	case length.Addr + length.Hash:
+		enc, err := domain.LatestStorage(key[:length.Addr], key[length.Addr:])
+		if err != nil {
+			return nil, false
+		}
+		c.update.ValLength = len(enc)
+		copy(c.update.CodeHashOrStorage[:], enc)
+	default:
+		panic("unk")
 	}
 	return c, false
 }
@@ -103,12 +155,19 @@ func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *CommitmentItem, v
 	t.tree.ReplaceOrInsert(item)
 }
 
+func (t *UpdateTree) TouchPlainKeyDom(d *SharedDomains, key, val []byte, fn func(c *CommitmentItem, val []byte)) {
+	item, _ := t.GetWithDomain(key, d)
+	fn(item, val)
+	t.tree.ReplaceOrInsert(item)
+}
+
 func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = commitment.DeleteUpdate
 		return
 	}
-
+	//
+	(&c.update).DecodeForStorage(val)
 	nonce, balance, chash := DecodeAccountBytes(val)
 	if c.update.Nonce != nonce {
 		c.update.Nonce = nonce
@@ -224,6 +283,22 @@ type DomainCommitted struct {
 	comTook time.Duration
 }
 
+func (d *DomainCommitted) PatriciaState() ([]byte, error) {
+	var state []byte
+	var err error
+
+	switch trie := (d.patriciaTrie).(type) {
+	case *commitment.HexPatriciaHashed:
+		state, err = trie.EncodeCurrentState(nil)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported state storing for patricia trie type: %T", d.patriciaTrie)
+	}
+	return state, nil
+}
+
 func (d *DomainCommitted) ResetFns(
 	branchFn func(prefix []byte) ([]byte, error),
 	accountFn func(plainKey []byte, cell *commitment.Cell) error,
@@ -289,17 +364,9 @@ func commitmentItemLess(i, j *CommitmentItem) bool {
 }
 
 func (d *DomainCommitted) storeCommitmentState(blockNum uint64) error {
-	var state []byte
-	var err error
-
-	switch trie := (d.patriciaTrie).(type) {
-	case *commitment.HexPatriciaHashed:
-		state, err = trie.EncodeCurrentState(nil)
-		if err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("unsupported state storing for patricia trie type: %T", d.patriciaTrie)
+	state, err := d.PatriciaState()
+	if err != nil {
+		return err
 	}
 	cs := &commitmentState{txNum: d.txNum, trieState: state, blockNum: blockNum}
 	encoded, err := cs.Encode()
