@@ -1,13 +1,12 @@
 package services
 
 import (
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func CheckTxPoolContent(expectedPendingSize, expectedQueuedSize, expectedBaseFeeSize int, logger log.Logger) {
-	pendingSize, queuedSize, baseFeeSize, err := requests.TxpoolContent(models.ReqId, logger)
+func CheckTxPoolContent(reqGen *requests.RequestGenerator, expectedPendingSize, expectedQueuedSize, expectedBaseFeeSize int, logger log.Logger) {
+	pendingSize, queuedSize, baseFeeSize, err := requests.TxpoolContent(reqGen, logger)
 	if err != nil {
 		logger.Error("FAILURE getting txpool content", "error", err)
 		return

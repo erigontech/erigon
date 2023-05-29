@@ -77,8 +77,6 @@ const (
 	// Localhost is the default localhost endpoint for web socket attachments
 	Localhost = "127.0.0.1:8545"
 
-	// ReqId is the request id for each request
-	ReqId = 0
 	// MaxNumberOfBlockChecks is the max number of blocks to look for a transaction in
 	MaxNumberOfBlockChecks = 3
 

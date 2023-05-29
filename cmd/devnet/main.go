@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/node"
+	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/log/v3"
 
@@ -68,6 +69,7 @@ func action(ctx *cli.Context) error {
 		return err
 	}
 	logger := logging.SetupLoggerCtx("devnet", ctx, false /* rootLogger */)
+	reqGen := requests.NewRequestGenerator(logger)
 
 	// Make root logger fail
 	log.Root().SetHandler(PanicHandler{})
@@ -80,7 +82,7 @@ func action(ctx *cli.Context) error {
 	var wg sync.WaitGroup
 
 	// start the first erigon node in a go routine
-	node.Start(&wg, dataDir, logger)
+	node.Start(reqGen, &wg, dataDir, logger)
 
 	// send a quit signal to the quit channels when done making checks
 	node.QuitOnSignal(&wg)
@@ -92,7 +94,7 @@ func action(ctx *cli.Context) error {
 	services.InitSubscriptions([]models.SubMethod{models.ETHNewHeads}, logger)
 
 	// execute all rpc methods amongst the two nodes
-	commands.ExecuteAllMethods(logger)
+	commands.ExecuteAllMethods(reqGen, logger)
 
 	// wait for all goroutines to complete before exiting
 	wg.Wait()

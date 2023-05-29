@@ -448,7 +448,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}); err != nil {
 		panic(err)
 	}
-	log.Warn("[dbg] 1111", "n", currentBlock.NumberU64())
 
 	currentBlockNumber := uint64(0)
 	if currentBlock != nil {
@@ -894,7 +893,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		newHeadCh, closeNewHeadCh := s.notifications.Events.AddHeaderSubscription()
 		defer closeNewHeadCh()
 
-		log.Info("Starting to mine", "etherbase", eb)
+		s.logger.Info("Starting to mine", "etherbase", eb)
 
 		var works bool
 		hasWork := true // Start mining immediately
@@ -912,16 +911,16 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 			if works || !hasWork {
 				select {
 				case <-newHeadCh:
-					log.Debug("Start mining new block based on new head channel")
+					s.logger.Debug("Start mining new block based on new head channel")
 					hasWork = true
 				case <-s.notifyMiningAboutNewTxs:
 					// Skip mining based on new tx notif for bor consensus
 					hasWork = s.chainConfig.Bor == nil
 					if hasWork {
-						log.Debug("Start mining new block based on txpool notif")
+						s.logger.Debug("Start mining new block based on txpool notif")
 					}
 				case <-mineEvery.C:
-					log.Debug("Start mining new block based on miner.recommit")
+					s.logger.Debug("Start mining new block based on miner.recommit")
 					hasWork = true
 				case err := <-errc:
 					works = false
@@ -930,7 +929,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 						return
 					}
 					if err != nil {
-						log.Warn("mining", "err", err)
+						s.logger.Warn("mining", "err", err)
 					}
 				case <-quitCh:
 					return

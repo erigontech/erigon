@@ -20,11 +20,11 @@ const (
 	sendValue        uint64 = 10000
 )
 
-func callSendTx(value uint64, toAddr, fromAddr string, logger log.Logger) (*libcommon.Hash, error) {
+func callSendTx(reqGen *requests.RequestGenerator, value uint64, toAddr, fromAddr string, logger log.Logger) (*libcommon.Hash, error) {
 	logger.Info("Sending tx", "value", value, "to", toAddr, "from", fromAddr)
 
 	// get the latest nonce for the next transaction
-	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(fromAddr), logger)
+	nonce, err := services.GetNonce(reqGen, libcommon.HexToAddress(fromAddr), logger)
 	if err != nil {
 		logger.Error("failed to get latest nonce", "error", err)
 		return nil, err
@@ -38,7 +38,7 @@ func callSendTx(value uint64, toAddr, fromAddr string, logger log.Logger) (*libc
 	}
 
 	// send the signed transaction
-	hash, err := requests.SendTransaction(models.ReqId, signedTx, logger)
+	hash, err := requests.SendTransaction(reqGen, signedTx, logger)
 	if err != nil {
 		logger.Error("failed to send transaction", "error", err)
 		return nil, err
@@ -52,33 +52,33 @@ func callSendTx(value uint64, toAddr, fromAddr string, logger log.Logger) (*libc
 	return hash, nil
 }
 
-func callSendTxWithDynamicFee(toAddr, fromAddr string, logger log.Logger) ([]*libcommon.Hash, error) {
+func callSendTxWithDynamicFee(reqGen *requests.RequestGenerator, toAddr, fromAddr string, logger log.Logger) ([]*libcommon.Hash, error) {
 	// get the latest nonce for the next transaction
-	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(fromAddr), logger)
+	nonce, err := services.GetNonce(reqGen, libcommon.HexToAddress(fromAddr), logger)
 	if err != nil {
 		logger.Error("failed to get latest nonce", "error", err)
 		return nil, err
 	}
 
-	lowerThanBaseFeeTxs, higherThanBaseFeeTxs, err := services.CreateManyEIP1559TransactionsRefWithBaseFee2(toAddr, &nonce, logger)
+	lowerThanBaseFeeTxs, higherThanBaseFeeTxs, err := services.CreateManyEIP1559TransactionsRefWithBaseFee2(reqGen, toAddr, &nonce, logger)
 	if err != nil {
 		logger.Error("failed CreateManyEIP1559TransactionsRefWithBaseFee", "error", err)
 		return nil, err
 	}
 
-	lowerThanBaseFeeHashlist, err := services.SendManyTransactions(lowerThanBaseFeeTxs, logger)
+	lowerThanBaseFeeHashlist, err := services.SendManyTransactions(reqGen, lowerThanBaseFeeTxs, logger)
 	if err != nil {
 		logger.Error("failed SendManyTransactions(lowerThanBaseFeeTxs)", "error", err)
 		return nil, err
 	}
 
-	higherThanBaseFeeHashlist, err := services.SendManyTransactions(higherThanBaseFeeTxs, logger)
+	higherThanBaseFeeHashlist, err := services.SendManyTransactions(reqGen, higherThanBaseFeeTxs, logger)
 	if err != nil {
 		logger.Error("failed SendManyTransactions(higherThanBaseFeeTxs)", "error", err)
 		return nil, err
 	}
 
-	services.CheckTxPoolContent(100, 0, 100, logger)
+	services.CheckTxPoolContent(reqGen, 100, 0, 100, logger)
 
 	hashmap := make(map[libcommon.Hash]bool)
 	for _, hash := range higherThanBaseFeeHashlist {
@@ -92,13 +92,13 @@ func callSendTxWithDynamicFee(toAddr, fromAddr string, logger log.Logger) ([]*li
 	logger.Info("SUCCESS: All transactions in pending pool included in blocks")
 
 	for i := 1; i <= 20; i++ {
-		blockNumber, err := requests.BlockNumber(models.ReqId, logger)
+		blockNumber, err := requests.BlockNumber(reqGen, logger)
 		if err != nil {
 			logger.Error("FAILURE => error getting block number", "error", err)
 		} else {
 			logger.Info("Got block number", "blockNum", blockNumber)
 		}
-		pendingSize, queuedSize, baseFeeSize, err := requests.TxpoolContent(models.ReqId, logger)
+		pendingSize, queuedSize, baseFeeSize, err := requests.TxpoolContent(reqGen, logger)
 		if err != nil {
 			logger.Error("FAILURE getting txpool content", "error", err)
 		} else {
@@ -110,11 +110,11 @@ func callSendTxWithDynamicFee(toAddr, fromAddr string, logger log.Logger) ([]*li
 	return append(lowerThanBaseFeeHashlist, higherThanBaseFeeHashlist...), nil
 }
 
-func callContractTx(logger log.Logger) (*libcommon.Hash, error) {
+func callContractTx(reqGen *requests.RequestGenerator, logger log.Logger) (*libcommon.Hash, error) {
 	// hashset to hold hashes for search after mining
 	hashes := make(map[libcommon.Hash]bool)
 	// get the latest nonce for the next transaction
-	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(models.DevAddress), logger)
+	nonce, err := services.GetNonce(reqGen, libcommon.HexToAddress(models.DevAddress), logger)
 	if err != nil {
 		logger.Error("failed to get latest nonce", "error", err)
 		return nil, err
@@ -128,7 +128,7 @@ func callContractTx(logger log.Logger) (*libcommon.Hash, error) {
 	}
 
 	// send the contract transaction to the node
-	hash, err := requests.SendTransaction(models.ReqId, signedTx, logger)
+	hash, err := requests.SendTransaction(reqGen, signedTx, logger)
 	if err != nil {
 		logger.Error("failed to send transaction", "error", err)
 		return nil, err
@@ -136,7 +136,7 @@ func callContractTx(logger log.Logger) (*libcommon.Hash, error) {
 	hashes[*hash] = true
 	logger.Info("")
 
-	eventHash, err := services.EmitFallbackEvent(subscriptionContract, transactOpts, logger)
+	eventHash, err := services.EmitFallbackEvent(reqGen, subscriptionContract, transactOpts, logger)
 	if err != nil {
 		logger.Error("failed to emit events", "error", err)
 		return nil, err
@@ -150,7 +150,7 @@ func callContractTx(logger log.Logger) (*libcommon.Hash, error) {
 
 	blockNum := (*txToBlockMap)[*eventHash]
 
-	block, err := requests.GetBlockByNumber(models.ReqId, devnetutils.HexToInt(blockNum), true, logger)
+	block, err := requests.GetBlockByNumber(reqGen, devnetutils.HexToInt(blockNum), true, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func callContractTx(logger log.Logger) (*libcommon.Hash, error) {
 		devnetutils.GenerateTopic(models.SolContractMethodSignature), hexutility.Bytes{}, hexutil.Uint(1),
 		block.Result.Hash, hexutil.Uint(0), false)
 
-	if err = requests.GetAndCompareLogs(models.ReqId, 0, 20, expectedLog, logger); err != nil {
+	if err = requests.GetAndCompareLogs(reqGen, 0, 20, expectedLog, logger); err != nil {
 		return nil, fmt.Errorf("failed to get logs: %v", err)
 	}
 
