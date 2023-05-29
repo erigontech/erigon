@@ -55,6 +55,7 @@ type RequestGenerator struct {
 func (req *RequestGenerator) call(target string, method, body string, response interface{}) rpctest.CallResult {
 	start := time.Now()
 	err := post(req.client, models.ErigonUrl, body, response, req.logger)
+	req.reqID++
 	return rpctest.CallResult{
 		RequestBody: body,
 		Target:      target,
@@ -161,19 +162,14 @@ func (req *RequestGenerator) PingErigonRpc() rpctest.CallResult {
 	return res
 }
 
-func initialiseRequestGenerator(reqId int, logger log.Logger) *RequestGenerator {
+func NewRequestGenerator(logger log.Logger) *RequestGenerator {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-
 	reqGen := RequestGenerator{
 		client: client,
-		reqID:  reqId,
+		reqID:  1,
 		logger: logger,
 	}
-	if reqGen.reqID == 0 {
-		reqGen.reqID++
-	}
-
 	return &reqGen
 }

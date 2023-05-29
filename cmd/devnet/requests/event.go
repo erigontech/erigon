@@ -10,9 +10,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func GetAndCompareLogs(reqId int, fromBlock uint64, toBlock uint64, expected rpctest.Log, logger log.Logger) error {
+func GetAndCompareLogs(reqGen *RequestGenerator, fromBlock uint64, toBlock uint64, expected rpctest.Log, logger log.Logger) error {
 	logger.Info("GETTING AND COMPARING LOGS")
-	reqGen := initialiseRequestGenerator(reqId, logger)
 	var b rpctest.EthGetLogs
 
 	if res := reqGen.Erigon(models.ETHGetLogs, reqGen.GetLogs(fromBlock, toBlock, expected.Address), &b); res.Err != nil {
