@@ -2035,7 +2035,8 @@ func (ac *AggregatorV3Context) accountFn(plainKey []byte, cell *commitment.Cell)
 	cell.Balance.Clear()
 	copy(cell.CodeHash[:], commitment.EmptyCodeHash)
 	if len(encAccount) > 0 {
-		nonce, balance, chash := DecodeAccountBytes(encAccount)
+		//nonce, balance, chash := DecodeAccountBytes(encAccount)
+		nonce, balance, chash := DecodeAccountBytes2(encAccount)
 		cell.Nonce = nonce
 		cell.Balance.Set(balance)
 		if chash != nil {

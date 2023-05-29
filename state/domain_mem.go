@@ -95,6 +95,7 @@ type SharedDomains struct {
 	txNum    atomic.Uint64
 	blockNum atomic.Uint64
 	estSize  atomic.Uint64
+	updates  *UpdatesWithCommitment
 
 	sync.RWMutex
 	account    *btree2.Map[string, []byte]
@@ -118,8 +119,17 @@ func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 		Commitment: comm,
 		commitment: btree2.NewMap[string, []byte](128),
 	}
+
+	sd.updates = NewUpdatesWithCommitment(sd)
 	sd.Commitment.ResetFns(sd.BranchFn, sd.AccountFn, sd.StorageFn)
 	return sd
+}
+
+func (sd *SharedDomains) AddUpdates(keys [][]byte, updates []commitment.Update) error {
+	sd.Lock()
+	defer sd.Unlock()
+	sd.updates.AddUpdates(keys, updates)
+	return nil
 }
 
 func (sd *SharedDomains) put(table string, key, val []byte) {
@@ -280,7 +290,8 @@ func (sd *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error
 	cell.Nonce = 0
 	cell.Balance.Clear()
 	if len(encAccount) > 0 {
-		nonce, balance, chash := DecodeAccountBytes(encAccount)
+		//nonce, balance, chash := DecodeAccountBytes(encAccount)
+		nonce, balance, chash := DecodeAccountBytes2(encAccount)
 		cell.Nonce = nonce
 		cell.Balance.Set(balance)
 		if len(chash) > 0 {
@@ -412,6 +423,17 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 }
 
 func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, err error) {
+	if sd.updates.Size() != 0 {
+		rh, err := sd.updates.CommitmentUpdates()
+		if err != nil {
+			return nil, err
+		}
+		//if onlyBuffer {
+		return rh, nil
+		//}
+
+	}
+
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	rootHash, branchNodeUpdates, err := sd.Commitment.ComputeCommitment(trace)
 	if err != nil {
@@ -667,4 +689,121 @@ func (sd *SharedDomains) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix stri
 	sd.commitment.Clear()
 	sd.estSize.Store(0)
 	return nil
+}
+
+type UpdatesWithCommitment struct {
+	updates *UpdateTree
+
+	domains           *SharedDomains
+	initPatriciaState sync.Once
+	patricia          commitment.Trie
+	commitment        *btree2.Map[string, []byte]
+	branchMerger      *commitment.BranchMerger
+}
+
+func (w *UpdatesWithCommitment) Size() uint64 {
+	return uint64(w.updates.tree.Len())
+}
+
+func NewUpdatesWithCommitment(domains *SharedDomains) *UpdatesWithCommitment {
+	return &UpdatesWithCommitment{
+		updates:      NewUpdateTree(),
+		domains:      domains,
+		commitment:   btree2.NewMap[string, []byte](128),
+		branchMerger: commitment.NewHexBranchMerger(8192),
+		patricia:     commitment.InitializeTrie(commitment.VariantHexPatriciaTrie),
+	}
+}
+
+func (w *UpdatesWithCommitment) AddUpdates(keys [][]byte, updates []commitment.Update) {
+	for i, u := range updates {
+		w.updates.TouchUpdate(keys[i], u)
+	}
+}
+
+// CommitmentUpdates returns the commitment updates for the current state of w.updates.
+// Commitment is based on sharedDomains commitment tree
+// All branch changes are stored inside Update4ReadWriter in commitment map.
+// Those updates got priority over sharedDomains commitment updates.
+func (w *UpdatesWithCommitment) CommitmentUpdates() ([]byte, error) {
+	w.patricia.Reset()
+	w.initPatriciaState.Do(func() {
+		// get commitment state from commitment domain (like we're adding updates to it)
+		stateBytes, err := w.domains.Commitment.PatriciaState()
+		if err != nil {
+			panic(err)
+		}
+		switch pt := w.patricia.(type) {
+		case *commitment.HexPatriciaHashed:
+			if err := pt.SetState(stateBytes); err != nil {
+				panic(fmt.Errorf("set HPH state: %w", err))
+			}
+			rh, err := pt.RootHash()
+			if err != nil {
+				panic(fmt.Errorf("HPH root hash: %w", err))
+			}
+			fmt.Printf("HPH state set: %x\n", rh)
+		default:
+			panic(fmt.Errorf("unsupported patricia type: %T", pt))
+		}
+	})
+
+	w.patricia.ResetFns(w.branchFn, w.accountFn, w.storageFn)
+	rh, branches, err := w.patricia.ProcessUpdates(w.updates.List(false))
+	if err != nil {
+		return nil, err
+	}
+	for k, update := range branches {
+		//w.commitment.Set(k, b)
+		prefix := []byte(k)
+
+		stateValue, err := w.branchFn(prefix)
+		if err != nil {
+			return nil, err
+		}
+		stated := commitment.BranchData(stateValue)
+		merged, err := w.branchMerger.Merge(stated, update)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(stated, merged) {
+			continue
+		}
+		w.commitment.Set(hex.EncodeToString(prefix), merged)
+	}
+	return rh, nil
+}
+
+func (w *UpdatesWithCommitment) accountFn(plainKey []byte, cell *commitment.Cell) error {
+	item, found := w.updates.Get(plainKey)
+	if found {
+		upd := item.Update()
+
+		cell.Nonce = upd.Nonce
+		cell.Balance.Set(&upd.Balance)
+		if upd.ValLength == length.Hash {
+			copy(cell.CodeHash[:], upd.CodeHashOrStorage[:])
+		}
+	}
+	return w.domains.AccountFn(plainKey, cell)
+}
+
+func (w *UpdatesWithCommitment) storageFn(plainKey []byte, cell *commitment.Cell) error {
+	item, found := w.updates.Get(plainKey)
+	if found {
+		upd := item.Update()
+		cell.StorageLen = upd.ValLength
+		copy(cell.Storage[:], upd.CodeHashOrStorage[:upd.ValLength])
+		cell.Delete = cell.StorageLen == 0
+	}
+	return w.domains.StorageFn(plainKey, cell)
+
+}
+
+func (w *UpdatesWithCommitment) branchFn(key []byte) ([]byte, error) {
+	b, ok := w.commitment.Get(string(key))
+	if !ok {
+		return w.domains.BranchFn(key)
+	}
+	return b, nil
 }

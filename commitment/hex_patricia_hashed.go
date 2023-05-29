@@ -31,6 +31,7 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 )
@@ -1900,6 +1901,33 @@ func (u *Update) Reset() {
 	copy(u.CodeHashOrStorage[:], EmptyCodeHash)
 }
 
+func (u *Update) Merge(b *Update) {
+	if b.Flags == DeleteUpdate {
+		u.Flags = DeleteUpdate
+		return
+	}
+	if b.Flags&BalanceUpdate != 0 {
+		u.Flags |= BalanceUpdate
+		u.Balance.Set(&b.Balance)
+	}
+	if b.Flags&NonceUpdate != 0 {
+		u.Flags |= NonceUpdate
+		u.Nonce = b.Nonce
+	}
+	if b.Flags&CodeUpdate != 0 {
+		u.Flags |= CodeUpdate
+		copy(u.CodeHashOrStorage[:], b.CodeHashOrStorage[:])
+		u.ValLength = b.ValLength
+		u.CodeValue = b.CodeValue
+	}
+	if b.Flags&StorageUpdate != 0 {
+		u.Flags |= StorageUpdate
+		copy(u.CodeHashOrStorage[:], b.CodeHashOrStorage[:])
+		u.ValLength = b.ValLength
+		u.CodeValue = common.Copy(b.CodeValue)
+	}
+}
+
 func (u *Update) DecodeForStorage(enc []byte) {
 	//u.Reset()
 
@@ -1976,6 +2004,8 @@ func (u *Update) Encode(buf []byte, numBuf []byte) []byte {
 	}
 	if u.Flags&CodeUpdate != 0 {
 		buf = append(buf, u.CodeHashOrStorage[:]...)
+		n := binary.PutUvarint(numBuf, uint64(u.ValLength))
+		buf = append(buf, numBuf[:n]...)
 	}
 	if u.Flags&StorageUpdate != 0 {
 		n := binary.PutUvarint(numBuf, uint64(u.ValLength))
@@ -2022,6 +2052,20 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 		}
 		copy(u.CodeHashOrStorage[:], buf[pos:pos+32])
 		pos += 32
+		l, n := binary.Uvarint(buf[pos:])
+		if n == 0 {
+			return 0, fmt.Errorf("decode Update: buffer too small for code len")
+		}
+		if n < 0 {
+			return 0, fmt.Errorf("decode Update: code len pos overflow")
+		}
+		pos += n
+		if len(buf) < pos+int(l) {
+			return 0, fmt.Errorf("decode Update: buffer too small for code value")
+		}
+		u.ValLength = int(l)
+		u.CodeValue = common.Copy(buf[pos : pos+int(l)])
+		pos += int(l)
 	}
 	if u.Flags&StorageUpdate != 0 {
 		l, n := binary.Uvarint(buf[pos:])
@@ -2029,7 +2073,7 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 			return 0, fmt.Errorf("decode Update: buffer too small for storage len")
 		}
 		if n < 0 {
-			return 0, fmt.Errorf("decode Update: storage lee overflow")
+			return 0, fmt.Errorf("decode Update: storage pos overflow")
 		}
 		pos += n
 		if len(buf) < pos+int(l) {

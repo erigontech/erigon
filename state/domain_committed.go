@@ -110,7 +110,13 @@ func (t *UpdateTree) GetWithDomain(key []byte, domain *SharedDomains) (*Commitme
 		if err != nil {
 			return nil, false
 		}
-		nonce, balance, chash := DecodeAccountBytes(enc)
+		//nonce, balance, chash := DecodeAccountBytes(enc)
+		if len(enc) == 0 {
+			c.update.Flags = commitment.DeleteUpdate
+			return c, true
+		}
+
+		nonce, balance, chash := DecodeAccountBytes2(enc)
 		if c.update.Nonce != nonce {
 			c.update.Nonce = nonce
 			c.update.Flags |= commitment.NonceUpdate
@@ -119,7 +125,7 @@ func (t *UpdateTree) GetWithDomain(key []byte, domain *SharedDomains) (*Commitme
 			c.update.Balance.Set(balance)
 			c.update.Flags |= commitment.BalanceUpdate
 		}
-		if !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
+		if len(chash) > 0 && !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
 			fmt.Printf("replaced code %x -> %x without CodeFLag\n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
 			copy(c.update.CodeHashOrStorage[:], chash)
 			c.update.ValLength = length.Hash
@@ -147,6 +153,12 @@ func (t *UpdateTree) GetWithDomain(key []byte, domain *SharedDomains) (*Commitme
 	return c, false
 }
 
+func (t *UpdateTree) TouchUpdate(key []byte, update commitment.Update) {
+	item, _ := t.Get(key)
+	item.update.Merge(&update)
+	t.tree.ReplaceOrInsert(item)
+}
+
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *CommitmentItem, val []byte)) {
@@ -167,8 +179,9 @@ func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
 		return
 	}
 	//
-	(&c.update).DecodeForStorage(val)
-	nonce, balance, chash := DecodeAccountBytes(val)
+	//(&c.update).DecodeForStorage(val)
+	//nonce, balance, chash := DecodeAccountBytes(val)
+	nonce, balance, chash := DecodeAccountBytes2(val)
 	if c.update.Nonce != nonce {
 		c.update.Nonce = nonce
 		c.update.Flags |= commitment.NonceUpdate
@@ -178,7 +191,7 @@ func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
 		c.update.Flags |= commitment.BalanceUpdate
 	}
 	if len(chash) > 0 && !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
-		fmt.Printf("replaced code %x -> %x without CodeFLag\n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
+		fmt.Printf("replaced code %x -> %x\n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
 		copy(c.update.CodeHashOrStorage[:], chash)
 		c.update.ValLength = length.Hash
 		c.update.Flags |= commitment.CodeUpdate
