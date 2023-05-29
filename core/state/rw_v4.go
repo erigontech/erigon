@@ -2,14 +2,18 @@ package state
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
+	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
@@ -304,27 +308,134 @@ func (m *MultiStateReader) ReadAccountIncarnation(address common.Address) (uint6
 
 type Update4ReadWriter struct {
 	updates *state.UpdateTree
-	writes  []commitment.Update
-	reads   []commitment.Update
+
+	initPatriciaState sync.Once
+
+	patricia     commitment.Trie
+	commitment   *btree2.Map[string, []byte]
+	branchMerger *commitment.BranchMerger
+	domains      *state.SharedDomains
+	writes       []commitment.Update
+	reads        []commitment.Update
+}
+
+func NewUpdate4ReadWriter(domains *state.SharedDomains) *Update4ReadWriter {
+	return &Update4ReadWriter{
+		updates:      state.NewUpdateTree(),
+		domains:      domains,
+		commitment:   btree2.NewMap[string, []byte](128),
+		branchMerger: commitment.NewHexBranchMerger(8192),
+		patricia:     commitment.InitializeTrie(commitment.VariantHexPatriciaTrie),
+	}
 }
 
 func (w *Update4ReadWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
-	w.updates.TouchPlainKey(address.Bytes(), accounts.SerialiseV3(account), w.updates.TouchAccount)
+	//w.updates.TouchPlainKey(address.Bytes(), accounts.SerialiseV3(account), w.updates.TouchAccount)
+	w.updates.TouchPlainKeyDom(w.domains, address.Bytes(), accounts.SerialiseV3(account), w.updates.TouchAccount)
 	return nil
 }
 
 func (w *Update4ReadWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	//addressBytes, codeHashBytes := address.Bytes(), codeHash.Bytes()
 	//fmt.Printf("code [%x] => [%x] CodeHash: %x, txNum: %d\n", address, code, codeHash, w.txNum)
-	w.updates.TouchPlainKey(address.Bytes(), code, w.updates.TouchCode)
+	//w.updates.TouchPlainKey(address.Bytes(), code, w.updates.TouchCode)
+	w.updates.TouchPlainKeyDom(w.domains, address.Bytes(), code, w.updates.TouchCode)
 	return nil
 }
 
 func (w *Update4ReadWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
 	addressBytes := address.Bytes()
-	w.updates.TouchPlainKey(addressBytes, nil, w.updates.TouchAccount)
+	//w.updates.TouchPlainKey(addressBytes, nil, w.updates.TouchAccount)
+	w.updates.TouchPlainKeyDom(w.domains, addressBytes, nil, w.updates.TouchAccount)
 	return nil
+}
+
+func (w *Update4ReadWriter) accountFn(plainKey []byte, cell *commitment.Cell) error {
+	item, found := w.updates.Get(plainKey)
+	if found {
+		upd := item.Update()
+
+		cell.Nonce = upd.Nonce
+		cell.Balance.Set(&upd.Balance)
+		if upd.ValLength == length.Hash {
+			copy(cell.CodeHash[:], upd.CodeHashOrStorage[:])
+		}
+	}
+	return w.domains.AccountFn(plainKey, cell)
+}
+
+func (w *Update4ReadWriter) storageFn(plainKey []byte, cell *commitment.Cell) error {
+	item, found := w.updates.Get(plainKey)
+	if found {
+		upd := item.Update()
+		cell.StorageLen = upd.ValLength
+		copy(cell.Storage[:], upd.CodeHashOrStorage[:upd.ValLength])
+		cell.Delete = cell.StorageLen == 0
+	}
+	return w.domains.StorageFn(plainKey, cell)
+
+}
+
+func (w *Update4ReadWriter) branchFn(key []byte) ([]byte, error) {
+	b, ok := w.commitment.Get(string(key))
+	if !ok {
+		return w.domains.BranchFn(key)
+	}
+	return b, nil
+}
+
+// CommitmentUpdates returns the commitment updates for the current state of w.updates.
+// Commitment is based on sharedDomains commitment tree
+// All branch changes are stored inside Update4ReadWriter in commitment map.
+// Those updates got priority over sharedDomains commitment updates.
+func (w *Update4ReadWriter) CommitmentUpdates() ([]byte, error) {
+	w.patricia.Reset()
+	w.initPatriciaState.Do(func() {
+		// get commitment state from commitment domain (like we're adding updates to it)
+		stateBytes, err := w.domains.Commitment.PatriciaState()
+		if err != nil {
+			panic(err)
+		}
+		switch pt := w.patricia.(type) {
+		case *commitment.HexPatriciaHashed:
+			if err := pt.SetState(stateBytes); err != nil {
+				panic(fmt.Errorf("set HPH state: %w", err))
+			}
+			rh, err := pt.RootHash()
+			if err != nil {
+				panic(fmt.Errorf("HPH root hash: %w", err))
+			}
+			fmt.Printf("HPH state set: %x\n", rh)
+		default:
+			panic(fmt.Errorf("unsupported patricia type: %T", pt))
+		}
+	})
+
+	w.patricia.ResetFns(w.branchFn, w.accountFn, w.storageFn)
+	rh, branches, err := w.patricia.ProcessUpdates(w.updates.List(false))
+	if err != nil {
+		return nil, err
+	}
+	for k, update := range branches {
+		//w.commitment.Set(k, b)
+		prefix := []byte(k)
+
+		stateValue, err := w.branchFn(prefix)
+		if err != nil {
+			return nil, err
+		}
+		stated := commitment.BranchData(stateValue)
+		merged, err := w.branchMerger.Merge(stated, update)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(stated, merged) {
+			continue
+		}
+		w.commitment.Set(hex.EncodeToString(prefix), merged)
+	}
+	return rh, nil
 }
 
 func (w *Update4ReadWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
@@ -332,17 +443,14 @@ func (w *Update4ReadWriter) WriteAccountStorage(address common.Address, incarnat
 		return nil
 	}
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
-	w.updates.TouchPlainKey(common.Append(address[:], key[:]), value.Bytes(), w.updates.TouchStorage)
+	//w.updates.TouchPlainKey(common.Append(address[:], key[:]), value.Bytes(), w.updates.TouchStorage)
+	w.updates.TouchPlainKeyDom(w.domains, common.Append(address[:], key[:]), value.Bytes(), w.updates.TouchStorage)
 	return nil
 }
 
 func (w *Update4ReadWriter) Updates() (pk [][]byte, upd []commitment.Update) {
 	pk, _, updates := w.updates.List(true)
 	return pk, updates
-}
-
-func NewUpdate4ReadWriter() *Update4ReadWriter {
-	return &Update4ReadWriter{updates: state.NewUpdateTree()}
 }
 
 func (w *Update4ReadWriter) CreateContract(address common.Address) error { return nil }

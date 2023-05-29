@@ -72,7 +72,7 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
 	}
-	io := state.NewUpdate4ReadWriter()
+	io := state.NewUpdate4ReadWriter(rs.Domains())
 	w.stateReader.SetUpd(io)
 	w.stateWriter.SetUpd(io)
 	w.getHeader = func(hash libcommon.Hash, number uint64) *types.Header {
@@ -180,10 +180,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 				//rw.callTracer.AddCoinbase(txTask.Coinbase, txTask.Uncles)
 				txTask.TraceTos = rw.callTracer.Tos()
 			}
-
+			//incorrect unwind to block 2
 			if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
 				txTask.Error = err
 			}
+
 			txTask.TraceTos = map[libcommon.Address]struct{}{}
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
@@ -216,7 +217,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		if err != nil {
 			txTask.Error = err
 		} else {
-			ibs.FinalizeTx(rules, rw.stateWriter)
+			if err = ibs.FinalizeTx(rules, rw.stateWriter); err != nil {
+				panic(err)
+			}
 			txTask.UsedGas = applyRes.UsedGas
 			txTask.Logs = ibs.GetLogs(txHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
@@ -229,11 +232,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		fmt.Printf("[ERR] %v\n", txTask.Error)
 		return
 	}
-
+	//
 	//if !txTask.Final {
-	//	if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
-	//		panic(err)
-	//	}
+	//if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
+	//	panic(err)
+	//}
 	//
 	//}
 	txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()

@@ -292,6 +292,10 @@ func (rs *StateV3) Commitment(txNum uint64, saveState bool) ([]byte, error) {
 	return rs.domains.Commit(saveState, false)
 }
 
+func (rs *StateV3) Domains() *libstate.SharedDomains {
+	return rs.domains
+}
+
 func (rs *StateV3) ApplyState4(txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
@@ -471,6 +475,10 @@ func (w *StateWriterBufferedV3) WriteSet() map[string]*exec22.KvList {
 
 func (w *StateWriterBufferedV3) Updates() ([][]byte, []commitment.Update) {
 	return w.upd.Updates()
+}
+
+func (w *StateWriterBufferedV3) Commit() ([]byte, error) {
+	return w.upd.CommitmentUpdates()
 }
 
 func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
