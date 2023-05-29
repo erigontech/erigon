@@ -95,7 +95,8 @@ func TestGetBlockReceipts(t *testing.T) {
 		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
 			hash, err := rawdb.ReadCanonicalHash(tx, i)
 			require.NoError(t, err)
-			hashes = append(hashes, hash)
+			block, senders, err := rawdb.ReadBlockWithSenders(tx, hash, i)
+			require.NoError(t, err)
 
 			block, senders, err := br.BlockWithSenders(m.Ctx, tx, hash, i)
 			require.NoError(t, err)

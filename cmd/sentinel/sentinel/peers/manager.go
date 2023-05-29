@@ -91,10 +91,15 @@ func (m *Manager) TryPeer(id peer.ID, fn func(peer *Peer, ok bool)) {
 // WithPeer will get the peer with id and run your lambda with it. it will update the last queried time
 // It will do all synchronization and so you can use the peer thread safe inside
 func (m *Manager) WithPeer(id peer.ID, fn func(peer *Peer)) {
+	if fn == nil {
+		return
+	}
 	p := m.getPeer(id)
 	p.working <- struct{}{}
+	defer func() {
+		<-p.working
+	}()
 	fn(p)
-	<-p.working
 }
 
 func (m *Manager) run(ctx context.Context) {

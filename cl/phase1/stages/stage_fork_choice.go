@@ -32,7 +32,8 @@ type StageForkChoiceCfg struct {
 	forkChoice      *forkchoice.ForkChoiceStore
 }
 
-const minPeersForDownload = 3
+const minPeersForDownload = 2
+const minPeersForSyncStart = 4
 
 func StageForkChoice(db kv.RwDB, downloader *network2.ForwardBeaconDownloader, genesisCfg *clparams.GenesisConfig,
 	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, executionClient *execution_client.ExecutionClient, gossipManager *network2.GossipManager, forkChoice *forkchoice.ForkChoiceStore) StageForkChoiceCfg {
@@ -139,6 +140,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 	maxBlockBehindBeforeDownload := int64(32)
 	overtimeMargin := uint64(6) // how much time has passed before trying download the next block in seconds
 	ctx := context.TODO()
+	isDownloading := false
 MainLoop:
 	for {
 		targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
@@ -153,8 +155,17 @@ MainLoop:
 			continue
 		}
 		waitWhenNotEnoughPeers := 5 * time.Second
-		if peersCount < minPeersForDownload {
-			log.Debug("Cannot sync up caplin, not enough peers", "have", peersCount, "needed", minPeersForDownload, "retryIn", waitWhenNotEnoughPeers)
+		if !isDownloading {
+			isDownloading = peersCount >= minPeersForSyncStart
+		}
+		if isDownloading {
+			isDownloading = peersCount >= minPeersForDownload
+			if !isDownloading {
+				log.Debug("[Caplin] Lost too many peers", "have", peersCount, "needed", minPeersForDownload)
+			}
+		}
+		if !isDownloading {
+			log.Debug("[Caplin] Waiting For Peers", "have", peersCount, "needed", minPeersForSyncStart, "retryIn", waitWhenNotEnoughPeers)
 			time.Sleep(waitWhenNotEnoughPeers)
 			continue
 		}
@@ -184,7 +195,6 @@ MainLoop:
 				break
 			}
 			if peersCount < minPeersForDownload {
-				log.Debug("lost too many peers, restarting sync...")
 				continue MainLoop
 			}
 		}

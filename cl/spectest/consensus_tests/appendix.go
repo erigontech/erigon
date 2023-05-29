@@ -127,7 +127,7 @@ func addSszTests() {
 		With("SyncCommittee", getSSZStaticConsensusTest(&solid.SyncCommittee{})).
 		//	With("SyncCommitteeContribution", getSSZStaticConsensusTest(&cltypes.SyncCommitteeContribution{})).
 		//	With("SyncCommitteeMessage", getSSZStaticConsensusTest(&cltypes.SyncCommitteeMessage{})).
-		With("Validator", getSSZStaticConsensusTest(&cltypes.Validator{}))
+		With("Validator", getSSZStaticConsensusTest(solid.NewValidator()))
 	// With("VoluntaryExit", getSSZStaticConsensusTest(&cltypes.VoluntaryExit{})) TODO
 	// With("Withdrawal", getSSZStaticConsensusTest(&types.Withdrawal{})) TODO
 }

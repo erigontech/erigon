@@ -1,7 +1,7 @@
 package transition
 
 import (
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
@@ -16,7 +16,7 @@ func ProcessEffectiveBalanceUpdates(state *state.BeaconState) error {
 	// Iterate over validator set and compute the diff of each validator.
 	var err error
 	var balance uint64
-	state.ForEachValidator(func(validator *cltypes.Validator, index, total int) bool {
+	state.ForEachValidator(func(validator solid.Validator, index, total int) bool {
 		balance, err = state.ValidatorBalance(index)
 		if err != nil {
 			return false

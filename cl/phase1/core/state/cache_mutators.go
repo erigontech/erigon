@@ -5,7 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -79,7 +79,7 @@ func (b *BeaconState) InitiateValidatorExit(index uint64) error {
 
 	currentEpoch := Epoch(b.BeaconState)
 	exitQueueEpoch := ComputeActivationExitEpoch(b.BeaconConfig(), currentEpoch)
-	b.ForEachValidator(func(v *cltypes.Validator, idx, total int) bool {
+	b.ForEachValidator(func(v solid.Validator, idx, total int) bool {
 		if v.ExitEpoch() != b.BeaconConfig().FarFutureEpoch && v.ExitEpoch() > exitQueueEpoch {
 			exitQueueEpoch = v.ExitEpoch()
 		}
@@ -87,7 +87,7 @@ func (b *BeaconState) InitiateValidatorExit(index uint64) error {
 	})
 
 	exitQueueChurn := 0
-	b.ForEachValidator(func(v *cltypes.Validator, idx, total int) bool {
+	b.ForEachValidator(func(v solid.Validator, idx, total int) bool {
 		if v.ExitEpoch() == exitQueueEpoch {
 			exitQueueChurn += 1
 		}

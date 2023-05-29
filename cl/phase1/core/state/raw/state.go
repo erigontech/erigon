@@ -27,7 +27,7 @@ type BeaconState struct {
 	eth1Data                   *cltypes.Eth1Data
 	eth1DataVotes              *solid.ListSSZ[*cltypes.Eth1Data]
 	eth1DepositIndex           uint64
-	validators                 *cltypes.ValidatorSet
+	validators                 *solid.ValidatorSet
 	balances                   solid.Uint64ListSSZ
 	randaoMixes                solid.HashVectorSSZ
 	slashings                  solid.Uint64VectorSSZ
@@ -81,7 +81,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		blockRoots:                  solid.NewHashVector(blockRootsLength),
 		stateRoots:                  solid.NewHashVector(stateRootsLength),
 		randaoMixes:                 solid.NewHashVector(randoMixesLength),
-		validators:                  cltypes.NewValidatorSet(int(cfg.ValidatorRegistryLimit)),
+		validators:                  solid.NewValidatorSet(int(cfg.ValidatorRegistryLimit)),
 		previousJustifiedCheckpoint: solid.NewCheckpoint(),
 		currentJustifiedCheckpoint:  solid.NewCheckpoint(),
 		finalizedCheckpoint:         solid.NewCheckpoint(),
