@@ -18,15 +18,17 @@ type config struct {
 	stagedSync *stagedsync.Sync
 	db         kv.RwDB
 	logger     log.Logger
+	borAPI     *bor.API
 	closeCh    chan struct{}
 }
 
-func Whitelist(engine consensus.Engine, stagedsync *stagedsync.Sync, db kv.RwDB, logger log.Logger, closeCh chan struct{}) {
+func Whitelist(engine consensus.Engine, stagedsync *stagedsync.Sync, db kv.RwDB, logger log.Logger, borAPI *bor.API, closeCh chan struct{}) {
 	config := &config{
 		engine:     engine,
 		stagedSync: stagedsync,
 		db:         db,
 		logger:     logger,
+		borAPI:     borAPI,
 		closeCh:    closeCh,
 	}
 
@@ -100,7 +102,7 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 
 	bor, borHandler, err := getBorHandler(config)
 	if err != nil {
-		log.Error("error while getting the ethHandler", "err", err)
+		log.Error("error while getting the borHandler", "err", err)
 		return
 	}
 
@@ -215,6 +217,7 @@ func getBorHandler(config *config) (*BorHandler, *bor.Bor, error) {
 	}
 
 	borhandler := &BorHandler{}
+	borhandler.BorAPI = config.borAPI
 
 	return borhandler, bor, nil
 }

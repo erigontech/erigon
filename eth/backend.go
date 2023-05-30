@@ -768,7 +768,7 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 	if casted, ok := backend.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, backend.logger)
+	apiList = commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, backend.logger)
 	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, backend.logger)
 	go func() {
 		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList, backend.logger); err != nil {
@@ -782,8 +782,10 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 	return nil
 }
 
+var apiList []rpc.API
+
 func (s *Ethereum) APIs() []rpc.API {
-	return []rpc.API{}
+	return apiList
 }
 
 func (s *Ethereum) Etherbase() (eb libcommon.Address, err error) {
@@ -1095,7 +1097,15 @@ func (s *Ethereum) Start() error {
 		if err != nil {
 			return err
 		}
-		borfinality.Whitelist(s.engine, s.stagedSync, s.ChainDB(), s.logger, s.closeCh)
+		var borAPI bor.API
+		apiList := s.APIs()
+		for _, api := range apiList {
+			if api.Namespace == "bor" {
+				borAPI = api.Service.(bor.API)
+				break
+			}
+		}
+		borfinality.Whitelist(s.engine, s.stagedSync, s.ChainDB(), s.logger, &borAPI, s.closeCh)
 	}
 
 	return nil
