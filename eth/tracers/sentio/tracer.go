@@ -28,6 +28,7 @@ type sentioTracer struct {
 	currentGas  math.HexOrDecimal64
 	callsNumber int
 	rootTrace   Trace
+	gasLimit    uint64
 }
 
 type TraceBase interface {
@@ -65,8 +66,14 @@ type Trace struct {
 	Traces []Trace `json:"traces,omitempty"`
 }
 
-func (t *sentioTracer) CaptureTxStart(gasLimit uint64) {}
-func (t *sentioTracer) CaptureTxEnd(restGas uint64)    {}
+func (t *sentioTracer) CaptureTxStart(gasLimit uint64) {
+	t.gasLimit = gasLimit
+}
+
+func (t *sentioTracer) CaptureTxEnd(restGas uint64) {
+	t.rootTrace.GasUsed = math.HexOrDecimal64(t.gasLimit - restGas)
+}
+
 func (t *sentioTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.env = env
 	// Update list of precompiles based on current block
@@ -80,6 +87,7 @@ func (t *sentioTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, 
 		To:    &to,
 		Gas:   math.HexOrDecimal64(gas),
 		Input: input,
+		Value: value.Bytes(),
 	}
 }
 func (t *sentioTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
