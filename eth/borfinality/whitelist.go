@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -192,7 +193,8 @@ func handleNoAckMilestone(ctx context.Context, borHandler *BorHandler, bor *bor.
 }
 
 func handleNoAckMilestoneByID(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, config *config) error {
-	milestoneIDs := borHandler.GetMilestoneIDsList()
+	service := whitelist.GetWhitelistingService()
+	milestoneIDs := service.GetMilestoneIDsList()
 
 	for _, milestoneID := range milestoneIDs {
 		// todo: check if we can ignore the error
