@@ -1,6 +1,7 @@
 package rawdb
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -50,10 +51,16 @@ func (m *Milestone) block() (uint64, libcommon.Hash) {
 	return m.Block, m.Hash
 }
 
-func ReadFinality[T BlockFinality[T]](db kv.Getter) (uint64, libcommon.Hash, error) {
+func ReadFinality[T BlockFinality[T]](db kv.RwDB) (uint64, libcommon.Hash, error) {
 	lastTV, key := getKey[T]()
 
-	data, err := db.GetOne(kv.BorFinality, key)
+	var data []byte
+
+	err := db.View(context.Background(), func(tx kv.Tx) error {
+		res, err := tx.GetOne(kv.BorFinality, key)
+		data = res
+		return err
+	})
 
 	if err != nil {
 		return 0, libcommon.Hash{}, fmt.Errorf("%w: empty response for %s", err, string(key))
@@ -75,7 +82,7 @@ func ReadFinality[T BlockFinality[T]](db kv.Getter) (uint64, libcommon.Hash, err
 	return block, hash, nil
 }
 
-func WriteLastFinality[T BlockFinality[T]](db kv.Putter, block uint64, hash libcommon.Hash) error {
+func WriteLastFinality[T BlockFinality[T]](db kv.RwDB, block uint64, hash libcommon.Hash) error {
 	lastTV, key := getKey[T]()
 
 	lastTV.set(block, hash)
@@ -87,7 +94,11 @@ func WriteLastFinality[T BlockFinality[T]](db kv.Putter, block uint64, hash libc
 		return fmt.Errorf("%w: %v for %s struct", ErrIncorrectFinalityToStore, err, string(key))
 	}
 
-	if err := db.Put(kv.BorFinality, key, enc); err != nil {
+	err = db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.BorFinality, key, enc)
+	})
+
+	if err != nil {
 		log.Error(fmt.Sprintf("Failed to store the %s struct", string(key)), "err", err)
 
 		return fmt.Errorf("%w: %v for %s struct", ErrDBNotResponding, err, string(key))
@@ -117,7 +128,7 @@ func getKey[T BlockFinality[T]]() (T, []byte) {
 	return lastT, key
 }
 
-func WriteLockField(db kv.Putter, val bool, block uint64, hash libcommon.Hash, idListMap map[string]struct{}) error {
+func WriteLockField(db kv.RwDB, val bool, block uint64, hash libcommon.Hash, idListMap map[string]struct{}) error {
 
 	lockField := LockField{
 		Val:    val,
@@ -135,7 +146,11 @@ func WriteLockField(db kv.Putter, val bool, block uint64, hash libcommon.Hash, i
 		return fmt.Errorf("%w: %v for lock field struct", ErrIncorrectLockFieldToStore, err)
 	}
 
-	if err := db.Put(kv.BorFinality, key, enc); err != nil {
+	err = db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.BorFinality, key, enc)
+	})
+
+	if err != nil {
 		log.Error("Failed to store the lock field struct", "err", err)
 
 		return fmt.Errorf("%w: %v for lock field struct", ErrDBNotResponding, err)
@@ -144,11 +159,17 @@ func WriteLockField(db kv.Putter, val bool, block uint64, hash libcommon.Hash, i
 	return nil
 }
 
-func ReadLockField(db kv.Getter) (bool, uint64, libcommon.Hash, map[string]struct{}, error) {
+func ReadLockField(db kv.RwDB) (bool, uint64, libcommon.Hash, map[string]struct{}, error) {
 	key := lockFieldKey
 	lockField := LockField{}
 
-	data, err := db.GetOne(kv.BorFinality, key)
+	var data []byte
+	err := db.View(context.Background(), func(tx kv.Tx) error {
+		res, err := tx.GetOne(kv.BorFinality, key)
+		data = res
+		return err
+	})
+
 	if err != nil {
 		return false, 0, libcommon.Hash{}, nil, fmt.Errorf("%w: empty response for lock field", err)
 	}
@@ -169,7 +190,7 @@ func ReadLockField(db kv.Getter) (bool, uint64, libcommon.Hash, map[string]struc
 	return val, block, hash, idList, nil
 }
 
-func WriteFutureMilestoneList(db kv.Putter, order []uint64, list map[uint64]libcommon.Hash) error {
+func WriteFutureMilestoneList(db kv.RwDB, order []uint64, list map[uint64]libcommon.Hash) error {
 	futureMilestoneField := FutureMilestoneField{
 		Order: order,
 		List:  list,
@@ -184,7 +205,11 @@ func WriteFutureMilestoneList(db kv.Putter, order []uint64, list map[uint64]libc
 		return fmt.Errorf("%w: %v for future milestone field struct", ErrIncorrectFutureMilestoneFieldToStore, err)
 	}
 
-	if err = db.Put(kv.BorFinality, key, enc); err != nil {
+	err = db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.BorFinality, key, enc)
+	})
+
+	if err != nil {
 		log.Error("Failed to store the future milestone field struct", "err", err)
 
 		return fmt.Errorf("%w: %v for future milestone field struct", ErrDBNotResponding, err)
@@ -193,11 +218,17 @@ func WriteFutureMilestoneList(db kv.Putter, order []uint64, list map[uint64]libc
 	return nil
 }
 
-func ReadFutureMilestoneList(db kv.Getter) ([]uint64, map[uint64]libcommon.Hash, error) {
+func ReadFutureMilestoneList(db kv.RwDB) ([]uint64, map[uint64]libcommon.Hash, error) {
 	key := futureMilestoneKey
 	futureMilestoneField := FutureMilestoneField{}
 
-	data, err := db.GetOne(kv.BorFinality, key)
+	var data []byte
+	err := db.View(context.Background(), func(tx kv.Tx) error {
+		res, err := tx.GetOne(kv.BorFinality, key)
+		data = res
+		return err
+	})
+
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: empty response for future milestone field", err)
 	}

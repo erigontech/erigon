@@ -113,8 +113,6 @@ func (m *milestone) IsValidPeer(fetchHeadersByNumber func(number uint64, amount 
 }
 
 func (m *milestone) Process(block uint64, hash common.Hash) {
-	m.finality.Lock()
-	defer m.finality.Unlock()
 
 	m.finality.Process(block, hash)
 

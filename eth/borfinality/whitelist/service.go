@@ -1,7 +1,6 @@
 package whitelist
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
@@ -28,11 +27,7 @@ type Service struct {
 var ws *Service
 
 func RegisterService(db kv.RwDB) error {
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	ws = NewService(tx)
+	ws = NewService(db)
 
 	return nil
 }
@@ -41,9 +36,9 @@ func GetWhitelistingService() *Service {
 	return ws
 }
 
-func NewService(tx kv.RwTx) *Service {
+func NewService(db kv.RwDB) *Service {
 	var checkpointDoExist = true
-	checkpointNumber, checkpointHash, err := rawdb.ReadFinality[*rawdb.Checkpoint](tx)
+	checkpointNumber, checkpointHash, err := rawdb.ReadFinality[*rawdb.Checkpoint](db)
 
 	if err != nil {
 		checkpointDoExist = false
@@ -51,18 +46,18 @@ func NewService(tx kv.RwTx) *Service {
 
 	var milestoneDoExist = true
 
-	milestoneNumber, milestoneHash, err := rawdb.ReadFinality[*rawdb.Milestone](tx)
+	milestoneNumber, milestoneHash, err := rawdb.ReadFinality[*rawdb.Milestone](db)
 	if err != nil {
 		milestoneDoExist = false
 	}
 
-	locked, lockedMilestoneNumber, lockedMilestoneHash, lockedMilestoneIDs, err := rawdb.ReadLockField(tx)
+	locked, lockedMilestoneNumber, lockedMilestoneHash, lockedMilestoneIDs, err := rawdb.ReadLockField(db)
 	if err != nil || !locked {
 		locked = false
 		lockedMilestoneIDs = make(map[string]struct{})
 	}
 
-	order, list, err := rawdb.ReadFutureMilestoneList(tx)
+	order, list, err := rawdb.ReadFutureMilestoneList(db)
 	if err != nil {
 		order = make([]uint64, 0)
 		list = make(map[uint64]common.Hash)
@@ -75,7 +70,7 @@ func NewService(tx kv.RwTx) *Service {
 				Number:   checkpointNumber,
 				Hash:     checkpointHash,
 				interval: 256,
-				db:       tx,
+				db:       db,
 			},
 		},
 
@@ -85,7 +80,7 @@ func NewService(tx kv.RwTx) *Service {
 				Number:   milestoneNumber,
 				Hash:     milestoneHash,
 				interval: 256,
-				db:       tx,
+				db:       db,
 			},
 
 			Locked:                locked,

@@ -146,7 +146,7 @@ type Ethereum struct {
 	pendingBlocks     chan *types.Block
 	minedBlocks       chan *types.Block
 
-	// downloader fields
+	// downloader
 	sentryCtx      context.Context
 	sentryCancel   context.CancelFunc
 	sentriesClient *sentry.MultiClient
