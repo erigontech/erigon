@@ -163,18 +163,20 @@ func handleMilestone(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, 
 	verifier := newBorVerifier()
 	num, hash, err := borHandler.fetchWhitelistMilestone(ctx, bor, verifier, config)
 
+	service := whitelist.GetWhitelistingService()
+
 	// If the current chain head is behind the received milestone, add it to the future milestone
 	// list. Also, the hash mismatch (end block hash) error will lead to rewind so also
 	// add that milestone to the future milestone list.
 	if errors.Is(err, errMissingBlocks) || errors.Is(err, errHashMismatch) {
-		borHandler.ProcessFutureMilestone(num, hash)
+		service.ProcessFutureMilestone(num, hash)
 	}
 
 	if err != nil {
 		return err
 	}
 
-	borHandler.ProcessMilestone(num, hash)
+	service.ProcessMilestone(num, hash)
 
 	return nil
 }
@@ -200,7 +202,7 @@ func handleNoAckMilestoneByID(ctx context.Context, borHandler *BorHandler, bor *
 		// todo: check if we can ignore the error
 		err := borHandler.fetchNoAckMilestoneByID(ctx, bor, milestoneID)
 		if err == nil {
-			borHandler.RemoveMilestoneID(milestoneID)
+			service.RemoveMilestoneID(milestoneID)
 		}
 	}
 
