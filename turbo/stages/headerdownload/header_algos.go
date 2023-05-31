@@ -534,8 +534,9 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			return true, false, 0, lastTime, nil
 		}
 		if !link.verified {
-			borFinality, borReorg := validateReorg(link.header)
-			if err := hd.VerifyHeader(link.header); err != nil || !borFinality || borReorg != nil {
+			// borFinality, borReorg := validateReorg(link.header)
+			// if err := hd.VerifyHeader(link.header); err != nil || !borFinality || borReorg != nil {
+			if err := hd.VerifyHeader(link.header); err != nil {
 				hd.badPoSHeaders[link.hash] = link.header.ParentHash
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
