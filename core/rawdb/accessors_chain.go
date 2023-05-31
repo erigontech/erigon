@@ -309,11 +309,11 @@ func WriteHeader(db kv.RwTx, header *types.Header, txsV3 bool) error {
 		headerKey = dbutils.HeaderKey(number, hash)
 	)
 	if txsV3 {
-		id, err := db.IncrementSequence(kv.BlockID, 1)
+		id, err := db.IncrementSequence(kv.HeaderID, 1)
 		if err != nil {
 			return fmt.Errorf("HeaderNumber mapping: %w", err)
 		}
-		if err := db.Put(kv.BlockID, headerKey, hexutility.EncodeTs(id)); err != nil {
+		if err := db.Put(kv.HeaderID, headerKey, hexutility.EncodeTs(id)); err != nil {
 			return fmt.Errorf("HeaderNumber mapping: %w", err)
 		}
 	}
@@ -336,11 +336,11 @@ func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash libcommon.Hash, hea
 		headerKey = dbutils.HeaderKey(number, hash)
 	)
 	if txsV3 {
-		id, err := db.IncrementSequence(kv.BlockID, 1)
+		id, err := db.IncrementSequence(kv.HeaderID, 1)
 		if err != nil {
 			return fmt.Errorf("HeaderNumber mapping: %w", err)
 		}
-		if err := db.Put(kv.BlockID, headerKey, hexutility.EncodeTs(id)); err != nil {
+		if err := db.Put(kv.HeaderID, headerKey, hexutility.EncodeTs(id)); err != nil {
 			return fmt.Errorf("HeaderNumber mapping: %w", err)
 		}
 	}
@@ -571,13 +571,13 @@ func ReadCanonicalBodyWithTransactions(db kv.Getter, hash libcommon.Hash, number
 		if body == nil {
 			return nil
 		}
-		blockID, err := db.GetOne(kv.BlockID, dbutils.HeaderKey(number, hash))
+		blockID, err := db.GetOne(kv.HeaderID, dbutils.HeaderKey(number, hash))
 		if err != nil {
 			log.Error("failed ReadTransactionByHash", "hash", hash, "block", number, "err", err)
 			return nil
 		}
 		if blockID == nil {
-			log.Error("BlockID not found", "hash", hash, "block", number)
+			log.Error("HeaderID not found", "hash", hash, "block", number)
 			return nil
 		}
 		body.Transactions, err = TxsV3(db, binary.BigEndian.Uint64(blockID), txAmount)
@@ -725,7 +725,7 @@ func WriteRawBodyIfNotExists(db kv.RwTx, hash libcommon.Hash, number uint64, bod
 func WriteRawBody(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.RawBody, txsV3 bool) (ok bool, lastTxnID uint64, err error) {
 	var baseTxnID, blockID uint64
 	if txsV3 {
-		blockIDBytes, err := db.GetOne(kv.BlockID, dbutils.HeaderKey(number, hash))
+		blockIDBytes, err := db.GetOne(kv.HeaderID, dbutils.HeaderKey(number, hash))
 		if err != nil {
 			return false, 0, err
 		}
@@ -761,7 +761,7 @@ func WriteBody(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.Body,
 	body.SendersFromTxs()
 	var baseTxId, blockID uint64
 	if txsV3 {
-		blockIDBytes, err := db.GetOne(kv.BlockID, dbutils.HeaderKey(number, hash))
+		blockIDBytes, err := db.GetOne(kv.HeaderID, dbutils.HeaderKey(number, hash))
 		if err != nil {
 			return err
 		}
@@ -976,7 +976,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx cont
 
 // ReadTd retrieves a block's total difficulty corresponding to the hash.
 func ReadTd(db kv.Getter, hash libcommon.Hash, number uint64) (*big.Int, error) {
-	data, err := db.GetOne(kv.HeaderTD, dbutils.HeaderKey(number, hash))
+	data, err := db.GetOne(kv.HeadersTotalDifficulty, dbutils.HeaderKey(number, hash))
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadTd: %w", err)
 	}
@@ -1004,7 +1004,7 @@ func WriteTd(db kv.Putter, hash libcommon.Hash, number uint64, td *big.Int) erro
 	if err != nil {
 		return fmt.Errorf("failed to RLP encode block total difficulty: %w", err)
 	}
-	if err := db.Put(kv.HeaderTD, dbutils.HeaderKey(number, hash), data); err != nil {
+	if err := db.Put(kv.HeadersTotalDifficulty, dbutils.HeaderKey(number, hash), data); err != nil {
 		return fmt.Errorf("failed to store block total difficulty: %w", err)
 	}
 	return nil
@@ -1012,8 +1012,8 @@ func WriteTd(db kv.Putter, hash libcommon.Hash, number uint64, td *big.Int) erro
 
 // TruncateTd removes all block total difficulty from block number N
 func TruncateTd(tx kv.RwTx, blockFrom uint64) error {
-	if err := tx.ForEach(kv.HeaderTD, hexutility.EncodeTs(blockFrom), func(k, _ []byte) error {
-		return tx.Delete(kv.HeaderTD, k)
+	if err := tx.ForEach(kv.HeadersTotalDifficulty, hexutility.EncodeTs(blockFrom), func(k, _ []byte) error {
+		return tx.Delete(kv.HeadersTotalDifficulty, k)
 	}); err != nil {
 		return fmt.Errorf("TruncateTd: %w", err)
 	}

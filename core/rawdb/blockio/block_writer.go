@@ -53,7 +53,7 @@ func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir
 	binary.BigEndian.PutUint64(startKey, from)
 	endKey := dbutils.HeaderKey(to, common.Hash{}) // etl.Tranform uses ExractEndKey as exclusive bound, therefore +1
 
-	fromTable := kv.BlockID
+	fromTable := kv.HeaderID
 	if !w.txsV3 {
 		fromTable = kv.Headers
 	}

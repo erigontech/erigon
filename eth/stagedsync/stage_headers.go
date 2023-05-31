@@ -1038,7 +1038,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 
 		if test { // If we are not in the test, we can do searching for the heaviest chain in the next cycle
 			// Find header with biggest TD
-			tdCursor, cErr := tx.Cursor(kv.HeaderTD)
+			tdCursor, cErr := tx.Cursor(kv.HeadersTotalDifficulty)
 			if cErr != nil {
 				return cErr
 			}
