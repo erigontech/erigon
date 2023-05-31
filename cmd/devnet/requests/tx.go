@@ -3,13 +3,13 @@ package requests
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func TxpoolContent(reqGen *RequestGenerator, logger log.Logger) (int, int, int, error) {
 	var (
-		b       rpctest.EthTxPool
+		b       models.EthTxPool
 		pending map[string]interface{}
 		queued  map[string]interface{}
 		baseFee map[string]interface{}
