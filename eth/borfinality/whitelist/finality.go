@@ -58,6 +58,7 @@ func (f *finality[T]) IsValidChain(currentHeader *types.Header, chain []*types.H
 }
 
 func (f *finality[T]) Process(block uint64, hash common.Hash) {
+	f.Lock()
 	f.doExist = true
 	f.Hash = hash
 	f.Number = block
@@ -66,6 +67,7 @@ func (f *finality[T]) Process(block uint64, hash common.Hash) {
 	if err != nil {
 		log.Error("Error in writing whitelist state to db", "err", err)
 	}
+	f.Unlock()
 }
 
 // Get returns the existing whitelisted
