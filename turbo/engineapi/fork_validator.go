@@ -184,7 +184,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	var foundCanonical bool
 	currentHash := header.ParentHash
 	unwindPoint := header.Number.Uint64() - 1
-	foundCanonical, criticalError = rawdb.IsCanonicalHash2(tx, currentHash, unwindPoint)
+	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
 	if criticalError != nil {
 		return
 	}
@@ -213,7 +213,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}
 		currentHash = sb.Header.ParentHash
 		unwindPoint = sb.Header.Number.Uint64() - 1
-		foundCanonical, criticalError = rawdb.IsCanonicalHash2(tx, currentHash, unwindPoint)
+		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
 		if criticalError != nil {
 			return
 		}

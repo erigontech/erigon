@@ -243,7 +243,7 @@ func writeForkChoiceHashes(
 	logger log.Logger,
 ) (bool, error) {
 	if forkChoice.SafeBlockHash != (libcommon.Hash{}) {
-		safeIsCanonical, _, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
+		safeIsCanonical, _, err := rawdb.IsCanonicalHashDeprecated(tx, forkChoice.SafeBlockHash)
 		if err != nil {
 			return false, err
 		}
@@ -254,7 +254,7 @@ func writeForkChoiceHashes(
 	}
 
 	if forkChoice.FinalizedBlockHash != (libcommon.Hash{}) {
-		finalizedIsCanonical, _, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
+		finalizedIsCanonical, _, err := rawdb.IsCanonicalHashDeprecated(tx, forkChoice.FinalizedBlockHash)
 		if err != nil {
 			return false, err
 		}
@@ -293,9 +293,9 @@ func startHandlingForkChoice(
 	headerHash := forkChoice.HeadBlockHash
 	logger.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
-	canonical, headerNumber, err := rawdb.IsCanonicalHash(tx, headerHash)
+	canonical, headerNumber, err := rawdb.IsCanonicalHashDeprecated(tx, headerHash)
 	if err != nil {
-		logger.Warn(fmt.Sprintf("[%s] Fork choice err (IsCanonicalHash)", s.LogPrefix()), "err", err)
+		logger.Warn(fmt.Sprintf("[%s] Fork choice err (IsCanonicalHashDeprecated)", s.LogPrefix()), "err", err)
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		return nil, err
 	}
