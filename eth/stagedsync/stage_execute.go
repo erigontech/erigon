@@ -599,6 +599,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	logPrefix := u.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
+	fmt.Printf("unwindExecutionStage: u.UnwindPoint=%d, s.BlockNumber=%d\n", u.UnwindPoint, s.BlockNumber)
+	cfg.agg.SharedDomains().Unwind()
+
 	if err = unwindExecutionStage(u, s, tx, ctx, cfg, initialCycle); err != nil {
 		return err
 	}

@@ -72,7 +72,7 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
 	}
-	io := state.NewUpdate4ReadWriter(rs.Domains())
+	io := state.NewUpdate4ReadWriter(rs.Domains().Updates())
 	w.stateReader.SetUpd(io)
 	w.stateWriter.SetUpd(io)
 	w.getHeader = func(hash libcommon.Hash, number uint64) *types.Header {

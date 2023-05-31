@@ -303,10 +303,10 @@ func (m *MultiStateReader) ReadAccountIncarnation(address common.Address) (uint6
 }
 
 type Update4ReadWriter struct {
-	updates *state.UpdateTree
-	domains *state.SharedDomains
-	writes  []commitment.Update
-	reads   []commitment.Update
+	updates *state.UpdatesWithCommitment
+	//updates *state.UpdateTree
+	//domains *state.SharedDomains
+	reads []commitment.Update
 }
 
 func UpdateToAccount(u commitment.Update) *accounts.Account {
@@ -320,17 +320,17 @@ func UpdateToAccount(u commitment.Update) *accounts.Account {
 	return &acc
 }
 
-func NewUpdate4ReadWriter(domains *state.SharedDomains) *Update4ReadWriter {
+func NewUpdate4ReadWriter(domains *state.UpdatesWithCommitment) *Update4ReadWriter {
 	return &Update4ReadWriter{
-		updates: state.NewUpdateTree(),
-		domains: domains,
+		updates: domains,
 	}
 }
 
 func (w *Update4ReadWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
 	//w.updates.TouchPlainKey(address.Bytes(), accounts.SerialiseV3(account), w.updates.TouchAccount)
-	w.updates.TouchPlainKeyDom(w.domains, address.Bytes(), accounts.SerialiseV3(account), w.updates.TouchAccount)
+	//w.updates.TouchPlainKeyDom(w.domains, address.Bytes(), accounts.SerialiseV3(account), w.updates.TouchAccount)
+	w.updates.TouchAccount(address.Bytes(), accounts.SerialiseV3(account))
 	return nil
 }
 
@@ -338,14 +338,17 @@ func (w *Update4ReadWriter) UpdateAccountCode(address common.Address, incarnatio
 	//addressBytes, codeHashBytes := address.Bytes(), codeHash.Bytes()
 	//fmt.Printf("code [%x] => [%x] CodeHash: %x, txNum: %d\n", address, code, codeHash, w.txNum)
 	//w.updates.TouchPlainKey(address.Bytes(), code, w.updates.TouchCode)
-	w.updates.TouchPlainKeyDom(w.domains, address.Bytes(), code, w.updates.TouchCode)
+	//w.updates.TouchPlainKeyDom(w.domains, address.Bytes(), code, w.updates.TouchCode)
+
+	w.updates.TouchCode(address.Bytes(), code)
 	return nil
 }
 
 func (w *Update4ReadWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
 	addressBytes := address.Bytes()
 	//w.updates.TouchPlainKey(addressBytes, nil, w.updates.TouchAccount)
-	w.updates.TouchPlainKeyDom(w.domains, addressBytes, nil, w.updates.TouchAccount)
+	//w.updates.TouchPlainKeyDom(w.domains, addressBytes, nil, w.updates.TouchAccount)
+	w.updates.TouchAccount(addressBytes, nil)
 	return nil
 }
 
@@ -355,53 +358,63 @@ func (w *Update4ReadWriter) WriteAccountStorage(address common.Address, incarnat
 	}
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
 	//w.updates.TouchPlainKey(common.Append(address[:], key[:]), value.Bytes(), w.updates.TouchStorage)
-	w.updates.TouchPlainKeyDom(w.domains, common.Append(address[:], key[:]), value.Bytes(), w.updates.TouchStorage)
+	//w.updates.TouchPlainKeyDom(w.domains, common.Append(address[:], key[:]), value.Bytes(), w.updates.TouchStorage)
+	w.updates.TouchStorage(common.Append(address[:], key[:]), value.Bytes())
 	return nil
 }
 
 func (w *Update4ReadWriter) Updates() (pk [][]byte, upd []commitment.Update) {
-	pk, _, updates := w.updates.List(true)
-	return pk, updates
+	return nil, nil
+	//pk, _, updates := w.updates.List(true)
+	//return pk, updates
 }
 
 func (w *Update4ReadWriter) CreateContract(address common.Address) error { return nil }
 
 func (w *Update4ReadWriter) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	ci, found := w.updates.Get(address.Bytes())
-	if !found {
-		return nil, nil
-	}
-
-	upd := ci.Update()
-	w.reads = append(w.reads, upd)
-	return UpdateToAccount(upd), nil
+	upd, _ := w.updates.Get(address.Bytes())
+	return UpdateToAccount(*upd), nil
+	//ci, found := w.updates.GetWithDomain(address.Bytes(), w.domains)
+	//if !found {
+	//	return nil, nil
+	//}
+	//
+	//upd := ci.Update()
+	//w.reads = append(w.reads, upd)
+	//return UpdateToAccount(upd), nil
 }
 
 func (w *Update4ReadWriter) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	ci, found := w.updates.Get(common.Append(address.Bytes(), key.Bytes()))
-	if !found {
-		return nil, nil
-	}
-	upd := ci.Update()
-	w.reads = append(w.reads, upd)
-
+	upd, _ := w.updates.Get(common.Append(address.Bytes(), key.Bytes()))
 	if upd.ValLength > 0 {
 		return upd.CodeHashOrStorage[:upd.ValLength], nil
 	}
 	return nil, nil
+	//ci, found := w.updates.GetWithDomain(common.Append(address.Bytes(), key.Bytes()), w.domains)
+	//if !found {
+	//	return nil, nil
+	//}
+	//upd := ci.Update()
+	//w.reads = append(w.reads, upd)
+	//
 }
 
 func (w *Update4ReadWriter) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	ci, found := w.updates.Get(address.Bytes())
-	if !found {
-		return nil, nil
-	}
-	upd := ci.Update()
-	w.reads = append(w.reads, upd)
-	if upd.ValLength > 0 {
-		return upd.CodeHashOrStorage[:upd.ValLength], nil
-	}
-	return nil, nil
+	upd, _ := w.updates.Get(address.Bytes())
+	//if upd.ValLength > 0 {
+	//	return upd.CodeHashOrStorage[:upd.ValLength], nil
+	//}
+	return upd.CodeValue, nil
+	//ci, found := w.updates.GetWithDomain(address.Bytes(), w.domains)
+	//if !found {
+	//	return nil, nil
+	//}
+	//upd := ci.Update()
+	//w.reads = append(w.reads, upd)
+	//if upd.ValLength > 0 {
+	//	return upd.CodeHashOrStorage[:upd.ValLength], nil
+	//}
+	//return nil, nil
 }
 
 func (w *Update4ReadWriter) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {

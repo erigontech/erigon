@@ -282,7 +282,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcomm
 						break
 					}
 					if l.trace {
-						fmt.Printf("storage: %x => %x\n", l.kHexS, vS)
+						fmt.Printf("storage: %x => %x\n", l.kHexS, vS[32:])
 					}
 
 					if err = l.receiver.Receive(StorageStreamItem, accWithInc, l.kHexS, nil, vS[32:], nil, false, 0); err != nil {
