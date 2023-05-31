@@ -28,6 +28,9 @@ type Peer struct {
 	m *Manager
 }
 
+func (p *Peer) ID() peer.ID {
+	return p.pid
+}
 func (p *Peer) Penalize() {
 	log.Debug("[Sentinel Peers] peer penalized", "peer-id", p.pid)
 	p.Penalties++
@@ -42,7 +45,7 @@ func (p *Peer) Forgive() {
 
 func (p *Peer) MarkUsed() {
 	p.useCount++
-	log.Debug("[Sentinel Peers] peer used", "peer-id", p.pid, "uses", p.useCount)
+	log.Trace("[Sentinel Peers] peer used", "peer-id", p.pid, "uses", p.useCount)
 	p.lastRequest = time.Now()
 }
 

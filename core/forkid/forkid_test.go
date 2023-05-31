@@ -159,9 +159,9 @@ func TestCreation(t *testing.T) {
 			params.ChiadoChainConfig,
 			params.ChiadoGenesisHash,
 			[]testcase{
-				{0, 0, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684930320}},
-				{4101957, 1684930315, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684930320}}, // Last pre-Shanghai block (approx)
-				{4101958, 1684930320, ID{Hash: checksumToBytes(0xcc663128), Next: 0}},          // First Shanghai block (approx)
+				{0, 0, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}},
+				{4101957, 1684934215, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}}, // Last pre-Shanghai block (approx)
+				{4101958, 1684934220, ID{Hash: checksumToBytes(0xa15a4252), Next: 0}},          // First Shanghai block (approx)
 			},
 		},
 	}

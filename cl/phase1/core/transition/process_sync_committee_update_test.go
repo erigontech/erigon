@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +24,7 @@ func TestProcessSyncCommittee(t *testing.T) {
 	for i := 0; i < validatorNum; i++ {
 		var pubKey [48]byte
 		binary.BigEndian.PutUint64(pubKey[:], uint64(i))
-		v := &cltypes.Validator{}
+		v := solid.NewValidator()
 		v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
 		v.SetPublicKey(pk)
 		v.SetEffectiveBalance(2000000000)

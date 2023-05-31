@@ -22,7 +22,7 @@ import (
 )
 
 // Start starts the process for two erigon nodes running on the dev chain
-func Start(wg *sync.WaitGroup, dataDir string, logger log.Logger) {
+func Start(reqGen *requests.RequestGenerator, wg *sync.WaitGroup, dataDir string, logger log.Logger) {
 	// add one goroutine to the wait-list
 	wg.Add(1)
 
@@ -33,7 +33,7 @@ func Start(wg *sync.WaitGroup, dataDir string, logger log.Logger) {
 	time.Sleep(time.Second * 10)
 
 	// get the enode of the first node
-	enode, err := getEnode(logger)
+	enode, err := getEnode(reqGen, logger)
 	if err != nil {
 		logger.Error("Starting the node", "error", err)
 	}
@@ -132,8 +132,8 @@ func nonMiningNodeArgs(dataDir string, nodeNumber int, enode string) []string {
 }
 
 // getEnode returns the enode of the mining node
-func getEnode(logger log.Logger) (string, error) {
-	nodeInfo, err := requests.AdminNodeInfo(0, logger)
+func getEnode(reqGen *requests.RequestGenerator, logger log.Logger) (string, error) {
+	nodeInfo, err := requests.AdminNodeInfo(reqGen, logger)
 	if err != nil {
 		return "", err
 	}

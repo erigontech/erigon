@@ -94,14 +94,14 @@ func dbSlice(chaindata string, bucket string, prefix []byte) {
 func testBlockHashes(chaindata string, block int, stateRoot libcommon.Hash) {
 	ethDb := mdbx.MustOpen(chaindata)
 	defer ethDb.Close()
+	br, _ := blocksIO(ethDb)
 	tool.Check(ethDb.View(context.Background(), func(tx kv.Tx) error {
 		blocksToSearch := 10000000
 		for i := uint64(block); i < uint64(block+blocksToSearch); i++ {
-			hash, err := rawdb.ReadCanonicalHash(tx, i)
+			header, err := br.HeaderByNumber(context.Background(), tx, i)
 			if err != nil {
 				panic(err)
 			}
-			header := rawdb.ReadHeader(tx, hash, i)
 			if header.Root == stateRoot || stateRoot == (libcommon.Hash{}) {
 				fmt.Printf("\n===============\nCanonical hash for %d: %x\n", i, hash)
 				fmt.Printf("Header.Root: %x\n", header.Root)
@@ -135,15 +135,16 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	var transactionsV3 bool
+	var histV3, transactionsV3 bool
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		transactionsV3, _ = kvcfg.TransactionsV3.Enabled(tx)
+		histV3, _ = kvcfg.HistoryV3.Enabled(tx)
 		return nil
 	}); err != nil {
 		panic(err)
 	}
 	br := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()), transactionsV3)
-	bw := blockio.NewBlockWriter(transactionsV3)
+	bw := blockio.NewBlockWriter(histV3, transactionsV3)
 	return br, bw
 }
 
@@ -153,11 +154,7 @@ func printTxHashes(chaindata string, block uint64) error {
 	br, _ := blocksIO(db)
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		for b := block; b < block+1; b++ {
-			hash, e := rawdb.ReadCanonicalHash(tx, b)
-			if e != nil {
-				return e
-			}
-			block, _, _ := br.BlockWithSenders(context.Background(), tx, hash, b)
+			block, _ := br.BlockByNumber(context.Background(), tx, b)
 			if block == nil {
 				break
 			}
@@ -469,6 +466,7 @@ func getBlockTotal(tx kv.Tx, blockFrom uint64, blockTotalOrOffset int64) uint64 
 func extractHashes(chaindata string, blockStep uint64, blockTotalOrOffset int64, name string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
+	br, _ := blocksIO(db)
 
 	f, err := os.Create(fmt.Sprintf("preverified_hashes_%s.go", name))
 	if err != nil {
@@ -487,7 +485,7 @@ func extractHashes(chaindata string, blockStep uint64, blockTotalOrOffset int64,
 		blockTotal := getBlockTotal(tx, b, blockTotalOrOffset)
 		// Note: blockTotal used here as block number rather than block count
 		for b <= blockTotal {
-			hash, err := rawdb.ReadCanonicalHash(tx, b)
+			hash, err := br.CanonicalHash(context.Background(), tx, b)
 			if err != nil {
 				return err
 			}
@@ -582,15 +580,15 @@ func extractBodies(datadir string) error {
 		return nil
 	})
 	*/
-	br := snapshotsync.NewBlockReader(snaps, false)
-	lastTxnID, _, err := br.LastTxNumInSnapshot(snaps.BlocksAvailable())
+	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
+	defer db.Close()
+	br, _ := blocksIO(db)
+	lastTxnID, _, err := br.(*snapshotsync.BlockReader).LastTxNumInSnapshot(snaps.BlocksAvailable())
 	if err != nil {
 		return err
 	}
 	fmt.Printf("txTxnID = %d\n", lastTxnID)
 
-	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
-	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
@@ -610,7 +608,7 @@ func extractBodies(datadir string) error {
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := libcommon.BytesToHash(k[8:])
 		var hash libcommon.Hash
-		if hash, err = rawdb.ReadCanonicalHash(tx, blockNumber); err != nil {
+		if hash, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
 			return err
 		}
 		_, baseTxId, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
@@ -1049,6 +1047,8 @@ func scanReceipts2(chaindata string) error {
 	if err != nil {
 		return err
 	}
+	br, _ := blocksIO(dbdb)
+
 	defer tx.Rollback()
 	blockNum, err := historyv2.AvailableFrom(tx)
 	if err != nil {
@@ -1066,7 +1066,7 @@ func scanReceipts2(chaindata string) error {
 			log.Info("Scanned", "block", blockNum, "fixed", fixedCount)
 		}
 		var hash libcommon.Hash
-		if hash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
+		if hash, err = br.CanonicalHash(context.Background(), tx, blockNum); err != nil {
 			return err
 		}
 		if hash == (libcommon.Hash{}) {

@@ -369,8 +369,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err := snapshots.ReopenFolder(); err != nil {
 		return err
 	}
+	blockReader := snapshotsync.NewBlockReader(snapshots, fromdb.TxsV3(db))
 
-	br := snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs.Tmp, snapshots, db, nil, nil, logger)
+	br := snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs.Tmp, blockReader, db, nil, nil, logger)
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return err

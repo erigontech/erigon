@@ -18,7 +18,6 @@ package gasprice_test
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"math/big"
 	"testing"
@@ -47,30 +46,14 @@ type testBackend struct {
 	blockReader services.FullBlockReader
 }
 
-func (b *testBackend) GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error) {
+func (b *testBackend) GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error) {
 	tx, err := b.db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	if number == nil {
-		return nil, nil
-	}
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, *number)
-	if err != nil {
-		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-	}
-
-	block, s, err := b.blockReader.BlockWithSenders(ctx, tx, hash, *number)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil
-	}
-	receipts := rawdb.ReadReceipts(tx, block, s)
+	receipts := rawdb.ReadReceipts(tx, block, nil)
 	return receipts, nil
 }
 
@@ -90,14 +73,7 @@ func (b *testBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber
 	if number == rpc.LatestBlockNumber {
 		return rawdb.ReadCurrentHeader(tx), nil
 	}
-	hash, err := rawdb.ReadCanonicalHash(tx, uint64(number))
-	if err != nil {
-		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
-	}
-	if hash == (libcommon.Hash{}) {
-		return nil, nil
-	}
-	return b.blockReader.Header(ctx, tx, hash, uint64(number))
+	return b.blockReader.HeaderByNumber(ctx, tx, uint64(number))
 }
 
 func (b *testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
@@ -110,15 +86,7 @@ func (b *testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber)
 	if number == rpc.LatestBlockNumber {
 		return b.blockReader.CurrentBlock(tx)
 	}
-	hash, err := rawdb.ReadCanonicalHash(tx, uint64(number))
-	if err != nil {
-		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
-	}
-	if hash == (libcommon.Hash{}) {
-		return nil, nil
-	}
-	block, _, err := b.blockReader.BlockWithSenders(ctx, tx, hash, uint64(number))
-	return block, err
+	return b.blockReader.BlockByNumber(ctx, tx, uint64(number))
 }
 
 func (b *testBackend) ChainConfig() *chain.Config {
@@ -173,11 +141,7 @@ func (b *testBackend) GetBlockByNumber(number uint64) *types.Block {
 	}
 	defer tx.Rollback()
 
-	hash, err := rawdb.ReadCanonicalHash(tx, number)
-	if err != nil {
-		return nil
-	}
-	block, _, _ := b.blockReader.BlockWithSenders(context.Background(), tx, hash, number)
+	block, _ := b.blockReader.BlockByNumber(context.Background(), tx, number)
 	return block
 }
 

@@ -45,7 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 const (
@@ -60,10 +59,6 @@ type HasChangeSetWriter interface {
 }
 
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
-
-type WithSnapshots interface {
-	Snapshots() *snapshotsync.RoSnapshots
-}
 
 type headerDownloader interface {
 	ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash)
@@ -442,7 +437,7 @@ Loop:
 			}
 		}
 
-		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		blockHash, err := cfg.blockReader.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
 			return err
 		}
@@ -581,17 +576,14 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (ch
 	}
 }
 func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, blockNum uint64) error {
-	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-	if err != nil {
-		return err
-	}
-	block, senders, err := cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
+	block, err := cfg.blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
 	if block == nil {
 		return nil
 	}
+	senders := block.Body().SendersFromTxs()     //TODO: BlockByNumber can return senders
 	stateReader := state.NewPlainStateReader(tx) //TODO: can do on batch! if make batch thread-safe
 	for _, sender := range senders {
 		a, _ := stateReader.ReadAccountData(sender)
@@ -686,7 +678,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	if !initialCycle && cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.accumulator
 
-		hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
+		hash, err := cfg.blockReader.CanonicalHash(ctx, tx, u.UnwindPoint)
 		if err != nil {
 			return fmt.Errorf("read canonical hash of unwind point: %w", err)
 		}

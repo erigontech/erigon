@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
@@ -23,7 +25,11 @@ const validatorSize = 48 + 32 + 8 + 1 + 8 + 8 + 8 + 8
 // The Validator type represents an Ethereum 2.0 validator.
 // It is stored as a flat buffer, which is a serialized representation of the struct.
 // A flat buffer enables efficient read and write operations, as well as memory storage, without the need for serialization or deserialization.
-type Validator [validatorSize]byte
+type Validator []byte
+
+func NewValidator() Validator {
+	return make([]byte, validatorSize)
+}
 
 // NewValidatorFromParameters creates a new Validator object from the provided parameters.
 // It is represented as a flat buffer.
@@ -36,8 +42,8 @@ func NewValidatorFromParameters(
 	ActivationEpoch uint64,
 	ExitEpoch uint64,
 	WithdrawableEpoch uint64,
-) *Validator {
-	v := &Validator{}
+) Validator {
+	v := NewValidator()
 	v.SetPublicKey(PublicKey)
 	v.SetWithdrawalCredentials(WithdrawalCredentials)
 	v.SetEffectiveBalance(EffectiveBalance)
@@ -48,17 +54,28 @@ func NewValidatorFromParameters(
 	v.SetWithdrawableEpoch(WithdrawableEpoch)
 	return v
 }
-func (v *Validator) CopyTo(dst *Validator) {
+
+func (v Validator) CopyTo(dst Validator) {
 	copy(dst[:], v[:])
 }
 
-func (v *Validator) EncodeSSZ(dst []byte) []byte {
-	buf := dst
-	buf = append(buf, v[:]...)
-	return buf
+func (v Validator) HashSSZ() ([32]byte, error) {
+	hashBuffer := make([]byte, 8*32)
+	if err := v.CopyHashBufferTo(hashBuffer); err != nil {
+		return [32]byte{}, err
+	}
+	hashBuffer = hashBuffer[:(8 * 32)]
+	if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, hashBuffer); err != nil {
+		return [32]byte{}, err
+	}
+	return common.BytesToHash(hashBuffer[:length.Hash]), nil
 }
 
-func (v *Validator) DecodeSSZ(buf []byte, _ int) error {
+func (v Validator) EncodeSSZ(dst []byte) ([]byte, error) {
+	return append(dst, v[:]...), nil
+}
+
+func (v Validator) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < v.EncodingSizeSSZ() {
 		return ssz.ErrLowBufferSize
 	}
@@ -66,38 +83,42 @@ func (v *Validator) DecodeSSZ(buf []byte, _ int) error {
 	return nil
 }
 
-func (v *Validator) EncodingSizeSSZ() int {
+func (v Validator) Clone() clonable.Clonable {
+	return NewValidator()
+}
+
+func (v Validator) EncodingSizeSSZ() int {
 	return 121
 }
 
-func (v *Validator) PublicKey() (o [48]byte) {
+func (v Validator) PublicKey() (o [48]byte) {
 	copy(o[:], v[:48])
 	return
 }
-func (v *Validator) WithdrawalCredentials() (o common.Hash) {
+func (v Validator) WithdrawalCredentials() (o common.Hash) {
 	copy(o[:], v[48:80])
 	return
 }
-func (v *Validator) EffectiveBalance() uint64 {
+func (v Validator) EffectiveBalance() uint64 {
 	return binary.LittleEndian.Uint64(v[80:88])
 }
-func (v *Validator) Slashed() bool {
+func (v Validator) Slashed() bool {
 	return v[88] != 0
 }
-func (v *Validator) ActivationEligibilityEpoch() uint64 {
+func (v Validator) ActivationEligibilityEpoch() uint64 {
 	return binary.LittleEndian.Uint64(v[89:97])
 }
-func (v *Validator) ActivationEpoch() uint64 {
+func (v Validator) ActivationEpoch() uint64 {
 	return binary.LittleEndian.Uint64(v[97:105])
 }
-func (v *Validator) ExitEpoch() uint64 {
+func (v Validator) ExitEpoch() uint64 {
 	return binary.LittleEndian.Uint64(v[105:113])
 }
-func (v *Validator) WithdrawableEpoch() uint64 {
+func (v Validator) WithdrawableEpoch() uint64 {
 	return binary.LittleEndian.Uint64(v[113:121])
 }
 
-func (v *Validator) CopyHashBufferTo(o []byte) error {
+func (v Validator) CopyHashBufferTo(o []byte) error {
 	for i := 0; i < 64; i++ {
 		o[i] = 0
 	}
@@ -113,38 +134,48 @@ func (v *Validator) CopyHashBufferTo(o []byte) error {
 	copy(o[160:192], v[97:105])
 	copy(o[192:224], v[105:113])
 	copy(o[224:256], v[113:121])
-
 	return nil
-
 }
 
-func (v *Validator) SetPublicKey(o [48]byte) {
+func (v Validator) SetPublicKey(o [48]byte) {
 	copy(v[:48], o[:])
-	return
 }
-func (v *Validator) SetWithdrawalCredentials(o common.Hash) {
+
+func (v Validator) SetWithdrawalCredentials(o common.Hash) {
 	copy(v[48:80], o[:])
-	return
 }
-func (v *Validator) SetEffectiveBalance(i uint64) {
+
+func (v Validator) SetEffectiveBalance(i uint64) {
 	binary.LittleEndian.PutUint64(v[80:88], i)
 }
-func (v *Validator) SetSlashed(b bool) {
+func (v Validator) SetSlashed(b bool) {
 	if b {
 		v[88] = 1
 		return
 	}
 	v[88] = 0
 }
-func (v *Validator) SetActivationEligibilityEpoch(i uint64) {
+func (v Validator) SetActivationEligibilityEpoch(i uint64) {
 	binary.LittleEndian.PutUint64(v[89:97], i)
 }
-func (v *Validator) SetActivationEpoch(i uint64) {
+
+func (v Validator) SetActivationEpoch(i uint64) {
 	binary.LittleEndian.PutUint64(v[97:105], i)
 }
-func (v *Validator) SetExitEpoch(i uint64) {
+
+func (v Validator) SetExitEpoch(i uint64) {
 	binary.LittleEndian.PutUint64(v[105:113], i)
 }
-func (v *Validator) SetWithdrawableEpoch(i uint64) {
+
+func (v Validator) SetWithdrawableEpoch(i uint64) {
 	binary.LittleEndian.PutUint64(v[113:121], i)
+}
+
+// Active returns if validator is active for given epoch
+func (v *Validator) Active(epoch uint64) bool {
+	return v.ActivationEpoch() <= epoch && epoch < v.ExitEpoch()
+}
+
+func (v *Validator) IsSlashable(epoch uint64) bool {
+	return !v.Slashed() && (v.ActivationEpoch() <= epoch) && (epoch < v.WithdrawableEpoch())
 }

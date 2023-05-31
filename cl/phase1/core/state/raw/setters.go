@@ -104,64 +104,66 @@ func (b *BeaconState) SetValidatorMinCurrentInclusionDelayAttestation(index int,
 	if index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
-	b.markLeaf(ValidatorsLeafIndex)
-	b.validators.Get(index).MinCurrentInclusionDelayAttestation = value
+	b.validators.SetMinCurrentInclusionDelayAttestation(index, value)
 	return nil
 }
+
 func (b *BeaconState) SetValidatorIsCurrentMatchingSourceAttester(index int, value bool) error {
 	if index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
-	b.markLeaf(ValidatorsLeafIndex)
-	b.validators.Get(index).IsCurrentMatchingSourceAttester = value
+	b.validators.SetIsCurrentMatchingSourceAttester(index, value)
 	return nil
 }
+
 func (b *BeaconState) SetValidatorIsCurrentMatchingTargetAttester(index int, value bool) error {
 	if index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
-	b.markLeaf(ValidatorsLeafIndex)
-	b.validators.Get(index).IsCurrentMatchingTargetAttester = value
+	b.validators.SetIsCurrentMatchingTargetAttester(index, value)
 	return nil
 }
+
 func (b *BeaconState) SetValidatorIsCurrentMatchingHeadAttester(index int, value bool) error {
 	if index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
-	b.markLeaf(ValidatorsLeafIndex)
-	b.validators.Get(index).IsCurrentMatchingHeadAttester = value
+	b.validators.SetIsCurrentMatchingHeadAttester(index, value)
 	return nil
 }
+
 func (b *BeaconState) SetValidatorMinPreviousInclusionDelayAttestation(index int, value *solid.PendingAttestation) error {
 	if index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
-	b.markLeaf(ValidatorsLeafIndex)
-	b.validators.Get(index).MinPreviousInclusionDelayAttestation = value
+	b.validators.SetMinPreviousInclusionDelayAttestation(index, value)
 	return nil
 }
+
 func (b *BeaconState) SetValidatorIsPreviousMatchingSourceAttester(index int, value bool) error {
 	if index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
-	b.markLeaf(ValidatorsLeafIndex)
-	b.validators.Get(index).IsPreviousMatchingSourceAttester = value
+	b.validators.SetIsPreviousMatchingSourceAttester(index, value)
 	return nil
 }
+
 func (b *BeaconState) SetValidatorIsPreviousMatchingTargetAttester(index int, value bool) error {
 	if index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
 	b.markLeaf(ValidatorsLeafIndex)
-	b.validators.Get(index).IsPreviousMatchingTargetAttester = value
+	b.validators.SetIsPreviousMatchingTargetAttester(index, value)
 	return nil
 }
+
 func (b *BeaconState) SetValidatorIsPreviousMatchingHeadAttester(index int, value bool) error {
 	if index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
 	b.markLeaf(ValidatorsLeafIndex)
-	b.validators.Get(index).IsPreviousMatchingHeadAttester = value
+
+	b.validators.SetIsPreviousMatchingHeadAttester(index, value)
 	return nil
 }
 
@@ -174,7 +176,7 @@ func (b *BeaconState) SetValidatorBalance(index int, balance uint64) error {
 	return nil
 }
 
-func (b *BeaconState) AddValidator(validator *cltypes.Validator, balance uint64) {
+func (b *BeaconState) AddValidator(validator solid.Validator, balance uint64) {
 	b.validators.Append(validator)
 	b.balances.Append(balance)
 
@@ -206,7 +208,7 @@ func (b *BeaconState) SetEpochParticipationForValidatorIndex(isCurrentEpoch bool
 	b.previousEpochParticipation.Set(index, byte(flags))
 }
 
-func (b *BeaconState) SetValidatorAtIndex(index int, validator *cltypes.Validator) {
+func (b *BeaconState) SetValidatorAtIndex(index int, validator solid.Validator) {
 	b.validators.Set(index, validator)
 	b.markLeaf(ValidatorsLeafIndex)
 }

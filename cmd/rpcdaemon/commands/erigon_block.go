@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -100,7 +101,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	firstHeaderTime := firstHeader.Time
 
 	if currentHeaderTime <= uintTimestamp {
-		blockResponse, err := buildBlockResponse(tx, highestNumber, fullTx)
+		blockResponse, err := buildBlockResponse(api._blockReader, tx, highestNumber, fullTx)
 		if err != nil {
 			return nil, err
 		}
@@ -109,7 +110,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	if firstHeaderTime >= uintTimestamp {
-		blockResponse, err := buildBlockResponse(tx, 0, fullTx)
+		blockResponse, err := buildBlockResponse(api._blockReader, tx, 0, fullTx)
 		if err != nil {
 			return nil, err
 		}
@@ -153,7 +154,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		resultingHeader = beforeHeader
 	}
 
-	response, err := buildBlockResponse(tx, uint64(blockNum), fullTx)
+	response, err := buildBlockResponse(api._blockReader, tx, uint64(blockNum), fullTx)
 	if err != nil {
 		return nil, err
 	}
@@ -161,18 +162,25 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	return response, nil
 }
 
-func buildBlockResponse(db kv.Tx, blockNum uint64, fullTx bool) (map[string]interface{}, error) {
-	block, err := rawdb.ReadBlockByNumber(db, blockNum)
+func buildBlockResponse(br services.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (map[string]interface{}, error) {
+	header, err := br.HeaderByNumber(context.Background(), db, blockNum)
 	if err != nil {
 		return nil, err
 	}
+	if header == nil {
+		return nil, nil
+	}
 
+	block, _, err := br.BlockWithSenders(context.Background(), db, header.Hash(), blockNum)
+	if err != nil {
+		return nil, err
+	}
 	if block == nil {
 		return nil, nil
 	}
 
 	additionalFields := make(map[string]interface{})
-	td, err := rawdb.ReadTd(db, block.Hash(), block.NumberU64())
+	td, err := rawdb.ReadTd(db, header.Hash(), header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}

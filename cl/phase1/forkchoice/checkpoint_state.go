@@ -47,7 +47,7 @@ type checkpointState struct {
 	activeBalance, epoch  uint64 // current active balance and epoch
 }
 
-func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet []*cltypes.Validator, randaoMixes solid.HashVectorSSZ,
+func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
 	genesisValidatorsRoot libcommon.Hash, fork *cltypes.Fork, activeBalance, epoch uint64) *checkpointState {
 	validators := make([]*checkpointValidator, len(validatorSet))
 	for i := range validatorSet {

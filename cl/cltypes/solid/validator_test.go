@@ -38,14 +38,14 @@ func TestValidator(t *testing.T) {
 	assert.Equal(t, withdrawableEpoch, validator.WithdrawableEpoch())
 
 	// Testing the SSZ encoding/decoding
-	encoded := validator.EncodeSSZ(nil)
-	newValidator := &Validator{}
+	encoded, _ := validator.EncodeSSZ(nil)
+	newValidator := NewValidator()
 	err := newValidator.DecodeSSZ(encoded, 0)
 	assert.NoError(t, err)
 	assert.Equal(t, validator, newValidator)
 
 	// Testing CopyTo
-	copiedValidator := &Validator{}
+	copiedValidator := NewValidator()
 	validator.CopyTo(copiedValidator)
 	assert.Equal(t, validator, copiedValidator)
 }

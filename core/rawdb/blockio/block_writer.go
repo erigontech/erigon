@@ -3,12 +3,15 @@ package blockio
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -18,10 +21,14 @@ import (
 
 // BlockReader can read blocks from db and snapshots
 type BlockWriter struct {
+	historyV3 bool
+
 	txsV3 bool
 }
 
-func NewBlockWriter(txsV3 bool) *BlockWriter { return &BlockWriter{txsV3: txsV3} }
+func NewBlockWriter(historyV3, txsV3 bool) *BlockWriter {
+	return &BlockWriter{historyV3: historyV3, txsV3: txsV3}
+}
 
 func (w *BlockWriter) TxsV3Enabled() bool { return w.txsV3 }
 func (w *BlockWriter) WriteBlock(tx kv.RwTx, block *types.Block) error {
@@ -66,6 +73,34 @@ func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir
 		},
 		logger,
 	)
+}
+
+func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+	// Property of blockchain: same block in different forks will have different hashes.
+	// Means - can mark all canonical blocks as non-canonical on unwind, and
+	// do opposite here - without storing any meta-info.
+	if err := rawdb.MakeBodiesCanonical(tx, from, ctx, logPrefix, logEvery, w.txsV3, func(blockNum, lastTxnNum uint64) error {
+		if w.historyV3 {
+			if err := rawdbv3.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("make block canonical: %w", err)
+	}
+	return nil
+}
+func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+	if err := rawdb.MakeBodiesNonCanonical(tx, from, deleteBodies, ctx, logPrefix, logEvery); err != nil {
+		return err
+	}
+	if w.historyV3 {
+		if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {

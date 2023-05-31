@@ -80,13 +80,20 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, deleteHeaders bool) err
 	return nil
 }
 
-// IsCanonicalHash determines whether a header with the given hash is on the canonical chain.
-func IsCanonicalHash(db kv.Getter, hash libcommon.Hash) (bool, error) {
+// IsCanonicalHashDeprecated determines whether a header with the given hash is on the canonical chain.
+func IsCanonicalHashDeprecated(db kv.Getter, hash libcommon.Hash) (bool, *uint64, error) {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {
-		return false, nil
+		return false, nil, nil
 	}
 	canonicalHash, err := ReadCanonicalHash(db, *number)
+	if err != nil {
+		return false, nil, err
+	}
+	return canonicalHash != (libcommon.Hash{}) && canonicalHash == hash, number, nil
+}
+func IsCanonicalHash(db kv.Getter, hash libcommon.Hash, number uint64) (bool, error) {
+	canonicalHash, err := ReadCanonicalHash(db, number)
 	if err != nil {
 		return false, err
 	}
@@ -1045,35 +1052,14 @@ func ReadReceipts(db kv.Tx, block *types.Block, senders []libcommon.Address) typ
 	}
 	if len(senders) > 0 {
 		block.SendersToTxs(senders)
+	} else {
+		senders = block.Body().SendersFromTxs()
 	}
 	if err := receipts.DeriveFields(block.Hash(), block.NumberU64(), block.Transactions(), senders); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", block.Hash(), "number", block.NumberU64(), "err", err, "stack", dbg.Stack())
 		return nil
 	}
 	return receipts
-}
-
-func ReadReceiptsByHash(db kv.Tx, hash libcommon.Hash) (types.Receipts, error) {
-	number := ReadHeaderNumber(db, hash)
-	if number == nil {
-		return nil, nil
-	}
-	canonicalHash, err := ReadCanonicalHash(db, *number)
-	if err != nil {
-		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-	}
-	b, s, err := ReadBlockWithSenders(db, hash, *number)
-	if err != nil {
-		return nil, err
-	}
-	if b == nil {
-		return nil, nil
-	}
-	receipts := ReadReceipts(db, b, s)
-	if receipts == nil {
-		return nil, nil
-	}
-	return receipts, nil
 }
 
 // WriteReceipts stores all the transaction receipts belonging to a block.
