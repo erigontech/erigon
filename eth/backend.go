@@ -1097,15 +1097,15 @@ func (s *Ethereum) Start() error {
 		if err != nil {
 			return err
 		}
-		var borAPI bor.API
+		var borAPI borfinality.BorAPI
 		apiList := s.APIs()
 		for _, api := range apiList {
 			if api.Namespace == "bor" {
-				borAPI = api.Service.(bor.API)
+				borAPI = api.Service.(borfinality.BorAPI)
 				break
 			}
 		}
-		borfinality.Whitelist(s.engine, s.stagedSync, s.ChainDB(), s.logger, &borAPI, s.closeCh)
+		borfinality.Whitelist(s.engine, s.stagedSync, s.ChainDB(), s.logger, borAPI, s.closeCh)
 	}
 
 	return nil

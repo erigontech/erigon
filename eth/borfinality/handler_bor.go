@@ -10,8 +10,12 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+type BorAPI interface {
+	GetRootHash(start uint64, end uint64) (string, error)
+}
+
 type BorHandler struct {
-	BorAPI *bor.API
+	BorAPI BorAPI
 	eth.ChainValidator
 }
 
