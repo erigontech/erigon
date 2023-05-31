@@ -1237,24 +1237,24 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		}
 		defer sn.Close()
 
-		_, expectedCount, err := DumpTxs(ctx, chainDB, blockFrom, blockTo, workers, lvl, logger, func(v []byte) error {
+		expectedCount, err := DumpTxs(ctx, chainDB, blockFrom, blockTo, workers, lvl, logger, func(v []byte) error {
 			return sn.AddWord(v)
 		})
 		if err != nil {
 			return fmt.Errorf("DumpTxs: %w", err)
 		}
-		if expectedCount != uint64(sn.Count()) {
+		if expectedCount != sn.Count() {
 			return fmt.Errorf("incorrect tx count: %d, expected from db: %d", sn.Count(), expectedCount)
 		}
 		snapDir, fileName := filepath.Split(f.Path)
 		ext := filepath.Ext(fileName)
 		logger.Log(lvl, "[snapshots] Compression", "ratio", sn.Ratio.String(), "file", fileName[:len(fileName)-len(ext)])
 
-		_, expectedCount, err = expectedTxsAmount(snapDir, blockFrom, blockTo)
+		_, expectedCount, err = txsAmountBasedOnBodiesSnapshots(snapDir, blockFrom, blockTo)
 		if err != nil {
 			return err
 		}
-		if expectedCount != uint64(sn.Count()) {
+		if expectedCount != sn.Count() {
 			return fmt.Errorf("incorrect tx count: %d, expected from snapshots: %d", sn.Count(), expectedCount)
 		}
 		if err := sn.Compress(); err != nil {
@@ -1330,7 +1330,7 @@ func hasIdxFile(sn *snaptype.FileInfo, logger log.Logger) bool {
 
 // DumpTxs - [from, to)
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
-func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) (firstTxID, expectedCount uint64, err error) {
+func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) (expectedCount int, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	warmupCtx, cancel := context.WithCancel(ctx)
@@ -1384,11 +1384,8 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers
 		return nil
 	}
 
-	firstIDSaved := false
-
 	doWarmup, warmupTxs, warmupSenders := blockTo-blockFrom >= 100_000 && workers > 4, &atomic.Bool{}, &atomic.Bool{}
 	from := hexutility.EncodeTs(blockFrom)
-	var lastBody types.BodyForStorage
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo { // [from, to)
@@ -1404,10 +1401,11 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers
 		if e := rlp.DecodeBytes(dataRLP, &body); e != nil {
 			return false, e
 		}
-		lastBody = body
 		if body.TxAmount == 0 {
 			return true, nil
 		}
+		expectedCount += int(body.TxAmount)
+
 		if doWarmup && !warmupSenders.Load() && blockNum%1_000 == 0 {
 			clean := kv.ReadAhead(warmupCtx, db, warmupSenders, kv.Senders, hexutility.EncodeTs(blockNum), 10_000)
 			defer clean()
@@ -1421,10 +1419,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers
 			return false, err
 		}
 
-		if !firstIDSaved {
-			firstIDSaved = true
-			firstTxID = body.BaseTxId
-		}
 		j := 0
 
 		if err := addSystemTx(tx, body.BaseTxId); err != nil {
@@ -1478,11 +1472,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers
 		}
 		return true, nil
 	}); err != nil {
-		return 0, 0, fmt.Errorf("BigChunks: %w", err)
+		return 0, fmt.Errorf("BigChunks: %w", err)
 	}
-
-	expectedCount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstTxID
-	return firstTxID, expectedCount, nil
+	return expectedCount, nil
 }
 
 // DumpHeaders - [from, to)
@@ -1600,7 +1592,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, firs
 
 var EmptyTxHash = common2.Hash{}
 
-func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, expectedCount uint64, err error) {
+func txsAmountBasedOnBodiesSnapshots(snapDir string, blockFrom, blockTo uint64) (firstTxID uint64, expectedCount int, err error) {
 	bodySegmentPath := filepath.Join(snapDir, snaptype.SegmentFileName(blockFrom, blockTo, snaptype.Bodies))
 	bodiesSegment, err := compress.NewDecompressor(bodySegmentPath)
 	if err != nil {
@@ -1633,7 +1625,7 @@ func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, ex
 		}
 	}
 
-	expectedCount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
+	expectedCount = int(lastBody.BaseTxId+uint64(lastBody.TxAmount)) - int(firstBody.BaseTxId)
 	return
 }
 
@@ -1644,7 +1636,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 		}
 	}()
 	firstBlockNum := blockFrom
-	firstTxID, expectedCount, err := expectedTxsAmount(snapDir, blockFrom, blockTo)
+	firstTxID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(snapDir, blockFrom, blockTo)
 	if err != nil {
 		return err
 	}
@@ -1662,7 +1654,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 		return err
 	}
 	defer d.Close()
-	if uint64(d.Count()) != expectedCount {
+	if d.Count() != expectedCount {
 		return fmt.Errorf("TransactionsIdx: at=%d-%d, pre index building, expect: %d, got %d", blockFrom, blockTo, expectedCount, d.Count())
 	}
 	p.Name.Store(&segFileName)
@@ -1758,7 +1750,7 @@ RETRY:
 		offset = nextPos
 	}
 
-	if i != expectedCount {
+	if int(i) != expectedCount {
 		return fmt.Errorf("TransactionsIdx: at=%d-%d, post index building, expect: %d, got %d", blockFrom, blockTo, expectedCount, i)
 	}
 

@@ -31,7 +31,7 @@ func TestDump(t *testing.T) {
 
 		var systemTxs int
 		var nonceList []uint64
-		_, _, err := snapshotsync.DumpTxs(m.Ctx, m.DB, 0, 10, 1, log.LvlInfo, log.New(), func(v []byte) error {
+		cnt, err := snapshotsync.DumpTxs(m.Ctx, m.DB, 0, 10, 1, log.LvlInfo, log.New(), func(v []byte) error {
 			if v == nil {
 				systemTxs++
 			} else {
@@ -45,6 +45,7 @@ func TestDump(t *testing.T) {
 		require.NoError(err)
 		require.Equal(2*(5+1), systemTxs)
 		require.Equal([]uint64{0, 1, 2, 3, 4}, nonceList)
+		require.Equal(2*(5+1)+5, cnt)
 	})
 	t.Run("headers", func(t *testing.T) {
 		require := require.New(t)
