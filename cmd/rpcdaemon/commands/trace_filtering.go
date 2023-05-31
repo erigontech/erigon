@@ -75,14 +75,6 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, nil
 	}
 
-	// Extract transactions from block
-	block, bErr := api.blockByNumberWithSenders(ctx, tx, blockNumber)
-	if bErr != nil {
-		return nil, bErr
-	}
-	if block == nil {
-		return nil, fmt.Errorf("could not find block  %d", blockNumber)
-	}
 	var txIndex int
 	for idx, txn := range block.Transactions() {
 		if txn.Hash() == txHash {
@@ -176,7 +168,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	bn := hexutil.Uint64(blockNum)
 
 	// Extract transactions from block
-	block, bErr := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	block, bErr := api.blockWithSenders(ctx, tx, hash, blockNum)
 	if bErr != nil {
 		return nil, bErr
 	}
