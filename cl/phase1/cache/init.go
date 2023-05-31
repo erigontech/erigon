@@ -11,3 +11,5 @@ func init() {
 		panic(err)
 	}
 }
+
+// sed -e '/^PREFIX/d' -e '/^SUFFIX/d'
