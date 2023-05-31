@@ -22,7 +22,7 @@ func TestBodiesUnwind(t *testing.T) {
 	tx, err := db.BeginRw(m.Ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	br, bw := m.NewBlocksIO()
+	_, bw := m.NewBlocksIO()
 
 	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, CommonTx: types.CommonTx{ChainID: u256.N1, Value: u256.N1, Gas: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
@@ -41,7 +41,7 @@ func TestBodiesUnwind(t *testing.T) {
 		require.NoError(err)
 	}
 	{
-		err = rawdb.MakeBodiesNonCanonical(tx, 5+1, false, m.Ctx, "test", logEvery) // block 5 already canonical, start from next one
+		err = bw.MakeBodiesNonCanonical(tx, 5+1, false, m.Ctx, "test", logEvery) // block 5 already canonical, start from next one
 		require.NoError(err)
 
 		n, err := tx.ReadSequence(kv.EthTx)
@@ -49,7 +49,7 @@ func TestBodiesUnwind(t *testing.T) {
 		require.Equal(2+5*(3+2), int(n)) // genesis 2 system txs + from 1, 5 block with 3 txn in each
 	}
 	{
-		err = rawdb.MakeBodiesCanonical(tx, 5+1, m.Ctx, "test", logEvery, br.TxsV3Enabled(), nil) // block 5 already canonical, start from next one
+		err = bw.MakeBodiesCanonical(tx, 5+1, m.Ctx, "test", logEvery) // block 5 already canonical, start from next one
 		require.NoError(err)
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
@@ -67,14 +67,14 @@ func TestBodiesUnwind(t *testing.T) {
 
 	{
 		// unwind to block 5, means mark blocks >= 6 as non-canonical
-		err = rawdb.MakeBodiesNonCanonical(tx, 5+1, false, m.Ctx, "test", logEvery)
+		err = bw.MakeBodiesNonCanonical(tx, 5+1, false, m.Ctx, "test", logEvery)
 		require.NoError(err)
 
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
 		require.Equal(2+5*(3+2), int(n)) // from 0, 5 block with 3 txn in each
 
-		err = rawdb.MakeBodiesCanonical(tx, 5+1, m.Ctx, "test", logEvery, br.TxsV3Enabled(), nil) // block 5 already canonical, start from next one
+		err = bw.MakeBodiesCanonical(tx, 5+1, m.Ctx, "test", logEvery) // block 5 already canonical, start from next one
 		require.NoError(err)
 		n, err = tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
