@@ -774,8 +774,9 @@ func HeadersPOW(
 	defer cfg.hd.SetFetchingNew(false)
 	headerProgress = cfg.hd.Progress()
 	logPrefix := s.LogPrefix()
+
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
-	hash, err := rawdb.ReadCanonicalHash(tx, headerProgress)
+	hash, err := cfg.blockReader.CanonicalHash(ctx, tx, headerProgress)
 	if err != nil {
 		return err
 	}

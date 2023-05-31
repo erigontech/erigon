@@ -275,19 +275,12 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash libcom
 	if blockNumber == nil {
 		return nil, nil
 	}
-	blockHash, err := rawdb.ReadCanonicalHash(tx, *blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if blockHash == (libcommon.Hash{}) {
-		return nil, nil
-	}
-	block, senders, err := b.BlockReader().BlockWithSenders(b.m.Ctx, tx, blockHash, *blockNumber)
+	block, err := b.BlockReader().BlockByNumber(b.m.Ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts := rawdb.ReadReceipts(tx, block, senders)
+	receipts := rawdb.ReadReceipts(tx, block, nil)
 	for _, receipt := range receipts {
 		if receipt.TxHash == txHash {
 			return receipt, nil
@@ -304,7 +297,7 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash libcomm
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -314,18 +307,18 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash libcomm
 	if txn != nil {
 		return txn, true, nil
 	}
-	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	blockNumber, ok, err := b.BlockReader().TxnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, false, err
 	}
-	if blockNumber == nil {
+	if !ok {
 		return nil, false, ethereum.NotFound
 	}
-	blockHash, err := rawdb.ReadCanonicalHash(tx, *blockNumber)
+	blockHash, err := b.BlockReader().CanonicalHash(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, false, err
 	}
-	body, err := b.BlockReader().BodyWithTransactions(ctx, tx, blockHash, *blockNumber)
+	body, err := b.BlockReader().BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, false, err
 	}
@@ -348,7 +341,7 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash libcommon.Hash)
 	if hash == b.pendingBlock.Hash() {
 		return b.pendingBlock, nil
 	}
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -392,11 +385,7 @@ func (b *SimulatedBackend) blockByNumberNoLock(ctx context.Context, number *big.
 	}
 	defer tx.Rollback()
 
-	hash, err := rawdb.ReadCanonicalHash(tx, number.Uint64())
-	if err != nil {
-		return nil, err
-	}
-	block, _, err := b.BlockReader().BlockWithSenders(ctx, tx, hash, number.Uint64())
+	block, err := b.BlockReader().BlockByNumber(ctx, tx, number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -450,11 +439,7 @@ func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, number *big.Int) 
 	if number == nil || number.Cmp(b.prependBlock.Number()) == 0 {
 		return b.prependBlock.Header(), nil
 	}
-	hash, err := rawdb.ReadCanonicalHash(tx, number.Uint64())
-	if err != nil {
-		return nil, err
-	}
-	header, err := b.BlockReader().Header(ctx, tx, hash, number.Uint64())
+	header, err := b.BlockReader().HeaderByNumber(ctx, tx, number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -867,102 +852,3 @@ func (m callMsg) IsFree() bool                  { return false }
 func (m callMsg) DataGas() uint64                { return params.DataGasPerBlob * uint64(len(m.CallMsg.DataHashes)) }
 func (m callMsg) MaxFeePerDataGas() *uint256.Int { return m.CallMsg.MaxFeePerDataGas }
 func (m callMsg) DataHashes() []libcommon.Hash   { return m.CallMsg.DataHashes }
-
-/*
-// filterBackend implements filters.Backend to support filtering for logs without
-// taking bloom-bits acceleration structures into account.
-type filterBackend struct {
-	db kv.RwDB
-	b  *SimulatedBackend
-}
-
-func (fb *filterBackend) HeaderByNumber(ctx context.Context, block rpc.BlockNumber) (*types.Header, error) {
-	if block == rpc.LatestBlockNumber {
-		return fb.b.HeaderByNumber(ctx, nil)
-	}
-	return fb.b.HeaderByNumber(ctx, big.NewInt(block.Int64()))
-}
-
-func (fb *filterBackend) HeaderByHash(ctx context.Context, hash libcommon.Hash) (*types.Header, error) {
-	return fb.b.HeaderByHash(ctx, hash)
-}
-
-func (fb *filterBackend) GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error) {
-	tx, err := fb.db.BeginRo(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	if number == nil {
-		return nil, err
-	}
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, *number)
-	if err != nil {
-		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-	}
-	b, senders, err := rawdb.ReadBlockWithSenders(tx, hash, *number)
-	if err != nil {
-		return nil, err
-	}
-	return rawdb.ReadReceipts(tx, b, senders), nil
-}
-
-func (fb *filterBackend) GetLogs(ctx context.Context, hash libcommon.Hash) ([][]*types.Log, error) {
-	tx, err := fb.db.BeginRo(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	if number == nil {
-		return nil, err
-	}
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, *number)
-	if err != nil {
-		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-	}
-	b, senders, err := rawdb.ReadBlockWithSenders(tx, hash, *number)
-	if err != nil {
-		return nil, err
-	}
-	receipts := rawdb.ReadReceipts(tx, b, senders)
-	if receipts == nil {
-		return nil, nil
-	}
-	logs := make([][]*types.Log, len(receipts))
-	for i, receipt := range receipts {
-		logs[i] = receipt.Logs
-	}
-	return logs, nil
-}
-
-func (fb *filterBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
-	return nullSubscription()
-}
-
-func (fb *filterBackend) SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription {
-	return fb.b.chainFeed.Subscribe(ch)
-}
-
-func (fb *filterBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {
-	return fb.b.rmLogsFeed.Subscribe(ch)
-}
-
-func (fb *filterBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription {
-	return fb.b.logsFeed.Subscribe(ch)
-}
-
-func (fb *filterBackend) SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription {
-	return nullSubscription()
-}
-
-func (fb *filterBackend) BloomStatus() (uint64, uint64) { return 4096, 0 }
-
-func nullSubscription() event.Subscription {
-	return event.NewSubscription(func(quit <-chan struct{}) error {
-		<-quit
-		return nil
-	})
-}
-*/

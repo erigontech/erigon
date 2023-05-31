@@ -84,7 +84,7 @@ func (fv *ForkValidator) ExtendingForkHeadHash() libcommon.Hash {
 }
 
 func (fv *ForkValidator) notifyTxPool(to uint64, accumulator *shards.Accumulator, c shards.StateChangeConsumer) error {
-	hash, err := rawdb.ReadCanonicalHash(fv.extendingFork, to)
+	hash, err := fv.blockReader.CanonicalHash(context.Background(), fv.extendingFork, to)
 	if err != nil {
 		return fmt.Errorf("read canonical hash of unwind point: %w", err)
 	}

@@ -36,7 +36,7 @@ func (r *RemoteBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, f
 	panic("not implemented")
 }
 func (r *RemoteBlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
-	hash, err := rawdb.ReadCanonicalHash(db, number)
+	hash, err := r.CanonicalHash(ctx, db, number)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
@@ -103,7 +103,7 @@ func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash
 }
 
 func (r *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+	canonicalHash, err := r.CanonicalHash(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,14 @@ func NewBlockReader(snapshots services.BlockSnapshots, transactionsV3 bool) *Blo
 func (r *BlockReader) Snapshots() services.BlockSnapshots { return r.sn }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
-	h = rawdb.ReadHeaderByNumber(tx, blockHeight)
+	blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+	if err != nil {
+		return nil, err
+	}
+	if blockHash == (libcommon.Hash{}) {
+		return nil, nil
+	}
+	h = rawdb.ReadHeader(tx, blockHash, blockHeight)
 	if h != nil {
 		return h, nil
 	}
