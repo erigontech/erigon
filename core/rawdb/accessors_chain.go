@@ -81,12 +81,19 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, deleteHeaders bool) err
 }
 
 // IsCanonicalHash determines whether a header with the given hash is on the canonical chain.
-func IsCanonicalHash(db kv.Getter, hash libcommon.Hash) (bool, error) {
+func IsCanonicalHash(db kv.Getter, hash libcommon.Hash) (bool, *uint64, error) {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {
-		return false, nil
+		return false, nil, nil
 	}
 	canonicalHash, err := ReadCanonicalHash(db, *number)
+	if err != nil {
+		return false, nil, err
+	}
+	return canonicalHash != (libcommon.Hash{}) && canonicalHash == hash, number, nil
+}
+func IsCanonicalHash2(db kv.Getter, hash libcommon.Hash, number uint64) (bool, error) {
+	canonicalHash, err := ReadCanonicalHash(db, number)
 	if err != nil {
 		return false, err
 	}
