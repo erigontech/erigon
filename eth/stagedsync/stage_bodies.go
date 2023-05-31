@@ -339,7 +339,7 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 	defer logEvery.Stop()
 
 	badBlock := u.BadBlock != (libcommon.Hash{})
-	if err := cfg.blockWriter.MakeBodiesNonCanonical(tx, u.UnwindPoint+1, badBlock /* deleteBodies */, ctx, u.LogPrefix(), logEvery, cfg.blockWriter.TxsV3Enabled()); err != nil {
+	if err := cfg.blockWriter.MakeBodiesNonCanonical(tx, u.UnwindPoint+1, badBlock /* deleteBodies */, ctx, u.LogPrefix(), logEvery); err != nil {
 		return err
 	}
 
