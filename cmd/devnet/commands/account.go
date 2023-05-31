@@ -12,10 +12,10 @@ const (
 	addr = "0x71562b71999873DB5b286dF957af199Ec94617F7"
 )
 
-func callGetBalance(addr string, blockNum models.BlockNumber, checkBal uint64, logger log.Logger) {
+func callGetBalance(reqGen *requests.RequestGenerator, addr string, blockNum models.BlockNumber, checkBal uint64, logger log.Logger) {
 	logger.Info("Getting balance", "addeess", addr)
 	address := libcommon.HexToAddress(addr)
-	bal, err := requests.GetBalance(models.ReqId, address, blockNum, logger)
+	bal, err := requests.GetBalance(reqGen, address, blockNum, logger)
 	if err != nil {
 		logger.Error("FAILURE", "error", err)
 		return
