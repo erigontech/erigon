@@ -65,7 +65,7 @@ func main() {
 func action(ctx *cli.Context) error {
 	dataDir := ctx.String("datadir")
 	logsDir := filepath.Join(dataDir, "logs")
-	if err := os.MkdirAll(logsDir, os.ModeDir); err != nil {
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
 		return err
 	}
 	logger := logging.SetupLoggerCtx("devnet", ctx, false /* rootLogger */)
