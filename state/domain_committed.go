@@ -125,21 +125,29 @@ func (t *UpdateTree) GetWithDomain(key []byte, domain *SharedDomains) (*Commitme
 			c.update.Balance.Set(balance)
 			c.update.Flags |= commitment.BalanceUpdate
 		}
-		if len(chash) > 0 && !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
-			fmt.Printf("replaced code %x -> %x without CodeFLag\n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
-			copy(c.update.CodeHashOrStorage[:], chash)
-			c.update.ValLength = length.Hash
-			//if !bytes.Equal(chash, commitment.Empty {
-			//c.update.Flags |= commitment.CodeUpdate
-			//}
+		if !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
+			if len(chash) == 0 {
+				copy(c.update.CodeHashOrStorage[:], commitment.EmptyCodeHash)
+				c.update.ValLength = length.Hash
+				c.update.CodeValue = nil
+			} else {
+				fmt.Printf("replaced code %x -> %x without CodeFlag\n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
+				copy(c.update.CodeHashOrStorage[:], chash)
+				c.update.ValLength = length.Hash
+				//if !bytes.Equal(chash, commitment.Empty {
+				//c.update.Flags |= commitment.CodeUpdate
+				//}
+				code, err := domain.LatestCode(key)
+				if err != nil {
+					return nil, false
+				}
+				if len(code) > 0 {
+					c.update.ValLength = length.Hash
+					c.update.CodeValue = common.Copy(code)
+				}
+			}
 		}
-		code, err := domain.LatestCode(key)
-		if err != nil {
-			return nil, false
-		}
-		c.update.ValLength = length.Hash
-		c.update.CodeValue = common.Copy(code)
-
+		return c, true
 	case length.Addr + length.Hash:
 		enc, err := domain.LatestStorage(key[:length.Addr], key[length.Addr:])
 		if err != nil {
@@ -147,6 +155,7 @@ func (t *UpdateTree) GetWithDomain(key []byte, domain *SharedDomains) (*Commitme
 		}
 		c.update.ValLength = len(enc)
 		copy(c.update.CodeHashOrStorage[:], enc)
+		return c, true
 	default:
 		panic("unk")
 	}
@@ -178,7 +187,9 @@ func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
 		c.update.Flags = commitment.DeleteUpdate
 		return
 	}
-	//
+	if c.update.Flags&commitment.DeleteUpdate != 0 {
+		c.update.Flags ^= commitment.DeleteUpdate
+	}
 	//(&c.update).DecodeForStorage(val)
 	//nonce, balance, chash := DecodeAccountBytes(val)
 	nonce, balance, chash := DecodeAccountBytes2(val)
@@ -190,11 +201,19 @@ func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
 		c.update.Balance.Set(balance)
 		c.update.Flags |= commitment.BalanceUpdate
 	}
-	if len(chash) > 0 && !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
-		fmt.Printf("replaced code %x -> %x\n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
-		copy(c.update.CodeHashOrStorage[:], chash)
-		c.update.ValLength = length.Hash
-		c.update.Flags |= commitment.CodeUpdate
+	if !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
+		if len(chash) == 0 {
+			c.update.Flags |= commitment.CodeUpdate
+			c.update.ValLength = length.Hash
+			c.update.CodeValue = nil
+			copy(c.update.CodeHashOrStorage[:], commitment.EmptyCodeHash)
+		} else {
+			fmt.Printf("replaced code %x -> %x\n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
+			copy(c.update.CodeHashOrStorage[:], chash)
+			c.update.ValLength = length.Hash
+			c.update.Flags |= commitment.CodeUpdate
+			// todo ehre we dont know code value
+		}
 	}
 }
 
@@ -220,6 +239,13 @@ func (t *UpdateTree) TouchStorage(c *CommitmentItem, val []byte) {
 }
 
 func (t *UpdateTree) TouchCode(c *CommitmentItem, val []byte) {
+	if len(val) == 0 {
+		copy(c.update.CodeHashOrStorage[:], commitment.EmptyCodeHash)
+		c.update.ValLength = length.Hash
+		c.update.CodeValue = nil
+		c.update.Flags |= commitment.CodeUpdate
+		return
+	}
 	t.keccak.Reset()
 	t.keccak.Write(val)
 	copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))

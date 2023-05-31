@@ -1488,9 +1488,9 @@ func (s *state) Decode(buf []byte) error {
 	return nil
 }
 
-func (c *Cell) bytes() []byte {
+func (c *Cell) Encode() []byte {
 	var pos = 1
-	size := 1 + c.hl + 1 + c.apl + c.spl + 1 + c.downHashedLen + 1 + c.extLen + 1 // max size
+	size := pos + 5 + c.hl + c.apl + c.spl + c.downHashedLen + c.extLen // max size
 	buf := make([]byte, size)
 
 	var flags uint8
@@ -1503,7 +1503,7 @@ func (c *Cell) bytes() []byte {
 	}
 	if c.apl != 0 {
 		flags |= 2
-		buf[pos] = byte(c.hl)
+		buf[pos] = byte(c.apl)
 		pos++
 		copy(buf[pos:pos+c.apl], c.apk[:])
 		pos += c.apl
@@ -1519,21 +1519,21 @@ func (c *Cell) bytes() []byte {
 		flags |= 8
 		buf[pos] = byte(c.downHashedLen)
 		pos++
-		copy(buf[pos:pos+c.downHashedLen], c.downHashedKey[:])
+		copy(buf[pos:pos+c.downHashedLen], c.downHashedKey[:c.downHashedLen])
 		pos += c.downHashedLen
 	}
 	if c.extLen != 0 {
 		flags |= 16
 		buf[pos] = byte(c.extLen)
 		pos++
-		copy(buf[pos:pos+c.downHashedLen], c.downHashedKey[:])
-		//pos += c.downHashedLen
+		copy(buf[pos:pos+c.extLen], c.extension[:])
+		pos += c.extLen
 	}
 	buf[0] = flags
 	return buf
 }
 
-func (c *Cell) decodeBytes(buf []byte) error {
+func (c *Cell) Decode(buf []byte) error {
 	if len(buf) < 1 {
 		return fmt.Errorf("invalid buffer size to contain Cell (at least 1 byte expected)")
 	}
@@ -1571,7 +1571,7 @@ func (c *Cell) decodeBytes(buf []byte) error {
 		c.extLen = int(buf[pos])
 		pos++
 		copy(c.extension[:], buf[pos:pos+c.extLen])
-		//pos += c.extLen
+		pos += c.extLen
 	}
 	return nil
 }
@@ -1586,7 +1586,7 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 		Root:          make([]byte, 0),
 	}
 
-	s.Root = hph.root.bytes()
+	s.Root = hph.root.Encode()
 	copy(s.CurrentKey[:], hph.currentKey[:])
 	copy(s.Depths[:], hph.depths[:])
 	copy(s.BranchBefore[:], hph.branchBefore[:])
@@ -1609,7 +1609,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 
 	hph.Reset()
 
-	if err := hph.root.decodeBytes(s.Root); err != nil {
+	if err := hph.root.Decode(s.Root); err != nil {
 		return err
 	}
 

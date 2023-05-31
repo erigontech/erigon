@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"math/rand"
 	"testing"
+	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -267,6 +269,57 @@ func Test_Sepolia(t *testing.T) {
 
 		require.EqualValues(t, testData.expectedRoot, fmt.Sprintf("%x", rootHash))
 	}
+}
+
+func Test_Cell_EncodeDecode(t *testing.T) {
+	rnd := rand.New(rand.NewSource(time.Now().UnixMilli()))
+	first := &Cell{
+		Nonce:         rnd.Uint64(),
+		hl:            length.Hash,
+		StorageLen:    rnd.Intn(33),
+		apl:           length.Addr,
+		spl:           length.Addr + length.Hash,
+		downHashedLen: rnd.Intn(129),
+		extLen:        rnd.Intn(65),
+		downHashedKey: [128]byte{},
+		extension:     [64]byte{},
+		spk:           [52]byte{},
+		h:             [32]byte{},
+		CodeHash:      [32]byte{},
+		Storage:       [32]byte{},
+		apk:           [20]byte{},
+	}
+	b := uint256.NewInt(rnd.Uint64())
+	first.Balance = *b
+
+	rnd.Read(first.downHashedKey[:first.downHashedLen])
+	rnd.Read(first.extension[:first.extLen])
+	rnd.Read(first.spk[:])
+	rnd.Read(first.apk[:])
+	rnd.Read(first.h[:])
+	rnd.Read(first.CodeHash[:])
+	rnd.Read(first.Storage[:first.StorageLen])
+	if rnd.Intn(100) > 50 {
+		first.Delete = true
+	}
+
+	second := &Cell{}
+	second.Decode(first.Encode())
+
+	require.EqualValues(t, first.downHashedLen, second.downHashedLen)
+	require.EqualValues(t, first.downHashedKey[:], second.downHashedKey[:])
+	require.EqualValues(t, first.apl, second.apl)
+	require.EqualValues(t, first.spl, second.spl)
+	require.EqualValues(t, first.hl, second.hl)
+	require.EqualValues(t, first.apk[:], second.apk[:])
+	require.EqualValues(t, first.spk[:], second.spk[:])
+	require.EqualValues(t, first.h[:], second.h[:])
+	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
+	// encode doesnt code Nonce, Balance, CodeHash and Storage
+	//require.EqualValues(t, first.CodeHash[:], second.CodeHash[:])
+	//require.EqualValues(t, first.Storage[:first.StorageLen], second.Storage[:second.StorageLen])
+	require.EqualValues(t, first.Delete, second.Delete)
+
 }
 
 func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
