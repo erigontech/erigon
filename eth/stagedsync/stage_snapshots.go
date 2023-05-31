@@ -255,9 +255,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 			type LastTxNumProvider interface {
 				FirstTxNumNotInSnapshots() uint64
 			}
-			lastTxnID := blockReader.(LastTxNumProvider).FirstTxNumNotInSnapshots()
+			firstTxNum := blockReader.(LastTxNumProvider).FirstTxNumNotInSnapshots()
 			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
+			if err := rawdb.ResetSequence(tx, kv.EthTx, firstTxNum); err != nil {
 				return err
 			}
 			if err != nil {
