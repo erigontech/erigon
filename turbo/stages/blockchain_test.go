@@ -107,10 +107,7 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 	require.NoError(t, err)
 
 	canonicalMock.DB.View(ctx, func(tx kv.Tx) error {
-		if hash2, err = rawdb.ReadCanonicalHash(tx, uint64(i)); err != nil {
-			t.Fatalf("Failed to read canonical hash 2: %v", err)
-		}
-		if block2, _, _ := blockReader.BlockWithSenders(ctx, tx, hash2, uint64(i)); block2 == nil {
+		if block2, _ := blockReader.BlockByNumber(ctx, tx, uint64(i)); block2 == nil {
 			t.Fatalf("Did not find canonical block 2")
 		}
 		return nil
@@ -564,14 +561,14 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 	err := m.InsertChain(chain)
 	require.NoError(t, err)
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginRo(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
 	br, _ := m.NewBlocksIO()
 	for _, block := range chain.Blocks {
 		// try to retrieve a block by its canonical hash and see if the block data can be retrieved.
-		ch, err := rawdb.ReadCanonicalHash(tx, block.NumberU64())
+		ch, err := br.CanonicalHash(m.Ctx, tx, block.NumberU64())
 		require.NoError(t, err)
 		if err != nil {
 			panic(err)

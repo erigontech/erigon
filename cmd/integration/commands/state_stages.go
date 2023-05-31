@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debugprint"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -351,11 +350,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			break
 		}
 
-		hash, err := rawdb.ReadCanonicalHash(tx, execAtBlock+1)
-		if err != nil {
-			return fmt.Errorf("failed ReadCanonicalHash: %w", err)
-		}
-		nextBlock, _, err := br.BlockWithSenders(context.Background(), tx, hash, execAtBlock+1)
+		nextBlock, err := br.BlockByNumber(context.Background(), tx, execAtBlock+1)
 		if err != nil {
 			panic(err)
 		}

@@ -52,7 +52,7 @@ func (back *RemoteBackend) RawTransactions(ctx context.Context, tx kv.Getter, fr
 	panic("not implemented")
 }
 func (back *RemoteBackend) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
-	hash, err := rawdb.ReadCanonicalHash(db, number)
+	hash, err := back.CanonicalHash(ctx, db, number)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}

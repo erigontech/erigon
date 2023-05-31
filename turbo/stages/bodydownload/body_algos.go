@@ -47,7 +47,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	maps.Clear(bd.peerMap)
 	bd.ClearBodyCache()
 	headHeight = bodyProgress
-	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
+	headHash, err = bd.br.CanonicalHash(context.Background(), db, headHeight)
 	if err != nil {
 		return 0, 0, libcommon.Hash{}, nil, err
 	}
@@ -65,7 +65,10 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("headTd higher than 2^256-1")
 	}
 	headTime = 0
-	headHeader := rawdb.ReadHeader(db, headHash, headHeight)
+	headHeader, err := bd.br.Header(context.Background(), db, headHash, headHeight)
+	if err != nil {
+		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
+	}
 	if headHeader != nil {
 		headTime = headHeader.Time
 	}
@@ -120,7 +123,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 				request = false
 			}
 		} else {
-			hash, err = rawdb.ReadCanonicalHash(tx, blockNum)
+			hash, err = blockReader.CanonicalHash(context.Background(), tx, blockNum)
 			if err != nil {
 				return nil, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
@@ -402,16 +405,13 @@ func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBloc
 	if bd.deliveriesH[blockNum] != nil {
 		header = bd.deliveriesH[blockNum]
 	} else {
-		hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-		if err != nil {
-			return nil, libcommon.Hash{}, err
-		}
-		header, err = blockReader.Header(context.Background(), tx, hash, blockNum)
+		var err error
+		header, err = blockReader.HeaderByNumber(context.Background(), tx, blockNum)
 		if err != nil {
 			return nil, libcommon.Hash{}, err
 		}
 		if header == nil {
-			return nil, libcommon.Hash{}, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", blockNum, hash, dbg.Stack())
+			return nil, libcommon.Hash{}, fmt.Errorf("header not found: blockNum=%d, trace=%s", blockNum, dbg.Stack())
 		}
 	}
 	return header, header.Hash(), nil

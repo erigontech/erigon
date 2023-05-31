@@ -144,15 +144,12 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		return state.IteratorDump{}, err
 	}
 
-	hash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNumber)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
-	if hash != (common.Hash{}) {
-		header := rawdb.ReadHeader(tx, hash, blockNumber)
-		if header != nil {
-			res.Root = header.Root.String()
-		}
+	if header != nil {
+		res.Root = header.Root.String()
 	}
 
 	return res, nil
@@ -299,7 +296,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 		if number == nil {
 			return nil, nil
 		}
-		canonicalHash, _ := rawdb.ReadCanonicalHash(tx, *number)
+		canonicalHash, _ := api._blockReader.CanonicalHash(ctx, tx, *number)
 		isCanonical := canonicalHash == blockHash
 		if !isCanonical {
 			return nil, fmt.Errorf("block hash is not canonical")
