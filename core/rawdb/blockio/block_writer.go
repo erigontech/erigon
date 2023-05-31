@@ -79,7 +79,7 @@ func extractHeaders(k []byte, _ []byte, next etl.ExtractNextFunc) error {
 	if len(k) != 40 {
 		return nil
 	}
-	return next(k, common.Copy(k[8:]), common.Copy(k[:8]))
+	return next(k, k[8:], k[:8])
 }
 
 func (w *BlockWriter) WriteRawBodyIfNotExists(tx kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnNum uint64, err error) {
