@@ -1066,7 +1066,7 @@ func CanDeleteTo(curBlockNum uint64, snapshots services.BlockSnapshots) (blockTo
 func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl) error {
 	chainConfig := fromdb.ChainConfig(br.db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	return retireBlocks(ctx, blockFrom, blockTo, *chainID, br.tmpDir, br.blockReader.Snapshots().(*RoSnapshots), br.db, br.workers, br.downloader, lvl, br.notifier, br.logger)
+	return retireBlocks(ctx, blockFrom, blockTo, *chainID, br.tmpDir, br.blockReader, br.db, br.workers, br.downloader, lvl, br.notifier, br.logger)
 }
 
 func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
@@ -1113,11 +1113,15 @@ type DBEventNotifier interface {
 	OnNewSnapshot()
 }
 
-func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, downloader proto_downloader.DownloaderClient,
+func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string,
+	blockReader services.FullBlockReader, db kv.RoDB, workers int, downloader proto_downloader.DownloaderClient,
 	lvl log.Lvl, notifier DBEventNotifier, logger log.Logger) error {
 	logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
+	snapshots := blockReader.Snapshots().(*RoSnapshots)
+	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
+
 	// in future we will do it in background
-	if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2SegmentSize, tmpDir, snapshots.Dir(), db, workers, lvl, logger); err != nil {
+	if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2SegmentSize, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
 	if err := snapshots.ReopenFolder(); err != nil {
@@ -1157,20 +1161,20 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	return nil
 }
 
-func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger) error {
+func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	if blocksPerFile == 0 {
 		return nil
 	}
 	chainConfig := fromdb.ChainConfig(chainDB)
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
-		if err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, chainDB, *chainConfig, workers, lvl, logger); err != nil {
+		if err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, *chainConfig, workers, lvl, logger, blockReader); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger) error {
+func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	chainId, _ := uint256.FromBig(chainConfig.ChainID)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -1208,7 +1212,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 			return err
 		}
 		defer sn.Close()
-		if err := DumpBodies(ctx, chainDB, blockFrom, blockTo, workers, lvl, logger, func(v []byte) error {
+		if err := DumpBodies(ctx, chainDB, blockFrom, blockTo, firstTxNum, workers, lvl, logger, func(v []byte) error {
 			return sn.AddWord(v)
 		}); err != nil {
 			return fmt.Errorf("DumpBodies: %w", err)
@@ -1535,7 +1539,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wor
 }
 
 // DumpBodies - [from, to)
-func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
+func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, firstTxNum uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -1557,6 +1561,16 @@ func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, work
 		if dataRLP == nil {
 			logger.Warn("header missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
 			return true, nil
+		}
+		body := &types.BodyForStorage{}
+		if err = rlp.DecodeBytes(dataRLP, body); err != nil {
+			return false, err
+		}
+		body.BaseTxId = firstTxNum
+		firstTxNum += uint64(body.TxAmount)
+		dataRLP, err = rlp.EncodeToBytes(body)
+		if err != nil {
+			return false, err
 		}
 
 		if err := collect(dataRLP); err != nil {

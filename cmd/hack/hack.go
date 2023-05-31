@@ -583,11 +583,6 @@ func extractBodies(datadir string) error {
 	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
 	defer db.Close()
 	br, _ := blocksIO(db)
-	lastTxnID, _, err := br.(*snapshotsync.BlockReader).LastTxNumInSnapshot(snaps.BlocksAvailable())
-	if err != nil {
-		return err
-	}
-	fmt.Printf("txTxnID = %d\n", lastTxnID)
 
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
