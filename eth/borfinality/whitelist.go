@@ -93,7 +93,7 @@ func RetryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 	retryHeimdallHandler(fn, config, tickerDuration, timeout, fnName, getBorHandler)
 }
 
-func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string, getBorHandler func(chain *config) (*BorHandler, *bor.Bor, error)) {
+func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string, getBorHandler func(chain *config) (*bor.Bor, error)) {
 	// a shortcut helps with tests and early exit
 	select {
 	case <-config.closeCh:
@@ -101,7 +101,7 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 	default:
 	}
 
-	bor, borHandler, err := getBorHandler(config)
+	bor, err := getBorHandler(config)
 	if err != nil {
 		log.Error("error while getting the borHandler", "err", err)
 		return
@@ -109,7 +109,7 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 
 	// first run for fetching milestones
 	firstCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	err = fn(firstCtx, bor, borHandler, config)
+	err = fn(firstCtx, bor, config)
 
 	cancel()
 
@@ -124,7 +124,7 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 		select {
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
-			err := fn(ctx, bor, borHandler, config)
+			err := fn(ctx, bor, config)
 
 			cancel()
 
@@ -138,11 +138,12 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 }
 
 // handleWhitelistCheckpoint handles the checkpoint whitelist mechanism.
-func handleWhitelistCheckpoint(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, config *config) error {
+func handleWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, config *config) error {
 	// Create a new bor verifier, which will be used to verify checkpoints and milestones
 	verifier := newBorVerifier()
+	service := whitelist.GetWhitelistingService()
 
-	blockNum, blockHash, err := borHandler.fetchWhitelistCheckpoint(ctx, bor, verifier, config)
+	blockNum, blockHash, err := fetchWhitelistCheckpoint(ctx, bor, verifier, config)
 	// If the array is empty, we're bound to receive an error. Non-nill error and non-empty array
 	// means that array has partial elements and it failed for some block. We'll add those partial
 	// elements anyway.
@@ -150,18 +151,18 @@ func handleWhitelistCheckpoint(ctx context.Context, borHandler *BorHandler, bor 
 		return err
 	}
 
-	borHandler.ProcessCheckpoint(blockNum, blockHash)
+	service.ProcessCheckpoint(blockNum, blockHash)
 
 	return nil
 }
 
-type heimdallHandler func(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, config *config) error
+type heimdallHandler func(ctx context.Context, bor *bor.Bor, config *config) error
 
 // handleMilestone handles the milestone mechanism.
-func handleMilestone(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, config *config) error {
+func handleMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
 	// Create a new bor verifier, which will be used to verify checkpoints and milestones
 	verifier := newBorVerifier()
-	num, hash, err := borHandler.fetchWhitelistMilestone(ctx, bor, verifier, config)
+	num, hash, err := fetchWhitelistMilestone(ctx, bor, verifier, config)
 
 	service := whitelist.GetWhitelistingService()
 
@@ -181,8 +182,8 @@ func handleMilestone(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, 
 	return nil
 }
 
-func handleNoAckMilestone(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, config *config) error {
-	milestoneID, err := borHandler.fetchNoAckMilestone(ctx, bor)
+func handleNoAckMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
+	milestoneID, err := fetchNoAckMilestone(ctx, bor)
 	service := whitelist.GetWhitelistingService()
 
 	//If failed to fetch the no-ack milestone then it give the error.
@@ -195,13 +196,13 @@ func handleNoAckMilestone(ctx context.Context, borHandler *BorHandler, bor *bor.
 	return nil
 }
 
-func handleNoAckMilestoneByID(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, config *config) error {
+func handleNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, config *config) error {
 	service := whitelist.GetWhitelistingService()
 	milestoneIDs := service.GetMilestoneIDsList()
 
 	for _, milestoneID := range milestoneIDs {
 		// todo: check if we can ignore the error
-		err := borHandler.fetchNoAckMilestoneByID(ctx, bor, milestoneID)
+		err := fetchNoAckMilestoneByID(ctx, bor, milestoneID)
 		if err == nil {
 			service.RemoveMilestoneID(milestoneID)
 		}
@@ -210,19 +211,16 @@ func handleNoAckMilestoneByID(ctx context.Context, borHandler *BorHandler, bor *
 	return nil
 }
 
-func getBorHandler(config *config) (*BorHandler, *bor.Bor, error) {
+func getBorHandler(config *config) (*bor.Bor, error) {
 
 	bor, ok := config.engine.(*bor.Bor)
 	if !ok {
-		return nil, nil, ErrNotBorConsensus
+		return nil, ErrNotBorConsensus
 	}
 
 	if bor.HeimdallClient == nil {
-		return nil, nil, ErrBorConsensusWithoutHeimdall
+		return nil, ErrBorConsensusWithoutHeimdall
 	}
 
-	borhandler := &BorHandler{}
-	borhandler.BorAPI = config.borAPI
-
-	return borhandler, bor, nil
+	return bor, nil
 }

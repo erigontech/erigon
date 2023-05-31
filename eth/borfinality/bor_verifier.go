@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -37,14 +38,14 @@ var (
 )
 
 type borVerifier struct {
-	verify func(ctx context.Context, borHandler *BorHandler, config *config, start uint64, end uint64, hash string, isCheckpoint bool) (string, error)
+	verify func(ctx context.Context, config *config, start uint64, end uint64, hash string, isCheckpoint bool) (string, error)
 }
 
 func newBorVerifier() *borVerifier {
 	return &borVerifier{borVerify}
 }
 
-func borVerify(ctx context.Context, borHandler *BorHandler, config *config, start uint64, end uint64, hash string, isCheckpoint bool) (string, error) {
+func borVerify(ctx context.Context, config *config, start uint64, end uint64, hash string, isCheckpoint bool) (string, error) {
 	roTx, err := config.db.BeginRo(ctx)
 	if err != nil {
 		return hash, err
@@ -55,6 +56,8 @@ func borVerify(ctx context.Context, borHandler *BorHandler, config *config, star
 	if isCheckpoint {
 		str = "checkpoint"
 	}
+
+	service := whitelist.GetWhitelistingService()
 
 	// check if we have the given blocks
 	currentBlock := rawdb.ReadCurrentBlock(roTx)
@@ -77,7 +80,7 @@ func borVerify(ctx context.Context, borHandler *BorHandler, config *config, star
 		var err error
 
 		// in case of checkpoint get the rootHash
-		localHash, err = borHandler.BorAPI.GetRootHash(start, end)
+		localHash, err = config.borAPI.GetRootHash(start, end)
 
 		if err != nil {
 			log.Debug("Failed to get root hash of given block range while whitelisting checkpoint", "start", start, "end", end, "err", err)
@@ -108,9 +111,9 @@ func borVerify(ctx context.Context, borHandler *BorHandler, config *config, star
 			doExist  bool
 		)
 
-		if doExist, rewindTo, _ = borHandler.GetWhitelistedMilestone(); doExist {
+		if doExist, rewindTo, _ = service.GetWhitelistedMilestone(); doExist {
 
-		} else if doExist, rewindTo, _ = borHandler.GetWhitelistedCheckpoint(); doExist {
+		} else if doExist, rewindTo, _ = service.GetWhitelistedCheckpoint(); doExist {
 
 		} else {
 			if start <= 0 {
