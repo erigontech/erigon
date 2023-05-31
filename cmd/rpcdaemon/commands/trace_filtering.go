@@ -75,14 +75,6 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, nil
 	}
 
-	// Extract transactions from block
-	block, bErr := api.blockByNumberWithSenders(ctx, tx, blockNumber)
-	if bErr != nil {
-		return nil, bErr
-	}
-	if block == nil {
-		return nil, fmt.Errorf("could not find block  %d", blockNumber)
-	}
 	var txIndex int
 	for idx, txn := range block.Transactions() {
 		if txn.Hash() == txHash {
@@ -176,7 +168,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	bn := hexutil.Uint64(blockNum)
 
 	// Extract transactions from block
-	block, bErr := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	block, bErr := api.blockWithSenders(ctx, tx, hash, blockNum)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -395,20 +387,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	for it.HasNext() {
 		b := it.Next()
 		// Extract transactions from block
-		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
-		if hashErr != nil {
-			if first {
-				first = false
-			} else {
-				stream.WriteMore()
-			}
-			stream.WriteObjectStart()
-			rpc.HandleError(hashErr, stream)
-			stream.WriteObjectEnd()
-			continue
-		}
-
-		block, bErr := api.blockWithSenders(ctx, dbtx, hash, b)
+		block, bErr := api.blockByNumberWithSenders(ctx, dbtx, b)
 		if bErr != nil {
 			if first {
 				first = false
@@ -427,7 +406,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 				stream.WriteMore()
 			}
 			stream.WriteObjectStart()
-			rpc.HandleError(fmt.Errorf("could not find block %x %d", hash, b), stream)
+			rpc.HandleError(fmt.Errorf("could not find block %d", b), stream)
 			stream.WriteObjectEnd()
 			continue
 		}

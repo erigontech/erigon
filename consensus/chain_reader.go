@@ -42,12 +42,7 @@ func (cr ChainReaderImpl) GetHeader(hash libcommon.Hash, number uint64) *types.H
 
 // GetHeaderByNumber retrieves a block header from the database by number.
 func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
-	hash, err := rawdb.ReadCanonicalHash(cr.Db, number)
-	if err != nil {
-		log.Error("ReadCanonicalHash failed", "err", err)
-		return nil
-	}
-	h, _ := cr.BlockReader.Header(context.Background(), cr.Db, hash, number)
+	h, _ := cr.BlockReader.HeaderByNumber(context.Background(), cr.Db, number)
 	return h
 }
 

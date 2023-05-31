@@ -169,7 +169,7 @@ func (e *Eth1Execution) GetBody(ctx context.Context, req *execution.GetSegmentRe
 	var body *types.Body
 	if req.BlockHash != nil && req.BlockNumber != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		if ok, err := rawdb.IsCanonicalHash(tx, blockHash); err != nil {
+		if ok, _, err := rawdb.IsCanonicalHashDeprecated(tx, blockHash); err != nil {
 			return nil, err
 		} else if ok {
 			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, *req.BlockNumber)
@@ -179,14 +179,12 @@ func (e *Eth1Execution) GetBody(ctx context.Context, req *execution.GetSegmentRe
 		}
 	} else if req.BlockHash != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		if ok, err := rawdb.IsCanonicalHash(tx, blockHash); err != nil {
+		ok, blockNumber, err := rawdb.IsCanonicalHashDeprecated(tx, blockHash)
+		if err != nil {
 			return nil, err
-		} else if ok {
-			blockNumber := rawdb.ReadHeaderNumber(tx, blockHash)
-			if blockNumber == nil {
-				return nil, nil
-			}
-			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, *req.BlockNumber)
+		}
+		if ok {
+			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, *blockNumber)
 			if err != nil {
 				return nil, err
 			}

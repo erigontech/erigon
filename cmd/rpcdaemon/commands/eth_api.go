@@ -158,7 +158,7 @@ func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
-	hash, hashErr := rawdb.ReadCanonicalHash(tx, number)
+	hash, hashErr := api._blockReader.CanonicalHash(ctx, tx, number)
 	if hashErr != nil {
 		return nil, hashErr
 	}
@@ -251,12 +251,12 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 }
 
 func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
-	n, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	n, h, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, n)
+	block, err := api.blockWithSenders(ctx, tx, h, n)
 	return block, err
 }
 

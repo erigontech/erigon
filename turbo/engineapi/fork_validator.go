@@ -84,7 +84,7 @@ func (fv *ForkValidator) ExtendingForkHeadHash() libcommon.Hash {
 }
 
 func (fv *ForkValidator) notifyTxPool(to uint64, accumulator *shards.Accumulator, c shards.StateChangeConsumer) error {
-	hash, err := rawdb.ReadCanonicalHash(fv.extendingFork, to)
+	hash, err := fv.blockReader.CanonicalHash(context.Background(), fv.extendingFork, to)
 	if err != nil {
 		return fmt.Errorf("read canonical hash of unwind point: %w", err)
 	}
@@ -183,14 +183,14 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	// Let's assemble the side fork backwards
 	var foundCanonical bool
 	currentHash := header.ParentHash
-	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
+	unwindPoint := header.Number.Uint64() - 1
+	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
 	if criticalError != nil {
 		return
 	}
 
 	var bodiesChain []*types.RawBody
 	var headersChain []*types.Header
-	unwindPoint := header.Number.Uint64() - 1
 	for !foundCanonical {
 		var sb types.RawBlock
 		var ok bool
@@ -212,11 +212,11 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 			return
 		}
 		currentHash = sb.Header.ParentHash
-		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
+		unwindPoint = sb.Header.Number.Uint64() - 1
+		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
 		if criticalError != nil {
 			return
 		}
-		unwindPoint = sb.Header.Number.Uint64() - 1
 	}
 	// Do not set an unwind point if we are already there.
 	if unwindPoint == fv.currentHeight {

@@ -133,7 +133,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 	return headers, nil
 }
 
-func AnswerGetBlockBodiesQuery(blockReader services.FullBlockReader, db kv.Tx, query GetBlockBodiesPacket) []rlp.RawValue { //nolint:unparam
+func AnswerGetBlockBodiesQuery(blockReader services.FullBlockReader, db kv.Tx, query GetBlockBodiesPacket, blockReader services.FullBlockReader) []rlp.RawValue { //nolint:unparam
 	// Gather blocks until the fetch or network limits is reached
 	var bytes int
 	bodies := make([]rlp.RawValue, 0, len(query))
@@ -147,19 +147,12 @@ func AnswerGetBlockBodiesQuery(blockReader services.FullBlockReader, db kv.Tx, q
 		if number == nil {
 			continue
 		}
-		body, err := blockReader.BodyWithTransactions(context.Background(), db, hash, *number)
-		if err != nil {
-			break
-		}
-		bodyRlp, err := rlp.EncodeToBytes(body)
-		if err != nil {
-			log.Error("ReadBodyRLP failed", "err", err)
-		}
-		if len(bodyRlp) == 0 {
+		bodyRLP, _ := blockReader.BodyRlp(context.Background(), db, hash, *number)
+		if len(bodyRLP) == 0 {
 			continue
 		}
-		bodies = append(bodies, bodyRlp)
-		bytes += len(bodyRlp)
+		bodies = append(bodies, bodyRLP)
+		bytes += len(bodyRLP)
 	}
 	return bodies
 }

@@ -197,7 +197,7 @@ func (bt *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 			}
 		} else if b.BlockHeader == nil {
 			if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-				canonical, cErr := rawdb.ReadCanonicalHash(tx, cb.NumberU64())
+				canonical, cErr := bt.br.CanonicalHash(context.Background(), tx, cb.NumberU64())
 				if cErr != nil {
 					return cErr
 				}

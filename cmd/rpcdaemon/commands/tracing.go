@@ -88,7 +88,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	var excessDataGas *big.Int
-	parentBlock, err := api.blockByHashWithSenders(ctx, tx, block.ParentHash())
+	parentBlock, err := api.blockWithSenders(ctx, tx, block.ParentHash(), block.NumberU64()-1)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -419,7 +419,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
 		}
-		hash, err := rawdb.ReadCanonicalHash(tx, i)
+		hash, err := api._blockReader.CanonicalHash(ctx, tx, i)
 		if err != nil {
 			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true)
 		}

@@ -243,7 +243,7 @@ func writeForkChoiceHashes(
 	logger log.Logger,
 ) (bool, error) {
 	if forkChoice.SafeBlockHash != (libcommon.Hash{}) {
-		safeIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
+		safeIsCanonical, _, err := rawdb.IsCanonicalHashDeprecated(tx, forkChoice.SafeBlockHash)
 		if err != nil {
 			return false, err
 		}
@@ -254,7 +254,7 @@ func writeForkChoiceHashes(
 	}
 
 	if forkChoice.FinalizedBlockHash != (libcommon.Hash{}) {
-		finalizedIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
+		finalizedIsCanonical, _, err := rawdb.IsCanonicalHashDeprecated(tx, forkChoice.FinalizedBlockHash)
 		if err != nil {
 			return false, err
 		}
@@ -293,14 +293,13 @@ func startHandlingForkChoice(
 	headerHash := forkChoice.HeadBlockHash
 	logger.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
-	canonical, err := rawdb.IsCanonicalHash(tx, headerHash)
+	canonical, headerNumber, err := rawdb.IsCanonicalHashDeprecated(tx, headerHash)
 	if err != nil {
-		logger.Warn(fmt.Sprintf("[%s] Fork choice err (IsCanonicalHash)", s.LogPrefix()), "err", err)
+		logger.Warn(fmt.Sprintf("[%s] Fork choice err (IsCanonicalHashDeprecated)", s.LogPrefix()), "err", err)
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		return nil, err
 	}
 	if canonical {
-		headerNumber := rawdb.ReadHeaderNumber(tx, headerHash)
 		ihProgress, err := s.IntermediateHashesAt(tx)
 		if err != nil {
 			logger.Warn(fmt.Sprintf("[%s] Fork choice err (IntermediateHashesAt)", s.LogPrefix()), "err", err)
@@ -331,8 +330,17 @@ func startHandlingForkChoice(
 		}
 	}
 
+	if headerNumber == nil {
+		logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", s.LogPrefix(), headerHash))
+		if test {
+			cfg.hd.BeaconRequestList.Remove(requestId)
+		} else {
+			schedulePoSDownload(requestId, headerHash, 0 /* header height is unknown, setting to 0 */, headerHash, s, cfg, logger)
+		}
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+	}
 	// Header itself may already be in the snapshots, if CL starts off at much earlier state than Erigon
-	header, err := cfg.blockReader.HeaderByHash(ctx, tx, headerHash)
+	header, err := cfg.blockReader.Header(ctx, tx, headerHash, *headerNumber)
 	if err != nil {
 		logger.Warn(fmt.Sprintf("[%s] Fork choice err (reading header by hash %x)", s.LogPrefix(), headerHash), "err", err)
 		cfg.hd.BeaconRequestList.Remove(requestId)
@@ -350,8 +358,6 @@ func startHandlingForkChoice(
 	}
 
 	cfg.hd.BeaconRequestList.Remove(requestId)
-
-	headerNumber := header.Number.Uint64()
 
 	if headerHash == cfg.forkValidator.ExtendingForkHeadHash() {
 		logger.Info(fmt.Sprintf("[%s] Fork choice update: flushing in-memory state (built by previous newPayload)", s.LogPrefix()))
@@ -382,7 +388,7 @@ func startHandlingForkChoice(
 		logger.Info(fmt.Sprintf("[%s] Fork choice: re-org", s.LogPrefix()), "goal", headerNumber, "from", preProgress, "unwind to", forkingPoint)
 
 		if requestStatus == engineapi.New {
-			if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
+			if *headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
 				// TODO(yperbasis): what if some bodies are missing and we have to download them?
 				cfg.hd.SetPendingPayloadHash(headerHash)
 			} else {
@@ -392,13 +398,13 @@ func startHandlingForkChoice(
 
 		u.UnwindTo(forkingPoint, libcommon.Hash{})
 
-		cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
+		cfg.hd.SetUnsettledForkChoice(forkChoice, *headerNumber)
 	} else {
 		// Extend canonical chain by the new header
 		logger.Info(fmt.Sprintf("[%s] Fork choice: chain extension", s.LogPrefix()), "from", preProgress, "to", headerNumber)
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
-		if err = fixCanonicalChain(s.LogPrefix(), logEvery, headerNumber, headerHash, tx, cfg.blockReader, logger); err != nil {
+		if err = fixCanonicalChain(s.LogPrefix(), logEvery, *headerNumber, headerHash, tx, cfg.blockReader, logger); err != nil {
 			return nil, err
 		}
 		if err = rawdb.WriteHeadHeaderHash(tx, headerHash); err != nil {
@@ -410,7 +416,7 @@ func startHandlingForkChoice(
 			return nil, err
 		}
 
-		if err := s.Update(tx, headerNumber); err != nil {
+		if err := s.Update(tx, *headerNumber); err != nil {
 			return nil, err
 		}
 
@@ -768,8 +774,9 @@ func HeadersPOW(
 	defer cfg.hd.SetFetchingNew(false)
 	headerProgress = cfg.hd.Progress()
 	logPrefix := s.LogPrefix()
+
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
-	hash, err := rawdb.ReadCanonicalHash(tx, headerProgress)
+	hash, err := cfg.blockReader.CanonicalHash(ctx, tx, headerProgress)
 	if err != nil {
 		return err
 	}

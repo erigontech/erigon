@@ -364,20 +364,25 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	}
 	defer tx.Rollback()
 
-	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, cannonicalBlockHash)
-	if err != nil {
-		return nil, err
-	}
-
-	if !isCanonicalHash {
-		return nil, fmt.Errorf("the hash %s is not cannonical", cannonicalBlockHash)
+	{
+		blockNum := rawdb.ReadHeaderNumber(tx, cannonicalBlockHash)
+		if blockNum == nil {
+			return nil, fmt.Errorf("the hash %s is not cannonical", cannonicalBlockHash)
+		}
+		isCanonicalHash, err := rawdb.IsCanonicalHash(tx, cannonicalBlockHash, *blockNum)
+		if err != nil {
+			return nil, err
+		}
+		if !isCanonicalHash {
+			return nil, fmt.Errorf("the hash %s is not cannonical", cannonicalBlockHash)
+		}
 	}
 
 	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithHash(cannonicalBlockHash, true), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	block, err := api.blockWithSenders(ctx, tx, cannonicalBlockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}

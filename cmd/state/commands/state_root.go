@@ -24,7 +24,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -137,12 +136,8 @@ func StateRoot(genesis *types.Genesis, logger log.Logger, blockNum uint64, datad
 		if block >= blockNum {
 			break
 		}
-		blockHash, err := rawdb.ReadCanonicalHash(historyTx, block)
-		if err != nil {
-			return err
-		}
 		var b *types.Block
-		b, _, err = blockReader.BlockWithSenders(ctx, historyTx, blockHash, block)
+		b, err = blockReader.BlockByNumber(ctx, historyTx, block)
 		if err != nil {
 			return err
 		}

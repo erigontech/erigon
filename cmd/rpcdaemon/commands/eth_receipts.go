@@ -90,15 +90,16 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	defer tx.Rollback()
 
 	if crit.BlockHash != nil {
-		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
-		if err != nil {
-			return nil, err
-		}
-		if header == nil {
+		num := rawdb.ReadHeaderNumber(tx, *crit.BlockHash)
+		//header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
+		//if err != nil {
+		//	return nil, err
+		//}
+		if num == nil {
 			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
-		begin = header.Number.Uint64()
-		end = header.Number.Uint64()
+		begin = *num
+		end = *num
 	} else {
 		// Convert the RPC block numbers into internal representations
 		latest, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, nil)
@@ -196,7 +197,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			continue
 		}
 
-		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
+		blockHash, err := api._blockReader.CanonicalHash(ctx, tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -684,11 +685,11 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	}
 	defer tx.Rollback()
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}

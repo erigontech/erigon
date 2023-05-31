@@ -125,7 +125,7 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 	}
 	currentParentHash := fcuHeader.ParentHash
 	currentParentNumber := fcuHeader.Number.Uint64() - 1
-	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash)
+	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 		}
 		currentParentHash = currentHeader.ParentHash
 		currentParentNumber = currentHeader.Number.Uint64() - 1
-		isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash)
+		isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -295,7 +295,11 @@ func (e *Eth1Execution) IsCanonicalHash(ctx context.Context, req *types2.H256) (
 	defer tx.Rollback()
 
 	blockHash := gointerfaces.ConvertH256ToHash(req)
-	isCanonical, err := rawdb.IsCanonicalHash(tx, blockHash)
+	blockNum := rawdb.ReadHeaderNumber(tx, blockHash)
+	if blockNum == nil {
+		return &execution.IsCanonicalResponse{Canonical: false}, nil
+	}
+	isCanonical, err := rawdb.IsCanonicalHash(tx, blockHash, *blockNum)
 	if err != nil {
 		return nil, err
 	}

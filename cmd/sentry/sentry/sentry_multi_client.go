@@ -637,7 +637,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 	}
 	defer tx.Rollback()
 
-	response := eth.AnswerGetBlockBodiesQuery(cs.blockReader, tx, query.GetBlockBodiesPacket)
+	response := eth.AnswerGetBlockBodiesQuery(cs.blockReader, tx, query.GetBlockBodiesPacket, cs.blockReader)
 	tx.Rollback()
 	b, err := rlp.EncodeToBytes(&eth.BlockBodiesRLPPacket66{
 		RequestId:            query.RequestId,
