@@ -183,13 +183,14 @@ func handleMilestone(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, 
 
 func handleNoAckMilestone(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, config *config) error {
 	milestoneID, err := borHandler.fetchNoAckMilestone(ctx, bor)
+	service := whitelist.GetWhitelistingService()
 
 	//If failed to fetch the no-ack milestone then it give the error.
 	if err != nil {
 		return err
 	}
 
-	borHandler.RemoveMilestoneID(milestoneID)
+	service.RemoveMilestoneID(milestoneID)
 
 	return nil
 }
