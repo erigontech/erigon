@@ -21,7 +21,7 @@ import (
 
 // ClearDevDB cleans up the dev folder used for the operations
 func ClearDevDB(dataDir string, logger log.Logger) error {
-	logger.Info("Deleting ./dev folders")
+	logger.Info("Deleting nodes' data folders")
 
 	nodeNumber := 1
 	for {
@@ -34,7 +34,7 @@ func ClearDevDB(dataDir string, logger log.Logger) error {
 			return err
 		}
 		if fileInfo.IsDir() {
-			if err := os.RemoveAll(dataDir); err != nil {
+			if err := os.RemoveAll(nodeDataDir); err != nil {
 				return err
 			}
 			logger.Info("SUCCESS => Deleted", "datadir", nodeDataDir)
