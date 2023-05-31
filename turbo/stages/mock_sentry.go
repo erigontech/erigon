@@ -733,5 +733,5 @@ func (ms *MockSentry) HistoryV3Components() *libstate.AggregatorV3 {
 }
 
 func (ms *MockSentry) NewBlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
-	return snapshotsync.NewBlockReader(ms.BlockSnapshots, ms.TransactionsV3), blockio.NewBlockWriter(ms.TransactionsV3)
+	return snapshotsync.NewBlockReader(ms.BlockSnapshots, ms.TransactionsV3), blockio.NewBlockWriter(ms.HistoryV3, ms.TransactionsV3)
 }
