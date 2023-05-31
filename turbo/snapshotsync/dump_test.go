@@ -64,8 +64,8 @@ func TestDump(t *testing.T) {
 		require := require.New(t)
 		i := 0
 		var baseIdList []uint64
-		lastTxIdInSnapshots := uint64(0)
-		err := snapshotsync.DumpBodies(m.Ctx, m.DB, 0, 10, lastTxIdInSnapshots, 1, log.LvlInfo, log.New(), func(v []byte) error {
+		firstTxNum := uint64(0)
+		err := snapshotsync.DumpBodies(m.Ctx, m.DB, 0, 10, firstTxNum, 1, log.LvlInfo, log.New(), func(v []byte) error {
 			i++
 			body := &types.BodyForStorage{}
 			require.NoError(rlp.DecodeBytes(v, body))
@@ -80,8 +80,8 @@ func TestDump(t *testing.T) {
 		require := require.New(t)
 		i := 0
 		var baseIdList []uint64
-		lastTxIdInSnapshots := uint64(1000)
-		err := snapshotsync.DumpBodies(m.Ctx, m.DB, 2, 10, lastTxIdInSnapshots, 1, log.LvlInfo, log.New(), func(v []byte) error {
+		firstTxNum := uint64(1000)
+		err := snapshotsync.DumpBodies(m.Ctx, m.DB, 2, 5, firstTxNum, 1, log.LvlInfo, log.New(), func(v []byte) error {
 			i++
 			body := &types.BodyForStorage{}
 			require.NoError(rlp.DecodeBytes(v, body))
@@ -89,8 +89,8 @@ func TestDump(t *testing.T) {
 			return nil
 		})
 		require.NoError(err)
-		require.Equal(4, i)
-		require.Equal([]uint64{1000, 1000 + 3, 1000 + 6, 1000 + 9}, baseIdList)
+		require.Equal(3, i)
+		require.Equal([]uint64{1000, 1000 + 3, 1000 + 6}, baseIdList)
 	})
 }
 
