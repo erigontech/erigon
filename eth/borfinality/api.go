@@ -5,7 +5,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -17,10 +16,11 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 	currentBlockNum := rawdb.ReadCurrentHeader(tx)
 	s := whitelist.GetWhitelistingService()
 	logger := log.New()
+	reqGen := requests.NewRequestGenerator(logger)
 
 	doExist, number, hash := s.GetWhitelistedMilestone()
 	if doExist && number <= currentBlockNum.Number.Uint64() {
-		block, err := requests.GetBlockByNumber(models.ReqId, number, false, logger)
+		block, err := requests.GetBlockByNumber(reqGen, number, false, logger)
 
 		if err != nil {
 			return 0, err
@@ -33,7 +33,7 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 
 	doExist, number, hash = s.GetWhitelistedCheckpoint()
 	if doExist && number <= currentBlockNum.Number.Uint64() {
-		block, err := requests.GetBlockByNumber(models.ReqId, number, false, logger)
+		block, err := requests.GetBlockByNumber(reqGen, number, false, logger)
 
 		if err != nil {
 			return 0, err

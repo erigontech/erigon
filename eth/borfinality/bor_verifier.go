@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
@@ -74,6 +73,8 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 	}
 
 	var localHash string
+	logger := log.New()
+	reqGen := requests.NewRequestGenerator(logger)
 
 	// verify the hash
 	if isCheckpoint {
@@ -88,7 +89,7 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 		}
 	} else {
 		// in case of milestone(isCheckpoint==false) get the hash of endBlock
-		block, err := requests.GetBlockByNumber(models.ReqId, end, false, config.logger)
+		block, err := requests.GetBlockByNumber(reqGen, end, false, config.logger)
 		if err != nil {
 			log.Debug("Failed to get end block hash while whitelisting milestone", "number", end, "err", err)
 			return hash, errEndBlock
@@ -133,7 +134,7 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 	}
 
 	// fetch the end block hash
-	block, err := requests.GetBlockByNumber(models.ReqId, end, false, config.logger)
+	block, err := requests.GetBlockByNumber(reqGen, end, false, config.logger)
 	if err != nil {
 		log.Debug("Failed to get end block hash while whitelisting", "err", err)
 		return hash, errEndBlock
@@ -164,8 +165,11 @@ func rewindBack(config *config, head uint64, rewindTo uint64) {
 func rewind(config *config, head uint64, rewindTo uint64) {
 	log.Warn("Rewinding chain because it doesn't match the received milestone", "to", rewindTo)
 
+	logger := log.New()
+	reqGen := requests.NewRequestGenerator(logger)
+
 	// fetch the end block hash
-	block, err := requests.GetBlockByNumber(models.ReqId, head, false, config.logger)
+	block, err := requests.GetBlockByNumber(reqGen, head, false, config.logger)
 	if err != nil {
 		log.Debug("Failed to get end block hash while rewinding/unwinding", "err", err)
 		return

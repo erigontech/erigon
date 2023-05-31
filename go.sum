@@ -102,8 +102,8 @@ github.com/anacrolix/utp v0.1.0/go.mod h1:MDwc+vsGEq7RMw6lr2GKOEqjWny5hO5OZXRVNa
 github.com/andreyvit/diff v0.0.0-20170406064948-c7f18ee00883 h1:bvNMNQO63//z+xNgfBlViaCIJKLlCJ6/fmUseuG0wVQ=
 github.com/andreyvit/diff v0.0.0-20170406064948-c7f18ee00883/go.mod h1:rCTlJbsFo29Kk6CurOXKm700vrz8f0KW0JNfpkRJY/8=
 github.com/anmitsu/go-shlex v0.0.0-20161002113705-648efa622239/go.mod h1:2FmKhYUyUczH0OGQWaF5ceTx0UBShxjsH6f8oGKYe2c=
-github.com/anshalshukla/erigon-lib v0.0.0-20230524075239-4bb9ec0a0fd2 h1:WNPCna7oztbAUpqicQgIVWYn2yetw6S/fdiMRUEmbc0=
-github.com/anshalshukla/erigon-lib v0.0.0-20230524075239-4bb9ec0a0fd2/go.mod h1:opG0iV7HLZBf/VCbUKs55McNWOqNs0iY48vN1TWxCE0=
+github.com/anshalshukla/erigon-lib v0.0.0-20230531183704-9119d14b086c h1:RGAJbspQHdTNsg0I7kpezhIgTWC34aAaPgCVEzo7l4I=
+github.com/anshalshukla/erigon-lib v0.0.0-20230531183704-9119d14b086c/go.mod h1:R1Wsn0BxmEUZOIcAeGJmaqiXSdegEQ/+GfdjFruu+jQ=
 github.com/apache/thrift v0.12.0/go.mod h1:cp2SuWMxlEZw2r+iP2GNCdIi4C1qmUzdZFSVb+bacwQ=
 github.com/arbovm/levenshtein v0.0.0-20160628152529-48b4e1c0c4d0 h1:jfIu9sQUG6Ig+0+Ap1h4unLjW6YQJpKZVmUzxsD4E/Q=
 github.com/arbovm/levenshtein v0.0.0-20160628152529-48b4e1c0c4d0/go.mod h1:t2tdKJDJF9BV14lnkjHmOQgcvEKgtqs5a1N3LNdJhGE=
