@@ -1118,8 +1118,10 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	lvl log.Lvl, notifier DBEventNotifier, logger log.Logger) error {
 	logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 	snapshots := blockReader.Snapshots().(*RoSnapshots)
+	lastTxNumInSnapshots := blockReader.(*BlockReader).LastTxNumInSnapshots()
+
 	// in future we will do it in background
-	if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2SegmentSize, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
+	if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2SegmentSize, tmpDir, snapshots.Dir(), lastTxNumInSnapshots, db, workers, lvl, logger, blockReader); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
 	if err := snapshots.ReopenFolder(); err != nil {
@@ -1159,20 +1161,20 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	return nil
 }
 
-func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, lastTxNumInSnapshots uint64, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	if blocksPerFile == 0 {
 		return nil
 	}
 	chainConfig := fromdb.ChainConfig(chainDB)
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
-		if err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, chainDB, *chainConfig, workers, lvl, logger, blockReader); err != nil {
+		if err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, lastTxNumInSnapshots, chainDB, *chainConfig, workers, lvl, logger, blockReader); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, lastTxNumInSnapshots uint64, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	chainId, _ := uint256.FromBig(chainConfig.ChainID)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -1210,7 +1212,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 			return err
 		}
 		defer sn.Close()
-		if err := DumpBodies(ctx, chainDB, blockFrom, blockTo, workers, lvl, logger, func(v []byte) error {
+		if err := DumpBodies(ctx, chainDB, blockFrom, blockTo, lastTxNumInSnapshots, workers, lvl, logger, func(v []byte) error {
 			return sn.AddWord(v)
 		}); err != nil {
 			return fmt.Errorf("DumpBodies: %w", err)
@@ -1545,7 +1547,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wor
 }
 
 // DumpBodies - [from, to)
-func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
+func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, lastTxNumInSnapshots uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -1567,6 +1569,16 @@ func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, work
 		if dataRLP == nil {
 			logger.Warn("header missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
 			return true, nil
+		}
+		body := &types.BodyForStorage{}
+		if err = rlp.DecodeBytes(dataRLP, body); err != nil {
+			return false, err
+		}
+		body.BaseTxId = lastTxNumInSnapshots
+		lastTxNumInSnapshots += uint64(body.TxAmount)
+		dataRLP, err = rlp.EncodeToBytes(body)
+		if err != nil {
+			return false, err
 		}
 
 		if err := collect(dataRLP); err != nil {

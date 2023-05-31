@@ -579,10 +579,7 @@ func extractBodies(datadir string) error {
 	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
 	defer db.Close()
 	br, _ := blocksIO(db)
-	lastTxnID, _, err := br.(*snapshotsync.BlockReader).LastTxNumInSnapshot(snaps.BlocksAvailable())
-	if err != nil {
-		return err
-	}
+	lastTxnID := br.(*snapshotsync.BlockReader).LastTxNumInSnapshots()
 	fmt.Printf("txTxnID = %d\n", lastTxnID)
 
 	tx, err := db.BeginRo(context.Background())
@@ -737,7 +734,7 @@ func fixTd(chaindata string) error {
 	defer c.Close()
 	var k, v []byte
 	for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
-		hv, herr := tx.GetOne(kv.HeaderTD, k)
+		hv, herr := tx.GetOne(kv.HeadersTotalDifficulty, k)
 		if herr != nil {
 			return herr
 		}
@@ -754,7 +751,7 @@ func fixTd(chaindata string) error {
 			binary.BigEndian.PutUint64(parentK[:], header.Number.Uint64()-1)
 			copy(parentK[8:], header.ParentHash[:])
 			var parentTdRec []byte
-			if parentTdRec, err = tx.GetOne(kv.HeaderTD, parentK[:]); err != nil {
+			if parentTdRec, err = tx.GetOne(kv.HeadersTotalDifficulty, parentK[:]); err != nil {
 				return fmt.Errorf("reading parentTd Rec for %d: %w", header.Number.Uint64(), err)
 			}
 			var parentTd big.Int
@@ -767,7 +764,7 @@ func fixTd(chaindata string) error {
 			if newHv, err = rlp.EncodeToBytes(&td); err != nil {
 				return fmt.Errorf("encoding td record for block %d: %w", header.Number.Uint64(), err)
 			}
-			if err = tx.Put(kv.HeaderTD, k, newHv); err != nil {
+			if err = tx.Put(kv.HeadersTotalDifficulty, k, newHv); err != nil {
 				return err
 			}
 		}
