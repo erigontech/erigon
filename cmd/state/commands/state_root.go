@@ -53,15 +53,16 @@ var stateRootCmd = &cobra.Command{
 }
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	var transactionsV3 bool
+	var histV3, transactionsV3 bool
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		transactionsV3, _ = kvcfg.TransactionsV3.Enabled(tx)
+		histV3, _ = kvcfg.HistoryV3.Enabled(tx)
 		return nil
 	}); err != nil {
 		panic(err)
 	}
 	br := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()), transactionsV3)
-	bw := blockio.NewBlockWriter(transactionsV3)
+	bw := blockio.NewBlockWriter(histV3, transactionsV3)
 	return br, bw
 }
 

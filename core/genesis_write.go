@@ -262,7 +262,11 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.In
 	if err != nil {
 		return nil, nil, err
 	}
-	blockWriter := blockio.NewBlockWriter(transactionV3)
+	histV3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	blockWriter := blockio.NewBlockWriter(histV3, transactionV3)
 
 	if err := blockWriter.WriteBlock(tx, block); err != nil {
 		return nil, nil, err
