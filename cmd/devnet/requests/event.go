@@ -6,13 +6,12 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func GetAndCompareLogs(reqGen *RequestGenerator, fromBlock uint64, toBlock uint64, expected rpctest.Log, logger log.Logger) error {
+func GetAndCompareLogs(reqGen *RequestGenerator, fromBlock uint64, toBlock uint64, expected models.Log, logger log.Logger) error {
 	logger.Info("GETTING AND COMPARING LOGS")
-	var b rpctest.EthGetLogs
+	var b models.EthGetLogs
 
 	if res := reqGen.Erigon(models.ETHGetLogs, reqGen.GetLogs(fromBlock, toBlock, expected.Address), &b); res.Err != nil {
 		return fmt.Errorf("failed to fetch logs: %v", res.Err)
