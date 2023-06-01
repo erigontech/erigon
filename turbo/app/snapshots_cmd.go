@@ -364,7 +364,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	db := mdbx.NewMDBX(logger).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
 	defer db.Close()
 
-	cfg := ethconfig.NewSnapCfg(true, true, true)
+	cfg := ethconfig.NewSnapCfg(true, false, true)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err := snapshots.ReopenFolder(); err != nil {
 		return err
