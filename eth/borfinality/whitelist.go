@@ -14,6 +14,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+var Config *config
+
 type config struct {
 	engine     consensus.Engine
 	stagedSync *stagedsync.Sync
@@ -24,7 +26,7 @@ type config struct {
 }
 
 func Whitelist(engine consensus.Engine, stagedsync *stagedsync.Sync, db kv.RwDB, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
-	config := &config{
+	Config = &config{
 		engine:     engine,
 		stagedSync: stagedsync,
 		db:         db,
@@ -33,10 +35,10 @@ func Whitelist(engine consensus.Engine, stagedsync *stagedsync.Sync, db kv.RwDB,
 		closeCh:    closeCh,
 	}
 
-	go startCheckpointWhitelistService(config)
-	go startMilestoneWhitelistService(config)
-	go startNoAckMilestoneService(config)
-	go startNoAckMilestoneByIDService(config)
+	go startCheckpointWhitelistService(Config)
+	go startMilestoneWhitelistService(Config)
+	go startNoAckMilestoneService(Config)
+	go startNoAckMilestoneByIDService(Config)
 }
 
 var (
@@ -90,7 +92,7 @@ func startNoAckMilestoneByIDService(config *config) {
 }
 
 func RetryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string) {
-	retryHeimdallHandler(fn, config, tickerDuration, timeout, fnName, getBorHandler)
+	retryHeimdallHandler(fn, config, tickerDuration, timeout, fnName, GetBorHandler)
 }
 
 func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string, getBorHandler func(chain *config) (*bor.Bor, error)) {
@@ -211,9 +213,9 @@ func handleNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, config *config)
 	return nil
 }
 
-func getBorHandler(config *config) (*bor.Bor, error) {
+func GetBorHandler() (*bor.Bor, error) {
 
-	bor, ok := config.engine.(*bor.Bor)
+	bor, ok := Config.engine.(*bor.Bor)
 	if !ok {
 		return nil, ErrNotBorConsensus
 	}

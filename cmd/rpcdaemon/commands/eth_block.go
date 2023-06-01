@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -20,6 +22,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
+	"github.com/ledgerwatch/erigon/eth/borfinality"
+	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -368,6 +372,52 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	numOfTx := hexutil.Uint(txAmount)
 
 	return &numOfTx, nil
+}
+
+// GetVoteOnHash implements eth_getVoteOnHash. Returns the boolean based on the whitelisting in bor consensus
+func (api *APIImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBlockNr uint64, hash string, milestoneId string) (bool, error) {
+	service := whitelist.GetWhitelistingService()
+
+	if service == nil {
+		return false, fmt.Errorf("Bor not available")
+	}
+
+	logger := log.New()
+	reqGen := requests.NewRequestGenerator(logger)
+	localEndBlock, err := requests.GetBlockByNumber(reqGen, endBlockNr, false, logger)
+	if err != nil {
+		return false, fmt.Errorf("failed to get end block")
+	}
+
+	localEndBlockHash := localEndBlock.Result.Hash.String()
+
+	isLocked := service.LockMutex(endBlockNr)
+
+	if !isLocked {
+		service.UnlockMutex(false, "", common.Hash{})
+		return false, errors.New("Whitelisted number or locked sprint number is more than the received end block number")
+	}
+
+	if localEndBlockHash != hash {
+		service.UnlockMutex(false, "", common.Hash{})
+		return false, fmt.Errorf("Hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
+	}
+
+	if service == nil {
+		return false, fmt.Errorf("Bor not available")
+	}
+
+	bor, err := borfinality.GetBorHandler()
+	err = bor.HeimdallClient.FetchMilestoneID(ctx, milestoneId)
+
+	if err != nil {
+		service.UnlockMutex(false, "", common.Hash{})
+		return false, fmt.Errorf("Milestone ID doesn't exist in Heimdall")
+	}
+
+	service.UnlockMutex(true, milestoneId, localEndBlock.Result.Hash)
+
+	return true, nil
 }
 
 func (api *APIImpl) blockByNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
