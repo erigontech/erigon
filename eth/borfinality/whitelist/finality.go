@@ -56,6 +56,7 @@ func (f *finality[T]) IsValidChain(currentHeader *types.Header, chain []*types.H
 
 	fmt.Println("Validating f.Number: ", f.Number)
 	fmt.Println("Validating f.Hash: ", f.Hash)
+	fmt.Println("Validation Response ", res)
 
 	return res, err
 }
