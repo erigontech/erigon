@@ -1,6 +1,8 @@
 package whitelist
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common/flags"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -58,6 +60,7 @@ func (m *milestone) IsValidChain(currentHeader *types.Header, chain []*types.Hea
 		return true, nil
 	}
 
+	fmt.Println("Locking - IsValidChain")
 	m.finality.RLock()
 	defer m.finality.RUnlock()
 
@@ -89,7 +92,7 @@ func (m *milestone) IsValidChain(currentHeader *types.Header, chain []*types.Hea
 	}
 
 	// isValid = true
-
+	fmt.Println("UnLocking - IsValidChain")
 	return true, nil
 }
 
@@ -113,6 +116,7 @@ func (m *milestone) IsValidPeer(fetchHeadersByNumber func(number uint64, amount 
 }
 
 func (m *milestone) Process(block uint64, hash common.Hash) {
+	fmt.Println("Locking - Process")
 	m.finality.Lock()
 	defer m.finality.Unlock()
 
@@ -129,12 +133,14 @@ func (m *milestone) Process(block uint64, hash common.Hash) {
 	// TODO: Uncomment once metrics is added
 	// whitelistedMilestoneMeter.Update(int64(block))
 
+	fmt.Println("UnLocking - Process")
 	m.UnlockSprint(block)
 }
 
 // This function will Lock the mutex at the time of voting
 // fixme: get rid of it
 func (m *milestone) LockMutex(endBlockNum uint64) bool {
+	fmt.Println("Locking - Mutex")
 	m.finality.Lock()
 
 	if m.doExist && endBlockNum <= m.Number { //if endNum is less than whitelisted milestone, then we won't lock the sprint
@@ -177,7 +183,7 @@ func (m *milestone) UnlockMutex(doLock bool, milestoneId string, endBlockHash co
 	// TODO: Uncomment once metrics is added
 	// milestoneIDLength := int64(len(m.LockedMilestoneIDs))
 	// MilestoneIdsLengthMeter.Update(milestoneIDLength)
-
+	fmt.Println("UnLocking - Mutex")
 	m.finality.Unlock()
 }
 
@@ -199,6 +205,7 @@ func (m *milestone) UnlockSprint(endBlockNum uint64) {
 
 // This function will remove the stored milestoneID
 func (m *milestone) RemoveMilestoneID(milestoneId string) {
+	fmt.Println("Locking - RemvoveMilestoneID")
 	m.finality.Lock()
 
 	delete(m.LockedMilestoneIDs, milestoneId)
@@ -212,6 +219,7 @@ func (m *milestone) RemoveMilestoneID(milestoneId string) {
 		log.Error("Error in writing lock data of milestone to db", "err", err)
 	}
 
+	fmt.Println("UnLocking - RemovingMilestoneID")
 	m.finality.Unlock()
 }
 
@@ -232,6 +240,7 @@ func (m *milestone) IsReorgAllowed(chain []*types.Header, lockedMilestoneNumber 
 
 // This will return the list of milestoneIDs stored.
 func (m *milestone) GetMilestoneIDsList() []string {
+	fmt.Println("Locking - GetMilestoneIDsList")
 	m.finality.RLock()
 	defer m.finality.RUnlock()
 
@@ -240,7 +249,7 @@ func (m *milestone) GetMilestoneIDsList() []string {
 	for key := range m.LockedMilestoneIDs {
 		keys = append(keys, key)
 	}
-
+	fmt.Println("UnLocking - GetMilestoneIDsList")
 	return keys
 }
 
