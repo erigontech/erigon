@@ -57,6 +57,8 @@ type ForkGraph struct {
 	// configurations
 	beaconCfg   *clparams.BeaconChainConfig
 	genesisTime uint64
+	// highest block seen
+	highestSeen uint64
 }
 
 func (f *ForkGraph) AnchorSlot() uint64 {
@@ -145,15 +147,13 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 		log.Debug("AddChainSegment: Resetting state reference as it was orphaned")
 		f.nextReferenceState.CopyInto(f.currentReferenceState)
 	}
-	// We may just use the current beacon state
-	prevCurrentStateSlot := f.currentState.Slot()
 
 	// Execute the state
 	if err := transition.TransitionState(newState, signedBlock, fullValidation); err != nil {
 		// Add block to list of invalid blocks
 		log.Debug("Invalid beacon block", "reason", err)
 		f.badBlocks[blockRoot] = struct{}{}
-		f.currentState = nil
+		f.currentReferenceState.CopyInto(f.currentState)
 		return nil, InvalidBlock, err
 	}
 
@@ -174,7 +174,8 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 	// Lastly add checkpoints to caches as well.
 	f.currentJustifiedCheckpoints[blockRoot] = newState.CurrentJustifiedCheckpoint().Copy()
 	f.finalizedCheckpoints[blockRoot] = newState.FinalizedCheckpoint().Copy()
-	if newState.Slot() > prevCurrentStateSlot {
+	if newState.Slot() > f.highestSeen {
+		f.highestSeen = newState.Slot()
 		f.currentState = newState
 		f.currentStateBlockRoot = blockRoot
 		if newState.Slot()%snapshotStateEverySlot == 0 && f.enabledPruning {
@@ -205,14 +206,6 @@ func (f *ForkGraph) getBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlo
 }
 
 func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.BeaconState, bool, error) {
-	didLongRecconnection := false
-	if f.currentStateBlockRoot == blockRoot {
-		if alwaysCopy {
-			s, err := f.currentState.Copy()
-			return s, didLongRecconnection, err
-		}
-		return f.currentState, didLongRecconnection, nil
-	}
 	// collect all blocks beetwen greatest extending node path and block.
 	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
 	// Use the parent root as a reverse iterator.
@@ -220,11 +213,11 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.
 	// use the current reference state root as reconnectio
 	reconnectionRootLong, err := f.currentReferenceState.BlockRoot()
 	if err != nil {
-		return nil, didLongRecconnection, err
+		return nil, false, err
 	}
 	reconnectionRootShort, err := f.nextReferenceState.BlockRoot()
 	if err != nil {
-		return nil, didLongRecconnection, err
+		return nil, false, err
 	}
 	// try and find the point of recconection
 	for currentIteratorRoot != reconnectionRootLong && currentIteratorRoot != reconnectionRootShort {
@@ -232,33 +225,40 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.
 		if !isSegmentPresent {
 			log.Debug("Could not retrieve state: Missing header", "missing", currentIteratorRoot,
 				"longRecconection", libcommon.Hash(reconnectionRootLong), "shortRecconection", libcommon.Hash(reconnectionRootShort))
-			return nil, didLongRecconnection, nil
+			return nil, false, nil
 		}
 		blocksInTheWay = append(blocksInTheWay, block)
 		currentIteratorRoot = block.Block.ParentRoot
 	}
+
 	var copyReferencedState *state.BeaconState
+	if f.currentStateBlockRoot == blockRoot {
+		if alwaysCopy {
+			s, err := f.currentState.Copy()
+			return s, currentIteratorRoot == reconnectionRootLong, err
+		}
+		return f.currentState, currentIteratorRoot == reconnectionRootLong, nil
+	}
 	// Take a copy to the reference state.
 	if currentIteratorRoot == reconnectionRootLong {
 		copyReferencedState, err = f.currentReferenceState.Copy()
 		if err != nil {
-			return nil, didLongRecconnection, err
+			return nil, true, err
 		}
-		didLongRecconnection = true
 	} else {
 		copyReferencedState, err = f.nextReferenceState.Copy()
 		if err != nil {
-			return nil, didLongRecconnection, err
+			return nil, false, err
 		}
 	}
 
 	// Traverse the blocks from top to bottom.
 	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
 		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], false); err != nil {
-			return nil, didLongRecconnection, err
+			return nil, currentIteratorRoot == reconnectionRootLong, err
 		}
 	}
-	return copyReferencedState, didLongRecconnection, nil
+	return copyReferencedState, currentIteratorRoot == reconnectionRootLong, nil
 }
 
 // updateChildren adds a new child to the parent node hash.
