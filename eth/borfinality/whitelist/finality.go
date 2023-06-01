@@ -53,8 +53,10 @@ func (f *finality[T]) IsValidChain(currentHeader *types.Header, chain []*types.H
 	}
 
 	res, err := isValidChain(currentHeader, chain, f.doExist, f.Number, f.Hash, f.interval)
-	fmt.Println("f.Number: ", f.Number)
-	fmt.Println("f.Hash: ", f.Hash)
+
+	fmt.Println("Validating f.Number: ", f.Number)
+	fmt.Println("Validating f.Hash: ", f.Hash)
+
 	return res, err
 }
 
@@ -64,7 +66,11 @@ func (f *finality[T]) Process(block uint64, hash common.Hash) {
 	f.Hash = hash
 	f.Number = block
 
+	fmt.Println("Processing f.Number: ", f.Number)
+	fmt.Println("Processing f.Hash: ", f.Hash)
+
 	err := rawdb.WriteLastFinality[T](f.db, block, hash)
+
 	if err != nil {
 		log.Error("Error in writing whitelist state to db", "err", err)
 	}
