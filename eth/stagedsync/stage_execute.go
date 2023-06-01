@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -321,34 +320,35 @@ func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint
 }
 
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) (err error) {
-	//defer func() {
-	//	if tx != nil {
-	//		fmt.Printf("after unwind exec: %d->%d\n", u.CurrentBlockNumber, u.UnwindPoint)
-	//		cfg.agg.MakeContext().IterAcc(nil, func(k, v []byte) {
-	//			vv, err := accounts.ConvertV3toV2(v)
-	//			if err != nil {
-	//				panic(err)
-	//			}
-	//			fmt.Printf("acc: %x, %x\n", k, vv)
-	//		}, tx)
-	//	}
-	//}()
+	defer func() {
+		if tx != nil {
+			fmt.Printf("after unwind exec: %d->%d\n", u.CurrentBlockNumber, u.UnwindPoint)
+			//cfg.agg.MakeContext().(nil, func(k, v []byte) {
+			//	vv, err := accounts.ConvertV3toV2(v)
+			//	if err != nil {
+			//		panic(err)
+			//	}
+			//	fmt.Printf("acc: %x, %x\n", k, vv)
+			//}, tx)
+		}
+	}()
 
-	cfg.agg.SetLogPrefix(s.LogPrefix())
+	agg := cfg.agg
+	agg.SetLogPrefix(s.LogPrefix())
+	rs := state.NewStateV3(agg.SharedDomains())
+	//rs := state.NewStateV3(tx.(*temporal.Tx).Agg().SharedDomains())
 
-	rs := state.NewStateV3(tx.(*temporal.Tx).Agg().SharedDomains())
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
 	if err != nil {
 		return err
 	}
+	//if err := agg.Flush(ctx, tx); err != nil {
+	//	return fmt.Errorf("AggregatorV3.Flush: %w", err)
+	//}
 	if err := rs.Unwind(ctx, tx, txNum, cfg.agg, accumulator); err != nil {
 		return fmt.Errorf("StateV3.Unwind: %w", err)
 	}
-	//if err := rs.Flush(ctx, tx, s.LogPrefix(), time.NewTicker(30*time.Second)); err != nil {
-	//	return fmt.Errorf("StateV3.Flush: %w", err)
-	//}
-
 	if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("truncate receipts: %w", err)
 	}
@@ -600,7 +600,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
 	fmt.Printf("unwindExecutionStage: u.UnwindPoint=%d, s.BlockNumber=%d\n", u.UnwindPoint, s.BlockNumber)
-	cfg.agg.SharedDomains().Unwind()
 
 	if err = unwindExecutionStage(u, s, tx, ctx, cfg, initialCycle); err != nil {
 		return err
