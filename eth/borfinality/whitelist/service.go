@@ -137,11 +137,13 @@ func (s *Service) ProcessCheckpoint(endBlockNum uint64, endBlockHash common.Hash
 func (s *Service) IsValidChain(currentHeader *types.Header, chain []*types.Header) (bool, error) {
 	checkpointBool, err := s.checkpointService.IsValidChain(currentHeader, chain)
 	if !checkpointBool {
+		fmt.Println("Checkpoint Bool: ", checkpointBool, "error: ", err)
 		return checkpointBool, err
 	}
 
 	milestoneBool, err := s.milestoneService.IsValidChain(currentHeader, chain)
 	if !milestoneBool {
+		fmt.Println("Milestone Bool: ", milestoneBool, "error: ", err)
 		return milestoneBool, err
 	}
 
