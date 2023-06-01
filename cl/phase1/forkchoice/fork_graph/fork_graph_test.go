@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 
@@ -42,9 +43,17 @@ func TestForkGraph(t *testing.T) {
 	_, status, err = graph.AddChainSegment(blockB, true)
 	require.NoError(t, err)
 	require.Equal(t, status, fork_graph.PreValidated)
+	// Retrieve the children for the parent hash
+	children := graph.GetChildren(blockB.Block.ParentRoot)
+	hash, err := blockB.Block.HashSSZ()
+	require.NoError(t, err)
+	// Assert that the children are as expected
+	require.Equal(t, []libcommon.Hash{hash}, children)
+
 	// Now make blockC a bad block
 	blockC.Block.ProposerIndex = 81214459 // some invalid thing
 	_, status, err = graph.AddChainSegment(blockC, true)
 	require.Error(t, err)
 	require.Equal(t, status, fork_graph.InvalidBlock)
+
 }

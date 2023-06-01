@@ -144,7 +144,7 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	v.makeBuf(v.l * length.Hash)
 	validatorLeaves := v.buf
 	hashBuffer := make([]byte, 8*32)
-	depth := getDepth(uint64(v.c))
+	depth := GetDepth(uint64(v.c))
 	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
 
 	if v.l == 0 {
