@@ -1066,7 +1066,50 @@ func CanDeleteTo(curBlockNum uint64, snapshots services.BlockSnapshots) (blockTo
 func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl) error {
 	chainConfig := fromdb.ChainConfig(br.db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	return retireBlocks(ctx, blockFrom, blockTo, *chainID, br.tmpDir, br.blockReader, br.db, br.workers, br.downloader, lvl, br.notifier, br.logger)
+	downloader, notifier, logger, blockReader, tmpDir, db, workers := br.downloader, br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
+	logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
+	snapshots := blockReader.Snapshots().(*RoSnapshots)
+	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
+
+	// in future we will do it in background
+	if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2SegmentSize, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
+		return fmt.Errorf("DumpBlocks: %w", err)
+	}
+	if err := snapshots.ReopenFolder(); err != nil {
+		return fmt.Errorf("reopen: %w", err)
+	}
+	snapshots.LogStat()
+	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
+		notifier.OnNewSnapshot()
+	}
+	merger := NewMerger(tmpDir, workers, lvl, *chainID, notifier, logger)
+	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
+	if len(rangesToMerge) == 0 {
+		return nil
+	}
+	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true /* doIndex */)
+	if err != nil {
+		return err
+	}
+	if err := snapshots.ReopenFolder(); err != nil {
+		return fmt.Errorf("reopen: %w", err)
+	}
+	snapshots.LogStat()
+	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
+		notifier.OnNewSnapshot()
+	}
+
+	if downloader != nil && !reflect.ValueOf(downloader).IsNil() {
+		downloadRequest := make([]DownloadRequest, 0, len(rangesToMerge))
+		for i := range rangesToMerge {
+			downloadRequest = append(downloadRequest, NewDownloadRequest(&rangesToMerge[i], "", ""))
+		}
+
+		if err := RequestSnapshotsDownload(ctx, downloadRequest, downloader); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
@@ -1111,54 +1154,6 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 
 type DBEventNotifier interface {
 	OnNewSnapshot()
-}
-
-func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string,
-	blockReader services.FullBlockReader, db kv.RoDB, workers int, downloader proto_downloader.DownloaderClient,
-	lvl log.Lvl, notifier DBEventNotifier, logger log.Logger) error {
-	logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
-	snapshots := blockReader.Snapshots().(*RoSnapshots)
-	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
-
-	// in future we will do it in background
-	if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2SegmentSize, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
-		return fmt.Errorf("DumpBlocks: %w", err)
-	}
-	if err := snapshots.ReopenFolder(); err != nil {
-		return fmt.Errorf("reopen: %w", err)
-	}
-	snapshots.LogStat()
-	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
-		notifier.OnNewSnapshot()
-	}
-	merger := NewMerger(tmpDir, workers, lvl, chainID, notifier, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
-	if len(rangesToMerge) == 0 {
-		return nil
-	}
-	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true /* doIndex */)
-	if err != nil {
-		return err
-	}
-	if err := snapshots.ReopenFolder(); err != nil {
-		return fmt.Errorf("reopen: %w", err)
-	}
-	snapshots.LogStat()
-	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
-		notifier.OnNewSnapshot()
-	}
-
-	if downloader != nil && !reflect.ValueOf(downloader).IsNil() {
-		downloadRequest := make([]DownloadRequest, 0, len(rangesToMerge))
-		for i := range rangesToMerge {
-			downloadRequest = append(downloadRequest, NewDownloadRequest(&rangesToMerge[i], "", ""))
-		}
-
-		if err := RequestSnapshotsDownload(ctx, downloadRequest, downloader); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
