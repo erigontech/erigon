@@ -142,7 +142,6 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initi
 	}); err != nil {
 		return headBlockHash, err
 	}
-
 	// Sync from scratch must be able Commit partial progress
 	// In all other cases - process blocks batch in 1 RwTx
 	blocksInSnapshots := uint64(0)
@@ -151,10 +150,7 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initi
 	}
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > blocksInSnapshots && finishProgressBefore == headersProgressBefore
-	canRunCycleInOneTransaction := true
-	if initialCycle && !isSynced {
-		canRunCycleInOneTransaction = false
-	}
+	canRunCycleInOneTransaction := !isSynced
 
 	// Main steps:
 	// - process new blocks
