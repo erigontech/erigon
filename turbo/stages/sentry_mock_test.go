@@ -96,7 +96,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 		initialCycle := true
-		if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, log.New(), m.BlockSnapshots, nil, nil); err != nil {
+		if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, log.New(), m.BlockSnapshots, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
