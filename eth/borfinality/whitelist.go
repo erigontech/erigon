@@ -95,7 +95,7 @@ func RetryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 	retryHeimdallHandler(fn, config, tickerDuration, timeout, fnName, GetBorHandler)
 }
 
-func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string, getBorHandler func(chain *config) (*bor.Bor, error)) {
+func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string, getBorHandler func() (*bor.Bor, error)) {
 	// a shortcut helps with tests and early exit
 	select {
 	case <-config.closeCh:
@@ -103,7 +103,7 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 	default:
 	}
 
-	bor, err := getBorHandler(config)
+	bor, err := getBorHandler()
 	if err != nil {
 		log.Error("error while getting the borHandler", "err", err)
 		return
