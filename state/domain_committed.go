@@ -116,7 +116,7 @@ func (t *UpdateTree) GetWithDomain(key []byte, domain *SharedDomains) (*Commitme
 			return c, true
 		}
 
-		nonce, balance, chash := DecodeAccountBytes2(enc)
+		nonce, balance, chash := DecodeAccountBytes(enc)
 		if c.update.Nonce != nonce {
 			c.update.Nonce = nonce
 			c.update.Flags |= commitment.NonceUpdate
@@ -190,9 +190,7 @@ func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
 	if c.update.Flags&commitment.DeleteUpdate != 0 {
 		c.update.Flags ^= commitment.DeleteUpdate
 	}
-	//(&c.update).DecodeForStorage(val)
-	//nonce, balance, chash := DecodeAccountBytes(val)
-	nonce, balance, chash := DecodeAccountBytes2(val)
+	nonce, balance, chash := DecodeAccountBytes(val)
 	if c.update.Nonce != nonce {
 		c.update.Nonce = nonce
 		c.update.Flags |= commitment.NonceUpdate
@@ -203,16 +201,13 @@ func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
 	}
 	if !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
 		if len(chash) == 0 {
-			c.update.Flags |= commitment.CodeUpdate
 			c.update.ValLength = length.Hash
-			c.update.CodeValue = nil
 			copy(c.update.CodeHashOrStorage[:], commitment.EmptyCodeHash)
 		} else {
 			fmt.Printf("replaced code %x -> %x\n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
 			copy(c.update.CodeHashOrStorage[:], chash)
 			c.update.ValLength = length.Hash
 			c.update.Flags |= commitment.CodeUpdate
-			// todo ehre we dont know code value
 		}
 	}
 }
@@ -239,18 +234,10 @@ func (t *UpdateTree) TouchStorage(c *CommitmentItem, val []byte) {
 }
 
 func (t *UpdateTree) TouchCode(c *CommitmentItem, val []byte) {
-	if len(val) == 0 {
-		copy(c.update.CodeHashOrStorage[:], commitment.EmptyCodeHash)
-		c.update.ValLength = length.Hash
-		c.update.CodeValue = nil
-		c.update.Flags |= commitment.CodeUpdate
-		return
-	}
 	t.keccak.Reset()
 	t.keccak.Write(val)
 	copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
 	c.update.ValLength = length.Hash
-	c.update.CodeValue = common.Copy(val)
 	c.update.Flags |= commitment.CodeUpdate
 }
 

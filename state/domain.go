@@ -541,7 +541,7 @@ func (h *domainWAL) size() uint64 {
 }
 
 func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
-	if h.discard {
+	if h.discard || !h.buffered {
 		return nil
 	}
 	if err := h.keys.Load(tx, h.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {

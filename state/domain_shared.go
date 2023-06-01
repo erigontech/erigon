@@ -15,7 +15,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -97,9 +96,8 @@ type SharedDomains struct {
 	txNum    atomic.Uint64
 	blockNum atomic.Uint64
 	estSize  atomic.Uint64
-	updates  *UpdatesWithCommitment
 
-	sync.RWMutex
+	muMaps     sync.RWMutex
 	account    *btree2.Map[string, []byte]
 	code       *btree2.Map[string, []byte]
 	storage    *btree2.Map[string, []byte]
@@ -110,8 +108,13 @@ type SharedDomains struct {
 	Commitment *DomainCommitted
 }
 
-func (sd *SharedDomains) Updates() *UpdatesWithCommitment {
-	return sd.updates
+func (sd *SharedDomains) Unwind() {
+	sd.muMaps.Lock()
+	defer sd.muMaps.Unlock()
+	sd.account.Clear()
+	sd.code.Clear()
+	sd.commitment.Clear()
+	sd.storage.Clear()
 }
 
 func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
@@ -126,19 +129,13 @@ func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 		commitment: btree2.NewMap[string, []byte](128),
 	}
 
-	sd.updates = NewUpdatesWithCommitment(sd)
 	sd.Commitment.ResetFns(sd.BranchFn, sd.AccountFn, sd.StorageFn)
 	return sd
 }
 
-func (sd *SharedDomains) AddUpdates(keys [][]byte, updates []commitment.Update) error {
-	sd.Lock()
-	defer sd.Unlock()
-	sd.updates.AddUpdates(keys, updates)
-	return nil
-}
-
 func (sd *SharedDomains) put(table string, key, val []byte) {
+	sd.muMaps.Lock()
+	defer sd.muMaps.Unlock()
 	sd.puts(table, hex.EncodeToString(key), val)
 }
 
@@ -174,9 +171,9 @@ func (sd *SharedDomains) puts(table string, key string, val []byte) {
 }
 
 func (sd *SharedDomains) Get(table string, key []byte) (v []byte, ok bool) {
-	sd.RWMutex.RLock()
+	sd.muMaps.RLock()
 	v, ok = sd.get(table, key)
-	sd.RWMutex.RUnlock()
+	sd.muMaps.RUnlock()
 	return v, ok
 }
 
@@ -239,8 +236,8 @@ func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
 }
 
 func (sd *SharedDomains) ReadsValidBtree(table string, list *exec22.KvList) bool {
-	sd.RWMutex.RLock()
-	defer sd.RWMutex.RUnlock()
+	sd.muMaps.RLock()
+	defer sd.muMaps.RUnlock()
 
 	var m *btree2.Map[string, []byte]
 	switch table {
@@ -281,7 +278,8 @@ func (sd *SharedDomains) BranchFn(pref []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("branchFn failed: %w", err)
 	}
-	if v == nil {
+	fmt.Printf("branchFn[sd]: %x: %x\n", pref, v)
+	if len(v) == 0 {
 		return nil, nil
 	}
 	// skip touchmap
@@ -296,21 +294,21 @@ func (sd *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error
 	cell.Nonce = 0
 	cell.Balance.Clear()
 	if len(encAccount) > 0 {
-		//nonce, balance, chash := DecodeAccountBytes(encAccount)
-		nonce, balance, chash := DecodeAccountBytes2(encAccount)
+		nonce, balance, chash := DecodeAccountBytes(encAccount)
 		cell.Nonce = nonce
 		cell.Balance.Set(balance)
 		if len(chash) > 0 {
 			copy(cell.CodeHash[:], chash)
 		}
+		fmt.Printf("accountFn[sd]: %x: n=%d b=%d ch=%x\n", plainKey, nonce, balance, chash)
 	}
 
 	code, err := sd.LatestCode(plainKey)
 	if err != nil {
-		return fmt.Errorf("accountFn: failed to read latest code: %w", err)
+		return fmt.Errorf("accountFn[sd]: failed to read latest code: %w", err)
 	}
 	if len(code) > 0 {
-		fmt.Printf("accountFn: code %x - %x\n", plainKey, code)
+		fmt.Printf("accountFn[sd]: code %x - %x\n", plainKey, code)
 		sd.Commitment.updates.keccak.Reset()
 		sd.Commitment.updates.keccak.Write(code)
 		copy(cell.CodeHash[:], sd.Commitment.updates.keccak.Sum(nil))
@@ -324,10 +322,11 @@ func (sd *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error
 func (sd *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error {
 	// Look in the summary table first
 	addr, loc := splitKey(plainKey)
-	enc, _, err := sd.aggCtx.StorageLatest(addr, loc, sd.roTx)
+	enc, err := sd.LatestStorage(addr, loc)
 	if err != nil {
 		return err
 	}
+	fmt.Printf("storageFn[sd]: %x|%x - %x\n", addr, loc, enc)
 	cell.StorageLen = len(enc)
 	copy(cell.Storage[:], enc)
 	cell.Delete = cell.StorageLen == 0
@@ -428,23 +427,7 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
 }
 
-func (sd *SharedDomains) Final() error {
-	return sd.updates.Flush()
-}
-
-func (sd *SharedDomains) Unwind() {
-	sd.updates.Unwind()
-}
-
 func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, err error) {
-	if sd.updates.Size() != 0 {
-		rh, err := sd.updates.CommitmentUpdates()
-		if err != nil {
-			return nil, err
-		}
-		return rh, nil
-	}
-
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	rootHash, branchNodeUpdates, err := sd.Commitment.ComputeCommitment(trace)
 	if err != nil {
@@ -679,8 +662,8 @@ func (sd *SharedDomains) flushBtree(ctx context.Context, rwTx kv.RwTx, table str
 
 // todo do we really need that? we already got this values in domainWAL
 func (sd *SharedDomains) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, logEvery *time.Ticker) error {
-	sd.RWMutex.Lock()
-	defer sd.RWMutex.Unlock()
+	sd.muMaps.Lock()
+	defer sd.muMaps.Unlock()
 
 	if err := sd.flushBtree(ctx, rwTx, kv.AccountDomain, sd.account, logPrefix, logEvery); err != nil {
 		return err
@@ -700,236 +683,4 @@ func (sd *SharedDomains) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix stri
 	sd.commitment.Clear()
 	sd.estSize.Store(0)
 	return nil
-}
-
-type UpdatesWithCommitment struct {
-	updates *UpdateTree
-
-	domains           *SharedDomains
-	initPatriciaState sync.Once
-	patricia          commitment.Trie
-	commitment        *btree2.Map[string, []byte]
-	branchMerger      *commitment.BranchMerger
-}
-
-func (w *UpdatesWithCommitment) Size() uint64 {
-	return uint64(w.updates.tree.Len())
-}
-
-func (w *UpdatesWithCommitment) Get(addr []byte) (*commitment.Update, bool) {
-	item, ok := w.updates.GetWithDomain(addr, w.domains)
-	if ok {
-		return &item.update, ok
-	}
-	return nil, ok
-}
-
-func (w *UpdatesWithCommitment) TouchAccount(addr []byte, enc []byte) {
-	w.updates.TouchPlainKeyDom(w.domains, addr, enc, w.updates.TouchAccount)
-}
-
-func (w *UpdatesWithCommitment) TouchCode(addr []byte, enc []byte) {
-	w.updates.TouchPlainKeyDom(w.domains, addr, enc, w.updates.TouchCode)
-}
-
-func (w *UpdatesWithCommitment) TouchStorage(fullkey []byte, enc []byte) {
-	w.updates.TouchPlainKeyDom(w.domains, fullkey, enc, w.updates.TouchStorage)
-}
-
-func (w *UpdatesWithCommitment) Unwind() {
-	w.updates.tree.Clear(true)
-	w.patricia.Reset()
-	w.commitment.Clear()
-
-}
-func (w *UpdatesWithCommitment) Flush() error {
-	pk, _, upd := w.updates.List(true)
-	for k, update := range upd {
-		upd := update
-		key := pk[k]
-		if upd.Flags == commitment.DeleteUpdate {
-
-			prev, err := w.domains.LatestAccount(key)
-			if err != nil {
-				return fmt.Errorf("latest account %x: %w", key, err)
-			}
-			if err := w.domains.DeleteAccount(key, prev); err != nil {
-				return fmt.Errorf("delete account %x: %w", key, err)
-			}
-			fmt.Printf("apply - delete account %x\n", key)
-		} else {
-			if upd.Flags&commitment.BalanceUpdate != 0 || upd.Flags&commitment.NonceUpdate != 0 {
-				prev, err := w.domains.LatestAccount(key)
-				if err != nil {
-					return fmt.Errorf("latest account %x: %w", key, err)
-				}
-				old := accounts.NewAccount()
-				if len(prev) > 0 {
-					accounts.DeserialiseV3(&old, prev)
-				}
-
-				if upd.Flags&commitment.BalanceUpdate != 0 {
-					old.Balance.Set(&upd.Balance)
-				}
-				if upd.Flags&commitment.NonceUpdate != 0 {
-					old.Nonce = upd.Nonce
-				}
-
-				acc := UpdateToAccount(upd)
-				fmt.Printf("apply - update account %x b %v n %d\n", key, upd.Balance.Uint64(), upd.Nonce)
-				if err := w.domains.UpdateAccountData(key, accounts.SerialiseV3(acc), prev); err != nil {
-					return err
-				}
-			}
-			if upd.Flags&commitment.CodeUpdate != 0 {
-				if len(upd.CodeValue[:]) != 0 && !bytes.Equal(upd.CodeHashOrStorage[:], commitment.EmptyCodeHash) {
-					fmt.Printf("apply - update code %x h %x v %x\n", key, upd.CodeHashOrStorage[:], upd.CodeValue[:])
-					if err := w.domains.UpdateAccountCode(key, upd.CodeValue, upd.CodeHashOrStorage[:]); err != nil {
-						return err
-					}
-				}
-			}
-			if upd.Flags&commitment.StorageUpdate != 0 {
-				prev, err := w.domains.LatestStorage(key[:length.Addr], key[length.Addr:])
-				if err != nil {
-					return fmt.Errorf("latest code %x: %w", key, err)
-				}
-				fmt.Printf("apply - storage %x h %x\n", key, upd.CodeHashOrStorage[:upd.ValLength])
-				err = w.domains.WriteAccountStorage(key[:length.Addr], key[length.Addr:], upd.CodeHashOrStorage[:upd.ValLength], prev)
-				if err != nil {
-					return err
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-func UpdateToAccount(u commitment.Update) *accounts.Account {
-	acc := accounts.NewAccount()
-	acc.Initialised = true
-	acc.Balance.Set(&u.Balance)
-	acc.Nonce = u.Nonce
-	if u.ValLength > 0 {
-		acc.CodeHash = common.BytesToHash(u.CodeHashOrStorage[:u.ValLength])
-	}
-	return &acc
-}
-func NewUpdatesWithCommitment(domains *SharedDomains) *UpdatesWithCommitment {
-	return &UpdatesWithCommitment{
-		updates:      NewUpdateTree(),
-		domains:      domains,
-		commitment:   btree2.NewMap[string, []byte](128),
-		branchMerger: commitment.NewHexBranchMerger(8192),
-		patricia:     commitment.InitializeTrie(commitment.VariantHexPatriciaTrie),
-	}
-}
-
-func (w *UpdatesWithCommitment) AddUpdates(keys [][]byte, updates []commitment.Update) {
-	for i, u := range updates {
-		w.updates.TouchUpdate(keys[i], u)
-	}
-}
-
-// CommitmentUpdates returns the commitment updates for the current state of w.updates.
-// Commitment is based on sharedDomains commitment tree
-// All branch changes are stored inside Update4ReadWriter in commitment map.
-// Those updates got priority over sharedDomains commitment updates.
-func (w *UpdatesWithCommitment) CommitmentUpdates() ([]byte, error) {
-	setup := false
-	w.initPatriciaState.Do(func() {
-		setup = true
-		// get commitment state from commitment domain (like we're adding updates to it)
-		stateBytes, err := w.domains.Commitment.PatriciaState()
-		if err != nil {
-			panic(err)
-		}
-		switch pt := w.patricia.(type) {
-		case *commitment.HexPatriciaHashed:
-			if err := pt.SetState(stateBytes); err != nil {
-				panic(fmt.Errorf("set HPH state: %w", err))
-			}
-			rh, err := pt.RootHash()
-			if err != nil {
-				panic(fmt.Errorf("HPH root hash: %w", err))
-			}
-			fmt.Printf("HPH state set: %x\n", rh)
-		default:
-			panic(fmt.Errorf("unsupported patricia type: %T", pt))
-		}
-	})
-	pk, hk, updates := w.updates.List(false)
-	if len(updates) == 0 {
-		return w.patricia.RootHash()
-	}
-	if !setup {
-		w.patricia.Reset()
-	}
-
-	w.patricia.SetTrace(true)
-	w.patricia.ResetFns(w.branchFn, w.accountFn, w.storageFn)
-	rh, branches, err := w.patricia.ProcessUpdates(pk, hk, updates)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Printf("\n rootHash %x\n", rh)
-	_ = branches
-	//for k, update := range branches {
-	//	//w.commitment.Set(k, b)
-	//	prefix := []byte(k)
-	//
-	//	stateValue, err := w.branchFn(prefix)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//	stated := commitment.BranchData(stateValue)
-	//	merged, err := w.branchMerger.Merge(stated, update)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//	if bytes.Equal(stated, merged) {
-	//		continue
-	//	}
-	//	w.commitment.Set(hex.EncodeToString(prefix), merged)
-	//}
-	return rh, nil
-}
-
-func (w *UpdatesWithCommitment) accountFn(plainKey []byte, cell *commitment.Cell) error {
-	item, found := w.updates.GetWithDomain(plainKey, w.domains)
-	if found {
-		upd := item.Update()
-
-		cell.Nonce = upd.Nonce
-		cell.Balance.Set(&upd.Balance)
-		if upd.ValLength == length.Hash {
-			copy(cell.CodeHash[:], upd.CodeHashOrStorage[:])
-		}
-		return nil
-	}
-	panic("DFFJKA")
-	//return w.domains.AccountFn(plainKey, cell)
-}
-
-func (w *UpdatesWithCommitment) storageFn(plainKey []byte, cell *commitment.Cell) error {
-	item, found := w.updates.GetWithDomain(plainKey, w.domains)
-	if found {
-		upd := item.Update()
-		cell.StorageLen = upd.ValLength
-		copy(cell.Storage[:], upd.CodeHashOrStorage[:upd.ValLength])
-		cell.Delete = cell.StorageLen == 0
-		return nil
-	}
-	panic("dK:AJNDFS:DKjb")
-	//return w.domains.StorageFn(plainKey, cell)
-
-}
-
-func (w *UpdatesWithCommitment) branchFn(key []byte) ([]byte, error) {
-	b, ok := w.commitment.Get(string(key))
-	if !ok {
-		return w.domains.BranchFn(key)
-	}
-	return b, nil
 }

@@ -472,10 +472,10 @@ func NewHexBranchMerger(capacity uint64) *BranchMerger {
 
 // MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1
 func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData, error) {
-	if branch2 == nil {
+	if len(branch2) == 0 {
 		return branch1, nil
 	}
-	if branch1 == nil {
+	if len(branch1) == 0 {
 		return branch2, nil
 	}
 

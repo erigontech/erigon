@@ -952,20 +952,22 @@ func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 			return err
 		}
 	}
-	//{
-	//	exists := map[string]struct{}{}
-	//	if err := a.commitment.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
-	//		if _, ok := exists[string(k)]; ok {
-	//			return nil
-	//		}
-	//		exists[string(k)] = struct{}{}
-	//
-	//		a.commitment.SetTxNum(txNum)
-	//		return a.commitment.put(k, v)
-	//	}); err != nil {
-	//		return err
-	//	}
-	//}
+	{
+		exists := map[string]struct{}{}
+		if err := a.commitment.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
+			if _, ok := exists[string(k)]; ok {
+				return nil
+			}
+			exists[string(k)] = struct{}{}
+
+			a.commitment.SetTxNum(txNum)
+			return a.commitment.put(k, v)
+		}); err != nil {
+			return err
+		}
+	}
+
+	a.domains.Unwind()
 
 	//if err := stateChanges.Load(a.rwTx, kv.PlainState, stateLoad, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 	//	return err
@@ -2035,8 +2037,7 @@ func (ac *AggregatorV3Context) accountFn(plainKey []byte, cell *commitment.Cell)
 	cell.Balance.Clear()
 	copy(cell.CodeHash[:], commitment.EmptyCodeHash)
 	if len(encAccount) > 0 {
-		//nonce, balance, chash := DecodeAccountBytes(encAccount)
-		nonce, balance, chash := DecodeAccountBytes2(encAccount)
+		nonce, balance, chash := DecodeAccountBytes(encAccount)
 		cell.Nonce = nonce
 		cell.Balance.Set(balance)
 		if chash != nil {

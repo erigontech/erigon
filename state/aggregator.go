@@ -1282,7 +1282,7 @@ func (ac *AggregatorContext) Close() {
 	ac.tracesTo.Close()
 }
 
-func DecodeAccountBytes2(enc []byte) (nonce uint64, balance *uint256.Int, hash []byte) {
+func DecodeAccountBytes(enc []byte) (nonce uint64, balance *uint256.Int, hash []byte) {
 	if len(enc) == 0 {
 		return
 	}
@@ -1309,34 +1309,6 @@ func DecodeAccountBytes2(enc []byte) (nonce uint64, balance *uint256.Int, hash [
 	}
 	if pos >= len(enc) {
 		panic(fmt.Errorf("deserialse2: %d >= %d ", pos, len(enc)))
-	}
-	return
-}
-
-func DecodeAccountBytes(enc []byte) (nonce uint64, balance *uint256.Int, hash []byte) {
-	balance = new(uint256.Int)
-
-	if len(enc) > 0 {
-		pos := 0
-		nonceBytes := int(enc[pos])
-		pos++
-		if nonceBytes > 0 {
-			nonce = bytesToUint64(enc[pos : pos+nonceBytes])
-			pos += nonceBytes
-		}
-		balanceBytes := int(enc[pos])
-		pos++
-		if balanceBytes > 0 {
-			balance.SetBytes(enc[pos : pos+balanceBytes])
-			pos += balanceBytes
-		}
-		codeHashBytes := int(enc[pos])
-		pos++
-
-		if codeHashBytes > 0 {
-			hash = make([]byte, length.Hash)
-			copy(hash, enc[pos:pos+codeHashBytes])
-		}
 	}
 	return
 }
