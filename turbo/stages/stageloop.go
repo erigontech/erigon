@@ -89,34 +89,8 @@ func StageLoop(ctx context.Context,
 			// continue
 		}
 
-		// Sync from scratch must be able Commit partial progress
-		// In all other cases - process blocks batch in 1 RwTx
-		blocksInSnapshots := uint64(0)
-		if blockSnapshots != nil {
-			blocksInSnapshots = blockSnapshots.BlocksAvailable()
-		}
-		var finishProgressBefore, headersProgressBefore uint64
-		var err error
-		if err := db.View(ctx, func(tx kv.Tx) error {
-			if finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
-				return err
-			}
-			if headersProgressBefore, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			log.Error("Staged Sync", "err", err)
-			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
-			continue
-		}
-
-		// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
-		isSynced := finishProgressBefore > 0 && finishProgressBefore > blocksInSnapshots && finishProgressBefore == headersProgressBefore
-		initialCycle = !isSynced
-
 		// Estimate the current top height seen from the peer
-		headBlockHash, err := StageLoopStep(ctx, db, sync, initialCycle, logger, hook)
+		headBlockHash, err := StageLoopStep(ctx, db, sync, initialCycle, logger, blockSnapshots, hook)
 
 		SendPayloadStatus(hd, headBlockHash, err)
 
@@ -133,6 +107,7 @@ func StageLoop(ctx context.Context,
 			continue
 		}
 
+		initialCycle = false
 		hd.AfterInitialCycle()
 
 		if loopMinTime != 0 {
@@ -148,24 +123,34 @@ func StageLoop(ctx context.Context,
 	}
 }
 
-func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, hook *Hook) (headBlockHash libcommon.Hash, err error) {
+func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockSnapshots *snapshotsync.RoSnapshots, hook *Hook) (headBlockHash libcommon.Hash, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	var finishProgressBefore uint64
+	var finishProgressBefore, headersProgressBefore uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		if finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
+			return err
+		}
+		if headersProgressBefore, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
 			return err
 		}
 		return nil
 	}); err != nil {
 		return headBlockHash, err
 	}
-
-	canRunCycleInOneTransaction := !initialCycle
+	// Sync from scratch must be able Commit partial progress
+	// In all other cases - process blocks batch in 1 RwTx
+	blocksInSnapshots := uint64(0)
+	if blockSnapshots != nil {
+		blocksInSnapshots = blockSnapshots.BlocksAvailable()
+	}
+	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
+	isSynced := finishProgressBefore > 0 && finishProgressBefore > blocksInSnapshots && finishProgressBefore == headersProgressBefore
+	canRunCycleInOneTransaction := !isSynced
 
 	// Main steps:
 	// - process new blocks
