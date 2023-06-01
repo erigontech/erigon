@@ -31,7 +31,7 @@ func TestDump(t *testing.T) {
 
 		var systemTxs int
 		var nonceList []uint64
-		cnt, err := snapshotsync.DumpTxs(m.Ctx, m.DB, 0, 10, 1, log.LvlInfo, log.New(), func(v []byte) error {
+		cnt, err := snapshotsync.DumpTxs(m.Ctx, m.DB, 0, 10, m.ChainConfig, 1, log.LvlInfo, log.New(), func(v []byte) error {
 			if v == nil {
 				systemTxs++
 			} else {
@@ -47,6 +47,31 @@ func TestDump(t *testing.T) {
 		require.Equal([]uint64{0, 1, 2, 3, 4}, nonceList)
 		require.Equal(2*(5+1)+5, cnt)
 	})
+	t.Run("txs_not_from_zero", func(t *testing.T) {
+		require := require.New(t)
+		slot := types2.TxSlot{}
+		parseCtx := types2.NewTxParseContext(*chainID)
+		parseCtx.WithSender(false)
+		var sender [20]byte
+
+		var systemTxs int
+		var nonceList []uint64
+		cnt, err := snapshotsync.DumpTxs(m.Ctx, m.DB, 2, 5, m.ChainConfig, 1, log.LvlInfo, log.New(), func(v []byte) error {
+			if v == nil {
+				systemTxs++
+			} else {
+				if _, err := parseCtx.ParseTransaction(v[1+20:], 0, &slot, sender[:], false /* hasEnvelope */, nil); err != nil {
+					return err
+				}
+				nonceList = append(nonceList, slot.Nonce)
+			}
+			return nil
+		})
+		require.NoError(err)
+		require.Equal(2*3, systemTxs)
+		require.Equal([]uint64{1, 2, 3}, nonceList)
+		require.Equal(2*3+3, cnt)
+	})
 	t.Run("headers", func(t *testing.T) {
 		require := require.New(t)
 		var nonceList []uint64
@@ -60,6 +85,20 @@ func TestDump(t *testing.T) {
 		})
 		require.NoError(err)
 		require.Equal([]uint64{0, 1, 2, 3, 4, 5}, nonceList)
+	})
+	t.Run("headers_not_from_zero", func(t *testing.T) {
+		require := require.New(t)
+		var nonceList []uint64
+		err := snapshotsync.DumpHeaders(m.Ctx, m.DB, 2, 5, 1, log.LvlInfo, log.New(), func(v []byte) error {
+			h := types.Header{}
+			if err := rlp.DecodeBytes(v[1:], &h); err != nil {
+				return err
+			}
+			nonceList = append(nonceList, h.Number.Uint64())
+			return nil
+		})
+		require.NoError(err)
+		require.Equal([]uint64{2, 3, 4}, nonceList)
 	})
 	t.Run("body", func(t *testing.T) {
 		require := require.New(t)

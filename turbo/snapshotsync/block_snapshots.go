@@ -1237,7 +1237,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		}
 		defer sn.Close()
 
-		expectedCount, err := DumpTxs(ctx, chainDB, blockFrom, blockTo, workers, lvl, logger, func(v []byte) error {
+		expectedCount, err := DumpTxs(ctx, chainDB, blockFrom, blockTo, &chainConfig, workers, lvl, logger, func(v []byte) error {
 			return sn.AddWord(v)
 		})
 		if err != nil {
@@ -1330,13 +1330,12 @@ func hasIdxFile(sn *snaptype.FileInfo, logger log.Logger) bool {
 
 // DumpTxs - [from, to)
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
-func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) (expectedCount int, err error) {
+func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) (expectedCount int, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	warmupCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	chainConfig := fromdb.ChainConfig(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	var prevTxID uint64
@@ -1368,7 +1367,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers
 		}
 		if tv == nil {
 			if err := collect(nil); err != nil {
-				return fmt.Errorf("AddWord1: %d", err)
+				return err
 			}
 			return nil
 		}
@@ -1379,7 +1378,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers
 			return err
 		}
 		if err := collect(valueBuf); err != nil {
-			return fmt.Errorf("AddWord2: %d", err)
+			return err
 		}
 		return nil
 	}
