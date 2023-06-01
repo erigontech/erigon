@@ -239,10 +239,12 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 }
 
 func (c *Collector) reset() {
-	for _, p := range c.dataProviders {
-		p.Dispose()
+	if c.dataProviders != nil {
+		for _, p := range c.dataProviders {
+			p.Dispose()
+		}
+		c.dataProviders = nil
 	}
-	c.dataProviders = nil
 	c.buf.Reset()
 	c.allFlushed = false
 }
