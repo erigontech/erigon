@@ -364,7 +364,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	db := mdbx.NewMDBX(logger).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
 	defer db.Close()
 
-	cfg := ethconfig.NewSnapCfg(true, false, true)
+	cfg := ethconfig.NewSnapCfg(true, true, true)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err := snapshots.ReopenFolder(); err != nil {
 		return err
@@ -396,20 +396,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Params", "from", from, "to", to, "every", every)
-	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files(), agg.Files()); err != nil {
-			return err
-		}
-		for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
-			if err := br.PruneAncientBlocks(tx, 100); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
 	for i := from; i < to; i += every {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo); err != nil {
 			panic(err)
