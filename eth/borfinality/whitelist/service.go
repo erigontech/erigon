@@ -135,6 +135,7 @@ func (s *Service) ProcessCheckpoint(endBlockNum uint64, endBlockHash common.Hash
 }
 
 func (s *Service) IsValidChain(currentHeader *types.Header, chain []*types.Header) (bool, error) {
+	fmt.Println("Service IsValidChain")
 	checkpointBool, err := s.checkpointService.IsValidChain(currentHeader, chain)
 	if !checkpointBool {
 		fmt.Println("Checkpoint Bool: ", checkpointBool, "error: ", err)
