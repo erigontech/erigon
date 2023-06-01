@@ -232,12 +232,13 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.
 	}
 
 	var copyReferencedState *state.BeaconState
+	didLongRecconnection := currentIteratorRoot == reconnectionRootLong && reconnectionRootLong != reconnectionRootShort
 	if f.currentStateBlockRoot == blockRoot {
 		if alwaysCopy {
 			s, err := f.currentState.Copy()
-			return s, currentIteratorRoot == reconnectionRootLong, err
+			return s, didLongRecconnection, err
 		}
-		return f.currentState, currentIteratorRoot == reconnectionRootLong, nil
+		return f.currentState, didLongRecconnection, nil
 	}
 	// Take a copy to the reference state.
 	if currentIteratorRoot == reconnectionRootLong {
@@ -255,10 +256,10 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.
 	// Traverse the blocks from top to bottom.
 	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
 		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], false); err != nil {
-			return nil, currentIteratorRoot == reconnectionRootLong, err
+			return nil, didLongRecconnection, err
 		}
 	}
-	return copyReferencedState, currentIteratorRoot == reconnectionRootLong, nil
+	return copyReferencedState, didLongRecconnection, nil
 }
 
 // updateChildren adds a new child to the parent node hash.
