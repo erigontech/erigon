@@ -1122,6 +1122,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 		return err
 	}
 	canDeleteTo := CanDeleteTo(currentProgress, blockSnapshots)
+	fmt.Printf("dbg: canDeleteTo=%d, currentProgress=%d, blockSnapshots=%d\n", canDeleteTo, currentProgress, blockSnapshots)
 	if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, limit); err != nil {
 		return nil
 	}
