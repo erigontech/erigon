@@ -12,7 +12,7 @@ func (arr *hashBuf) makeBuf(size int) {
 	arr.buf = arr.buf[:size]
 }
 
-func getDepth(v uint64) uint8 {
+func GetDepth(v uint64) uint8 {
 	// If there are 0 or 1 nodes, the depth is 0.
 	if v <= 1 {
 		return 0
