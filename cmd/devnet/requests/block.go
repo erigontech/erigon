@@ -8,12 +8,11 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
 func BlockNumber(reqGen *RequestGenerator, logger log.Logger) (uint64, error) {
-	var b rpctest.EthBlockNumber
+	var b models.EthBlockNumber
 
 	req := reqGen.BlockNumber()
 	res := reqGen.Erigon(models.ETHBlockNumber, req, &b)
@@ -26,8 +25,8 @@ func BlockNumber(reqGen *RequestGenerator, logger log.Logger) (uint64, error) {
 	return number, nil
 }
 
-func GetBlockByNumber(reqGen *RequestGenerator, blockNum uint64, withTxs bool, logger log.Logger) (rpctest.EthBlockByNumber, error) {
-	var b rpctest.EthBlockByNumber
+func GetBlockByNumber(reqGen *RequestGenerator, blockNum uint64, withTxs bool, logger log.Logger) (models.EthBlockByNumber, error) {
+	var b models.EthBlockByNumber
 
 	req := reqGen.GetBlockByNumber(blockNum, withTxs)
 
@@ -45,7 +44,7 @@ func GetBlockByNumber(reqGen *RequestGenerator, blockNum uint64, withTxs bool, l
 
 func GetBlockByNumberDetails(reqGen *RequestGenerator, blockNum string, withTxs bool, logger log.Logger) (map[string]interface{}, error) {
 	var b struct {
-		rpctest.CommonResponse
+		models.CommonResponse
 		Result interface{} `json:"result"`
 	}
 
@@ -68,8 +67,8 @@ func GetBlockByNumberDetails(reqGen *RequestGenerator, blockNum string, withTxs 
 	return m, nil
 }
 
-func GetTransactionCount(reqGen *RequestGenerator, address libcommon.Address, blockNum models.BlockNumber, logger log.Logger) (rpctest.EthGetTransactionCount, error) {
-	var b rpctest.EthGetTransactionCount
+func GetTransactionCount(reqGen *RequestGenerator, address libcommon.Address, blockNum models.BlockNumber, logger log.Logger) (models.EthGetTransactionCount, error) {
+	var b models.EthGetTransactionCount
 
 	if res := reqGen.Erigon(models.ETHGetTransactionCount, reqGen.GetTransactionCount(address, blockNum), &b); res.Err != nil {
 		return b, fmt.Errorf("error getting transaction count: %v", res.Err)
@@ -83,7 +82,7 @@ func GetTransactionCount(reqGen *RequestGenerator, address libcommon.Address, bl
 }
 
 func SendTransaction(reqGen *RequestGenerator, signedTx *types.Transaction, logger log.Logger) (*libcommon.Hash, error) {
-	var b rpctest.EthSendRawTransaction
+	var b models.EthSendRawTransaction
 
 	var buf bytes.Buffer
 	if err := (*signedTx).MarshalBinary(&buf); err != nil {

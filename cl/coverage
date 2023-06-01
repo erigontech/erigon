@@ -1,0 +1,15 @@
+#!/bin/bash
+
+SKIP_TESTS=(
+    "github.com\/ledgerwatch\/erigon\/cl\/beacon"
+    "github.com\/ledgerwatch\/erigon\/cl\/phase1"
+    "github.com\/ledgerwatch\/erigon\/cl\/phase1\/core"
+    "github.com\/ledgerwatch\/erigon\/cl\/phase1\/network"
+    "github.com\/ledgerwatch\/erigon\/cl\/phase1\/stages"
+    "github.com\/ledgerwatch\/erigon\/cl\/rpc"
+    "github.com\/ledgerwatch\/erigon\/cl\/spectest\/consensus_tests"
+)
+
+FLAGS=$(printf " -e /%s\\\t/d" "${SKIP_TESTS[@]}")
+
+go test ./... --cover | sed ${FLAGS}
