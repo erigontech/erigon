@@ -771,7 +771,7 @@ func (r *BlockReader) FirstTxNumNotInSnapshots() uint64 {
 	}
 
 	lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
-	return lastTxnID + 1
+	return lastTxnID
 }
 
 func (r *BlockReader) IterateBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error {
