@@ -132,13 +132,17 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 		return nil, InvalidBlock, nil
 	}
 
-	newState, err := f.GetState(block.ParentRoot, false)
+	newState, didLongRecconnection, err := f.GetState(block.ParentRoot, false)
 	if err != nil {
 		return nil, InvalidBlock, err
 	}
 	if newState == nil {
 		log.Debug("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
 		return nil, MissingSegment, nil
+	}
+	// if we did so by long recconection, i am afraid we need to discard the current state.
+	if didLongRecconnection {
+		f.nextReferenceState = f.currentReferenceState
 	}
 	// We may just use the current beacon state
 	prevCurrentStateSlot := f.currentState.Slot()
@@ -199,12 +203,14 @@ func (f *ForkGraph) getBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlo
 	return obj, has
 }
 
-func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.BeaconState, error) {
+func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.BeaconState, bool, error) {
+	didLongRecconnection := false
 	if f.currentStateBlockRoot == blockRoot {
 		if alwaysCopy {
-			return f.currentState.Copy()
+			s, err := f.currentState.Copy()
+			return s, didLongRecconnection, err
 		}
-		return f.currentState, nil
+		return f.currentState, didLongRecconnection, nil
 	}
 	// collect all blocks beetwen greatest extending node path and block.
 	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
@@ -213,11 +219,11 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.
 	// use the current reference state root as reconnectio
 	reconnectionRootLong, err := f.currentReferenceState.BlockRoot()
 	if err != nil {
-		return nil, err
+		return nil, didLongRecconnection, err
 	}
 	reconnectionRootShort, err := f.nextReferenceState.BlockRoot()
 	if err != nil {
-		return nil, err
+		return nil, didLongRecconnection, err
 	}
 	// try and find the point of recconection
 	for currentIteratorRoot != reconnectionRootLong && currentIteratorRoot != reconnectionRootShort {
@@ -225,7 +231,7 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.
 		if !isSegmentPresent {
 			log.Debug("Could not retrieve state: Missing header", "missing", currentIteratorRoot,
 				"longRecconection", libcommon.Hash(reconnectionRootLong), "shortRecconection", libcommon.Hash(reconnectionRootShort))
-			return nil, nil
+			return nil, didLongRecconnection, nil
 		}
 		blocksInTheWay = append(blocksInTheWay, block)
 		currentIteratorRoot = block.Block.ParentRoot
@@ -235,22 +241,23 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.
 	if currentIteratorRoot == reconnectionRootLong {
 		copyReferencedState, err = f.currentReferenceState.Copy()
 		if err != nil {
-			return nil, err
+			return nil, didLongRecconnection, err
 		}
+		didLongRecconnection = true
 	} else {
 		copyReferencedState, err = f.nextReferenceState.Copy()
 		if err != nil {
-			return nil, err
+			return nil, didLongRecconnection, err
 		}
 	}
 
 	// Traverse the blocks from top to bottom.
 	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
 		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], false); err != nil {
-			return nil, err
+			return nil, didLongRecconnection, err
 		}
 	}
-	return copyReferencedState, nil
+	return copyReferencedState, didLongRecconnection, nil
 }
 
 // updateChildren adds a new child to the parent node hash.
