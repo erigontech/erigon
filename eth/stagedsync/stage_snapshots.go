@@ -260,7 +260,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 				return err
 			}
 			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
+			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID); err != nil {
 				return err
 			}
 			if err != nil {
