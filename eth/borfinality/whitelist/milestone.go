@@ -207,20 +207,21 @@ func (m *milestone) UnlockSprint(endBlockNum uint64) {
 func (m *milestone) RemoveMilestoneID(milestoneId string) {
 	fmt.Println("Locking - RemvoveMilestoneID")
 	m.finality.Lock()
-
+	defer m.finality.Unlock()
+	fmt.Println("::::::::")
 	delete(m.LockedMilestoneIDs, milestoneId)
 
 	if len(m.LockedMilestoneIDs) == 0 {
 		m.Locked = false
 	}
-
+	fmt.Println("AFDIASNFOUBSNDO")
 	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
+	fmt.Println("RemoveMilestonesID: error: ", err)
 	if err != nil {
 		log.Error("Error in writing lock data of milestone to db", "err", err)
 	}
 
 	fmt.Println("UnLocking - RemovingMilestoneID")
-	m.finality.Unlock()
 }
 
 // This will check whether the incoming chain matches the locked sprint hash
