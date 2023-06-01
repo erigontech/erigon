@@ -143,6 +143,7 @@ func preloadFileAsync(name string) {
 }
 
 func doDiff(cliCtx *cli.Context) error {
+	defer log.Info("Done")
 	srcF, dstF := cliCtx.String("src"), cliCtx.String("dst")
 	src, err := compress.NewDecompressor(srcF)
 	if err != nil {
