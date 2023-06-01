@@ -53,7 +53,8 @@ func (f *finality[T]) IsValidChain(currentHeader *types.Header, chain []*types.H
 	}
 
 	res, err := isValidChain(currentHeader, chain, f.doExist, f.Number, f.Hash, f.interval)
-
+	fmt.Println("f.Number: ", f.Number)
+	fmt.Println("f.Hash: ", f.Hash)
 	return res, err
 }
 
