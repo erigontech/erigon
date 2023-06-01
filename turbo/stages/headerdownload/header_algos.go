@@ -1394,7 +1394,7 @@ func validateReorg(current *types.Header) (bool, error) {
 	// Call the bor chain validator service
 	s := whitelist.GetWhitelistingService()
 	if s != nil {
-		return s.IsValidChain(current, nil)
+		return s.IsValidChain(current, []*types.Header{current})
 	}
 
 	return true, nil
