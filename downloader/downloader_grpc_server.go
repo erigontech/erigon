@@ -151,14 +151,14 @@ func createMagnetLinkWithInfoHash(hash *prototypes.H160, torrentClient *torrent.
 	}
 
 	magnet := mi.Magnet(&infoHash, nil)
-	go func(magnetUrl string) {
-		t, err := torrentClient.AddMagnet(magnetUrl)
-		if err != nil {
-			log.Warn("[downloader] add magnet link", "err", err)
-			return
-		}
-		t.DisallowDataDownload()
-		t.AllowDataUpload()
+	t, err := torrentClient.AddMagnet(magnet.String())
+	if err != nil {
+		//log.Warn("[downloader] add magnet link", "err", err)
+		return false, err
+	}
+	t.DisallowDataDownload()
+	t.AllowDataUpload()
+	go func(t *torrent.Torrent) {
 		<-t.GotInfo()
 
 		mi := t.Metainfo()
@@ -166,7 +166,7 @@ func createMagnetLinkWithInfoHash(hash *prototypes.H160, torrentClient *torrent.
 			log.Warn("[downloader] create torrent file", "err", err)
 			return
 		}
-	}(magnet.String())
+	}(t)
 	//log.Debug("[downloader] downloaded both seg and torrent files", "hash", infoHash)
 	return false, nil
 }

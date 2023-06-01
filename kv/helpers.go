@@ -158,9 +158,12 @@ func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string
 			}
 			defer c.Close()
 
-			for k, _, err := c.Seek(from); k != nil && amount > 0; k, _, err = c.Next() {
+			for k, v, err := c.Seek(from); k != nil && amount > 0; k, v, err = c.Next() {
 				if err != nil {
 					return err
+				}
+				if len(v) > 0 {
+					_, _ = v[0], v[len(v)-1]
 				}
 				amount--
 				select {
