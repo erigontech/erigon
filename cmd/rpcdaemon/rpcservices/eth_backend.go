@@ -202,6 +202,9 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash libcommon.Hash) (uint64, bool, error) {
 	return back.blockReader.TxnLookup(ctx, tx, txnHash)
 }
+func (back *RemoteBackend) HasSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (bool, error) {
+	panic("HasSenders is low-level method, don't use it in RPCDaemon")
+}
 func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error) {
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockHeight)
 }
