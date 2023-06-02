@@ -16,7 +16,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
@@ -62,7 +61,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -272,7 +270,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	backend.chainConfig = chainConfig
 
 	if config.HistoryV3 {
-		backend.chainDB, err = temporal.New(backend.chainDB, backend.agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+		backend.chainDB, err = temporal.New(backend.chainDB, backend.agg, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 		if err != nil {
 			return nil, err
 		}

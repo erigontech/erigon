@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -42,7 +41,7 @@ func TestDump(t *testing.T) {
 				nonceList = append(nonceList, slot.Nonce)
 			}
 			return nil
-		}, ethconfig.EnableTxsV3InTest)
+		})
 		require.NoError(err)
 		require.Equal(2*(5+1), systemTxs)
 		require.Equal([]uint64{0, 1, 2, 3, 4}, nonceList)

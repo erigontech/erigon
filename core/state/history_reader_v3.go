@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
 // HistoryReaderV3 Implements StateReader and StateWriter
@@ -50,9 +51,14 @@ func (hr *HistoryReaderV3) ReadAccountData(address libcommon.Address) (*accounts
 }
 
 func (hr *HistoryReaderV3) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
-	acc := make([]byte, 20+8)
-	copy(acc, address.Bytes())
-	binary.BigEndian.PutUint64(acc[20:], incarnation)
+	var acc []byte
+	if ethconfig.EnableHistoryV4InTest {
+		acc = address.Bytes()
+	} else {
+		acc = make([]byte, 20+8)
+		copy(acc, address.Bytes())
+		binary.BigEndian.PutUint64(acc[20:], incarnation)
+	}
 	enc, _, err := hr.ttx.DomainGetAsOf(temporal.StorageDomain, acc, key.Bytes(), hr.txNum)
 	if hr.trace {
 		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, *key, enc)
