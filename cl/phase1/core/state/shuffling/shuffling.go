@@ -3,6 +3,7 @@ package shuffling
 import (
 	"encoding/binary"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 
 	"github.com/ledgerwatch/erigon/cl/utils"
