@@ -707,7 +707,7 @@ func DeleteBody(db kv.Deleter, hash libcommon.Hash, number uint64) {
 	}
 }
 
-func MakeBodiesCanonicalV3(tx kv.RwTx, from uint64) error {
+func AppendCanonicalTxNums(tx kv.RwTx, from uint64) error {
 	maxTxNum, err := rawdbv3.TxNums.Max(tx, from-1)
 	if err != nil {
 		return err

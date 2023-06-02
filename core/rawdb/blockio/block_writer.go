@@ -96,7 +96,7 @@ func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.C
 	}
 
 	if w.historyV3 {
-		if err := rawdb.MakeBodiesCanonicalV3(tx, from); err != nil {
+		if err := rawdb.AppendCanonicalTxNums(tx, from); err != nil {
 			return err
 		}
 	}
