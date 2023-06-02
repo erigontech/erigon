@@ -618,7 +618,7 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		}
 		versionedHashes, commitments, proofs, blobs := blobTx.GetDataHashes(), blobTx.Commitments, blobTx.Proofs, blobTx.Blobs
 		lenCheck := len(versionedHashes)
-		if lenCheck != len(commitments) || lenCheck != len(blobTx.Proofs) || lenCheck != len(blobs) {
+		if lenCheck != len(commitments) || lenCheck != len(proofs) || lenCheck != len(blobs) {
 			return nil, fmt.Errorf("tx %d in block %s has inconsistent commitments (%d) / proofs (%d) / blobs (%d) / "+
 				"versioned hashes (%d)", i, block.Hash(), len(commitments), len(proofs), len(blobs), lenCheck)
 		}
