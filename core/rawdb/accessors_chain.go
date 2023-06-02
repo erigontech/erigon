@@ -348,8 +348,8 @@ func DeleteHeader(db kv.Deleter, hash libcommon.Hash, number uint64) {
 }
 
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
-func ReadBodyRLP(db kv.Tx, hash libcommon.Hash, number uint64) rlp.RawValue {
-	body := ReadBodyWithTransactions(db, hash, number)
+func ReadBodyRLP(db kv.Tx, hash libcommon.Hash, number uint64, txsV3 bool) rlp.RawValue {
+	body, _ := ReadBodyWithTransactions(db, hash, number, txsV3)
 	bodyRlp, err := rlp.EncodeToBytes(body)
 	if err != nil {
 		log.Error("ReadBodyRLP failed", "err", err)
@@ -491,7 +491,22 @@ func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, err
 	return body, baseTxId, txAmount, nil
 }
 
-func ReadBodyWithTransactions(db kv.Getter, hash libcommon.Hash, number uint64) *types.Body {
+func ReadBodyWithTransactions(db kv.Getter, hash libcommon.Hash, number uint64, txsV3 bool) (*types.Body, error) {
+	if txsV3 {
+		return ReadCanonicalBodyWithTransactions(db, hash, number), nil
+	}
+
+	canonicalHash, err := ReadCanonicalHash(db, number)
+	if err != nil {
+		return nil, fmt.Errorf("read canonical hash failed: %d, %w", number, err)
+	}
+	if canonicalHash == hash {
+		return ReadCanonicalBodyWithTransactions(db, hash, number), nil
+	}
+	return NonCanonicalBodyWithTransactions(db, hash, number), nil
+}
+
+func ReadCanonicalBodyWithTransactions(db kv.Getter, hash libcommon.Hash, number uint64) *types.Body {
 	body, baseTxId, txAmount := ReadBody(db, hash, number)
 	if body == nil {
 		return nil
@@ -1115,12 +1130,12 @@ func ReceiptsAvailableFrom(tx kv.Tx) (uint64, error) {
 //
 // Note, due to concurrent download of header and block body the header and thus
 // canonical hash can be stored in the database but the body data not (yet).
-func ReadBlock(tx kv.Getter, hash libcommon.Hash, number uint64) *types.Block {
+func ReadBlock(tx kv.Getter, hash libcommon.Hash, number uint64, txsV3 bool) *types.Block {
 	header := ReadHeader(tx, hash, number)
 	if header == nil {
 		return nil
 	}
-	body := ReadBodyWithTransactions(tx, hash, number)
+	body, _ := ReadBodyWithTransactions(tx, hash, number, txsV3)
 	if body == nil {
 		return nil
 	}
@@ -1155,18 +1170,22 @@ func HasBlock(db kv.Getter, hash libcommon.Hash, number uint64) bool {
 	return len(body) > 0
 }
 
-func ReadBlockWithSenders(db kv.Getter, hash libcommon.Hash, number uint64) (*types.Block, []libcommon.Address, error) {
-	block := ReadBlock(db, hash, number)
+func ReadBlockWithSenders(db kv.Getter, hash libcommon.Hash, number uint64, txsV3 bool) (*types.Block, []libcommon.Address, error) {
+	block := ReadBlock(db, hash, number, txsV3)
 	if block == nil {
+		fmt.Printf("nil 1\n")
 		return nil, nil, nil
 	}
 	senders, err := ReadSenders(db, hash, number)
 	if err != nil {
+		fmt.Printf("nil 2\n")
 		return nil, nil, err
 	}
 	if len(senders) != block.Transactions().Len() {
+		fmt.Printf("nil 3\n")
 		return block, senders, nil // no senders is fine - will recover them on the fly
 	}
+	fmt.Printf("not nil 4\n")
 	block.SendersToTxs(senders)
 	return block, senders, nil
 }
@@ -1350,19 +1369,6 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 
 	return nil
 }
-
-func ReadBlockByNumber(db kv.Tx, number uint64) (*types.Block, error) {
-	hash, err := ReadCanonicalHash(db, number)
-	if err != nil {
-		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
-	}
-	if hash == (libcommon.Hash{}) {
-		return nil, nil
-	}
-
-	return ReadBlock(db, hash, number), nil
-}
-
 func ReadTotalIssued(db kv.Getter, number uint64) (*big.Int, error) {
 	data, err := db.GetOne(kv.Issuance, hexutility.EncodeTs(number))
 	if err != nil {

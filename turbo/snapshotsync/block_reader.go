@@ -308,25 +308,17 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash libcommon.H
 	return h, nil
 }
 
-func readBodyWithTransactionsDeprecated(db kv.Getter, hash libcommon.Hash, number uint64) (*types.Body, error) {
-	canonicalHash, err := rawdb.ReadCanonicalHash(db, number)
-	if err != nil {
-		return nil, fmt.Errorf("read canonical hash failed: %d, %w", number, err)
-	}
-	if canonicalHash == hash {
-		return rawdb.ReadBodyWithTransactions(db, hash, number), nil
-	}
-	return rawdb.NonCanonicalBodyWithTransactions(db, hash, number), nil
-}
-
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (body *types.Body, err error) {
 	if r.TransactionsV3 {
-		body = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
+		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight, r.TransactionsV3)
+		if err != nil {
+			return nil, err
+		}
 		if body != nil {
 			return body, nil
 		}
 	} else {
-		body, err = readBodyWithTransactionsDeprecated(tx, hash, blockHeight)
+		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight, r.TransactionsV3)
 		if err != nil {
 			return nil, err
 		}
@@ -432,7 +424,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash l
 				}
 			}
 
-			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight, r.TransactionsV3)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -442,8 +434,9 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash l
 		if err != nil {
 			return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
 		}
+		fmt.Printf("is can: %d, isCan=%t, forceCanonical=%t\n", blockHeight, canonicalHash == hash, forceCanonical)
 		if canonicalHash == hash {
-			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight, r.TransactionsV3)
 			if err != nil {
 				return nil, nil, err
 			}

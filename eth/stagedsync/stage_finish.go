@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	common2 "github.com/ledgerwatch/erigon/common"
@@ -123,7 +124,7 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 	return nil
 }
 
-func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishStageAfterSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx, logger log.Logger) error {
+func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishStageAfterSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx, logger log.Logger, blockReader services.FullBlockReader) error {
 	t := time.Now()
 	if notifier == nil {
 		logger.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
@@ -174,7 +175,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 
 		t = time.Now()
 		if notifier.HasLogSubsriptions() {
-			logs, err := ReadLogs(tx, notifyFrom, isUnwind)
+			logs, err := ReadLogs(tx, notifyFrom, isUnwind, blockReader)
 			if err != nil {
 				return err
 			}
@@ -186,7 +187,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	return nil
 }
 
-func ReadLogs(tx kv.Tx, from uint64, isUnwind bool) ([]*remote.SubscribeLogsReply, error) {
+func ReadLogs(tx kv.Tx, from uint64, isUnwind bool, blockReader services.FullBlockReader) ([]*remote.SubscribeLogsReply, error) {
 	logs, err := tx.Cursor(kv.Log)
 	if err != nil {
 		return nil, err
@@ -206,7 +207,7 @@ func ReadLogs(tx kv.Tx, from uint64, isUnwind bool) ([]*remote.SubscribeLogsRepl
 		if block == nil || blockNum != prevBlockNum {
 			logIndex = 0
 			prevBlockNum = blockNum
-			if block, err = rawdb.ReadBlockByNumber(tx, blockNum); err != nil {
+			if block, err = blockReader.BlockByNumber(context.Background(), tx, blockNum); err != nil {
 				return nil, err
 			}
 		}
