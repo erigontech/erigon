@@ -506,9 +506,9 @@ func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 	}
 
 	if buffered {
-		w.values = etl.NewCollector(d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM))
+		w.values = etl.NewCollector(d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), d.logger)
 		w.values.LogLvl(log.LvlTrace)
-		w.keys = etl.NewCollector(d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM))
+		w.keys = etl.NewCollector(d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), d.logger)
 		w.keys.LogLvl(log.LvlTrace)
 	}
 	return w

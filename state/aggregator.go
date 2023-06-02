@@ -134,7 +134,7 @@ func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode Co
 	if err != nil {
 		return nil, err
 	}
-	a.commitment = NewCommittedDomain(commitd, commitmentMode, commitTrieVariant, logger)
+	a.commitment = NewCommittedDomain(commitd, commitmentMode, commitTrieVariant)
 
 	if a.logAddrs, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "logaddrs", kv.LogAddressKeys, kv.LogAddressIdx, false, nil, logger); err != nil {
 		return nil, err
