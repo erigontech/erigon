@@ -611,7 +611,7 @@ func (rs *StateV3) SizeEstimate() (r uint64) {
 	return r * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
 }
 
-func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
+func (rs *StateV3) ReadsValid(readLists map[string]*libstate.KvList) bool {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	for table, list := range readLists {
@@ -641,7 +641,7 @@ func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
 	return true
 }
 
-func (rs *StateV3) readsValidMap(table string, list *exec22.KvList, m map[string][]byte) bool {
+func (rs *StateV3) readsValidMap(table string, list *libstate.KvList, m map[string][]byte) bool {
 	switch table {
 	case CodeSizeTable:
 		for i, key := range list.Keys {
@@ -663,7 +663,7 @@ func (rs *StateV3) readsValidMap(table string, list *exec22.KvList, m map[string
 	return true
 }
 
-func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.Map[string, []byte]) bool {
+func (rs *StateV3) readsValidBtree(table string, list *libstate.KvList, m *btree2.Map[string, []byte]) bool {
 	for i, key := range list.Keys {
 		if val, ok := m.Get(key); ok {
 			if !bytes.Equal(list.Vals[i], val) {
@@ -678,7 +678,7 @@ func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.
 type StateWriterBufferedV3 struct {
 	rs           *StateV3
 	txNum        uint64
-	writeLists   map[string]*exec22.KvList
+	writeLists   map[string]*libstate.KvList
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
@@ -704,7 +704,7 @@ func (w *StateWriterBufferedV3) ResetWriteSet() {
 	w.codePrevs = nil
 }
 
-func (w *StateWriterBufferedV3) WriteSet() map[string]*exec22.KvList {
+func (w *StateWriterBufferedV3) WriteSet() map[string]*libstate.KvList {
 	return w.writeLists
 }
 
@@ -788,7 +788,7 @@ type StateReaderV3 struct {
 	composite []byte
 
 	discardReadList bool
-	readLists       map[string]*exec22.KvList
+	readLists       map[string]*libstate.KvList
 }
 
 func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
@@ -798,12 +798,12 @@ func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
 	}
 }
 
-func (r *StateReaderV3) DiscardReadList()                   { r.discardReadList = true }
-func (r *StateReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum }
-func (r *StateReaderV3) SetTx(tx kv.Tx)                     { r.tx = tx }
-func (r *StateReaderV3) ReadSet() map[string]*exec22.KvList { return r.readLists }
-func (r *StateReaderV3) SetTrace(trace bool)                { r.trace = trace }
-func (r *StateReaderV3) ResetReadSet()                      { r.readLists = newReadList() }
+func (r *StateReaderV3) DiscardReadList()                     { r.discardReadList = true }
+func (r *StateReaderV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
+func (r *StateReaderV3) SetTx(tx kv.Tx)                       { r.tx = tx }
+func (r *StateReaderV3) ReadSet() map[string]*libstate.KvList { return r.readLists }
+func (r *StateReaderV3) SetTrace(trace bool)                  { r.trace = trace }
+func (r *StateReaderV3) ResetReadSet()                        { r.readLists = newReadList() }
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
@@ -920,7 +920,7 @@ func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, 
 
 var writeListPool = sync.Pool{
 	New: func() any {
-		return map[string]*exec22.KvList{
+		return map[string]*libstate.KvList{
 			kv.PlainState:        {},
 			StorageTable:         {},
 			kv.Code:              {},
@@ -930,14 +930,14 @@ var writeListPool = sync.Pool{
 	},
 }
 
-func newWriteList() map[string]*exec22.KvList {
-	v := writeListPool.Get().(map[string]*exec22.KvList)
+func newWriteList() map[string]*libstate.KvList {
+	v := writeListPool.Get().(map[string]*libstate.KvList)
 	for _, tbl := range v {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return v
 }
-func returnWriteList(v map[string]*exec22.KvList) {
+func returnWriteList(v map[string]*libstate.KvList) {
 	if v == nil {
 		return
 	}
@@ -946,7 +946,7 @@ func returnWriteList(v map[string]*exec22.KvList) {
 
 var readListPool = sync.Pool{
 	New: func() any {
-		return map[string]*exec22.KvList{
+		return map[string]*libstate.KvList{
 			kv.PlainState:     {},
 			kv.Code:           {},
 			CodeSizeTable:     {},
@@ -956,14 +956,14 @@ var readListPool = sync.Pool{
 	},
 }
 
-func newReadList() map[string]*exec22.KvList {
-	v := readListPool.Get().(map[string]*exec22.KvList)
+func newReadList() map[string]*libstate.KvList {
+	v := readListPool.Get().(map[string]*libstate.KvList)
 	for _, tbl := range v {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return v
 }
-func returnReadList(v map[string]*exec22.KvList) {
+func returnReadList(v map[string]*libstate.KvList) {
 	if v == nil {
 		return
 	}
