@@ -75,7 +75,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	if cfg.blockRetire != nil && cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled && s.BlockNumber < cfg.blockRetire.Snapshots().BlocksAvailable() {
 		s.BlockNumber = cfg.blockRetire.Snapshots().BlocksAvailable()
 	}
-	txsV3Enabled := cfg.blockWriter.TxsV3Enabled() // allow stor senders for non-canonical blocks
 
 	quitCh := ctx.Done()
 	useExternalTx := tx != nil
@@ -109,39 +108,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer logEvery.Stop()
 
 	startFrom := s.BlockNumber + 1
-	currentHeaderIdx := uint64(0)
-	canonical := make([]libcommon.Hash, to-s.BlockNumber)
-
-	if !txsV3Enabled {
-		canonicalC, err := tx.Cursor(kv.HeaderCanonical)
-		if err != nil {
-			return err
-		}
-		defer canonicalC.Close()
-
-		for k, v, err := canonicalC.Seek(hexutility.EncodeTs(startFrom)); k != nil; k, v, err = canonicalC.Next() {
-			if err != nil {
-				return err
-			}
-			if err := libcommon.Stopped(quitCh); err != nil {
-				return err
-			}
-
-			if currentHeaderIdx >= to-s.BlockNumber { // if header stage is ehead of body stage
-				break
-			}
-
-			copy(canonical[currentHeaderIdx][:], v)
-			currentHeaderIdx++
-
-			select {
-			default:
-			case <-logEvery.C:
-				logger.Info(fmt.Sprintf("[%s] Preload headers", logPrefix), "block_number", binary.BigEndian.Uint64(k))
-			}
-		}
-	}
-	logger.Trace(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "amount", len(canonical))
 
 	jobs := make(chan *senderRecoveryJob, cfg.batchSize)
 	out := make(chan *senderRecoveryJob, cfg.batchSize)
@@ -236,15 +202,15 @@ Loop:
 			break
 		}
 
-		var body *types.Body
-		if txsV3Enabled {
-
-		} else {
-			if canonical[blockNumber-s.BlockNumber-1] != blockHash {
-				// non-canonical case
-				continue
-			}
+		has, err := cfg.blockReader.HasSenders(ctx, tx, blockHash, blockNumber)
+		if err != nil {
+			return err
 		}
+		if has {
+			continue
+		}
+
+		var body *types.Body
 		if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
 			return err
 		}
@@ -406,7 +372,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 	sn := cfg.blockRetire.Snapshots()
 	if !(sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce) && cfg.prune.TxIndex.Enabled() {
 		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
-		if err = rawdb.PruneTable(tx, kv.Senders, to, ctx, 1_000); err != nil {
+		if err = rawdb.PruneTable(tx, kv.Senders, to, ctx, 100); err != nil {
 			return err
 		}
 	}
