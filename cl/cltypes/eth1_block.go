@@ -193,15 +193,14 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}
 	baseFee := new(big.Int).SetBytes(reversedBaseFeePerGas)
-
 	// If the block version is Capella or later, calculate the withdrawals hash.
 	var withdrawalsHash *libcommon.Hash
 	if b.version >= clparams.CapellaVersion {
 		withdrawalsHash = new(libcommon.Hash)
 		// extract all withdrawals from itearable list
 		withdrawals := make([]*types.Withdrawal, b.Withdrawals.Len())
-		b.Withdrawals.Range(func(_ int, w *types.Withdrawal, _ int) bool {
-			withdrawals = append(withdrawals, w)
+		b.Withdrawals.Range(func(idx int, w *types.Withdrawal, _ int) bool {
+			withdrawals[idx] = w
 			return true
 		})
 		*withdrawalsHash = types.DeriveSha(types.Withdrawals(withdrawals))
