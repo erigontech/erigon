@@ -34,8 +34,8 @@ func TestEth1Header(t *testing.T) {
 	blockHash := libcommon.Hash{}
 	transactionsRoot := libcommon.Hash{}
 	withdrawalsRoot := libcommon.Hash{}
-	dataGasUsed := uint64(13)
-	excessDataGas := uint64(11)
+	dataGasUsed := uint64(50)
+	excessDataGas := uint64(60)
 
 	// Test Eth1Header
 	header = &Eth1Header{
@@ -75,5 +75,5 @@ func TestEth1Header(t *testing.T) {
 	// Test HashSSZ
 	root, err := header.HashSSZ()
 	assert.NoError(t, err)
-	assert.Equal(t, libcommon.HexToHash("40cfd5eae75760f80eddcee9e60a2c783e090d4474b099bf2bdeffb5496a1ccb"), libcommon.Hash(root))
+	assert.Equal(t, libcommon.HexToHash("0x9170a25a0980f07bcb9af2a52ff915262763e0e6a2df26aa205b967bd462a6d3"), libcommon.Hash(root))
 }
