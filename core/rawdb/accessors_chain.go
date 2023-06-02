@@ -446,7 +446,6 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) err
 			return fmt.Errorf("broken tx rlp: %w", err)
 		}
 
-		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := db.Append(kv.EthTx, txIdKey, buf.Bytes()); err != nil {
 			return err
 		}
@@ -459,12 +458,11 @@ func WriteRawTransactions(tx kv.RwTx, txs [][]byte, baseTxId uint64) error {
 	txIdKey := make([]byte, 8)
 	for _, txn := range txs {
 		binary.BigEndian.PutUint64(txIdKey, txId)
-		txId++
-
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := tx.Append(kv.EthTx, txIdKey, txn); err != nil {
 			return fmt.Errorf("txId=%d, baseTxId=%d, %w", txId, baseTxId, err)
 		}
+		txId++
 	}
 	return nil
 }
