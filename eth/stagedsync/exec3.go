@@ -177,7 +177,7 @@ func ExecV3(ctx context.Context,
 		defer applyTx.Rollback()
 	} else {
 		if blockSnapshots.Cfg().Enabled {
-			defer blockSnapshots.EnableMadvNormal().DisableReadAhead()
+			//defer blockSnapshots.EnableMadvNormal().DisableReadAhead()
 		}
 	}
 

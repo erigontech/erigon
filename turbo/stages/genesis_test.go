@@ -142,7 +142,7 @@ func TestSetupGenesis(t *testing.T) {
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			_, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(tmpdir), nil)
+			_, _, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(tmpdir), nil, log.New())
 			config, genesis, err := test.fn(db)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {
