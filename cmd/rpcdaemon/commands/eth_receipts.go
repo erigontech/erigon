@@ -64,10 +64,9 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 		return h
 	}
 	header := block.Header()
-	excessDataGas := header.ParentExcessDataGas(getHeader)
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{}, excessDataGas)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{})
 		if err != nil {
 			return nil, err
 		}
@@ -649,15 +648,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
-	var edg *big.Int
-	if n := block.Number().Uint64(); n > 0 {
-		if parentHeader, err := api._blockReader.Header(ctx, tx, block.ParentHash(), n-1); err != nil {
-			return nil, err
-		} else {
-			edg = parentHeader.ExcessDataGas
-		}
-	}
-
 	if txn == nil {
 		borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
 		if err != nil {
@@ -666,14 +656,14 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		if borReceipt == nil {
 			return nil, nil
 		}
-		return marshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false, edg), nil
+		return marshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
 	if len(receipts) <= int(txnIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
 	}
 
-	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true, edg), nil
+	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -705,17 +695,9 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 	result := make([]map[string]interface{}, 0, len(receipts))
-	var edg *big.Int
-	if n := block.Number().Uint64(); n > 0 {
-		if parentHeader, err := api._blockReader.Header(ctx, tx, block.ParentHash(), n-1); err != nil {
-			return nil, err
-		} else {
-			edg = parentHeader.ExcessDataGas
-		}
-	}
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, edg))
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true))
 	}
 
 	if chainConfig.Bor != nil {
@@ -726,7 +708,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 				return nil, err
 			}
 			if borReceipt != nil {
-				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false, edg))
+				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 			}
 		}
 	}
@@ -734,7 +716,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	return result, nil
 }
 
-func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, txnHash common.Hash, signed bool, excessDataGas *big.Int) map[string]interface{} {
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, txnHash common.Hash, signed bool) map[string]interface{} {
 	var chainId *big.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
@@ -791,10 +773,10 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 	// Set derived blob related fields
 	numBlobs := len(txn.GetDataHashes())
 	if numBlobs > 0 {
-		if excessDataGas == nil {
+		if header.ExcessDataGas == nil {
 			log.Warn("excess data gas not set when trying to marshal blob tx")
 		} else {
-			dataGasPrice, err := misc.GetDataGasPrice(excessDataGas)
+			dataGasPrice, err := misc.GetDataGasPrice(*header.ExcessDataGas)
 			if err != nil {
 				log.Error(err.Error())
 			}

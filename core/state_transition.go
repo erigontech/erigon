@@ -207,15 +207,14 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	dgval := new(uint256.Int)
 	var dataGasUsed uint64
 	if st.evm.ChainRules().IsCancun {
-		dataGasUsed = st.dataGasUsed()
 		if st.evm.Context().ExcessDataGas == nil {
-			return fmt.Errorf("%w: sharding is active but ExcessDataGas is nil", ErrInternalFailure)
+			return fmt.Errorf("%w: Cancun is active but ExcessDataGas is nil", ErrInternalFailure)
 		}
-		dataGasPrice, err := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
+		dataGasPrice, err := misc.GetDataGasPrice(*st.evm.Context().ExcessDataGas)
 		if err != nil {
 			return err
 		}
-		_, overflow = dgval.MulOverflow(dataGasPrice, new(uint256.Int).SetUint64(dataGasUsed))
+		_, overflow = dgval.MulOverflow(dataGasPrice, new(uint256.Int).SetUint64(st.dataGasUsed()))
 		if overflow {
 			return fmt.Errorf("%w: overflow converting datagas: %v", ErrInsufficientFunds, dgval)
 		}
@@ -312,7 +311,10 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 	if st.dataGasUsed() > 0 && st.evm.ChainRules().IsCancun {
-		dataGasPrice, err := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
+		if st.evm.Context().ExcessDataGas == nil {
+			return fmt.Errorf("%w: Cancun is active but ExcessDataGas is nil", ErrInternalFailure)
+		}
+		dataGasPrice, err := misc.GetDataGasPrice(*st.evm.Context().ExcessDataGas)
 		if err != nil {
 			return err
 		}
