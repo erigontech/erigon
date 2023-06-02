@@ -25,13 +25,15 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -141,7 +143,8 @@ func TestSetupGenesis(t *testing.T) {
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			db := memdb.NewTestDB(t)
+			_, _, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(tmpdir), nil, log.New())
+			blockReader := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()), ethconfig.EnableTxsV3InTest)
 			config, genesis, err := test.fn(db)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {
@@ -164,7 +167,7 @@ func TestSetupGenesis(t *testing.T) {
 			} else if err == nil {
 				if dbErr := db.View(context.Background(), func(tx kv.Tx) error {
 					// Check database content.
-					stored := rawdb.ReadBlock(tx, test.wantHash, 0)
+					stored, _, _ := blockReader.BlockWithSenders(context.Background(), tx, test.wantHash, 0)
 					if stored.Hash() != test.wantHash {
 						t.Errorf("%s: block in DB has hash %s, want %s", test.name, stored.Hash(), test.wantHash)
 					}

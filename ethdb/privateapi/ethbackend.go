@@ -44,7 +44,8 @@ import (
 // 3.0.0 - adding PoS interfaces
 // 3.1.0 - add Subscribe to logs
 // 3.2.0 - add EngineGetBlobsBundleV1
-var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 2, Patch: 0}
+// 3.3.0 - merge EngineGetBlobsBundleV1 into EngineGetPayload
+var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 3, Patch: 0}
 
 const MaxBuilders = 128
 
@@ -296,60 +297,6 @@ func (s *EthBackendServer) checkWithdrawalsPresence(time uint64, withdrawals []*
 		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
 	}
 	return nil
-}
-
-func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
-	// TODO: get the latest update on this function (it was replaced)
-	if !s.proposing {
-		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
-	}
-
-	if s.config.TerminalTotalDifficulty == nil {
-		return nil, fmt.Errorf("not a proof-of-stake chain")
-	}
-
-	s.logger.Debug("[GetBlobsBundleV1] acquiring lock")
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.logger.Debug("[GetBlobsBundleV1] lock acquired")
-
-	builder, ok := s.builders[req.PayloadId]
-	if !ok {
-		s.logger.Warn("Payload not stored", "payloadId", req.PayloadId)
-		return nil, &UnknownPayloadErr
-	}
-
-	block, err := builder.Stop()
-	if err != nil {
-		s.logger.Error("Failed to build PoS block", "err", err)
-		return nil, err
-	}
-
-	blobsBundle := &types2.BlobsBundleV1{
-		BlockHash: gointerfaces.ConvertHashToH256(block.Block.Header().Hash()),
-	}
-	for i, tx := range block.Block.Transactions() {
-		if tx.Type() != types.BlobTxType {
-			continue
-		}
-		blobtx, ok := tx.(*types.BlobTxWrapper)
-		if !ok {
-			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobtx)
-		}
-		versionedHashes, kzgs, blobs, proofs := blobtx.GetDataHashes(), blobtx.Commitments, blobtx.Blobs, blobtx.Proofs
-		lenCheck := len(versionedHashes)
-		if lenCheck != len(kzgs) || lenCheck != len(blobs) || lenCheck != len(blobtx.Proofs) {
-			return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d) / proofs (%d)"+
-				" / versioned hashes (%d)", i, block.Block.Hash(), len(blobs), len(kzgs), len(proofs), lenCheck)
-		}
-		for _, blob := range blobs {
-			blobsBundle.Blobs = append(blobsBundle.Blobs, blob[:])
-		}
-		for _, kzg := range kzgs {
-			blobsBundle.Kzgs = append(blobsBundle.Kzgs, kzg[:])
-		}
-	}
-	return blobsBundle, nil
 }
 
 // EngineNewPayload validates and possibly executes payload
@@ -648,7 +595,7 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		BlockNumber:   block.NumberU64(),
 		ExtraData:     block.Extra(),
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
-		BlockHash:     gointerfaces.ConvertHashToH256(header.Hash()),
+		BlockHash:     gointerfaces.ConvertHashToH256(block.Hash()),
 		Transactions:  encodedTransactions,
 	}
 	if block.Withdrawals() != nil {
@@ -663,9 +610,37 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 	}
 
 	blockValue := blockValue(blockWithReceipts, baseFee)
+
+	blobsBundle := &types2.BlobsBundleV1{}
+	for i, tx := range block.Transactions() {
+		if tx.Type() != types.BlobTxType {
+			continue
+		}
+		blobTx, ok := tx.(*types.BlobTxWrapper)
+		if !ok {
+			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobTx)
+		}
+		versionedHashes, commitments, proofs, blobs := blobTx.GetDataHashes(), blobTx.Commitments, blobTx.Proofs, blobTx.Blobs
+		lenCheck := len(versionedHashes)
+		if lenCheck != len(commitments) || lenCheck != len(proofs) || lenCheck != len(blobs) {
+			return nil, fmt.Errorf("tx %d in block %s has inconsistent commitments (%d) / proofs (%d) / blobs (%d) / "+
+				"versioned hashes (%d)", i, block.Hash(), len(commitments), len(proofs), len(blobs), lenCheck)
+		}
+		for _, commitment := range commitments {
+			blobsBundle.Commitments = append(blobsBundle.Commitments, commitment[:])
+		}
+		for _, proof := range proofs {
+			blobsBundle.Proofs = append(blobsBundle.Proofs, proof[:])
+		}
+		for _, blob := range blobs {
+			blobsBundle.Blobs = append(blobsBundle.Blobs, blob[:])
+		}
+	}
+
 	return &remote.EngineGetPayloadResponse{
 		ExecutionPayload: payload,
 		BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
+		BlobsBundle:      blobsBundle,
 	}, nil
 }
 

@@ -29,6 +29,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
+var NO_GENESIS_TIME_ERR error = errors.New("genesis time is not set")
+var NO_VALIDATOR_ROOT_HASH error = errors.New("genesis validators root is not set")
+
 func ForkDigestVersion(digest [4]byte, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) (clparams.StateVersion, error) {
 	var (
 		phase0ForkDigest, altairForkDigest, bellatrixForkDigest, capellaForkDigest, denebForkDigest [4]byte
@@ -93,10 +96,10 @@ func ComputeForkDigest(
 	genesisConfig *clparams.GenesisConfig,
 ) ([4]byte, error) {
 	if genesisConfig.GenesisTime == 0 {
-		return [4]byte{}, errors.New("genesis time is not set")
+		return [4]byte{}, NO_GENESIS_TIME_ERR
 	}
 	if genesisConfig.GenesisValidatorRoot == (libcommon.Hash{}) {
-		return [4]byte{}, errors.New("genesis validators root is not set")
+		return [4]byte{}, NO_VALIDATOR_ROOT_HASH
 	}
 
 	currentEpoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
@@ -117,16 +120,17 @@ func ComputeNextForkDigest(
 	genesisConfig *clparams.GenesisConfig,
 ) ([4]byte, error) {
 	if genesisConfig.GenesisTime == 0 {
-		return [4]byte{}, errors.New("genesis time is not set")
+		return [4]byte{}, NO_GENESIS_TIME_ERR
 	}
 	if genesisConfig.GenesisValidatorRoot == (libcommon.Hash{}) {
-		return [4]byte{}, errors.New("genesis validators root is not set")
+		return [4]byte{}, NO_VALIDATOR_ROOT_HASH
 	}
 
 	currentEpoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
 	// Retrieve next fork version.
 	nextForkIndex := 0
 	forkList := forkList(beaconConfig.ForkVersionSchedule)
+	fmt.Println(forkList, beaconConfig.ForkVersionSchedule)
 	for _, fork := range forkList {
 		if currentEpoch >= fork.epoch {
 			nextForkIndex++
@@ -139,7 +143,7 @@ func ComputeNextForkDigest(
 		return [4]byte{}, nil
 	}
 	nextForkIndex++
-
+	fmt.Println(forkList[nextForkIndex].version)
 	return ComputeForkDigestForVersion(forkList[nextForkIndex].version, genesisConfig.GenesisValidatorRoot)
 }
 

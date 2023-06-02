@@ -97,7 +97,7 @@ func (h *hashList) Set(index int, newValue libcommon.Hash) {
 }
 
 func (h *hashList) hashVectorSSZ() ([32]byte, error) {
-	depth := getDepth(uint64(h.c))
+	depth := GetDepth(uint64(h.c))
 	offset := length.Hash * h.l
 	elements := common.Copy(h.u[:offset])
 	for i := uint8(0); i < depth; i++ {
@@ -117,7 +117,7 @@ func (h *hashList) hashVectorSSZ() ([32]byte, error) {
 }
 
 func (h *hashList) HashSSZ() ([32]byte, error) {
-	depth := getDepth(uint64(h.c))
+	depth := GetDepth(uint64(h.c))
 	baseRoot := [32]byte{}
 	var err error
 	if h.l == 0 {

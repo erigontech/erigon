@@ -61,11 +61,9 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -272,7 +270,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	backend.chainConfig = chainConfig
 
 	if config.HistoryV3 {
-		backend.chainDB, err = temporal.New(backend.chainDB, backend.agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+		backend.chainDB, err = temporal.New(backend.chainDB, backend.agg, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 		if err != nil {
 			return nil, err
 		}
@@ -623,7 +621,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	}
 
 	backend.stagedSync, err = stages3.NewStagedSync(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config,
-		backend.sentriesClient, backend.notifications, backend.downloaderClient, backend.agg, backend.forkValidator, backend.engine, logger, backend.blockReader, backend.blockWriter)
+		backend.sentriesClient, backend.notifications, backend.downloaderClient, backend.agg, backend.forkValidator, logger, backend.blockReader, backend.blockWriter)
 	if err != nil {
 		return nil, err
 	}
