@@ -76,7 +76,7 @@ func TestBodiesUnwind(t *testing.T) {
 
 	{
 		// unwind to block 5, means mark blocks >= 6 as non-canonical
-		err = bw.MakeBodiesNonCanonical(tx, 5+1, false, m.Ctx, "test", logEvery, br.TxsV3Enabled())
+		err = bw.MakeBodiesNonCanonical(tx, 5+1, false, m.Ctx, "test", logEvery)
 		require.NoError(err)
 
 		n, err := tx.ReadSequence(kv.EthTx)
