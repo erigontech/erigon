@@ -294,6 +294,7 @@ func (e *EngineImpl) newPayload(version uint32, ctx context.Context, payload *Ex
 		ep.Withdrawals = privateapi.ConvertWithdrawalsToRpc(payload.Withdrawals)
 	}
 	if version >= 3 && payload.DataGasUsed != nil && payload.ExcessDataGas != nil {
+		ep.Version = 3
 		dataGasUsed := uint64(*payload.DataGasUsed)
 		ep.DataGasUsed = &dataGasUsed
 		excessDataGas := uint64(*payload.ExcessDataGas)

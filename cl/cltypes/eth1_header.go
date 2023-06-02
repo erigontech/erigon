@@ -98,7 +98,7 @@ func (h *Eth1Header) EncodingSizeSSZ() int {
 	}
 
 	if h.version >= clparams.DenebVersion {
-		size += 8 * 2
+		size += 8 * 2 // DataGasUsed + ExcessDataGas
 	}
 	if h.Extra == nil {
 		h.Extra = solid.NewExtraData()
