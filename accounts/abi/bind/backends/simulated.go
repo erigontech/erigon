@@ -348,15 +348,10 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash libcommon.Hash)
 	}
 	defer tx.Rollback()
 
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	if number == nil {
-		return nil, nil
-	}
-	block, _, err := b.BlockReader().BlockWithSenders(ctx, tx, hash, *number)
+	block, err := b.BlockReader().BlockByHash(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
-
 	if block != nil {
 		return block, nil
 	}
