@@ -146,6 +146,7 @@ func handleWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, config *config
 	service := whitelist.GetWhitelistingService()
 
 	blockNum, blockHash, err := fetchWhitelistCheckpoint(ctx, bor, verifier, config)
+	fmt.Println("Handle Whitelist", blockNum)
 	// If the array is empty, we're bound to receive an error. Non-nill error and non-empty array
 	// means that array has partial elements and it failed for some block. We'll add those partial
 	// elements anyway.
@@ -164,8 +165,9 @@ type heimdallHandler func(ctx context.Context, bor *bor.Bor, config *config) err
 func handleMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
 	// Create a new bor verifier, which will be used to verify checkpoints and milestones
 	verifier := newBorVerifier()
-	num, hash, err := fetchWhitelistMilestone(ctx, bor, verifier, config)
 
+	num, hash, err := fetchWhitelistMilestone(ctx, bor, verifier, config)
+	fmt.Println("Handle Whitelist Whitelist", num)
 	service := whitelist.GetWhitelistingService()
 
 	// If the current chain head is behind the received milestone, add it to the future milestone

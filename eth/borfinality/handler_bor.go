@@ -3,6 +3,7 @@ package borfinality
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/bor"
@@ -69,10 +70,11 @@ func fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, verifier *borVer
 		log.Error("Failed to fetch latest milestone for whitelisting", "err", err)
 		return num, hash, errMilestone
 	}
-
+	fmt.Println("FEtch whitelitst")
 	num = milestone.EndBlock.Uint64()
 	hash = milestone.Hash
 
+	fmt.Println("FEtch whitelitst um jknsjfnskd: ", num)
 	// Verify if the milestone fetched can be added to the local whitelist entry or not
 	// If verified, it returns the hash of the end block of the milestone. If not,
 	// it will return appropriate error.
