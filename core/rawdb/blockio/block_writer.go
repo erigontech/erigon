@@ -91,9 +91,17 @@ func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.C
 		// Property of blockchain: same block in different forks will have different hashes.
 		// Means - can mark all canonical blocks as non-canonical on unwind, and
 		// do opposite here - without storing any meta-info.
-		if err := rawdb.MakeBodiesCanonical(tx, from, ctx, logPrefix, logEvery); err != nil {
+		if err := rawdb.MakeBodiesCanonicalOld(tx, from, ctx, logPrefix, logEvery, w.txsV3, func(blockNum, lastTxnNum uint64) error {
+			if w.historyV3 {
+				if err := rawdbv3.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
 			return fmt.Errorf("make block canonical: %w", err)
 		}
+		return nil
 	}
 	if w.historyV3 {
 		if err := rawdb.AppendCanonicalTxNums(tx, from); err != nil {

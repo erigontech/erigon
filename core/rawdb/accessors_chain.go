@@ -746,7 +746,7 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 }
 
 // MakeBodiesCanonical - move all txs of non-canonical blocks from NonCanonicalTxs table to EthTx table
-func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+func MakeBodiesCanonicalOld(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker, transactionsV3 bool, cb func(blockNum, lastTxnNum uint64) error) error {
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -764,7 +764,8 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
 			return err
 		}
-		newBaseId, err := tx.IncrementSequence(kv.EthTx, uint64(bodyForStorage.TxAmount))
+		ethTx := kv.EthTx
+		newBaseId, err := tx.IncrementSequence(ethTx, uint64(bodyForStorage.TxAmount))
 		if err != nil {
 			return err
 		}
@@ -788,6 +789,12 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 		bodyForStorage.BaseTxId = newBaseId
 		if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
 			return err
+		}
+		if cb != nil {
+			lastTxnNum := bodyForStorage.BaseTxId + uint64(bodyForStorage.TxAmount)
+			if err = cb(blockNum, lastTxnNum); err != nil {
+				return err
+			}
 		}
 
 		select {

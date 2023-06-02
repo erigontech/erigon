@@ -309,22 +309,12 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash libcommon.H
 }
 
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (body *types.Body, err error) {
-	if r.TransactionsV3 {
-		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight, r.TransactionsV3)
-		if err != nil {
-			return nil, err
-		}
-		if body != nil {
-			return body, nil
-		}
-	} else {
-		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight, r.TransactionsV3)
-		if err != nil {
-			return nil, err
-		}
-		if body != nil {
-			return body, nil
-		}
+	body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight, r.TransactionsV3)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		return body, nil
 	}
 
 	view := r.sn.View()
@@ -732,16 +722,9 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 			return nil, nil
 		}
 
-		if r.TransactionsV3 {
-			txn, err = rawdb.CanonicalTxnByID(tx, 1+uint64(i)) // +1 for system txn
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i))
-			if err != nil {
-				return nil, err
-			}
+		txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i))
+		if err != nil {
+			return nil, err
 		}
 		return txn, nil
 	}
