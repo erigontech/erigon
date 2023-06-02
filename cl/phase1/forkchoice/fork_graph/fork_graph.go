@@ -145,7 +145,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 	// if we did so by long recconection, i am afraid we need to discard the current state.
 	if didLongRecconnection {
 		log.Debug("AddChainSegment: Resetting state reference as it was orphaned")
-		f.nextReferenceState.CopyInto(f.currentReferenceState)
+		f.currentReferenceState.CopyInto(f.nextReferenceState)
 	}
 
 	// Execute the state
