@@ -104,7 +104,7 @@ func (u *BitList) Cap() int {
 }
 
 func (u *BitList) HashSSZ() ([32]byte, error) {
-	depth := getDepth((uint64(u.c) + 31) / 32)
+	depth := GetDepth((uint64(u.c) + 31) / 32)
 	baseRoot := [32]byte{}
 	if u.l == 0 {
 		copy(baseRoot[:], merkle_tree.ZeroHashes[depth][:])

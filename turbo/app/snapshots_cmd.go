@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -90,6 +91,20 @@ var snapshotCommand = cli.Command{
 			Action: doDecompressSpeed,
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
+		{
+			Name:   "diff",
+			Action: doDiff,
+			Flags: joinFlags([]cli.Flag{
+				&cli.PathFlag{
+					Name:     "src",
+					Required: true,
+				},
+				&cli.PathFlag{
+					Name:     "dst",
+					Required: true,
+				},
+			}, debug.Flags, logging.Flags),
+		},
 	},
 }
 
@@ -125,6 +140,36 @@ func preloadFileAsync(name string) {
 		ff, _ := os.Open(name)
 		_, _ = io.CopyBuffer(io.Discard, bufio.NewReaderSize(ff, 64*1024*1024), make([]byte, 64*1024*1024))
 	}()
+}
+
+func doDiff(cliCtx *cli.Context) error {
+	defer log.Info("Done")
+	srcF, dstF := cliCtx.String("src"), cliCtx.String("dst")
+	src, err := compress.NewDecompressor(srcF)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := compress.NewDecompressor(dstF)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	i := 0
+	srcG, dstG := src.MakeGetter(), dst.MakeGetter()
+	var srcBuf, dstBuf []byte
+	for srcG.HasNext() {
+		i++
+		srcBuf, _ = srcG.Next(srcBuf[:0])
+		dstBuf, _ = dstG.Next(dstBuf[:0])
+
+		if !bytes.Equal(srcBuf, dstBuf) {
+			log.Error(fmt.Sprintf("found difference: %d, %x, %x\n", i, srcBuf, dstBuf))
+			return nil
+		}
+	}
+	return nil
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {

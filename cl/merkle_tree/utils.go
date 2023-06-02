@@ -17,11 +17,11 @@ func NextPowerOfTwo(n uint64) uint64 {
 	return n
 }
 
-// getDepth returns the depth of a merkle tree with a given number of nodes.
+// GetDepth returns the depth of a merkle tree with a given number of nodes.
 // The depth is defined as the number of levels in the tree, with the root
 // node at level 0 and each child node at a level one greater than its parent.
 // If the number of nodes is less than or equal to 1, the depth is 0.
-func getDepth(v uint64) uint8 {
+func GetDepth(v uint64) uint8 {
 	// If there are 0 or 1 nodes, the depth is 0.
 	if v <= 1 {
 		return 0
