@@ -45,8 +45,8 @@ func TestFakeExponential(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		factor := uint256.NewInt(uint64(tt.factor))
-		denom := uint256.NewInt(uint64(tt.denom))
+		factor := uint256.NewInt(tt.factor)
+		denom := uint256.NewInt(tt.denom)
 		result, err := FakeExponential(factor, denom, tt.num)
 		if err != nil {
 			t.Error(err)
