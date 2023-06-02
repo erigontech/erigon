@@ -764,17 +764,17 @@ func (r *BlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash libco
 	return blockNum, true, nil
 }
 
-func (r *BlockReader) LastTxNumInSnapshot(blockNum uint64) (uint64, bool, error) {
+func (r *BlockReader) FirstTxNumNotInSnapshots() uint64 {
 	view := r.sn.View()
 	defer view.Close()
 
-	sn, ok := view.TxsSegment(blockNum)
+	sn, ok := view.TxsSegment(r.sn.BlocksAvailable())
 	if !ok {
-		return 0, false, nil
+		return 0
 	}
 
 	lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
-	return lastTxnID, true, nil
+	return lastTxnID
 }
 
 func (r *BlockReader) IterateBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error {

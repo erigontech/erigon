@@ -253,21 +253,15 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 
 		case stages.Bodies:
 			type LastTxNumProvider interface {
-				LastTxNumInSnapshot(blockNum uint64) (uint64, bool, error)
+				FirstTxNumNotInSnapshots() uint64
 			}
-			lastTxnID, ok, err := blockReader.(LastTxNumProvider).LastTxNumInSnapshot(blocksAvailable)
-			if err != nil {
-				return err
-			}
+			firstTxNum := blockReader.(LastTxNumProvider).FirstTxNumNotInSnapshots()
 			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID); err != nil {
+			if err := rawdb.ResetSequence(tx, kv.EthTx, firstTxNum); err != nil {
 				return err
 			}
 			if err != nil {
 				return err
-			}
-			if !ok {
-				return fmt.Errorf("snapshot not found for block: %d", blocksAvailable)
 			}
 
 			historyV3, err := kvcfg.HistoryV3.Enabled(tx)
