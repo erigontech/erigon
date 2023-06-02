@@ -84,11 +84,16 @@ type KvList struct {
 	Vals [][]byte
 }
 
-func (l KvList) Len() int {
+func (l *KvList) Push(key string, val []byte) {
+	l.Keys = append(l.Keys, key)
+	l.Vals = append(l.Vals, val)
+}
+
+func (l *KvList) Len() int {
 	return len(l.Keys)
 }
 
-func (l KvList) Less(i, j int) bool {
+func (l *KvList) Less(i, j int) bool {
 	return l.Keys[i] < l.Keys[j]
 }
 
