@@ -662,114 +662,6 @@ func (d *Domain) MakeContext() *DomainContext {
 	return dc
 }
 
-func (dc *DomainContext) Close() {
-	for _, item := range dc.files {
-		if item.src.frozen {
-			continue
-		}
-		refCnt := item.src.refcount.Add(-1)
-		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && item.src.canDelete.Load() {
-			item.src.closeFilesAndRemove()
-		}
-	}
-	dc.hc.Close()
-}
-
-// IteratePrefix iterates over key-value pairs of the domain that start with given prefix
-// Such iteration is not intended to be used in public API, therefore it uses read-write transaction
-// inside the domain. Another version of this for public API use needs to be created, that uses
-// roTx instead and supports ending the iterations before it reaches the end.
-func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
-	dc.d.stats.HistoryQueries.Add(1)
-
-	var cp CursorHeap
-	heap.Init(&cp)
-	var k, v []byte
-	var err error
-	keysCursor, err := dc.d.tx.CursorDupSort(dc.d.keysTable)
-	if err != nil {
-		return err
-	}
-	defer keysCursor.Close()
-	if k, v, err = keysCursor.Seek(prefix); err != nil {
-		return err
-	}
-	if bytes.HasPrefix(k, prefix) {
-		keySuffix := make([]byte, len(k)+8)
-		copy(keySuffix, k)
-		copy(keySuffix[len(k):], v)
-		step := ^binary.BigEndian.Uint64(v)
-		txNum := step * dc.d.aggregationStep
-		if v, err = dc.d.tx.GetOne(dc.d.valsTable, keySuffix); err != nil {
-			return err
-		}
-		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
-	}
-	for i, item := range dc.files {
-		bg := dc.statelessBtree(i)
-		if bg.Empty() {
-			continue
-		}
-
-		cursor, err := bg.Seek(prefix)
-		if err != nil {
-			continue
-		}
-
-		g := dc.statelessGetter(i)
-		key := cursor.Key()
-		if bytes.HasPrefix(key, prefix) {
-			val := cursor.Value()
-			heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: g, endTxNum: item.endTxNum, reverse: true})
-		}
-	}
-	for cp.Len() > 0 {
-		lastKey := common.Copy(cp[0].key)
-		lastVal := common.Copy(cp[0].val)
-		// Advance all the items that have this key (including the top)
-		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-			ci1 := cp[0]
-			switch ci1.t {
-			case FILE_CURSOR:
-				if ci1.dg.HasNext() {
-					ci1.key, _ = ci1.dg.Next(ci1.key[:0])
-					if bytes.HasPrefix(ci1.key, prefix) {
-						ci1.val, _ = ci1.dg.Next(ci1.val[:0])
-						heap.Fix(&cp, 0)
-					} else {
-						heap.Pop(&cp)
-					}
-				} else {
-					heap.Pop(&cp)
-				}
-			case DB_CURSOR:
-				k, v, err = ci1.c.NextNoDup()
-				if err != nil {
-					return err
-				}
-				if k != nil && bytes.HasPrefix(k, prefix) {
-					ci1.key = common.Copy(k)
-					keySuffix := make([]byte, len(k)+8)
-					copy(keySuffix, k)
-					copy(keySuffix[len(k):], v)
-					if v, err = dc.d.tx.GetOne(dc.d.valsTable, keySuffix); err != nil {
-						return err
-					}
-					ci1.val = common.Copy(v)
-					heap.Fix(&cp, 0)
-				} else {
-					heap.Pop(&cp)
-				}
-			}
-		}
-		if len(lastVal) > 0 {
-			it(lastKey, lastVal)
-		}
-	}
-	return nil
-}
-
 // Collation is the set of compressors created after aggregation
 type Collation struct {
 	valuesComp   *compress.Compressor
@@ -1580,4 +1472,113 @@ func (dc *DomainContext) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([
 		return nil, err
 	}
 	return v, nil
+}
+
+func (dc *DomainContext) Close() {
+	for _, item := range dc.files {
+		if item.src.frozen {
+			continue
+		}
+		refCnt := item.src.refcount.Add(-1)
+		//GC: last reader responsible to remove useles files: close it and delete
+		if refCnt == 0 && item.src.canDelete.Load() {
+			item.src.closeFilesAndRemove()
+		}
+	}
+	dc.hc.Close()
+}
+
+// IteratePrefix iterates over key-value pairs of the domain that start with given prefix
+// Such iteration is not intended to be used in public API, therefore it uses read-write transaction
+// inside the domain. Another version of this for public API use needs to be created, that uses
+// roTx instead and supports ending the iterations before it reaches the end.
+func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
+	dc.d.stats.HistoryQueries.Add(1)
+
+	var cp CursorHeap
+	heap.Init(&cp)
+	var k, v []byte
+	var err error
+	keysCursor, err := dc.d.tx.CursorDupSort(dc.d.keysTable)
+	if err != nil {
+		return err
+	}
+	defer keysCursor.Close()
+	if k, v, err = keysCursor.Seek(prefix); err != nil {
+		return err
+	}
+	if bytes.HasPrefix(k, prefix) {
+		keySuffix := make([]byte, len(k)+8)
+		copy(keySuffix, k)
+		copy(keySuffix[len(k):], v)
+		step := ^binary.BigEndian.Uint64(v)
+		txNum := step * dc.d.aggregationStep
+		if v, err = dc.d.tx.GetOne(dc.d.valsTable, keySuffix); err != nil {
+			return err
+		}
+		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
+	}
+
+	for i, item := range dc.files {
+		bg := dc.statelessBtree(i)
+		if bg.Empty() {
+			continue
+		}
+
+		cursor, err := bg.Seek(prefix)
+		if err != nil {
+			continue
+		}
+
+		g := dc.statelessGetter(i)
+		key := cursor.Key()
+		if bytes.HasPrefix(key, prefix) {
+			val := cursor.Value()
+			heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: g, endTxNum: item.endTxNum, reverse: true})
+		}
+	}
+	for cp.Len() > 0 {
+		lastKey := common.Copy(cp[0].key)
+		lastVal := common.Copy(cp[0].val)
+		// Advance all the items that have this key (including the top)
+		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
+			ci1 := cp[0]
+			switch ci1.t {
+			case FILE_CURSOR:
+				if ci1.dg.HasNext() {
+					ci1.key, _ = ci1.dg.Next(ci1.key[:0])
+					if bytes.HasPrefix(ci1.key, prefix) {
+						ci1.val, _ = ci1.dg.Next(ci1.val[:0])
+						heap.Fix(&cp, 0)
+					} else {
+						heap.Pop(&cp)
+					}
+				} else {
+					heap.Pop(&cp)
+				}
+			case DB_CURSOR:
+				k, v, err = ci1.c.NextNoDup()
+				if err != nil {
+					return err
+				}
+				if k != nil && bytes.HasPrefix(k, prefix) {
+					ci1.key = common.Copy(k)
+					keySuffix := make([]byte, len(k)+8)
+					copy(keySuffix, k)
+					copy(keySuffix[len(k):], v)
+					if v, err = dc.d.tx.GetOne(dc.d.valsTable, keySuffix); err != nil {
+						return err
+					}
+					ci1.val = common.Copy(v)
+					heap.Fix(&cp, 0)
+				} else {
+					heap.Pop(&cp)
+				}
+			}
+		}
+		if len(lastVal) > 0 {
+			it(lastKey, lastVal)
+		}
+	}
+	return nil
 }
