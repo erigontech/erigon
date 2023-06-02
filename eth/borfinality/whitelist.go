@@ -26,14 +26,10 @@ type config struct {
 }
 
 func Whitelist(engine consensus.Engine, stagedsync *stagedsync.Sync, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
-	bor, err := GetBorHandler()
-	if err != nil {
-		panic(fmt.Errorf("Unable to get bor handler: ", err))
-	}
 	Config = &config{
 		engine:     engine,
 		stagedSync: stagedsync,
-		db:         bor.DB,
+		db:         engine.(*bor.Bor).DB,
 		logger:     logger,
 		borAPI:     borAPI,
 		closeCh:    closeCh,
