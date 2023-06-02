@@ -703,7 +703,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 			return nil, nil
 		}
 
-		txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i), canonicalHash, r.TransactionsV3)
+		txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i), canonicalHash)
 		if err != nil {
 			return nil, err
 		}
