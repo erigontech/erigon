@@ -130,7 +130,7 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 	return next(k, k[8:], k[:8])
 }
 
-func (w *BlockWriter) WriteRawBodyIfNotExists(tx kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnNum uint64, err error) {
+func (w *BlockWriter) WriteRawBodyIfNotExists(tx kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, err error) {
 	return rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
 }
 func (w *BlockWriter) WriteBody(tx kv.RwTx, hash common.Hash, number uint64, body *types.Body) error {

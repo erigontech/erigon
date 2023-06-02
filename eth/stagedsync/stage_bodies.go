@@ -202,7 +202,7 @@ func BodiesForward(
 			}
 
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-			ok, lastTxnNum, err := cfg.blockWriter.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
+			ok, err := cfg.blockWriter.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
 			if err != nil {
 				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
