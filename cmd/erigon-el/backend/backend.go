@@ -621,7 +621,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	}
 
 	backend.stagedSync, err = stages3.NewStagedSync(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config,
-		backend.sentriesClient, backend.notifications, backend.downloaderClient, backend.agg, backend.forkValidator, backend.engine, logger, backend.blockReader, backend.blockWriter)
+		backend.sentriesClient, backend.notifications, backend.downloaderClient, backend.agg, backend.forkValidator, logger, backend.blockReader, backend.blockWriter)
 	if err != nil {
 		return nil, err
 	}
