@@ -25,14 +25,14 @@ import (
 
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (string, kv.RwDB, *Aggregator) {
 	b.Helper()
+	logger := log.New()
 	path := b.TempDir()
 	b.Cleanup(func() { os.RemoveAll(path) })
-	logger := log.New()
 	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	b.Cleanup(db.Close)
-	agg, err := NewAggregator(path, path, aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
+	agg, err := NewAggregator(path, path, aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie, logger)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)
 	return path, db, agg
@@ -105,13 +105,14 @@ func Benchmark_BtreeIndex_Allocation(b *testing.B) {
 }
 
 func Benchmark_BtreeIndex_Search(b *testing.B) {
+	logger := log.New()
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 	tmp := b.TempDir()
 	defer os.RemoveAll(tmp)
 	dataPath := "../../data/storage.256-288.kv"
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err := BuildBtreeIndex(dataPath, indexPath)
+	err := BuildBtreeIndex(dataPath, indexPath, logger)
 	require.NoError(b, err)
 
 	M := 1024
@@ -138,12 +139,13 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 func benchInitBtreeIndex(b *testing.B, M uint64) (*BtIndex, [][]byte, string) {
 	b.Helper()
 
+	logger := log.New()
 	tmp := b.TempDir()
 	b.Cleanup(func() { os.RemoveAll(tmp) })
 
-	dataPath := generateCompressedKV(b, tmp, 52, 10, 1000000)
+	dataPath := generateCompressedKV(b, tmp, 52, 10, 1000000, logger)
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bt")
-	bt, err := CreateBtreeIndex(indexPath, dataPath, M)
+	bt, err := CreateBtreeIndex(indexPath, dataPath, M, logger)
 	require.NoError(b, err)
 
 	keys, err := pivotKeysFromKV(dataPath)

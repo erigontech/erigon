@@ -238,7 +238,7 @@ func (cq *CompressionQueue) Pop() interface{} {
 }
 
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
-func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath string, datFile *DecompressedFile, workers int, dictBuilder *DictionaryBuilder, lvl log.Lvl) error {
+func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath string, datFile *DecompressedFile, workers int, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
 
@@ -258,7 +258,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 	})
 	dictBuilder.Close()
 	if lvl < log.LvlTrace {
-		log.Log(lvl, fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
+		logger.Log(lvl, fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	}
 	ch := make(chan *CompressionWord, 10_000)
 	inputSize, outputSize := &atomic.Uint64{}, &atomic.Uint64{}
@@ -403,7 +403,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		select {
 		case <-logEvery.C:
 			if lvl < log.LvlTrace {
-				log.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch), "workers", workers)
+				logger.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(totalWords)), "ch", len(ch), "workers", workers)
 			}
 		default:
 		}
@@ -453,7 +453,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 
 	//var m runtime.MemStats
 	//common.ReadMemStats(&m)
-	//log.Info(fmt.Sprintf("[%s] Dictionary build done", logPrefix), "input", common.ByteCount(inputSize.Load()), "output", common.ByteCount(outputSize.Load()), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	//logger.Info(fmt.Sprintf("[%s] Dictionary build done", logPrefix), "input", common.ByteCount(inputSize.Load()), "output", common.ByteCount(outputSize.Load()), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	posMap := make(map[uint64]uint64)
 	for _, m := range posMaps {
 		for l, c := range m {
@@ -532,7 +532,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		logCtx = append(logCtx, fmt.Sprintf("%d", i), fmt.Sprintf("%d", n))
 	}
 	if lvl < log.LvlTrace {
-		log.Log(lvl, fmt.Sprintf("[%s] Effective dictionary", logPrefix), logCtx...)
+		logger.Log(lvl, fmt.Sprintf("[%s] Effective dictionary", logPrefix), logCtx...)
 	}
 	var cf *os.File
 	if cf, err = os.Create(segmentFilePath); err != nil {
@@ -649,7 +649,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		//fmt.Printf("[comp] depth=%d, code=[%b], codeLen=%d pos=%d\n", p.depth, p.code, p.codeBits, p.pos)
 	}
 	if lvl < log.LvlTrace {
-		log.Log(lvl, fmt.Sprintf("[%s] Positional dictionary", logPrefix), "positionList.len", positionList.Len(), "posSize", common.ByteCount(posSize))
+		logger.Log(lvl, fmt.Sprintf("[%s] Positional dictionary", logPrefix), "positionList.len", positionList.Len(), "posSize", common.ByteCount(posSize))
 	}
 	// Re-encode all the words with the use of optimised (via Huffman coding) dictionaries
 	wc := 0
@@ -727,7 +727,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		select {
 		case <-logEvery.C:
 			if lvl < log.LvlTrace {
-				log.Log(lvl, fmt.Sprintf("[%s] Compressed", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(wc)/float64(totalWords)))
+				logger.Log(lvl, fmt.Sprintf("[%s] Compressed", logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(wc)/float64(totalWords)))
 			}
 		default:
 		}
@@ -752,7 +752,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
 // No error channels for now
-func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector, minPatternScore uint64, completion *sync.WaitGroup) {
+func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector, minPatternScore uint64, completion *sync.WaitGroup, logger log.Logger) {
 	defer completion.Done()
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
@@ -789,7 +789,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 		for i := 0; i < n; i++ {
 			inv[filtered[i]] = int32(i)
 		}
-		//log.Info("Inverted array done")
+		//logger.Info("Inverted array done")
 		var k int
 		// Process all suffixes one by one starting from
 		// first suffix in txt[]
@@ -840,7 +840,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 					prefixLen++
 				}
 				if prefixLen != int(lcp[i]) {
-					log.Error("Mismatch", "prefixLen", prefixLen, "lcp[i]", lcp[i], "i", i)
+					logger.Error("Mismatch", "prefixLen", prefixLen, "lcp[i]", lcp[i], "i", i)
 					break
 				}
 				l := int(lcp[i]) // Length of potential dictionary word
@@ -849,7 +849,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				}
 			}
 		}
-		//log.Info("LCP array checked")
+		//logger.Info("LCP array checked")
 		// Walk over LCP array and compute the scores of the strings
 		var b = inv
 		j = 0
@@ -907,7 +907,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				}
 				binary.BigEndian.PutUint64(dictVal, score)
 				if err := dictCollector.Collect(dictKey, dictVal); err != nil {
-					log.Error("processSuperstring", "collect", err)
+					logger.Error("processSuperstring", "collect", err)
 				}
 				prevSkipped = false //nolint
 				break
@@ -916,8 +916,8 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 	}
 }
 
-func DictionaryBuilderFromCollectors(ctx context.Context, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl) (*DictionaryBuilder, error) {
-	dictCollector := etl.NewCollector(logPrefix+"_collectDict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+func DictionaryBuilderFromCollectors(ctx context.Context, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
+	dictCollector := etl.NewCollector(logPrefix+"_collectDict", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer dictCollector.Close()
 	dictCollector.LogLvl(lvl)
 

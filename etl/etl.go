@@ -82,23 +82,24 @@ func Transform(
 	extractFunc ExtractFunc,
 	loadFunc LoadFunc,
 	args TransformArgs,
+	logger log.Logger,
 ) error {
 	bufferSize := BufferOptimalSize
 	if args.BufferSize > 0 {
 		bufferSize = datasize.ByteSize(args.BufferSize)
 	}
 	buffer := getBufferByType(args.BufferType, bufferSize)
-	collector := NewCollector(logPrefix, tmpdir, buffer)
+	collector := NewCollector(logPrefix, tmpdir, buffer, logger)
 	defer collector.Close()
 
 	t := time.Now()
-	if err := extractBucketIntoFiles(logPrefix, db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, collector, extractFunc, args.Quit, args.LogDetailsExtract); err != nil {
+	if err := extractBucketIntoFiles(logPrefix, db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, collector, extractFunc, args.Quit, args.LogDetailsExtract, logger); err != nil {
 		return err
 	}
-	log.Trace(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
+	logger.Trace(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
 
 	defer func(t time.Time) {
-		log.Trace(fmt.Sprintf("[%s] Load finished", logPrefix), "took", time.Since(t))
+		logger.Trace(fmt.Sprintf("[%s] Load finished", logPrefix), "took", time.Since(t))
 	}(time.Now())
 	return collector.Load(db, toBucket, loadFunc, args)
 }
@@ -114,6 +115,7 @@ func extractBucketIntoFiles(
 	extractFunc ExtractFunc,
 	quit <-chan struct{},
 	additionalLogArguments AdditionalLogArguments,
+	logger log.Logger,
 ) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -140,7 +142,7 @@ func extractBucketIntoFiles(
 				logArs = append(logArs, "current_prefix", makeCurrentKeyStr(k))
 			}
 
-			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), logArs...)
+			logger.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), logArs...)
 		}
 		if endkey != nil && bytes.Compare(k, endkey) >= 0 {
 			// endKey is exclusive bound: [startkey, endkey)

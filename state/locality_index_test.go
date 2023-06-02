@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,13 +27,14 @@ func BenchmarkName2(b *testing.B) {
 }
 
 func TestLocality(t *testing.T) {
+	logger := log.New()
 	ctx, require := context.Background(), require.New(t)
 	const Module uint64 = 31
-	path, db, ii, txs := filledInvIndexOfSize(t, 300, 4, Module)
+	path, db, ii, txs := filledInvIndexOfSize(t, 300, 4, Module, logger)
 	mergeInverted(t, db, ii, txs)
 	ic := ii.MakeContext()
 	defer ic.Close()
-	li, _ := NewLocalityIndex(path, path, 4, "inv")
+	li, _ := NewLocalityIndex(path, path, 4, "inv", logger)
 	defer li.Close()
 	err := li.BuildMissedIndices(ctx, ic)
 	require.NoError(err)
@@ -90,7 +92,7 @@ func TestLocality(t *testing.T) {
 	})
 	t.Run("locality index: lookup", func(t *testing.T) {
 		liCtx := li.MakeContext()
-		defer liCtx.Close()
+		defer liCtx.Close(logger)
 		var k [8]byte
 		binary.BigEndian.PutUint64(k[:], 1)
 		v1, v2, from, ok1, ok2 := li.lookupIdxFiles(liCtx, k[:], 1*li.aggregationStep*StepsInBiggestFile)

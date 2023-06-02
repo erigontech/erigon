@@ -20,11 +20,14 @@ package recsplit
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 // go test -trimpath -v -fuzz=FuzzRecSplit -fuzztime=10s ./recsplit
 
 func FuzzRecSplit(f *testing.F) {
+	logger := log.New()
 	f.Add(2, []byte("1stkey2ndkey"))
 	f.Fuzz(func(t *testing.T, count int, in []byte) {
 		if count < 1 {
@@ -56,7 +59,7 @@ func FuzzRecSplit(f *testing.F) {
 			TmpDir:     tmpDir,
 			IndexFile:  indexFile,
 			LeafSize:   8,
-		})
+		}, logger)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -30,9 +30,10 @@ import (
 )
 
 func TestCompressEmptyDict(t *testing.T) {
+	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 100, 1, log.LvlDebug)
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 100, 1, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,10 +79,11 @@ func checksum(file string) uint32 {
 
 func prepareDict(t *testing.T) *Decompressor {
 	t.Helper()
+	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug)
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

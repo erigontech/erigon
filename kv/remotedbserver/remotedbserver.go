@@ -82,6 +82,7 @@ type KvServer struct {
 
 	trace     bool
 	rangeStep int // make sure `s.with` has limited time
+	logger    log.Logger
 }
 
 type threadSafeTx struct {
@@ -93,13 +94,14 @@ type Snapsthots interface {
 	Files() []string
 }
 
-func NewKvServer(ctx context.Context, db kv.RoDB, snapshots Snapsthots, historySnapshots Snapsthots) *KvServer {
+func NewKvServer(ctx context.Context, db kv.RoDB, snapshots Snapsthots, historySnapshots Snapsthots, logger log.Logger) *KvServer {
 	return &KvServer{
 		trace:     false,
 		rangeStep: 1024,
 		kv:        db, stateChangeStreams: newStateChangeStreams(), ctx: ctx,
 		blockSnapshots: snapshots, historySnapshots: historySnapshots,
 		txs: map[uint64]*threadSafeTx{}, txsMapLock: &sync.RWMutex{},
+		logger: logger,
 	}
 }
 
@@ -123,7 +125,7 @@ func (s *KvServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply
 
 func (s *KvServer) begin(ctx context.Context) (id uint64, err error) {
 	if s.trace {
-		log.Info(fmt.Sprintf("[kv_server] begin %d %s\n", id, dbg.Stack()))
+		s.logger.Info(fmt.Sprintf("[kv_server] begin %d %s\n", id, dbg.Stack()))
 	}
 	s.txsMapLock.Lock()
 	defer s.txsMapLock.Unlock()
@@ -139,7 +141,7 @@ func (s *KvServer) begin(ctx context.Context) (id uint64, err error) {
 // renew - rollback and begin tx without changing it's `id`
 func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 	if s.trace {
-		log.Info(fmt.Sprintf("[kv_server] renew %d %s\n", id, dbg.Stack()[:2]))
+		s.logger.Info(fmt.Sprintf("[kv_server] renew %d %s\n", id, dbg.Stack()[:2]))
 	}
 	s.txsMapLock.Lock()
 	defer s.txsMapLock.Unlock()
@@ -159,7 +161,7 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 
 func (s *KvServer) rollback(id uint64) {
 	if s.trace {
-		log.Info(fmt.Sprintf("[kv_server] rollback %d %s\n", id, dbg.Stack()[:2]))
+		s.logger.Info(fmt.Sprintf("[kv_server] rollback %d %s\n", id, dbg.Stack()[:2]))
 	}
 	s.txsMapLock.Lock()
 	defer s.txsMapLock.Unlock()
@@ -189,16 +191,16 @@ func (s *KvServer) with(id uint64, f func(kv.Tx) error) error {
 	}
 
 	if s.trace {
-		log.Info(fmt.Sprintf("[kv_server] with %d try lock %s\n", id, dbg.Stack()[:2]))
+		s.logger.Info(fmt.Sprintf("[kv_server] with %d try lock %s\n", id, dbg.Stack()[:2]))
 	}
 	tx.Lock()
 	if s.trace {
-		log.Info(fmt.Sprintf("[kv_server] with %d can lock %s\n", id, dbg.Stack()[:2]))
+		s.logger.Info(fmt.Sprintf("[kv_server] with %d can lock %s\n", id, dbg.Stack()[:2]))
 	}
 	defer func() {
 		tx.Unlock()
 		if s.trace {
-			log.Info(fmt.Sprintf("[kv_server] with %d unlock %s\n", id, dbg.Stack()[:2]))
+			s.logger.Info(fmt.Sprintf("[kv_server] with %d unlock %s\n", id, dbg.Stack()[:2]))
 		}
 	}()
 	return f(tx.Tx)

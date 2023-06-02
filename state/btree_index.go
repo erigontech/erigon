@@ -638,6 +638,7 @@ type BtIndexWriter struct {
 	keyCount        uint64
 	etlBufLimit     datasize.ByteSize
 	bytesPerRec     int
+	logger          log.Logger
 }
 
 type BtIndexWriterArgs struct {
@@ -653,8 +654,8 @@ const BtreeLogPrefix = "btree"
 // Typical bucket size is 100 - 2048, larger bucket sizes result in smaller representations of hash functions, at a cost of slower access
 // salt parameters is used to randomise the hash function construction, to ensure that different Erigon instances (nodes)
 // are likely to use different hash function, to collision attacks are unlikely to slow down any meaningful number of nodes at the same time
-func NewBtIndexWriter(args BtIndexWriterArgs) (*BtIndexWriter, error) {
-	btw := &BtIndexWriter{lvl: log.LvlDebug}
+func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter, error) {
+	btw := &BtIndexWriter{lvl: log.LvlDebug, logger: logger}
 	btw.tmpDir = args.TmpDir
 	btw.indexFile = args.IndexFile
 
@@ -665,7 +666,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs) (*BtIndexWriter, error) {
 		btw.etlBufLimit = etl.BufferOptimalSize
 	}
 
-	btw.bucketCollector = etl.NewCollector(BtreeLogPrefix+" "+fname, btw.tmpDir, etl.NewSortableBuffer(btw.etlBufLimit))
+	btw.bucketCollector = etl.NewCollector(BtreeLogPrefix+" "+fname, btw.tmpDir, etl.NewSortableBuffer(btw.etlBufLimit), logger)
 	btw.bucketCollector.LogLvl(log.LvlDebug)
 
 	btw.maxOffset = 0
@@ -730,7 +731,7 @@ func (btw *BtIndexWriter) Build() error {
 		return err
 	}
 
-	log.Log(btw.lvl, "[index] write", "file", btw.indexFileName)
+	btw.logger.Log(btw.lvl, "[index] write", "file", btw.indexFileName)
 	btw.built = true
 
 	_ = btw.indexW.Flush()
@@ -793,8 +794,8 @@ type BtIndex struct {
 	getter       *compress.Getter
 }
 
-func CreateBtreeIndex(indexPath, dataPath string, M uint64) (*BtIndex, error) {
-	err := BuildBtreeIndex(dataPath, indexPath)
+func CreateBtreeIndex(indexPath, dataPath string, M uint64, logger log.Logger) (*BtIndex, error) {
+	err := BuildBtreeIndex(dataPath, indexPath, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -803,21 +804,21 @@ func CreateBtreeIndex(indexPath, dataPath string, M uint64) (*BtIndex, error) {
 
 var DefaultBtreeM = uint64(2048)
 
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *compress.Decompressor, p *background.Progress) (*BtIndex, error) {
-	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, p)
+func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *compress.Decompressor, p *background.Progress, logger log.Logger) (*BtIndex, error) {
+	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, p, logger)
 	if err != nil {
 		return nil, err
 	}
 	return OpenBtreeIndexWithDecompressor(indexPath, M, decompressor)
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor, p *background.Progress) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor, p *background.Progress, logger log.Logger) error {
 	args := BtIndexWriterArgs{
 		IndexFile: indexPath,
 		TmpDir:    filepath.Dir(indexPath),
 	}
 
-	iw, err := NewBtIndexWriter(args)
+	iw, err := NewBtIndexWriter(args, logger)
 	if err != nil {
 		return err
 	}
@@ -854,7 +855,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 }
 
 // Opens .kv at dataPath and generates index over it to file 'indexPath'
-func BuildBtreeIndex(dataPath, indexPath string) error {
+func BuildBtreeIndex(dataPath, indexPath string, logger log.Logger) error {
 	decomp, err := compress.NewDecompressor(dataPath)
 	if err != nil {
 		return err
@@ -865,7 +866,7 @@ func BuildBtreeIndex(dataPath, indexPath string) error {
 		TmpDir:    filepath.Dir(indexPath),
 	}
 
-	iw, err := NewBtIndexWriter(args)
+	iw, err := NewBtIndexWriter(args, logger)
 	if err != nil {
 		return err
 	}

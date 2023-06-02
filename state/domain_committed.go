@@ -589,7 +589,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 		p := ps.AddNew(datFileName, 1)
 		defer ps.Delete(p)
 
-		if comp, err = compress.NewCompressor(ctx, "merge", datPath, d.dir, compress.MinPatternScore, workers, log.LvlTrace); err != nil {
+		if comp, err = compress.NewCompressor(ctx, "merge", datPath, d.dir, compress.MinPatternScore, workers, log.LvlTrace, d.logger); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", d.filenameBase, err)
 		}
 		var cp CursorHeap
@@ -702,12 +702,12 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 
 		p = ps.AddNew(datFileName, uint64(keyCount))
 		defer ps.Delete(p)
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, idxPath, d.dir, keyCount, false /* values */, p); err != nil {
+		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, idxPath, d.dir, keyCount, false /* values */, p, d.logger); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 
 		btPath := strings.TrimSuffix(idxPath, "kvi") + "bt"
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, 2048, valuesIn.decompressor, p)
+		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, 2048, valuesIn.decompressor, p, d.logger)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("create btindex %s [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}

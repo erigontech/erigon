@@ -29,6 +29,8 @@ import (
 //Variables Naming:
 //  tx - Database Transaction
 //  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
+//  blockNum - Ethereum block number - same across all nodes. blockID - auto-increment ID - which can be differrent across all nodes
+//  txNum/txID - same
 //  RoTx - Read-Only Database Transaction. RwTx - read-write
 //  k, v - key, value
 //  ts - TimeStamp. Usually it's Etherum's TransactionNumber (auto-increment ID). Or BlockNumber.

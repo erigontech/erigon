@@ -20,9 +20,12 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestRecSplit2(t *testing.T) {
+	logger := log.New()
 	tmpDir := t.TempDir()
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
@@ -31,7 +34,7 @@ func TestRecSplit2(t *testing.T) {
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   8,
-	})
+	}, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,6 +59,7 @@ func TestRecSplit2(t *testing.T) {
 }
 
 func TestRecSplitDuplicate(t *testing.T) {
+	logger := log.New()
 	tmpDir := t.TempDir()
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
@@ -64,7 +68,7 @@ func TestRecSplitDuplicate(t *testing.T) {
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   8,
-	})
+	}, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +84,7 @@ func TestRecSplitDuplicate(t *testing.T) {
 }
 
 func TestRecSplitLeafSizeTooLarge(t *testing.T) {
+	logger := log.New()
 	tmpDir := t.TempDir()
 	_, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
@@ -88,13 +93,14 @@ func TestRecSplitLeafSizeTooLarge(t *testing.T) {
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   64,
-	})
+	}, logger)
 	if err == nil {
 		t.Errorf("test is expected to fail, leaf size too large")
 	}
 }
 
 func TestIndexLookup(t *testing.T) {
+	logger := log.New()
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
 	rs, err := NewRecSplit(RecSplitArgs{
@@ -104,7 +110,7 @@ func TestIndexLookup(t *testing.T) {
 		TmpDir:     tmpDir,
 		IndexFile:  indexFile,
 		LeafSize:   8,
-	})
+	}, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,6 +134,7 @@ func TestIndexLookup(t *testing.T) {
 }
 
 func TestTwoLayerIndex(t *testing.T) {
+	logger := log.New()
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
 	rs, err := NewRecSplit(RecSplitArgs{
@@ -138,7 +145,7 @@ func TestTwoLayerIndex(t *testing.T) {
 		IndexFile:  indexFile,
 		LeafSize:   8,
 		Enums:      true,
-	})
+	}, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

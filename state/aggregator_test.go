@@ -33,7 +33,7 @@ func testDbAndAggregator(t *testing.T, aggStep uint64) (string, kv.RwDB, *Aggreg
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	t.Cleanup(db.Close)
-	agg, err := NewAggregator(filepath.Join(path, "e4"), filepath.Join(path, "e4tmp"), aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
+	agg, err := NewAggregator(filepath.Join(path, "e4"), filepath.Join(path, "e4tmp"), aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie, logger)
 	require.NoError(t, err)
 	return path, db, agg
 }
@@ -164,6 +164,7 @@ func TestAggregator_Merge(t *testing.T) {
 // - we could close first aggregator and open another with previous data still available
 // - new aggregator SeekCommitment must return txNum equal to amount of total txns
 func TestAggregator_RestartOnDatadir(t *testing.T) {
+	logger := log.New()
 	aggStep := uint64(50)
 	path, db, agg := testDbAndAggregator(t, aggStep)
 
@@ -222,7 +223,7 @@ func TestAggregator_RestartOnDatadir(t *testing.T) {
 	tx = nil
 
 	// Start another aggregator on same datadir
-	anotherAgg, err := NewAggregator(filepath.Join(path, "e4"), filepath.Join(path, "e4tmp"), aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
+	anotherAgg, err := NewAggregator(filepath.Join(path, "e4"), filepath.Join(path, "e4tmp"), aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie, logger)
 	require.NoError(t, err)
 	require.NoError(t, anotherAgg.ReopenFolder())
 
@@ -260,6 +261,7 @@ func TestAggregator_RestartOnDatadir(t *testing.T) {
 }
 
 func TestAggregator_RestartOnFiles(t *testing.T) {
+	logger := log.New()
 	aggStep := uint64(100)
 
 	path, db, agg := testDbAndAggregator(t, aggStep)
@@ -314,7 +316,7 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 
 	require.NoError(t, os.RemoveAll(filepath.Join(path, "db4")))
 
-	newDb, err := mdbx.NewMDBX(log.New()).InMem(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	newDb, err := mdbx.NewMDBX(logger).InMem(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).Open()
 	require.NoError(t, err)
@@ -324,7 +326,7 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer newTx.Rollback()
 
-	newAgg, err := NewAggregator(path, path, aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
+	newAgg, err := NewAggregator(path, path, aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.ReopenFolder())
 
@@ -481,13 +483,14 @@ func Test_EncodeCommitmentState(t *testing.T) {
 
 func Test_BtreeIndex_Seek(t *testing.T) {
 	tmp := t.TempDir()
+	logger := log.New()
 
 	keyCount, M := 120000, 1024
-	dataPath := generateCompressedKV(t, tmp, 52, 180 /*val size*/, keyCount)
+	dataPath := generateCompressedKV(t, tmp, 52, 180 /*val size*/, keyCount, logger)
 	defer os.RemoveAll(tmp)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err := BuildBtreeIndex(dataPath, indexPath)
+	err := BuildBtreeIndex(dataPath, indexPath, logger)
 	require.NoError(t, err)
 
 	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M))
@@ -546,7 +549,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 	return listing, nil
 }
 
-func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int) string {
+func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger) string {
 	tb.Helper()
 
 	args := BtIndexWriterArgs{
@@ -555,7 +558,7 @@ func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCoun
 		KeyCount:  12,
 	}
 
-	iw, err := NewBtIndexWriter(args)
+	iw, err := NewBtIndexWriter(args, logger)
 	require.NoError(tb, err)
 
 	defer iw.Close()
@@ -563,7 +566,7 @@ func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCoun
 	values := make([]byte, valueSize)
 
 	dataPath := path.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
-	comp, err := compress.NewCompressor(context.Background(), "cmp", dataPath, tmp, compress.MinPatternScore, 1, log.LvlDebug)
+	comp, err := compress.NewCompressor(context.Background(), "cmp", dataPath, tmp, compress.MinPatternScore, 1, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
 	for i := 0; i < keyCount; i++ {
@@ -615,16 +618,17 @@ func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCoun
 }
 
 func Test_InitBtreeIndex(t *testing.T) {
+	logger := log.New()
 	tmp := t.TempDir()
 	defer os.RemoveAll(tmp)
 
 	keyCount, M := 100, uint64(4)
-	compPath := generateCompressedKV(t, tmp, 52, 300, keyCount)
+	compPath := generateCompressedKV(t, tmp, 52, 300, keyCount, logger)
 	decomp, err := compress.NewDecompressor(compPath)
 	require.NoError(t, err)
 	defer decomp.Close()
 
-	err = BuildBtreeIndexWithDecompressor(tmp+".bt", decomp, &background.Progress{})
+	err = BuildBtreeIndexWithDecompressor(tmp+".bt", decomp, &background.Progress{}, logger)
 	require.NoError(t, err)
 
 	bt, err := OpenBtreeIndexWithDecompressor(tmp+".bt", M, decomp)

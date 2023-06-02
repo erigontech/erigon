@@ -105,6 +105,7 @@ type RecSplit struct {
 	enums              bool // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
 	built              bool // Flag indicating that the hash function has been built and no more keys can be added
 	trace              bool
+	logger             log.Logger
 }
 
 type RecSplitArgs struct {
@@ -128,9 +129,9 @@ type RecSplitArgs struct {
 // Typical bucket size is 100 - 2000, larger bucket sizes result in smaller representations of hash functions, at a cost of slower access
 // salt parameters is used to randomise the hash function construction, to ensure that different Erigon instances (nodes)
 // are likely to use different hash function, to collision attacks are unlikely to slow down any meaningful number of nodes at the same time
-func NewRecSplit(args RecSplitArgs) (*RecSplit, error) {
+func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
-	rs := &RecSplit{bucketSize: args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount), lvl: log.LvlDebug}
+	rs := &RecSplit{bucketSize: args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount), lvl: log.LvlDebug, logger: logger}
 	if len(args.StartSeed) == 0 {
 		args.StartSeed = []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
@@ -154,11 +155,11 @@ func NewRecSplit(args RecSplitArgs) (*RecSplit, error) {
 	if rs.etlBufLimit == 0 {
 		rs.etlBufLimit = etl.BufferOptimalSize
 	}
-	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit))
+	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	rs.enums = args.Enums
 	if args.Enums {
-		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit))
+		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
 		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
@@ -225,10 +226,10 @@ func (rs *RecSplit) ResetNextSalt() {
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
-	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix+" "+rs.indexFileName, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit))
+	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix+" "+rs.indexFileName, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), rs.logger)
 	if rs.offsetCollector != nil {
 		rs.offsetCollector.Close()
-		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix+" "+rs.indexFileName, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit))
+		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix+" "+rs.indexFileName, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), rs.logger)
 	}
 	rs.currentBucket = rs.currentBucket[:0]
 	rs.currentBucketOffs = rs.currentBucketOffs[:0]

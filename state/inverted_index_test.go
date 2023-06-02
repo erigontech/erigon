@@ -38,11 +38,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
-func testDbAndInvertedIndex(tb testing.TB, aggStep uint64) (string, kv.RwDB, *InvertedIndex) {
+func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (string, kv.RwDB, *InvertedIndex) {
 	tb.Helper()
 	path := tb.TempDir()
 	tb.Cleanup(func() { os.RemoveAll(path) })
-	logger := log.New()
 	keysTable := "Keys"
 	indexTable := "Index"
 	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
@@ -52,16 +51,17 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64) (string, kv.RwDB, *In
 		}
 	}).MustOpen()
 	tb.Cleanup(db.Close)
-	ii, err := NewInvertedIndex(path, path, aggStep, "inv" /* filenameBase */, keysTable, indexTable, false, nil)
+	ii, err := NewInvertedIndex(path, path, aggStep, "inv" /* filenameBase */, keysTable, indexTable, false, nil, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(ii.Close)
 	return path, db, ii
 }
 
 func TestInvIndexCollationBuild(t *testing.T) {
+	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	_, db, ii := testDbAndInvertedIndex(t, 16)
+	_, db, ii := testDbAndInvertedIndex(t, 16, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -133,9 +133,10 @@ func TestInvIndexCollationBuild(t *testing.T) {
 }
 
 func TestInvIndexAfterPrune(t *testing.T) {
+	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	_, db, ii := testDbAndInvertedIndex(t, 16)
+	_, db, ii := testDbAndInvertedIndex(t, 16, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -203,14 +204,14 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	}
 }
 
-func filledInvIndex(tb testing.TB) (string, kv.RwDB, *InvertedIndex, uint64) {
+func filledInvIndex(tb testing.TB, logger log.Logger) (string, kv.RwDB, *InvertedIndex, uint64) {
 	tb.Helper()
-	return filledInvIndexOfSize(tb, uint64(1000), 16, 31)
+	return filledInvIndexOfSize(tb, uint64(1000), 16, 31, logger)
 }
 
-func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64) (string, kv.RwDB, *InvertedIndex, uint64) {
+func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log.Logger) (string, kv.RwDB, *InvertedIndex, uint64) {
 	tb.Helper()
-	path, db, ii := testDbAndInvertedIndex(tb, aggStep)
+	path, db, ii := testDbAndInvertedIndex(tb, aggStep, logger)
 	ctx, require := context.Background(), require.New(tb)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
@@ -382,9 +383,10 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 }
 
 func TestInvIndexRanges(t *testing.T) {
+	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	_, db, ii, txs := filledInvIndex(t)
+	_, db, ii, txs := filledInvIndex(t, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -410,18 +412,20 @@ func TestInvIndexRanges(t *testing.T) {
 }
 
 func TestInvIndexMerge(t *testing.T) {
-	_, db, ii, txs := filledInvIndex(t)
+	logger := log.New()
+	_, db, ii, txs := filledInvIndex(t, logger)
 
 	mergeInverted(t, db, ii, txs)
 	checkRanges(t, db, ii, txs)
 }
 
 func TestInvIndexScanFiles(t *testing.T) {
-	path, db, ii, txs := filledInvIndex(t)
+	logger := log.New()
+	path, db, ii, txs := filledInvIndex(t, logger)
 
 	// Recreate InvertedIndex to scan the files
 	var err error
-	ii, err = NewInvertedIndex(path, path, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, false, nil)
+	ii, err = NewInvertedIndex(path, path, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, false, nil, logger)
 	require.NoError(t, err)
 	defer ii.Close()
 
@@ -430,7 +434,8 @@ func TestInvIndexScanFiles(t *testing.T) {
 }
 
 func TestChangedKeysIterator(t *testing.T) {
-	_, db, ii, txs := filledInvIndex(t)
+	logger := log.New()
+	_, db, ii, txs := filledInvIndex(t, logger)
 	ctx := context.Background()
 	mergeInverted(t, db, ii, txs)
 	roTx, err := db.BeginRo(ctx)
@@ -491,8 +496,10 @@ func TestChangedKeysIterator(t *testing.T) {
 }
 
 func TestScanStaticFiles(t *testing.T) {
+	logger := log.New()
 	ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1,
-		files: btree2.NewBTreeG[*filesItem](filesItemLess),
+		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
+		logger: logger,
 	}
 	files := []string{
 		"test.0-1.ef",
@@ -513,8 +520,10 @@ func TestScanStaticFiles(t *testing.T) {
 }
 
 func TestCtxFiles(t *testing.T) {
+	logger := log.New()
 	ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1,
-		files: btree2.NewBTreeG[*filesItem](filesItemLess),
+		files:  btree2.NewBTreeG[*filesItem](filesItemLess),
+		logger: logger,
 	}
 	files := []string{
 		"test.0-1.ef", // overlap with same `endTxNum=4`

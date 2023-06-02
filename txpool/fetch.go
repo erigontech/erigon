@@ -52,6 +52,7 @@ type Fetch struct {
 	sentryClients            []direct.SentryClient // sentry clients that will be used for accessing the network
 	stateChangesParseCtxLock sync.Mutex
 	pooledTxsParseCtxLock    sync.Mutex
+	logger                   log.Logger
 }
 
 type StateChangesClient interface {
@@ -61,7 +62,8 @@ type StateChangesClient interface {
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
 // SentryClient here is an interface, it is suitable for mocking in tests (mock will need
 // to implement all the functions of the SentryClient interface).
-func NewFetch(ctx context.Context, sentryClients []direct.SentryClient, pool Pool, stateChangesClient StateChangesClient, coreDB kv.RoDB, db kv.RwDB, chainID uint256.Int) *Fetch {
+func NewFetch(ctx context.Context, sentryClients []direct.SentryClient, pool Pool, stateChangesClient StateChangesClient, coreDB kv.RoDB, db kv.RwDB,
+	chainID uint256.Int, logger log.Logger) *Fetch {
 	f := &Fetch{
 		ctx:                  ctx,
 		sentryClients:        sentryClients,
@@ -71,6 +73,7 @@ func NewFetch(ctx context.Context, sentryClients []direct.SentryClient, pool Poo
 		stateChangesClient:   stateChangesClient,
 		stateChangesParseCtx: types2.NewTxParseContext(chainID).ChainIDRequired(), //TODO: change ctx if rules changed
 		pooledTxsParseCtx:    types2.NewTxParseContext(chainID).ChainIDRequired(),
+		logger:               logger,
 	}
 	f.pooledTxsParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
 	f.stateChangesParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
@@ -118,7 +121,7 @@ func (f *Fetch) ConnectCore() {
 					time.Sleep(3 * time.Second)
 					continue
 				}
-				log.Warn("[txpool.handleStateChanges]", "err", err)
+				f.logger.Warn("[txpool.handleStateChanges]", "err", err)
 			}
 		}
 	}()
@@ -137,7 +140,7 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 				continue
 			}
 			// Report error and wait more
-			log.Warn("[txpool.recvMessage] sentry not ready yet", "err", err)
+			f.logger.Warn("[txpool.recvMessage] sentry not ready yet", "err", err)
 			continue
 		}
 
@@ -146,7 +149,7 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 				time.Sleep(3 * time.Second)
 				continue
 			}
-			log.Warn("[txpool.recvMessage]", "err", err)
+			f.logger.Warn("[txpool.recvMessage]", "err", err)
 		}
 	}
 }
@@ -190,9 +193,9 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 			}
 
 			if rlp.IsRLPError(err) {
-				log.Debug("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
+				f.logger.Debug("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
 			} else {
-				log.Warn("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
+				f.logger.Warn("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
 			}
 		}
 		if f.wg != nil {
@@ -369,7 +372,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		}
 		f.pool.AddRemoteTxs(ctx, txs)
 	default:
-		defer log.Trace("[txpool] dropped p2p message", "id", req.Id)
+		defer f.logger.Trace("[txpool] dropped p2p message", "id", req.Id)
 	}
 
 	return nil
@@ -388,7 +391,7 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 				continue
 			}
 			// Report error and wait more
-			log.Warn("[txpool.recvPeers] sentry not ready yet", "err", err)
+			f.logger.Warn("[txpool.recvPeers] sentry not ready yet", "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -398,7 +401,7 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 				continue
 			}
 
-			log.Warn("[txpool.recvPeers]", "err", err)
+			f.logger.Warn("[txpool.recvPeers]", "err", err)
 		}
 	}
 }
@@ -471,7 +474,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 						_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.Txs[i], minedTxs.Senders.At(i), false /* hasEnvelope */, nil)
 						return err
 					}); err != nil {
-						log.Warn("stream.Recv", "err", err)
+						f.logger.Warn("stream.Recv", "err", err)
 						continue
 					}
 				}
@@ -484,7 +487,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 						_, err = parseContext.ParseTransaction(change.Txs[i], 0, unwindTxs.Txs[i], unwindTxs.Senders.At(i), false /* hasEnvelope */, nil)
 						return err
 					}); err != nil {
-						log.Warn("stream.Recv", "err", err)
+						f.logger.Warn("stream.Recv", "err", err)
 						continue
 					}
 				}
@@ -493,7 +496,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 		if err := f.db.View(ctx, func(tx kv.Tx) error {
 			return f.pool.OnNewBlock(ctx, req, unwindTxs, minedTxs, tx)
 		}); err != nil {
-			log.Warn("onNewBlock", "err", err)
+			f.logger.Warn("onNewBlock", "err", err)
 		}
 		if f.wg != nil {
 			f.wg.Done()

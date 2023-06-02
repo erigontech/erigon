@@ -36,7 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types"
 )
 
-func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB, force bool) (cc *chain.Config, blockNum uint64, err error) {
+func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB, force bool, logger log.Logger) (cc *chain.Config, blockNum uint64, err error) {
 	if err = txPoolDB.View(ctx, func(tx kv.Tx) error {
 		cc, err = txpool.ChainConfig(tx)
 		if err != nil {
@@ -72,11 +72,11 @@ func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB
 			}
 			return nil
 		}); err != nil {
-			log.Error("cant read chain config from core db", "err", err)
+			logger.Error("cant read chain config from core db", "err", err)
 			time.Sleep(5 * time.Second)
 			continue
 		} else if cc == nil {
-			log.Error("cant read chain config from core db")
+			logger.Error("cant read chain config from core db")
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -100,7 +100,8 @@ func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB
 	return cc, blockNum, nil
 }
 
-func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cache, newTxs chan types.Announcements, chainDB kv.RoDB, sentryClients []direct.SentryClient, stateChangesClient txpool.StateChangesClient) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
+func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cache, newTxs chan types.Announcements, chainDB kv.RoDB,
+	sentryClients []direct.SentryClient, stateChangesClient txpool.StateChangesClient, logger log.Logger) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
 	txPoolDB, err := mdbx.NewMDBX(log.New()).Label(kv.TxPoolDB).Path(cfg.DBDir).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
 		Flags(func(f uint) uint { return f ^ mdbx2.Durable | mdbx2.SafeNoSync }).
@@ -111,7 +112,7 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		return nil, nil, nil, nil, nil, err
 	}
 
-	chainConfig, _, err := SaveChainConfigIfNeed(ctx, chainDB, txPoolDB, true)
+	chainConfig, _, err := SaveChainConfigIfNeed(ctx, chainDB, txPoolDB, true, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
@@ -123,16 +124,16 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		shanghaiTime = cfg.OverrideShanghaiTime
 	}
 
-	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime)
+	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
 
-	fetch := txpool.NewFetch(ctx, sentryClients, txPool, stateChangesClient, chainDB, txPoolDB, *chainID)
+	fetch := txpool.NewFetch(ctx, sentryClients, txPool, stateChangesClient, chainDB, txPoolDB, *chainID, logger)
 	//fetch.ConnectCore()
 	//fetch.ConnectSentries()
 
-	send := txpool.NewSend(ctx, sentryClients, txPool)
-	txpoolGrpcServer := txpool.NewGrpcServer(ctx, txPool, txPoolDB, *chainID)
+	send := txpool.NewSend(ctx, sentryClients, txPool, logger)
+	txpoolGrpcServer := txpool.NewGrpcServer(ctx, txPool, txPoolDB, *chainID, logger)
 	return txPoolDB, txPool, fetch, send, txpoolGrpcServer, nil
 }
