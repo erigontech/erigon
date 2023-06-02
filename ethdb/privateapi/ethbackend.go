@@ -387,11 +387,16 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 	}
 
 	if req.Version >= 3 {
-		header.ExcessDataGas = gointerfaces.ConvertH256ToUint256Int(req.ExcessDataGas).ToBig()
+		header.DataGasUsed = req.DataGasUsed
+		header.ExcessDataGas = req.ExcessDataGas
 	}
 
-	if !s.config.IsCancun(header.Time) && header.ExcessDataGas != nil || s.config.IsCancun(header.Time) && header.ExcessDataGas == nil {
-		return nil, &rpc.InvalidParamsError{Message: "excess data gas setting doesn't match sharding state"}
+	if !s.config.IsCancun(header.Time) && (header.DataGasUsed != nil || header.ExcessDataGas != nil) {
+		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas present before Cancun"}
+	}
+
+	if s.config.IsCancun(header.Time) && (header.DataGasUsed == nil || header.ExcessDataGas == nil) {
+		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas missing"}
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
@@ -619,9 +624,10 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		return nil, err
 	}
 	block := blockWithReceipts.Block
+	header := block.Header()
 
 	baseFee := new(uint256.Int)
-	baseFee.SetFromBig(block.Header().BaseFee)
+	baseFee.SetFromBig(header.BaseFee)
 
 	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
 	if err != nil {
@@ -630,10 +636,10 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 
 	payload := &types2.ExecutionPayload{
 		Version:       1,
-		ParentHash:    gointerfaces.ConvertHashToH256(block.Header().ParentHash),
-		Coinbase:      gointerfaces.ConvertAddressToH160(block.Header().Coinbase),
-		Timestamp:     block.Header().Time,
-		PrevRandao:    gointerfaces.ConvertHashToH256(block.Header().MixDigest),
+		ParentHash:    gointerfaces.ConvertHashToH256(header.ParentHash),
+		Coinbase:      gointerfaces.ConvertAddressToH160(header.Coinbase),
+		Timestamp:     header.Time,
+		PrevRandao:    gointerfaces.ConvertHashToH256(header.MixDigest),
 		StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),
 		ReceiptRoot:   gointerfaces.ConvertHashToH256(block.ReceiptHash()),
 		LogsBloom:     gointerfaces.ConvertBytesToH2048(block.Bloom().Bytes()),
@@ -642,7 +648,7 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		BlockNumber:   block.NumberU64(),
 		ExtraData:     block.Extra(),
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
-		BlockHash:     gointerfaces.ConvertHashToH256(block.Header().Hash()),
+		BlockHash:     gointerfaces.ConvertHashToH256(header.Hash()),
 		Transactions:  encodedTransactions,
 	}
 	if block.Withdrawals() != nil {
@@ -650,11 +656,10 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		payload.Withdrawals = ConvertWithdrawalsToRpc(block.Withdrawals())
 	}
 
-	if block.ExcessDataGas() != nil {
+	if header.DataGasUsed != nil && header.ExcessDataGas != nil {
 		payload.Version = 3
-		var excessDataGas uint256.Int
-		excessDataGas.SetFromBig(block.Header().ExcessDataGas)
-		payload.ExcessDataGas = gointerfaces.ConvertUint256IntToH256(&excessDataGas)
+		payload.DataGasUsed = header.DataGasUsed
+		payload.ExcessDataGas = header.ExcessDataGas
 	}
 
 	blockValue := blockValue(blockWithReceipts, baseFee)

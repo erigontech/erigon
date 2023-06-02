@@ -159,14 +159,6 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		}
 	}
 
-	if config.IsCancun(header.Time) {
-		parent := chain.GetHeaderByHash(header.ParentHash)
-		if parent == nil {
-			return nil, nil, fmt.Errorf("Could not find the parent of block %v to get excess data gas", header.Number.Uint64())
-		}
-		header.SetExcessDataGas(misc.CalcExcessDataGas(parent.ExcessDataGas, misc.CountBlobs(txs)))
-	}
-
 	return txs, r, nil
 }
 
@@ -180,6 +172,10 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	if config.IsCancun(header.Time) {
+		dataGasUsed := uint64(misc.CountBlobs(txs) * params.DataGasPerBlob)
+		header.DataGasUsed = &dataGasUsed
 	}
 	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, nil
 }
@@ -255,6 +251,9 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	}
 
 	if !chain.Config().IsCancun(header.Time) {
+		if header.DataGasUsed != nil {
+			return fmt.Errorf("invalid dataGasUsed before fork: have %v, expected 'nil'", header.DataGasUsed)
+		}
 		if header.ExcessDataGas != nil {
 			return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
 		}

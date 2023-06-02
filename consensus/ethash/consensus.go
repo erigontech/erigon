@@ -235,6 +235,9 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 		// Verify the header's EIP-1559 attributes.
 		return err
 	}
+	if header.DataGasUsed != nil {
+		return fmt.Errorf("invalid dataGasUsed before fork: have %v, expected 'nil'", header.DataGasUsed)
+	}
 	if header.ExcessDataGas != nil {
 		return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
 	}
@@ -600,6 +603,12 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash libcommon.Hash) {
 	}
 	if header.BaseFee != nil {
 		enc = append(enc, header.BaseFee)
+	}
+	if header.WithdrawalsHash != nil {
+		enc = append(enc, header.WithdrawalsHash)
+	}
+	if header.DataGasUsed != nil {
+		enc = append(enc, header.DataGasUsed)
 	}
 	if header.ExcessDataGas != nil {
 		enc = append(enc, header.ExcessDataGas)
