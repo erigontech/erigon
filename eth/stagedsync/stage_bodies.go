@@ -10,7 +10,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/log/v3"
 
@@ -206,12 +206,8 @@ func BodiesForward(
 			if err != nil {
 				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
-			if cfg.transactionsV3 && cfg.historyV3 && ok {
-				if err := cfg.blockWriter.MakeBodiesCanonical(tx, blockHeight, ctx, logPrefix, logEvery); err != nil {
-					return false, err
-				}
-			} else if cfg.historyV3 && ok {
-				if err := rawdbv3.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
+			if cfg.historyV3 && ok {
+				if err := rawdb.AppendCanonicalTxNums(tx, blockHeight); err != nil {
 					return false, err
 				}
 			}

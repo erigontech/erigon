@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -734,6 +735,42 @@ func DeleteBody(db kv.Deleter, hash libcommon.Hash, number uint64) {
 	if err := db.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, hash)); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
 	}
+}
+
+func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
+	nextBaseTxNum := uint64(0)
+	if from > 0 {
+		nextBaseTxNum, err = rawdbv3.TxNums.Max(tx, from-1)
+		if err != nil {
+			return err
+		}
+		nextBaseTxNum++
+	}
+	for blockNum := from; ; blockNum++ {
+		h, err := ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		if h == (libcommon.Hash{}) {
+			break
+		}
+
+		data := ReadStorageBodyRLP(tx, h, blockNum)
+		if len(data) == 0 {
+			break
+		}
+		bodyForStorage := new(types.BodyForStorage)
+		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
+			return err
+		}
+
+		nextBaseTxNum += uint64(bodyForStorage.TxAmount)
+		err = rawdbv3.TxNums.Append(tx, blockNum, nextBaseTxNum-1)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // MakeBodiesCanonical - move all txs of non-canonical blocks from NonCanonicalTxs table to EthTx table
