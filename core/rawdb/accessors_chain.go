@@ -646,6 +646,10 @@ func ReadBody(db kv.Getter, hash libcommon.Hash, number uint64) (*types.Body, ui
 	return body, bodyForStorage.BaseTxId + 1, bodyForStorage.TxAmount - 2 // 1 system txn in the begining of block, and 1 at the end
 }
 
+func HasSenders(db kv.Getter, hash libcommon.Hash, number uint64) (bool, error) {
+	return db.Has(kv.Senders, dbutils.BlockBodyKey(number, hash))
+}
+
 func ReadSenders(db kv.Getter, hash libcommon.Hash, number uint64) ([]libcommon.Address, error) {
 	data, err := db.GetOne(kv.Senders, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
