@@ -305,13 +305,31 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash libcommon.H
 	return h, nil
 }
 
-func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (body *types.Body, err error) {
-	body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight, r.TransactionsV3)
+func readBodyWithTransactionsDeprecated(db kv.Getter, hash libcommon.Hash, number uint64) (*types.Body, error) {
+	canonicalHash, err := rawdb.ReadCanonicalHash(db, number)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read canonical hash failed: %d, %w", number, err)
 	}
-	if body != nil {
-		return body, nil
+	if canonicalHash == hash {
+		return rawdb.ReadBodyWithTransactions(db, hash, number), nil
+	}
+	return rawdb.NonCanonicalBodyWithTransactions(db, hash, number), nil
+}
+
+func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (body *types.Body, err error) {
+	if r.TransactionsV3 {
+		body = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
+		if body != nil {
+			return body, nil
+		}
+	} else {
+		body, err = readBodyWithTransactionsDeprecated(tx, hash, blockHeight)
+		if err != nil {
+			return nil, err
+		}
+		if body != nil {
+			return body, nil
+		}
 	}
 
 	view := r.sn.View()
@@ -396,7 +414,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash l
 				}
 			}
 
-			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight, r.TransactionsV3)
+			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -407,7 +425,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash l
 			return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
 		}
 		if canonicalHash == hash {
-			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight, r.TransactionsV3)
+			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
 			if err != nil {
 				return nil, nil, err
 			}

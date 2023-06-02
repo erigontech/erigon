@@ -108,17 +108,17 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	canonicalC, err := tx.Cursor(kv.HeaderCanonical)
-	if err != nil {
-		return err
-	}
-	defer canonicalC.Close()
-
 	startFrom := s.BlockNumber + 1
 	currentHeaderIdx := uint64(0)
 	canonical := make([]libcommon.Hash, to-s.BlockNumber)
 
 	if !txsV3Enabled {
+		canonicalC, err := tx.Cursor(kv.HeaderCanonical)
+		if err != nil {
+			return err
+		}
+		defer canonicalC.Close()
+
 		for k, v, err := canonicalC.Seek(hexutility.EncodeTs(startFrom)); k != nil; k, v, err = canonicalC.Next() {
 			if err != nil {
 				return err
@@ -214,14 +214,14 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		return nil
 	}
 
-	bodiesC, err := tx.Cursor(kv.BlockBody)
+	bodiesC, err := tx.Cursor(kv.HeaderCanonical)
 	if err != nil {
 		return err
 	}
 	defer bodiesC.Close()
 
 Loop:
-	for k, _, err := bodiesC.Seek(hexutility.EncodeTs(startFrom)); k != nil; k, _, err = bodiesC.Next() {
+	for k, v, err := bodiesC.Seek(hexutility.EncodeTs(startFrom)); k != nil; k, v, err = bodiesC.Next() {
 		if err != nil {
 			return err
 		}
@@ -229,8 +229,8 @@ Loop:
 			return err
 		}
 
-		blockNumber := binary.BigEndian.Uint64(k[:8])
-		blockHash := libcommon.BytesToHash(k[8:])
+		blockNumber := binary.BigEndian.Uint64(k)
+		blockHash := libcommon.BytesToHash(v)
 
 		if blockNumber > to {
 			break
@@ -238,23 +238,19 @@ Loop:
 
 		var body *types.Body
 		if txsV3Enabled {
-			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
-				return err
-			}
-			if body == nil {
-				logger.Warn(fmt.Sprintf("[%s] blockReader.BodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
-				continue
-			}
+
 		} else {
 			if canonical[blockNumber-s.BlockNumber-1] != blockHash {
 				// non-canonical case
 				continue
 			}
-			body = rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNumber, false)
-			if body == nil {
-				logger.Warn(fmt.Sprintf("[%s] ReadCanonicalBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
-				continue
-			}
+		}
+		if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
+			return err
+		}
+		if body == nil {
+			logger.Warn(fmt.Sprintf("[%s] ReadBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
+			continue
 		}
 
 		select {

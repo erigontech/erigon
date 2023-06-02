@@ -96,6 +96,7 @@ func TestGetBlockReceipts(t *testing.T) {
 			block, err := br.BlockByNumber(m.Ctx, tx, i)
 			require.NoError(t, err)
 
+			hashes = append(hashes, block.Hash())
 			// If known, encode and queue for response packet
 			r := rawdb.ReadReceipts(tx, block, nil)
 			encoded, err := rlp.EncodeToBytes(r)

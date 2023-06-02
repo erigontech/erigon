@@ -34,7 +34,7 @@ func NewBlockWriter(historyV3, txsV3 bool) *BlockWriter {
 
 func (w *BlockWriter) TxsV3Enabled() bool { return w.txsV3 }
 func (w *BlockWriter) WriteBlock(tx kv.RwTx, block *types.Block) error {
-	if err := rawdb.WriteHeader(tx, block.HeaderNoCopy(), w.txsV3); err != nil {
+	if err := rawdb.WriteHeader(tx, block.HeaderNoCopy()); err != nil {
 		return err
 	}
 	if err := rawdb.WriteBody(tx, block.Hash(), block.NumberU64(), block.Body()); err != nil {
@@ -43,10 +43,10 @@ func (w *BlockWriter) WriteBlock(tx kv.RwTx, block *types.Block) error {
 	return nil
 }
 func (w *BlockWriter) WriteHeader(tx kv.RwTx, header *types.Header) error {
-	return rawdb.WriteHeader(tx, header, w.txsV3)
+	return rawdb.WriteHeader(tx, header)
 }
 func (w *BlockWriter) WriteHeaderRaw(tx kv.StatelessRwTx, number uint64, hash common.Hash, headerRlp []byte, skipIndexing bool) error {
-	return rawdb.WriteHeaderRaw(tx, number, hash, headerRlp, skipIndexing, w.txsV3)
+	return rawdb.WriteHeaderRaw(tx, number, hash, headerRlp, skipIndexing)
 }
 func (w *BlockWriter) WriteCanonicalHash(tx kv.RwTx, hash common.Hash, number uint64) error {
 	return rawdb.WriteCanonicalHash(tx, hash, number)
