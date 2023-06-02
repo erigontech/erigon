@@ -29,7 +29,6 @@ const (
 	ETHBACKEND_EngineGetPayload_FullMethodName                = "/remote.ETHBACKEND/EngineGetPayload"
 	ETHBACKEND_EngineGetPayloadBodiesByHashV1_FullMethodName  = "/remote.ETHBACKEND/EngineGetPayloadBodiesByHashV1"
 	ETHBACKEND_EngineGetPayloadBodiesByRangeV1_FullMethodName = "/remote.ETHBACKEND/EngineGetPayloadBodiesByRangeV1"
-	ETHBACKEND_EngineGetBlobsBundleV1_FullMethodName          = "/remote.ETHBACKEND/EngineGetBlobsBundleV1"
 	ETHBACKEND_Version_FullMethodName                         = "/remote.ETHBACKEND/Version"
 	ETHBACKEND_ProtocolVersion_FullMethodName                 = "/remote.ETHBACKEND/ProtocolVersion"
 	ETHBACKEND_ClientVersion_FullMethodName                   = "/remote.ETHBACKEND/ClientVersion"
@@ -53,12 +52,10 @@ type ETHBACKENDClient interface {
 	EngineNewPayload(ctx context.Context, in *types.ExecutionPayload, opts ...grpc.CallOption) (*EnginePayloadStatus, error)
 	// Update fork choice
 	EngineForkChoiceUpdated(ctx context.Context, in *EngineForkChoiceUpdatedRequest, opts ...grpc.CallOption) (*EngineForkChoiceUpdatedResponse, error)
-	// Fetch Execution Payload using its ID.
+	// Fetch the payload along with its blobs by ID.
 	EngineGetPayload(ctx context.Context, in *EngineGetPayloadRequest, opts ...grpc.CallOption) (*EngineGetPayloadResponse, error)
 	EngineGetPayloadBodiesByHashV1(ctx context.Context, in *EngineGetPayloadBodiesByHashV1Request, opts ...grpc.CallOption) (*EngineGetPayloadBodiesV1Response, error)
 	EngineGetPayloadBodiesByRangeV1(ctx context.Context, in *EngineGetPayloadBodiesByRangeV1Request, opts ...grpc.CallOption) (*EngineGetPayloadBodiesV1Response, error)
-	// Fetch the blobs bundle using its ID.
-	EngineGetBlobsBundleV1(ctx context.Context, in *EngineGetBlobsBundleRequest, opts ...grpc.CallOption) (*types.BlobsBundleV1, error)
 	// Version returns the service version number
 	Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error)
 	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
@@ -156,15 +153,6 @@ func (c *eTHBACKENDClient) EngineGetPayloadBodiesByHashV1(ctx context.Context, i
 func (c *eTHBACKENDClient) EngineGetPayloadBodiesByRangeV1(ctx context.Context, in *EngineGetPayloadBodiesByRangeV1Request, opts ...grpc.CallOption) (*EngineGetPayloadBodiesV1Response, error) {
 	out := new(EngineGetPayloadBodiesV1Response)
 	err := c.cc.Invoke(ctx, ETHBACKEND_EngineGetPayloadBodiesByRangeV1_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *eTHBACKENDClient) EngineGetBlobsBundleV1(ctx context.Context, in *EngineGetBlobsBundleRequest, opts ...grpc.CallOption) (*types.BlobsBundleV1, error) {
-	out := new(types.BlobsBundleV1)
-	err := c.cc.Invoke(ctx, ETHBACKEND_EngineGetBlobsBundleV1_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -317,12 +305,10 @@ type ETHBACKENDServer interface {
 	EngineNewPayload(context.Context, *types.ExecutionPayload) (*EnginePayloadStatus, error)
 	// Update fork choice
 	EngineForkChoiceUpdated(context.Context, *EngineForkChoiceUpdatedRequest) (*EngineForkChoiceUpdatedResponse, error)
-	// Fetch Execution Payload using its ID.
+	// Fetch the payload along with its blobs by ID.
 	EngineGetPayload(context.Context, *EngineGetPayloadRequest) (*EngineGetPayloadResponse, error)
 	EngineGetPayloadBodiesByHashV1(context.Context, *EngineGetPayloadBodiesByHashV1Request) (*EngineGetPayloadBodiesV1Response, error)
 	EngineGetPayloadBodiesByRangeV1(context.Context, *EngineGetPayloadBodiesByRangeV1Request) (*EngineGetPayloadBodiesV1Response, error)
-	// Fetch the blobs bundle using its ID.
-	EngineGetBlobsBundleV1(context.Context, *EngineGetBlobsBundleRequest) (*types.BlobsBundleV1, error)
 	// Version returns the service version number
 	Version(context.Context, *emptypb.Empty) (*types.VersionReply, error)
 	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
@@ -374,9 +360,6 @@ func (UnimplementedETHBACKENDServer) EngineGetPayloadBodiesByHashV1(context.Cont
 }
 func (UnimplementedETHBACKENDServer) EngineGetPayloadBodiesByRangeV1(context.Context, *EngineGetPayloadBodiesByRangeV1Request) (*EngineGetPayloadBodiesV1Response, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EngineGetPayloadBodiesByRangeV1 not implemented")
-}
-func (UnimplementedETHBACKENDServer) EngineGetBlobsBundleV1(context.Context, *EngineGetBlobsBundleRequest) (*types.BlobsBundleV1, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method EngineGetBlobsBundleV1 not implemented")
 }
 func (UnimplementedETHBACKENDServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Version not implemented")
@@ -561,24 +544,6 @@ func _ETHBACKEND_EngineGetPayloadBodiesByRangeV1_Handler(srv interface{}, ctx co
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ETHBACKENDServer).EngineGetPayloadBodiesByRangeV1(ctx, req.(*EngineGetPayloadBodiesByRangeV1Request))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ETHBACKEND_EngineGetBlobsBundleV1_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(EngineGetBlobsBundleRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ETHBACKENDServer).EngineGetBlobsBundleV1(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ETHBACKEND_EngineGetBlobsBundleV1_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ETHBACKENDServer).EngineGetBlobsBundleV1(ctx, req.(*EngineGetBlobsBundleRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -812,10 +777,6 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EngineGetPayloadBodiesByRangeV1",
 			Handler:    _ETHBACKEND_EngineGetPayloadBodiesByRangeV1_Handler,
-		},
-		{
-			MethodName: "EngineGetBlobsBundleV1",
-			Handler:    _ETHBACKEND_EngineGetBlobsBundleV1_Handler,
 		},
 		{
 			MethodName: "Version",

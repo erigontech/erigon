@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon-lib
 go 1.19
 
 require (
-	github.com/ledgerwatch/interfaces v0.0.0-20230506191109-292e4ca4d85f
+	github.com/ledgerwatch/interfaces v0.0.0-20230602100217-2411e25360a5
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.1.0
