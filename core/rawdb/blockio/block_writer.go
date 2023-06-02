@@ -102,15 +102,6 @@ func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.C
 	return nil
 }
 func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
-	defer func() {
-		fmt.Printf("=MakeBodiesNonCanonical: %d\n", from)
-		tx.ForEach(kv.MaxTxNum, nil, func(k, v []byte) error {
-			fmt.Printf("max: %d, %d\n", binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(v))
-			return nil
-		})
-		fmt.Printf("=MakeBodiesNonCanonical end\n")
-	}()
-
 	if !w.txsV3 {
 		if err := rawdb.MakeBodiesNonCanonical(tx, from, deleteBodies, ctx, logPrefix, logEvery); err != nil {
 			return err
@@ -146,9 +137,6 @@ func (w *BlockWriter) WriteBody(tx kv.RwTx, hash common.Hash, number uint64, bod
 	return rawdb.WriteBody(tx, hash, number, body)
 }
 func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error {
-	if w.txsV3 {
-		panic("txsV3 doesn't allow TruncateBodies")
-	}
 	fromB := hexutility.EncodeTs(from)
 	if err := tx.ForEach(kv.BlockBody, fromB, func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
 		return err
