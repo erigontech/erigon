@@ -35,6 +35,8 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	case fork_graph.PreValidated:
 		return nil
 	case fork_graph.Success:
+	case fork_graph.BelowAnchor:
+		log.Debug("replay block", "code", status)
 	default:
 		return fmt.Errorf("replay block, code: %+v", status)
 	}
