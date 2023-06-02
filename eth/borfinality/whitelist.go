@@ -25,11 +25,11 @@ type config struct {
 	closeCh    chan struct{}
 }
 
-func Whitelist(engine consensus.Engine, stagedsync *stagedsync.Sync, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
+func Whitelist(engine consensus.Engine, borDB kv.RwDB, stagedsync *stagedsync.Sync, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
 	Config = &config{
 		engine:     engine,
 		stagedSync: stagedsync,
-		db:         engine.(*bor.Bor).DB,
+		db:         borDB,
 		logger:     logger,
 		borAPI:     borAPI,
 		closeCh:    closeCh,
