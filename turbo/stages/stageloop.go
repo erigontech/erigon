@@ -231,11 +231,12 @@ type Hook struct {
 	sync          *stagedsync.Sync
 	chainConfig   *chain.Config
 	logger        log.Logger
+	blockReader   services.FullBlockReader
 	updateHead    func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int)
 }
 
-func NewHook(ctx context.Context, notifications *shards.Notifications, sync *stagedsync.Sync, chainConfig *chain.Config, logger log.Logger, updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int)) *Hook {
-	return &Hook{ctx: ctx, notifications: notifications, sync: sync, chainConfig: chainConfig, logger: logger, updateHead: updateHead}
+func NewHook(ctx context.Context, notifications *shards.Notifications, sync *stagedsync.Sync, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int)) *Hook {
+	return &Hook{ctx: ctx, notifications: notifications, sync: sync, blockReader: blockReader, chainConfig: chainConfig, logger: logger, updateHead: updateHead}
 }
 func (h *Hook) BeforeRun(tx kv.Tx, canRunCycleInOneTransaction bool) error {
 	notifications := h.notifications
@@ -250,6 +251,7 @@ func (h *Hook) BeforeRun(tx kv.Tx, canRunCycleInOneTransaction bool) error {
 }
 func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	notifications := h.notifications
+	blockReader := h.blockReader
 	// -- send notifications START
 	//TODO: can this 2 headers be 1
 	var headHeader, currentHeder *types.Header
@@ -287,7 +289,7 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	}
 
 	if notifications != nil && notifications.Events != nil {
-		if err = stagedsync.NotifyNewHeaders(h.ctx, finishProgressBefore, head, h.sync.PrevUnwindPoint(), notifications.Events, tx, h.logger); err != nil {
+		if err = stagedsync.NotifyNewHeaders(h.ctx, finishProgressBefore, head, h.sync.PrevUnwindPoint(), notifications.Events, tx, h.logger, blockReader); err != nil {
 			return nil
 		}
 	}

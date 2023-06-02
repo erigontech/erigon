@@ -430,12 +430,9 @@ func CanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]type
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
-	txIdKey := make([]byte, 8)
 	txs := make([]types.Transaction, amount)
-	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
-
-	if err := db.ForAmount(kv.EthTx, txIdKey, amount, func(k, v []byte) error {
+	if err := db.ForAmount(kv.EthTx, hexutility.EncodeTs(baseTxId), amount, func(k, v []byte) error {
 		var decodeErr error
 		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v); decodeErr != nil {
 			return decodeErr
@@ -453,12 +450,9 @@ func NonCanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]t
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
-	txIdKey := make([]byte, 8)
 	txs := make([]types.Transaction, amount)
-	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
-
-	if err := db.ForAmount(kv.NonCanonicalTxs, txIdKey, amount, func(k, v []byte) error {
+	if err := db.ForAmount(kv.NonCanonicalTxs, hexutility.EncodeTs(baseTxId), amount, func(k, v []byte) error {
 		var decodeErr error
 		if txs[i], decodeErr = types.DecodeTransaction(v); decodeErr != nil {
 			return decodeErr
@@ -474,9 +468,9 @@ func NonCanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]t
 
 func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) error {
 	txId := baseTxId
+	txIdKey := make([]byte, 8)
 	buf := bytes.NewBuffer(nil)
 	for _, tx := range txs {
-		txIdKey := make([]byte, 8)
 		binary.BigEndian.PutUint64(txIdKey, txId)
 		txId++
 
@@ -485,7 +479,7 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) err
 			return fmt.Errorf("broken tx rlp: %w", err)
 		}
 
-		if err := db.Append(kv.EthTx, txIdKey, common.CopyBytes(buf.Bytes())); err != nil {
+		if err := db.Append(kv.EthTx, txIdKey, buf.Bytes()); err != nil {
 			return err
 		}
 	}
@@ -494,8 +488,8 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) err
 
 func WriteRawTransactions(tx kv.RwTx, txs [][]byte, baseTxId uint64) error {
 	txId := baseTxId
+	txIdKey := make([]byte, 8)
 	for _, txn := range txs {
-		txIdKey := make([]byte, 8)
 		binary.BigEndian.PutUint64(txIdKey, txId)
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := tx.Append(kv.EthTx, txIdKey, txn); err != nil {
@@ -835,6 +829,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx cont
 				return err
 			}
 		}
+
 		// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
 		i := uint64(0)
 		if err := tx.ForAmount(kv.EthTx, hexutility.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
@@ -889,6 +884,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx cont
 			return err
 		}
 	}
+
 	return nil
 }
 
