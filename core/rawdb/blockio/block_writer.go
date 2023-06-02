@@ -37,7 +37,7 @@ func (w *BlockWriter) WriteBlock(tx kv.RwTx, block *types.Block) error {
 	if err := rawdb.WriteHeader(tx, block.HeaderNoCopy(), w.txsV3); err != nil {
 		return err
 	}
-	if err := rawdb.WriteBody(tx, block.Hash(), block.NumberU64(), block.Body(), w.txsV3); err != nil {
+	if err := rawdb.WriteBody(tx, block.Hash(), block.NumberU64(), block.Body()); err != nil {
 		return err
 	}
 	return nil
@@ -60,14 +60,10 @@ func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir
 	binary.BigEndian.PutUint64(startKey, from)
 	endKey := dbutils.HeaderKey(to, common.Hash{}) // etl.Tranform uses ExractEndKey as exclusive bound, therefore +1
 
-	fromTable := kv.HeaderID
-	if !w.txsV3 {
-		fromTable = kv.Headers
-	}
 	return etl.Transform(
 		logPrefix,
 		tx,
-		fromTable,
+		kv.Headers,
 		kv.HeaderNumber,
 		tmpDir,
 		extractHeaders,
@@ -118,10 +114,10 @@ func extractHeaders(k []byte, _ []byte, next etl.ExtractNextFunc) error {
 }
 
 func (w *BlockWriter) WriteRawBodyIfNotExists(tx kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnNum uint64, err error) {
-	return rawdb.WriteRawBodyIfNotExists(tx, hash, number, body, w.txsV3)
+	return rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
 }
 func (w *BlockWriter) WriteBody(tx kv.RwTx, hash common.Hash, number uint64, body *types.Body) error {
-	return rawdb.WriteBody(tx, hash, number, body, w.txsV3)
+	return rawdb.WriteBody(tx, hash, number, body)
 }
 func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error {
 	if w.txsV3 {
