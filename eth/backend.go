@@ -1090,7 +1090,7 @@ func (s *Ethereum) Start() error {
 	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, nil, hook)
 
 	if s.chainConfig.Bor != nil {
-		err := borwhitelist.RegisterService(s.chainDB)
+		err := borwhitelist.RegisterService(s.engine.(*bor.Bor).DB)
 		if err != nil {
 			return err
 		}
@@ -1102,6 +1102,7 @@ func (s *Ethereum) Start() error {
 				break
 			}
 		}
+
 		borfinality.Whitelist(s.engine, s.stagedSync, s.logger, borAPI, s.closeCh)
 	}
 
