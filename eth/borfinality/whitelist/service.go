@@ -127,6 +127,7 @@ func (s *Service) GetWhitelistedMilestone() (bool, uint64, common.Hash) {
 }
 
 func (s *Service) ProcessMilestone(endBlockNum uint64, endBlockHash common.Hash) {
+	fmt.Println("PRocess milestone called")
 	s.milestoneService.Process(endBlockNum, endBlockHash)
 }
 

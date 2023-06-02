@@ -178,7 +178,7 @@ func handleMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
 	if err != nil {
 		return err
 	}
-
+	fmt.Println("Handle milestone : process milestone")
 	service.ProcessMilestone(num, hash)
 
 	return nil
