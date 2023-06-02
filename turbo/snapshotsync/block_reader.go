@@ -813,7 +813,7 @@ func (r *BlockReader) FirstTxNumNotInSnapshots() uint64 {
 	return lastTxnID
 }
 
-func (r *BlockReader) IterateBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error {
+func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error {
 	view := r.sn.View()
 	defer view.Close()
 

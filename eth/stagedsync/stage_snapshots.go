@@ -280,9 +280,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 					return err
 				}
 				type IterBody interface {
-					IterateBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error
+					IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error
 				}
-				if err := blockReader.(IterBody).IterateBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+				if err := blockReader.(IterBody).IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 					if blockNum == 0 || blockNum > toBlock {
 						return nil
 					}

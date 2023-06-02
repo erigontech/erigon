@@ -78,23 +78,23 @@ func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir
 }
 
 func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+	defer func() {
+		fmt.Printf("=MakeBodiesCanonical: %d\n", from)
+		tx.ForEach(kv.MaxTxNum, nil, func(k, v []byte) error {
+			fmt.Printf("max: %d, %d\n", binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(v))
+			return nil
+		})
+		fmt.Printf("=MakeBodiesCanonical end\n")
+	}()
+
 	if !w.txsV3 {
 		// Property of blockchain: same block in different forks will have different hashes.
 		// Means - can mark all canonical blocks as non-canonical on unwind, and
 		// do opposite here - without storing any meta-info.
-		if err := rawdb.MakeBodiesCanonical(tx, from, ctx, logPrefix, logEvery, func(blockNum, lastTxnNum uint64) error {
-			if w.historyV3 {
-				if err := rawdbv3.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
+		if err := rawdb.MakeBodiesCanonical(tx, from, ctx, logPrefix, logEvery); err != nil {
 			return fmt.Errorf("make block canonical: %w", err)
 		}
-		return nil
 	}
-
 	if w.historyV3 {
 		if err := rawdb.AppendCanonicalTxNums(tx, from); err != nil {
 			return err
@@ -103,6 +103,15 @@ func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.C
 	return nil
 }
 func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+	defer func() {
+		fmt.Printf("=MakeBodiesNonCanonical: %d\n", from)
+		tx.ForEach(kv.MaxTxNum, nil, func(k, v []byte) error {
+			fmt.Printf("max: %d, %d\n", binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(v))
+			return nil
+		})
+		fmt.Printf("=MakeBodiesNonCanonical end\n")
+	}()
+
 	if !w.txsV3 {
 		if err := rawdb.MakeBodiesNonCanonical(tx, from, deleteBodies, ctx, logPrefix, logEvery); err != nil {
 			return err
@@ -115,8 +124,10 @@ func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodi
 		return nil
 	}
 
-	if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
-		return err
+	if w.historyV3 {
+		if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -129,7 +140,7 @@ func extractHeaders(k []byte, _ []byte, next etl.ExtractNextFunc) error {
 	return next(k, k[8:], k[:8])
 }
 
-func (w *BlockWriter) WriteRawBodyIfNotExists(tx kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnNum uint64, err error) {
+func (w *BlockWriter) WriteRawBodyIfNotExists(tx kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, err error) {
 	return rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
 }
 func (w *BlockWriter) WriteBody(tx kv.RwTx, hash common.Hash, number uint64, body *types.Body) error {

@@ -10,7 +10,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/log/v3"
 
@@ -204,14 +203,17 @@ func BodiesForward(
 			}
 
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-			ok, lastTxnNum, err := cfg.blockWriter.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
+			ok, err := cfg.blockWriter.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
 			if err != nil {
 				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
 			if cfg.historyV3 && ok {
-				if err := rawdbv3.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
+				if err := cfg.blockWriter.MakeBodiesCanonical(tx, blockHeight, ctx, logPrefix, logEvery); err != nil {
 					return false, err
 				}
+				//if err := rawdbv3.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
+				//	return false, err
+				//}
 			}
 			if ok {
 				dataflow.BlockBodyDownloadStates.AddChange(blockHeight, dataflow.BlockBodyCleared)
