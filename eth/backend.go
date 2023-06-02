@@ -1104,7 +1104,7 @@ func (s *Ethereum) Start() error {
 			}
 		}
 
-		borfinality.Whitelist(s.engine, borDB, s.stagedSync, s.logger, borAPI, s.closeCh)
+		borfinality.Whitelist(s.engine, borDB, s.chainDB, s.stagedSync, s.logger, borAPI, s.closeCh)
 	}
 
 	return nil

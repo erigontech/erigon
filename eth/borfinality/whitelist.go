@@ -19,17 +19,19 @@ var Config *config
 type config struct {
 	engine     consensus.Engine
 	stagedSync *stagedsync.Sync
-	db         kv.RwDB
+	bordb      kv.RwDB
+	chaindb    kv.RwDB
 	logger     log.Logger
 	borAPI     BorAPI
 	closeCh    chan struct{}
 }
 
-func Whitelist(engine consensus.Engine, borDB kv.RwDB, stagedsync *stagedsync.Sync, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
+func Whitelist(engine consensus.Engine, borDB kv.RwDB, chainDB kv.RwDB, stagedsync *stagedsync.Sync, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
 	Config = &config{
 		engine:     engine,
 		stagedSync: stagedsync,
-		db:         borDB,
+		bordb:      borDB,
+		chaindb:    chainDB,
 		logger:     logger,
 		borAPI:     borAPI,
 		closeCh:    closeCh,
