@@ -412,6 +412,13 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash l
 	return r.blockWithSenders(ctx, tx, hash, blockHeight, false)
 }
 func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []libcommon.Address, err error) {
+	defer func() {
+		if block == nil {
+			fmt.Printf("=blockWithSenders: %d, %x, %t, %d\n", blockHeight, hash, true, 0)
+		} else {
+			fmt.Printf("=blockWithSenders: %d, %x, %t, %d\n", blockHeight, hash, false, block.Transactions().Len())
+		}
+	}()
 	blocksAvailable := r.sn.BlocksAvailable()
 	if blocksAvailable == 0 || blockHeight > blocksAvailable {
 		if r.TransactionsV3 {
