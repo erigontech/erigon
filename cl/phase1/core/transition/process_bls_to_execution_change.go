@@ -3,6 +3,7 @@ package transition
 import (
 	"bytes"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	"github.com/Giulio2002/bls"

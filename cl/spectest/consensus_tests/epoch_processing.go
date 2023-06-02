@@ -1,11 +1,12 @@
 package consensus_tests
 
 import (
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	transition2 "github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 	"io/fs"
 	"os"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	transition2 "github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 
 	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/assert"
