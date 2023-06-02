@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -706,8 +707,39 @@ func DeleteBody(db kv.Deleter, hash libcommon.Hash, number uint64) {
 	}
 }
 
+func MakeBodiesCanonicalV3(tx kv.RwTx, from uint64) error {
+	maxTxNum, err := rawdbv3.TxNums.Max(tx, from-1)
+	if err != nil {
+		return err
+	}
+	for blockNum := from; ; blockNum++ {
+		h, err := ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		if h == (libcommon.Hash{}) {
+			break
+		}
+
+		data := ReadStorageBodyRLP(tx, h, blockNum)
+		if len(data) == 0 {
+			break
+		}
+		bodyForStorage := new(types.BodyForStorage)
+		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
+			return err
+		}
+		err = rawdbv3.TxNums.Append(tx, blockNum, maxTxNum)
+		if err != nil {
+			return err
+		}
+		maxTxNum += uint64(bodyForStorage.TxAmount)
+	}
+	return nil
+}
+
 // MakeBodiesCanonical - move all txs of non-canonical blocks from NonCanonicalTxs table to EthTx table
-func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker, txsV3 bool, cb func(blockNum uint64, lastTxnNum uint64) error) error {
+func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker, cb func(blockNum uint64, lastTxnNum uint64) error) error {
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -730,24 +762,20 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 			return err
 		}
 
-		if txsV3 {
-
-		} else {
-			// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
-			i := uint64(0)
-			if err := tx.ForAmount(kv.NonCanonicalTxs, hexutility.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
-				id := newBaseId + 1 + i
-				if err := tx.Put(kv.EthTx, hexutility.EncodeTs(id), v); err != nil {
-					return err
-				}
-				if err := tx.Delete(kv.NonCanonicalTxs, k); err != nil {
-					return err
-				}
-				i++
-				return nil
-			}); err != nil {
+		// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
+		i := uint64(0)
+		if err := tx.ForAmount(kv.NonCanonicalTxs, hexutility.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
+			id := newBaseId + 1 + i
+			if err := tx.Put(kv.EthTx, hexutility.EncodeTs(id), v); err != nil {
 				return err
 			}
+			if err := tx.Delete(kv.NonCanonicalTxs, k); err != nil {
+				return err
+			}
+			i++
+			return nil
+		}); err != nil {
+			return err
 		}
 
 		bodyForStorage.BaseTxId = newBaseId
@@ -773,10 +801,7 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 }
 
 // MakeBodiesNonCanonical - move all txs of canonical blocks to NonCanonicalTxs bucket
-func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx context.Context, logPrefix string, logEvery *time.Ticker, txsV3 bool) error {
-	if txsV3 {
-		return nil
-	}
+func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
 	var firstMovedTxnID uint64
 	var firstMovedTxnIDIsSet bool
 	for blockNum := from; ; blockNum++ {
@@ -810,26 +835,22 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx cont
 			}
 		}
 
-		if txsV3 {
-
-		} else {
-			// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
-			i := uint64(0)
-			if err := tx.ForAmount(kv.EthTx, hexutility.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
-				if !deleteBodies {
-					id := newBaseId + 1 + i
-					if err := tx.Put(kv.NonCanonicalTxs, hexutility.EncodeTs(id), v); err != nil {
-						return err
-					}
-				}
-				if err := tx.Delete(kv.EthTx, k); err != nil {
+		// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
+		i := uint64(0)
+		if err := tx.ForAmount(kv.EthTx, hexutility.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
+			if !deleteBodies {
+				id := newBaseId + 1 + i
+				if err := tx.Put(kv.NonCanonicalTxs, hexutility.EncodeTs(id), v); err != nil {
 					return err
 				}
-				i++
-				return nil
-			}); err != nil {
+			}
+			if err := tx.Delete(kv.EthTx, k); err != nil {
 				return err
 			}
+			i++
+			return nil
+		}); err != nil {
+			return err
 		}
 
 		if deleteBodies {

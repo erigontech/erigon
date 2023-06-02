@@ -78,29 +78,45 @@ func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir
 }
 
 func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
-	// Property of blockchain: same block in different forks will have different hashes.
-	// Means - can mark all canonical blocks as non-canonical on unwind, and
-	// do opposite here - without storing any meta-info.
-	if err := rawdb.MakeBodiesCanonical(tx, from, ctx, logPrefix, logEvery, w.txsV3, func(blockNum, lastTxnNum uint64) error {
-		if w.historyV3 {
-			if err := rawdbv3.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
-				return err
+	if !w.txsV3 {
+		// Property of blockchain: same block in different forks will have different hashes.
+		// Means - can mark all canonical blocks as non-canonical on unwind, and
+		// do opposite here - without storing any meta-info.
+		if err := rawdb.MakeBodiesCanonical(tx, from, ctx, logPrefix, logEvery, func(blockNum, lastTxnNum uint64) error {
+			if w.historyV3 {
+				if err := rawdbv3.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
+					return err
+				}
 			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("make block canonical: %w", err)
 		}
 		return nil
-	}); err != nil {
-		return fmt.Errorf("make block canonical: %w", err)
+	}
+
+	if w.historyV3 {
+		if err := rawdb.MakeBodiesCanonicalV3(tx, from); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
-	if err := rawdb.MakeBodiesNonCanonical(tx, from, deleteBodies, ctx, logPrefix, logEvery, w.txsV3); err != nil {
-		return err
-	}
-	if w.historyV3 {
-		if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
+	if !w.txsV3 {
+		if err := rawdb.MakeBodiesNonCanonical(tx, from, deleteBodies, ctx, logPrefix, logEvery); err != nil {
 			return err
 		}
+		if w.historyV3 {
+			if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
+		return err
 	}
 	return nil
 }
