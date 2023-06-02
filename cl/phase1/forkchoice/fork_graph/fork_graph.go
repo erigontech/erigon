@@ -178,7 +178,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 		f.highestSeen = newState.Slot()
 		f.currentState = newState
 		f.currentStateBlockRoot = blockRoot
-		if newState.Slot()%snapshotStateEverySlot == 0 && f.enabledPruning {
+		if newState.Slot()%snapshotStateEverySlot == 0 && f.nextReferenceState.Slot() < f.beaconCfg.SlotsPerEpoch && f.enabledPruning {
 			if err := f.removeOldData(); err != nil {
 				return nil, LogisticError, err
 			}
@@ -288,9 +288,6 @@ func (f *ForkGraph) GetFinalizedCheckpoint(blockRoot libcommon.Hash) (solid.Chec
 }
 
 func (f *ForkGraph) removeOldData() (err error) {
-	if f.nextReferenceState.Slot() < f.beaconCfg.SlotsPerEpoch {
-		return nil
-	}
 	pruneSlot := f.nextReferenceState.Slot() - f.beaconCfg.SlotsPerEpoch
 	oldRoots := make([]libcommon.Hash, 0, len(f.blocks))
 	for hash, signedBlock := range f.blocks {
