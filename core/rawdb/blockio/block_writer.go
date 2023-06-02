@@ -140,7 +140,6 @@ func extractHeaders(k []byte, _ []byte, next etl.ExtractNextFunc) error {
 }
 
 func (w *BlockWriter) WriteRawBodyIfNotExists(tx kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, err error) {
-	fmt.Printf("=WriteRawBodyIfNotExists: %d, %x, %d\n", number, hash, len(body.Transactions))
 	return rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
 }
 func (w *BlockWriter) WriteBody(tx kv.RwTx, hash common.Hash, number uint64, body *types.Body) error {

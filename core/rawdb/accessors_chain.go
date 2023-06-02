@@ -1180,19 +1180,15 @@ func HasBlock(db kv.Getter, hash libcommon.Hash, number uint64) bool {
 func ReadBlockWithSenders(db kv.Getter, hash libcommon.Hash, number uint64, txsV3 bool) (*types.Block, []libcommon.Address, error) {
 	block := ReadBlock(db, hash, number, txsV3)
 	if block == nil {
-		fmt.Printf("nil 1\n")
 		return nil, nil, nil
 	}
 	senders, err := ReadSenders(db, hash, number)
 	if err != nil {
-		fmt.Printf("nil 2\n")
 		return nil, nil, err
 	}
 	if len(senders) != block.Transactions().Len() {
-		fmt.Printf("nil 3\n")
 		return block, senders, nil // no senders is fine - will recover them on the fly
 	}
-	fmt.Printf("not nil 4\n")
 	block.SendersToTxs(senders)
 	return block, senders, nil
 }
