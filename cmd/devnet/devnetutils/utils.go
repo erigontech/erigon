@@ -13,7 +13,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/log/v3"
@@ -21,7 +21,7 @@ import (
 
 // ClearDevDB cleans up the dev folder used for the operations
 func ClearDevDB(dataDir string, logger log.Logger) error {
-	logger.Info("Deleting ./dev folders")
+	logger.Info("Deleting nodes' data folders")
 
 	nodeNumber := 1
 	for {
@@ -34,7 +34,7 @@ func ClearDevDB(dataDir string, logger log.Logger) error {
 			return err
 		}
 		if fileInfo.IsDir() {
-			if err := os.RemoveAll(dataDir); err != nil {
+			if err := os.RemoveAll(nodeDataDir); err != nil {
 				return err
 			}
 			logger.Info("SUCCESS => Deleted", "datadir", nodeDataDir)
@@ -67,7 +67,7 @@ func UniqueIDFromEnode(enode string) (string, error) {
 	return enode[:i], nil
 }
 
-// ParseResponse converts any of the rpctest interfaces to a string for readability
+// ParseResponse converts any of the models interfaces to a string for readability
 func ParseResponse(resp interface{}) (string, error) {
 	result, err := json.Marshal(resp)
 	if err != nil {
@@ -107,8 +107,8 @@ func HashSlicesAreEqual(s1, s2 []libcommon.Hash) bool {
 	return true
 }
 
-func BuildLog(hash libcommon.Hash, blockNum string, address libcommon.Address, topics []libcommon.Hash, data hexutility.Bytes, txIndex hexutil.Uint, blockHash libcommon.Hash, index hexutil.Uint, removed bool) rpctest.Log {
-	return rpctest.Log{
+func BuildLog(hash libcommon.Hash, blockNum string, address libcommon.Address, topics []libcommon.Hash, data hexutility.Bytes, txIndex hexutil.Uint, blockHash libcommon.Hash, index hexutil.Uint, removed bool) models.Log {
+	return models.Log{
 		Address:     address,
 		Topics:      topics,
 		Data:        data,
@@ -121,7 +121,7 @@ func BuildLog(hash libcommon.Hash, blockNum string, address libcommon.Address, t
 	}
 }
 
-func CompareLogEvents(expected, actual rpctest.Log) ([]error, bool) {
+func CompareLogEvents(expected, actual models.Log) ([]error, bool) {
 	var errs []error
 
 	switch {

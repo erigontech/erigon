@@ -111,14 +111,14 @@ func IsValidIndexedAttestation(b *raw.BeaconState, att *cltypes.IndexedAttestati
 		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 
-	pks := [][]byte{}
+	pks := make([][]byte, 0, inds.Length())
 	if err := solid.RangeErr[uint64](inds, func(_ int, v uint64, _ int) error {
 		val, err := b.ValidatorForValidatorIndex(int(v))
 		if err != nil {
 			return err
 		}
-		pk := val.PublicKey()
-		pks = append(pks, pk[:])
+		pk := val.PublicKeyBytes()
+		pks = append(pks, pk)
 		return nil
 	}); err != nil {
 		return false, err
