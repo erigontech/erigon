@@ -95,9 +95,6 @@ func TestGetBlockReceipts(t *testing.T) {
 		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
 			block, err := br.BlockByNumber(m.Ctx, tx, i)
 			require.NoError(t, err)
-
-			block, senders, err := br.BlockWithSenders(m.Ctx, tx, hash, i)
-			require.NoError(t, err)
 			// If known, encode and queue for response packet
 			r := rawdb.ReadReceipts(tx, block, nil)
 			encoded, err := rlp.EncodeToBytes(r)
