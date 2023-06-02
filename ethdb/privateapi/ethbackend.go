@@ -590,7 +590,7 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		BlockNumber:   block.NumberU64(),
 		ExtraData:     block.Extra(),
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
-		BlockHash:     gointerfaces.ConvertHashToH256(header.Hash()),
+		BlockHash:     gointerfaces.ConvertHashToH256(block.Hash()),
 		Transactions:  encodedTransactions,
 	}
 	if block.Withdrawals() != nil {
