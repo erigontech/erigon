@@ -228,11 +228,14 @@ func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*chain.Config, *types.Bloc
 		return cc, genesisBlock, nil
 	}
 
-	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+	hash, err := rawdb.ReadCanonicalHash(tx, 0)
 	if err != nil {
 		return nil, nil, err
 	}
-	cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+	if err != nil {
+		return nil, nil, err
+	}
+	cc, err = rawdb.ReadChainConfig(tx, hash)
 	if err != nil {
 		return nil, nil, err
 	}
