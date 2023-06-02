@@ -842,7 +842,6 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 
 		var ok bool
 		ok, i.blockNum, err = rawdbv3.TxNums.FindBlockNum(i.tx, txNum)
-		fmt.Printf("FindBlockNum: txNum=%d, bn=%d\n", txNum, i.blockNum)
 		if err != nil {
 			return
 		}
@@ -859,7 +858,6 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 			return
 		}
 		i.maxTxNumInBlock, err = rawdbv3.TxNums.Max(i.tx, blockNum)
-		fmt.Printf("max: txNum=%d, bn=%d\n", blockNum, i.maxTxNumInBlock)
 		if err != nil {
 			return
 		}
