@@ -1540,26 +1540,25 @@ func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, firs
 		}
 		copy(key, k)
 		copy(key[8:], v)
-		dataRLP, err := tx.GetOne(kv.BlockBody, key)
-		if err != nil {
-			return false, err
-		}
-		if dataRLP == nil {
-			logger.Warn("header missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
-			return true, nil
-		}
 
 		// Important: DB does store canonical and non-canonical txs in same table. And using same body.BaseTxID
 		// But snapshots using canonical TxNum in field body.BaseTxID
+		// So, we manually calc this field here and serialize again.
+		//
 		// FYI: we also have other table to map canonical BlockNum->TxNum: kv.MaxTxNum
-		body := &types.BodyForStorage{}
-		if err = rlp.DecodeBytes(dataRLP, body); err != nil {
+		body, err := rawdb.ReadBodyForStorageByKey(tx, key)
+		if err != nil {
 			return false, err
 		}
+		if body == nil {
+			logger.Warn("body missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
+			return true, nil
+		}
+
 		body.BaseTxId = firstTxNum
 		firstTxNum += uint64(body.TxAmount)
 
-		dataRLP, err = rlp.EncodeToBytes(body)
+		dataRLP, err := rlp.EncodeToBytes(body)
 		if err != nil {
 			return false, err
 		}
