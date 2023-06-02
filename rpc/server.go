@@ -54,11 +54,13 @@ type Server struct {
 	disableStreaming bool
 	traceRequests    bool // Whether to print requests at INFO level
 	batchLimit       int  // Maximum number of requests in a batch
+	logger           log.Logger
 }
 
 // NewServer creates a new server instance with no registered handlers.
-func NewServer(batchConcurrency uint, traceRequests, disableStreaming bool) *Server {
-	server := &Server{idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency, disableStreaming: disableStreaming, traceRequests: traceRequests}
+func NewServer(batchConcurrency uint, traceRequests, disableStreaming bool, logger log.Logger) *Server {
+	server := &Server{idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency,
+		disableStreaming: disableStreaming, traceRequests: traceRequests, logger: logger}
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.
 	rpcService := &RPCService{server: server}
@@ -101,7 +103,7 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 	s.codecs.Add(codec)
 	defer s.codecs.Remove(codec)
 
-	c := initClient(codec, s.idgen, &s.services)
+	c := initClient(codec, s.idgen, &s.services, s.logger)
 	<-codec.closed()
 	c.Close()
 }
@@ -115,7 +117,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 		return
 	}
 
-	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency, s.traceRequests)
+	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger)
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
 
@@ -142,7 +144,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 // subscriptions.
 func (s *Server) Stop() {
 	if atomic.CompareAndSwapInt32(&s.run, 1, 0) {
-		log.Info("RPC server shutting down")
+		s.logger.Info("RPC server shutting down")
 		s.codecs.Each(func(c interface{}) bool {
 			c.(ServerCodec).close()
 			return true

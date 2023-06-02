@@ -143,10 +143,11 @@ func TestNodeCloseClosesDB(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, _ := New(testNodeConfig(t), log.New())
+	logger := log.New()
+	stack, _ := New(testNodeConfig(t), logger)
 	defer stack.Close()
 
-	db, err := OpenDatabase(stack.Config(), kv.SentryDB)
+	db, err := OpenDatabase(stack.Config(), kv.SentryDB, logger)
 	if err != nil {
 		t.Fatal("can't open DB:", err)
 	}
@@ -170,14 +171,15 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, err := New(testNodeConfig(t), log.New())
+	logger := log.New()
+	stack, err := New(testNodeConfig(t), logger)
 	require.NoError(t, err)
 	defer stack.Close()
 
 	var db kv.RwDB
 	stack.RegisterLifecycle(&InstrumentedService{
 		startHook: func() {
-			db, err = OpenDatabase(stack.Config(), kv.SentryDB)
+			db, err = OpenDatabase(stack.Config(), kv.SentryDB, logger)
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}
@@ -197,12 +199,13 @@ func TestNodeOpenDatabaseFromLifecycleStop(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, _ := New(testNodeConfig(t), log.New())
+	logger := log.New()
+	stack, _ := New(testNodeConfig(t), logger)
 	defer stack.Close()
 
 	stack.RegisterLifecycle(&InstrumentedService{
 		stopHook: func() {
-			db, err := OpenDatabase(stack.Config(), kv.ChainDB)
+			db, err := OpenDatabase(stack.Config(), kv.ChainDB, logger)
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}

@@ -196,6 +196,7 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
 		diagnostics.SetupFlagsAccess(ctx)
 		diagnostics.SetupVersionAccess()
 		diagnostics.SetupBlockBodyDownload()
+		diagnostics.SetupHeaderDownloadStats()
 	}
 
 	// pprof server

@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -27,14 +28,16 @@ type SentinelServer struct {
 	sentinel       *sentinel.Sentinel
 	gossipNotifier *gossipNotifier
 
-	mu sync.RWMutex
+	mu     sync.RWMutex
+	logger log.Logger
 }
 
-func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel) *SentinelServer {
+func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.Logger) *SentinelServer {
 	return &SentinelServer{
 		sentinel:       sentinel,
 		ctx:            ctx,
 		gossipNotifier: newGossipNotifier(),
+		logger:         logger,
 	}
 }
 
@@ -59,7 +62,9 @@ func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*senti
 	if err := pid.UnmarshalText([]byte(p.Pid)); err != nil {
 		return nil, err
 	}
-	s.sentinel.Peers().BanBadPeer(pid)
+	s.sentinel.Peers().WithPeer(pid, func(peer *peers.Peer) {
+		peer.Ban()
+	})
 	return &sentinelrpc.EmptyMessage{}, nil
 }
 
@@ -118,69 +123,94 @@ func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sen
 				},
 				BlobIndex: packet.blobIndex,
 			}); err != nil {
-				log.Warn("[Sentinel] Could not relay gossip packet", "reason", err)
+				s.logger.Warn("[Sentinel] Could not relay gossip packet", "reason", err)
 			}
 		}
 	}
 }
 
-func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
+func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration) (ctx context.Context, cn func()) {
+	if dur > 0 {
+		ctx, cn = context.WithTimeout(pctx, 8*time.Second)
+	} else {
+		ctx, cn = context.WithCancel(pctx)
+	}
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			cn()
+		case <-ctx.Done():
+			return
+		}
+	}()
+	return ctx, cn
+}
+
+func (s *SentinelServer) SendRequest(pctx context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	retryReqInterval := time.NewTicker(200 * time.Millisecond)
 	defer retryReqInterval.Stop()
-	timeout := time.NewTimer(2 * time.Second)
-	defer retryReqInterval.Stop()
+	ctx, cn := s.withTimeoutCtx(pctx, 0)
+	defer cn()
 	doneCh := make(chan *sentinelrpc.ResponseData)
 	// Try finding the data to our peers
-	for {
+	uniquePeers := map[peer.ID]struct{}{}
+	requestPeer := func(peer *peers.Peer) {
+		peer.MarkUsed()
+		data, isError, err := communication.SendRequestRawToPeer(ctx, s.sentinel.Host(), req.Data, req.Topic, peer.ID())
+		if err != nil {
+			return
+		}
+		if isError > 3 {
+			peer.Disconnect(fmt.Sprintf("invalid response, starting byte %d", isError))
+			peer.Penalize()
+		}
+		if isError != 0 {
+			return
+		}
+		ans := &sentinelrpc.ResponseData{
+			Data:  data,
+			Error: isError != 0,
+			Peer: &sentinelrpc.Peer{
+				Pid: peer.ID().String(),
+			},
+		}
 		select {
-		case <-s.ctx.Done():
-			return nil, context.Canceled
-		case <-retryReqInterval.C:
-			// Spawn new thread for request
+		case doneCh <- ans:
+			peer.MarkReplied()
+			retryReqInterval.Stop()
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+	go func() {
+		for {
 			pid, err := s.sentinel.RandomPeer(req.Topic)
 			if err != nil {
-				// Wait a bit to not exhaust CPU and skip.
 				continue
 			}
-			pidText, err := pid.MarshalText()
-			if err != nil {
-				return nil, err
+			if _, ok := uniquePeers[pid]; !ok {
+				go s.sentinel.Peers().WithPeer(pid, requestPeer)
+				uniquePeers[pid] = struct{}{}
 			}
-			//log.Trace("[sentinel] Sent request", "pid", pid)
-			s.sentinel.Peers().PeerDoRequest(pid)
-			go func() {
-				data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.sentinel.Host(), req.Data, req.Topic, pid)
-				s.sentinel.Peers().PeerFinishRequest(pid)
-				if err != nil {
-					s.sentinel.Peers().Penalize(pid)
-					return
-				} else if isError {
-					s.sentinel.Peers().DisconnectPeer(pid)
-				}
-				select {
-				case doneCh <- &sentinelrpc.ResponseData{
-					Data:  data,
-					Error: isError,
-					Peer: &sentinelrpc.Peer{
-						Pid: string(pidText),
-					},
-				}:
-				default:
-				}
-			}()
-		case resp := <-doneCh:
-			return resp, nil
-		case <-timeout.C:
-			return &sentinelrpc.ResponseData{
-				Data:  []byte("sentinel timeout"),
-				Error: true,
-				Peer: &sentinelrpc.Peer{
-					Pid: "",
-				},
-			}, nil
+			select {
+			case <-retryReqInterval.C:
+			case <-ctx.Done():
+				return
+			}
 		}
+	}()
+	select {
+	case resp := <-doneCh:
+		return resp, nil
+	case <-ctx.Done():
+		return &sentinelrpc.ResponseData{
+			Data:  []byte("request timeout"),
+			Error: true,
+			Peer:  &sentinelrpc.Peer{Pid: ""},
+		}, nil
 	}
 }
 
@@ -236,7 +266,7 @@ func (s *SentinelServer) startServerBackgroundLoop() {
 			peers := s.sentinel.PeersList()
 			s.sentinel.Stop()
 			status := s.sentinel.Status()
-			s.sentinel, err = createSentinel(s.sentinel.Config(), s.sentinel.DB())
+			s.sentinel, err = createSentinel(s.sentinel.Config(), s.sentinel.DB(), s.logger)
 			if err != nil {
 				log.Warn("Could not coordinate sentinel", "err", err)
 				continue
@@ -254,7 +284,7 @@ func (s *SentinelServer) startServerBackgroundLoop() {
 
 func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
 	var err error
-	log.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.Topic)
+	s.logger.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.Topic)
 	data := pkt.GetData()
 
 	// If we use snappy codec then decompress it accordingly.

@@ -80,12 +80,12 @@ func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64,
 	if err != nil {
 		return err
 	}
-	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
+	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), logger)
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, transactionV3)
+	blockReader := snapshotsync.NewBlockReader(allSnapshots, transactionV3)
 
 	chainDb := db
 	defer chainDb.Close()
@@ -123,7 +123,7 @@ func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64,
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 
-	engine := initConsensusEngine(chainConfig, allSnapshots)
+	engine := initConsensusEngine(chainConfig, allSnapshots, logger)
 
 	for !interrupt {
 

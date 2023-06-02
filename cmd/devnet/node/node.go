@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -20,37 +21,33 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-// Holds the number id of each node on the network, the first node is node 0
-var nodeNumber int
-
 // Start starts the process for two erigon nodes running on the dev chain
-func Start(wg *sync.WaitGroup) {
+func Start(reqGen *requests.RequestGenerator, wg *sync.WaitGroup, dataDir string, logger log.Logger) {
 	// add one goroutine to the wait-list
 	wg.Add(1)
 
 	// start the first node
-	go StartNode(wg, miningNodeArgs())
+	go StartNode(wg, miningNodeArgs(dataDir, 1), 1, logger)
 
 	// sleep for a while to allow first node to start
 	time.Sleep(time.Second * 10)
 
 	// get the enode of the first node
-	enode, err := getEnode()
+	enode, err := getEnode(reqGen, logger)
 	if err != nil {
-		// TODO: Log the error, it means node did not start well
-		fmt.Printf("error starting the node: %s\n", err)
+		logger.Error("Starting the node", "error", err)
 	}
 
 	// add one goroutine to the wait-list
 	wg.Add(1)
 
 	// start the second node, connect it to the mining node with the enode
-	go StartNode(wg, nonMiningNodeArgs(2, enode))
+	go StartNode(wg, nonMiningNodeArgs(dataDir, 2, enode), 2, logger)
 }
 
 // StartNode starts an erigon node on the dev chain
-func StartNode(wg *sync.WaitGroup, args []string) {
-	fmt.Printf("\nRunning node %d with flags ==> %v\n", nodeNumber, args)
+func StartNode(wg *sync.WaitGroup, args []string, nodeNumber int, logger log.Logger) {
+	logger.Info("Running node", "number", nodeNumber, "args", args)
 
 	// catch any errors and avoid panics if an error occurs
 	defer func() {
@@ -60,17 +57,16 @@ func StartNode(wg *sync.WaitGroup, args []string) {
 			return
 		}
 
-		log.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
+		logger.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
 		wg.Done()
 		os.Exit(1)
 	}()
 
 	app := erigonapp.MakeApp("devnet", runNode, erigoncli.DefaultFlags)
-	nodeNumber++ // increment the number of nodes on the network
 	if err := app.Run(args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
-			log.Warn("Error writing app run error to stderr", "err", printErr)
+			logger.Warn("Error writing app run error to stderr", "err", printErr)
 		}
 		wg.Done()
 		os.Exit(1)
@@ -88,12 +84,12 @@ func runNode(ctx *cli.Context) error {
 	}
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
-	nodeCfg := node.NewNodConfigUrfave(ctx)
-	ethCfg := node.NewEthConfigUrfave(ctx, nodeCfg)
+	nodeCfg := node.NewNodConfigUrfave(ctx, logger)
+	ethCfg := node.NewEthConfigUrfave(ctx, nodeCfg, logger)
 
 	ethNode, err := node.New(nodeCfg, ethCfg, logger)
 	if err != nil {
-		log.Error("Devnet startup", "err", err)
+		logger.Error("Devnet startup", "err", err)
 		return err
 	}
 
@@ -105,35 +101,39 @@ func runNode(ctx *cli.Context) error {
 }
 
 // miningNodeArgs returns custom args for starting a mining node
-func miningNodeArgs() []string {
-	dataDir, _ := models.ParameterFromArgument(models.DataDirArg, models.DataDirParam+fmt.Sprintf("%d", nodeNumber))
+func miningNodeArgs(dataDir string, nodeNumber int) []string {
+	nodeDataDir := filepath.Join(dataDir, fmt.Sprintf("%d", nodeNumber))
+	dataDirArg, _ := models.ParameterFromArgument(models.DataDirArg, nodeDataDir)
 	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
 	devPeriod, _ := models.ParameterFromArgument(models.DevPeriodArg, models.DevPeriodParam)
 	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamMine)
 	httpApi, _ := models.ParameterFromArgument(models.HttpApiArg, models.HttpApiParam)
 	ws := models.WSArg
 	consoleVerbosity, _ := models.ParameterFromArgument(models.ConsoleVerbosityArg, models.ConsoleVerbosityParam)
-	logDir, _ := models.ParameterFromArgument(models.LogDirArg, models.LogDirParam+"/node_1")
+	p2pProtocol, _ := models.ParameterFromArgument("--p2p.protocol", "68")
+	downloaderArg, _ := models.ParameterFromArgument("--no-downloader", "true")
 
-	return []string{models.BuildDirArg, dataDir, chainType, privateApiAddr, models.Mine, httpApi, ws, devPeriod, consoleVerbosity, logDir}
+	return []string{models.BuildDirArg, dataDirArg, chainType, privateApiAddr, models.Mine, httpApi, ws, devPeriod, consoleVerbosity, p2pProtocol, downloaderArg}
 }
 
 // nonMiningNodeArgs returns custom args for starting a non-mining node
-func nonMiningNodeArgs(nodeNumber int, enode string) []string {
-	dataDir, _ := models.ParameterFromArgument(models.DataDirArg, models.DataDirParam+fmt.Sprintf("%d", nodeNumber))
+func nonMiningNodeArgs(dataDir string, nodeNumber int, enode string) []string {
+	nodeDataDir := filepath.Join(dataDir, fmt.Sprintf("%d", nodeNumber))
+	dataDirArg, _ := models.ParameterFromArgument(models.DataDirArg, nodeDataDir)
 	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
 	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamNoMine)
 	staticPeers, _ := models.ParameterFromArgument(models.StaticPeersArg, enode)
 	consoleVerbosity, _ := models.ParameterFromArgument(models.ConsoleVerbosityArg, models.ConsoleVerbosityParam)
-	logDir, _ := models.ParameterFromArgument(models.LogDirArg, models.LogDirParam+"/node_2")
 	torrentPort, _ := models.ParameterFromArgument(models.TorrentPortArg, models.TorrentPortParam)
+	p2pProtocol, _ := models.ParameterFromArgument("--p2p.protocol", "68")
+	downloaderArg, _ := models.ParameterFromArgument("--no-downloader", "true")
 
-	return []string{models.BuildDirArg, dataDir, chainType, privateApiAddr, staticPeers, models.NoDiscover, consoleVerbosity, logDir, torrentPort}
+	return []string{models.BuildDirArg, dataDirArg, chainType, privateApiAddr, staticPeers, models.NoDiscover, consoleVerbosity, torrentPort, p2pProtocol, downloaderArg}
 }
 
 // getEnode returns the enode of the mining node
-func getEnode() (string, error) {
-	nodeInfo, err := requests.AdminNodeInfo(0)
+func getEnode(reqGen *requests.RequestGenerator, logger log.Logger) (string, error) {
+	nodeInfo, err := requests.AdminNodeInfo(reqGen, logger)
 	if err != nil {
 		return "", err
 	}

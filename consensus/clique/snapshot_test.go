@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // testerAccountPool is a pool to maintain currently active tester accounts,
@@ -423,10 +424,11 @@ func TestClique(t *testing.T) {
 
 			cliqueDB := memdb.NewTestDB(t)
 
-			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB)
+			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB, log.New())
 			engine.FakeDiff = true
 			// Create a pristine blockchain with the genesis injected
 			m := stages.MockWithGenesisEngine(t, genesis, engine, false)
+			blockReader, _ := m.NewBlocksIO()
 
 			chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(tt.votes), func(j int, gen *core.BlockGen) {
 				// Cast the vote contained in this block
@@ -507,7 +509,7 @@ func TestClique(t *testing.T) {
 
 			var snap *clique.Snapshot
 			if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-				snap, err = engine.Snapshot(stagedsync.ChainReader{Cfg: config, Db: tx}, head.NumberU64(), head.Hash(), nil)
+				snap, err = engine.Snapshot(stagedsync.ChainReader{Cfg: config, Db: tx, BlockReader: blockReader}, head.NumberU64(), head.Hash(), nil)
 				if err != nil {
 					return err
 				}

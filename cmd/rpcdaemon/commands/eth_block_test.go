@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -27,7 +26,7 @@ import (
 func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 	b, err := api.GetBlockByNumber(context.Background(), rpc.LatestBlockNumber, false)
@@ -41,7 +40,7 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tx, err := m.DB.BeginRw(ctx)
@@ -49,7 +48,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := rawdb.ReadBlockByHash(tx, latestBlockHash)
+	latestBlock, err := br.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
@@ -74,12 +73,12 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 	m := stages.MockWithTxPool(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {})
+	ff := rpchelper.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {}, m.Log)
 
 	expected := 1
 	header := &types.Header{
@@ -105,7 +104,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
@@ -117,7 +116,7 @@ func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
 func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tx, err := m.DB.BeginRw(ctx)
@@ -125,7 +124,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := rawdb.ReadBlockByHash(tx, latestBlockHash)
+	latestBlock, err := br.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
@@ -150,7 +149,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
@@ -162,7 +161,7 @@ func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
 func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tx, err := m.DB.BeginRw(ctx)
@@ -170,7 +169,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := rawdb.ReadBlockByHash(tx, latestBlockHash)
+	latestBlock, err := br.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
@@ -195,7 +194,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 func TestGetBlockTransactionCountByHash(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
@@ -211,7 +210,7 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 		tx.Rollback()
 		t.Errorf("failed reading block by hash: %s", err)
 	}
-	bodyWithTx, err := rawdb.ReadBodyWithTransactions(tx, blockHash, header.Number.Uint64())
+	bodyWithTx, err := br.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed getting body with transactions: %s", err)
@@ -231,7 +230,7 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
@@ -247,7 +246,7 @@ func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
 		tx.Rollback()
 		t.Errorf("failed reading block by hash: %s", err)
 	}
-	bodyWithTx, err := rawdb.ReadBodyWithTransactions(tx, blockHash, header.Number.Uint64())
+	bodyWithTx, err := br.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed getting body with transactions: %s", err)
@@ -267,7 +266,7 @@ func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
 func TestGetBlockTransactionCountByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
@@ -282,7 +281,7 @@ func TestGetBlockTransactionCountByNumber(t *testing.T) {
 		tx.Rollback()
 		t.Errorf("failed reading block by hash: %s", err)
 	}
-	bodyWithTx, err := rawdb.ReadBodyWithTransactions(tx, blockHash, header.Number.Uint64())
+	bodyWithTx, err := br.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed getting body with transactions: %s", err)
@@ -302,7 +301,7 @@ func TestGetBlockTransactionCountByNumber(t *testing.T) {
 func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
@@ -318,7 +317,7 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 		tx.Rollback()
 		t.Errorf("failed reading block by hash: %s", err)
 	}
-	bodyWithTx, err := rawdb.ReadBodyWithTransactions(tx, blockHash, header.Number.Uint64())
+	bodyWithTx, err := br.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed getting body with transactions: %s", err)

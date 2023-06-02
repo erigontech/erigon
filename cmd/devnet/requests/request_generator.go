@@ -10,12 +10,23 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/valyala/fastjson"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 )
 
-func post(client *http.Client, url, request string, response interface{}) error {
+type CallResult struct {
+	Target      string
+	Took        time.Duration
+	RequestID   int
+	Method      string
+	RequestBody string
+	Response    []byte
+	Result      *fastjson.Value
+	Err         error
+}
+
+func post(client *http.Client, url, request string, response interface{}, logger log.Logger) error {
 	start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request)) // nolint:bodyclose
 	if err != nil {
@@ -24,7 +35,7 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	defer func(Body io.ReadCloser) {
 		closeErr := Body.Close()
 		if closeErr != nil {
-			log.Warn("body close", "err", closeErr)
+			logger.Warn("body close", "err", closeErr)
 		}
 	}(r.Body)
 
@@ -42,19 +53,20 @@ func post(client *http.Client, url, request string, response interface{}) error 
 		return fmt.Errorf("failed to unmarshal response: %s", err)
 	}
 
-	log.Info("Got in", "time", time.Since(start).Seconds())
+	logger.Info("Got in", "time", time.Since(start).Seconds())
 	return nil
 }
 
 type RequestGenerator struct {
 	reqID  int
 	client *http.Client
+	logger log.Logger
 }
 
-func (req *RequestGenerator) call(target string, method, body string, response interface{}) rpctest.CallResult {
+func (req *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
 	start := time.Now()
-	err := post(req.client, models.ErigonUrl, body, response)
-	return rpctest.CallResult{
+	err := post(req.client, models.ErigonUrl, body, response, req.logger)
+	r := CallResult{
 		RequestBody: body,
 		Target:      target,
 		Took:        time.Since(start),
@@ -62,9 +74,11 @@ func (req *RequestGenerator) call(target string, method, body string, response i
 		Method:      method,
 		Err:         err,
 	}
+	req.reqID++
+	return r
 }
 
-func (req *RequestGenerator) Erigon(method models.RPCMethod, body string, response interface{}) rpctest.CallResult {
+func (req *RequestGenerator) Erigon(method models.RPCMethod, body string, response interface{}) CallResult {
 	return req.call(models.ErigonUrl, string(method), body, response)
 }
 
@@ -118,9 +132,9 @@ func (req *RequestGenerator) GetBlockDetails(blockNum string) string {
 	return fmt.Sprintf(template, models.OTSGetBlockDetails, blockNum, req.reqID)
 }
 
-func (req *RequestGenerator) PingErigonRpc() rpctest.CallResult {
+func (req *RequestGenerator) PingErigonRpc() CallResult {
 	start := time.Now()
-	res := rpctest.CallResult{
+	res := CallResult{
 		RequestID: req.reqID,
 	}
 
@@ -136,7 +150,7 @@ func (req *RequestGenerator) PingErigonRpc() rpctest.CallResult {
 	defer func(body io.ReadCloser) {
 		closeErr := body.Close()
 		if closeErr != nil {
-			log.Warn("failed to close readCloser", "err", closeErr)
+			req.logger.Warn("failed to close readCloser", "err", closeErr)
 		}
 	}(resp.Body)
 
@@ -160,18 +174,14 @@ func (req *RequestGenerator) PingErigonRpc() rpctest.CallResult {
 	return res
 }
 
-func initialiseRequestGenerator(reqId int) *RequestGenerator {
+func NewRequestGenerator(logger log.Logger) *RequestGenerator {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-
 	reqGen := RequestGenerator{
 		client: client,
-		reqID:  reqId,
+		reqID:  1,
+		logger: logger,
 	}
-	if reqGen.reqID == 0 {
-		reqGen.reqID++
-	}
-
 	return &reqGen
 }

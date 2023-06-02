@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Hashes
@@ -87,15 +88,16 @@ func makeTestDb(ctx context.Context, db kv.RwDB) {
 }
 
 func TestMockDownloadRequest(t *testing.T) {
+	logger := log.New()
 	db := memdb.NewTestDB(t)
 	ctx := context.Background()
 	require := require.New(t)
 
 	makeTestDb(ctx, db)
-	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
+	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil, logger)
 	hd.SetPOSSync(true)
 	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false, logger)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -144,17 +146,18 @@ func TestMockDownloadRequest(t *testing.T) {
 }
 
 func TestMockValidExecution(t *testing.T) {
+	logger := log.New()
 	db := memdb.NewTestDB(t)
 	ctx := context.Background()
 	require := require.New(t)
 
 	makeTestDb(ctx, db)
 
-	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
+	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil, logger)
 	hd.SetPOSSync(true)
 
 	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false, logger)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -180,17 +183,18 @@ func TestMockValidExecution(t *testing.T) {
 }
 
 func TestMockInvalidExecution(t *testing.T) {
+	logger := log.New()
 	db := memdb.NewTestDB(t)
 	ctx := context.Background()
 	require := require.New(t)
 
 	makeTestDb(ctx, db)
 
-	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
+	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil, logger)
 	hd.SetPOSSync(true)
 
 	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false, logger)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -216,16 +220,17 @@ func TestMockInvalidExecution(t *testing.T) {
 }
 
 func TestNoTTD(t *testing.T) {
+	logger := log.New()
 	db := memdb.NewTestDB(t)
 	ctx := context.Background()
 	require := require.New(t)
 
 	makeTestDb(ctx, db)
 
-	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
+	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil, logger)
 
 	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{}, nil, hd, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{}, nil, hd, false, logger)
 
 	var err error
 

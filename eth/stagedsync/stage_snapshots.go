@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -40,42 +39,32 @@ type SnapshotsCfg struct {
 	chainConfig chain.Config
 	dirs        datadir.Dirs
 
-	snapshots          *snapshotsync.RoSnapshots
 	blockRetire        *snapshotsync.BlockRetire
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        services.FullBlockReader
 	dbEventNotifier    snapshotsync.DBEventNotifier
-	engine             consensus.Engine
 
 	historyV3 bool
 	agg       *state.AggregatorV3
 }
 
-func StageSnapshotsCfg(
-	db kv.RwDB,
-	chainConfig chain.Config,
-	dirs datadir.Dirs,
-	snapshots *snapshotsync.RoSnapshots,
+func StageSnapshotsCfg(db kv.RwDB,
+	chainConfig chain.Config, dirs datadir.Dirs,
 	blockRetire *snapshotsync.BlockRetire,
 	snapshotDownloader proto_downloader.DownloaderClient,
-	blockReader services.FullBlockReader,
-	dbEventNotifier snapshotsync.DBEventNotifier,
-	engine consensus.Engine,
-	historyV3 bool,
-	agg *state.AggregatorV3,
+	blockReader services.FullBlockReader, dbEventNotifier snapshotsync.DBEventNotifier,
+	historyV3 bool, agg *state.AggregatorV3,
 ) SnapshotsCfg {
 	return SnapshotsCfg{
 		db:                 db,
 		chainConfig:        chainConfig,
 		dirs:               dirs,
-		snapshots:          snapshots,
 		blockRetire:        blockRetire,
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
 		dbEventNotifier:    dbEventNotifier,
 		historyV3:          historyV3,
 		agg:                agg,
-		engine:             engine,
 	}
 }
 
@@ -85,6 +74,7 @@ func SpawnStageSnapshots(
 	tx kv.RwTx,
 	cfg SnapshotsCfg,
 	initialCycle bool,
+	logger log.Logger,
 ) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -94,7 +84,7 @@ func SpawnStageSnapshots(
 		}
 		defer tx.Rollback()
 	}
-	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle); err != nil {
+	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle, logger); err != nil {
 		return err
 	}
 	var minProgress uint64
@@ -121,8 +111,12 @@ func SpawnStageSnapshots(
 	return nil
 }
 
-func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool) error {
-	if !initialCycle || cfg.snapshots == nil || !cfg.snapshots.Cfg().Enabled {
+func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool, logger log.Logger) error {
+	if !initialCycle || cfg.blockReader == nil {
+		return nil
+	}
+	snapshots := cfg.blockReader.Snapshots().(*snapshotsync.RoSnapshots)
+	if snapshots == nil || !snapshots.Cfg().Enabled {
 		return nil
 	}
 
@@ -130,32 +124,32 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	cfg.snapshots.LogStat()
+	snapshots.LogStat()
 	cfg.agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 		return histBlockNumProgress
 	})
 
 	// Create .idx files
-	if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
-		if !cfg.snapshots.Cfg().Produce && cfg.snapshots.IndicesMax() == 0 {
+	if snapshots.IndicesMax() < snapshots.SegmentsMax() {
+		if !snapshots.Cfg().Produce && snapshots.IndicesMax() == 0 {
 			return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
 		}
-		if cfg.snapshots.Cfg().Produce {
-			if !cfg.snapshots.SegmentsReady() {
+		if snapshots.Cfg().Produce {
+			if !snapshots.SegmentsReady() {
 				return fmt.Errorf("not all snapshot segments are available")
 			}
 
 			// wait for Downloader service to download all expected snapshots
-			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
+			if snapshots.IndicesMax() < snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 				indexWorkers := estimate.IndexSnapshot.Workers()
-				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.dirs, *chainID, indexWorkers); err != nil {
+				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.dirs, *chainID, indexWorkers, logger); err != nil {
 					return fmt.Errorf("BuildMissedIndices: %w", err)
 				}
 			}
 
-			if err := cfg.snapshots.ReopenFolder(); err != nil {
+			if err := snapshots.ReopenFolder(); err != nil {
 				return err
 			}
 			if cfg.dbEventNotifier != nil {
@@ -176,7 +170,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
-	blocksAvailable := cfg.snapshots.BlocksAvailable()
+	blocksAvailable := snapshots.BlocksAvailable()
 	if s.BlockNumber < blocksAvailable { // allow genesis
 		if err := s.Update(tx, blocksAvailable); err != nil {
 			return err
@@ -184,13 +178,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = blocksAvailable
 	}
 
-	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.snapshots, cfg.blockReader, cfg.chainConfig, cfg.engine, cfg.agg); err != nil {
+	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, snapshots, cfg.blockReader, cfg.agg, logger); err != nil {
 		return err
 	}
 	return nil
 }
 
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, sn *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, chainConfig chain.Config, engine consensus.Engine, agg *state.AggregatorV3) error {
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
+	dirs datadir.Dirs, sn *snapshotsync.RoSnapshots,
+	blockReader services.FullBlockReader, agg *state.AggregatorV3,
+	logger log.Logger) error {
 	blocksAvailable := sn.BlocksAvailable()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -209,7 +206,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 		}
 		switch stage {
 		case stages.Headers:
-			h2n := etl.NewCollector(logPrefix, dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+			h2n := etl.NewCollector(logPrefix, dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 			defer h2n.Close()
 			h2n.LogLvl(log.LvlDebug)
 
@@ -236,7 +233,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					log.Info(fmt.Sprintf("[%s] Total difficulty index: %dk/%dk", logPrefix, header.Number.Uint64()/1000, sn.BlocksAvailable()/1000))
+					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %dk/%dk", logPrefix, header.Number.Uint64()/1000, sn.BlocksAvailable()/1000))
 				default:
 				}
 				return nil
@@ -255,14 +252,17 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 
 		case stages.Bodies:
+			type LastTxNumProvider interface {
+				LastTxNumInSnapshot(blockNum uint64) (uint64, bool, error)
+			}
+			lastTxnID, ok, err := blockReader.(LastTxNumProvider).LastTxNumInSnapshot(blocksAvailable)
+			if err != nil {
+				return err
+			}
 			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-			ok, err := sn.ViewTxs(blocksAvailable, func(sn *snapshotsync.TxnSegment) error {
-				lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
-				if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID); err != nil {
-					return err
-				}
-				return nil
-			})
+			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID); err != nil {
+				return err
+			}
 			if err != nil {
 				return err
 			}
@@ -285,28 +285,24 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if err := rawdbv3.TxNums.WriteForGenesis(tx, 1); err != nil {
 					return err
 				}
-				if err := sn.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
-					for _, b := range bs {
-						if err := b.Iterate(func(blockNum, baseTxNum, txAmount uint64) error {
-							if blockNum == 0 || blockNum > toBlock {
-								return nil
-							}
-							select {
-							case <-ctx.Done():
-								return ctx.Err()
-							case <-logEvery.C:
-								log.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, sn.BlocksAvailable()/1000))
-							default:
-							}
-							maxTxNum := baseTxNum + txAmount - 1
+				type IterBody interface {
+					IterateBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error
+				}
+				if err := blockReader.(IterBody).IterateBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+					if blockNum == 0 || blockNum > toBlock {
+						return nil
+					}
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-logEvery.C:
+						logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, sn.BlocksAvailable()/1000))
+					default:
+					}
+					maxTxNum := baseTxNum + txAmount - 1
 
-							if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
-								return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
-							}
-							return nil
-						}); err != nil {
-							return err
-						}
+					if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+						return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
 					}
 					return nil
 				}); err != nil {
@@ -324,8 +320,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx kv.RwTx) error {
-	if cfg.snapshots.Cfg().NoDownloader {
-		if err := cfg.snapshots.ReopenFolder(); err != nil {
+	snapshots := cfg.blockReader.Snapshots().(*snapshotsync.RoSnapshots)
+	if snapshots.Cfg().NoDownloader {
+		if err := snapshots.ReopenFolder(); err != nil {
 			return err
 		}
 		if cfg.dbEventNotifier != nil { // can notify right here, even that write txn is not commit
@@ -346,7 +343,7 @@ func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx 
 	var missingSnapshots []snapshotsync.Range
 	var existingFiles []snaptype.FileInfo
 	if !dbEmpty {
-		existingFiles, missingSnapshots, err = snapshotsync.Segments(cfg.snapshots.Dir())
+		existingFiles, missingSnapshots, err = snapshotsync.Segments(snapshots.Dir())
 		if err != nil {
 			return err
 		}
@@ -417,7 +414,7 @@ Loop:
 			if stats, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
 			} else if stats.Completed {
-				if !cfg.snapshots.Cfg().Verify { // will verify after loop
+				if !snapshots.Cfg().Verify { // will verify after loop
 					if _, err := cfg.snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 						return err
 					}
@@ -449,20 +446,20 @@ Loop:
 	}
 
 Finish:
-	if cfg.snapshots.Cfg().Verify {
+	if snapshots.Cfg().Verify {
 		if _, err := cfg.snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 			return err
 		}
 	}
 
-	if err := cfg.snapshots.ReopenFolder(); err != nil {
+	if err := snapshots.ReopenFolder(); err != nil {
 		return err
 	}
 	if err := cfg.agg.OpenFolder(); err != nil {
 		return err
 	}
 
-	if err := rawdb.WriteSnapshots(tx, cfg.snapshots.Files(), cfg.agg.Files()); err != nil {
+	if err := rawdb.WriteSnapshots(tx, snapshots.Files(), cfg.agg.Files()); err != nil {
 		return err
 	}
 	if cfg.dbEventNotifier != nil { // can notify right here, even that write txn is not commit
@@ -475,8 +472,8 @@ Finish:
 	}
 	if firstNonGenesis != nil {
 		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
-		if cfg.snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
-			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db", s.LogPrefix()), "max_in_snapshots", cfg.snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
+			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db", s.LogPrefix()), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
 		}
 	}
 	return nil

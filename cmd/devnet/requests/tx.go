@@ -3,18 +3,17 @@ package requests
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/cmd/devnet/models"
+	"github.com/ledgerwatch/log/v3"
 )
 
-func TxpoolContent(reqId int) (int, int, int, error) {
+func TxpoolContent(reqGen *RequestGenerator, logger log.Logger) (int, int, int, error) {
 	var (
-		b       rpctest.EthTxPool
+		b       models.EthTxPool
 		pending map[string]interface{}
 		queued  map[string]interface{}
 		baseFee map[string]interface{}
 	)
-
-	reqGen := initialiseRequestGenerator(reqId)
 
 	if res := reqGen.Erigon("txpool_content", reqGen.TxpoolContent(), &b); res.Err != nil {
 		return len(pending), len(queued), len(baseFee), fmt.Errorf("failed to fetch txpool content: %v", res.Err)

@@ -61,11 +61,11 @@ func initGenesis(ctx *cli.Context) error {
 	stack := MakeConfigNodeDefault(ctx, logger)
 	defer stack.Close()
 
-	chaindb, err := node.OpenDatabase(stack.Config(), kv.ChainDB)
+	chaindb, err := node.OpenDatabase(stack.Config(), kv.ChainDB, logger)
 	if err != nil {
 		utils.Fatalf("Failed to open database: %v", err)
 	}
-	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, "")
+	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, "", logger)
 	if err != nil {
 		utils.Fatalf("Failed to write genesis block: %v", err)
 	}

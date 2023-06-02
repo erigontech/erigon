@@ -1,13 +1,15 @@
 package cltypes
 
-import "github.com/ledgerwatch/erigon/cl/cltypes/clonable"
+import (
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
+)
 
 func (*SignedBeaconBlock) Clone() clonable.Clonable {
 	return &SignedBeaconBlock{}
 }
 
-func (*PendingAttestation) Clone() clonable.Clonable {
-	return &PendingAttestation{}
+func (*IndexedAttestation) Clone() clonable.Clonable {
+	return &IndexedAttestation{}
 }
 
 func (*BeaconBody) Clone() clonable.Clonable {
@@ -16,10 +18,6 @@ func (*BeaconBody) Clone() clonable.Clonable {
 
 func (*Eth1Block) Clone() clonable.Clonable {
 	return &Eth1Block{}
-}
-
-func (*BeaconBlocksByRootRequest) Clone() clonable.Clonable {
-	return &BeaconBlocksByRootRequest{}
 }
 
 func (*Eth1Data) Clone() clonable.Clonable {
@@ -32,18 +30,6 @@ func (*SignedBLSToExecutionChange) Clone() clonable.Clonable {
 
 func (*HistoricalSummary) Clone() clonable.Clonable {
 	return &HistoricalSummary{}
-}
-
-func (*Validator) Clone() clonable.Clonable {
-	return &Validator{}
-}
-
-func (*Attestation) Clone() clonable.Clonable {
-	return &Attestation{}
-}
-
-func (*Checkpoint) Clone() clonable.Clonable {
-	return &Checkpoint{}
 }
 
 func (*DepositData) Clone() clonable.Clonable {
@@ -94,10 +80,6 @@ func (*AggregateAndProof) Clone() clonable.Clonable {
 	return &AggregateAndProof{}
 }
 
-func (*AttestationData) Clone() clonable.Clonable {
-	return &AttestationData{}
-}
-
 func (*BeaconBlockHeader) Clone() clonable.Clonable {
 	return &BeaconBlockHeader{}
 }
@@ -110,23 +92,12 @@ func (*SignedBeaconBlockHeader) Clone() clonable.Clonable {
 	return &SignedBeaconBlockHeader{}
 }
 
-func (*SyncCommittee) Clone() clonable.Clonable {
-	return &SyncCommittee{}
-}
 func (*Fork) Clone() clonable.Clonable {
 	return &Fork{}
 }
 
-func (*BlobSideCar) Clone() clonable.Clonable {
-	return &BlobSideCar{}
-}
-
-func (*BlobIdentifier) Clone() clonable.Clonable {
-	return &BlobIdentifier{}
-}
-
-func (*BlobKZGCommitment) Clone() clonable.Clonable {
-	return &BlobKZGCommitment{}
+func (*KZGCommitment) Clone() clonable.Clonable {
+	return &KZGCommitment{}
 }
 
 func (*Eth1Header) Clone() clonable.Clonable {

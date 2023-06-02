@@ -197,13 +197,13 @@ func (ethash *Ethash) VerifyUncle(chain consensus.ChainHeaderReader, header *typ
 	return ethash.verifyHeader(chain, uncle, ancestors[uncle.ParentHash], true, seal)
 }
 
-func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types.Header, uncle bool) error {
+func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types.Header, checkTimestamp, skipGasLimit bool) error {
 	// Ensure that the header's extra-data section is of a reasonable size
 	if uint64(len(header.Extra)) > params.MaximumExtraDataSize {
 		return fmt.Errorf("extra-data too long: %d > %d", len(header.Extra), params.MaximumExtraDataSize)
 	}
 	// Verify the header's timestamp
-	if !uncle {
+	if checkTimestamp {
 		unixNow := time.Now().Unix()
 		if header.Time > uint64(unixNow+allowedFutureBlockTimeSeconds) {
 			return consensus.ErrFutureBlock
@@ -226,26 +226,17 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 		if header.BaseFee != nil {
 			return fmt.Errorf("invalid baseFee before fork: have %d, expected 'nil'", header.BaseFee)
 		}
-		// Verify that the gas limit remains within allowed bounds
-		diff := int64(parent.GasLimit) - int64(header.GasLimit)
-		if diff < 0 {
-			diff *= -1
+		if !skipGasLimit {
+			if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
+				return err
+			}
 		}
-		limit := parent.GasLimit / params.GasLimitBoundDivisor
-		if uint64(diff) >= limit || header.GasLimit < params.MinGasLimit {
-			return fmt.Errorf("invalid gas limit: have %d, want %d += %d", header.GasLimit, parent.GasLimit, limit)
-		}
-	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
+	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header, skipGasLimit); err != nil {
 		// Verify the header's EIP-1559 attributes.
 		return err
 	}
-	if !chain.Config().IsCancun(header.Time) {
-		if header.ExcessDataGas != nil {
-			return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
-		}
-	} else if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil {
-		// Verify the header's EIP-4844 attributes.
-		return err
+	if header.ExcessDataGas != nil {
+		return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
 	}
 
 	// Verify that the block number is parent's +1
@@ -268,7 +259,7 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 // stock Ethereum ethash engine.
 // See YP section 4.3.4. "Block Header Validity"
 func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, parent *types.Header, uncle bool, seal bool) error {
-	if err := VerifyHeaderBasics(chain, header, parent, uncle); err != nil {
+	if err := VerifyHeaderBasics(chain, header, parent, !uncle /*checkTimestamp*/, false /*skipGasLimit*/); err != nil {
 		return err
 	}
 	// Verify the block's difficulty based on its timestamp and parent's difficulty
@@ -569,13 +560,6 @@ func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state
 ) (types.Transactions, types.Receipts, error) {
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(config, state, header, uncles)
-	if config.IsCancun(header.Time) {
-		if parent := chain.GetHeaderByHash(header.ParentHash); parent != nil {
-			header.SetExcessDataGas(misc.CalcExcessDataGas(parent.ExcessDataGas, misc.CountBlobs(txs)))
-		} else {
-			header.SetExcessDataGas(new(big.Int))
-		}
-	}
 	return txs, r, nil
 }
 
@@ -627,6 +611,21 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash libcommon.Hash) {
 
 func (ethash *Ethash) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
 	return false
+}
+
+func (ethash *Ethash) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, _ consensus.SystemCall,
+) ([]consensus.Reward, error) {
+	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
+	rewards := make([]consensus.Reward, 1+len(uncles))
+	rewards[0].Beneficiary = header.Coinbase
+	rewards[0].Kind = consensus.RewardAuthor
+	rewards[0].Amount = minerReward
+	for i, uncle := range uncles {
+		rewards[i+1].Beneficiary = uncle.Coinbase
+		rewards[i+1].Kind = consensus.RewardUncle
+		rewards[i+1].Amount = uncleRewards[i]
+	}
+	return rewards, nil
 }
 
 // AccumulateRewards returns rewards for a given block. The mining reward consists

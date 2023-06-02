@@ -15,8 +15,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func mainWithFlags(ctx context.Context, flags observer.CommandFlags) error {
-	server, err := observer.NewServer(flags)
+func mainWithFlags(ctx context.Context, flags observer.CommandFlags, logger log.Logger) error {
+	server, err := observer.NewServer(flags, logger)
 	if err != nil {
 		return err
 	}

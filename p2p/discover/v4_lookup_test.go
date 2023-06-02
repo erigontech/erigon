@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
 	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestUDPv4_Lookup(t *testing.T) {
@@ -36,11 +37,12 @@ func TestUDPv4_Lookup(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
+	logger := log.New()
 
 	ctx := context.Background()
 	ctx = contextWithReplyTimeout(ctx, time.Second)
 
-	test := newUDPTestContext(ctx, t)
+	test := newUDPTestContext(ctx, t, logger)
 	defer test.close()
 
 	// Lookup on empty table returns no nodes.
@@ -74,6 +76,7 @@ func TestUDPv4_LookupIterator(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
+	logger := log.New()
 
 	// Set up RandomNodes() to use expected keys instead of generating random ones.
 	testNetPrivateKeys := lookupTestnet.privateKeys()
@@ -86,7 +89,7 @@ func TestUDPv4_LookupIterator(t *testing.T) {
 	ctx = contextWithReplyTimeout(ctx, time.Second)
 	ctx = contextWithPrivateKeyGenerator(ctx, privateKeyGenerator)
 
-	test := newUDPTestContext(ctx, t)
+	test := newUDPTestContext(ctx, t, logger)
 	defer test.close()
 
 	// Seed table with initial nodes.
@@ -121,7 +124,8 @@ func TestUDPv4_LookupIterator(t *testing.T) {
 // method is called.
 func TestUDPv4_LookupIteratorClose(t *testing.T) {
 	t.Parallel()
-	test := newUDPTest(t)
+	logger := log.New()
+	test := newUDPTest(t, logger)
 	defer test.close()
 
 	// Seed table with initial nodes.

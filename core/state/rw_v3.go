@@ -9,6 +9,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -34,14 +35,17 @@ type StateV3 struct {
 	senderTxNums map[common.Address]uint64
 
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
+	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
+	logger              log.Logger
 }
 
-func NewStateV3(domains *libstate.SharedDomains) *StateV3 {
+func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
 	return &StateV3{
 		domains:             domains,
 		triggers:            map[uint64]*exec22.TxTask{},
 		senderTxNums:        map[common.Address]uint64{},
 		applyPrevAccountBuf: make([]byte, 256),
+		logger:              logger,
 	}
 }
 

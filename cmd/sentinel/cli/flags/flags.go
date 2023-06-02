@@ -82,4 +82,9 @@ var (
 		Name:  "transition-chain",
 		Usage: "enable chain transition",
 	}
+	InitSyncFlag = cli.BoolFlag{
+		Value: false,
+		Name:  "initial-sync",
+		Usage: "use initial-sync",
+	}
 )

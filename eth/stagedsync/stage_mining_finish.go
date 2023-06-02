@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -17,6 +18,7 @@ type MiningFinishCfg struct {
 	engine      consensus.Engine
 	sealCancel  chan struct{}
 	miningState MiningState
+	blockReader services.FullBlockReader
 }
 
 func StageMiningFinishCfg(
@@ -25,6 +27,7 @@ func StageMiningFinishCfg(
 	engine consensus.Engine,
 	miningState MiningState,
 	sealCancel chan struct{},
+	blockReader services.FullBlockReader,
 ) MiningFinishCfg {
 	return MiningFinishCfg{
 		db:          db,
@@ -32,10 +35,11 @@ func StageMiningFinishCfg(
 		engine:      engine,
 		miningState: miningState,
 		sealCancel:  sealCancel,
+		blockReader: blockReader,
 	}
 }
 
-func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit <-chan struct{}) error {
+func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit <-chan struct{}, logger log.Logger) error {
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
 
@@ -73,7 +77,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	cfg.miningState.PendingResultCh <- block
 
 	if block.Transactions().Len() > 0 {
-		log.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
+		logger.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
 			"block_num", block.NumberU64(),
 			"transactions", block.Transactions().Len(),
 			"gas_used", block.GasUsed(),
@@ -85,11 +89,11 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	select {
 	case cfg.sealCancel <- struct{}{}:
 	default:
-		log.Trace("None in-flight sealing task.")
+		logger.Trace("None in-flight sealing task.")
 	}
-	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx}
+	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader}
 	if err := cfg.engine.Seal(chain, block, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
-		log.Warn("Block sealing failed", "err", err)
+		logger.Warn("Block sealing failed", "err", err)
 	}
 
 	return nil

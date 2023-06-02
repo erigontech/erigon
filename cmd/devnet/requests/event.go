@@ -6,13 +6,12 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/log/v3"
 )
 
-func GetAndCompareLogs(reqId int, fromBlock uint64, toBlock uint64, expected rpctest.Log) error {
-	fmt.Printf("\nGETTING AND COMPARING LOGS\n")
-	reqGen := initialiseRequestGenerator(reqId)
-	var b rpctest.EthGetLogs
+func GetAndCompareLogs(reqGen *RequestGenerator, fromBlock uint64, toBlock uint64, expected models.Log, logger log.Logger) error {
+	logger.Info("GETTING AND COMPARING LOGS")
+	var b models.EthGetLogs
 
 	if res := reqGen.Erigon(models.ETHGetLogs, reqGen.GetLogs(fromBlock, toBlock, expected.Address), &b); res.Err != nil {
 		return fmt.Errorf("failed to fetch logs: %v", res.Err)
@@ -31,7 +30,7 @@ func GetAndCompareLogs(reqId int, fromBlock uint64, toBlock uint64, expected rpc
 	// compare the log events
 	errs, ok := devnetutils.CompareLogEvents(expected, actual)
 	if !ok {
-		fmt.Printf("FAILURE => log result is incorrect: %v\n", errs)
+		logger.Error("Log result is incorrect", "errors", errs)
 		return fmt.Errorf("incorrect logs: %v", errs)
 	}
 
@@ -40,7 +39,7 @@ func GetAndCompareLogs(reqId int, fromBlock uint64, toBlock uint64, expected rpc
 		return fmt.Errorf("error parsing response: %v", err)
 	}
 
-	fmt.Println("SUCCESS => Logs compared successfully, no discrepancies")
+	log.Info("SUCCESS => Logs compared successfully, no discrepancies")
 
 	return nil
 }

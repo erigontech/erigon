@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -21,31 +22,30 @@ import (
 )
 
 type TxLookupCfg struct {
-	db        kv.RwDB
-	prune     prune.Mode
-	tmpdir    string
-	snapshots *snapshotsync.RoSnapshots
-	borConfig *chain.BorConfig
+	db          kv.RwDB
+	prune       prune.Mode
+	tmpdir      string
+	borConfig   *chain.BorConfig
+	blockReader services.FullBlockReader
 }
 
 func StageTxLookupCfg(
 	db kv.RwDB,
 	prune prune.Mode,
 	tmpdir string,
-	snapshots *snapshotsync.RoSnapshots,
 	borConfig *chain.BorConfig,
+	blockReader services.FullBlockReader,
 ) TxLookupCfg {
 	return TxLookupCfg{
-		db:        db,
-		prune:     prune,
-		tmpdir:    tmpdir,
-		snapshots: snapshots,
-		borConfig: borConfig,
+		db:          db,
+		prune:       prune,
+		tmpdir:      tmpdir,
+		borConfig:   borConfig,
+		blockReader: blockReader,
 	}
 }
 
-func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, ctx context.Context) (err error) {
-	quitCh := ctx.Done()
+func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -56,6 +56,9 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	}
 	logPrefix := s.LogPrefix()
 	endBlock, err := s.ExecutionAt(tx)
+	if s.BlockNumber > endBlock { // Erigon will self-heal (download missed blocks) eventually
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -73,10 +76,12 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 			}
 		}
 	}
-	if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
-		if cfg.snapshots.BlocksAvailable() > startBlock {
+
+	snapshots := cfg.blockReader.Snapshots()
+	if snapshots.Cfg().Enabled {
+		if snapshots.BlocksAvailable() > startBlock {
 			// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
-			startBlock = cfg.snapshots.BlocksAvailable()
+			startBlock = snapshots.BlocksAvailable()
 			if err = s.UpdatePrune(tx, startBlock); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
 				return err
 			}
@@ -87,12 +92,12 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		startBlock++
 	}
 	// etl.Transform uses ExtractEndKey as exclusive bound, therefore endBlock + 1
-	if err = txnLookupTransform(logPrefix, tx, startBlock, endBlock+1, quitCh, cfg); err != nil {
+	if err = txnLookupTransform(logPrefix, tx, startBlock, endBlock+1, ctx, cfg, logger); err != nil {
 		return fmt.Errorf("txnLookupTransform: %w", err)
 	}
 
 	if cfg.borConfig != nil {
-		if err = borTxnLookupTransform(logPrefix, tx, startBlock, endBlock+1, quitCh, cfg); err != nil {
+		if err = borTxnLookupTransform(logPrefix, tx, startBlock, endBlock+1, ctx.Done(), cfg, logger); err != nil {
 			return fmt.Errorf("borTxnLookupTransform: %w", err)
 		}
 	}
@@ -110,8 +115,13 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 }
 
 // txnLookupTransform - [startKey, endKey)
-func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, quitCh <-chan struct{}, cfg TxLookupCfg) error {
+func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
 	bigNum := new(big.Int)
+	txsV3Enabled := cfg.blockReader.TxsV3Enabled()
+	if txsV3Enabled {
+		panic("implement me. need iterate by kv.BlockID instead of kv.HeaderCanonical")
+	}
+
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum)
@@ -128,17 +138,17 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
-		Quit:            quitCh,
+		Quit:            ctx.Done(),
 		ExtractStartKey: hexutility.EncodeTs(blockFrom),
 		ExtractEndKey:   hexutility.EncodeTs(blockTo),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
-	})
+	}, logger)
 }
 
 // txnLookupTransform - [startKey, endKey)
-func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, quitCh <-chan struct{}, cfg TxLookupCfg) error {
+func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, quitCh <-chan struct{}, cfg TxLookupCfg, logger log.Logger) error {
 	bigNum := new(big.Int)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
@@ -160,10 +170,10 @@ func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
-	})
+	}, logger)
 }
 
-func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
+func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
 	if s.BlockNumber <= u.UnwindPoint {
 		return nil
 	}
@@ -179,16 +189,17 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	// end key needs to be s.BlockNumber + 1 and not s.BlockNumber, because
 	// the keys in BlockBody table always have hash after the block number
 	blockFrom, blockTo := u.UnwindPoint+1, s.BlockNumber+1
-	if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
-		smallestInDB := cfg.snapshots.BlocksAvailable()
+	snapshots := cfg.blockReader.Snapshots()
+	if snapshots.Cfg().Enabled {
+		smallestInDB := snapshots.BlocksAvailable()
 		blockFrom, blockTo = cmp.Max(blockFrom, smallestInDB), cmp.Max(blockTo, smallestInDB)
 	}
 	// etl.Transform uses ExtractEndKey as exclusive bound, therefore blockTo + 1
-	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
+	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg, logger); err != nil {
 		return fmt.Errorf("unwind TxLookUp: %w", err)
 	}
 	if cfg.borConfig != nil {
-		if err := deleteBorTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
+		if err := deleteBorTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg, logger); err != nil {
 			return fmt.Errorf("unwind BorTxLookUp: %w", err)
 		}
 	}
@@ -203,7 +214,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	return nil
 }
 
-func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, initialCycle bool) (err error) {
+func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, initialCycle bool, logger log.Logger) (err error) {
 	logPrefix := s.LogPrefix()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -218,11 +229,12 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	var pruneBor bool
 
 	// Forward stage doesn't write anything before PruneTo point
+	blockSnapshots := cfg.blockReader.Snapshots()
 	if cfg.prune.TxIndex.Enabled() {
 		blockTo = cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 		pruneBor = true
-	} else if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
-		blockTo = snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.snapshots)
+	} else if blockSnapshots != nil && blockSnapshots.Cfg().Enabled {
+		blockTo = snapshotsync.CanDeleteTo(s.ForwardProgress, blockSnapshots)
 	}
 
 	if !initialCycle { // limit time for pruning
@@ -230,12 +242,12 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}
 
 	if blockFrom < blockTo {
-		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
+		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger); err != nil {
 			return fmt.Errorf("prune TxLookUp: %w", err)
 		}
 
 		if cfg.borConfig != nil && pruneBor {
-			if err = deleteBorTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
+			if err = deleteBorTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger); err != nil {
 				return fmt.Errorf("prune BorTxLookUp: %w", err)
 			}
 		}
@@ -254,7 +266,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 }
 
 // deleteTxLookupRange - [blockFrom, blockTo)
-func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg) error {
+func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) error {
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum)
@@ -277,11 +289,11 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
-	})
+	}, logger)
 }
 
 // deleteTxLookupRange - [blockFrom, blockTo)
-func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg) error {
+func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) error {
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 
@@ -298,5 +310,5 @@ func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uin
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
-	})
+	}, logger)
 }

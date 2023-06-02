@@ -4,11 +4,11 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 )
 
 var testMetadata = &cltypes.Metadata{
@@ -18,15 +18,6 @@ var testMetadata = &cltypes.Metadata{
 
 var testPing = &cltypes.Ping{
 	Id: 420,
-}
-
-var testSingleRoot = &cltypes.SingleRoot{
-	Root: libcommon.HexToHash("96"),
-}
-
-var testLcRangeRequest = &cltypes.LightClientUpdatesByRangeRequest{
-	Period: 69,
-	Count:  666,
 }
 
 var testBlockRangeRequest = &cltypes.BeaconBlocksByRangeRequest{
@@ -53,8 +44,6 @@ func TestMarshalNetworkTypes(t *testing.T) {
 	cases := []ssz.EncodableSSZ{
 		testMetadata,
 		testPing,
-		testSingleRoot,
-		testLcRangeRequest,
 		testBlockRangeRequest,
 		testStatus,
 	}
@@ -62,8 +51,6 @@ func TestMarshalNetworkTypes(t *testing.T) {
 	unmarshalDestinations := []ssz.EncodableSSZ{
 		&cltypes.Metadata{},
 		&cltypes.Ping{},
-		&cltypes.SingleRoot{},
-		&cltypes.LightClientUpdatesByRangeRequest{},
 		&cltypes.BeaconBlocksByRangeRequest{},
 		&cltypes.Status{},
 	}
