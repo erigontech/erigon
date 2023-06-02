@@ -30,21 +30,20 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
@@ -483,6 +482,10 @@ func (h *History) DiscardHistory() {
 	h.InvertedIndex.StartWrites()
 	h.wal = h.newWriter(h.tmpdir, false, true)
 }
+func (h *History) StartUnbufferedWrites() {
+	h.InvertedIndex.StartUnbufferedWrites()
+	h.wal = h.newWriter(h.tmpdir, false, false)
+}
 func (h *History) StartWrites() {
 	h.InvertedIndex.StartWrites()
 	h.wal = h.newWriter(h.tmpdir, true, false)
@@ -496,7 +499,7 @@ func (h *History) FinishWrites() {
 func (h *History) Rotate() historyFlusher {
 	w := h.wal
 	h.wal = h.newWriter(h.wal.tmpdir, h.wal.buffered, h.wal.discard)
-	return historyFlusher{w, h.InvertedIndex.Rotate()}
+	return historyFlusher{h: w, i: h.InvertedIndex.Rotate()}
 }
 
 type historyFlusher struct {
@@ -604,6 +607,16 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 	historyKey1 := historyKey[:lk]
 	historyVal := historyKey[lk:]
 	invIdxVal := historyKey[:lk]
+
+	if !h.buffered {
+		if err := h.h.tx.Put(h.h.historyValsTable, historyKey1, historyVal); err != nil {
+			return err
+		}
+		if err := ii.tx.Put(ii.indexKeysTable, ii.txNumBytes[:], invIdxVal); err != nil {
+			return err
+		}
+		return nil
+	}
 	if err := h.historyVals.Collect(historyKey1, historyVal); err != nil {
 		return err
 	}

@@ -406,7 +406,10 @@ func (ii *InvertedIndex) DiscardHistory(tmpdir string) {
 	ii.wal = ii.newWriter(tmpdir, false, true)
 }
 func (ii *InvertedIndex) StartWrites() {
-	ii.wal = ii.newWriter(ii.tmpdir, WALCollectorRAM > 0, false)
+	ii.wal = ii.newWriter(ii.tmpdir, true, false)
+}
+func (ii *InvertedIndex) StartUnbufferedWrites() {
+	ii.wal = ii.newWriter(ii.tmpdir, false, false)
 }
 func (ii *InvertedIndex) FinishWrites() {
 	ii.wal.close()

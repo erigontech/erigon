@@ -650,7 +650,6 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 	}
 	closeItem = false
 	d.stats.MergesCount++
-	d.mergesCount++
 	return
 }
 
