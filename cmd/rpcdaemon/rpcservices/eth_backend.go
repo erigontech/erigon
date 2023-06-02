@@ -252,12 +252,6 @@ func (back *RemoteBackend) EngineGetPayloadBodiesByRangeV1(ctx context.Context, 
 	return back.remoteEthBackend.EngineGetPayloadBodiesByRangeV1(ctx, request)
 }
 
-func (back *RemoteBackend) EngineGetBlobsBundleV1(ctx context.Context, payloadId uint64) (*types2.BlobsBundleV1, error) {
-	return back.remoteEthBackend.EngineGetBlobsBundleV1(ctx, &remote.EngineGetBlobsBundleRequest{
-		PayloadId: payloadId,
-	})
-}
-
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {
 	nodes, err := back.remoteEthBackend.NodeInfo(ctx, &remote.NodesInfoRequest{Limit: limit})
 	if err != nil {

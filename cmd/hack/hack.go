@@ -114,11 +114,7 @@ func testBlockHashes(chaindata string, block int, stateRoot libcommon.Hash) {
 }
 
 func getCurrentBlockNumber(tx kv.Tx) *uint64 {
-	hash := rawdb.ReadHeadBlockHash(tx)
-	if hash == (libcommon.Hash{}) {
-		return nil
-	}
-	return rawdb.ReadHeaderNumber(tx, hash)
+	return rawdb.ReadCurrentBlockNumber(tx)
 }
 
 func printCurrentBlockNumber(chaindata string) {
@@ -583,11 +579,6 @@ func extractBodies(datadir string) error {
 	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
 	defer db.Close()
 	br, _ := blocksIO(db)
-	lastTxnID, _, err := br.(*snapshotsync.BlockReader).LastTxNumInSnapshot(snaps.BlocksAvailable())
-	if err != nil {
-		return err
-	}
-	fmt.Printf("txTxnID = %d\n", lastTxnID)
 
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {

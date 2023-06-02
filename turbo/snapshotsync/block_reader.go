@@ -360,7 +360,8 @@ func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash libcommon.
 }
 
 func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error) {
-	if blockHeight >= r.sn.BlocksAvailable() {
+	blocksAvailable := r.sn.BlocksAvailable()
+	if blocksAvailable == 0 || blockHeight > blocksAvailable {
 		body, _, txAmount = rawdb.ReadBody(tx, hash, blockHeight)
 		return body, txAmount, nil
 	}
@@ -382,7 +383,8 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash l
 	return r.blockWithSenders(ctx, tx, hash, blockHeight, false)
 }
 func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []libcommon.Address, err error) {
-	if blockHeight >= r.sn.BlocksAvailable() {
+	blocksAvailable := r.sn.BlocksAvailable()
+	if blocksAvailable == 0 || blockHeight > blocksAvailable {
 		if r.TransactionsV3 {
 			if forceCanonical {
 				canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
@@ -684,7 +686,8 @@ func (r *BlockReader) txnByHash(txnHash libcommon.Hash, segments []*TxnSegment, 
 // TxnByIdxInBlock - doesn't include system-transactions in the begin/end of block
 // return nil if 0 < i < body.TxAmount
 func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
-	if blockNum >= r.sn.BlocksAvailable() {
+	blocksAvailable := r.sn.BlocksAvailable()
+	if blocksAvailable == 0 || blockNum > blocksAvailable {
 		canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
 			return nil, err
@@ -761,17 +764,17 @@ func (r *BlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash libco
 	return blockNum, true, nil
 }
 
-func (r *BlockReader) LastTxNumInSnapshot(blockNum uint64) (uint64, bool, error) {
+func (r *BlockReader) FirstTxNumNotInSnapshots() uint64 {
 	view := r.sn.View()
 	defer view.Close()
 
-	sn, ok := view.TxsSegment(blockNum)
+	sn, ok := view.TxsSegment(r.sn.BlocksAvailable())
 	if !ok {
-		return 0, false, nil
+		return 0
 	}
 
 	lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
-	return lastTxnID, true, nil
+	return lastTxnID
 }
 
 func (r *BlockReader) IterateBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error {

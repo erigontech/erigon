@@ -2,9 +2,10 @@ package consensus_tests
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 	"io/fs"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 
 	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/assert"

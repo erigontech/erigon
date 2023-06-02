@@ -58,7 +58,7 @@ func (arr *byteBasedUint64Slice) CopyTo(target *byteBasedUint64Slice) {
 
 // depth returns the depth of the Merkle tree representing the slice.
 func (arr *byteBasedUint64Slice) depth() int {
-	return int(getDepth(uint64(arr.c) / 4))
+	return int(GetDepth(uint64(arr.c) / 4))
 }
 
 // Range iterates over the slice and applies a provided function to each element.
@@ -120,7 +120,7 @@ func (arr *byteBasedUint64Slice) Cap() int {
 
 // HashListSSZ computes the SSZ hash of the slice as a list. It returns the hash and any error encountered.
 func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
-	depth := getDepth((uint64(arr.c)*8 + 31) / 32)
+	depth := GetDepth((uint64(arr.c)*8 + 31) / 32)
 	baseRoot := [32]byte{}
 	var err error
 	if arr.l == 0 {
@@ -137,7 +137,7 @@ func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
 
 // HashVectorSSZ computes the SSZ hash of the slice as a vector. It returns the hash and any error encountered.
 func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
-	depth := getDepth((uint64(arr.c)*8 + 31) / 32)
+	depth := GetDepth((uint64(arr.c)*8 + 31) / 32)
 	offset := 32*((arr.l-1)/4) + 32
 	elements := arr.u[:offset]
 	for i := uint8(0); i < depth; i++ {

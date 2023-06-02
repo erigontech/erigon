@@ -5,9 +5,10 @@
 package spectest
 
 import (
-	"github.com/ledgerwatch/erigon/cl/spectest/consensus_tests"
 	"os"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/spectest/consensus_tests"
 
 	"github.com/ledgerwatch/erigon/spectest"
 )

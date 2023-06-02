@@ -809,20 +809,45 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		require.Equal(uint64(0), receiptsAvailable)
 	}
 
-	if pm.History.Enabled() {
-		afterPrune := uint64(0)
-		err := tx.ForEach(kv.AccountsHistory, nil, func(k, _ []byte) error {
-			n := binary.BigEndian.Uint64(k[length.Addr:])
-			require.Greater(n, pm.History.PruneTo(head))
-			afterPrune++
-			return nil
-		})
-		require.Greater(afterPrune, uint64(0))
-		assert.NoError(t, err)
+	if m.HistoryV3 {
+		//TODO: e3 not implemented Prune feature yet
+		/*
+			if pm.History.Enabled() {
+				it, err := tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, 0, int(pm.History.PruneTo(head)), order.Asc, -1)
+				require.NoError(err)
+				count, err := iter.CountKV(it)
+				require.NoError(err)
+				require.Zero(count)
+
+				it, err = tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(pm.History.PruneTo(head)), -1, order.Asc, -1)
+				require.NoError(err)
+				count, err = iter.CountKV(it)
+				require.NoError(err)
+				require.Equal(3, count)
+			} else {
+				it, err := tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, 0, -1, order.Asc, -1)
+				require.NoError(err)
+				count, err := iter.CountKV(it)
+				require.NoError(err)
+				require.Equal(3, count)
+			}
+		*/
 	} else {
-		found, err := bitmapdb.Get64(tx, kv.AccountsHistory, address[:], 0, 1024)
-		require.NoError(err)
-		require.Equal(uint64(0), found.Minimum())
+		if pm.History.Enabled() {
+			afterPrune := uint64(0)
+			err := tx.ForEach(kv.AccountsHistory, nil, func(k, _ []byte) error {
+				n := binary.BigEndian.Uint64(k[length.Addr:])
+				require.Greater(n, pm.History.PruneTo(head))
+				afterPrune++
+				return nil
+			})
+			require.Greater(afterPrune, uint64(0))
+			assert.NoError(t, err)
+		} else {
+			found, err := bitmapdb.Get64(tx, kv.AccountsHistory, address[:], 0, 1024)
+			require.NoError(err)
+			require.Equal(uint64(0), found.Minimum())
+		}
 	}
 
 	br, _ := m.NewBlocksIO()
@@ -1042,7 +1067,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		st := state.New(state.NewDbStateReader(tx))
+		st := state.New(m.NewStateReader(tx))
 		assert.NoError(t, err)
 		assert.False(t, st.Exist(theAddr), "Contract should've been removed")
 		return nil
@@ -1798,7 +1823,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		}
 		err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 
-			statedb := state.New(state.NewDbStateReader(tx))
+			statedb := state.New(m.NewStateReader(tx))
 			// If all is correct, then slot 1 and 2 are zero
 			key1 := libcommon.HexToHash("01")
 			var got uint256.Int
