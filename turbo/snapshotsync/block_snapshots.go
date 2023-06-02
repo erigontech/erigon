@@ -1234,7 +1234,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 
 		expectedCount, err := DumpTxs(ctx, chainDB, blockFrom, blockTo, &chainConfig, workers, lvl, logger, func(v []byte) error {
 			return sn.AddWord(v)
-		}, blockReader.TxsV3Enabled())
+		})
 		if err != nil {
 			return fmt.Errorf("DumpTxs: %w", err)
 		}
@@ -1325,7 +1325,7 @@ func hasIdxFile(sn *snaptype.FileInfo, logger log.Logger) bool {
 
 // DumpTxs - [from, to)
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
-func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error, txsV3 bool) (expectedCount int, err error) {
+func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) (expectedCount int, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	warmupCtx, cancel := context.WithCancel(ctx)
@@ -1334,7 +1334,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	var prevTxID uint64
-	numBuf := make([]byte, binary.MaxVarintLen64)
+	numBuf := make([]byte, 8)
 	parseCtx := types2.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
 	slot := types2.TxSlot{}
@@ -1356,7 +1356,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 	valueBuf := make([]byte, 16*4096)
 	addSystemTx := func(tx kv.Tx, txId uint64) error {
 		binary.BigEndian.PutUint64(numBuf, txId)
-		tv, err := tx.GetOne(kv.EthTx, numBuf[:8])
+		tv, err := tx.GetOne(kv.EthTx, numBuf[:])
 		if err != nil {
 			return err
 		}
@@ -1423,21 +1423,13 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 		} else {
 			prevTxID = body.BaseTxId
 		}
-		if txsV3 {
-			binary.BigEndian.PutUint64(numBuf, blockNum)
-		} else {
-			binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
-		}
-		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount-2, func(tk, tv []byte) error {
-			if txsV3 {
-
-			} else {
-				id := binary.BigEndian.Uint64(tk)
-				if prevTxID != 0 && id != prevTxID+1 {
-					panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
-				}
-				prevTxID = id
+		binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
+		if err := tx.ForAmount(kv.EthTx, numBuf[:], body.TxAmount-2, func(tk, tv []byte) error {
+			id := binary.BigEndian.Uint64(tk)
+			if prevTxID != 0 && id != prevTxID+1 {
+				panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
 			}
+			prevTxID = id
 			parseCtx.WithSender(len(senders) == 0)
 			valueBuf, err = parse(tv, valueBuf, senders, j)
 			if err != nil {
@@ -1556,12 +1548,17 @@ func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, firs
 			logger.Warn("header missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
 			return true, nil
 		}
+
+		// Important: DB does store canonical and non-canonical txs in same table. And using same body.BaseTxID
+		// But snapshots using canonical TxNum in field body.BaseTxID
+		// FYI: we also have other table to map canonical BlockNum->TxNum: kv.MaxTxNum
 		body := &types.BodyForStorage{}
 		if err = rlp.DecodeBytes(dataRLP, body); err != nil {
 			return false, err
 		}
 		body.BaseTxId = firstTxNum
 		firstTxNum += uint64(body.TxAmount)
+
 		dataRLP, err = rlp.EncodeToBytes(body)
 		if err != nil {
 			return false, err
