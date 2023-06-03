@@ -113,6 +113,21 @@ func ReadHeaderNumber(db kv.Getter, hash libcommon.Hash) *uint64 {
 	number := binary.BigEndian.Uint64(data)
 	return &number
 }
+func ReadBadHeaderNumber(db kv.Getter, hash libcommon.Hash) *uint64 {
+	data, err := db.GetOne(kv.BadHeaderNumber, hash.Bytes())
+	if err != nil {
+		log.Error("ReadHeaderNumber failed", "err", err)
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	if len(data) != 8 {
+		log.Error("ReadHeaderNumber got wrong data len", "len", len(data))
+		return nil
+	}
+	number := binary.BigEndian.Uint64(data)
+	return &number
+}
 
 // WriteHeaderNumber stores the hash->number mapping.
 func WriteHeaderNumber(db kv.Putter, hash libcommon.Hash, number uint64) error {
@@ -799,46 +814,24 @@ func MakeBodiesCanonicalOld(tx kv.RwTx, from uint64, ctx context.Context, logPre
 	return nil
 }
 
-func DeleteBadCanonicalBlocks(tx kv.RwTx, from uint64) error {
+// MarkCanonicalChainAsBad - moves canonical hashes from `kv.HeaderNumber` to `kv.BadHeaderNumber`
+func MarkCanonicalChainAsBad(tx kv.RwTx, from uint64) error {
 	for blockNum := from; ; blockNum++ {
-		h, err := ReadCanonicalHash(tx, blockNum)
+		blockNumBytes := hexutility.EncodeTs(blockNum)
+		blockHash, err := tx.GetOne(kv.HeaderCanonical, blockNumBytes)
 		if err != nil {
 			return err
 		}
-		if h == (libcommon.Hash{}) {
+		if blockHash == nil {
 			break
 		}
-		k := dbutils.BlockBodyKey(blockNum, h)
-		bodyForStorage, err := ReadBodyForStorageByKey(tx, k)
-		if err != nil {
+		if err = tx.Delete(kv.HeaderNumber, blockHash); err != nil {
 			return err
 		}
-		if bodyForStorage == nil {
-			break
-		}
-
-		// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
-		i := uint64(0)
-		if err := tx.ForAmount(kv.EthTx, hexutility.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
-			if err := tx.Delete(kv.EthTx, k); err != nil {
-				return err
-			}
-			i++
-			return nil
-		}); err != nil {
-			return err
-		}
-		if err = tx.Delete(kv.Senders, k); err != nil {
-			return err
-		}
-		if err = tx.Delete(kv.BlockBody, k); err != nil {
-			return err
-		}
-		if err = tx.Delete(kv.Headers, k); err != nil {
+		if err = tx.Put(kv.BadHeaderNumber, blockHash, blockNumBytes); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 

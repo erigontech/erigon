@@ -793,6 +793,9 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount u
 	}
 	return nil
 }
+func (r *BlockReader) ReadBadHeaderNumber(ctx context.Context, db kv.Getter, hash libcommon.Hash) *uint64 {
+	return rawdb.ReadBadHeaderNumber(db, hash)
+}
 func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
 	hash, err := rawdb.ReadCanonicalHash(db, number)
 	if err != nil {

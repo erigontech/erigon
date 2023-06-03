@@ -29,6 +29,7 @@ type HeaderReader interface {
 
 type CanonicalReader interface {
 	CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (common.Hash, error)
+	BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error)
 }
 
 type BodyReader interface {

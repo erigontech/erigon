@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"math/big"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -79,7 +78,7 @@ func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir
 	)
 }
 
-func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64) error {
 	if w.historyV3 {
 		if err := rawdb.AppendCanonicalTxNums(tx, from); err != nil {
 			return err
@@ -87,12 +86,10 @@ func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.C
 	}
 	return nil
 }
-func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
-	if deleteBodies {
-		if err := rawdb.DeleteBadCanonicalBlocks(tx, from); err != nil {
-			return err
-		}
-	}
+func (w *BlockWriter) MarkCanonicalChainAsBad(tx kv.RwTx, from uint64) error {
+	return rawdb.MarkCanonicalChainAsBad(tx, from)
+}
+func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64) error {
 	if w.historyV3 {
 		if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
 			return err
