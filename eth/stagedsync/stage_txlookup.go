@@ -234,12 +234,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	} else if blockSnapshots != nil && blockSnapshots.Cfg().Enabled {
 		blockTo = snapshotsync.CanDeleteTo(s.ForwardProgress, blockSnapshots)
 	}
-
-	pruneLimit := uint64(100)
-	if initialCycle {
-		pruneLimit = 10_000
-	}
-	blockTo = cmp.Min(blockTo, blockFrom+pruneLimit)
+	blockTo = cmp.Min(blockTo, blockFrom+100)
 
 	if blockFrom < blockTo {
 		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger); err != nil {

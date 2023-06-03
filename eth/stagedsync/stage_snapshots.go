@@ -501,11 +501,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	br := cfg.blockRetire
 	sn := br.Snapshots()
 	if sn.Cfg().Enabled {
-		pruneLimit := 100
-		if initialCycle {
-			pruneLimit = 10_000
-		}
-		if err := br.PruneAncientBlocks(tx, pruneLimit); err != nil {
+		if err := br.PruneAncientBlocks(tx, 100); err != nil {
 			return err
 		}
 	}
