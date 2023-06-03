@@ -10,6 +10,9 @@ import (
 	"strings"
 )
 
+const RootPathDataFile = "data.bin"
+const RootPathSidecarFile = "sidecar.bin"
+
 type RootPathOsFs struct {
 	Root string
 }
@@ -32,11 +35,11 @@ func (f *RootPathOsFs) Get(namespace string, object string, id string, extra ...
 	if err != nil {
 		return nil, nil, err
 	}
-	fp, err := os.Open(path.Join(infoPath, "data.bin"))
+	fp, err := os.Open(path.Join(infoPath, RootPathDataFile))
 	if err != nil {
 		return nil, nil, err
 	}
-	blob, err := os.ReadFile(path.Join(infoPath, "sidecar.bin"))
+	blob, err := os.ReadFile(path.Join(infoPath, RootPathSidecarFile))
 	if err == nil {
 		sidecar = blob
 	}
@@ -49,7 +52,7 @@ func (f *RootPathOsFs) Put(data io.Reader, sidecar []byte, namespace string, obj
 		return err
 	}
 	_ = os.MkdirAll(infoPath, 0o755)
-	fp, err := os.OpenFile(path.Join(infoPath, "data.bin"), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+	fp, err := os.OpenFile(path.Join(infoPath, RootPathDataFile), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
 	if err != nil {
 		return err
 	}
@@ -58,7 +61,7 @@ func (f *RootPathOsFs) Put(data io.Reader, sidecar []byte, namespace string, obj
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(path.Join(infoPath, "sidecar.bin"), sidecar, 0o755)
+	err = os.WriteFile(path.Join(infoPath, RootPathSidecarFile), sidecar, 0o755)
 	if err == nil {
 		return err
 	}
