@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	dbg "runtime/debug"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/commands"
@@ -33,8 +32,9 @@ type PanicHandler struct {
 }
 
 func (ph PanicHandler) Log(r *log.Record) error {
-	fmt.Printf("Stack: %s\n", dbg.Stack())
-	os.Exit(1)
+	fmt.Println("LEGACY LOG:", r.Msg)
+	//fmt.Printf("Stack: %s\n", dbg.Stack())
+	//os.Exit(1)
 	return nil
 }
 

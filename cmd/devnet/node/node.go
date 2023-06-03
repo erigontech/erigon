@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
@@ -48,6 +49,7 @@ type Node struct {
 	GRPCPort                   int    `arg:"-" default:"8547"` // flag not defined
 	TCPPort                    int    `arg:"-" default:"8548"` // flag not defined
 	StaticPeers                string `arg:"--staticpeers"`
+	WithoutHeimdall            bool   `arg:"--bor.withoutheimdall" flag:"" default:"false"`
 }
 
 // getEnode returns the enode of the mining node
@@ -91,6 +93,7 @@ func (node Node) getEnode() (string, error) {
 func (node *Node) configure(nw *Network, nodeNumber int) (err error) {
 	node.DataDir = filepath.Join(nw.DataDir, fmt.Sprintf("%d", nodeNumber))
 	node.Chain = nw.Chain
+
 	node.StaticPeers = strings.Join(nw.peers, ",")
 
 	node.PrivateApiAddr, _, err = portFromBase(nw.BasePrivateApiAddr, nodeNumber, 1)
@@ -133,6 +136,11 @@ func (node *Miner) Start(nw *Network, nodeNumber int) (err error) {
 
 	if err != nil {
 		return err
+	}
+
+	switch node.Chain {
+	case networkname.BorDevnetChainName:
+		node.WithoutHeimdall = true
 	}
 
 	args, err := devnetutils.AsArgs(node)
