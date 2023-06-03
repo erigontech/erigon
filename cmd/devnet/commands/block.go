@@ -67,15 +67,15 @@ func callSendTxWithDynamicFee(node *node.Node, toAddr, fromAddr string, logger l
 		return nil, err
 	}
 
-	lowerThanBaseFeeHashlist, err := services.SendManyTransactions(node, lowerThanBaseFeeTxs, logger)
-	if err != nil {
-		logger.Error("failed SendManyTransactions(lowerThanBaseFeeTxs)", "error", err)
-		return nil, err
-	}
-
 	higherThanBaseFeeHashlist, err := services.SendManyTransactions(node, higherThanBaseFeeTxs, logger)
 	if err != nil {
 		logger.Error("failed SendManyTransactions(higherThanBaseFeeTxs)", "error", err)
+		return nil, err
+	}
+
+	lowerThanBaseFeeHashlist, err := services.SendManyTransactions(node, lowerThanBaseFeeTxs, logger)
+	if err != nil {
+		logger.Error("failed SendManyTransactions(lowerThanBaseFeeTxs)", "error", err)
 		return nil, err
 	}
 
