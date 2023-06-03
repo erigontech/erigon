@@ -712,6 +712,7 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 		if err != nil {
 			return err
 		}
+		fmt.Printf("[dbg] iterate db last: %d, %d\n", from-1, nextBaseTxNum)
 		nextBaseTxNum++
 	}
 	for blockNum := from; ; blockNum++ {
@@ -727,12 +728,13 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 		if len(data) == 0 {
 			break
 		}
-		bodyForStorage := new(types.BodyForStorage)
-		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
+		bodyForStorage := types.BodyForStorage{}
+		if err := rlp.DecodeBytes(data, &bodyForStorage); err != nil {
 			return err
 		}
 
 		nextBaseTxNum += uint64(bodyForStorage.TxAmount)
+		fmt.Printf("[dbg] iterate db: %d, %d\n", blockNum, nextBaseTxNum-1)
 		err = rawdbv3.TxNums.Append(tx, blockNum, nextBaseTxNum-1)
 		if err != nil {
 			return err

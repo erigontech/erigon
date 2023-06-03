@@ -14,7 +14,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -269,22 +268,16 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 				return err
 			}
 			if historyV3 {
-				var toBlock uint64
-				if sn != nil {
-					toBlock = sn.BlocksAvailable()
-				}
-				toBlock = cmp.Max(toBlock, progress)
-
 				_ = tx.ClearBucket(kv.MaxTxNum)
-				if err := rawdbv3.TxNums.WriteForGenesis(tx, 1); err != nil {
-					return err
-				}
+				//if err := rawdbv3.TxNums.WriteForGenesis(tx, 1); err != nil {
+				//	return err
+				//}
 				type IterBody interface {
 					IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error
 				}
 				if err := blockReader.(IterBody).IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
-					if blockNum == 0 || blockNum > toBlock {
-						return nil
+					if blockNum == 0 {
+						fmt.Printf("[dbg] iterate: %d, %d, %d\n", blockNum, baseTxNum, txAmount)
 					}
 					select {
 					case <-ctx.Done():
@@ -301,6 +294,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 					return nil
 				}); err != nil {
 					return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+				}
+				if err := rawdb.AppendCanonicalTxNums(tx, blockReader.Snapshots().BlocksAvailable()+1); err != nil {
+					return err
 				}
 			}
 			if err := rawdb.WriteSnapshots(tx, sn.Files(), agg.Files()); err != nil {
