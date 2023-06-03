@@ -19,6 +19,10 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+//Naming:
+//  Prune: delete old data
+//  Unwind: delete recent data
+
 // BlockReader can read blocks from db and snapshots
 type BlockWriter struct {
 	historyV3 bool
@@ -169,10 +173,10 @@ func (w *BlockWriter) ResetSenders(ctx context.Context, db kv.RoDB, tx kv.RwTx) 
 	return backup.ClearTables(ctx, db, tx, kv.Senders)
 }
 
-// Prune - [1, to) old blocks after moving it to snapshots.
+// PruneBlocks - [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func (w *BlockWriter) Prune(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
-	return rawdb.DeleteAncientBlocks(tx, blockTo, blocksDeleteLimit)
+func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+	return rawdb.DeleteAncientBlocks(tx, blockTo, blocksDeleteLimit, w.txsV3)
 }

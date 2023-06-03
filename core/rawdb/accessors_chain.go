@@ -1204,7 +1204,7 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 // keeps genesis in db: [1, to)
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, txsV3 bool) error {
 	c, err := tx.Cursor(kv.Headers)
 	if err != nil {
 		return err
@@ -1235,11 +1235,14 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 			break
 		}
 
-		canonicalHash, err = ReadCanonicalHash(tx, n)
-		if err != nil {
-			return err
+		isCanonical := true
+		if !txsV3 {
+			canonicalHash, err = ReadCanonicalHash(tx, n)
+			if err != nil {
+				return err
+			}
+			isCanonical = bytes.Equal(k[8:], canonicalHash[:])
 		}
-		isCanonical := bytes.Equal(k[8:], canonicalHash[:])
 
 		b, err = ReadBodyForStorageByKey(tx, k)
 		if err != nil {
@@ -1267,6 +1270,9 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 			return err
 		}
 		if err = tx.Delete(kv.BlockBody, kCopy); err != nil {
+			return err
+		}
+		if err = tx.Delete(kv.Senders, kCopy); err != nil {
 			return err
 		}
 	}

@@ -36,6 +36,7 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
@@ -1008,10 +1009,11 @@ type BlockRetire struct {
 	notifier    DBEventNotifier
 	logger      log.Logger
 	blockReader services.FullBlockReader
+	blockWriter *blockio.BlockWriter
 }
 
-func NewBlockRetire(workers int, tmpDir string, blockReader services.FullBlockReader, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier, logger log.Logger) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, blockReader: blockReader, db: db, downloader: downloader, notifier: notifier, logger: logger}
+func NewBlockRetire(workers int, tmpDir string, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier, logger log.Logger) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, blockReader: blockReader, blockWriter: blockWriter, db: db, downloader: downloader, notifier: notifier, logger: logger}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
 func (br *BlockRetire) NeedSaveFilesListInDB() bool {
@@ -1122,11 +1124,8 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 		return err
 	}
 	canDeleteTo := CanDeleteTo(currentProgress, blockSnapshots)
-	if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, limit); err != nil {
+	if err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
 		return nil
-	}
-	if err := rawdb.PruneTable(tx, kv.Senders, canDeleteTo, context.Background(), limit); err != nil {
-		return err
 	}
 	return nil
 }

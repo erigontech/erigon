@@ -868,7 +868,7 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	var blockRetire *snapshotsync.BlockRetire
 	if sn.Cfg().Enabled {
-		blockRetire = snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), tmpdir, br, db, nil, nil, logger)
+		blockRetire = snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), tmpdir, br, bw, db, nil, nil, logger)
 	}
 
 	pm, err := prune.Get(tx)

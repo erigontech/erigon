@@ -202,13 +202,13 @@ Loop:
 			break
 		}
 
-		//has, err := cfg.blockReader.HasSenders(ctx, tx, blockHash, blockNumber)
-		//if err != nil {
-		//	return err
-		//}
-		//if has {
-		//	continue
-		//}
+		has, err := cfg.blockReader.HasSenders(ctx, tx, blockHash, blockNumber)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
 
 		var body *types.Body
 		if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
