@@ -289,8 +289,14 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 				}); err != nil {
 					return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 				}
-				if err := rawdb.AppendCanonicalTxNums(tx, blockReader.Snapshots().BlocksAvailable()+1); err != nil {
-					return err
+				if blockReader.Snapshots().BlocksAvailable() > 0 {
+					if err := rawdb.AppendCanonicalTxNums(tx, blockReader.Snapshots().BlocksAvailable()+1); err != nil {
+						return err
+					}
+				} else {
+					if err := rawdb.AppendCanonicalTxNums(tx, 0); err != nil {
+						return err
+					}
 				}
 			}
 			if err := rawdb.WriteSnapshots(tx, sn.Files(), agg.Files()); err != nil {
