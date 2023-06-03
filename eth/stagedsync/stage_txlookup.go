@@ -235,6 +235,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	} else if blockSnapshots != nil && blockSnapshots.Cfg().Enabled {
 		blockTo = snapshotsync.CanDeleteTo(s.ForwardProgress, blockSnapshots)
 	}
+	// can't prune much here: because tx_lookup index has crypto-hashed-keys, and 1 block producing hundreds of deletes
 	blockTo = cmp.Min(blockTo, blockFrom+10)
 
 	if blockFrom < blockTo {

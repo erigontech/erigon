@@ -118,6 +118,11 @@ func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodi
 		return nil
 	}
 
+	//if deleteBodies {
+	//if err := rawdb.MakeBodiesNonCanonical(tx, from, deleteBodies, ctx, logPrefix, logEvery); err != nil {
+	//	return err
+	//}
+	//}
 	if w.historyV3 {
 		if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
 			return err
