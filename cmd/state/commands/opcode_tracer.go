@@ -421,13 +421,9 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 	}
 	defer historyTx.Rollback()
 
-	var historyV3, txsV3 bool
+	var historyV3 bool
 	chainDb.View(context.Background(), func(tx kv.Tx) (err error) {
 		historyV3, err = kvcfg.HistoryV3.Enabled(tx)
-		if err != nil {
-			return err
-		}
-		txsV3, err = kvcfg.TransactionsV3.Enabled(tx)
 		if err != nil {
 			return err
 		}

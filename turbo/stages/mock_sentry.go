@@ -99,7 +99,6 @@ type MockSentry struct {
 	txPoolDB         kv.RwDB
 
 	HistoryV3      bool
-	TransactionsV3 bool
 	agg            *libstate.AggregatorV3
 	BlockSnapshots *snapshotsync.RoSnapshots
 }
@@ -234,9 +233,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	logger := log.New()
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	histV3, txsV3, db, agg := temporal.NewTestDB(tb, ctx, dirs, gspec, logger)
+	histV3, db, agg := temporal.NewTestDB(tb, ctx, dirs, gspec, logger)
 	cfg.HistoryV3 = histV3
-	cfg.TransactionsV3 = txsV3
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, logger)
 	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger)
@@ -259,7 +257,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
 		HistoryV3:      cfg.HistoryV3,
-		TransactionsV3: cfg.TransactionsV3,
 	}
 	if tb != nil {
 		tb.Cleanup(mock.Close)

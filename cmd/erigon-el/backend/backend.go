@@ -192,11 +192,6 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			return err
 		}
 
-		config.TransactionsV3 = true
-		if err != nil {
-			return err
-		}
-
 		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
 		if err != nil {
 			return err

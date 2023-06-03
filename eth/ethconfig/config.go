@@ -230,9 +230,6 @@ type Config struct {
 	// gRPC Address to connect to Heimdall node
 	HeimdallgRPCAddress string
 
-	//  New DB table for storing transactions allows: keeping multiple branches of block bodies in the DB simultaneously
-	TransactionsV3 bool
-
 	// URL to connect to Heimdall node
 	HeimdallURL string
 

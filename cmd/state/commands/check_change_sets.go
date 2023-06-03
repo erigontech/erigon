@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -31,9 +30,8 @@ import (
 )
 
 var (
-	historyfile    string
-	nocheck        bool
-	transactionsV3 bool
+	historyfile string
+	nocheck     bool
 )
 
 func init() {
@@ -42,7 +40,6 @@ func init() {
 	withSnapshotBlocks(checkChangeSetsCmd)
 	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", "", "path to the file where the changesets and history are expected to be. If omitted, the same as <datadir>/erion/chaindata")
 	checkChangeSetsCmd.Flags().BoolVar(&nocheck, "nocheck", false, "set to turn off the changeset checking and only execute transaction (for performance testing)")
-	checkChangeSetsCmd.Flags().BoolVar(&transactionsV3, utils.TransactionV3Flag.Name, utils.TransactionV3Flag.Value, utils.TransactionV3Flag.Usage)
 	rootCmd.AddCommand(checkChangeSetsCmd)
 }
 
@@ -56,13 +53,13 @@ var checkChangeSetsCmd = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return err
 		}
-		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck, transactionsV3)
+		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck)
 	},
 }
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool, transactionV3 bool) error {
+func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}

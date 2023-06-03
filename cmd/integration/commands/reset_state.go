@@ -107,17 +107,13 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots, agg *state.Aggre
 	if err != nil {
 		return err
 	}
-	txs3, err := kvcfg.TransactionsV3.Enabled(tx)
-	if err != nil {
-		return err
-	}
 	lastK, lastV, err := rawdbv3.Last(tx, kv.MaxTxNum)
 	if err != nil {
 		return err
 	}
 
 	_, lastBlockInHistSnap, _ := rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
-	fmt.Fprintf(w, "history.v3: %t, txs.v3: %t, idx steps: %.02f, lastMaxTxNum=%d->%d, lastBlockInSnap=%d\n\n", h3, txs3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV), lastBlockInHistSnap)
+	fmt.Fprintf(w, "history.v3: %t,  idx steps: %.02f, lastMaxTxNum=%d->%d, lastBlockInSnap=%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV), lastBlockInHistSnap)
 	s1, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err
