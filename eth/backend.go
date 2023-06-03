@@ -1037,7 +1037,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		allSnapshots.OptimisticalyReopenWithDB(db)
 	}
 	blockReader := snapshotsync.NewBlockReader(allSnapshots)
-	blockWriter := blockio.NewBlockWriter(histV3, transactionsV3)
+	blockWriter := blockio.NewBlockWriter(histV3)
 
 	dir.MustExist(dirs.SnapHistory)
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)

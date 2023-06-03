@@ -416,7 +416,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	blockReader := snapshotsync.NewBlockReader(snapshots)
-	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db), fromdb.TxsV3(db))
+	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
 
 	br := snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs.Tmp, blockReader, blockWriter, db, nil, nil, logger)
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)

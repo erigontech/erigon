@@ -140,7 +140,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 		panic(err)
 	}
 	br := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()))
-	bw := blockio.NewBlockWriter(histV3, transactionsV3)
+	bw := blockio.NewBlockWriter(histV3)
 	return br, bw
 }
 
