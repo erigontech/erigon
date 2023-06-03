@@ -91,7 +91,6 @@ func TestGetBlockReceipts(t *testing.T) {
 		receipts []rlp.RawValue
 	)
 	br, _ := m.NewBlocksIO()
-
 	err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
 			block, err := br.BlockByNumber(m.Ctx, tx, i)

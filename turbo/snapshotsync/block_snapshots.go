@@ -1334,7 +1334,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	var prevTxID uint64
-	numBuf := make([]byte, binary.MaxVarintLen64)
+	numBuf := make([]byte, 8)
 	parseCtx := types2.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
 	slot := types2.TxSlot{}
@@ -1356,7 +1356,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 	valueBuf := make([]byte, 16*4096)
 	addSystemTx := func(tx kv.Tx, txId uint64) error {
 		binary.BigEndian.PutUint64(numBuf, txId)
-		tv, err := tx.GetOne(kv.EthTx, numBuf[:8])
+		tv, err := tx.GetOne(kv.EthTx, numBuf)
 		if err != nil {
 			return err
 		}
@@ -1424,7 +1424,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 			prevTxID = body.BaseTxId
 		}
 		binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
-		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount-2, func(tk, tv []byte) error {
+		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxAmount-2, func(tk, tv []byte) error {
 			id := binary.BigEndian.Uint64(tk)
 			if prevTxID != 0 && id != prevTxID+1 {
 				panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
@@ -1540,21 +1540,25 @@ func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, firs
 		}
 		copy(key, k)
 		copy(key[8:], v)
-		dataRLP, err := tx.GetOne(kv.BlockBody, key)
+
+		// Important: DB does store canonical and non-canonical txs in same table. And using same body.BaseTxID
+		// But snapshots using canonical TxNum in field body.BaseTxID
+		// So, we manually calc this field here and serialize again.
+		//
+		// FYI: we also have other table to map canonical BlockNum->TxNum: kv.MaxTxNum
+		body, err := rawdb.ReadBodyForStorageByKey(tx, key)
 		if err != nil {
 			return false, err
 		}
-		if dataRLP == nil {
-			logger.Warn("header missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
+		if body == nil {
+			logger.Warn("body missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
 			return true, nil
 		}
-		body := &types.BodyForStorage{}
-		if err = rlp.DecodeBytes(dataRLP, body); err != nil {
-			return false, err
-		}
+
 		body.BaseTxId = firstTxNum
 		firstTxNum += uint64(body.TxAmount)
-		dataRLP, err = rlp.EncodeToBytes(body)
+
+		dataRLP, err := rlp.EncodeToBytes(body)
 		if err != nil {
 			return false, err
 		}
