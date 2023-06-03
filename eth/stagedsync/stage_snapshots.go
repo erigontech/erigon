@@ -488,7 +488,7 @@ func calculateTime(amountLeft, rate uint64) string {
 /* ====== PRUNING ====== */
 // snapshots pruning sections works more as a retiring of blocks
 // retiring blocks means moving block data from db into snapshots
-func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
+func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -501,7 +501,11 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	br := cfg.blockRetire
 	sn := br.Snapshots()
 	if sn.Cfg().Enabled {
-		if err := br.PruneAncientBlocks(tx, 100); err != nil {
+		pruneLimit := 100
+		if initialCycle {
+			pruneLimit = 10_000
+		}
+		if err := br.PruneAncientBlocks(tx, pruneLimit); err != nil {
 			return err
 		}
 	}
