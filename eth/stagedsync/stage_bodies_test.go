@@ -9,6 +9,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 
@@ -46,13 +47,25 @@ func TestBodiesUnwind(t *testing.T) {
 		_, err = bw.WriteRawBodyIfNotExists(tx, hash, i, b)
 		require.NoError(err)
 	}
+	err = rawdb.AppendCanonicalTxNums(tx, 1)
+	require.NoError(err)
+
 	{
+		n, err := tx.ReadSequence(kv.EthTx)
+		require.NoError(err)
+		require.Equal(2+10*(3+2), int(n)) // genesis 2 system txs + from 1, 10 block with 3 txn in each
+
+		lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(err)
+		require.Equal(0, int(lastBlockNum))
+		require.Equal(1, int(lastTxNum))
+
 		err = bw.MakeBodiesNonCanonical(tx, 5+1) // block 5 already canonical, start from next one
 		require.NoError(err)
 
-		n, err := tx.ReadSequence(kv.EthTx)
+		n, err = tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(2+5*(3+2), int(n)) // genesis 2 system txs + from 1, 5 block with 3 txn in each
+		require.Equal(2+10*(3+2), int(n)) // genesis 2 system txs + from 1, 5 block with 3 txn in each
 	}
 	{
 		err = bw.MakeBodiesCanonical(tx, 5+1) // block 5 already canonical, start from next one
@@ -78,7 +91,12 @@ func TestBodiesUnwind(t *testing.T) {
 
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
-		require.Equal(2+5*(3+2), int(n)) // from 0, 5 block with 3 txn in each
+		require.Equal(2+11*(3+2), int(n)) // from 0, 5 block with 3 txn in each
+
+		lastBlockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(err)
+		require.Equal(1, int(lastTxNum))
+		require.Equal(1, int(lastBlockNum))
 
 		err = bw.MakeBodiesCanonical(tx, 5+1) // block 5 already canonical, start from next one
 		require.NoError(err)
