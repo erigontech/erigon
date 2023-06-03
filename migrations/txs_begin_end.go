@@ -145,7 +145,7 @@ var TxsBeginEnd = Migration{
 				if err = tx.Delete(kv.Headers, k); err != nil {
 					return err
 				}
-				if err = tx.Delete(kv.HeadersTD, k); err != nil {
+				if err = tx.Delete(kv.HeaderTD, k); err != nil {
 					return err
 				}
 				if err = tx.Delete(kv.HeaderNumber, k[8:]); err != nil {
