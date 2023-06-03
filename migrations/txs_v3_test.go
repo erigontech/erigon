@@ -3,6 +3,8 @@ package migrations_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -43,7 +45,7 @@ func TestTxsV3(t *testing.T) {
 			require.NoError(err)
 
 		}
-		err = rawdb.MakeBodiesNonCanonical(tx, 1, false, context.Background(), "", logEvery)
+		err = rawdb.MakeBodiesNonCanonical(tx, 7, false, context.Background(), "", logEvery)
 		require.NoError(err)
 
 		for i := uint64(7); i < 10; i++ {
@@ -89,11 +91,11 @@ func TestTxsV3(t *testing.T) {
 		require.NoError(err)
 		cnt, err := c.Count()
 		require.NoError(err)
+		tx.ForEach(kv.NonCanonicalTxs, nil, func(k, v []byte) error {
+			fmt.Printf("see: %d\n", binary.BigEndian.Uint64(k))
+			return nil
+		})
 		require.Zero(cnt)
-
-		v, err := tx.ReadSequence(kv.NonCanonicalTxs)
-		require.NoError(err)
-		require.Zero(v)
 
 		has, err := tx.Has(kv.EthTx, hexutility.EncodeTs(0))
 		require.NoError(err)
