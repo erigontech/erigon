@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"runtime"
 	"time"
 
@@ -47,10 +48,10 @@ var TxsV3 = Migration{
 					return err
 				}
 				isCanonical := bytes.Equal(k[8:], canonicalHash[:])
+				fmt.Printf("a: %d, %t\n", blockNum, isCanonical)
 				if isCanonical {
 					return nil // skip
 				}
-
 				b, err := rawdb.ReadBodyForStorageByKey(tx, k)
 				if err != nil {
 					return err
@@ -58,6 +59,7 @@ var TxsV3 = Migration{
 				if b == nil {
 					log.Debug("DeleteAncientBlocks: block body not found", "height", blockNum)
 				} else {
+					fmt.Printf("a: %d, %t\n", blockNum, isCanonical)
 					for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
 						binary.BigEndian.PutUint64(txIDBytes, txID)
 						if err = tx.Delete(kv.NonCanonicalTxs, txIDBytes); err != nil {
