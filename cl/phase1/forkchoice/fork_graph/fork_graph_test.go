@@ -1,12 +1,10 @@
-package fork_graph_test
+package fork_graph
 
 import (
 	_ "embed"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -30,30 +28,23 @@ func TestForkGraph(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(blockB, block2, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappy(blockC, block2, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
-	graph := fork_graph.New(anchorState, false)
+	graph := New(anchorState, false)
 	_, status, err := graph.AddChainSegment(blockA, true)
 	require.NoError(t, err)
 	// Save current state hash
 	require.NoError(t, err)
-	require.Equal(t, status, fork_graph.Success)
+	require.Equal(t, status, Success)
 	_, status, err = graph.AddChainSegment(blockB, true)
 	require.NoError(t, err)
-	require.Equal(t, status, fork_graph.Success)
+	require.Equal(t, status, Success)
 	// Try again with same should yield success
 	_, status, err = graph.AddChainSegment(blockB, true)
 	require.NoError(t, err)
-	require.Equal(t, status, fork_graph.PreValidated)
-	// Retrieve the children for the parent hash
-	children := graph.GetChildren(blockB.Block.ParentRoot)
-	hash, err := blockB.Block.HashSSZ()
-	require.NoError(t, err)
-	// Assert that the children are as expected
-	require.Equal(t, []libcommon.Hash{hash}, children)
-
+	require.Equal(t, status, PreValidated)
 	// Now make blockC a bad block
 	blockC.Block.ProposerIndex = 81214459 // some invalid thing
 	_, status, err = graph.AddChainSegment(blockC, true)
 	require.Error(t, err)
-	require.Equal(t, status, fork_graph.InvalidBlock)
-
+	require.Equal(t, status, InvalidBlock)
+	graph.removeOldData()
 }

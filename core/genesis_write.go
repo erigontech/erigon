@@ -489,6 +489,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 		MixDigest:     g.Mixhash,
 		Coinbase:      g.Coinbase,
 		BaseFee:       g.BaseFee,
+		DataGasUsed:   g.DataGasUsed,
 		ExcessDataGas: g.ExcessDataGas,
 		AuRaStep:      g.AuRaStep,
 		AuRaSeal:      g.AuRaSeal,
@@ -563,7 +564,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			}
 
 			if len(account.Constructor) > 0 {
-				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head, g.ExcessDataGas); err != nil {
+				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head); err != nil {
 					return
 				}
 			}

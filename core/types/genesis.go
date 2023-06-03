@@ -50,7 +50,8 @@ type Genesis struct {
 	Mixhash       common.Hash    `json:"mixHash"`
 	Coinbase      common.Address `json:"coinbase"`
 	BaseFee       *big.Int       `json:"baseFeePerGas"`
-	ExcessDataGas *big.Int       `json:"excessDataGas"`
+	DataGasUsed   *uint64        `json:"dataGasUsed"`
+	ExcessDataGas *uint64        `json:"excessDataGas"`
 	Alloc         GenesisAlloc   `json:"alloc"      gencodec:"required"`
 	AuRaStep      uint64         `json:"auRaStep"`
 	AuRaSeal      []byte         `json:"auRaSeal"`
@@ -105,7 +106,8 @@ type genesisSpecMarshaling struct {
 	Number        math.HexOrDecimal64
 	Difficulty    *math.HexOrDecimal256
 	BaseFee       *math.HexOrDecimal256
-	ExcessDataGas *math.HexOrDecimal256
+	DataGasUsed   *math.HexOrDecimal64
+	ExcessDataGas *math.HexOrDecimal64
 	Alloc         map[common2.UnprefixedAddress]GenesisAccount
 }
 

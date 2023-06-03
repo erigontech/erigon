@@ -28,7 +28,6 @@ type ApiBackend interface {
 	EngineNewPayload(ctx context.Context, payload *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error)
 	EngineForkchoiceUpdated(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedResponse, error)
 	EngineGetPayload(ctx context.Context, payloadId uint64) (*remote.EngineGetPayloadResponse, error)
-	EngineGetBlobsBundleV1(ctx context.Context, payloadId uint64) (*types2.BlobsBundleV1, error)
 	NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error)
 	Peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 	PendingBlock(ctx context.Context) (*types.Block, error)

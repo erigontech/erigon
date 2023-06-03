@@ -10,6 +10,8 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/log/v3"
@@ -209,9 +211,14 @@ func BodiesForward(
 				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
 			if cfg.historyV3 && ok {
-				if err := rawdb.AppendCanonicalTxNums(tx, blockHeight); err != nil {
+				body, _ := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(blockHeight, header.Hash()))
+				lastTxnID := body.BaseTxId + uint64(body.TxAmount) - 1
+				if err := rawdbv3.TxNums.Append(tx, blockHeight, lastTxnID); err != nil {
 					return false, err
 				}
+				//if err := rawdb.AppendCanonicalTxNums(tx, blockHeight); err != nil {
+				//	return false, err
+				//}
 			}
 			if ok {
 				dataflow.BlockBodyDownloadStates.AddChange(blockHeight, dataflow.BlockBodyCleared)

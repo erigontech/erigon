@@ -2,6 +2,12 @@
 
 All notable changes to `diagnostics` will be documented in this file.
 
+## Version 3
+
+### Added
+
+- Header downloader monitor for diagnostics system (#7590)
+
 ## Version 2
 
 ### Added

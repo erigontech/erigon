@@ -60,7 +60,7 @@ func TestBeaconBody(t *testing.T) {
 	assert.Equal(t, libcommon.HexToHash("17892e0144f88a0aa3e19f8b5f55129aed3fce23f1f32a08518ccd47b6ecbcf9"), libcommon.Hash(root))
 
 	_, err = body.ExecutionPayload.RlpHeader()
-	assert.Error(t, err)
+	assert.NoError(t, err)
 
 	p, err := body.ExecutionPayload.PayloadHeader()
 	assert.NoError(t, err)

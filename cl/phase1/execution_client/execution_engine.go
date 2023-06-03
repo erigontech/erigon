@@ -123,8 +123,8 @@ func convertPayloadToGrpc(e *cltypes.Eth1Block) (*types.ExecutionPayload, error)
 		}
 	}
 	withdrawals := make([]*types2.Withdrawal, e.Withdrawals.Len())
-	e.Withdrawals.Range(func(_ int, w *types2.Withdrawal, _ int) bool {
-		withdrawals = append(withdrawals, w)
+	e.Withdrawals.Range(func(idx int, w *types2.Withdrawal, _ int) bool {
+		withdrawals[idx] = w
 		return true
 	})
 
