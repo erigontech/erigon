@@ -359,8 +359,6 @@ func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 }
 
 func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -370,7 +368,9 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 	sn := cfg.blockRetire.Snapshots()
-	if !(sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce) && cfg.prune.TxIndex.Enabled() {
+	if sn.Cfg().Enabled {
+		// noop. in this case senders will be deleted by BlockRetire.PruneAncientBlocks after data-freezing.
+	} else if cfg.prune.TxIndex.Enabled() {
 		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 		if err = rawdb.PruneTable(tx, kv.Senders, to, ctx, 100); err != nil {
 			return err

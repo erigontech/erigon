@@ -498,13 +498,14 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		defer tx.Rollback()
 	}
 
-	sn := cfg.blockRetire.Snapshots()
-	if sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce {
-		br := cfg.blockRetire
+	br := cfg.blockRetire
+	sn := br.Snapshots()
+	if sn.Cfg().Enabled {
 		if err := br.PruneAncientBlocks(tx, 100); err != nil {
 			return err
 		}
-
+	}
+	if sn.Cfg().Enabled && sn.Cfg().Produce {
 		//TODO: initialSync maybe save files progress here
 		if cfg.agg.NeedSaveFilesListInDB() || br.NeedSaveFilesListInDB() {
 			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files(), cfg.agg.Files()); err != nil {
