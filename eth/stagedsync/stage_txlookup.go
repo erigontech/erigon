@@ -236,7 +236,21 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		blockTo = snapshotsync.CanDeleteTo(s.ForwardProgress, blockSnapshots)
 	}
 	// can't prune much here: because tx_lookup index has crypto-hashed-keys, and 1 block producing hundreds of deletes
-	blockTo = cmp.Min(blockTo, blockFrom+10)
+	blockTo = cmp.Min(blockTo, blockFrom+100)
+	for i := blockFrom; i < blockTo; i++ {
+		go func(blockNum uint64) {
+			_ = cfg.db.View(ctx, func(tx kv.Tx) error {
+				blk, err := cfg.blockReader.BlockByNumber(ctx, tx, blockNum)
+				if err != nil {
+					return err
+				}
+				for _, txn := range blk.Transactions() {
+					_, _ = rawdb.ReadTxLookupEntry(tx, txn.Hash())
+				}
+				return nil
+			})
+		}(i)
+	}
 
 	if blockFrom < blockTo {
 		defer func(t time.Time) { fmt.Printf("stage_txlookup.go:241: %s\n", time.Since(t)) }(time.Now())
