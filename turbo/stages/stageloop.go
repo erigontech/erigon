@@ -406,7 +406,7 @@ func NewDefaultStages(ctx context.Context,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
 	blockWriter := blockio.NewBlockWriter(cfg.HistoryV3, cfg.TransactionsV3)
-	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, blockReader, db, snapDownloader, notifications.Events, logger)
+	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, blockReader, blockWriter, db, snapDownloader, notifications.Events, logger)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.

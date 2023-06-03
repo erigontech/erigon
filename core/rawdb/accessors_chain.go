@@ -1291,10 +1291,13 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
 		kCopy := common.CopyBytes(k)
-		if err = tx.Delete(kv.Headers, kCopy); err != nil {
+		if err = tx.Delete(kv.Senders, kCopy); err != nil {
 			return err
 		}
 		if err = tx.Delete(kv.BlockBody, kCopy); err != nil {
+			return err
+		}
+		if err = tx.Delete(kv.Headers, kCopy); err != nil {
 			return err
 		}
 	}

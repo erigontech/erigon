@@ -370,7 +370,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	var snapshotsDownloader proto_downloader.DownloaderClient
 
-	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, blockReader, mock.DB, snapshotsDownloader, mock.Notifications.Events, logger)
+	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, blockReader, blockWriter, mock.DB, snapshotsDownloader, mock.Notifications.Events, logger)
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx,
 			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs, blockRetire, snapshotsDownloader, blockReader, mock.Notifications.Events, mock.HistoryV3, mock.agg),
