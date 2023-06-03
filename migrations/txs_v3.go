@@ -48,7 +48,6 @@ var TxsV3 = Migration{
 					return err
 				}
 				isCanonical := bytes.Equal(k[8:], canonicalHash[:])
-				fmt.Printf("a: %d, %t\n", blockNum, isCanonical)
 				if isCanonical {
 					return nil // skip
 				}
@@ -62,6 +61,7 @@ var TxsV3 = Migration{
 					fmt.Printf("a: %d, %t\n", blockNum, isCanonical)
 					for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
 						binary.BigEndian.PutUint64(txIDBytes, txID)
+						fmt.Printf("del: %d\n", txID)
 						if err = tx.Delete(kv.NonCanonicalTxs, txIDBytes); err != nil {
 							return err
 						}
