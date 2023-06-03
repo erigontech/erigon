@@ -1414,7 +1414,7 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 		sn, _ := allSnapshots(context.Background(), db, logger)
 		transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
 		histV3 := kvcfg.HistoryV3.FromDB(db)
-		_blockReaderSingleton = snapshotsync.NewBlockReader(sn, transactionsV3)
+		_blockReaderSingleton = snapshotsync.NewBlockReader(sn)
 		_blockWriterSingleton = blockio.NewBlockWriter(histV3, transactionsV3)
 	})
 	return _blockReaderSingleton, _blockWriterSingleton

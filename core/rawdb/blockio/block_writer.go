@@ -32,8 +32,8 @@ type BlockWriter struct {
 	txsV3 bool
 }
 
-func NewBlockWriter(historyV3, txsV3 bool) *BlockWriter {
-	return &BlockWriter{historyV3: historyV3, txsV3: txsV3}
+func NewBlockWriter(historyV3 bool) *BlockWriter {
+	return &BlockWriter{historyV3: historyV3, txsV3: true}
 }
 
 func (w *BlockWriter) TxsV3Enabled() bool { return w.txsV3 }

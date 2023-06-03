@@ -133,13 +133,10 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 			return genesis.Config, block, &types.GenesisMismatchError{Stored: storedHash, New: hash}
 		}
 	}
-	transactionV3, err := kvcfg.TransactionsV3.Enabled(tx)
-	if err != nil {
-		return nil, nil, err
-	}
-	blockReader := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()), transactionV3)
+	blockReader := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()))
 	number := rawdb.ReadHeaderNumber(tx, storedHash)
 	if number != nil {
+		var err error
 		storedBlock, _, err = blockReader.BlockWithSenders(context.Background(), tx, storedHash, *number)
 		if err != nil {
 			return genesis.Config, nil, err
@@ -258,15 +255,11 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.In
 	if err := config.CheckConfigForkOrder(); err != nil {
 		return nil, nil, err
 	}
-	transactionV3, err := kvcfg.TransactionsV3.Enabled(tx)
-	if err != nil {
-		return nil, nil, err
-	}
 	histV3, err := kvcfg.HistoryV3.Enabled(tx)
 	if err != nil {
 		return nil, nil, err
 	}
-	blockWriter := blockio.NewBlockWriter(histV3, transactionV3)
+	blockWriter := blockio.NewBlockWriter(histV3)
 
 	if err := blockWriter.WriteBlock(tx, block); err != nil {
 		return nil, nil, err

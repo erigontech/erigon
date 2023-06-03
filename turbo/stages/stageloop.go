@@ -451,7 +451,7 @@ func NewDefaultStages(ctx context.Context,
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient,
 	dirs datadir.Dirs, notifications *shards.Notifications, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3,
 	logger log.Logger) (*stagedsync.Sync, error) {
-	blockReader, blockWriter := snapshotsync.NewBlockReader(snapshots, cfg.TransactionsV3), blockio.NewBlockWriter(cfg.HistoryV3, cfg.TransactionsV3)
+	blockReader, blockWriter := snapshotsync.NewBlockReader(snapshots), blockio.NewBlockWriter(cfg.HistoryV3, cfg.TransactionsV3)
 
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,

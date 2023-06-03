@@ -415,7 +415,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err := snapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	blockReader := snapshotsync.NewBlockReader(snapshots, fromdb.TxsV3(db))
+	blockReader := snapshotsync.NewBlockReader(snapshots)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db), fromdb.TxsV3(db))
 
 	br := snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs.Tmp, blockReader, blockWriter, db, nil, nil, logger)

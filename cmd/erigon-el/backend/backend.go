@@ -192,7 +192,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			return err
 		}
 
-		config.TransactionsV3, err = kvcfg.TransactionsV3.WriteOnce(tx, config.TransactionsV3)
+		config.TransactionsV3 = true
 		if err != nil {
 			return err
 		}
@@ -909,7 +909,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if !snConfig.NoDownloader {
 		allSnapshots.OptimisticalyReopenWithDB(db)
 	}
-	blockReader := snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
+	blockReader := snapshotsync.NewBlockReader(allSnapshots)
 	blockWriter := blockio.NewBlockWriter(histV3, transactionsV3)
 
 	dir.MustExist(dirs.SnapHistory)
