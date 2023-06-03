@@ -269,16 +269,10 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 			}
 			if historyV3 {
 				_ = tx.ClearBucket(kv.MaxTxNum)
-				//if err := rawdbv3.TxNums.WriteForGenesis(tx, 1); err != nil {
-				//	return err
-				//}
 				type IterBody interface {
 					IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error
 				}
 				if err := blockReader.(IterBody).IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
-					if blockNum == 0 {
-						fmt.Printf("[dbg] iterate: %d, %d, %d\n", blockNum, baseTxNum, txAmount)
-					}
 					select {
 					case <-ctx.Done():
 						return ctx.Err()
