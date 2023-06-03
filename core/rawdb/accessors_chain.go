@@ -29,7 +29,6 @@ import (
 	"github.com/gballet/go-verkle"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -1205,36 +1204,22 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, txsV3 bool) error {
-	c, err := tx.Cursor(kv.Headers)
+	from, to := hexutility.EncodeTs(1), hexutility.EncodeTs(blockTo) // preserve genesis
+	iter, err := tx.RangeAscend(kv.Headers, from, to, blocksDeleteLimit)
 	if err != nil {
 		return err
 	}
-	defer c.Close()
-
-	// find first non-genesis block
-	firstK, _, err := c.Seek(hexutility.EncodeTs(1))
-	if err != nil {
-		return err
-	}
-	if firstK == nil { //nothing to delete
-		return err
-	}
-	blockFrom := binary.BigEndian.Uint64(firstK)
-	stopAtBlock := cmp.Min(blockTo, blockFrom+uint64(blocksDeleteLimit))
 
 	var canonicalHash libcommon.Hash
-	var b *types.BodyForStorage
 
-	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
+	txIDBytes := make([]byte, 8)
+	for iter.HasNext() {
+		k, _, err := iter.Next()
 		if err != nil {
 			return err
 		}
 
 		n := binary.BigEndian.Uint64(k)
-		if n >= stopAtBlock { // [from, to)
-			break
-		}
-
 		isCanonical := true
 		if !txsV3 {
 			canonicalHash, err = ReadCanonicalHash(tx, n)
@@ -1244,35 +1229,38 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, txsV
 			isCanonical = bytes.Equal(k[8:], canonicalHash[:])
 		}
 
-		b, err = ReadBodyForStorageByKey(tx, k)
+		b, err := ReadBodyForStorageByKey(tx, k)
 		if err != nil {
 			return err
 		}
 		if b == nil {
 			log.Debug("DeleteAncientBlocks: block body not found", "height", n)
 		} else {
-			txIDBytes := make([]byte, 8)
 			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
 				binary.BigEndian.PutUint64(txIDBytes, txID)
-				bucket := kv.EthTx
-				if !isCanonical {
-					bucket = kv.NonCanonicalTxs
-				}
-				if err = tx.Delete(bucket, txIDBytes); err != nil {
-					return err
+				if txsV3 {
+					if err = tx.Delete(kv.EthTx, txIDBytes); err != nil {
+						return err
+					}
+				} else {
+					bucket := kv.EthTx
+					if !isCanonical {
+						bucket = kv.NonCanonicalTxs
+					}
+					if err = tx.Delete(bucket, txIDBytes); err != nil {
+						return err
+					}
 				}
 			}
 		}
-		// Copying k because otherwise the same memory will be reused
-		// for the next key and Delete below will end up deleting 1 more record than required
-		kCopy := common.CopyBytes(k)
-		if err = tx.Delete(kv.Headers, kCopy); err != nil {
+
+		if err = tx.Delete(kv.Senders, k); err != nil {
 			return err
 		}
-		if err = tx.Delete(kv.BlockBody, kCopy); err != nil {
+		if err = tx.Delete(kv.BlockBody, k); err != nil {
 			return err
 		}
-		if err = tx.Delete(kv.Senders, kCopy); err != nil {
+		if err = tx.Delete(kv.Headers, k); err != nil {
 			return err
 		}
 	}
