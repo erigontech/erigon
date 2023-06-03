@@ -8,11 +8,12 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
+	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func InitSubscriptions(methods []models.SubMethod, logger log.Logger) {
+func InitSubscriptions(methods []requests.SubMethod, logger log.Logger) {
 	logger.Info("CONNECTING TO WEBSOCKETS AND SUBSCRIBING TO METHODS...")
 	if err := subscribeAll(methods, logger); err != nil {
 		logger.Error("failed to subscribe to all methods", "error", err)
@@ -24,7 +25,7 @@ func InitSubscriptions(methods []models.SubMethod, logger log.Logger) {
 	models.NewHeadsChan = make(chan interface{})
 
 	go func() {
-		methodSub := (*models.MethodSubscriptionMap)[models.ETHNewHeads]
+		methodSub := (*models.MethodSubscriptionMap)[requests.Methods.ETHNewHeads]
 		if methodSub == nil {
 			logger.Error("method subscription should not be nil")
 			return
@@ -46,7 +47,7 @@ func SearchReservesForTransactionHash(hashes map[libcommon.Hash]bool, logger log
 }
 
 // subscribe connects to a websocket client and returns the subscription handler and a channel buffer
-func subscribe(client *rpc.Client, method models.SubMethod, args ...interface{}) (*models.MethodSubscription, error) {
+func subscribe(client *rpc.Client, method requests.SubMethod, args ...interface{}) (*models.MethodSubscription, error) {
 	methodSub := models.NewMethodSubscription(method)
 
 	namespace, subMethod, err := devnetutils.NamespaceAndSubMethodFromMethod(string(method))
@@ -66,8 +67,8 @@ func subscribe(client *rpc.Client, method models.SubMethod, args ...interface{})
 	return methodSub, nil
 }
 
-func subscribeToMethod(method models.SubMethod, logger log.Logger) (*models.MethodSubscription, error) {
-	client, err := rpc.DialWebsocket(context.Background(), fmt.Sprintf("ws://%s", models.Localhost), "", logger)
+func subscribeToMethod(method requests.SubMethod, logger log.Logger) (*models.MethodSubscription, error) {
+	client, err := rpc.DialWebsocket(context.Background(), "ws://localhost:8545", "", logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial websocket: %v", err)
 	}
@@ -90,7 +91,7 @@ func searchBlockForHashes(hashmap map[libcommon.Hash]bool, logger log.Logger) (*
 	txToBlock := make(map[libcommon.Hash]string, len(hashmap))
 
 	toFind := len(hashmap)
-	methodSub := (*models.MethodSubscriptionMap)[models.ETHNewHeads]
+	methodSub := (*models.MethodSubscriptionMap)[requests.Methods.ETHNewHeads]
 	if methodSub == nil {
 		return nil, fmt.Errorf("client subscription should not be nil")
 	}
@@ -133,8 +134,8 @@ func UnsubscribeAll() {
 }
 
 // subscribeAll subscribes to the range of methods provided
-func subscribeAll(methods []models.SubMethod, logger log.Logger) error {
-	m := make(map[models.SubMethod]*models.MethodSubscription)
+func subscribeAll(methods []requests.SubMethod, logger log.Logger) error {
+	m := make(map[requests.SubMethod]*models.MethodSubscription)
 	models.MethodSubscriptionMap = &m
 	for _, method := range methods {
 		sub, err := subscribeToMethod(method, logger)

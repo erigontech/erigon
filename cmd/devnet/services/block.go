@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
+	"github.com/ledgerwatch/erigon/cmd/devnet/node"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
@@ -27,15 +28,15 @@ var (
 	signer = types.LatestSigner(params.AllCliqueProtocolChanges)
 )
 
-func CreateManyEIP1559TransactionsRefWithBaseFee(reqGen *requests.RequestGenerator, addr string, startingNonce *uint64, logger log.Logger) ([]*types.Transaction, []*types.Transaction, error) {
+func CreateManyEIP1559TransactionsRefWithBaseFee(node *node.Node, addr string, startingNonce *uint64, logger log.Logger) ([]*types.Transaction, []*types.Transaction, error) {
 	toAddress := libcommon.HexToAddress(addr)
 
-	baseFeePerGas, err := BaseFeeFromBlock(reqGen, logger)
+	baseFeePerGas, err := BaseFeeFromBlock(node, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed BaseFeeFromBlock: %v", err)
 	}
 
-	log.Info("BaseFeePerGas", "val", baseFeePerGas)
+	logger.Info("BaseFeePerGas", "val", baseFeePerGas)
 
 	lowerBaseFeeTransactions, higherBaseFeeTransactions, err := signEIP1559TxsLowerAndHigherThanBaseFee2(1, 1, baseFeePerGas, startingNonce, toAddress, logger)
 	if err != nil {
@@ -45,10 +46,10 @@ func CreateManyEIP1559TransactionsRefWithBaseFee(reqGen *requests.RequestGenerat
 	return lowerBaseFeeTransactions, higherBaseFeeTransactions, nil
 }
 
-func CreateManyEIP1559TransactionsRefWithBaseFee2(reqGen *requests.RequestGenerator, addr string, startingNonce *uint64, logger log.Logger) ([]*types.Transaction, []*types.Transaction, error) {
+func CreateManyEIP1559TransactionsRefWithBaseFee2(node *node.Node, addr string, startingNonce *uint64, logger log.Logger) ([]*types.Transaction, []*types.Transaction, error) {
 	toAddress := libcommon.HexToAddress(addr)
 
-	baseFeePerGas, err := BaseFeeFromBlock(reqGen, logger)
+	baseFeePerGas, err := BaseFeeFromBlock(node, logger)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed BaseFeeFromBlock: %v", err)
 	}
@@ -229,7 +230,7 @@ func txHashInBlock(client *rpc.Client, hashmap map[libcommon.Hash]bool, blockNum
 		currBlock models.Block
 		numFound  int
 	)
-	err := client.CallContext(ctx, &currBlock, string(models.ETHGetBlockByNumber), blockNumber, false)
+	err := client.CallContext(ctx, &currBlock, string(requests.Methods.ETHGetBlockByNumber), blockNumber, false)
 	if err != nil {
 		return uint64(0), 0, fmt.Errorf("failed to get block by number: %v", err)
 	}
@@ -243,7 +244,7 @@ func txHashInBlock(client *rpc.Client, hashmap map[libcommon.Hash]bool, blockNum
 			txToBlockMap[txnHash] = blockNumber
 			delete(hashmap, txnHash)
 			if len(hashmap) == 0 {
-				return devnetutils.HexToInt(blockNumber), numFound, nil
+				return requests.HexToInt(blockNumber), numFound, nil
 			}
 		}
 	}
@@ -252,7 +253,7 @@ func txHashInBlock(client *rpc.Client, hashmap map[libcommon.Hash]bool, blockNum
 }
 
 // EmitFallbackEvent emits an event from the contract using the fallback method
-func EmitFallbackEvent(reqGen *requests.RequestGenerator, subContract *contracts.Subscription, opts *bind.TransactOpts, logger log.Logger) (*libcommon.Hash, error) {
+func EmitFallbackEvent(node *node.Node, subContract *contracts.Subscription, opts *bind.TransactOpts, logger log.Logger) (*libcommon.Hash, error) {
 	logger.Info("EMITTING EVENT FROM FALLBACK...")
 
 	// adding one to the nonce before initiating another transaction
@@ -268,7 +269,7 @@ func EmitFallbackEvent(reqGen *requests.RequestGenerator, subContract *contracts
 		return nil, fmt.Errorf("failed to sign fallback transaction: %v", err)
 	}
 
-	hash, err := requests.SendTransaction(reqGen, &signedTx, logger)
+	hash, err := node.SendTransaction(&signedTx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send fallback transaction: %v", err)
 	}
@@ -276,9 +277,9 @@ func EmitFallbackEvent(reqGen *requests.RequestGenerator, subContract *contracts
 	return hash, nil
 }
 
-func BaseFeeFromBlock(reqGen *requests.RequestGenerator, logger log.Logger) (uint64, error) {
+func BaseFeeFromBlock(node *node.Node, logger log.Logger) (uint64, error) {
 	var val uint64
-	res, err := requests.GetBlockByNumberDetails(reqGen, "latest", false, logger)
+	res, err := node.GetBlockByNumberDetails("latest", false)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get base fee from block: %v\n", err)
 	}
@@ -286,18 +287,18 @@ func BaseFeeFromBlock(reqGen *requests.RequestGenerator, logger log.Logger) (uin
 	if v, ok := res["baseFeePerGas"]; !ok {
 		return val, fmt.Errorf("baseFeePerGas field missing from response")
 	} else {
-		val = devnetutils.HexToInt(v.(string))
+		val = requests.HexToInt(v.(string))
 	}
 
 	return val, err
 }
 
-func SendManyTransactions(reqGen *requests.RequestGenerator, signedTransactions []*types.Transaction, logger log.Logger) ([]*libcommon.Hash, error) {
+func SendManyTransactions(node *node.Node, signedTransactions []*types.Transaction, logger log.Logger) ([]*libcommon.Hash, error) {
 	logger.Info("Sending multiple transactions to the txpool...")
 	hashes := make([]*libcommon.Hash, len(signedTransactions))
 
 	for idx, tx := range signedTransactions {
-		hash, err := requests.SendTransaction(reqGen, tx, logger)
+		hash, err := node.SendTransaction(tx)
 		if err != nil {
 			logger.Error("failed SendTransaction", "error", err)
 			return nil, err
