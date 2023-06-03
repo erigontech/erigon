@@ -368,7 +368,6 @@ var StateUnwindOrder = UnwindOrder{
 
 var DefaultPruneOrder = PruneOrder{
 	stages.Finish,
-	stages.Snapshots,
 	stages.TxLookup,
 	stages.LogIndex,
 	stages.StorageHistoryIndex,
@@ -386,6 +385,7 @@ var DefaultPruneOrder = PruneOrder{
 	stages.Bodies,
 	stages.BlockHashes,
 	stages.Headers,
+	stages.Snapshots,
 }
 
 var MiningUnwindOrder = UnwindOrder{} // nothing to unwind in mining - because mining does not commit db changes
