@@ -24,6 +24,11 @@ func TestUniqueIDFromEnode(t *testing.T) {
 			shouldError: false,
 		},
 		{
+			input:       "enode://11c368e7a2775951d66ff155a982844ccd5219d10b53e310001e1e40c6a4e76c2f6e42f39acc1e4015cd3b7428765125214d89b07ca5fa2c19ac94746fc360b0@127.0.0.1:63380",
+			expectedRes: "enode://11c368e7a2775951d66ff155a982844ccd5219d10b53e310001e1e40c6a4e76c2f6e42f39acc1e4015cd3b7428765125214d89b07ca5fa2c19ac94746fc360b0@127.0.0.1:63380",
+			shouldError: false,
+		},
+		{
 			input:       "enode://11c368e7a2775951d66ff155a982844ccd5219d10b53e310001e1e40c6a4e76c2f6e42f39acc1e4015cd3b7428765125214d89b07ca5fa2c19ac94746fc360b0@127.0.0.1:63380discport=0",
 			expectedRes: "",
 			shouldError: true,

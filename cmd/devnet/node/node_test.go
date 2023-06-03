@@ -16,7 +16,7 @@ func TestNodeArgs(t *testing.T) {
 	args, _ := devnetutils.AsArgs(node.Miner{
 		Node: node.Node{
 			DataDir:        filepath.Join("data", fmt.Sprintf("%d", 1)),
-			PrivateApiAddr: "localhost:9091",
+			PrivateApiAddr: "localhost:9092",
 		},
 	})
 
@@ -40,7 +40,7 @@ func TestNodeArgs(t *testing.T) {
 		Node: node.Node{
 			DataDir:        filepath.Join("data", fmt.Sprintf("%d", 2)),
 			StaticPeers:    "enode",
-			PrivateApiAddr: "localhost:9092",
+			PrivateApiAddr: "localhost:9091",
 		},
 	})
 
@@ -158,8 +158,10 @@ func miningNodeArgs(dataDir string, nodeNumber int) []string {
 	consoleVerbosity, _ := parameterFromArgument(consoleVerbosityArg, consoleVerbosityParam)
 	p2pProtocol, _ := parameterFromArgument("--p2p.protocol", "68")
 	downloaderArg, _ := parameterFromArgument("--no-downloader", "true")
+	httpPortArg, _ := parameterFromArgument("--http.port", "8545")
+	authrpcPortArg, _ := parameterFromArgument("--authrpc.port", "8551")
 
-	return []string{buildDirArg, dataDirArg, chainType, privateApiAddr, mine, httpApi, ws, devPeriod, consoleVerbosity, p2pProtocol, downloaderArg}
+	return []string{buildDirArg, dataDirArg, chainType, privateApiAddr, httpPortArg, authrpcPortArg, mine, httpApi, ws, devPeriod, consoleVerbosity, p2pProtocol, downloaderArg}
 }
 
 // nonMiningNodeArgs returns custom args for starting a non-mining node
@@ -173,6 +175,9 @@ func nonMiningNodeArgs(dataDir string, nodeNumber int, enode string) []string {
 	torrentPort, _ := parameterFromArgument(torrentPortArg, torrentPortParam)
 	p2pProtocol, _ := parameterFromArgument("--p2p.protocol", "68")
 	downloaderArg, _ := parameterFromArgument("--no-downloader", "true")
+	httpPortArg, _ := parameterFromArgument("--http.port", "8545")
+	httpApi, _ := parameterFromArgument(httpApiArg, "eth,debug,net,trace,web3,erigon")
+	authrpcPortArg, _ := parameterFromArgument("--authrpc.port", "8551")
 
-	return []string{buildDirArg, dataDirArg, chainType, privateApiAddr, staticPeers, noDiscover, consoleVerbosity, torrentPort, p2pProtocol, downloaderArg}
+	return []string{buildDirArg, dataDirArg, chainType, privateApiAddr, httpPortArg, authrpcPortArg, httpApi, staticPeers, noDiscover, consoleVerbosity, torrentPort, p2pProtocol, downloaderArg}
 }
