@@ -9,17 +9,17 @@ import (
 	"io"
 	"sync/atomic"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -56,13 +56,13 @@ func (back *RemoteBackend) BlockByNumber(ctx context.Context, db kv.Tx, number u
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
-	if hash == (libcommon.Hash{}) {
+	if hash == (common.Hash{}) {
 		return nil, nil
 	}
 	block, _, err := back.BlockWithSenders(ctx, db, hash, number)
 	return block, err
 }
-func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash libcommon.Hash) (*types.Block, error) {
+func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error) {
 	number := rawdb.ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil, nil
@@ -93,13 +93,13 @@ func (back *RemoteBackend) EnsureVersionCompatibility() bool {
 	return true
 }
 
-func (back *RemoteBackend) Etherbase(ctx context.Context) (libcommon.Address, error) {
+func (back *RemoteBackend) Etherbase(ctx context.Context) (common.Address, error) {
 	res, err := back.remoteEthBackend.Etherbase(ctx, &remote.EtherbaseRequest{})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
-			return libcommon.Address{}, errors.New(s.Message())
+			return common.Address{}, errors.New(s.Message())
 		}
-		return libcommon.Address{}, err
+		return common.Address{}, err
 	}
 
 	return gointerfaces.ConvertH160toAddress(res.Address), nil
@@ -199,38 +199,38 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	return nil
 }
 
-func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash libcommon.Hash) (uint64, bool, error) {
+func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
 	return back.blockReader.TxnLookup(ctx, tx, txnHash)
 }
-func (back *RemoteBackend) HasSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (bool, error) {
+func (back *RemoteBackend) HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error) {
 	panic("HasSenders is low-level method, don't use it in RPCDaemon")
 }
-func (back *RemoteBackend) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash libcommon.Hash) (blockHeight *uint64, err error) {
+func (back *RemoteBackend) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockNum *uint64, err error) {
 	return back.blockReader.BadHeaderNumber(ctx, tx, hash)
 }
-func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error) {
-	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockHeight)
+func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error) {
+	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockNum)
 }
-func (back *RemoteBackend) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (body *types.Body, err error) {
-	return back.blockReader.BodyWithTransactions(ctx, tx, hash, blockHeight)
+func (back *RemoteBackend) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, err error) {
+	return back.blockReader.BodyWithTransactions(ctx, tx, hash, blockNum)
 }
-func (back *RemoteBackend) BodyRlp(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
-	return back.blockReader.BodyRlp(ctx, tx, hash, blockHeight)
+func (back *RemoteBackend) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error) {
+	return back.blockReader.BodyRlp(ctx, tx, hash, blockNum)
 }
-func (back *RemoteBackend) Body(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error) {
-	return back.blockReader.Body(ctx, tx, hash, blockHeight)
+func (back *RemoteBackend) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txAmount uint32, err error) {
+	return back.blockReader.Body(ctx, tx, hash, blockNum)
 }
-func (back *RemoteBackend) Header(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (*types.Header, error) {
-	return back.blockReader.Header(ctx, tx, hash, blockHeight)
+func (back *RemoteBackend) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error) {
+	return back.blockReader.Header(ctx, tx, hash, blockNum)
 }
-func (back *RemoteBackend) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
-	return back.blockReader.HeaderByNumber(ctx, tx, blockHeight)
+func (back *RemoteBackend) HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error) {
+	return back.blockReader.HeaderByNumber(ctx, tx, blockNum)
 }
-func (back *RemoteBackend) HeaderByHash(ctx context.Context, tx kv.Getter, hash libcommon.Hash) (*types.Header, error) {
+func (back *RemoteBackend) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	return back.blockReader.HeaderByHash(ctx, tx, hash)
 }
-func (back *RemoteBackend) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (libcommon.Hash, error) {
-	return back.blockReader.CanonicalHash(ctx, tx, blockHeight)
+func (back *RemoteBackend) CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, error) {
+	return back.blockReader.CanonicalHash(ctx, tx, blockNum)
 }
 func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, error) {
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
