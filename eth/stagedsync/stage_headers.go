@@ -1029,6 +1029,10 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		if err != nil {
 			return fmt.Errorf("iterate over headers to mark bad headers: %w", err)
 		}
+
+		if err := cfg.blockWriter.MarkCanonicalChainAsBad(tx, u.UnwindPoint+1); err != nil {
+			return err
+		}
 	}
 	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, false /* deleteHeaders */); err != nil {
 		return err
