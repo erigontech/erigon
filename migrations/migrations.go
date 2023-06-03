@@ -121,7 +121,25 @@ func (m *Migrator) PendingMigrations(tx kv.Tx) ([]Migration, error) {
 
 func (m *Migrator) VerifyVersion(db kv.RwDB) error {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		return rawdb.CheckDBSchemaVersion(tx)
+		major, minor, _, ok, err := rawdb.ReadDBSchemaVersion(tx)
+		if err != nil {
+			return fmt.Errorf("reading DB schema version: %w", err)
+		}
+		if ok {
+			if major > kv.DBSchemaVersion.Major {
+				return fmt.Errorf("cannot downgrade major DB version from %d to %d", major, kv.DBSchemaVersion.Major)
+			} else if major == kv.DBSchemaVersion.Major {
+				if minor > kv.DBSchemaVersion.Minor {
+					return fmt.Errorf("cannot downgrade minor DB version from %d.%d to %d.%d", major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Major)
+				}
+			} else {
+				// major < kv.DBSchemaVersion.Major
+				if kv.DBSchemaVersion.Major-major > 1 {
+					return fmt.Errorf("cannot upgrade major DB version for more than 1 version from %d to %d, use integration tool if you know what you are doing", major, kv.DBSchemaVersion.Major)
+				}
+			}
+		}
+		return nil
 	}); err != nil {
 		return fmt.Errorf("migrator.VerifyVersion: %w", err)
 	}

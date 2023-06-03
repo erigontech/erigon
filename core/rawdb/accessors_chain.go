@@ -1758,29 +1758,20 @@ func WriteDBSchemaVersion(tx kv.RwTx) error {
 	}
 	return nil
 }
-func CheckDBSchemaVersion(tx kv.Tx) error {
+func ReadDBSchemaVersion(tx kv.Tx) (major, minor, patch uint32, ok bool, err error) {
 	existingVersion, err := tx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey)
 	if err != nil {
-		return fmt.Errorf("reading DB schema version: %w", err)
+		return 0, 0, 0, false, fmt.Errorf("reading DB schema version: %w", err)
 	}
-	if len(existingVersion) != 0 && len(existingVersion) != 12 {
-		return fmt.Errorf("incorrect length of DB schema version: %d", len(existingVersion))
+	if len(existingVersion) == 0 {
+		return 0, 0, 0, false, nil
 	}
-	if len(existingVersion) == 12 {
-		major := binary.BigEndian.Uint32(existingVersion)
-		minor := binary.BigEndian.Uint32(existingVersion[4:])
-		if major > kv.DBSchemaVersion.Major {
-			return fmt.Errorf("cannot downgrade major DB version from %d to %d", major, kv.DBSchemaVersion.Major)
-		} else if major == kv.DBSchemaVersion.Major {
-			if minor > kv.DBSchemaVersion.Minor {
-				return fmt.Errorf("cannot downgrade minor DB version from %d.%d to %d.%d", major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Minor)
-			}
-		} else {
-			// major < kv.DBSchemaVersion.Major
-			if kv.DBSchemaVersion.Major-major > 1 {
-				return fmt.Errorf("cannot upgrade major DB version for more than 1 version from %d to %d, use integration tool if you know what you are doing", major, kv.DBSchemaVersion.Major)
-			}
-		}
+	if len(existingVersion) != 12 {
+		return 0, 0, 0, false, fmt.Errorf("incorrect length of DB schema version: %d", len(existingVersion))
 	}
-	return nil
+
+	major = binary.BigEndian.Uint32(existingVersion)
+	minor = binary.BigEndian.Uint32(existingVersion[4:])
+	patch = binary.BigEndian.Uint32(existingVersion[8:])
+	return major, minor, patch, true, nil
 }
