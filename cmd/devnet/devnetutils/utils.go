@@ -4,9 +4,11 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -53,11 +55,29 @@ func UniqueIDFromEnode(enode string) (string, error) {
 	// iterate through characters in the string until we reach '?'
 	// using index iteration because enode characters have single codepoints
 	var i int
+	var ati int
+
 	for i < len(enode) && enode[i] != byte('?') {
+		if enode[i] == byte('@') {
+			ati = i
+		}
+
 		i++
 	}
 
-	// if '?' is not found in the enode, return the original enode
+	if ati == 0 {
+		return "", fmt.Errorf("invalid enode string")
+	}
+
+	if _, apiPort, err := net.SplitHostPort(enode[ati+1 : i]); err != nil {
+		return "", fmt.Errorf("invalid enode string")
+	} else {
+		if _, err := strconv.Atoi(apiPort); err != nil {
+			return "", fmt.Errorf("invalid enode string")
+		}
+	}
+
+	// if '?' is not found in the enode, return the original enode if it has a valid address
 	if i == len(enode) {
 		return enode, nil
 	}
@@ -168,7 +188,7 @@ func AsArgs(args interface{}) (Args, error) {
 			}
 		}
 
-		if len(value) == 0 {
+		if len(value) == 0 || value == "0" {
 			if defaultString, hasDefault := field.Tag.Lookup("default"); hasDefault {
 				value = defaultString
 			}
