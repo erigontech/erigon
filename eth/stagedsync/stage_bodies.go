@@ -37,7 +37,6 @@ type BodiesCfg struct {
 	blockReader     services.FullBlockReader
 	blockWriter     *blockio.BlockWriter
 	historyV3       bool
-	transactionsV3  bool
 }
 
 func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,

@@ -1412,10 +1412,9 @@ var _blockWriterSingleton *blockio.BlockWriter
 func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter) {
 	openBlockReaderOnce.Do(func() {
 		sn, _ := allSnapshots(context.Background(), db, logger)
-		transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
 		histV3 := kvcfg.HistoryV3.FromDB(db)
-		_blockReaderSingleton = snapshotsync.NewBlockReader(sn, transactionsV3)
-		_blockWriterSingleton = blockio.NewBlockWriter(histV3, transactionsV3)
+		_blockReaderSingleton = snapshotsync.NewBlockReader(sn)
+		_blockWriterSingleton = blockio.NewBlockWriter(histV3)
 	})
 	return _blockReaderSingleton, _blockWriterSingleton
 }

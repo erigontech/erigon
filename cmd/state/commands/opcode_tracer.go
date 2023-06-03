@@ -421,19 +421,15 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 	}
 	defer historyTx.Rollback()
 
-	var historyV3, txsV3 bool
+	var historyV3 bool
 	chainDb.View(context.Background(), func(tx kv.Tx) (err error) {
 		historyV3, err = kvcfg.HistoryV3.Enabled(tx)
 		if err != nil {
 			return err
 		}
-		txsV3, err = kvcfg.TransactionsV3.Enabled(tx)
-		if err != nil {
-			return err
-		}
 		return nil
 	})
-	blockReader := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()), txsV3)
+	blockReader := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()))
 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{Tracer: ot, Debug: true}

@@ -241,9 +241,7 @@ func Erigon4(genesis *types.Genesis, chainConfig *chain2.Config, logger log.Logg
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	//transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
-	transactionsV3 := false
-	blockReader = snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
+	blockReader = snapshotsync.NewBlockReader(allSnapshots)
 	engine := initConsensusEngine(chainConfig, allSnapshots, logger)
 
 	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {

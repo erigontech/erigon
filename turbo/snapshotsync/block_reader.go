@@ -196,8 +196,8 @@ type BlockReader struct {
 	TransactionsV3 bool
 }
 
-func NewBlockReader(snapshots services.BlockSnapshots, transactionsV3 bool) *BlockReader {
-	return &BlockReader{sn: snapshots.(*RoSnapshots), TransactionsV3: transactionsV3}
+func NewBlockReader(snapshots services.BlockSnapshots) *BlockReader {
+	return &BlockReader{sn: snapshots.(*RoSnapshots), TransactionsV3: false}
 }
 
 func (r *BlockReader) Snapshots() services.BlockSnapshots { return r.sn }

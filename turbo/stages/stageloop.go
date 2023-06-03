@@ -405,7 +405,7 @@ func NewDefaultStages(ctx context.Context,
 	logger log.Logger,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
-	blockWriter := blockio.NewBlockWriter(cfg.HistoryV3, cfg.TransactionsV3)
+	blockWriter := blockio.NewBlockWriter(cfg.HistoryV3)
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, blockReader, blockWriter, db, snapDownloader, notifications.Events, logger)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
@@ -451,7 +451,7 @@ func NewDefaultStages(ctx context.Context,
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient,
 	dirs datadir.Dirs, notifications *shards.Notifications, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3,
 	logger log.Logger) (*stagedsync.Sync, error) {
-	blockReader, blockWriter := snapshotsync.NewBlockReader(snapshots, cfg.TransactionsV3), blockio.NewBlockWriter(cfg.HistoryV3, cfg.TransactionsV3)
+	blockReader, blockWriter := snapshotsync.NewBlockReader(snapshots), blockio.NewBlockWriter(cfg.HistoryV3)
 
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,
