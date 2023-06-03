@@ -620,6 +620,7 @@ var (
 	}
 	TransactionV3Flag = cli.BoolFlag{
 		Name:  "experimental.transactions.v3",
+		Value: true,
 		Usage: "(this flag is in testing stage) Not recommended yet: Can't change this flag after node creation. New DB table for transactions allows keeping multiple branches of block bodies in the DB simultaneously",
 	}
 
