@@ -711,7 +711,9 @@ func saveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *header
 		logger.Info("PoS headers verified and saved", "requestId", cfg.hd.RequestId(), "fork head", lastValidHash)
 	}
 
-	cfg.hd.HeadersCollector().Close()
+	if cfg.hd.HeadersCollector() != nil {
+		cfg.hd.HeadersCollector().Close()
+	}
 	cfg.hd.SetHeadersCollector(nil)
 	cfg.hd.SetPosStatus(headerdownload.Idle)
 }

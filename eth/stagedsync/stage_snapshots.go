@@ -14,7 +14,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -269,23 +268,11 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 				return err
 			}
 			if historyV3 {
-				var toBlock uint64
-				if sn != nil {
-					toBlock = sn.BlocksAvailable()
-				}
-				toBlock = cmp.Max(toBlock, progress)
-
 				_ = tx.ClearBucket(kv.MaxTxNum)
-				if err := rawdbv3.TxNums.WriteForGenesis(tx, 1); err != nil {
-					return err
-				}
 				type IterBody interface {
-					IterateBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error
+					IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error
 				}
-				if err := blockReader.(IterBody).IterateBodies(func(blockNum, baseTxNum, txAmount uint64) error {
-					if blockNum == 0 || blockNum > toBlock {
-						return nil
-					}
+				if err := blockReader.(IterBody).IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 					select {
 					case <-ctx.Done():
 						return ctx.Err()
@@ -301,6 +288,15 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 					return nil
 				}); err != nil {
 					return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+				}
+				if blockReader.Snapshots().BlocksAvailable() > 0 {
+					if err := rawdb.AppendCanonicalTxNums(tx, blockReader.Snapshots().BlocksAvailable()+1); err != nil {
+						return err
+					}
+				} else {
+					if err := rawdb.AppendCanonicalTxNums(tx, 0); err != nil {
+						return err
+					}
 				}
 			}
 			if err := rawdb.WriteSnapshots(tx, sn.Files(), agg.Files()); err != nil {
@@ -498,13 +494,14 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		defer tx.Rollback()
 	}
 
-	sn := cfg.blockRetire.Snapshots()
-	if sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce {
-		br := cfg.blockRetire
+	br := cfg.blockRetire
+	sn := br.Snapshots()
+	if sn.Cfg().Enabled {
 		if err := br.PruneAncientBlocks(tx, 100); err != nil {
 			return err
 		}
-
+	}
+	if sn.Cfg().Enabled && sn.Cfg().Produce {
 		//TODO: initialSync maybe save files progress here
 		if cfg.agg.NeedSaveFilesListInDB() || br.NeedSaveFilesListInDB() {
 			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files(), cfg.agg.Files()); err != nil {
