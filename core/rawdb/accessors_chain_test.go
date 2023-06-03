@@ -190,7 +190,7 @@ func TestBlockStorage(t *testing.T) {
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
 	}
-	if err := bw.TruncateBlocks(context.Background(), tx, 2); err != nil {
+	if err := bw.UnwindBlocks(context.Background(), tx, 2); err != nil {
 		t.Fatal(err)
 	}
 	if entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); entry == nil {
@@ -199,7 +199,7 @@ func TestBlockStorage(t *testing.T) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
 	}
 	// Delete the block and verify the execution
-	if err := bw.TruncateBlocks(context.Background(), tx, block.NumberU64()); err != nil {
+	if err := bw.UnwindBlocks(context.Background(), tx, block.NumberU64()); err != nil {
 		t.Fatal(err)
 	}
 	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
@@ -219,13 +219,13 @@ func TestBlockStorage(t *testing.T) {
 	require.NoError(bw.WriteBlock(tx, block))
 
 	// prune: [1: N)
-	require.NoError(bw.Prune(ctx, tx, 0, 1))
+	require.NoError(bw.PruneBlocks(ctx, tx, 0, 1))
 	entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.NotNil(entry)
-	require.NoError(bw.Prune(ctx, tx, 1, 1))
+	require.NoError(bw.PruneBlocks(ctx, tx, 1, 1))
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.NotNil(entry)
-	require.NoError(bw.Prune(ctx, tx, 2, 1))
+	require.NoError(bw.PruneBlocks(ctx, tx, 2, 1))
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.Nil(entry)
 }
@@ -580,7 +580,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
 	}
-	if err := bw.TruncateBlocks(context.Background(), tx, 2); err != nil {
+	if err := bw.UnwindBlocks(context.Background(), tx, 2); err != nil {
 		t.Fatal(err)
 	}
 	entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
@@ -612,7 +612,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Equal(uint64(1001), rw2.Amount)
 
 	// Delete the block and verify the execution
-	if err := bw.TruncateBlocks(context.Background(), tx, block.NumberU64()); err != nil {
+	if err := bw.UnwindBlocks(context.Background(), tx, block.NumberU64()); err != nil {
 		t.Fatal(err)
 	}
 	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
@@ -633,13 +633,13 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 		t.Fatalf("Could not write block: %v", err)
 	}
 	// prune: [1: N)
-	require.NoError(bw.Prune(ctx, tx, 0, 1))
+	require.NoError(bw.PruneBlocks(ctx, tx, 0, 1))
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.NotNil(entry)
-	require.NoError(bw.Prune(ctx, tx, 1, 1))
+	require.NoError(bw.PruneBlocks(ctx, tx, 1, 1))
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.NotNil(entry)
-	require.NoError(bw.Prune(ctx, tx, 2, 1))
+	require.NoError(bw.PruneBlocks(ctx, tx, 2, 1))
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.Nil(entry)
 }

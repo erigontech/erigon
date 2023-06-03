@@ -336,7 +336,7 @@ func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash libcommon.Hash, hea
 	return nil
 }
 
-// DeleteHeader - dangerous, use DeleteAncientBlocks/TruncateBlocks methods
+// DeleteHeader - dangerous, use DeleteAncientBlocks/UnwindBlocks methods
 func DeleteHeader(db kv.Deleter, hash libcommon.Hash, number uint64) {
 	if err := db.Delete(kv.Headers, dbutils.HeaderKey(number, hash)); err != nil {
 		log.Crit("Failed to delete header", "err", err)
@@ -1291,8 +1291,8 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	if k != nil {
 		n := binary.BigEndian.Uint64(k)
 		if n > 1 {
-			log.Info("TruncateBlocks", "block", n)
-			defer log.Info("TruncateBlocks done")
+			log.Info("UnwindBlocks", "block", n)
+			defer log.Info("UnwindBlocks done")
 		}
 	}
 	for ; k != nil; k, _, err = c.Prev() {
@@ -1323,7 +1323,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					log.Info("TruncateBlocks", "block", n)
+					log.Info("UnwindBlocks", "block", n)
 				default:
 				}
 
@@ -1350,7 +1350,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info("TruncateBlocks", "block", n)
+			log.Info("UnwindBlocks", "block", n)
 		default:
 		}
 	}

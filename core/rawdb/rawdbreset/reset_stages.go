@@ -54,7 +54,7 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) er
 func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3,
 	br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine, logger log.Logger) error {
 	// keep Genesis
-	if err := bw.TruncateBlocks(context.Background(), tx, 1); err != nil {
+	if err := bw.UnwindBlocks(context.Background(), tx, 1); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.Bodies, 1); err != nil {

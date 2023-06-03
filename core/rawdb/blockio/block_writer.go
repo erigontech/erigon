@@ -163,7 +163,7 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 	return nil
 }
 
-func (w *BlockWriter) TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
+func (w *BlockWriter) UnwindBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	return rawdb.TruncateBlocks(ctx, tx, blockFrom)
 }
 func (w *BlockWriter) TruncateTd(tx kv.RwTx, blockFrom uint64) error {
