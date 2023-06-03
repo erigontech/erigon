@@ -2,19 +2,17 @@ package devnetutils
 
 import (
 	"crypto/rand"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
-	"strconv"
+	"reflect"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -59,29 +57,12 @@ func UniqueIDFromEnode(enode string) (string, error) {
 		i++
 	}
 
-	// if '?' is not found in the enode, return an error
+	// if '?' is not found in the enode, return the original enode
 	if i == len(enode) {
-		return "", fmt.Errorf("invalid enode string")
+		return enode, nil
 	}
 
 	return enode[:i], nil
-}
-
-// ParseResponse converts any of the models interfaces to a string for readability
-func ParseResponse(resp interface{}) (string, error) {
-	result, err := json.Marshal(resp)
-	if err != nil {
-		return "", fmt.Errorf("error trying to marshal response: %v", err)
-	}
-
-	return string(result), nil
-}
-
-// HexToInt converts a hexadecimal string to uint64
-func HexToInt(hexStr string) uint64 {
-	cleaned := strings.ReplaceAll(hexStr, "0x", "") // remove the 0x prefix
-	result, _ := strconv.ParseUint(cleaned, 16, 64)
-	return result
 }
 
 // NamespaceAndSubMethodFromMethod splits a parent method into namespace and the actual method
@@ -91,55 +72,6 @@ func NamespaceAndSubMethodFromMethod(method string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid string to split")
 	}
 	return parts[0], parts[1], nil
-}
-
-func HashSlicesAreEqual(s1, s2 []libcommon.Hash) bool {
-	if len(s1) != len(s2) {
-		return false
-	}
-
-	for i := 0; i < len(s1); i++ {
-		if s1[i] != s2[i] {
-			return false
-		}
-	}
-
-	return true
-}
-
-func BuildLog(hash libcommon.Hash, blockNum string, address libcommon.Address, topics []libcommon.Hash, data hexutility.Bytes, txIndex hexutil.Uint, blockHash libcommon.Hash, index hexutil.Uint, removed bool) models.Log {
-	return models.Log{
-		Address:     address,
-		Topics:      topics,
-		Data:        data,
-		BlockNumber: hexutil.Uint64(HexToInt(blockNum)),
-		TxHash:      hash,
-		TxIndex:     txIndex,
-		BlockHash:   blockHash,
-		Index:       index,
-		Removed:     removed,
-	}
-}
-
-func CompareLogEvents(expected, actual models.Log) ([]error, bool) {
-	var errs []error
-
-	switch {
-	case expected.Address != actual.Address:
-		errs = append(errs, fmt.Errorf("expected address: %v, actual address %v", expected.Address, actual.Address))
-	case expected.TxHash != actual.TxHash:
-		errs = append(errs, fmt.Errorf("expected txhash: %v, actual txhash %v", expected.TxHash, actual.TxHash))
-	case expected.BlockHash != actual.BlockHash:
-		errs = append(errs, fmt.Errorf("expected blockHash: %v, actual blockHash %v", expected.BlockHash, actual.BlockHash))
-	case expected.BlockNumber != actual.BlockNumber:
-		errs = append(errs, fmt.Errorf("expected blockNumber: %v, actual blockNumber %v", expected.BlockNumber, actual.BlockNumber))
-	case expected.TxIndex != actual.TxIndex:
-		errs = append(errs, fmt.Errorf("expected txIndex: %v, actual txIndex %v", expected.TxIndex, actual.TxIndex))
-	case !HashSlicesAreEqual(expected.Topics, actual.Topics):
-		errs = append(errs, fmt.Errorf("expected topics: %v, actual topics %v", expected.Topics, actual.Topics))
-	}
-
-	return errs, len(errs) == 0
 }
 
 func GenerateTopic(signature string) []libcommon.Hash {
@@ -161,4 +93,139 @@ func RandomNumberInRange(min, max uint64) (uint64, error) {
 	}
 
 	return uint64(n.Int64() + int64(min)), nil
+}
+
+type Args []string
+
+func AsArgs(args interface{}) (Args, error) {
+
+	argsValue := reflect.ValueOf(args)
+
+	if argsValue.Kind() == reflect.Ptr {
+		argsValue = argsValue.Elem()
+	}
+
+	if argsValue.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("Args type must be struct or struc pointer, got %T", args)
+	}
+
+	return gatherArgs(argsValue, func(v reflect.Value, field reflect.StructField) (string, error) {
+		tag := field.Tag.Get("arg")
+
+		if tag == "-" {
+			return "", nil
+		}
+
+		// only process public fields (reflection won't return values of unsafe fields without unsafe operations)
+		if r, _ := utf8.DecodeRuneInString(field.Name); !(unicode.IsLetter(r) && unicode.IsUpper(r)) {
+			return "", nil
+		}
+
+		var key string
+		var positional bool
+
+		for _, key = range strings.Split(tag, ",") {
+			if key == "" {
+				continue
+			}
+
+			key = strings.TrimLeft(key, " ")
+
+			if pos := strings.Index(key, ":"); pos != -1 {
+				key = key[:pos]
+			}
+
+			switch {
+			case strings.HasPrefix(key, "---"):
+				return "", fmt.Errorf("%s.%s: too many hyphens", v.Type().Name(), field.Name)
+			case strings.HasPrefix(key, "--"):
+
+			case strings.HasPrefix(key, "-"):
+				if len(key) != 2 {
+					return "", fmt.Errorf("%s.%s: short arguments must be one character only", v.Type().Name(), field.Name)
+				}
+			case key == "positional":
+				key = ""
+				positional = true
+			default:
+				return "", fmt.Errorf("unrecognized tag '%s' on field %s", key, tag)
+			}
+		}
+
+		if len(key) == 0 && !positional {
+			key = "--" + strings.ToLower(field.Name)
+		}
+
+		value := fmt.Sprintf("%v", v.FieldByIndex(field.Index).Interface())
+
+		flagValue, isFlag := field.Tag.Lookup("flag")
+
+		if isFlag {
+			if value != "true" {
+				if flagValue == "true" {
+					value = flagValue
+				}
+			}
+		}
+
+		if len(value) == 0 {
+			if defaultString, hasDefault := field.Tag.Lookup("default"); hasDefault {
+				value = defaultString
+			}
+
+			if len(value) == 0 {
+				return "", nil
+			}
+		}
+
+		if len(key) == 0 {
+			return value, nil
+		}
+
+		if isFlag {
+			if value == "true" {
+				return key, nil
+			}
+
+			return "", nil
+		}
+
+		if len(value) == 0 {
+			return key, nil
+		}
+
+		return fmt.Sprintf("%s=%s", key, value), nil
+	})
+}
+
+func gatherArgs(v reflect.Value, visit func(v reflect.Value, field reflect.StructField) (string, error)) (args Args, err error) {
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Type().Field(i)
+
+		var gathered Args
+
+		fieldType := field.Type
+
+		if fieldType.Kind() == reflect.Ptr {
+			fieldType.Elem()
+		}
+
+		if fieldType.Kind() == reflect.Struct {
+			gathered, err = gatherArgs(v.FieldByIndex(field.Index), visit)
+		} else {
+			var value string
+
+			if value, err = visit(v, field); len(value) > 0 {
+				gathered = Args{value}
+			}
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		args = append(args, gathered...)
+	}
+
+	return args, nil
 }
