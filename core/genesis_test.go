@@ -25,7 +25,7 @@ import (
 
 func TestGenesisBlockHashes(t *testing.T) {
 	logger := log.New()
-	_, _, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil, logger)
+	_, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil, logger)
 	check := func(network string) {
 		genesis := core.GenesisBlockByChainName(network)
 		tx, err := db.BeginRw(context.Background())
@@ -74,7 +74,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 
 func TestCommitGenesisIdempotency(t *testing.T) {
 	logger := log.New()
-	_, _, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil, logger)
+	_, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil, logger)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -111,7 +111,7 @@ func TestAllocConstructor(t *testing.T) {
 		},
 	}
 
-	historyV3, _, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil, logger)
+	historyV3, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil, logger)
 	_, _, err := core.CommitGenesisBlock(db, genSpec, "", logger)
 	require.NoError(err)
 
