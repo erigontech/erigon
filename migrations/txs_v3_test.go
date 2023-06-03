@@ -3,8 +3,6 @@ package migrations_test
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
-	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -91,10 +89,6 @@ func TestTxsV3(t *testing.T) {
 		require.NoError(err)
 		cnt, err := c.Count()
 		require.NoError(err)
-		tx.ForEach(kv.NonCanonicalTxs, nil, func(k, v []byte) error {
-			fmt.Printf("see: %d\n", binary.BigEndian.Uint64(k))
-			return nil
-		})
 		require.Zero(cnt)
 
 		has, err := tx.Has(kv.EthTx, hexutility.EncodeTs(0))
