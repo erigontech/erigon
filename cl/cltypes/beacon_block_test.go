@@ -24,7 +24,7 @@ func TestBeaconBody(t *testing.T) {
 	voluntaryExits := solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
 	syncAggregate := &SyncAggregate{}
 	executionChanges := solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
-	blobKzgCommitments := solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsPerBlock, 48)
+	blobKzgCommitments := solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
 	version := clparams.DenebVersion
 	block := types.NewBlock(&types.Header{
 		BaseFee: big.NewInt(1),
@@ -57,7 +57,7 @@ func TestBeaconBody(t *testing.T) {
 	// Test HashSSZ
 	root, err := body.HashSSZ()
 	assert.NoError(t, err)
-	assert.Equal(t, libcommon.HexToHash("17892e0144f88a0aa3e19f8b5f55129aed3fce23f1f32a08518ccd47b6ecbcf9"), libcommon.Hash(root))
+	assert.Equal(t, libcommon.HexToHash("918d1ee08d700e422fcce6319cd7509b951d3ebfb1a05291aab9466b7e9826fc"), libcommon.Hash(root))
 
 	_, err = body.ExecutionPayload.RlpHeader()
 	assert.NoError(t, err)

@@ -11,17 +11,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//go:embed test_data/block_processing/deneb_state.ssz_snappy
-var denebState []byte
+//go:embed test_data/block_processing/capella_block.ssz_snappy
+var capellaBlock []byte
 
-//go:embed test_data/block_processing/deneb_block.ssz_snappy
-var denebBlock []byte
+//go:embed test_data/block_processing/capella_state.ssz_snappy
+var capellaState []byte
 
-func TestBlockProcessingDeneb(t *testing.T) {
-	t.Skip("Need to update due to data_gas_used")
+func TestBlockProcessing(t *testing.T) {
 	state := state.New(&clparams.MainnetBeaconConfig)
-	require.NoError(t, utils.DecodeSSZSnappy(state, denebState, int(clparams.DenebVersion)))
+	require.NoError(t, utils.DecodeSSZSnappy(state, capellaState, int(clparams.CapellaVersion)))
 	block := &cltypes.SignedBeaconBlock{}
-	require.NoError(t, utils.DecodeSSZSnappy(block, denebBlock, int(clparams.DenebVersion)))
+	require.NoError(t, utils.DecodeSSZSnappy(block, capellaBlock, int(clparams.CapellaVersion)))
 	require.NoError(t, TransitionState(state, block, true)) // All checks already made in transition state
 }
