@@ -35,6 +35,11 @@ func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 func (r *RemoteBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	panic("not implemented")
 }
+
+func (r *RemoteBlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash libcommon.Hash) (blockHeight *uint64, err error) {
+	return rawdb.ReadBadHeaderNumber(tx, hash)
+}
+
 func (r *RemoteBlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
 	hash, err := r.CanonicalHash(ctx, db, number)
 	if err != nil {
@@ -123,6 +128,7 @@ func (r *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, b
 func (r *RemoteBlockReader) HasSenders(ctx context.Context, _ kv.Getter, hash libcommon.Hash, blockHeight uint64) (bool, error) {
 	panic("HasSenders is low-level method, don't use it in RPCDaemon")
 }
+
 func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error) {
 	reply, err := r.client.Block(ctx, &remote.BlockRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockHeight: blockHeight})
 	if err != nil {
@@ -793,8 +799,8 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount u
 	}
 	return nil
 }
-func (r *BlockReader) ReadBadHeaderNumber(ctx context.Context, db kv.Getter, hash libcommon.Hash) *uint64 {
-	return rawdb.ReadBadHeaderNumber(db, hash)
+func (r *BlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash libcommon.Hash) (blockHeight *uint64, err error) {
+	return rawdb.ReadBadHeaderNumber(tx, hash)
 }
 func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
 	hash, err := rawdb.ReadCanonicalHash(db, number)

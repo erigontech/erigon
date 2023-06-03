@@ -205,6 +205,9 @@ func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash 
 func (back *RemoteBackend) HasSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (bool, error) {
 	panic("HasSenders is low-level method, don't use it in RPCDaemon")
 }
+func (back *RemoteBackend) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash libcommon.Hash) (blockHeight *uint64, err error) {
+	return back.blockReader.BadHeaderNumber(ctx, tx, hash)
+}
 func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error) {
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockHeight)
 }

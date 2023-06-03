@@ -113,20 +113,19 @@ func ReadHeaderNumber(db kv.Getter, hash libcommon.Hash) *uint64 {
 	number := binary.BigEndian.Uint64(data)
 	return &number
 }
-func ReadBadHeaderNumber(db kv.Getter, hash libcommon.Hash) *uint64 {
+func ReadBadHeaderNumber(db kv.Getter, hash libcommon.Hash) (*uint64, error) {
 	data, err := db.GetOne(kv.BadHeaderNumber, hash.Bytes())
 	if err != nil {
-		log.Error("ReadHeaderNumber failed", "err", err)
+		return nil, err
 	}
 	if len(data) == 0 {
-		return nil
+		return nil, nil
 	}
 	if len(data) != 8 {
-		log.Error("ReadHeaderNumber got wrong data len", "len", len(data))
-		return nil
+		return nil, fmt.Errorf("ReadHeaderNumber got wrong data len: %d", len(data))
 	}
 	number := binary.BigEndian.Uint64(data)
-	return &number
+	return &number, nil
 }
 
 // WriteHeaderNumber stores the hash->number mapping.
@@ -751,88 +750,17 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 	return nil
 }
 
-// MakeBodiesCanonical - move all txs of non-canonical blocks from NonCanonicalTxs table to EthTx table
-func MakeBodiesCanonicalOld(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker, cb func(blockNum uint64, lastTxnNum uint64) error) error {
-	for blockNum := from; ; blockNum++ {
-		h, err := ReadCanonicalHash(tx, blockNum)
-		if err != nil {
-			return err
-		}
-		if h == (libcommon.Hash{}) {
-			break
-		}
-
-		data := ReadStorageBodyRLP(tx, h, blockNum)
-		if len(data) == 0 {
-			break
-		}
-		bodyForStorage := new(types.BodyForStorage)
-		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
-			return err
-		}
-		ethTx := kv.EthTx
-		newBaseId, err := tx.IncrementSequence(ethTx, uint64(bodyForStorage.TxAmount))
-		if err != nil {
-			return err
-		}
-
-		// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
-		i := uint64(0)
-		if err := tx.ForAmount(kv.NonCanonicalTxs, hexutility.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
-			id := newBaseId + 1 + i
-			if err := tx.Put(kv.EthTx, hexutility.EncodeTs(id), v); err != nil {
-				return err
-			}
-			if err := tx.Delete(kv.NonCanonicalTxs, k); err != nil {
-				return err
-			}
-			i++
-			return nil
-		}); err != nil {
-			return err
-		}
-
-		bodyForStorage.BaseTxId = newBaseId
-		if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
-			return err
-		}
-		if cb != nil {
-			lastTxnNum := bodyForStorage.BaseTxId + uint64(bodyForStorage.TxAmount)
-			if err = cb(blockNum, lastTxnNum); err != nil {
-				return err
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Making bodies canonical...", logPrefix), "current block", blockNum)
-		default:
-		}
-	}
-	return nil
-}
-
 // MarkCanonicalChainAsBad - moves canonical hashes from `kv.HeaderNumber` to `kv.BadHeaderNumber`
 func MarkCanonicalChainAsBad(tx kv.RwTx, from uint64) error {
-	for blockNum := from; ; blockNum++ {
-		blockNumBytes := hexutility.EncodeTs(blockNum)
-		blockHash, err := tx.GetOne(kv.HeaderCanonical, blockNumBytes)
-		if err != nil {
+	return tx.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(from), func(blockHash, blockNumBytes []byte) error {
+		if err := tx.Delete(kv.HeaderNumber, blockHash); err != nil {
 			return err
 		}
-		if blockHash == nil {
-			break
-		}
-		if err = tx.Delete(kv.HeaderNumber, blockHash); err != nil {
+		if err := tx.Put(kv.BadHeaderNumber, blockHash, blockNumBytes); err != nil {
 			return err
 		}
-		if err = tx.Put(kv.BadHeaderNumber, blockHash, blockNumBytes); err != nil {
-			return err
-		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // ReadTd retrieves a block's total difficulty corresponding to the hash.
