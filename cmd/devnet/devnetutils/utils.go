@@ -21,7 +21,7 @@ import (
 func ClearDevDB(dataDir string, logger log.Logger) error {
 	logger.Info("Deleting nodes' data folders")
 
-	nodeNumber := 1
+	nodeNumber := 0
 	for {
 		nodeDataDir := filepath.Join(dataDir, fmt.Sprintf("%d", nodeNumber))
 		fileInfo, err := os.Stat(nodeDataDir)
