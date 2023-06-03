@@ -43,7 +43,7 @@ func (f *RootPathOsFs) Get(namespace string, object string, id string, extra ...
 	if err == nil {
 		sidecar = blob
 	}
-	return fp, blob, nil
+	return fp, sidecar, nil
 }
 
 func (f *RootPathOsFs) Put(data io.Reader, sidecar []byte, namespace string, object string, id string, extra ...string) error {
