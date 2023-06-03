@@ -35,23 +35,6 @@ func PruneMode(db kv.RoDB) (pm prune.Mode) {
 	}
 	return
 }
-func TxsV3(db kv.RoDB) (enabled bool) {
-	return true
-}
-
-func HistV3(db kv.RoDB) (enabled bool) {
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		var err error
-		enabled, err = kvcfg.TransactionsV3.Enabled(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	return
-}
 func HistV3(db kv.RoDB) (enabled bool) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		var err error
