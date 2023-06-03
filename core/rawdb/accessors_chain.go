@@ -910,7 +910,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx cont
 
 // ReadTd retrieves a block's total difficulty corresponding to the hash.
 func ReadTd(db kv.Getter, hash libcommon.Hash, number uint64) (*big.Int, error) {
-	data, err := db.GetOne(kv.HeadersTotalDifficulty, dbutils.HeaderKey(number, hash))
+	data, err := db.GetOne(kv.HeadersTD, dbutils.HeaderKey(number, hash))
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadTd: %w", err)
 	}
@@ -938,7 +938,7 @@ func WriteTd(db kv.Putter, hash libcommon.Hash, number uint64, td *big.Int) erro
 	if err != nil {
 		return fmt.Errorf("failed to RLP encode block total difficulty: %w", err)
 	}
-	if err := db.Put(kv.HeadersTotalDifficulty, dbutils.HeaderKey(number, hash), data); err != nil {
+	if err := db.Put(kv.HeadersTD, dbutils.HeaderKey(number, hash), data); err != nil {
 		return fmt.Errorf("failed to store block total difficulty: %w", err)
 	}
 	return nil
@@ -946,8 +946,8 @@ func WriteTd(db kv.Putter, hash libcommon.Hash, number uint64, td *big.Int) erro
 
 // TruncateTd removes all block total difficulty from block number N
 func TruncateTd(tx kv.RwTx, blockFrom uint64) error {
-	if err := tx.ForEach(kv.HeadersTotalDifficulty, hexutility.EncodeTs(blockFrom), func(k, _ []byte) error {
-		return tx.Delete(kv.HeadersTotalDifficulty, k)
+	if err := tx.ForEach(kv.HeadersTD, hexutility.EncodeTs(blockFrom), func(k, _ []byte) error {
+		return tx.Delete(kv.HeadersTD, k)
 	}); err != nil {
 		return fmt.Errorf("TruncateTd: %w", err)
 	}
