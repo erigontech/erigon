@@ -87,9 +87,6 @@ func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blo
 func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
 	return &RemoteBlockReader{client}
 }
-func (r *RemoteBlockReader) TxsV3Enabled() bool {
-	panic("not implemented")
-}
 
 func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash libcommon.Hash) (uint64, bool, error) {
 	reply, err := r.client.TxnLookup(ctx, &remote.TxnLookupRequest{TxnHash: gointerfaces.ConvertHashToH256(txnHash)})
@@ -309,7 +306,7 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash libcommon.H
 }
 
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (body *types.Body, err error) {
-	body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight, r.TransactionsV3)
+	body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -396,38 +393,21 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash l
 func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []libcommon.Address, err error) {
 	blocksAvailable := r.sn.BlocksAvailable()
 	if blocksAvailable == 0 || blockHeight > blocksAvailable {
-		if r.TransactionsV3 {
-			if forceCanonical {
-				canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
-				if err != nil {
-					return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-				}
-				if canonicalHash != hash {
-					return nil, nil, nil
-				}
-			}
-
-			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight, r.TransactionsV3)
-			if err != nil {
-				return nil, nil, err
-			}
-			return block, senders, nil
-		}
-		canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
-		if err != nil {
-			return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-		}
-		if canonicalHash == hash {
-			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight, r.TransactionsV3)
-			if err != nil {
-				return nil, nil, err
-			}
-			return block, senders, nil
-		}
 		if forceCanonical {
+			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+			if err != nil {
+				return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
+			}
+			if canonicalHash != hash {
+				return nil, nil, nil
+			}
+		}
+
+		block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+		if err != nil {
 			return nil, nil, err
 		}
-		return rawdb.NonCanonicalBlockWithSenders(tx, hash, blockHeight)
+		return block, senders, nil
 	}
 
 	view := r.sn.View()
@@ -813,7 +793,6 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount u
 	}
 	return nil
 }
-func (r *BlockReader) TxsV3Enabled() bool { return r.TransactionsV3 }
 func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
 	hash, err := rawdb.ReadCanonicalHash(db, number)
 	if err != nil {

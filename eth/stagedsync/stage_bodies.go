@@ -111,8 +111,6 @@ func BodiesForward(
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	// TxsV3 feature allow store non-canonical txs in kv.EthTx table. So, nothing to do in this case
-
 	// Property of blockchain: same block in different forks will have different hashes.
 	// Means - can mark all canonical blocks as non-canonical on unwind, and
 	// do opposite here - without storing any meta-info.

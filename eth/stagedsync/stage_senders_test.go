@@ -158,21 +158,18 @@ func TestSenders(t *testing.T) {
 	}
 
 	{
-		if br.TxsV3Enabled() {
-			c, _ := tx.Cursor(kv.EthTx)
-			cnt, _ := c.Count()
-			assert.Equal(t, 5, int(cnt))
-		} else {
-			txs, err := rawdb.CanonicalTransactions(tx, 1, 2)
-			assert.NoError(t, err)
-			assert.Equal(t, 2, len(txs))
-			txs, err = rawdb.CanonicalTransactions(tx, 5, 3)
-			assert.NoError(t, err)
-			assert.Equal(t, 3, len(txs))
-			txs, err = rawdb.CanonicalTransactions(tx, 5, 1024)
-			assert.NoError(t, err)
-			assert.Equal(t, 3, len(txs))
-		}
+		c, _ := tx.Cursor(kv.EthTx)
+		cnt, _ := c.Count()
+		assert.Equal(t, 5, int(cnt))
 
+		txs, err := rawdb.CanonicalTransactions(tx, 1, 2)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(txs))
+		txs, err = rawdb.CanonicalTransactions(tx, 5, 3)
+		assert.NoError(t, err)
+		assert.Equal(t, 3, len(txs))
+		txs, err = rawdb.CanonicalTransactions(tx, 5, 1024)
+		assert.NoError(t, err)
+		assert.Equal(t, 3, len(txs))
 	}
 }

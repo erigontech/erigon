@@ -61,7 +61,6 @@ type FullBlockReader interface {
 	TxnReader
 	CanonicalReader
 
-	TxsV3Enabled() bool
 	Snapshots() BlockSnapshots
 }
 

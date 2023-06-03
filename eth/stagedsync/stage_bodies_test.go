@@ -20,9 +20,6 @@ func TestBodiesUnwind(t *testing.T) {
 	require := require.New(t)
 	m := stages2.Mock(t)
 	db := m.DB
-	if m.TransactionsV3 {
-		t.Skip("txsV3 do not update txs/bodies info by re-org")
-	}
 	tx, err := db.BeginRw(m.Ctx)
 	require.NoError(err)
 	defer tx.Rollback()
