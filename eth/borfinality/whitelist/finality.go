@@ -1,7 +1,6 @@
 package whitelist
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -54,21 +53,13 @@ func (f *finality[T]) IsValidChain(currentHeader *types.Header, chain []*types.H
 
 	res, err := isValidChain(currentHeader, chain, f.doExist, f.Number, f.Hash, f.interval)
 
-	fmt.Println("Validating f.Number: ", f.Number)
-	fmt.Println("Validating f.Hash: ", f.Hash)
-	fmt.Println("Validation Response ", res)
-
 	return res, err
 }
 
 func (f *finality[T]) Process(block uint64, hash common.Hash) {
-
 	f.doExist = true
 	f.Hash = hash
 	f.Number = block
-
-	fmt.Println("Processing f.Number: ", f.Number)
-	fmt.Println("Processing f.Hash: ", f.Hash)
 
 	err := rawdb.WriteLastFinality[T](f.db, block, hash)
 
@@ -89,7 +80,6 @@ func (f *finality[T]) Get() (bool, uint64, common.Hash) {
 
 	block, hash, err := rawdb.ReadFinality[T](f.db)
 	if err != nil {
-		fmt.Println("Error while reading whitelisted state from Db", "err", err)
 		return false, f.Number, f.Hash
 	}
 

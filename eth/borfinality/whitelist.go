@@ -14,8 +14,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-var Config *config
-
 type config struct {
 	engine     consensus.Engine
 	stagedSync *stagedsync.Sync
@@ -27,7 +25,7 @@ type config struct {
 }
 
 func Whitelist(engine consensus.Engine, borDB kv.RwDB, chainDB kv.RwDB, stagedsync *stagedsync.Sync, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
-	Config = &config{
+	config := &config{
 		engine:     engine,
 		stagedSync: stagedsync,
 		bordb:      borDB,
@@ -37,10 +35,10 @@ func Whitelist(engine consensus.Engine, borDB kv.RwDB, chainDB kv.RwDB, stagedsy
 		closeCh:    closeCh,
 	}
 
-	go startCheckpointWhitelistService(Config)
-	go startMilestoneWhitelistService(Config)
-	go startNoAckMilestoneService(Config)
-	go startNoAckMilestoneByIDService(Config)
+	go startCheckpointWhitelistService(config)
+	go startMilestoneWhitelistService(config)
+	go startNoAckMilestoneService(config)
+	go startNoAckMilestoneByIDService(config)
 }
 
 var (
@@ -94,10 +92,10 @@ func startNoAckMilestoneByIDService(config *config) {
 }
 
 func RetryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string) {
-	retryHeimdallHandler(fn, config, tickerDuration, timeout, fnName, GetBorHandler)
+	retryHeimdallHandler(fn, config, tickerDuration, timeout, fnName)
 }
 
-func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string, getBorHandler func() (*bor.Bor, error)) {
+func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string) {
 	// a shortcut helps with tests and early exit
 	select {
 	case <-config.closeCh:
@@ -105,15 +103,14 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 	default:
 	}
 
-	bor, err := getBorHandler()
-	if err != nil {
-		log.Error("error while getting the borHandler", "err", err)
-		return
+	bor, ok := config.engine.(*bor.Bor)
+	if !ok {
+		log.Error("bor engine not available")
 	}
 
 	// first run for fetching milestones
 	firstCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	err = fn(firstCtx, bor, config)
+	err := fn(firstCtx, bor, config)
 
 	cancel()
 
@@ -215,18 +212,4 @@ func handleNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, config *config)
 	}
 
 	return nil
-}
-
-func GetBorHandler() (*bor.Bor, error) {
-
-	bor, ok := Config.engine.(*bor.Bor)
-	if !ok {
-		return nil, ErrNotBorConsensus
-	}
-
-	if bor.HeimdallClient == nil {
-		return nil, ErrBorConsensusWithoutHeimdall
-	}
-
-	return bor, nil
 }

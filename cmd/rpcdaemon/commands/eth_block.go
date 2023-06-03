@@ -16,13 +16,13 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
-	"github.com/ledgerwatch/erigon/eth/borfinality"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
@@ -379,14 +379,14 @@ func (api *APIImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	service := whitelist.GetWhitelistingService()
 
 	if service == nil {
-		return false, fmt.Errorf("Bor not available")
+		return false, errors.New("only available in Bor engine")
 	}
 
 	logger := log.New()
 	reqGen := requests.NewRequestGenerator(logger)
 	localEndBlock, err := requests.GetBlockByNumber(reqGen, endBlockNr, false, logger)
 	if err != nil {
-		return false, fmt.Errorf("failed to get end block")
+		return false, errors.New("failed to get end block")
 	}
 
 	localEndBlockHash := localEndBlock.Result.Hash.String()
@@ -395,24 +395,23 @@ func (api *APIImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 
 	if !isLocked {
 		service.UnlockMutex(false, "", common.Hash{})
-		return false, errors.New("Whitelisted number or locked sprint number is more than the received end block number")
+		return false, errors.New("whitelisted number or locked sprint number is more than the received end block number")
 	}
 
 	if localEndBlockHash != hash {
 		service.UnlockMutex(false, "", common.Hash{})
-		return false, fmt.Errorf("Hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
+		return false, fmt.Errorf("hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
 	}
 
-	if service == nil {
-		return false, fmt.Errorf("Bor not available")
+	bor, ok := api._engine.(*bor.Bor)
+	if !ok {
+		return false, errors.New("bor engine not available")
 	}
-
-	bor, err := borfinality.GetBorHandler()
 	err = bor.HeimdallClient.FetchMilestoneID(ctx, milestoneId)
 
 	if err != nil {
 		service.UnlockMutex(false, "", common.Hash{})
-		return false, fmt.Errorf("Milestone ID doesn't exist in Heimdall")
+		return false, errors.New("milestone ID doesn't exist in Heimdall")
 	}
 
 	service.UnlockMutex(true, milestoneId, localEndBlock.Result.Hash)

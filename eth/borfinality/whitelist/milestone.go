@@ -116,7 +116,6 @@ func (m *milestone) IsValidPeer(fetchHeadersByNumber func(number uint64, amount 
 }
 
 func (m *milestone) Process(block uint64, hash common.Hash) {
-	fmt.Println("Locking - Process")
 	m.finality.Lock()
 	defer m.finality.Unlock()
 
@@ -133,14 +132,12 @@ func (m *milestone) Process(block uint64, hash common.Hash) {
 	// TODO: Uncomment once metrics is added
 	// whitelistedMilestoneMeter.Update(int64(block))
 
-	fmt.Println("UnLocking - Process")
 	m.UnlockSprint(block)
 }
 
 // This function will Lock the mutex at the time of voting
 // fixme: get rid of it
 func (m *milestone) LockMutex(endBlockNum uint64) bool {
-	fmt.Println("Locking - Mutex")
 	m.finality.Lock()
 
 	if m.doExist && endBlockNum <= m.Number { //if endNum is less than whitelisted milestone, then we won't lock the sprint
@@ -183,7 +180,7 @@ func (m *milestone) UnlockMutex(doLock bool, milestoneId string, endBlockHash co
 	// TODO: Uncomment once metrics is added
 	// milestoneIDLength := int64(len(m.LockedMilestoneIDs))
 	// MilestoneIdsLengthMeter.Update(milestoneIDLength)
-	fmt.Println("UnLocking - Mutex")
+
 	m.finality.Unlock()
 }
 
@@ -205,23 +202,21 @@ func (m *milestone) UnlockSprint(endBlockNum uint64) {
 
 // This function will remove the stored milestoneID
 func (m *milestone) RemoveMilestoneID(milestoneId string) {
-	fmt.Println("Locking - RemvoveMilestoneID")
 	m.finality.Lock()
 	defer m.finality.Unlock()
-	fmt.Println("::::::::")
+
 	delete(m.LockedMilestoneIDs, milestoneId)
 
 	if len(m.LockedMilestoneIDs) == 0 {
 		m.Locked = false
 	}
-	fmt.Println("AFDIASNFOUBSNDO")
+
 	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
-	fmt.Println("RemoveMilestonesID: error: ", err)
+
 	if err != nil {
 		log.Error("Error in writing lock data of milestone to db", "err", err)
 	}
 
-	fmt.Println("UnLocking - RemovingMilestoneID")
 }
 
 // This will check whether the incoming chain matches the locked sprint hash
@@ -241,7 +236,6 @@ func (m *milestone) IsReorgAllowed(chain []*types.Header, lockedMilestoneNumber 
 
 // This will return the list of milestoneIDs stored.
 func (m *milestone) GetMilestoneIDsList() []string {
-	fmt.Println("Locking - GetMilestoneIDsList")
 	m.finality.RLock()
 	defer m.finality.RUnlock()
 
@@ -250,7 +244,7 @@ func (m *milestone) GetMilestoneIDsList() []string {
 	for key := range m.LockedMilestoneIDs {
 		keys = append(keys, key)
 	}
-	fmt.Println("UnLocking - GetMilestoneIDsList")
+
 	return keys
 }
 

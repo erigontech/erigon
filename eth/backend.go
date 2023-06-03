@@ -1091,10 +1091,9 @@ func (s *Ethereum) Start() error {
 
 	if s.chainConfig.Bor != nil {
 		borDB := s.engine.(*bor.Bor).DB
-		err := borwhitelist.RegisterService(borDB)
-		if err != nil {
-			return err
-		}
+
+		borwhitelist.RegisterService(borDB)
+
 		var borAPI borfinality.BorAPI
 		apiList := s.APIs()
 		for _, api := range apiList {

@@ -14,11 +14,13 @@ import (
 
 func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 	currentBlockNum := rawdb.ReadCurrentHeader(tx)
-	s := whitelist.GetWhitelistingService()
+
+	service := whitelist.GetWhitelistingService()
+
 	logger := log.New()
 	reqGen := requests.NewRequestGenerator(logger)
 
-	doExist, number, hash := s.GetWhitelistedMilestone()
+	doExist, number, hash := service.GetWhitelistedMilestone()
 	if doExist && number <= currentBlockNum.Number.Uint64() {
 		block, err := requests.GetBlockByNumber(reqGen, number, false, logger)
 
@@ -31,7 +33,7 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
-	doExist, number, hash = s.GetWhitelistedCheckpoint()
+	doExist, number, hash = service.GetWhitelistedCheckpoint()
 	if doExist && number <= currentBlockNum.Number.Uint64() {
 		block, err := requests.GetBlockByNumber(reqGen, number, false, logger)
 
@@ -44,7 +46,7 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
-	return 0, fmt.Errorf("No finalized block")
+	return 0, fmt.Errorf("no finalized block")
 }
 
 // CurrentFinalizedBlock retrieves the current finalized block of the canonical

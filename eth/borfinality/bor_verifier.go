@@ -28,9 +28,6 @@ var (
 	// errEndBlock is returned when we're unable to fetch a block locally.
 	errEndBlock = errors.New("failed to get end block")
 
-	// errBlockNumberConversion is returned when we get err in parsing hexautil block number
-	errBlockNumberConversion = errors.New("failed to parse the block number")
-
 	// TODO: Uncomment once metrics is added
 	// Metrics for collecting the rewindLength
 	// rewindLengthMeter = metrics.NewRegisteredMeter("chain/autorewind/length", nil)

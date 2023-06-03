@@ -26,10 +26,8 @@ type Service struct {
 
 var ws *Service
 
-func RegisterService(db kv.RwDB) error {
+func RegisterService(db kv.RwDB) {
 	ws = NewService(db)
-
-	return nil
 }
 
 func GetWhitelistingService() *Service {
