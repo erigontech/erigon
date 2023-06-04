@@ -2,20 +2,23 @@ package requests
 
 import (
 	"fmt"
-
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
-	"github.com/ledgerwatch/log/v3"
 )
 
-func TxpoolContent(reqGen *RequestGenerator, logger log.Logger) (int, int, int, error) {
+type EthTxPool struct {
+	CommonResponse
+	Result interface{} `json:"result"`
+}
+
+func (reqGen *RequestGenerator) TxpoolContent() (int, int, int, error) {
 	var (
-		b       models.EthTxPool
+		b       EthTxPool
 		pending map[string]interface{}
 		queued  map[string]interface{}
 		baseFee map[string]interface{}
 	)
 
-	if res := reqGen.Erigon("txpool_content", reqGen.TxpoolContent(), &b); res.Err != nil {
+	method, body := reqGen.txpoolContent()
+	if res := reqGen.call(method, body, &b); res.Err != nil {
 		return len(pending), len(queued), len(baseFee), fmt.Errorf("failed to fetch txpool content: %v", res.Err)
 	}
 
@@ -47,4 +50,9 @@ func TxpoolContent(reqGen *RequestGenerator, logger log.Logger) (int, int, int, 
 	}
 
 	return pendingLen, queuedLen, baseFeeLen, nil
+}
+
+func (req *RequestGenerator) txpoolContent() (RPCMethod, string) {
+	const template = `{"jsonrpc":"2.0","method":%q,"params":[],"id":%d}`
+	return Methods.TxpoolContent, fmt.Sprintf(template, Methods.TxpoolContent, req.reqID)
 }
