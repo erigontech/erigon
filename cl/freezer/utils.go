@@ -9,6 +9,9 @@ import (
 )
 
 func PutObjectSSZIntoFreezer(objectName, freezerNamespace string, numericalId uint64, object ssz.Marshaler, record Freezer) error {
+	if record == nil {
+		return nil
+	}
 	var buffer bytes.Buffer
 	encoded, err := object.EncodeSSZ(nil)
 	if err != nil {

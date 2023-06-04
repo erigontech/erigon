@@ -59,7 +59,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval {
 		f.proposerBoostRoot = blockRoot
 	}
-	if f.recorder != nil && lastProcessedState.Slot()%f.forkGraph.Config().SlotsPerEpoch == 0 {
+	if lastProcessedState.Slot()%f.forkGraph.Config().SlotsPerEpoch == 0 {
 		if err := freezer.PutObjectSSZIntoFreezer("beaconState", "caplin_core", lastProcessedState.Slot(), lastProcessedState, f.recorder); err != nil {
 			return err
 		}

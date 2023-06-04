@@ -91,10 +91,8 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 			"numGC", m.NumGC,
 		)
 
-		if g.recorder != nil {
-			if err := freezer.PutObjectSSZIntoFreezer("gossip_signedBeaconBlock", "caplin_core", block.Block.Slot, block, g.recorder); err != nil {
-				return err
-			}
+		if err := freezer.PutObjectSSZIntoFreezer("gossip_signedBeaconBlock", "caplin_core", block.Block.Slot, block, g.recorder); err != nil {
+			return err
 		}
 
 		peers := metrics.GetOrCreateGauge("caplin_peer_count", func() float64 {
