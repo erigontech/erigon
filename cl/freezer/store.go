@@ -18,6 +18,7 @@ func (b *BlobStore) Get(namespace, object, id string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer o.Close()
 	return io.ReadAll(o)
 }
 
@@ -38,8 +39,8 @@ func (b *SidecarBlobStore) Get(namespace, object, id string) (blob []byte, sidec
 	if err != nil {
 		return nil, nil, err
 	}
+	defer a.Close()
 	sidecar = bb
-
 	blob, err = io.ReadAll(a)
 	if err != nil {
 		return
