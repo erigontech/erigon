@@ -42,7 +42,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -1166,58 +1165,6 @@ func ReadHeaderByHash(db kv.Getter, hash libcommon.Hash) (*types.Header, error) 
 		return nil, nil
 	}
 	return ReadHeader(db, hash, *number), nil
-}
-
-func ReadAncestor(db kv.Getter, hash libcommon.Hash, number, ancestor uint64, maxNonCanonical *uint64, blockReader services.HeaderAndCanonicalReader) (libcommon.Hash, uint64) {
-	if ancestor > number {
-		return libcommon.Hash{}, 0
-	}
-	if ancestor == 1 {
-		header, err := blockReader.Header(context.Background(), db, hash, number)
-		if err != nil {
-			panic(err)
-		}
-		// in this case it is cheaper to just read the header
-		if header != nil {
-			return header.ParentHash, number - 1
-		}
-		return libcommon.Hash{}, 0
-	}
-	for ancestor != 0 {
-		h, err := blockReader.CanonicalHash(context.Background(), db, number)
-		if err != nil {
-			panic(err)
-		}
-		if h == hash {
-			ancestorHash, err := blockReader.CanonicalHash(context.Background(), db, number-ancestor)
-			if err != nil {
-				panic(err)
-			}
-			h, err := blockReader.CanonicalHash(context.Background(), db, number)
-			if err != nil {
-				panic(err)
-			}
-			if h == hash {
-				number -= ancestor
-				return ancestorHash, number
-			}
-		}
-		if *maxNonCanonical == 0 {
-			return libcommon.Hash{}, 0
-		}
-		*maxNonCanonical--
-		ancestor--
-		header, err := blockReader.Header(context.Background(), db, hash, number)
-		if err != nil {
-			panic(err)
-		}
-		if header == nil {
-			return libcommon.Hash{}, 0
-		}
-		hash = header.ParentHash
-		number--
-	}
-	return hash, number
 }
 
 func DeleteNewerEpochs(tx kv.RwTx, number uint64) error {
