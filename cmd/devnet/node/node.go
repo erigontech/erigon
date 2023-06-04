@@ -1,9 +1,10 @@
 package node
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net"
 	"net/url"
 	"os"
@@ -39,7 +40,8 @@ type Node struct {
 	DataDir                    string `arg:"--datadir" default:"./dev"`
 	Chain                      string `arg:"--chain" default:"dev"`
 	ConsoleVerbosity           string `arg:"--log.console.verbosity" default:"0"`
-	LogDir                     string `arg:"--log.dir.path"` //default:"./cmd/devnet/debug_logs"
+	DirVerbosity               string `arg:"--log.dir.verbosity"`
+	LogDirPath                 string `arg:"--log.dir.path"` //default:"./cmd/devnet/debug_logs"
 	P2PProtocol                string `arg:"--p2p.protocol" default:"68"`
 	Downloader                 string `arg:"--no-downloader" default:"true"`
 	PrivateApiAddr             string `arg:"--private.api.addr" default:"localhost:9090"`
@@ -69,7 +71,8 @@ func (node Node) getEnode() (string, error) {
 						if errors.As(opErr.Err, &callErr) {
 							if callErr.Syscall == "connectex" {
 								reqCount++
-								time.Sleep(time.Duration(rand.Intn(5)) * time.Second)
+								delay, _ := rand.Int(rand.Reader, big.NewInt(4))
+								time.Sleep(time.Duration(delay.Int64()+1) * time.Second)
 								continue
 							}
 						}
@@ -92,6 +95,10 @@ func (node Node) getEnode() (string, error) {
 
 func (node *Node) configure(nw *Network, nodeNumber int) (err error) {
 	node.DataDir = filepath.Join(nw.DataDir, fmt.Sprintf("%d", nodeNumber))
+
+	//TODO add a log.dir.prefix arg and set it to the node name (node-%d)
+	//node.LogDirPath = filepath.Join(nw.DataDir, "logs")
+
 	node.Chain = nw.Chain
 
 	node.StaticPeers = strings.Join(nw.peers, ",")
