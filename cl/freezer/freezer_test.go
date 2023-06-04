@@ -2,6 +2,9 @@ package freezer_test
 
 import (
 	"os"
+	"path"
+	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/freezer"
@@ -82,7 +85,10 @@ func TestMemoryStore(t *testing.T) {
 }
 
 func TestRootPathStore(t *testing.T) {
-	testFreezer(t, func() (freezer.Freezer, func()) {
-		return &freezer.RootPathOsFs{"test_output"}, func() { os.RemoveAll("test_output") }
-	})
+	cnt := atomic.Uint64{}
+	c := func() (freezer.Freezer, func()) {
+		base := path.Join("test_output", strconv.Itoa(int(cnt.Load())))
+		return &freezer.RootPathOsFs{base}, func() { os.RemoveAll(base) }
+	}
+	testFreezer(t, c)
 }
