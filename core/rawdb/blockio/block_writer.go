@@ -147,5 +147,5 @@ func (w *BlockWriter) ResetSenders(ctx context.Context, db kv.RoDB, tx kv.RwTx) 
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
-	return rawdb.DeleteAncientBlocks(tx, blockTo, blocksDeleteLimit, w.txsV3)
+	return rawdb.PruneBlocks(tx, blockTo, blocksDeleteLimit)
 }
