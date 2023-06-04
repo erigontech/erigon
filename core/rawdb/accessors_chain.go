@@ -185,13 +185,6 @@ func WriteHeadBlockHash(db kv.Putter, hash libcommon.Hash) {
 	}
 }
 
-// DeleteHeaderNumber removes hash->number mapping.
-func DeleteHeaderNumber(db kv.Deleter, hash libcommon.Hash) {
-	if err := db.Delete(kv.HeaderNumber, hash[:]); err != nil {
-		log.Crit("Failed to delete hash mapping", "err", err)
-	}
-}
-
 // ReadForkchoiceHead retrieves headBlockHash from the last Engine API forkChoiceUpdated.
 func ReadForkchoiceHead(db kv.Getter) libcommon.Hash {
 	data, err := db.GetOne(kv.LastForkchoice, []byte("headBlockHash"))
@@ -262,14 +255,6 @@ func ReadHeaderRLP(db kv.Getter, hash libcommon.Hash, number uint64) rlp.RawValu
 		log.Error("ReadHeaderRLP failed", "err", err)
 	}
 	return data
-}
-
-// HasHeader verifies the existence of a block header corresponding to the hash.
-func HasHeader(db kv.Has, hash libcommon.Hash, number uint64) bool {
-	if has, err := db.Has(kv.Headers, dbutils.HeaderKey(number, hash)); !has || err != nil {
-		return false
-	}
-	return true
 }
 
 // ReadHeader retrieves the block header corresponding to the hash.
@@ -524,20 +509,6 @@ func ReadBodyWithTransactions(db kv.Getter, hash libcommon.Hash, number uint64) 
 		return nil, err
 	}
 	return body, err
-}
-
-func NonCanonicalBodyWithTransactions(db kv.Getter, hash libcommon.Hash, number uint64) *types.Body {
-	body, baseTxId, txAmount := ReadBody(db, hash, number)
-	if body == nil {
-		return nil
-	}
-	var err error
-	body.Transactions, err = NonCanonicalTransactions(db, baseTxId, txAmount)
-	if err != nil {
-		log.Error("failed ReadTransactionByHash", "hash", hash, "block", number, "err", err)
-		return nil
-	}
-	return body
 }
 
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
@@ -795,15 +766,6 @@ func TruncateTd(tx kv.RwTx, blockFrom uint64) error {
 	return nil
 }
 
-// HasReceipts verifies the existence of all the transaction receipts belonging
-// to a block.
-func HasReceipts(db kv.Has, hash libcommon.Hash, number uint64) bool {
-	if has, err := db.Has(kv.Receipts, hexutility.EncodeTs(number)); !has || err != nil {
-		return false
-	}
-	return true
-}
-
 // ReadRawReceipts retrieves all the transaction receipts belonging to a block.
 // The receipt metadata fields are not guaranteed to be populated, so they
 // should not be used. Use ReadReceipts instead if the metadata is needed.
@@ -995,27 +957,6 @@ func ReadBlock(tx kv.Getter, hash libcommon.Hash, number uint64) *types.Block {
 		return nil
 	}
 	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
-}
-
-func NonCanonicalBlockWithSenders(tx kv.Getter, hash libcommon.Hash, number uint64) (*types.Block, []libcommon.Address, error) {
-	header := ReadHeader(tx, hash, number)
-	if header == nil {
-		return nil, nil, nil
-	}
-	body := NonCanonicalBodyWithTransactions(tx, hash, number)
-	if body == nil {
-		return nil, nil, nil
-	}
-	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
-	senders, err := ReadSenders(tx, hash, number)
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(senders) != block.Transactions().Len() {
-		return block, senders, nil // no senders is fine - will recover them on the fly
-	}
-	block.SendersToTxs(senders)
-	return block, senders, nil
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
