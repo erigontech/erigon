@@ -1789,3 +1789,30 @@ func ReadVerkleNode(tx kv.RwTx, root libcommon.Hash) (verkle.VerkleNode, error) 
 	}
 	return verkle.ParseNode(encoded, 0, root[:])
 }
+func WriteDBSchemaVersion(tx kv.RwTx) error {
+	var version [12]byte
+	binary.BigEndian.PutUint32(version[:], kv.DBSchemaVersion.Major)
+	binary.BigEndian.PutUint32(version[4:], kv.DBSchemaVersion.Minor)
+	binary.BigEndian.PutUint32(version[8:], kv.DBSchemaVersion.Patch)
+	if err := tx.Put(kv.DatabaseInfo, kv.DBSchemaVersionKey, version[:]); err != nil {
+		return fmt.Errorf("writing DB schema version: %w", err)
+	}
+	return nil
+}
+func ReadDBSchemaVersion(tx kv.Tx) (major, minor, patch uint32, ok bool, err error) {
+	existingVersion, err := tx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey)
+	if err != nil {
+		return 0, 0, 0, false, fmt.Errorf("reading DB schema version: %w", err)
+	}
+	if len(existingVersion) == 0 {
+		return 0, 0, 0, false, nil
+	}
+	if len(existingVersion) != 12 {
+		return 0, 0, 0, false, fmt.Errorf("incorrect length of DB schema version: %d", len(existingVersion))
+	}
+
+	major = binary.BigEndian.Uint32(existingVersion)
+	minor = binary.BigEndian.Uint32(existingVersion[4:])
+	patch = binary.BigEndian.Uint32(existingVersion[8:])
+	return major, minor, patch, true, nil
+}
