@@ -308,14 +308,11 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 		var cc *chain.Config
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			genesisBlock, err := blockReader.BlockByNumber(ctx, tx, 0)
+			genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 			if err != nil {
 				return err
 			}
-			if genesisBlock == nil {
-				return fmt.Errorf("genesis not found in DB. Likely Erigon was never started on this datadir")
-			}
-			cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+			cc, err = rawdb.ReadChainConfig(tx, genesisHash)
 			if err != nil {
 				return err
 			}
