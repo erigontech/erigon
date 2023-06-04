@@ -222,6 +222,7 @@ func TestBlockStorage(t *testing.T) {
 		// mark chain as bad
 		//  - it must be not available by hash
 		//  - but available by hash+num - if read num from kv.BadHeaderNumber table
+		//  - prune blocks: must delete Canonical/NonCanonical/BadBlocks also
 		foundBn, _ := br.BadHeaderNumber(ctx, tx, block.Hash())
 		require.Nil(foundBn)
 		found, _ := br.BlockByHash(ctx, tx, block.Hash())
