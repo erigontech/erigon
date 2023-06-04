@@ -28,6 +28,16 @@ var (
 		Usage: "sets the lightclient server host addr",
 		Value: "localhost",
 	}
+	BeaconApiAddr = cli.StringFlag{
+		Name:  "beacon.api.addr",
+		Usage: "sets the host to listen for beacon api requests",
+		Value: "localhost",
+	}
+	BeaconApiPort = cli.UintFlag{
+		Name:  "beacon.api.port",
+		Usage: "sets the port to listen for beacon api requests",
+		Value: 5555,
+	}
 	BootnodesFlag = cli.StringFlag{
 		Name:  "sentinel.bootnodes",
 		Usage: "Comma separated enode URLs for P2P discovery bootstrap",

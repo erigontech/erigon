@@ -1,15 +1,35 @@
 package beacon
 
 import (
+	"net"
 	"net/http"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/log/v3"
 )
 
+func ListenAndServe(api *ApiHandler, protocol, address string) {
+	listener, err := net.Listen(protocol, address)
+	if err != nil {
+		log.Warn("[Beacon API] Failed to start listening", "addr", address, "err", err)
+	}
+
+	if err := http.Serve(listener, api); err != nil {
+		log.Warn("[Beacon API] failed to start serving", "addr", address, "err", err)
+	}
+}
+
 type ApiHandler struct {
-	o   sync.Once
-	mux chi.Router
+	o              sync.Once
+	mux            chi.Router
+	genesisCfg     *clparams.GenesisConfig
+	beaconChainCfg *clparams.BeaconChainConfig
+}
+
+func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig) *ApiHandler {
+	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig}
 }
 
 func (a *ApiHandler) init() {
@@ -23,7 +43,7 @@ func (a *ApiHandler) init() {
 			r.Route("/beacon", func(r chi.Router) {
 				r.Get("/headers/{tag}", nil)      // otterscan
 				r.Get("/blocks/{slot}/root", nil) //otterscan
-				r.Get("/genesis", nil)
+				r.Get("/genesis", a.getGenesis)
 				r.Post("/binded_blocks", nil)
 				r.Post("/blocks", nil)
 				r.Route("/pool", func(r chi.Router) {
@@ -47,15 +67,15 @@ func (a *ApiHandler) init() {
 					r.Get("/proposer/{epoch}", nil)
 					r.Post("/sync/{epoch}", nil)
 				})
-				r.Get("blinded_blocks/{slot}", nil)
-				r.Get("attestation_data", nil)
-				r.Get("aggregate_attestation", nil)
-				r.Post("aggregate_and_proofs", nil)
-				r.Post("beacon_committee_subscriptions", nil)
-				r.Post("sync_committee_subscriptions", nil)
-				r.Get("sync_committee_contribution", nil)
-				r.Post("contribution_and_proofs", nil)
-				r.Post("prepare_beacon_proposer", nil)
+				r.Get("/blinded_blocks/{slot}", nil)
+				r.Get("/attestation_data", nil)
+				r.Get("/aggregate_attestation", nil)
+				r.Post("/aggregate_and_proofs", nil)
+				r.Post("/beacon_committee_subscriptions", nil)
+				r.Post("/sync_committee_subscriptions", nil)
+				r.Get("/sync_committee_contribution", nil)
+				r.Post("/contribution_and_proofs", nil)
+				r.Post("/prepare_beacon_proposer", nil)
 			})
 		})
 		r.Route("/v2", func(r chi.Router) {
