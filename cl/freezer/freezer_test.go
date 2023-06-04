@@ -17,7 +17,7 @@ func runBlobStoreTest(t *testing.T, b *freezer.BlobStore) {
 	err = b.Put(nil, "../../../test", "a", "b")
 	assert.ErrorIs(t, err, os.ErrInvalid)
 	// get bad item
-	err = b.Put(nil, "../../../test", "a", "b")
+	_, err = b.Get("../../../test", "a", "b")
 	assert.ErrorIs(t, err, os.ErrInvalid)
 	// put item into obj
 	orig := []byte{1, 2, 3, 4}
@@ -40,8 +40,9 @@ func runSidecarBlobStoreTest(t *testing.T, b *freezer.SidecarBlobStore) {
 	err = b.Put(nil, nil, "../../../test", "a", "b")
 	assert.ErrorIs(t, err, os.ErrInvalid)
 	// get bad item
-	err = b.Put(nil, nil, "../../../test", "a", "b")
+	_, _, err = b.Get("../../../test", "a", "b")
 	assert.ErrorIs(t, err, os.ErrInvalid)
+
 	// put item into obj
 	orig := []byte{1, 2, 3, 4}
 	orig2 := []byte{5, 6, 7, 8}
