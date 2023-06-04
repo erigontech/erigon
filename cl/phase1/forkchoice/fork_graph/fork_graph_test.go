@@ -31,9 +31,13 @@ func TestForkGraph(t *testing.T) {
 	graph := New(anchorState, false)
 	_, status, err := graph.AddChainSegment(blockA, true)
 	require.NoError(t, err)
-	// Save current state hash
-	require.NoError(t, err)
 	require.Equal(t, status, Success)
+	// Now make blockC a bad block
+	blockC.Block.ProposerIndex = 81214459 // some invalid thing
+	_, status, err = graph.AddChainSegment(blockC, true)
+	require.Error(t, err)
+	require.Equal(t, status, InvalidBlock)
+	// Save current state hash
 	_, status, err = graph.AddChainSegment(blockB, true)
 	require.NoError(t, err)
 	require.Equal(t, status, Success)
@@ -41,10 +45,5 @@ func TestForkGraph(t *testing.T) {
 	_, status, err = graph.AddChainSegment(blockB, true)
 	require.NoError(t, err)
 	require.Equal(t, status, PreValidated)
-	// Now make blockC a bad block
-	blockC.Block.ProposerIndex = 81214459 // some invalid thing
-	_, status, err = graph.AddChainSegment(blockC, true)
-	require.Error(t, err)
-	require.Equal(t, status, InvalidBlock)
 	graph.removeOldData()
 }

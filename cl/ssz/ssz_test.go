@@ -15,12 +15,11 @@ import (
 var beaconState []byte
 
 func TestEncodeDecode(t *testing.T) {
-	t.Skip("Need to update due to data_gas_used")
 	bs := state.New(&clparams.MainnetBeaconConfig)
-	require.NoError(t, utils.DecodeSSZSnappy(bs, beaconState, int(clparams.DenebVersion)))
+	require.NoError(t, utils.DecodeSSZSnappy(bs, beaconState, int(clparams.CapellaVersion)))
 	root, err := bs.HashSSZ()
 	require.NoError(t, err)
-	require.Equal(t, common.Hash(root), common.HexToHash("0x7d085d9f2cce04eefb4c0aafad744fd2ce4ff962b2c3589fda53aab084171406"))
+	require.Equal(t, common.Hash(root), common.HexToHash("0x36eb1bb5b4616f9d5046b2a719a8c4217f3dc40c1b7dff7abcc55c47f142a78b"))
 	d, err := bs.EncodeSSZ(nil)
 	require.NoError(t, err)
 	dec, _ := utils.DecompressSnappy(beaconState)
