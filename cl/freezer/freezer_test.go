@@ -9,9 +9,16 @@ import (
 )
 
 func runBlobStoreTest(t *testing.T, b *freezer.BlobStore) {
+	var err error
+	// put bad item into obj
+	err = b.Put(nil, "../../../test", "a", "b")
+	assert.ErrorIs(t, err, os.ErrInvalid)
+	// get bad item
+	err = b.Put(nil, "../../../test", "a", "b")
+	assert.ErrorIs(t, err, os.ErrInvalid)
 	// put item into obj
 	orig := []byte{1, 2, 3, 4}
-	err := b.Put(orig, "test", "a", "b")
+	err = b.Put(orig, "test", "a", "b")
 	assert.NoError(t, err)
 
 	// get item from obj

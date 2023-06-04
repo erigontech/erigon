@@ -1,9 +1,7 @@
 package freezer
 
 import (
-	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -21,11 +19,7 @@ func (f *RootPathOsFs) resolveFileName(namespace string, object string, id strin
 	root := filepath.Clean(f.Root)
 	j := filepath.Join(root, namespace, object, id)
 	if !strings.HasPrefix(j, root) {
-		return "", &fs.PathError{
-			Op:   "lookup",
-			Path: j,
-			Err:  fmt.Errorf("path not in root"),
-		}
+		return "", os.ErrInvalid
 	}
 	return j, nil
 }

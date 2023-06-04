@@ -2,9 +2,9 @@ package freezer
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -30,7 +30,7 @@ func (f *InMemory) get(name string) (*bytes.Buffer, error) {
 	}
 	cast, ok := val.(*bytes.Buffer)
 	if !ok {
-		return nil, fs.ErrNotExist
+		panic("incorrect item in sync map... this should never happen")
 	}
 	return cast, nil
 }
@@ -38,11 +38,7 @@ func (f *InMemory) get(name string) (*bytes.Buffer, error) {
 func (f *InMemory) resolveFileName(namespace string, object string, id string, extra ...string) (string, error) {
 	j := filepath.Join("inmem", namespace, object, id)
 	if !strings.HasPrefix(j, "inmem") {
-		return "", &fs.PathError{
-			Op:   "lookup",
-			Path: j,
-			Err:  fmt.Errorf("path not in root"),
-		}
+		return "", os.ErrInvalid
 	}
 	return j, nil
 }
