@@ -72,16 +72,20 @@ func runSidecarBlobStoreTest(t *testing.T, b *freezer.SidecarBlobStore) {
 
 func testFreezer(t *testing.T, fn func() (freezer.Freezer, func())) {
 	t.Run("BlobStore", func(t *testing.T) {
-		runBlobStoreTest(t, freezer.NewBlobStore(&freezer.InMemory{}))
+		f, cn := fn()
+		defer cn()
+		runBlobStoreTest(t, freezer.NewBlobStore(f))
 	})
 	t.Run("SidecarBlobStore", func(t *testing.T) {
-		runSidecarBlobStoreTest(t, freezer.NewSidecarBlobStore(&freezer.InMemory{}))
+		f, cn := fn()
+		defer cn()
+		runSidecarBlobStoreTest(t, freezer.NewSidecarBlobStore(f))
 	})
 }
 
 func TestMemoryStore(t *testing.T) {
 	testFreezer(t, func() (freezer.Freezer, func()) {
-		return &freezer.InMemory{}, nil
+		return &freezer.InMemory{}, func() {}
 	})
 }
 
