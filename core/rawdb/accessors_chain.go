@@ -65,9 +65,9 @@ func WriteCanonicalHash(db kv.Putter, hash libcommon.Hash, number uint64) error 
 }
 
 // TruncateCanonicalHash removes all the number to hash canonical mapping from block number N
-func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, badBlock bool) error {
+func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) error {
 	if err := tx.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(blockFrom), func(blockNumBytes, blockHash []byte) error {
-		if badBlock {
+		if markChainAsBad {
 			if err := tx.Delete(kv.HeaderNumber, blockHash); err != nil {
 				return err
 			}
