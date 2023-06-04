@@ -56,6 +56,7 @@ func (a *ApiHandler) init() {
 					r.Get("/head/validators/{index}", nil) // otterscan
 					r.Get("/head/committees", nil)         // otterscan
 					r.Route("/{state_id}", func(r chi.Router) {
+						r.Get("/validators", nil)
 						r.Get("/fork", nil)
 						r.Get("/validators/{id}", nil)
 					})
