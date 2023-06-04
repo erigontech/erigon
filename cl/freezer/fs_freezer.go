@@ -56,7 +56,7 @@ func (f *RootPathOsFs) Put(data io.Reader, sidecar []byte, namespace string, obj
 		return err
 	}
 	if sidecar != nil {
-		err = os.WriteFile(path.Join(infoPath, RootPathSidecarFile), sidecar, 0o755)
+		err = os.WriteFile(path.Join(infoPath, RootPathSidecarFile), sidecar, 0o600)
 		if err == nil {
 			return err
 		}

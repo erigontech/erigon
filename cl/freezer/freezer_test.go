@@ -58,6 +58,7 @@ func runSidecarBlobStoreTest(t *testing.T, b *freezer.SidecarBlobStore) {
 	ans, sidecar, err = b.Get("test", "b", "a")
 	assert.ErrorIs(t, err, os.ErrNotExist)
 	assert.Nil(t, ans)
+	assert.Nil(t, sidecar)
 
 	// put item without sidecar
 	err = b.Put(orig2, nil, "test", "a", "c")
