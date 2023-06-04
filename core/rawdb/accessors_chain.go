@@ -1043,7 +1043,7 @@ func ReadBlockWithSenders(db kv.Getter, hash libcommon.Hash, number uint64) (*ty
 
 // WriteBlock serializes a block into the database, header and body separately.
 func WriteBlock(db kv.RwTx, block *types.Block) error {
-	if err := WriteHeader(db, block.Header()); err != nil {
+	if err := WriteHeader(db, block.HeaderNoCopy()); err != nil {
 		return err
 	}
 	if err := WriteBody(db, block.Hash(), block.NumberU64(), block.Body()); err != nil {

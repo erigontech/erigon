@@ -35,13 +35,7 @@ func NewBlockWriter(historyV3 bool) *BlockWriter {
 }
 
 func (w *BlockWriter) WriteBlock(tx kv.RwTx, block *types.Block) error {
-	if err := rawdb.WriteHeader(tx, block.HeaderNoCopy()); err != nil {
-		return err
-	}
-	if err := rawdb.WriteBody(tx, block.Hash(), block.NumberU64(), block.Body()); err != nil {
-		return err
-	}
-	return nil
+	return rawdb.WriteBlock(tx, block)
 }
 func (w *BlockWriter) WriteHeader(tx kv.RwTx, header *types.Header) error {
 	return rawdb.WriteHeader(tx, header)
