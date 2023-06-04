@@ -65,12 +65,17 @@ func WriteCanonicalHash(db kv.Putter, hash libcommon.Hash, number uint64) error 
 }
 
 // TruncateCanonicalHash removes all the number to hash canonical mapping from block number N
-func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, deleteHeaders bool) error {
-	if err := tx.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(blockFrom), func(k, v []byte) error {
-		if deleteHeaders {
-			DeleteHeader(tx, libcommon.BytesToHash(v), blockFrom)
+func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, badBlock bool) error {
+	if err := tx.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(blockFrom), func(blockNumBytes, blockHash []byte) error {
+		if badBlock {
+			if err := tx.Delete(kv.HeaderNumber, blockHash); err != nil {
+				return err
+			}
+			if err := tx.Put(kv.BadHeaderNumber, blockHash, blockNumBytes); err != nil {
+				return err
+			}
 		}
-		return tx.Delete(kv.HeaderCanonical, k)
+		return tx.Delete(kv.HeaderCanonical, blockNumBytes)
 	}); err != nil {
 		return fmt.Errorf("TruncateCanonicalHash: %w", err)
 	}
@@ -746,19 +751,6 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 		}
 	}
 	return nil
-}
-
-// MarkCanonicalChainAsBad - moves canonical hashes from `kv.HeaderNumber` to `kv.BadHeaderNumber`
-func MarkCanonicalChainAsBad(tx kv.RwTx, from uint64) error {
-	return tx.ForEach(kv.HeaderCanonical, hexutility.EncodeTs(from), func(blockHash, blockNumBytes []byte) error {
-		if err := tx.Delete(kv.HeaderNumber, blockHash); err != nil {
-			return err
-		}
-		if err := tx.Put(kv.BadHeaderNumber, blockHash, blockNumBytes); err != nil {
-			return err
-		}
-		return nil
-	})
 }
 
 // ReadTd retrieves a block's total difficulty corresponding to the hash.

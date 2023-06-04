@@ -218,6 +218,32 @@ func TestBlockStorage(t *testing.T) {
 	// write again and delete it as old one
 	require.NoError(bw.WriteBlock(tx, block))
 
+	{
+		// mark chain as bad
+		//  - it must be not available by hash
+		//  - but available by hash+num - if read num from kv.BadHeaderNumber table
+		foundBn, _ := br.BadHeaderNumber(ctx, tx, block.Hash())
+		require.Nil(foundBn)
+		found, _ := br.BlockByHash(ctx, tx, block.Hash())
+		require.NotNil(found)
+
+		err = rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64())
+		require.NoError(err)
+		err = rawdb.TruncateCanonicalHash(tx, block.NumberU64(), true)
+		require.NoError(err)
+		foundBlock, _ := br.BlockByHash(ctx, tx, block.Hash())
+		require.Nil(foundBlock)
+
+		foundBn = rawdb.ReadHeaderNumber(tx, block.Hash())
+		require.Nil(foundBn)
+		foundBn, _ = br.BadHeaderNumber(ctx, tx, block.Hash())
+		require.NotNil(foundBn)
+		foundBlock, _ = br.BlockByNumber(ctx, tx, *foundBn)
+		require.Nil(foundBlock)
+		foundBlock, _, _ = br.BlockWithSenders(ctx, tx, block.Hash(), *foundBn)
+		require.NotNil(foundBlock)
+	}
+
 	// prune: [1: N)
 	require.NoError(bw.PruneBlocks(ctx, tx, 0, 1))
 	entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())

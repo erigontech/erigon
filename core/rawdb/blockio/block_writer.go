@@ -86,9 +86,6 @@ func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64) error {
 	}
 	return nil
 }
-func (w *BlockWriter) MarkCanonicalChainAsBad(tx kv.RwTx, from uint64) error {
-	return rawdb.MarkCanonicalChainAsBad(tx, from)
-}
 func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64) error {
 	if w.historyV3 {
 		if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
