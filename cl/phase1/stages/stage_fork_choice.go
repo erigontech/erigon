@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -30,13 +31,22 @@ type StageForkChoiceCfg struct {
 	state           *state.BeaconState
 	gossipManager   *network2.GossipManager
 	forkChoice      *forkchoice.ForkChoiceStore
+	caplinFreezer   freezer.Freezer
 }
 
 const minPeersForDownload = 2
 const minPeersForSyncStart = 4
 
+var (
+	freezerNameSpacePrefix = ""
+	blockObjectName        = "singedBeaconBlock"
+	stateObjectName        = "beaconState"
+	gossipAction           = "gossip"
+)
+
 func StageForkChoice(db kv.RwDB, downloader *network2.ForwardBeaconDownloader, genesisCfg *clparams.GenesisConfig,
-	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, executionClient *execution_client.ExecutionClient, gossipManager *network2.GossipManager, forkChoice *forkchoice.ForkChoiceStore) StageForkChoiceCfg {
+	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, executionClient *execution_client.ExecutionClient, gossipManager *network2.GossipManager,
+	forkChoice *forkchoice.ForkChoiceStore, caplinFreezer freezer.Freezer) StageForkChoiceCfg {
 	return StageForkChoiceCfg{
 		db:              db,
 		downloader:      downloader,
@@ -46,6 +56,7 @@ func StageForkChoice(db kv.RwDB, downloader *network2.ForwardBeaconDownloader, g
 		executionClient: executionClient,
 		gossipManager:   gossipManager,
 		forkChoice:      forkChoice,
+		caplinFreezer:   caplinFreezer,
 	}
 }
 
@@ -94,6 +105,10 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 	cfg.downloader.SetHighestProcessedSlot(cfg.state.Slot())
 	cfg.downloader.SetProcessFunction(func(highestSlotProcessed uint64, _ libcommon.Hash, newBlocks []*cltypes.SignedBeaconBlock) (uint64, libcommon.Hash, error) {
 		for _, block := range newBlocks {
+			if err := freezer.PutObjectSSZIntoFreezer("downloaded_signedBeaconBlock", "caplin_core", block.Block.Slot, block, cfg.caplinFreezer); err != nil {
+				return highestSlotProcessed, libcommon.Hash{}, err
+			}
+
 			sendForckchoice :=
 				utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == block.Block.Slot
 			if err := cfg.forkChoice.OnBlock(block, false, true); err != nil {

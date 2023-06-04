@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
@@ -111,5 +112,12 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		defer cc.Close()
 		engine = execution_client.NewExecutionEnginePhase1FromClient(ctx, remote.NewETHBACKENDClient(cc))
 	}
-	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, engine, state)
+	var caplinFreezer freezer.Freezer
+	if cfg.RecordMode {
+		caplinFreezer = &freezer.RootPathOsFs{
+			Root: cfg.RecordDir,
+		}
+	}
+
+	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, engine, state, caplinFreezer)
 }

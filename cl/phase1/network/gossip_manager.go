@@ -6,6 +6,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -23,6 +24,7 @@ import (
 type GossipManager struct {
 	ctx context.Context
 
+	recorder   freezer.Freezer
 	forkChoice *forkchoice.ForkChoiceStore
 	sentinel   sentinel.SentinelClient
 	// configs
@@ -30,13 +32,15 @@ type GossipManager struct {
 	genesisConfig *clparams.GenesisConfig
 }
 
-func NewGossipReceiver(ctx context.Context, s sentinel.SentinelClient, forkChoice *forkchoice.ForkChoiceStore, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig) *GossipManager {
+func NewGossipReceiver(ctx context.Context, s sentinel.SentinelClient, forkChoice *forkchoice.ForkChoiceStore,
+	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, recorder freezer.Freezer) *GossipManager {
 	return &GossipManager{
 		sentinel:      s,
 		forkChoice:    forkChoice,
 		ctx:           ctx,
 		beaconConfig:  beaconConfig,
 		genesisConfig: genesisConfig,
+		recorder:      recorder,
 	}
 }
 
@@ -86,6 +90,10 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 			"alloc/sys", libcommon.ByteCount(m.Alloc)+"/"+libcommon.ByteCount(m.Sys),
 			"numGC", m.NumGC,
 		)
+
+		if err := freezer.PutObjectSSZIntoFreezer("gossip_signedBeaconBlock", "caplin_core", block.Block.Slot, block, g.recorder); err != nil {
+			return err
+		}
 
 		peers := metrics.GetOrCreateGauge("caplin_peer_count", func() float64 {
 			return float64(count.Amount)
