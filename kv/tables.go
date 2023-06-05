@@ -27,7 +27,8 @@ import (
 // DBSchemaVersion versions list
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 6.0 - BlockTransaction table now has system-txs before and after block (records are absent if block has no system-tx, but sequence increasing)
-var DBSchemaVersion = types.VersionReply{Major: 6, Minor: 0, Patch: 0}
+// 6.1 - Canonical/NonCanonical/BadBlock transations now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
+var DBSchemaVersion = types.VersionReply{Major: 6, Minor: 1, Patch: 0}
 
 // ChaindataTables
 
@@ -241,9 +242,13 @@ const (
 	// DatabaseInfo is used to store information about data layout.
 	DatabaseInfo = "DbInfo"
 
-	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
-	HeaderNumber = "HeaderNumber" // header_hash -> num_u64
-
+	// Naming:
+	//   NeaderNumber - Ethereum-specific block number. All nodes have same BlockNum.
+	//   NeaderID - auto-increment ID. Depends on order in which node see headers.
+	//      Invariant: for all headers in snapshots Number == ID. It means no reason to store Num/ID for this headers in DB.
+	//   Same about: TxNum/TxID, BlockNum/BlockID
+	HeaderNumber    = "HeaderNumber"           // header_hash -> header_num_u64
+	BadHeaderNumber = "BadHeaderNumber"        // header_hash -> header_num_u64
 	HeaderCanonical = "CanonicalHeader"        // block_num_u64 -> header hash
 	Headers         = "Header"                 // block_num_u64 + hash -> header (RLP)
 	HeaderTD        = "HeadersTotalDifficulty" // block_num_u64 + hash -> td (RLP)
@@ -268,9 +273,6 @@ const (
 	EthTx           = "BlockTransaction"        // tx_id_u64 -> rlp(tx)
 	NonCanonicalTxs = "NonCanonicalTransaction" // tbl_sequence_u64 -> rlp(tx)
 	MaxTxNum        = "MaxTxNum"                // block_number_u64 -> max_tx_num_in_block_u64
-
-	// EthTxV3 - stores only txs of canonical blocks. Here key is txID + block_hash.
-	EthTxV3 = "BlockTransactionV3" // tbl_sequence_u64 -> rlp(tx)
 
 	Receipts = "Receipt"        // block_num_u64 -> canonical block receipts (non-canonical are not stored)
 	Log      = "TransactionLog" // block_num_u64 + txId -> logs of transaction
@@ -480,6 +482,7 @@ var ChaindataTables = []string{
 	Code,
 	ContractCode,
 	HeaderNumber,
+	BadHeaderNumber,
 	BlockBody,
 	Receipts,
 	TxLookup,
@@ -511,7 +514,6 @@ var ChaindataTables = []string{
 	Log,
 	Sequence,
 	EthTx,
-	EthTxV3,
 	NonCanonicalTxs,
 	TrieOfAccounts,
 	TrieOfStorage,
