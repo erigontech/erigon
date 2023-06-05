@@ -1,30 +1,29 @@
 package commands
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
+	"github.com/ledgerwatch/erigon/cmd/devnet/node"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/log/v3"
 )
 
 // ExecuteAllMethods runs all the simulation tests for erigon devnet
-func ExecuteAllMethods(reqGen *requests.RequestGenerator, logger log.Logger) {
+func ExecuteAllMethods(nw *node.Network, logger log.Logger) {
 	// test connection to JSON RPC
 	logger.Info("PINGING JSON RPC...")
-	if err := pingErigonRpc(reqGen, logger); err != nil {
+	if err := pingErigonRpc(nw.Node(0), logger); err != nil {
 		return
 	}
 	logger.Info("")
 
 	// get balance of the receiver's account
-	callGetBalance(reqGen, addr, models.Latest, 0, logger)
+	callGetBalance(nw.Node(0), addr, requests.BlockNumbers.Latest, 0, logger)
 	logger.Info("")
 
 	// confirm that the txpool is empty
 	logger.Info("CONFIRMING TXPOOL IS EMPTY BEFORE SENDING TRANSACTION...")
-	services.CheckTxPoolContent(reqGen, 0, 0, 0, logger)
+	services.CheckTxPoolContent(nw.Node(0), 0, 0, 0, logger)
 	logger.Info("")
 
 	/*
@@ -41,12 +40,12 @@ func ExecuteAllMethods(reqGen *requests.RequestGenerator, logger log.Logger) {
 	//}
 	//fmt.Println()
 
-	_, err := callSendTxWithDynamicFee(reqGen, recipientAddress, models.DevAddress, logger)
+	_, err := callSendTxWithDynamicFee(nw.Node(0), recipientAddress, models.DevAddress, logger)
 	if err != nil {
 		logger.Error("callSendTxWithDynamicFee", "error", err)
 		return
 	}
-	fmt.Println()
+	logger.Info("")
 
 	// initiate a contract transaction
 	//fmt.Println("INITIATING A CONTRACT TRANSACTION...")

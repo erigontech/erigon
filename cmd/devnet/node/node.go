@@ -1,9 +1,16 @@
 package node
 
 import (
+	"crypto/rand"
+	"errors"
 	"fmt"
+	"math/big"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,9 +18,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
@@ -21,32 +28,192 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-// Start starts the process for two erigon nodes running on the dev chain
-func Start(reqGen *requests.RequestGenerator, wg *sync.WaitGroup, dataDir string, logger log.Logger) {
-	// add one goroutine to the wait-list
-	wg.Add(1)
-
-	// start the first node
-	go StartNode(wg, miningNodeArgs(dataDir, 1), 1, logger)
-
-	// sleep for a while to allow first node to start
-	time.Sleep(time.Second * 10)
-
-	// get the enode of the first node
-	enode, err := getEnode(reqGen, logger)
-	if err != nil {
-		logger.Error("Starting the node", "error", err)
-	}
-
-	// add one goroutine to the wait-list
-	wg.Add(1)
-
-	// start the second node, connect it to the mining node with the enode
-	go StartNode(wg, nonMiningNodeArgs(dataDir, 2, enode), 2, logger)
+type NetworkNode interface {
+	Start(nw *Network, nodeNumber int) error
+	getEnode() (string, error)
+	node() *Node
 }
 
-// StartNode starts an erigon node on the dev chain
-func StartNode(wg *sync.WaitGroup, args []string, nodeNumber int, logger log.Logger) {
+type Node struct {
+	*requests.RequestGenerator `arg:"-"`
+	BuildDir                   string `arg:"positional" default:"./build/bin/devnet"`
+	DataDir                    string `arg:"--datadir" default:"./dev"`
+	Chain                      string `arg:"--chain" default:"dev"`
+	ConsoleVerbosity           string `arg:"--log.console.verbosity" default:"0"`
+	DirVerbosity               string `arg:"--log.dir.verbosity"`
+	LogDirPath                 string `arg:"--log.dir.path"` //default:"./cmd/devnet/debug_logs"
+	P2PProtocol                string `arg:"--p2p.protocol" default:"68"`
+	Downloader                 string `arg:"--no-downloader" default:"true"`
+	PrivateApiAddr             string `arg:"--private.api.addr" default:"localhost:9090"`
+	HttpPort                   int    `arg:"--http.port" default:"8545"`
+	AuthRpcPort                int    `arg:"--authrpc.port" default:"8551"`
+	WSPort                     int    `arg:"-" default:"8546"` // flag not defined
+	GRPCPort                   int    `arg:"-" default:"8547"` // flag not defined
+	TCPPort                    int    `arg:"-" default:"8548"` // flag not defined
+	StaticPeers                string `arg:"--staticpeers"`
+	WithoutHeimdall            bool   `arg:"--bor.withoutheimdall" flag:"" default:"false"`
+}
+
+// getEnode returns the enode of the mining node
+func (node Node) getEnode() (string, error) {
+	reqCount := 0
+
+	for {
+		nodeInfo, err := node.AdminNodeInfo()
+
+		if err != nil {
+			if reqCount < 10 {
+				var urlErr *url.Error
+				if errors.As(err, &urlErr) {
+					var opErr *net.OpError
+					if errors.As(urlErr.Err, &opErr) {
+						var callErr *os.SyscallError
+						if errors.As(opErr.Err, &callErr) {
+							if callErr.Syscall == "connectex" {
+								reqCount++
+								delay, _ := rand.Int(rand.Reader, big.NewInt(4))
+								time.Sleep(time.Duration(delay.Int64()+1) * time.Second)
+								continue
+							}
+						}
+					}
+				}
+			}
+
+			return "", err
+		}
+
+		enode, err := devnetutils.UniqueIDFromEnode(nodeInfo.Enode)
+
+		if err != nil {
+			return "", err
+		}
+
+		return enode, nil
+	}
+}
+
+func (node *Node) configure(nw *Network, nodeNumber int) (err error) {
+	node.DataDir = filepath.Join(nw.DataDir, fmt.Sprintf("%d", nodeNumber))
+
+	//TODO add a log.dir.prefix arg and set it to the node name (node-%d)
+	//node.LogDirPath = filepath.Join(nw.DataDir, "logs")
+
+	node.Chain = nw.Chain
+
+	node.StaticPeers = strings.Join(nw.peers, ",")
+
+	node.PrivateApiAddr, _, err = portFromBase(nw.BasePrivateApiAddr, nodeNumber, 1)
+
+	if err != nil {
+		return err
+	}
+
+	httpApiAddr, apiPort, err := portFromBase(nw.BaseRPCAddr, nodeNumber, 5)
+
+	if err != nil {
+		return err
+	}
+
+	node.HttpPort = apiPort
+	node.WSPort = apiPort + 1
+	node.GRPCPort = apiPort + 2
+	node.TCPPort = apiPort + 3
+	node.AuthRpcPort = apiPort + 4
+
+	node.RequestGenerator = requests.NewRequestGenerator("http://"+httpApiAddr, nw.Logger)
+
+	return nil
+}
+
+type Miner struct {
+	Node
+	Mine      bool   `arg:"--mine" flag:"true"`
+	DevPeriod string `arg:"--dev.period" default:"30"`
+	HttpApi   string `arg:"--http.api" default:"admin,eth,erigon,web3,net,debug,trace,txpool,parity,ots"`
+	WS        string `arg:"--ws" flag:"" default:"true"`
+}
+
+func (node *Miner) node() *Node {
+	return &node.Node
+}
+
+func (node *Miner) Start(nw *Network, nodeNumber int) (err error) {
+	err = node.configure(nw, nodeNumber)
+
+	if err != nil {
+		return err
+	}
+
+	switch node.Chain {
+	case networkname.BorDevnetChainName:
+		node.WithoutHeimdall = true
+	}
+
+	args, err := devnetutils.AsArgs(node)
+
+	if err != nil {
+		return err
+	}
+
+	nw.wg.Add(1)
+
+	go startNode(&nw.wg, args, nodeNumber, nw.Logger)
+
+	return nil
+}
+
+type NonMiner struct {
+	Node
+	HttpApi     string `arg:"--http.api" default:"eth,debug,net,trace,web3,erigon"`
+	TorrentPort string `arg:"--torrent.port" default:"42070"`
+	NoDiscover  string `arg:"--nodiscover" flag:"" default:"true"`
+}
+
+func (node *NonMiner) node() *Node {
+	return &node.Node
+}
+
+func (node *NonMiner) Start(nw *Network, nodeNumber int) (err error) {
+	err = node.configure(nw, nodeNumber)
+
+	if err != nil {
+		return err
+	}
+
+	args, err := devnetutils.AsArgs(node)
+
+	if err != nil {
+		return err
+	}
+
+	nw.wg.Add(1)
+
+	go startNode(&nw.wg, args, nodeNumber, nw.Logger)
+
+	return nil
+}
+
+func portFromBase(baseAddr string, increment int, portCount int) (string, int, error) {
+	apiHost, apiPort, err := net.SplitHostPort(baseAddr)
+
+	if err != nil {
+		return "", -1, err
+	}
+
+	portNo, err := strconv.Atoi(apiPort)
+
+	if err != nil {
+		return "", -1, err
+	}
+
+	portNo += (increment * portCount)
+
+	return fmt.Sprintf("%s:%d", apiHost, portNo), portNo, nil
+}
+
+// startNode starts an erigon node on the dev chain
+func startNode(wg *sync.WaitGroup, args []string, nodeNumber int, logger log.Logger) {
 	logger.Info("Running node", "number", nodeNumber, "args", args)
 
 	// catch any errors and avoid panics if an error occurs
@@ -59,16 +226,19 @@ func StartNode(wg *sync.WaitGroup, args []string, nodeNumber int, logger log.Log
 
 		logger.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
 		wg.Done()
+		//TODO - this should be at process end not here wg should be enough
 		os.Exit(1)
 	}()
 
-	app := erigonapp.MakeApp("devnet", runNode, erigoncli.DefaultFlags)
+	app := erigonapp.MakeApp(fmt.Sprintf("node-%d", nodeNumber), runNode, erigoncli.DefaultFlags)
+
 	if err := app.Run(args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
 			logger.Warn("Error writing app run error to stderr", "err", printErr)
 		}
 		wg.Done()
+		//TODO - this should be at process end not here wg should be enough
 		os.Exit(1)
 	}
 }
@@ -98,61 +268,4 @@ func runNode(ctx *cli.Context) error {
 		logger.Error("error while serving Devnet node", "err", err)
 	}
 	return err
-}
-
-// miningNodeArgs returns custom args for starting a mining node
-func miningNodeArgs(dataDir string, nodeNumber int) []string {
-	nodeDataDir := filepath.Join(dataDir, fmt.Sprintf("%d", nodeNumber))
-	dataDirArg, _ := models.ParameterFromArgument(models.DataDirArg, nodeDataDir)
-	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
-	devPeriod, _ := models.ParameterFromArgument(models.DevPeriodArg, models.DevPeriodParam)
-	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamMine)
-	httpApi, _ := models.ParameterFromArgument(models.HttpApiArg, models.HttpApiParam)
-	ws := models.WSArg
-	consoleVerbosity, _ := models.ParameterFromArgument(models.ConsoleVerbosityArg, models.ConsoleVerbosityParam)
-	p2pProtocol, _ := models.ParameterFromArgument("--p2p.protocol", "68")
-	downloaderArg, _ := models.ParameterFromArgument("--no-downloader", "true")
-
-	return []string{models.BuildDirArg, dataDirArg, chainType, privateApiAddr, models.Mine, httpApi, ws, devPeriod, consoleVerbosity, p2pProtocol, downloaderArg}
-}
-
-// nonMiningNodeArgs returns custom args for starting a non-mining node
-func nonMiningNodeArgs(dataDir string, nodeNumber int, enode string) []string {
-	nodeDataDir := filepath.Join(dataDir, fmt.Sprintf("%d", nodeNumber))
-	dataDirArg, _ := models.ParameterFromArgument(models.DataDirArg, nodeDataDir)
-	chainType, _ := models.ParameterFromArgument(models.ChainArg, models.ChainParam)
-	privateApiAddr, _ := models.ParameterFromArgument(models.PrivateApiAddrArg, models.PrivateApiParamNoMine)
-	staticPeers, _ := models.ParameterFromArgument(models.StaticPeersArg, enode)
-	consoleVerbosity, _ := models.ParameterFromArgument(models.ConsoleVerbosityArg, models.ConsoleVerbosityParam)
-	torrentPort, _ := models.ParameterFromArgument(models.TorrentPortArg, models.TorrentPortParam)
-	p2pProtocol, _ := models.ParameterFromArgument("--p2p.protocol", "68")
-	downloaderArg, _ := models.ParameterFromArgument("--no-downloader", "true")
-
-	return []string{models.BuildDirArg, dataDirArg, chainType, privateApiAddr, staticPeers, models.NoDiscover, consoleVerbosity, torrentPort, p2pProtocol, downloaderArg}
-}
-
-// getEnode returns the enode of the mining node
-func getEnode(reqGen *requests.RequestGenerator, logger log.Logger) (string, error) {
-	nodeInfo, err := requests.AdminNodeInfo(reqGen, logger)
-	if err != nil {
-		return "", err
-	}
-
-	enode, err := devnetutils.UniqueIDFromEnode(nodeInfo.Enode)
-	if err != nil {
-		return "", err
-	}
-
-	return enode, nil
-}
-
-// QuitOnSignal stops the node goroutines after all checks have been made on the devnet
-func QuitOnSignal(wg *sync.WaitGroup) {
-	models.QuitNodeChan = make(chan bool)
-	go func() {
-		for <-models.QuitNodeChan {
-			wg.Done()
-			wg.Done()
-		}
-	}()
 }

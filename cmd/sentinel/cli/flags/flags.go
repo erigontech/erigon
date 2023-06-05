@@ -87,4 +87,14 @@ var (
 		Name:  "initial-sync",
 		Usage: "use initial-sync",
 	}
+	RecordModeFlag = cli.BoolFlag{
+		Value: false,
+		Name:  "record-mode",
+		Usage: "enable/disable record mode",
+	}
+	RecordModeDir = cli.StringFlag{
+		Value: "caplin-recordings",
+		Name:  "record-dir",
+		Usage: "directory for states and block recordings",
+	}
 )
