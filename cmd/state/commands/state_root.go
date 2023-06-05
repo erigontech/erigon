@@ -157,7 +157,7 @@ func StateRoot(genesis *types.Genesis, logger log.Logger, blockNum uint64, datad
 			h, _ := blockReader.Header(ctx, historyTx, hash, number)
 			return h
 		}
-		if _, err = runBlock(ethash.NewFullFaker(), intraBlockState, noOpWriter, w, chainConfig, getHeader, b, vmConfig, false); err != nil {
+		if _, err = runBlock(ethash.NewFullFaker(), intraBlockState, noOpWriter, w, chainConfig, getHeader, b, vmConfig, false, logger); err != nil {
 			return fmt.Errorf("block %d: %w", block, err)
 		}
 		if block+1 == blockNum {
