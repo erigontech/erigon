@@ -50,7 +50,7 @@ type Index struct {
 	bucketSize         int
 	size               int64
 	modTime            time.Time
-	baseDataID         uint64
+	baseDataID         uint64 // Index internaly organized as [0,N) array. Use this field to map EntityID=[M;M+N) to [0,N)
 	bucketCount        uint64 // Number of buckets
 	keyCount           uint64
 	recMask            uint64
