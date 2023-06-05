@@ -8,25 +8,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/metrics/methelp"
 )
-
-type BlockProcessor interface {
-	ProcessBlockHeader(s *state.BeaconState, block *cltypes.BeaconBlock) error
-	ProcessWithdrawals(s *state.BeaconState, withdrawals *solid.ListSSZ[*types.Withdrawal]) error
-	ProcessExecutionPayload(s *state.BeaconState, payload *cltypes.Eth1Block) error
-	ProcessRandao(s *state.BeaconState, randao [96]byte, proposerIndex uint64) error
-	ProcessEth1Data(state *state.BeaconState, eth1Data *cltypes.Eth1Data) error
-	ProcessProposerSlashing(s *state.BeaconState, propSlashing *cltypes.ProposerSlashing) error
-	ProcessAttesterSlashing(s *state.BeaconState, attSlashing *cltypes.AttesterSlashing) error
-	ProcessAttestations(s *state.BeaconState, attestations *solid.ListSSZ[*solid.Attestation]) error
-	ProcessSyncAggregate(s *state.BeaconState, sync *cltypes.SyncAggregate) error
-	ProcessVoluntaryExit(s *state.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit) error
-	ProcessBlsToExecutionChange(state *state.BeaconState, signedChange *cltypes.SignedBLSToExecutionChange) error
-	ProcessDeposit(s *state.BeaconState, deposit *cltypes.Deposit) error
-	VerifyKzgCommitmentsAgainstTransactions(transactions *solid.TransactionsSSZ, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) (bool, error)
-}
 
 // ProcessBlock processes a block with the block processor
 func ProcessBlock(impl BlockProcessor, s *state.BeaconState, signedBlock *cltypes.SignedBeaconBlock) error {
@@ -86,7 +69,7 @@ func ProcessBlock(impl BlockProcessor, s *state.BeaconState, signedBlock *cltype
 }
 
 // ProcessOperations is called by ProcessBlock and prcesses the block body operations
-func ProcessOperations(impl BlockProcessor, s *state.BeaconState, blockBody *cltypes.BeaconBody) error {
+func ProcessOperations(impl BlockOperationProcessor, s *state.BeaconState, blockBody *cltypes.BeaconBody) error {
 	if blockBody.Deposits.Len() != int(maximumDeposits(s)) {
 		return errors.New("outstanding deposits do not match maximum deposits")
 	}
