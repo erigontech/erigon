@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -19,22 +19,22 @@ func computeSigningRootEpoch(epoch uint64, domain []byte) (libcommon.Hash, error
 	return utils.Keccak256(b, domain), nil
 }
 
-func ProcessBlockHeader(state *state2.BeaconState, block *cltypes.BeaconBlock, fullValidation bool) error {
+func ProcessBlockHeader(s *state.BeaconState, block *cltypes.BeaconBlock, fullValidation bool) error {
 	if fullValidation {
-		if block.Slot != state.Slot() {
-			return fmt.Errorf("state slot: %d, not equal to block slot: %d", state.Slot(), block.Slot)
+		if block.Slot != s.Slot() {
+			return fmt.Errorf("state slot: %d, not equal to block slot: %d", s.Slot(), block.Slot)
 		}
-		if block.Slot <= state.LatestBlockHeader().Slot {
-			return fmt.Errorf("slock slot: %d, not greater than latest block slot: %d", block.Slot, state.LatestBlockHeader().Slot)
+		if block.Slot <= s.LatestBlockHeader().Slot {
+			return fmt.Errorf("slock slot: %d, not greater than latest block slot: %d", block.Slot, s.LatestBlockHeader().Slot)
 		}
-		propInd, err := state.GetBeaconProposerIndex()
+		propInd, err := s.GetBeaconProposerIndex()
 		if err != nil {
 			return fmt.Errorf("error in GetBeaconProposerIndex: %v", err)
 		}
 		if block.ProposerIndex != propInd {
 			return fmt.Errorf("block proposer index: %d, does not match beacon proposer index: %d", block.ProposerIndex, propInd)
 		}
-		blockHeader := state.LatestBlockHeader()
+		blockHeader := s.LatestBlockHeader()
 		latestRoot, err := (&blockHeader).HashSSZ()
 		if err != nil {
 			return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
@@ -48,14 +48,14 @@ func ProcessBlockHeader(state *state2.BeaconState, block *cltypes.BeaconBlock, f
 	if err != nil {
 		return fmt.Errorf("unable to hash tree root of block body: %v", err)
 	}
-	state.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
+	s.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
 		Slot:          block.Slot,
 		ProposerIndex: block.ProposerIndex,
 		ParentRoot:    block.ParentRoot,
 		BodyRoot:      bodyRoot,
 	})
 
-	proposer, err := state.ValidatorForValidatorIndex(int(block.ProposerIndex))
+	proposer, err := s.ValidatorForValidatorIndex(int(block.ProposerIndex))
 	if err != nil {
 		return err
 	}
@@ -65,8 +65,8 @@ func ProcessBlockHeader(state *state2.BeaconState, block *cltypes.BeaconBlock, f
 	return nil
 }
 
-func ProcessRandao(s *state2.BeaconState, randao [96]byte, proposerIndex uint64, fullValidation bool) error {
-	epoch := state2.Epoch(s.BeaconState)
+func ProcessRandao(s *state.BeaconState, randao [96]byte, proposerIndex uint64, fullValidation bool) error {
+	epoch := state.Epoch(s.BeaconState)
 	proposer, err := s.ValidatorForValidatorIndex(int(proposerIndex))
 	if err != nil {
 		return err
@@ -100,7 +100,7 @@ func ProcessRandao(s *state2.BeaconState, randao [96]byte, proposerIndex uint64,
 	return nil
 }
 
-func ProcessEth1Data(state *state2.BeaconState, eth1Data *cltypes.Eth1Data) error {
+func ProcessEth1Data(state *state.BeaconState, eth1Data *cltypes.Eth1Data) error {
 	state.AddEth1DataVote(eth1Data)
 	newVotes := state.Eth1DataVotes()
 
