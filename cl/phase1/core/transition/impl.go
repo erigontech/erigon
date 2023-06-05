@@ -13,6 +13,8 @@ import (
 
 var _ machine.Interface = (*impl)(nil)
 
+var DefaultMachine = &impl{}
+
 type impl struct {
 	FullValidation bool
 }

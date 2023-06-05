@@ -85,7 +85,7 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	if baseState.Slot() < f.computeStartSlotAtEpoch(checkpoint.Epoch()) {
 		log.Debug("Long checkpoint detected")
 		// If we require to change it then process the future epoch
-		if err := transition.ProcessSlots(baseState, f.computeStartSlotAtEpoch(checkpoint.Epoch())); err != nil {
+		if err := transition.DefaultMachine.ProcessSlots(baseState, f.computeStartSlotAtEpoch(checkpoint.Epoch())); err != nil {
 			return nil, err
 		}
 	}
