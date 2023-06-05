@@ -121,7 +121,7 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *exec22.
 }
 
 func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDomains) error {
-	return nil
+	//return nil
 	var acc accounts.Account
 
 	if txTask.WriteLists != nil {
@@ -138,14 +138,12 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 						if err := domains.DeleteAccount(kb, list.Vals[k]); err != nil {
 							return err
 						}
+						fmt.Printf("applied %x DELETE\n", kb)
+						continue
 					} else {
 						if err := domains.UpdateAccountData(kb, list.Vals[k], prev); err != nil {
 							return err
 						}
-					}
-					if list.Vals[k] == nil {
-						fmt.Printf("applied %x deleted\n", kb)
-						continue
 					}
 					acc.Reset()
 					accounts.DeserialiseV3(&acc, list.Vals[k])

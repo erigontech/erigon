@@ -73,8 +73,8 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
 	}
-	w4, _ := state.WrapStateIO(rs.Domains())
-	w.stateWriter = state.NewMultiStateWriter(w4, w.bufferedWriter)
+	//w4, _ := state.WrapStateIO(rs.Domains())
+	w.stateWriter = state.NewMultiStateWriter( /*w4,*/ w.bufferedWriter)
 
 	w.getHeader = func(hash libcommon.Hash, number uint64) *types.Header {
 		h, err := blockReader.Header(ctx, w.chainTx, hash, number)

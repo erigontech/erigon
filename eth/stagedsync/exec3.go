@@ -689,17 +689,17 @@ Loop:
 		if !parallel {
 			outputBlockNum.Set(blockNum)
 			// MA commitment
-			if blockNum > 0 {
-				rh, err := agg.ComputeCommitment(false, false)
-				if err != nil {
-					return fmt.Errorf("StateV3.Apply: %w", err)
-				}
-				if !bytes.Equal(rh, header.Root.Bytes()) {
-					log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(header.Root.Bytes()), "bn", blockNum, "txn", inputTxNum)
-
-					return fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, header.Root.Bytes(), blockNum)
-				}
+			//if blockNum > 0 {
+			rh, err := agg.ComputeCommitment(true, false)
+			if err != nil {
+				return fmt.Errorf("StateV3.Apply: %w", err)
 			}
+			if !bytes.Equal(rh, header.Root.Bytes()) {
+				log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(header.Root.Bytes()), "bn", blockNum, "txn", inputTxNum)
+
+				return fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, header.Root.Bytes(), blockNum)
+			}
+			//}
 
 			select {
 			case <-logEvery.C:
