@@ -250,13 +250,22 @@ const (
 
 	BlockBody = "BlockBody" // block_num_u64 + hash -> block body
 
-	// EthTx - stores only txs of canonical blocks. As a result - id's used in this table are also
-	// canonical - same across all nodex in network - regardless reorgs. Transactions of
-	// non-canonical blocs are not removed, but moved to NonCanonicalTransaction - then during re-org don't
-	// need re-download block from network.
+	// Naming:
+	//  TxNum - Ethereum canonical transaction number - same across all nodes.
+	//  TxnID - auto-increment ID - can be differrent across all nodes
+	//  BlockNum/BlockID - same
+	//
+	// EthTx - stores all transactions of Canonical/NonCanonical/Bad blocks
+	// TxnID (auto-increment ID) - means nodes in network will have different ID of same transactions
+	// Snapshots (frozen data): using TxNum (not TxnID)
+	//
+	// During ReOrg - txs are not removed/updated
+	//
 	// Also this table has system-txs before and after block: if
-	// block has no system-tx - records are absent, but sequence increasing
-	EthTx           = "BlockTransaction"        // tbl_sequence_u64 -> rlp(tx)
+	// block has no system-tx - records are absent, but TxnID increasing
+	//
+	// In Erigon3: table MaxTxNum storing TxNum (not TxnID). History/Indices are using TxNum (not TxnID).
+	EthTx           = "BlockTransaction"        // tx_id_u64 -> rlp(tx)
 	NonCanonicalTxs = "NonCanonicalTransaction" // tbl_sequence_u64 -> rlp(tx)
 	MaxTxNum        = "MaxTxNum"                // block_number_u64 -> max_tx_num_in_block_u64
 
