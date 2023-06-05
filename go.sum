@@ -449,6 +449,8 @@ github.com/ledgerwatch/erigon-lib v0.0.0-20230603101257-079c50c8e7e9 h1:1rVUe0LK
 github.com/ledgerwatch/erigon-lib v0.0.0-20230603101257-079c50c8e7e9/go.mod h1:FhbowXTrC1rT1Les246ls279E7EtF05T/3AWbKN3oI8=
 github.com/ledgerwatch/erigon-snapshot v1.2.0 h1:Pf6eu5XqB29Mlg3oY9zxZ8qenSi2azgcwuNRDvV2rAM=
 github.com/ledgerwatch/erigon-snapshot v1.2.0/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
+github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230605042354-196538d42475 h1:1BvWA6agTUS4RZUHx79f45HpvelMVv4iEddaURUYcC8=
+github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230605042354-196538d42475/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
 github.com/ledgerwatch/log/v3 v3.8.0 h1:gCpp7uGtIerEz1jKVPeDnbIopFPud9ZnCpBLlLBGqPU=
 github.com/ledgerwatch/log/v3 v3.8.0/go.mod h1:J2Jl6zV/58LeA6LTaVVnCGyf1/cYYSEOOLHY4ZN8S2A=
 github.com/ledgerwatch/secp256k1 v1.0.0 h1:Usvz87YoTG0uePIV8woOof5cQnLXGYa162rFf3YnwaQ=
