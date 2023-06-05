@@ -276,9 +276,14 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		logger.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 	parallel := initialCycle && tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, logPrefix,
-		to, logger); err != nil {
-		return fmt.Errorf("ExecV3: %w", err)
+	if parallel {
+		if err := ExecV3Parallel(ctx, s, u, workersCount, cfg, tx, logPrefix, to, logger); err != nil {
+			return fmt.Errorf("ExecV3Parallel: %w", err)
+		}
+	} else {
+		if err := ExecV3(ctx, s, u, workersCount, cfg, tx, logPrefix, to, logger); err != nil {
+			return fmt.Errorf("ExecV3Parallel: %w", err)
+		}
 	}
 	return nil
 }
