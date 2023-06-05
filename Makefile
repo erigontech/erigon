@@ -108,7 +108,6 @@ erigon: go-version erigon.cmd
 COMMANDS += devnet
 COMMANDS += erigon-el-mock
 COMMANDS += downloader
-COMMANDS += erigon-cl
 COMMANDS += hack
 COMMANDS += integration
 COMMANDS += observer
@@ -167,7 +166,7 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.52.2
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.53.2
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:

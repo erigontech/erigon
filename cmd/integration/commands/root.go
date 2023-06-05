@@ -13,12 +13,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/core/state/historyv2read"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
@@ -55,7 +53,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(opts kv2.MdbxOpts, applyMigrations bool) (kv.RwDB, error) {
+func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
 	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
 	// to read all options from DB, instead of overriding them
 	opts = opts.Flags(func(f uint) uint { return f | mdbx.Accede })
@@ -68,10 +66,10 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool) (kv.RwDB, error) {
 			return nil, err
 		}
 		if has {
-			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
+			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
 			db = opts.Exclusive().MustOpen()
-			if err := migrator.Apply(db, datadirCli); err != nil {
+			if err := migrator.Apply(db, datadirCli, logger); err != nil {
 				return nil, err
 			}
 			db.Close()
@@ -92,8 +90,8 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool) (kv.RwDB, error) {
 			return nil, err
 		}
 		if h3 {
-			_, agg := allSnapshots(context.Background(), db)
-			tdb, err := temporal.New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chain])
+			_, agg := allSnapshots(context.Background(), db, logger)
+			tdb, err := temporal.New(db, agg, systemcontracts.SystemContractCodeLookup[chain])
 			if err != nil {
 				return nil, err
 			}

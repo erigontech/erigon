@@ -12,6 +12,8 @@ import (
 	"syscall"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -59,8 +61,8 @@ func importChain(cliCtx *cli.Context) error {
 		return err
 	}
 
-	nodeCfg := turboNode.NewNodConfigUrfave(cliCtx)
-	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg)
+	nodeCfg := turboNode.NewNodConfigUrfave(cliCtx, logger)
+	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
 	stack := makeConfigNode(nodeCfg, logger)
 	defer stack.Close()
@@ -69,19 +71,19 @@ func importChain(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	err = ethereum.Init(stack, ethCfg, logger)
+	err = ethereum.Init(stack, ethCfg)
 	if err != nil {
 		return err
 	}
 
-	if err := ImportChain(ethereum, ethereum.ChainDB(), cliCtx.Args().First()); err != nil {
+	if err := ImportChain(ethereum, ethereum.ChainDB(), cliCtx.Args().First(), logger); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string) error {
+func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.Logger) error {
 	// Watch for Ctrl-C while the import is running.
 	// If a signal is received, the import will stop at the next batch.
 	interrupt := make(chan os.Signal, 1)
@@ -91,7 +93,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string) error {
 	defer close(interrupt)
 	go func() {
 		if _, ok := <-interrupt; ok {
-			log.Info("Interrupted during import, stopping at next batch")
+			logger.Info("Interrupted during import, stopping at next batch")
 		}
 		close(stop)
 	}()
@@ -104,7 +106,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string) error {
 		}
 	}
 
-	log.Info("Importing blockchain", "file", fn)
+	logger.Info("Importing blockchain", "file", fn)
 
 	// Open the file handle and potentially unwrap the gzip stream
 	fh, err := os.Open(fn)
@@ -153,9 +155,10 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string) error {
 			return fmt.Errorf("interrupted")
 		}
 
-		missing := missingBlocks(chainDB, blocks[:i])
+		br, _ := ethereum.BlockIO()
+		missing := missingBlocks(chainDB, blocks[:i], br)
 		if len(missing) == 0 {
-			log.Info("Skipping batch as all blocks present", "batch", batch, "first", blocks[0].Hash(), "last", blocks[i-1].Hash())
+			logger.Info("Skipping batch as all blocks present", "batch", batch, "first", blocks[0].Hash(), "last", blocks[i-1].Hash())
 			continue
 		}
 
@@ -165,7 +168,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string) error {
 			TopBlock: missing[len(missing)-1],
 		}
 
-		if err := InsertChain(ethereum, missingChain); err != nil {
+		if err := InsertChain(ethereum, missingChain, logger); err != nil {
 			return err
 		}
 	}
@@ -183,13 +186,11 @@ func ChainHasBlock(chainDB kv.RwDB, block *types.Block) bool {
 	return chainHasBlock
 }
 
-func missingBlocks(chainDB kv.RwDB, blocks []*types.Block) []*types.Block {
+func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.FullBlockReader) []*types.Block {
 	var headBlock *types.Block
 	chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
-		hash := rawdb.ReadHeadHeaderHash(tx)
-		number := rawdb.ReadHeaderNumber(tx, hash)
-		headBlock = rawdb.ReadBlock(tx, hash, *number)
-		return nil
+		headBlock, err = blockReader.CurrentBlock(tx)
+		return err
 	})
 
 	for i, block := range blocks {
@@ -209,7 +210,7 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block) []*types.Block {
 	return nil
 }
 
-func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack) error {
+func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logger) error {
 	sentryControlServer := ethereum.SentryControlServer()
 	initialCycle := false
 
@@ -219,8 +220,10 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack) error {
 	}
 
 	sentryControlServer.Hd.MarkAllVerified()
+	blockReader, _ := ethereum.BlockIO()
 
-	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainConfig(), ethereum.ChainDB(), ethereum.StagedSync(), ethereum.Notifications(), initialCycle, sentryControlServer.UpdateHead)
+	hook := stages.NewHook(ethereum.SentryCtx(), ethereum.Notifications(), ethereum.StagedSync(), blockReader, ethereum.ChainConfig(), logger, sentryControlServer.UpdateHead)
+	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainDB(), ethereum.StagedSync(), initialCycle, logger, blockReader.Snapshots().(*snapshotsync.RoSnapshots), hook)
 	if err != nil {
 		return err
 	}

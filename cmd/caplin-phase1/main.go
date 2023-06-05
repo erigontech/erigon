@@ -18,6 +18,11 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon/cl/freezer"
+	"github.com/ledgerwatch/erigon/cl/phase1/core"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -26,8 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/caplin-phase1/caplin1"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
@@ -37,7 +40,7 @@ import (
 )
 
 func main() {
-	app := lightclientapp.MakeApp("caplin-phase1", runCaplinNode, flags.LCDefaultFlags)
+	app := lightclientapp.MakeApp("caplin-phase1", runCaplinNode, flags.CLDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -53,16 +56,21 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	if err != nil {
 		log.Error("[Phase1] Could not initialize caplin", "err", err)
 	}
-
-	if _, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if _, err := debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Phase1]", "chain", cliCtx.String(flags.Chain.Name))
 	log.Info("[Phase1] Running Caplin", "cfg", cfg)
-	state, err := core.RetrieveBeaconState(ctx, cfg.BeaconCfg, cfg.GenesisCfg, cfg.CheckpointUri)
-	if err != nil {
-		return err
+	// Either start from genesis or a checkpoint
+	var state *state.BeaconState
+	if cfg.InitialSync {
+		state = cfg.InitalState
+	} else {
+		state, err = core.RetrieveBeaconState(ctx, cfg.BeaconCfg, cfg.GenesisCfg, cfg.CheckpointUri)
+		if err != nil {
+			return err
+		}
 	}
 
 	forkDigest, err := fork.ComputeForkDigest(cfg.BeaconCfg, cfg.GenesisCfg)
@@ -80,11 +88,11 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		NoDiscovery:   cfg.NoDiscovery,
 	}, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
 		ForkDigest:     forkDigest,
-		FinalizedRoot:  state.FinalizedCheckpoint().Root,
-		FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
-		HeadSlot:       state.FinalizedCheckpoint().Epoch * cfg.BeaconCfg.SlotsPerEpoch,
-		HeadRoot:       state.FinalizedCheckpoint().Root,
-	})
+		FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
+		FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
+		HeadSlot:       state.FinalizedCheckpoint().Epoch() * cfg.BeaconCfg.SlotsPerEpoch,
+		HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
+	}, log.Root())
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 	}
@@ -104,5 +112,12 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		defer cc.Close()
 		engine = execution_client.NewExecutionEnginePhase1FromClient(ctx, remote.NewETHBACKENDClient(cc))
 	}
-	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, engine, state)
+	var caplinFreezer freezer.Freezer
+	if cfg.RecordMode {
+		caplinFreezer = &freezer.RootPathOsFs{
+			Root: cfg.RecordDir,
+		}
+	}
+
+	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, engine, state, caplinFreezer)
 }

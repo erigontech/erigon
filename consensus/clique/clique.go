@@ -30,17 +30,18 @@ import (
 
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -194,11 +195,12 @@ type Clique struct {
 	FakeDiff bool // Skip difficulty verifications
 
 	exitCh chan struct{}
+	logger log.Logger
 }
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliqueDB kv.RwDB) *Clique {
+func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliqueDB kv.RwDB, logger log.Logger) *Clique {
 	config := cfg.Clique
 
 	// Set any missing consensus parameters to their defaults
@@ -221,18 +223,19 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliq
 		signatures:     signatures,
 		proposals:      make(map[libcommon.Address]bool),
 		exitCh:         exitCh,
+		logger:         logger,
 	}
 
 	// warm the cache
-	snapNum, err := lastSnapshot(cliqueDB)
+	snapNum, err := lastSnapshot(cliqueDB, logger)
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
-			log.Error("on Clique init while getting latest snapshot", "err", err)
+			logger.Error("on Clique init while getting latest snapshot", "err", err)
 		}
 	} else {
 		snaps, err := c.snapshots(snapNum, warmupCacheSnapshots)
 		if err != nil {
-			log.Error("on Clique init", "err", err)
+			logger.Error("on Clique init", "err", err)
 		}
 
 		for _, sn := range snaps {
@@ -366,6 +369,11 @@ func (c *Clique) Initialize(config *chain.Config, chain consensus.ChainHeaderRea
 	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 }
 
+func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall,
+) ([]consensus.Reward, error) {
+	return []consensus.Reward{}, nil
+}
+
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
@@ -374,13 +382,6 @@ func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *sta
 ) (types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
-	if config.IsCancun(header.Time) {
-		if parent := chain.GetHeaderByHash(header.ParentHash); parent != nil {
-			header.SetExcessDataGas(misc.CalcExcessDataGas(parent.ExcessDataGas, misc.CountBlobs(txs)))
-		} else {
-			header.SetExcessDataGas(new(big.Int))
-		}
-	}
 	return txs, r, nil
 }
 
@@ -420,7 +421,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	}
 	// For 0-period chains, refuse to seal empty blocks (no reward but would spin sealing)
 	if c.config.Period == 0 && len(block.Transactions()) == 0 {
-		log.Info("Sealing paused, waiting for transactions")
+		c.logger.Info("Sealing paused, waiting for transactions")
 		return nil
 	}
 	// Don't hold the signer fields for the entire sealing procedure
@@ -441,7 +442,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		if recent == signer {
 			// Signer is among RecentsRLP, only wait if the current block doesn't shift it out
 			if limit := uint64(len(snap.Signers)/2 + 1); number < limit || seen > number-limit {
-				log.Info("Signed recently, must wait for others")
+				c.logger.Info("Signed recently, must wait for others")
 				return nil
 			}
 		}
@@ -453,7 +454,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
 		delay += time.Duration(rand.Int63n(int64(wiggle))) // nolint: gosec
 
-		log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
+		c.logger.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 	}
 	// Sign all the things!
 	sighash, err := signFn(signer, accounts.MimetypeClique, CliqueRLP(header))
@@ -462,7 +463,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	}
 	copy(header.Extra[len(header.Extra)-ExtraSeal:], sighash)
 	// Wait until sealing is terminated or delay timeout.
-	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+	c.logger.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
 	go func() {
 		defer debug.LogPanic()
 		select {
@@ -474,7 +475,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		select {
 		case results <- block.WithSeal(header):
 		default:
-			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
+			c.logger.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
 		}
 	}()
 
@@ -536,7 +537,7 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}
 }
 
-func NewCliqueAPI(db kv.RoDB, engine consensus.EngineReader) rpc.API {
+func NewCliqueAPI(db kv.RoDB, engine consensus.EngineReader, blockReader services.FullBlockReader) rpc.API {
 	var c *Clique
 	if casted, ok := engine.(*Clique); ok {
 		c = casted
@@ -545,7 +546,7 @@ func NewCliqueAPI(db kv.RoDB, engine consensus.EngineReader) rpc.API {
 	return rpc.API{
 		Namespace: "clique",
 		Version:   "1.0",
-		Service:   &API{db: db, clique: c},
+		Service:   &API{db: db, clique: c, blockReader: blockReader},
 		Public:    false,
 	}
 }

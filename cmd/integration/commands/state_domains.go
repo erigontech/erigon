@@ -127,7 +127,7 @@ var readDomains = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true)
+		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -157,7 +157,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	mode := libstate.ParseCommitmentMode(commitmentMode)
 	libstate.COMPARE_INDEXES = true
 
-	_, _, _, agg := newDomains(ctx, chainDb, stepSize, mode, trieVariant)
+	_, _, _, agg := newDomains(ctx, chainDb, stepSize, mode, trieVariant, logger)
 	defer agg.Close()
 
 	histTx, err := chainDb.BeginRo(ctx)
@@ -241,7 +241,7 @@ var stateDomains = &cobra.Command{
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true)
+		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -276,7 +276,7 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context, logger lo
 	}
 	mode := libstate.ParseCommitmentMode(commitmentMode)
 
-	engine, cfg, _, agg := newDomains(ctx, chainDb, stepSize, mode, trieVariant)
+	engine, cfg, _, agg := newDomains(ctx, chainDb, stepSize, mode, trieVariant, logger)
 	defer agg.Close()
 
 	agg.SetDB(stateDb)
@@ -305,13 +305,14 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context, logger lo
 	}
 
 	aggWriter, aggReader := WrapAggregator(agg, stateTx)
+	br, _ := blocksIO(chainDb, logger)
 	proc := blockProcessor{
 		chainConfig: fromdb.ChainConfig(chainDb),
 		vmConfig:    vm.Config{},
 		engine:      engine,
 		reader:      aggReader,
 		writer:      aggWriter,
-		blockReader: getBlockReader(chainDb),
+		blockReader: br,
 		stateTx:     stateTx,
 		stateDb:     stateDb,
 		blockNum:    latestBlock,
@@ -552,14 +553,13 @@ func (b *blockProcessor) applyBlock(
 	}
 
 	getHashFn := core.GetHashFn(header, b.getHeader)
-	parentHeader := b.getHeader(block.ParentHash(), b.blockNum-1)
 	for i, tx := range block.Transactions() {
 		if b.txNum >= b.startTxNum {
 			ibs := state.New(b.reader)
 			ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			b.vmConfig.Tracer = ct
-			receipt, _, err := core.ApplyTransaction(b.chainConfig, getHashFn, b.engine, nil, gp, ibs, b.writer, header, tx, usedGas, b.vmConfig, parentHeader.ExcessDataGas)
+			receipt, _, err := core.ApplyTransaction(b.chainConfig, getHashFn, b.engine, nil, gp, ibs, b.writer, header, tx, usedGas, b.vmConfig)
 			if err != nil {
 				return nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}

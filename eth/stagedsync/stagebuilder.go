@@ -30,19 +30,19 @@ func MiningStages(
 			ID:          stages.MiningCreateBlock,
 			Description: "Mining: construct new block from tx pool",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnMiningCreateBlockStage(s, tx, createBlockCfg, ctx.Done())
+				return SpawnMiningCreateBlockStage(s, tx, createBlockCfg, ctx.Done(), logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
 			ID:          stages.MiningExecution,
 			Description: "Mining: construct new block from tx pool",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnMiningExecStage(s, tx, execCfg, ctx.Done())
+				return SpawnMiningExecStage(s, tx, execCfg, ctx.Done(), logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
 			ID:          stages.HashState,
@@ -51,7 +51,7 @@ func MiningStages(
 				return SpawnHashStateStage(s, tx, hashStateCfg, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
 			ID:          stages.IntermediateHashes,
@@ -65,16 +65,16 @@ func MiningStages(
 				return nil
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
 			ID:          stages.MiningFinish,
 			Description: "Mining: create and propagate valid block",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnMiningFinishStage(s, tx, finish, ctx.Done())
+				return SpawnMiningFinishStage(s, tx, finish, ctx.Done(), logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },
-			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx) error { return nil },
+			Prune:  func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 	}
 }

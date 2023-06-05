@@ -34,14 +34,14 @@ var cmdResetState = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return
 		}
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
 		}
 		ctx, _ := common.RootContext()
 		defer db.Close()
-		sn, agg := allSnapshots(ctx, db)
+		sn, agg := allSnapshots(ctx, db, logger)
 		defer sn.Close()
 		defer agg.Close()
 
@@ -113,15 +113,8 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots, agg *state.Aggre
 	}
 
 	_, lastBlockInHistSnap, _ := rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
-	fmt.Fprintf(w, "history.v3: %t, idx steps: %.02f, lastMaxTxNum=%d->%d, lastBlockInSnap=%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV), lastBlockInHistSnap)
-
-	transactionsV3, _ := kvcfg.TransactionsV3.Enabled(tx)
-	var s1 uint64
-	if transactionsV3 {
-		s1, err = tx.ReadSequence(kv.EthTxV3)
-	} else {
-		s1, err = tx.ReadSequence(kv.EthTx)
-	}
+	fmt.Fprintf(w, "history.v3: %t,  idx steps: %.02f, lastMaxTxNum=%d->%d, lastBlockInSnap=%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV), lastBlockInHistSnap)
+	s1, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err
 	}

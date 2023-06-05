@@ -30,10 +30,10 @@ type Server struct {
 	natInterface nat.Interface
 	discConfig   discover.Config
 
-	log log.Logger
+	logger log.Logger
 }
 
-func NewServer(flags CommandFlags) (*Server, error) {
+func NewServer(flags CommandFlags, logger log.Logger) (*Server, error) {
 	nodeDBPath := filepath.Join(flags.DataDir, "nodes", "eth66")
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}
@@ -42,7 +42,7 @@ func NewServer(flags CommandFlags) (*Server, error) {
 		return nil, err
 	}
 
-	localNode, err := makeLocalNode(nodeDBPath, privateKey, flags.Chain)
+	localNode, err := makeLocalNode(nodeDBPath, privateKey, flags.Chain, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -67,13 +67,11 @@ func NewServer(flags CommandFlags) (*Server, error) {
 		return nil, fmt.Errorf("bootnodes parse error: %w", err)
 	}
 
-	logger := log.New()
-
 	discConfig := discover.Config{
 		PrivateKey:  privateKey,
 		NetRestrict: netRestrictList,
 		Bootnodes:   bootnodes,
-		Log:         logger.New(),
+		Log:         logger,
 	}
 
 	instance := Server{
@@ -86,12 +84,12 @@ func NewServer(flags CommandFlags) (*Server, error) {
 	return &instance, nil
 }
 
-func makeLocalNode(nodeDBPath string, privateKey *ecdsa.PrivateKey, chain string) (*enode.LocalNode, error) {
+func makeLocalNode(nodeDBPath string, privateKey *ecdsa.PrivateKey, chain string, logger log.Logger) (*enode.LocalNode, error) {
 	db, err := enode.OpenDB(nodeDBPath, "")
 	if err != nil {
 		return nil, err
 	}
-	localNode := enode.NewLocalNode(db, privateKey)
+	localNode := enode.NewLocalNode(db, privateKey, logger)
 	localNode.SetFallbackIP(net.IP{127, 0, 0, 1})
 
 	forksEntry, err := makeForksENREntry(chain)
@@ -135,7 +133,7 @@ func (server *Server) mapNATPort(ctx context.Context, realAddr *net.UDPAddr) {
 
 	go func() {
 		defer debug.LogPanic()
-		nat.Map(server.natInterface, ctx.Done(), "udp", realAddr.Port, realAddr.Port, "ethereum discovery")
+		nat.Map(server.natInterface, ctx.Done(), "udp", realAddr.Port, realAddr.Port, "ethereum discovery", server.logger)
 	}()
 }
 
@@ -144,13 +142,13 @@ func (server *Server) detectNATExternalIP() (net.IP, error) {
 		return nil, errors.New("no NAT flag configured")
 	}
 	if _, hasExtIP := server.natInterface.(nat.ExtIP); !hasExtIP {
-		server.log.Debug("Detecting external IP...")
+		server.logger.Debug("Detecting external IP...")
 	}
 	ip, err := server.natInterface.ExternalIP()
 	if err != nil {
 		return nil, fmt.Errorf("NAT ExternalIP error: %w", err)
 	}
-	server.log.Debug("External IP detected", "ip", ip)
+	server.logger.Debug("External IP detected", "ip", ip)
 	return ip, nil
 }
 
@@ -179,7 +177,7 @@ func (server *Server) Listen(ctx context.Context) (*discover.UDPv4, error) {
 		server.mapNATPort(ctx, realAddr)
 	}
 
-	server.log.Debug("Discovery UDP listener is up", "addr", realAddr)
+	server.logger.Debug("Discovery UDP listener is up", "addr", realAddr)
 
 	return discover.ListenV4(ctx, conn, server.localNode, server.discConfig)
 }

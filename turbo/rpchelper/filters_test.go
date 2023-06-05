@@ -11,6 +11,7 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon/eth/filters"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func createLog() *remote.SubscribeLogsReply {
@@ -55,7 +56,7 @@ func TestFilters_GenerateSubscriptionID(t *testing.T) {
 }
 
 func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
-	f := New(context.TODO(), nil, nil, nil, func() {})
+	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
 
 	subbedTopic := libcommon.BytesToHash([]byte{10, 20})
 
@@ -86,7 +87,7 @@ func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.
 }
 
 func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
-	f := New(context.TODO(), nil, nil, nil, func() {})
+	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
 
 	var nilTopic libcommon.Hash
 	subbedTopic := libcommon.BytesToHash([]byte{10, 20})
@@ -118,7 +119,7 @@ func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAr
 }
 
 func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
-	f := New(context.TODO(), nil, nil, nil, func() {})
+	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
@@ -157,7 +158,7 @@ func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 }
 
 func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
-	f := New(context.TODO(), nil, nil, nil, func() {})
+	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
@@ -231,7 +232,7 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 		return nil
 	}
 
-	f := New(context.TODO(), nil, nil, nil, func() {})
+	f := New(context.TODO(), nil, nil, nil, func() {}, log.New())
 	f.logsRequestor.Store(loadRequester)
 
 	// first request has no filters

@@ -101,9 +101,10 @@ type Message interface {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	UsedGas    uint64 // Total used gas but include the refunded gas
-	Err        error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	ReturnData []byte // Returned data from evm(function result or data supplied with revert opcode)
+	UsedGas     uint64 // Total used gas but include the refunded gas
+	UsedDataGas uint64 // Total data gas used
+	Err         error  // Any error encountered during the execution(listed in core/vm/errors.go)
+	ReturnData  []byte // Returned data from evm(function result or data supplied with revert opcode)
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -206,15 +207,14 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	dgval := new(uint256.Int)
 	var dataGasUsed uint64
 	if st.evm.ChainRules().IsCancun {
-		dataGasUsed = st.dataGasUsed()
 		if st.evm.Context().ExcessDataGas == nil {
-			return fmt.Errorf("%w: sharding is active but ExcessDataGas is nil", ErrInternalFailure)
+			return fmt.Errorf("%w: Cancun is active but ExcessDataGas is nil", ErrInternalFailure)
 		}
-		dataGasPrice, err := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
+		dataGasPrice, err := misc.GetDataGasPrice(*st.evm.Context().ExcessDataGas)
 		if err != nil {
 			return err
 		}
-		_, overflow = dgval.MulOverflow(dataGasPrice, new(uint256.Int).SetUint64(dataGasUsed))
+		_, overflow = dgval.MulOverflow(dataGasPrice, new(uint256.Int).SetUint64(st.dataGasUsed()))
 		if overflow {
 			return fmt.Errorf("%w: overflow converting datagas: %v", ErrInsufficientFunds, dgval)
 		}
@@ -311,7 +311,10 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 	if st.dataGasUsed() > 0 && st.evm.ChainRules().IsCancun {
-		dataGasPrice, err := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
+		if st.evm.Context().ExcessDataGas == nil {
+			return fmt.Errorf("%w: Cancun is active but ExcessDataGas is nil", ErrInternalFailure)
+		}
+		dataGasPrice, err := misc.GetDataGasPrice(*st.evm.Context().ExcessDataGas)
 		if err != nil {
 			return err
 		}
@@ -465,9 +468,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 
 	return &ExecutionResult{
-		UsedGas:    st.gasUsed(),
-		Err:        vmerr,
-		ReturnData: ret,
+		UsedGas:     st.gasUsed(),
+		UsedDataGas: st.dataGasUsed(),
+		Err:         vmerr,
+		ReturnData:  ret,
 	}, nil
 }
 

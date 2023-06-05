@@ -21,6 +21,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 func confirmStatusCode(t *testing.T, got, want int) {
@@ -102,9 +104,10 @@ func TestHTTPResponseWithEmptyGet(t *testing.T) {
 
 // This checks that maxRequestContentLength is not applied to the response of a request.
 func TestHTTPRespBodyUnlimited(t *testing.T) {
+	logger := log.New()
 	const respLength = maxRequestContentLength * 3
 
-	s := NewServer(50, false /* traceRequests */, true)
+	s := NewServer(50, false /* traceRequests */, true, logger)
 	defer s.Stop()
 	if err := s.RegisterName("test", largeRespService{respLength}); err != nil {
 		t.Fatal(err)
@@ -112,7 +115,7 @@ func TestHTTPRespBodyUnlimited(t *testing.T) {
 	ts := httptest.NewServer(s)
 	defer ts.Close()
 
-	c, err := DialHTTP(ts.URL)
+	c, err := DialHTTP(ts.URL, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,11 +3,13 @@ package cli
 import (
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 
@@ -30,7 +32,12 @@ type ConsensusClientCliCfg struct {
 	Chaindata        string                      `json:"chaindata"`
 	ErigonPrivateApi string                      `json:"erigonPrivateApi"`
 	TransitionChain  bool                        `json:"transitionChain"`
-	NetworkType      clparams.NetworkType
+	NetworkType      clparams.NetworkType        `json:"networkType"`
+	InitialSync      bool                        `json:"initialSync"`
+	RecordMode       bool                        `json:"recordMode"`
+	RecordDir        string                      `json:"recordDir"`
+
+	InitalState *state.BeaconState
 }
 
 func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
@@ -51,13 +58,23 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 			return nil, fmt.Errorf("no genesis file provided")
 		}
 		cfg.GenesisCfg = new(clparams.GenesisConfig)
+		var stateByte []byte
 		// Now parse genesis time and genesis fork
-		if *cfg.GenesisCfg, err = clparams.ParseGenesisSSZToGenesisConfig(ctx.String(flags.GenesisSSZFlag.Name)); err != nil {
+		if *cfg.GenesisCfg, stateByte, err = clparams.ParseGenesisSSZToGenesisConfig(
+			ctx.String(flags.GenesisSSZFlag.Name),
+			cfg.BeaconCfg.GetCurrentStateVersion(0)); err != nil {
+			return nil, err
+		}
+		cfg.InitalState = state.New(cfg.BeaconCfg)
+		if cfg.InitalState.DecodeSSZ(stateByte, int(cfg.BeaconCfg.GetCurrentStateVersion(0))); err != nil {
 			return nil, err
 		}
 	}
 	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.String(flags.SentinelServerAddr.Name), ctx.Int(flags.SentinelServerPort.Name))
 	cfg.ServerProtocol = "tcp"
+
+	cfg.RecordMode = ctx.Bool(flags.RecordModeFlag.Name)
+	cfg.RecordDir = ctx.String(flags.RecordModeDir.Name)
 
 	cfg.Port = uint(ctx.Int(flags.SentinelDiscoveryPort.Name))
 	cfg.Addr = ctx.String(flags.SentinelDiscoveryAddr.Name)
@@ -82,7 +99,9 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	}
 	if ctx.String(flags.SentinelStaticPeersFlag.Name) != "" {
 		cfg.NetworkCfg.StaticPeers = utils.SplitAndTrim(ctx.String(flags.SentinelStaticPeersFlag.Name))
+		fmt.Println(cfg.NetworkCfg.StaticPeers)
 	}
 	cfg.TransitionChain = ctx.Bool(flags.TransitionChainFlag.Name)
+	cfg.InitialSync = ctx.Bool(flags.InitSyncFlag.Name)
 	return cfg, nil
 }

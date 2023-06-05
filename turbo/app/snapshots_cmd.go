@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -90,6 +92,20 @@ var snapshotCommand = cli.Command{
 			Action: doDecompressSpeed,
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
+		{
+			Name:   "diff",
+			Action: doDiff,
+			Flags: joinFlags([]cli.Flag{
+				&cli.PathFlag{
+					Name:     "src",
+					Required: true,
+				},
+				&cli.PathFlag{
+					Name:     "dst",
+					Required: true,
+				},
+			}, debug.Flags, logging.Flags),
+		},
 	},
 }
 
@@ -125,6 +141,36 @@ func preloadFileAsync(name string) {
 		ff, _ := os.Open(name)
 		_, _ = io.CopyBuffer(io.Discard, bufio.NewReaderSize(ff, 64*1024*1024), make([]byte, 64*1024*1024))
 	}()
+}
+
+func doDiff(cliCtx *cli.Context) error {
+	defer log.Info("Done")
+	srcF, dstF := cliCtx.String("src"), cliCtx.String("dst")
+	src, err := compress.NewDecompressor(srcF)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := compress.NewDecompressor(dstF)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	i := 0
+	srcG, dstG := src.MakeGetter(), dst.MakeGetter()
+	var srcBuf, dstBuf []byte
+	for srcG.HasNext() {
+		i++
+		srcBuf, _ = srcG.Next(srcBuf[:0])
+		dstBuf, _ = dstG.Next(dstBuf[:0])
+
+		if !bytes.Equal(srcBuf, dstBuf) {
+			log.Error(fmt.Sprintf("found difference: %d, %x, %x\n", i, srcBuf, dstBuf))
+			return nil
+		}
+	}
+	return nil
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
@@ -197,7 +243,8 @@ func doRam(cliCtx *cli.Context) error {
 
 func doIndicesCommand(cliCtx *cli.Context) error {
 	var err error
-	if _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	var logger log.Logger
+	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -206,7 +253,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 	//from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	chainDB := mdbx.NewMDBX(log.New()).Path(dirs.Chaindata).Readonly().MustOpen()
+	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).Readonly().MustOpen()
 	defer chainDB.Close()
 
 	dir.MustExist(dirs.SnapHistory)
@@ -218,16 +265,16 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	}
 	cfg := ethconfig.NewSnapCfg(true, true, false)
 
-	allSnapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
+	allSnapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
 	allSnapshots.LogStat()
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := snapshotsync.BuildMissedIndices("Indexing", ctx, dirs, *chainID, indexWorkers); err != nil {
+	if err := snapshotsync.BuildMissedIndices("Indexing", ctx, dirs, *chainID, indexWorkers, logger); err != nil {
 		return err
 	}
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB)
+	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -299,7 +346,8 @@ func doUncompress(cliCtx *cli.Context) error {
 }
 func doCompress(cliCtx *cli.Context) error {
 	var err error
-	if _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	var logger log.Logger
+	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -310,7 +358,7 @@ func doCompress(cliCtx *cli.Context) error {
 	}
 	f := args.First()
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	c, err := compress.NewCompressor(ctx, "compress", f, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo)
+	c, err := compress.NewCompressor(ctx, "compress", f, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
 	if err != nil {
 		return err
 	}
@@ -359,17 +407,19 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
 
-	db := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
+	db := mdbx.NewMDBX(logger).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, true, true)
-	snapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
+	snapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err := snapshots.ReopenFolder(); err != nil {
 		return err
 	}
+	blockReader := snapshotsync.NewBlockReader(snapshots)
+	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
 
-	br := snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs.Tmp, snapshots, db, nil, nil)
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
+	br := snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs.Tmp, blockReader, blockWriter, db, nil, nil, logger)
+	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return err
 	}

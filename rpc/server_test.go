@@ -28,10 +28,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestServerRegisterName(t *testing.T) {
-	server := NewServer(50, false /* traceRequests */, true)
+	logger := log.New()
+	server := NewServer(50, false /* traceRequests */, true, logger)
 	service := new(testService)
 
 	if err := server.RegisterName("test", service); err != nil {
@@ -54,6 +57,7 @@ func TestServerRegisterName(t *testing.T) {
 }
 
 func TestServer(t *testing.T) {
+	logger := log.New()
 	files, err := os.ReadDir("testdata")
 	if err != nil {
 		t.Fatal("where'd my testdata go?")
@@ -65,13 +69,13 @@ func TestServer(t *testing.T) {
 		path := filepath.Join("testdata", f.Name())
 		name := strings.TrimSuffix(f.Name(), filepath.Ext(f.Name()))
 		t.Run(name, func(t *testing.T) {
-			runTestScript(t, path)
+			runTestScript(t, path, logger)
 		})
 	}
 }
 
-func runTestScript(t *testing.T, file string) {
-	server := newTestServer()
+func runTestScript(t *testing.T, file string, logger log.Logger) {
+	server := newTestServer(logger)
 	content, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +140,8 @@ func runTestScript(t *testing.T, file string) {
 // This test checks that responses are delivered for very short-lived connections that
 // only carry a single request.
 func TestServerShortLivedConn(t *testing.T) {
-	server := newTestServer()
+	logger := log.New()
+	server := newTestServer(logger)
 	defer server.Stop()
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

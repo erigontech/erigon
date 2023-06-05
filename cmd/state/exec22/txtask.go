@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -39,8 +40,8 @@ type TxTask struct {
 	EvmBlockContext evmtypes.BlockContext
 
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
-	ReadLists          map[string]*KvList
-	WriteLists         map[string]*KvList
+	ReadLists          map[string]*state.KvList
+	WriteLists         map[string]*state.KvList
 	AccountPrevs       map[string][]byte
 	AccountDels        map[string]*accounts.Account
 	StoragePrevs       map[string][]byte
@@ -78,30 +79,6 @@ func (h *TxTaskQueue) Pop() interface{} {
 	old[n-1] = nil
 	*h = old[:n-1]
 	return x
-}
-
-// KvList sort.Interface to sort write list by keys
-type KvList struct {
-	Keys []string
-	Vals [][]byte
-}
-
-func (l *KvList) Push(key string, val []byte) {
-	l.Keys = append(l.Keys, key)
-	l.Vals = append(l.Vals, val)
-}
-
-func (l *KvList) Len() int {
-	return len(l.Keys)
-}
-
-func (l *KvList) Less(i, j int) bool {
-	return l.Keys[i] < l.Keys[j]
-}
-
-func (l *KvList) Swap(i, j int) {
-	l.Keys[i], l.Keys[j] = l.Keys[j], l.Keys[i]
-	l.Vals[i], l.Vals[j] = l.Vals[j], l.Vals[i]
 }
 
 // QueueWithRetry is trhead-safe priority-queue of tasks - which attempt to minimize conflict-rate (retry-rate).

@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/log/v3"
 )
 
 //Variables Naming:
@@ -60,20 +61,21 @@ import (
 //      1. Application - rely on TemporalDB (Ex: ExecutionLayer) or just DB (Ex: TxPool, Sentry, Downloader).
 
 type tRestoreCodeHash func(tx kv.Getter, key, v []byte, force *common.Hash) ([]byte, error)
-type tConvertV3toV2 func(v []byte) ([]byte, error)
+type tConvertAccount func(v []byte) ([]byte, error)
 type tParseIncarnation func(v []byte) (uint64, error)
 
 type DB struct {
 	kv.RwDB
 	agg *state.AggregatorV3
 
-	convertV3toV2        tConvertV3toV2
+	convertV3toV2        tConvertAccount
+	convertV2toV3        tConvertAccount
 	restoreCodeHash      tRestoreCodeHash
 	parseInc             tParseIncarnation
 	systemContractLookup map[common.Address][]common.CodeRecord
 }
 
-func New(db kv.RwDB, agg *state.AggregatorV3, cb1 tConvertV3toV2, cb2 tRestoreCodeHash, cb3 tParseIncarnation, systemContractLookup map[common.Address][]common.CodeRecord) (*DB, error) {
+func New(db kv.RwDB, agg *state.AggregatorV3, systemContractLookup map[common.Address][]common.CodeRecord) (*DB, error) {
 	if !kvcfg.HistoryV3.FromDB(db) {
 		panic("not supported")
 	}
@@ -94,7 +96,11 @@ func New(db kv.RwDB, agg *state.AggregatorV3, cb1 tConvertV3toV2, cb2 tRestoreCo
 		}
 	}
 
-	return &DB{RwDB: db, agg: agg, convertV3toV2: cb1, restoreCodeHash: cb2, parseInc: cb3, systemContractLookup: systemContractLookup}, nil
+	return &DB{RwDB: db, agg: agg,
+		convertV3toV2: accounts.ConvertV3toV2, convertV2toV3: accounts.ConvertV2toV3,
+		restoreCodeHash: historyv2read.RestoreCodeHash, parseInc: accounts.DecodeIncarnationFromStorage,
+		systemContractLookup: systemContractLookup,
+	}, nil
 }
 func (db *DB) Agg() *state.AggregatorV3 { return db.agg }
 func (db *DB) InternalDB() kv.RwDB      { return db.RwDB }
@@ -139,8 +145,6 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
 	tx.aggCtx = db.agg.MakeContext()
-	db.agg.StartUnbufferedWrites()
-	db.agg.SetTx(tx.MdbxTx)
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -166,8 +170,6 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
 	tx.aggCtx = db.agg.MakeContext()
-	db.agg.StartUnbufferedWrites()
-	db.agg.SetTx(tx.MdbxTx)
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -202,8 +204,6 @@ func (tx *Tx) autoClose() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
-	tx.db.agg.FinishWrites()
-	tx.db.agg.SetTx(nil)
 	if tx.aggCtx != nil {
 		tx.aggCtx.Close()
 	}
@@ -438,6 +438,12 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 		if err != nil {
 			return nil, false, err
 		}
+		if len(v) > 0 {
+			v, err = tx.db.convertV2toV3(v)
+			if err != nil {
+				return nil, false, err
+			}
+		}
 		return v, true, nil
 	case StorageHistory:
 		return tx.aggCtx.ReadAccountStorageNoStateWithRecent2(key, ts, tx.MdbxTx)
@@ -503,8 +509,8 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 }
 
 // TODO: need remove `gspec` param (move SystemContractCodeLookup feature somewhere)
-func NewTestDB(tb testing.TB, ctx context.Context, dirs datadir.Dirs, gspec *types.Genesis) (histV3 bool, db kv.RwDB, agg *state.AggregatorV3) {
-	histV3 = ethconfig.EnableHistoryV3InTest
+func NewTestDB(tb testing.TB, ctx context.Context, dirs datadir.Dirs, gspec *types.Genesis, logger log.Logger) (histV3 bool, db kv.RwDB, agg *state.AggregatorV3) {
+	historyV3 := ethconfig.EnableHistoryV3InTest
 
 	if tb != nil {
 		db = memdb.NewTestDB(tb)
@@ -512,14 +518,14 @@ func NewTestDB(tb testing.TB, ctx context.Context, dirs datadir.Dirs, gspec *typ
 		db = memdb.New(dirs.DataDir)
 	}
 	_ = db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
-		_, _ = kvcfg.HistoryV3.WriteOnce(tx, histV3)
+		_, _ = kvcfg.HistoryV3.WriteOnce(tx, historyV3)
 		return nil
 	})
 
-	if histV3 {
+	if historyV3 {
 		var err error
 		dir.MustExist(dirs.SnapHistory)
-		agg, err = state.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
+		agg, err = state.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
 		if err != nil {
 			panic(err)
 		}
@@ -532,10 +538,10 @@ func NewTestDB(tb testing.TB, ctx context.Context, dirs datadir.Dirs, gspec *typ
 			sc = systemcontracts.SystemContractCodeLookup[gspec.Config.ChainName]
 		}
 
-		db, err = New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, sc)
+		db, err = New(db, agg, sc)
 		if err != nil {
 			panic(err)
 		}
 	}
-	return histV3, db, agg
+	return historyV3, db, agg
 }

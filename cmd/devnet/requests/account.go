@@ -1,34 +1,44 @@
 package requests
 
 import (
-	"encoding/json"
 	"fmt"
-	"strconv"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
-func GetBalance(reqId int, address libcommon.Address, blockNum models.BlockNumber) (uint64, error) {
-	reqGen := initialiseRequestGenerator(reqId)
-	var b rpctest.EthBalance
+type EthBalance struct {
+	CommonResponse
+	Balance hexutil.Big `json:"result"`
+}
 
-	if res := reqGen.Erigon(models.ETHGetBalance, reqGen.GetBalance(address, blockNum), &b); res.Err != nil {
+type EthTransaction struct {
+	From     libcommon.Address  `json:"from"`
+	To       *libcommon.Address `json:"to"` // Pointer because it might be missing
+	Hash     string             `json:"hash"`
+	Gas      hexutil.Big        `json:"gas"`
+	GasPrice hexutil.Big        `json:"gasPrice"`
+	Input    hexutility.Bytes   `json:"input"`
+	Value    hexutil.Big        `json:"value"`
+}
+
+func (reqGen *RequestGenerator) GetBalance(address libcommon.Address, blockNum BlockNumber) (uint64, error) {
+	var b EthBalance
+
+	method, body := reqGen.getBalance(address, blockNum)
+	if res := reqGen.call(method, body, &b); res.Err != nil {
 		return 0, fmt.Errorf("failed to get balance: %v", res.Err)
 	}
 
-	bal, err := json.Marshal(b.Balance)
-	if err != nil {
-		fmt.Println(err)
+	if !b.Balance.ToInt().IsUint64() {
+		return 0, fmt.Errorf("balance is not uint64")
 	}
 
-	balStr := string(bal)[3 : len(bal)-1]
-	balance, err := strconv.ParseInt(balStr, 16, 64)
-	if err != nil {
-		return 0, fmt.Errorf("cannot convert balance to decimal: %v", err)
-	}
+	return b.Balance.ToInt().Uint64(), nil
+}
 
-	return uint64(balance), nil
+func (req *RequestGenerator) getBalance(address libcommon.Address, blockNum BlockNumber) (RPCMethod, string) {
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x","%v"],"id":%d}`
+	return Methods.ETHGetBalance, fmt.Sprintf(template, Methods.ETHGetBalance, address, blockNum, req.reqID)
 }

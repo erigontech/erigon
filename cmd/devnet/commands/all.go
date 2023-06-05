@@ -1,29 +1,30 @@
 package commands
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
+	"github.com/ledgerwatch/erigon/cmd/devnet/node"
+	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // ExecuteAllMethods runs all the simulation tests for erigon devnet
-func ExecuteAllMethods() {
+func ExecuteAllMethods(nw *node.Network, logger log.Logger) {
 	// test connection to JSON RPC
-	fmt.Printf("\nPINGING JSON RPC...\n")
-	if err := pingErigonRpc(); err != nil {
+	logger.Info("PINGING JSON RPC...")
+	if err := pingErigonRpc(nw.Node(0), logger); err != nil {
 		return
 	}
-	fmt.Println()
+	logger.Info("")
 
 	// get balance of the receiver's account
-	callGetBalance(addr, models.Latest, 0)
-	fmt.Println()
+	callGetBalance(nw.Node(0), addr, requests.BlockNumbers.Latest, 0, logger)
+	logger.Info("")
 
 	// confirm that the txpool is empty
-	fmt.Println("CONFIRMING TXPOOL IS EMPTY BEFORE SENDING TRANSACTION...")
-	services.CheckTxPoolContent(0, 0, 0)
-	fmt.Println()
+	logger.Info("CONFIRMING TXPOOL IS EMPTY BEFORE SENDING TRANSACTION...")
+	services.CheckTxPoolContent(nw.Node(0), 0, 0, 0, logger)
+	logger.Info("")
 
 	/*
 	* Cannot run contract tx after running regular tx because contract tx simulates a new backend
@@ -39,12 +40,12 @@ func ExecuteAllMethods() {
 	//}
 	//fmt.Println()
 
-	_, err := callSendTxWithDynamicFee(recipientAddress, models.DevAddress)
+	_, err := callSendTxWithDynamicFee(nw.Node(0), recipientAddress, models.DevAddress, logger)
 	if err != nil {
-		fmt.Printf("callSendTxWithDynamicFee error: %v\n", err)
+		logger.Error("callSendTxWithDynamicFee", "error", err)
 		return
 	}
-	fmt.Println()
+	logger.Info("")
 
 	// initiate a contract transaction
 	//fmt.Println("INITIATING A CONTRACT TRANSACTION...")
@@ -55,6 +56,6 @@ func ExecuteAllMethods() {
 	//}
 	//fmt.Println()
 
-	fmt.Print("SEND SIGNAL TO QUIT ALL RUNNING NODES")
+	logger.Info("SEND SIGNAL TO QUIT ALL RUNNING NODES")
 	models.QuitNodeChan <- true
 }

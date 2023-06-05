@@ -157,15 +157,15 @@ func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash
 	return api._txnReader.TxnLookup(ctx, tx, txnHash)
 }
 
-func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Block, error) {
-	hash, hashErr := rawdb.ReadCanonicalHash(tx, number)
+func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
+	hash, hashErr := api._blockReader.CanonicalHash(ctx, tx, number)
 	if hashErr != nil {
 		return nil, hashErr
 	}
-	return api.blockWithSenders(tx, hash, number)
+	return api.blockWithSenders(ctx, tx, hash, number)
 }
 
-func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.Block, error) {
+func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
 			return it, nil
@@ -176,16 +176,16 @@ func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.B
 		return nil, nil
 	}
 
-	return api.blockWithSenders(tx, hash, *number)
+	return api.blockWithSenders(ctx, tx, hash, *number)
 }
 
-func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
+func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
 			return it, nil
 		}
 	}
-	block, _, err := api._blockReader.BlockWithSenders(context.Background(), tx, hash, number)
+	block, _, err := api._blockReader.BlockWithSenders(ctx, tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
@@ -228,11 +228,14 @@ func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*chain.Config, *types.Bloc
 		return cc, genesisBlock, nil
 	}
 
-	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+	hash, err := rawdb.ReadCanonicalHash(tx, 0)
 	if err != nil {
 		return nil, nil, err
 	}
-	cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+	if err != nil {
+		return nil, nil, err
+	}
+	cc, err = rawdb.ReadChainConfig(tx, hash)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -247,13 +250,13 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
-func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
-	n, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
+	n, h, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockByNumberWithSenders(tx, n)
+	block, err := api.blockWithSenders(ctx, tx, h, n)
 	return block, err
 }
 
@@ -279,14 +282,14 @@ func (api *BaseAPI) checkPruneHistory(tx kv.Tx, block uint64) error {
 		return nil
 	}
 	if p.History.Enabled() {
-		latest, err := api.blockByRPCNumber(rpc.LatestBlockNumber, tx)
+		latest, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), tx, api.filters)
 		if err != nil {
 			return err
 		}
-		if latest == nil {
+		if latest <= 1 {
 			return nil
 		}
-		prunedTo := p.History.PruneTo(latest.Number().Uint64())
+		prunedTo := p.History.PruneTo(latest)
 		if block < prunedTo {
 			return fmt.Errorf("history has been pruned for this block")
 		}

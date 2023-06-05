@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
@@ -49,11 +51,13 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	}
 }
 
-func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 	// Prepare output slice.
 	responsePacket := []*cltypes.SignedBeaconBlock{}
 
-	message, err := b.sentinel.SendRequest(b.ctx, &sentinel.RequestData{
+	ctx, cn := context.WithTimeout(ctx, time.Second*time.Duration(5+10*count))
+	defer cn()
+	message, err := b.sentinel.SendRequest(ctx, &sentinel.RequestData{
 		Data:  reqData,
 		Topic: topic,
 	})
@@ -61,7 +65,9 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 		return nil, "", err
 	}
 	if message.Error {
-		log.Debug("received range req error", "err", string(message.Data))
+		rd := snappy.NewReader(bytes.NewBuffer(message.Data))
+		errBytes, _ := io.ReadAll(rd)
+		log.Debug("received range req error", "err", string(errBytes))
 		return nil, message.Peer.Pid, nil
 	}
 
@@ -120,7 +126,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
-func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 	req := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: start,
 		Count:     count,
@@ -132,18 +138,21 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(start, count uint64) ([]*cltyp
 	}
 
 	data := common.CopyBytes(buffer.Bytes())
-	return b.sendBlocksRequest(communication.BeaconBlocksByRangeProtocolV2, data, count)
+	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRangeProtocolV2, data, count)
 }
 
 // SendBeaconBlocksByRootReq retrieves blocks by root from beacon chain.
-func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(roots [][32]byte) ([]*cltypes.SignedBeaconBlock, string, error) {
-	var req cltypes.BeaconBlocksByRootRequest = roots
+func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(ctx context.Context, roots [][32]byte) ([]*cltypes.SignedBeaconBlock, string, error) {
+	var req solid.HashListSSZ = solid.NewHashList(69696969)
+	for _, root := range roots {
+		req.Append(root)
+	}
 	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, &req); err != nil {
+	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
 		return nil, "", err
 	}
 	data := common.CopyBytes(buffer.Bytes())
-	return b.sendBlocksRequest(communication.BeaconBlocksByRootProtocolV2, data, uint64(len(roots)))
+	return b.sendBlocksRequest(ctx, communication.BeaconBlocksByRootProtocolV2, data, uint64(len(roots)))
 }
 
 // Peers retrieves peer count.
