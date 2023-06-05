@@ -69,8 +69,7 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 	}
 
 	var localHash string
-	logger := log.New()
-	reqGen := requests.NewRequestGenerator(logger)
+	reqGen := requests.NewRequestGenerator(config.logger)
 
 	// verify the hash
 	if isCheckpoint {
@@ -161,8 +160,7 @@ func rewindBack(config *config, head uint64, rewindTo uint64) {
 func rewind(config *config, head uint64, rewindTo uint64) {
 	log.Warn("Rewinding chain because it doesn't match the received milestone", "to", rewindTo)
 
-	logger := log.New()
-	reqGen := requests.NewRequestGenerator(logger)
+	reqGen := requests.NewRequestGenerator(config.logger)
 
 	// fetch the end block hash
 	block, err := requests.GetBlockByNumber(reqGen, head, false, config.logger)
