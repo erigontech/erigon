@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -309,6 +310,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 	defer tx.Rollback()
 
+	logger := log.New("generate-chain", config.ChainName)
+
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
 		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
 		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, config: config, engine: engine, txs: make([]types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1)}
@@ -323,7 +326,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 				misc.ApplyDAOHardFork(ibs)
 			}
 		}
-		systemcontracts.UpgradeBuildInSystemContract(config, b.header.Number, ibs)
+		systemcontracts.UpgradeBuildInSystemContract(config, b.header.Number, ibs, logger)
 		// Execute any user modifications to the block
 		if gen != nil {
 			gen(i, b)

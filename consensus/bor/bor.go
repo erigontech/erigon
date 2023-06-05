@@ -575,7 +575,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 				}
 
 				// new snap shot
-				snap = newSnapshot(c.config, c.signatures, number, hash, validators)
+				snap = newSnapshot(c.config, c.signatures, number, hash, validators, c.logger)
 				if err := snap.store(c.DB); err != nil {
 					return nil, err
 				}
@@ -1352,7 +1352,7 @@ func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*val
 		}
 	}
 
-	if err := v.UpdateWithChangeSet(changes); err != nil {
+	if err := v.UpdateWithChangeSet(changes, logger); err != nil {
 		logger.Error("Error while updating change set", "error", err)
 	}
 
