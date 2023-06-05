@@ -114,6 +114,7 @@ func (sd *SharedDomains) Unwind() {
 	sd.account.Clear()
 	sd.code.Clear()
 	sd.commitment.Clear()
+	sd.Commitment.patriciaTrie.Reset()
 	sd.storage.Clear()
 }
 
@@ -366,7 +367,7 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	}
 
 	sd.put(kv.CodeDomain, addr, nil)
-	sd.Commitment.TouchPlainKey(addr, nil, sd.Commitment.TouchCode)
+	// commitment delete already has been applied via account
 	if err := sd.Code.Delete(addr, nil); err != nil {
 		return err
 	}

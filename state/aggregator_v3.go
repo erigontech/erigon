@@ -968,6 +968,11 @@ func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 	}
 
 	a.domains.Unwind()
+	bn, txn, err := a.domains.Commitment.SeekCommitment(txUnwindTo - 1)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Unwind domains to block %d, txn %d\n", bn, txn)
 
 	//if err := stateChanges.Load(a.rwTx, kv.PlainState, stateLoad, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 	//	return err
@@ -2070,6 +2075,9 @@ func (ac *AggregatorV3Context) storageFn(plainKey []byte, cell *commitment.Cell)
 	return nil
 }
 
+func (ac *AggregatorV3Context) IterateAccounts(pref []byte, fn func(key, value []byte)) error {
+	return ac.accounts.IteratePrefix(pref, fn)
+}
 func (ac *AggregatorV3Context) AccountLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
 	return ac.accounts.GetLatest(addr, nil, roTx)
 }

@@ -400,21 +400,42 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64) error {
 		return err
 	}
 
-	var stepbuf [2]byte
-	step := uint16(d.txNum / d.aggregationStep)
-	binary.BigEndian.PutUint16(stepbuf[:], step)
-	switch d.Domain.wal {
-	case nil:
-		if err = d.Domain.Put(keyCommitmentState, stepbuf[:], encoded); err != nil {
-			return err
-		}
-	default:
-		if err := d.Domain.PutWithPrev(keyCommitmentState, stepbuf[:], encoded, d.prevState); err != nil {
-			return err
-		}
-		d.prevState = encoded
+	//var stepbuf [4]byte
+	////step := uint32(d.txNum / d.aggregationStep)
+	//binary.BigEndian.PutUint32(stepbuf[:], step)
+
+	var dbuf [8]byte
+	binary.BigEndian.PutUint64(dbuf[:], d.txNum)
+
+	fmt.Printf("commitment put %d\n", d.txNum)
+	if err := d.Domain.PutWithPrev(keyCommitmentState, dbuf[:], encoded, d.prevState); err != nil {
+		return err
 	}
+	d.prevState = encoded
 	return nil
+}
+
+func (d *DomainCommitted) Restore(value []byte) (uint64, uint64, error) {
+	//if d.prevState != nil {
+	cs := new(commitmentState)
+	if err := cs.Decode(value); err != nil {
+		return 0, 0, fmt.Errorf("failed to decode previous stored commitment state: %w", err)
+	}
+	if hext, ok := d.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
+		if err := hext.SetState(cs.trieState); err != nil {
+			return 0, 0, fmt.Errorf("failed restore state : %w", err)
+		}
+		if d.trace {
+			rh, err := hext.RootHash()
+			if err != nil {
+				return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
+			}
+			fmt.Printf("[commitment] restored state: block=%d txn=%d rh=%x\n", cs.blockNum, cs.txNum, rh)
+		}
+	} else {
+		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
+	}
+	return cs.blockNum, cs.txNum, nil
 }
 
 // nolint
@@ -728,9 +749,9 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 		rootHash, err = d.patriciaTrie.RootHash()
 		return rootHash, nil, err
 	}
-	if len(updates) > 1 {
-		d.patriciaTrie.Reset()
-	}
+	//if len(updates) > 1 {
+	//	d.patriciaTrie.Reset()
+	//}
 
 	// data accessing functions should be set once before
 	d.patriciaTrie.SetTrace(trace)
@@ -763,61 +784,34 @@ var keyCommitmentState = []byte("state")
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (d *DomainCommitted) SeekCommitment(aggStep, sinceTx uint64) (blockNum, txNum uint64, err error) {
+func (d *DomainCommitted) SeekCommitment(sinceTx uint64) (blockNum, txNum uint64, err error) {
 	if d.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
 		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 	// todo add support of bin state dumping
-
 	var (
 		latestState []byte
-		stepbuf     [2]byte
-		step               = uint16(sinceTx/aggStep) - 1
-		latestTxNum uint64 = sinceTx - 1
+		latestTxNum uint64
 	)
-	if sinceTx == 0 {
-		step = 0
-		latestTxNum = 0
+	if sinceTx > 0 {
+		latestTxNum = sinceTx - 1
 	}
 
 	d.SetTxNum(latestTxNum)
 	ctx := d.MakeContext()
 	defer ctx.Close()
 
-	for {
-		binary.BigEndian.PutUint16(stepbuf[:], step)
-
-		s, err := ctx.Get(keyCommitmentState, stepbuf[:], d.tx)
-		if err != nil {
-			return 0, 0, err
+	d.defaultDc.IteratePrefix(keyCommitmentState, func(key, value []byte) {
+		txn := binary.BigEndian.Uint64(value)
+		if txn == latestTxNum || len(latestState) != 0 {
+			fmt.Printf("found state txn: %d, value: %x\n", txn, value[:])
+			return
 		}
-		if len(s) < 8 {
-			break
-		}
-		v := binary.BigEndian.Uint64(s)
-		if v == latestTxNum && len(latestState) != 0 {
-			break
-		}
-		latestTxNum, latestState = v, s
-		lookupTxN := latestTxNum + aggStep
-		step = uint16(latestTxNum/aggStep) + 1
-		d.SetTxNum(lookupTxN)
-	}
-
-	var latest commitmentState
-	if err := latest.Decode(latestState); err != nil {
-		return 0, 0, nil
-	}
-
-	if hext, ok := d.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
-		if err := hext.SetState(latest.trieState); err != nil {
-			return 0, 0, err
-		}
-	} else {
-		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
-	}
-
-	return latest.blockNum, latest.txNum, nil
+		hk := bytes.TrimPrefix(key, keyCommitmentState)
+		fmt.Printf("txn: %d, value: %x\n", binary.BigEndian.Uint64(hk), value[:])
+		latestTxNum, latestState = txn, value
+	})
+	return d.Restore(latestState)
 }
 
 type commitmentState struct {
