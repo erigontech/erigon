@@ -34,10 +34,6 @@ func NewEthBackendClientDirect(server remote.ETHBACKENDServer) *EthBackendClient
 	return &EthBackendClientDirect{server: server}
 }
 
-func (s *EthBackendClientDirect) EngineGetBlobsBundleV1(ctx context.Context, in *remote.EngineGetBlobsBundleRequest, opts ...grpc.CallOption) (*types.BlobsBundleV1, error) {
-	return s.server.EngineGetBlobsBundleV1(ctx, in)
-}
-
 func (s *EthBackendClientDirect) Etherbase(ctx context.Context, in *remote.EtherbaseRequest, opts ...grpc.CallOption) (*remote.EtherbaseReply, error) {
 	return s.server.Etherbase(ctx, in)
 }

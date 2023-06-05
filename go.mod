@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon-lib
 go 1.19
 
 require (
-	github.com/ledgerwatch/interfaces v0.0.0-20230506191109-292e4ca4d85f
+	github.com/ledgerwatch/interfaces v0.0.0-20230602104541-cdc6e215fb3e
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.1.0
@@ -16,7 +16,7 @@ require (
 	github.com/anacrolix/dht/v2 v2.19.2-0.20221121215055-066ad8494444
 	github.com/anacrolix/go-libutp v1.3.0
 	github.com/anacrolix/log v0.14.0
-	github.com/anacrolix/torrent v1.51.3
+	github.com/anacrolix/torrent v1.52.0
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
 	github.com/crate-crypto/go-kzg-4844 v0.2.0
 	github.com/deckarep/golang-set/v2 v2.3.0
@@ -30,7 +30,7 @@ require (
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/spaolacci/murmur3 v1.1.0
-	github.com/stretchr/testify v1.8.3
+	github.com/stretchr/testify v1.8.4
 	github.com/tidwall/btree v1.6.0
 	golang.org/x/crypto v0.9.0
 	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
@@ -51,7 +51,7 @@ require (
 	github.com/anacrolix/generics v0.0.0-20230428105757-683593396d68 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
-	github.com/anacrolix/missinggo/v2 v2.7.1 // indirect
+	github.com/anacrolix/missinggo/v2 v2.7.2-0.20230527121029-a582b4f397b9 // indirect
 	github.com/anacrolix/mmsg v1.0.0 // indirect
 	github.com/anacrolix/multiless v0.3.0 // indirect
 	github.com/anacrolix/stm v0.4.0 // indirect
