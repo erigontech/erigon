@@ -157,7 +157,7 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 	return bodies
 }
 
-func AnswerGetReceiptsQuery(db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
+func AnswerGetReceiptsQuery(br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
 		bytes    int
@@ -168,16 +168,19 @@ func AnswerGetReceiptsQuery(db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, 
 			lookups >= 2*maxReceiptsServe {
 			break
 		}
-		// Retrieve the requested block's receipts
 		number := rawdb.ReadHeaderNumber(db, hash)
 		if number == nil {
 			return nil, nil
 		}
-		block, senders, err := rawdb.ReadBlockWithSenders(db, hash, *number)
+		// Retrieve the requested block's receipts
+		b, s, err := br.BlockWithSenders(context.Background(), db, hash, *number)
 		if err != nil {
 			return nil, err
 		}
-		results := rawdb.ReadReceipts(db, block, senders)
+		if b == nil {
+			return nil, nil
+		}
+		results := rawdb.ReadReceipts(db, b, s)
 		if results == nil {
 			header, err := rawdb.ReadHeaderByHash(db, hash)
 			if err != nil {

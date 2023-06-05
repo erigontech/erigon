@@ -11,6 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/log/v3"
 
@@ -35,7 +37,6 @@ type BodiesCfg struct {
 	blockReader     services.FullBlockReader
 	blockWriter     *blockio.BlockWriter
 	historyV3       bool
-	transactionsV3  bool
 }
 
 func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
@@ -202,14 +203,19 @@ func BodiesForward(
 			}
 
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-			ok, lastTxnNum, err := cfg.blockWriter.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
+			ok, err := cfg.blockWriter.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
 			if err != nil {
 				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
 			if cfg.historyV3 && ok {
-				if err := rawdbv3.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
+				body, _ := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(blockHeight, header.Hash()))
+				lastTxnID := body.BaseTxId + uint64(body.TxAmount) - 1
+				if err := rawdbv3.TxNums.Append(tx, blockHeight, lastTxnID); err != nil {
 					return false, err
 				}
+				//if err := rawdb.AppendCanonicalTxNums(tx, blockHeight); err != nil {
+				//	return false, err
+				//}
 			}
 			if ok {
 				dataflow.BlockBodyDownloadStates.AddChange(blockHeight, dataflow.BlockBodyCleared)

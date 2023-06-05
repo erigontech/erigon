@@ -30,9 +30,8 @@ import (
 )
 
 var (
-	historyfile    string
-	nocheck        bool
-	transactionsV3 bool
+	historyfile string
+	nocheck     bool
 )
 
 func init() {
@@ -41,7 +40,6 @@ func init() {
 	withSnapshotBlocks(checkChangeSetsCmd)
 	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", "", "path to the file where the changesets and history are expected to be. If omitted, the same as <datadir>/erion/chaindata")
 	checkChangeSetsCmd.Flags().BoolVar(&nocheck, "nocheck", false, "set to turn off the changeset checking and only execute transaction (for performance testing)")
-	checkChangeSetsCmd.Flags().BoolVar(&transactionsV3, "experimental.transactions.v3", false, "(this flag is in testing stage) Not recommended yet: Can't change this flag after node creation. New DB table for transactions allows keeping multiple branches of block bodies in the DB simultaneously")
 	rootCmd.AddCommand(checkChangeSetsCmd)
 }
 
@@ -55,13 +53,13 @@ var checkChangeSetsCmd = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return err
 		}
-		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck, transactionsV3)
+		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck)
 	},
 }
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool, transactionV3 bool) error {
+func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}
@@ -85,7 +83,7 @@ func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64,
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader := snapshotsync.NewBlockReader(allSnapshots, transactionV3)
+	blockReader := snapshotsync.NewBlockReader(allSnapshots)
 
 	chainDb := db
 	defer chainDb.Close()

@@ -13,32 +13,14 @@ import (
 )
 
 const (
-	MaxAttesterSlashings = 2
-	MaxProposerSlashings = 16
-	MaxAttestations      = 128
-	MaxDeposits          = 16
-	MaxVoluntaryExits    = 16
-	MaxExecutionChanges  = 16
-	MaxBlobsPerBlock     = 4
+	MaxAttesterSlashings         = 2
+	MaxProposerSlashings         = 16
+	MaxAttestations              = 128
+	MaxDeposits                  = 16
+	MaxVoluntaryExits            = 16
+	MaxExecutionChanges          = 16
+	MaxBlobsCommittmentsPerBlock = 4096
 )
-
-func getBeaconBlockMinimumSize(v clparams.StateVersion) (size uint32) {
-	switch v {
-	case clparams.DenebVersion:
-		size = 392
-	case clparams.CapellaVersion:
-		size = 388
-	case clparams.BellatrixVersion:
-		size = 384
-	case clparams.AltairVersion:
-		size = 380
-	case clparams.Phase0Version:
-		size = 220
-	default:
-		panic("unimplemented version")
-	}
-	return
-}
 
 type SignedBeaconBlock struct {
 	Signature [96]byte
@@ -100,7 +82,6 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (b *BeaconBody) EncodingSizeSSZ() (size int) {
-	size = int(getBeaconBlockMinimumSize(b.Version))
 
 	if b.Eth1Data == nil {
 		b.Eth1Data = &Eth1Data{}
@@ -133,7 +114,7 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
 	}
 	if b.BlobKzgCommitments == nil {
-		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsPerBlock, 48)
+		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
 	}
 
 	size += b.ProposerSlashings.EncodingSizeSSZ()
@@ -161,7 +142,8 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
 	}
 
-	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
+	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
+	return err
 }
 
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {

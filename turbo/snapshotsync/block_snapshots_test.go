@@ -71,8 +71,7 @@ func TestMergeSnapshots(t *testing.T) {
 	for i := uint64(500_000); i < 500_000+N*100_000; i += 100_000 {
 		createFile(i, i+100_000)
 	}
-	cfg := ethconfig.Snapshot{Enabled: true}
-	s := NewRoSnapshots(cfg, dir, logger)
+	s := NewRoSnapshots(ethconfig.Snapshot{Enabled: true}, dir, logger)
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
 	{

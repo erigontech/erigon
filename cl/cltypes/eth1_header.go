@@ -30,7 +30,8 @@ type Eth1Header struct {
 	BlockHash        libcommon.Hash
 	TransactionsRoot libcommon.Hash
 	WithdrawalsRoot  libcommon.Hash
-	ExcessDataGas    [32]byte
+	DataGasUsed      uint64
+	ExcessDataGas    uint64
 	// internals
 	version clparams.StateVersion
 }
@@ -59,7 +60,8 @@ func (e *Eth1Header) Capella() {
 // Capella converts the header to capella version.
 func (e *Eth1Header) Deneb() {
 	e.version = clparams.DenebVersion
-	e.ExcessDataGas = [32]byte{}
+	e.DataGasUsed = 0
+	e.ExcessDataGas = 0
 }
 
 func (e *Eth1Header) IsZero() bool {
@@ -68,7 +70,9 @@ func (e *Eth1Header) IsZero() bool {
 	}
 	return e.ParentHash == libcommon.Hash{} && e.FeeRecipient == libcommon.Address{} && e.StateRoot == libcommon.Hash{} &&
 		e.ReceiptsRoot == libcommon.Hash{} && e.LogsBloom == types.Bloom{} && e.PrevRandao == libcommon.Hash{} && e.BlockNumber == 0 &&
-		e.GasLimit == 0 && e.GasUsed == 0 && e.Time == 0 && e.Extra.EncodingSizeSSZ() == 0 && e.BaseFeePerGas == [32]byte{} && e.BlockHash == libcommon.Hash{} && e.TransactionsRoot == libcommon.Hash{}
+		e.GasLimit == 0 && e.GasUsed == 0 && e.Time == 0 && e.Extra.EncodingSizeSSZ() == 0 && e.BaseFeePerGas == [32]byte{} &&
+		e.BlockHash == libcommon.Hash{} && e.TransactionsRoot == libcommon.Hash{} && e.WithdrawalsRoot == libcommon.Hash{} &&
+		e.DataGasUsed == 0 && e.ExcessDataGas == 0
 }
 
 // EncodeSSZ encodes the header in SSZ format.
@@ -94,7 +98,7 @@ func (h *Eth1Header) EncodingSizeSSZ() int {
 	}
 
 	if h.version >= clparams.DenebVersion {
-		size += 32
+		size += 8 * 2 // DataGasUsed + ExcessDataGas
 	}
 	if h.Extra == nil {
 		h.Extra = solid.NewExtraData()
@@ -117,7 +121,7 @@ func (h *Eth1Header) getSchema() []interface{} {
 		s = append(s, h.WithdrawalsRoot[:])
 	}
 	if h.version >= clparams.DenebVersion {
-		s = append(s, h.ExcessDataGas[:])
+		s = append(s, &h.DataGasUsed, &h.ExcessDataGas)
 	}
 	return s
 }

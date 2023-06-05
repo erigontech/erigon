@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -33,7 +32,8 @@ func ExecutionStages(ctx context.Context, sm prune.Mode, snapshots stagedsync.Sn
 	return defaultStages
 }
 
-func NewStagedSync(ctx context.Context,
+func NewStagedSync(
+	ctx context.Context,
 	db kv.RwDB,
 	p2pCfg p2p.Config,
 	cfg *ethconfig.Config,
@@ -42,13 +42,12 @@ func NewStagedSync(ctx context.Context,
 	snapDownloader proto_downloader.DownloaderClient,
 	agg *state.AggregatorV3,
 	forkValidator *engineapi.ForkValidator,
-	engine consensus.Engine,
 	logger log.Logger,
 	blockReader services.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
 ) (*stagedsync.Sync, error) {
 	dirs := cfg.Dirs
-	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, blockReader, db, snapDownloader, notifications.Events, logger)
+	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, blockReader, blockWriter, db, snapDownloader, notifications.Events, logger)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.

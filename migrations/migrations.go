@@ -3,13 +3,13 @@ package migrations
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"path/filepath"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ugorji/go/codec"
@@ -120,17 +120,11 @@ func (m *Migrator) PendingMigrations(tx kv.Tx) ([]Migration, error) {
 
 func (m *Migrator) VerifyVersion(db kv.RwDB) error {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		var err error
-		existingVersion, err := tx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey)
+		major, minor, _, ok, err := rawdb.ReadDBSchemaVersion(tx)
 		if err != nil {
 			return fmt.Errorf("reading DB schema version: %w", err)
 		}
-		if len(existingVersion) != 0 && len(existingVersion) != 12 {
-			return fmt.Errorf("incorrect length of DB schema version: %d", len(existingVersion))
-		}
-		if len(existingVersion) == 12 {
-			major := binary.BigEndian.Uint32(existingVersion)
-			minor := binary.BigEndian.Uint32(existingVersion[4:])
+		if ok {
 			if major > kv.DBSchemaVersion.Major {
 				return fmt.Errorf("cannot downgrade major DB version from %d to %d", major, kv.DBSchemaVersion.Major)
 			} else if major == kv.DBSchemaVersion.Major {
@@ -236,16 +230,8 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir string, logger log.Logger) error {
 		}
 		logger.Info("Applied migration", "name", v.Name)
 	}
-	// Write DB schema version
-	var version [12]byte
-	binary.BigEndian.PutUint32(version[:], kv.DBSchemaVersion.Major)
-	binary.BigEndian.PutUint32(version[4:], kv.DBSchemaVersion.Minor)
-	binary.BigEndian.PutUint32(version[8:], kv.DBSchemaVersion.Patch)
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		if err := tx.Put(kv.DatabaseInfo, kv.DBSchemaVersionKey, version[:]); err != nil {
-			return fmt.Errorf("writing DB schema version: %w", err)
-		}
-		return nil
+		return rawdb.WriteDBSchemaVersion(tx)
 	}); err != nil {
 		return fmt.Errorf("migrator.Apply: %w", err)
 	}

@@ -34,6 +34,8 @@ type ConsensusClientCliCfg struct {
 	TransitionChain  bool                        `json:"transitionChain"`
 	NetworkType      clparams.NetworkType        `json:"networkType"`
 	InitialSync      bool                        `json:"initialSync"`
+	RecordMode       bool                        `json:"recordMode"`
+	RecordDir        string                      `json:"recordDir"`
 
 	InitalState *state.BeaconState
 }
@@ -70,6 +72,9 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	}
 	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.String(flags.SentinelServerAddr.Name), ctx.Int(flags.SentinelServerPort.Name))
 	cfg.ServerProtocol = "tcp"
+
+	cfg.RecordMode = ctx.Bool(flags.RecordModeFlag.Name)
+	cfg.RecordDir = ctx.String(flags.RecordModeDir.Name)
 
 	cfg.Port = uint(ctx.Int(flags.SentinelDiscoveryPort.Name))
 	cfg.Addr = ctx.String(flags.SentinelDiscoveryAddr.Name)

@@ -18,23 +18,24 @@ type BlockReader interface {
 	BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error)
 	BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error)
 	CurrentBlock(db kv.Tx) (*types.Block, error)
-	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
+	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error)
 }
 
 type HeaderReader interface {
-	Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error)
-	HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error)
+	Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error)
+	HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error)
 	HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error)
 }
 
 type CanonicalReader interface {
-	CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (common.Hash, error)
+	CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, error)
 }
 
 type BodyReader interface {
-	BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error)
-	BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error)
-	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error)
+	BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, err error)
+	BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error)
+	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txAmount uint32, err error)
+	HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
 }
 
 type TxnReader interface {

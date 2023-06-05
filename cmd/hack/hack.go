@@ -114,11 +114,7 @@ func testBlockHashes(chaindata string, block int, stateRoot libcommon.Hash) {
 }
 
 func getCurrentBlockNumber(tx kv.Tx) *uint64 {
-	hash := rawdb.ReadHeadBlockHash(tx)
-	if hash == (libcommon.Hash{}) {
-		return nil
-	}
-	return rawdb.ReadHeaderNumber(tx, hash)
+	return rawdb.ReadCurrentBlockNumber(tx)
 }
 
 func printCurrentBlockNumber(chaindata string) {
@@ -135,16 +131,15 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	var histV3, transactionsV3 bool
+	var histV3 bool
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		transactionsV3, _ = kvcfg.TransactionsV3.Enabled(tx)
 		histV3, _ = kvcfg.HistoryV3.Enabled(tx)
 		return nil
 	}); err != nil {
 		panic(err)
 	}
-	br := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()), transactionsV3)
-	bw := blockio.NewBlockWriter(histV3, transactionsV3)
+	br := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()))
+	bw := blockio.NewBlockWriter(histV3)
 	return br, bw
 }
 
@@ -583,11 +578,6 @@ func extractBodies(datadir string) error {
 	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
 	defer db.Close()
 	br, _ := blocksIO(db)
-	lastTxnID, _, err := br.(*snapshotsync.BlockReader).LastTxNumInSnapshot(snaps.BlocksAvailable())
-	if err != nil {
-		return err
-	}
-	fmt.Printf("txTxnID = %d\n", lastTxnID)
 
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {

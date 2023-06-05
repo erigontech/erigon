@@ -241,9 +241,7 @@ func Erigon4(genesis *types.Genesis, chainConfig *chain2.Config, logger log.Logg
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	//transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
-	transactionsV3 := false
-	blockReader = snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
+	blockReader = snapshotsync.NewBlockReader(allSnapshots)
 	engine := initConsensusEngine(chainConfig, allSnapshots, logger)
 
 	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
@@ -420,14 +418,13 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *StateR
 	}
 
 	getHashFn := core.GetHashFn(header, getHeader)
-	excessDataGas := header.ParentExcessDataGas(getHeader)
 	for i, tx := range block.Transactions() {
 		if txNum >= startTxNum {
 			ibs := state.New(rw)
 			ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			vmConfig.Tracer = ct
-			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, excessDataGas)
+			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig)
 			if err != nil {
 				return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}

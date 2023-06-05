@@ -254,20 +254,13 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.In
 	if err := config.CheckConfigForkOrder(); err != nil {
 		return nil, nil, err
 	}
-	transactionV3, err := kvcfg.TransactionsV3.Enabled(tx)
-	if err != nil {
-		return nil, nil, err
-	}
 	histV3, err := kvcfg.HistoryV3.Enabled(tx)
 	if err != nil {
 		return nil, nil, err
 	}
-	blockWriter := blockio.NewBlockWriter(histV3, transactionV3)
+	blockWriter := blockio.NewBlockWriter(histV3)
 
-	if err := blockWriter.WriteHeader(tx, block.HeaderNoCopy()); err != nil {
-		return nil, nil, err
-	}
-	if err := blockWriter.WriteBody(tx, block.Hash(), block.NumberU64(), block.Body()); err != nil {
+	if err := blockWriter.WriteBlock(tx, block); err != nil {
 		return nil, nil, err
 	}
 	if err := blockWriter.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
@@ -488,6 +481,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 		MixDigest:     g.Mixhash,
 		Coinbase:      g.Coinbase,
 		BaseFee:       g.BaseFee,
+		DataGasUsed:   g.DataGasUsed,
 		ExcessDataGas: g.ExcessDataGas,
 		AuRaStep:      g.AuRaStep,
 		AuRaSeal:      g.AuRaSeal,
@@ -562,7 +556,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			}
 
 			if len(account.Constructor) > 0 {
-				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head, g.ExcessDataGas); err != nil {
+				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head); err != nil {
 					return
 				}
 			}

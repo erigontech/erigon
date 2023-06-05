@@ -867,7 +867,7 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	var blockRetire *snapshotsync.BlockRetire
 	if sn.Cfg().Enabled {
-		blockRetire = snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), tmpdir, br, db, nil, nil, logger)
+		blockRetire = snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), tmpdir, br, bw, db, nil, nil, logger)
 	}
 
 	pm, err := prune.Get(tx)
@@ -1417,10 +1417,9 @@ var _blockWriterSingleton *blockio.BlockWriter
 func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter) {
 	openBlockReaderOnce.Do(func() {
 		sn, _ := allSnapshots(context.Background(), db, logger)
-		transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
 		histV3 := kvcfg.HistoryV3.FromDB(db)
-		_blockReaderSingleton = snapshotsync.NewBlockReader(sn, transactionsV3)
-		_blockWriterSingleton = blockio.NewBlockWriter(histV3, transactionsV3)
+		_blockReaderSingleton = snapshotsync.NewBlockReader(sn)
+		_blockWriterSingleton = blockio.NewBlockWriter(histV3)
 	})
 	return _blockReaderSingleton, _blockWriterSingleton
 }

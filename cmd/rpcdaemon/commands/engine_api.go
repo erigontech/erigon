@@ -42,7 +42,8 @@ type ExecutionPayload struct {
 	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
 	Transactions  []hexutility.Bytes  `json:"transactions"  gencodec:"required"`
 	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
-	ExcessDataGas *hexutil.Big        `json:"excessDataGas"`
+	DataGasUsed   *hexutil.Uint64     `json:"dataGasUsed"`
+	ExcessDataGas *hexutil.Uint64     `json:"excessDataGas"`
 }
 
 // GetPayloadV2Response represents the response of the getPayloadV2 method
@@ -82,9 +83,9 @@ type TransitionConfiguration struct {
 
 // BlobsBundleV1 holds the blobs of an execution payload
 type BlobsBundleV1 struct {
-	KZGs   []types.KZGCommitment `json:"kzgs"   gencodec:"required"`
-	Blobs  []types.Blob          `json:"blobs"  gencodec:"required"`
-	Proofs []types.KZGProof      `json:"proofs" gencodec:"required"`
+	Commitments []types.KZGCommitment `json:"commitments" gencodec:"required"`
+	Proofs      []types.KZGProof      `json:"proofs"      gencodec:"required"`
+	Blobs       []types.Blob          `json:"blobs"       gencodec:"required"`
 }
 
 type ExecutionPayloadBodyV1 struct {
@@ -292,16 +293,12 @@ func (e *EngineImpl) newPayload(version uint32, ctx context.Context, payload *Ex
 		ep.Version = 2
 		ep.Withdrawals = privateapi.ConvertWithdrawalsToRpc(payload.Withdrawals)
 	}
-	if version >= 3 && payload.ExcessDataGas != nil {
+	if version >= 3 && payload.DataGasUsed != nil && payload.ExcessDataGas != nil {
 		ep.Version = 3
-		var excessDataGas *uint256.Int
-		var overflow bool
-		excessDataGas, overflow = uint256.FromBig((*big.Int)(payload.ExcessDataGas))
-		if overflow {
-			log.Warn("NewPayload ExcessDataGas overflow")
-			return nil, fmt.Errorf("invalid request, excess data gas overflow")
-		}
-		ep.ExcessDataGas = gointerfaces.ConvertUint256IntToH256(excessDataGas)
+		dataGasUsed := uint64(*payload.DataGasUsed)
+		ep.DataGasUsed = &dataGasUsed
+		excessDataGas := uint64(*payload.ExcessDataGas)
+		ep.ExcessDataGas = &excessDataGas
 	}
 
 	res, err := e.api.EngineNewPayload(ctx, ep)
@@ -342,8 +339,10 @@ func convertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 		res.Withdrawals = privateapi.ConvertWithdrawalsFromRpc(payload.Withdrawals)
 	}
 	if payload.Version >= 3 {
-		edg := gointerfaces.ConvertH256ToUint256Int(payload.ExcessDataGas).ToBig()
-		res.ExcessDataGas = (*hexutil.Big)(edg)
+		dataGasUsed := *payload.DataGasUsed
+		res.DataGasUsed = (*hexutil.Uint64)(&dataGasUsed)
+		excessDataGas := *payload.ExcessDataGas
+		res.ExcessDataGas = (*hexutil.Uint64)(&excessDataGas)
 	}
 	return res
 }
@@ -402,24 +401,24 @@ func (e *EngineImpl) GetPayloadV3(ctx context.Context, payloadID hexutility.Byte
 	epl := convertPayloadFromRpc(response.ExecutionPayload)
 	blockValue := gointerfaces.ConvertH256ToUint256Int(response.BlockValue).ToBig()
 
-	ep, err := e.api.EngineGetBlobsBundleV1(ctx, decodedPayloadId)
-	if err != nil {
-		return nil, err
+	commitments := response.BlobsBundle.GetCommitments()
+	proofs := response.BlobsBundle.GetProofs()
+	blobs := response.BlobsBundle.GetBlobs()
+	if len(commitments) != len(proofs) || len(proofs) != len(blobs) {
+		return nil, fmt.Errorf("should have same number of commitments/proofs/blobs, got %v vs %v vs %v", len(commitments), len(proofs), len(blobs))
 	}
-	kzgs := ep.GetKzgs()
-	blobs := ep.GetBlobs()
-	if len(kzgs) != len(blobs) {
-		return nil, fmt.Errorf("should have same number of kzgs and blobs, got %v vs %v", len(kzgs), len(blobs))
-	}
-	replyKzgs := make([]types.KZGCommitment, len(kzgs))
+	replyCommitments := make([]types.KZGCommitment, len(commitments))
+	replyProofs := make([]types.KZGProof, len(proofs))
 	replyBlobs := make([]types.Blob, len(blobs))
-	for i := range kzgs {
-		copy(replyKzgs[i][:], kzgs[i])
+	for i := range commitments {
+		copy(replyCommitments[i][:], commitments[i])
+		copy(replyProofs[i][:], proofs[i])
 		copy(replyBlobs[i][:], blobs[i])
 	}
 	bb := &BlobsBundleV1{
-		KZGs:  replyKzgs,
-		Blobs: replyBlobs,
+		Commitments: replyCommitments,
+		Proofs:      replyProofs,
+		Blobs:       replyBlobs,
 	}
 
 	return &GetPayloadV3Response{

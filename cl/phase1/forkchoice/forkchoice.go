@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/freezer"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
@@ -38,6 +39,8 @@ type ForkChoiceStore struct {
 	mu        sync.Mutex
 	// EL
 	engine execution_client.ExecutionEngine
+	// freezer
+	recorder freezer.Freezer
 }
 
 type LatestMessage struct {
@@ -46,7 +49,7 @@ type LatestMessage struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(anchorState *state2.BeaconState, engine execution_client.ExecutionEngine, enabledPruning bool) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(anchorState *state2.BeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, enabledPruning bool) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -76,6 +79,7 @@ func NewForkChoiceStore(anchorState *state2.BeaconState, engine execution_client
 		checkpointStates:              checkpointStates,
 		eth2Roots:                     eth2Roots,
 		engine:                        engine,
+		recorder:                      recorder,
 	}, nil
 }
 

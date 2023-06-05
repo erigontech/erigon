@@ -17,7 +17,7 @@ import (
 func Setup(address string) {
 	http.HandleFunc("/debug/metrics/prometheus", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		metrics2.WritePrometheus(w, false)
+		metrics2.WritePrometheus(w, true)
 		contentType := expfmt.Negotiate(r.Header)
 		enc := expfmt.NewEncoder(w, contentType)
 		mf, err := prometheus.DefaultGatherer.Gather()

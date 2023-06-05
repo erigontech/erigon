@@ -5,8 +5,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/require"
-
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 )
 
 func MockRequestGenerator(reqId int) *RequestGenerator {
@@ -28,7 +26,7 @@ func TestRequestGenerator_GetAdminNodeInfo(t *testing.T) {
 
 	for _, testCase := range testCases {
 		reqGen := MockRequestGenerator(testCase.reqId)
-		got := reqGen.GetAdminNodeInfo()
+		_, got := reqGen.adminNodeInfo()
 		require.EqualValues(t, testCase.expected, got)
 	}
 }
@@ -37,32 +35,32 @@ func TestRequestGenerator_GetBalance(t *testing.T) {
 	testCases := []struct {
 		reqId    int
 		address  libcommon.Address
-		blockNum models.BlockNumber
+		blockNum BlockNumber
 		expected string
 	}{
 		{
 			1,
 			libcommon.HexToAddress("0x67b1d87101671b127f5f8714789c7192f7ad340e"),
-			models.Latest,
+			BlockNumbers.Latest,
 			`{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x67b1d87101671b127f5f8714789c7192f7ad340e","latest"],"id":1}`,
 		},
 		{
 			2,
 			libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7"),
-			models.Earliest,
+			BlockNumbers.Earliest,
 			`{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x71562b71999873db5b286df957af199ec94617f7","earliest"],"id":2}`,
 		},
 		{
 			3,
 			libcommon.HexToAddress("0x1b5fd2fed153fa7fac43300273c70c068bfa406a"),
-			models.Pending,
+			BlockNumbers.Pending,
 			`{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x1b5fd2fed153fa7fac43300273c70c068bfa406a","pending"],"id":3}`,
 		},
 	}
 
 	for _, testCase := range testCases {
 		reqGen := MockRequestGenerator(testCase.reqId)
-		got := reqGen.GetBalance(testCase.address, testCase.blockNum)
+		_, got := reqGen.getBalance(testCase.address, testCase.blockNum)
 		require.EqualValues(t, testCase.expected, got)
 	}
 }
@@ -96,7 +94,7 @@ func TestRequestGenerator_GetBlockByNumber(t *testing.T) {
 
 	for _, testCase := range testCases {
 		reqGen := MockRequestGenerator(testCase.reqId)
-		got := reqGen.GetBlockByNumber(testCase.blockNum, testCase.withTxs)
+		_, got := reqGen.getBlockByNumber(testCase.blockNum, testCase.withTxs)
 		require.EqualValues(t, testCase.expected, got)
 	}
 }
@@ -134,7 +132,7 @@ func TestRequestGenerator_GetLogs(t *testing.T) {
 
 	for _, testCase := range testCases {
 		reqGen := MockRequestGenerator(testCase.reqId)
-		got := reqGen.GetLogs(testCase.fromBlock, testCase.toBlock, testCase.address)
+		_, got := reqGen.getLogs(testCase.fromBlock, testCase.toBlock, testCase.address)
 		require.EqualValues(t, testCase.expected, got)
 	}
 }
@@ -143,32 +141,32 @@ func TestRequestGenerator_GetTransactionCount(t *testing.T) {
 	testCases := []struct {
 		reqId    int
 		address  libcommon.Address
-		blockNum models.BlockNumber
+		blockNum BlockNumber
 		expected string
 	}{
 		{
 			1,
 			libcommon.HexToAddress("0x67b1d87101671b127f5f8714789c7192f7ad340e"),
-			models.Latest,
+			BlockNumbers.Latest,
 			`{"jsonrpc":"2.0","method":"eth_getTransactionCount","params":["0x67b1d87101671b127f5f8714789c7192f7ad340e","latest"],"id":1}`,
 		},
 		{
 			2,
 			libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7"),
-			models.Earliest,
+			BlockNumbers.Earliest,
 			`{"jsonrpc":"2.0","method":"eth_getTransactionCount","params":["0x71562b71999873db5b286df957af199ec94617f7","earliest"],"id":2}`,
 		},
 		{
 			3,
 			libcommon.HexToAddress("0x1b5fd2fed153fa7fac43300273c70c068bfa406a"),
-			models.Pending,
+			BlockNumbers.Pending,
 			`{"jsonrpc":"2.0","method":"eth_getTransactionCount","params":["0x1b5fd2fed153fa7fac43300273c70c068bfa406a","pending"],"id":3}`,
 		},
 	}
 
 	for _, testCase := range testCases {
 		reqGen := MockRequestGenerator(testCase.reqId)
-		got := reqGen.GetTransactionCount(testCase.address, testCase.blockNum)
+		_, got := reqGen.getTransactionCount(testCase.address, testCase.blockNum)
 		require.EqualValues(t, testCase.expected, got)
 	}
 }
@@ -198,7 +196,7 @@ func TestRequestGenerator_SendRawTransaction(t *testing.T) {
 
 	for _, testCase := range testCases {
 		reqGen := MockRequestGenerator(testCase.reqId)
-		got := reqGen.SendRawTransaction(testCase.signedTx)
+		_, got := reqGen.sendRawTransaction(testCase.signedTx)
 		require.EqualValues(t, testCase.expected, got)
 	}
 }
@@ -215,7 +213,65 @@ func TestRequestGenerator_TxpoolContent(t *testing.T) {
 
 	for _, testCase := range testCases {
 		reqGen := MockRequestGenerator(testCase.reqId)
-		got := reqGen.TxpoolContent()
+		_, got := reqGen.txpoolContent()
+		require.EqualValues(t, testCase.expected, got)
+	}
+}
+
+func TestParseResponse(t *testing.T) {
+	type Person struct {
+		Name string
+		Age  int
+	}
+
+	testCases := []struct {
+		input    interface{}
+		expected string
+	}{
+		{
+			Person{
+				Name: "Leonard",
+				Age:  10,
+			},
+			`{"Name":"Leonard","Age":10}`,
+		},
+		{
+			struct {
+				Person struct {
+					Name string
+					Age  int
+				}
+				WorkID string
+			}{
+				Person: Person{
+					Name: "Uzi",
+					Age:  23,
+				},
+				WorkID: "123456",
+			},
+			`{"Person":{"Name":"Uzi","Age":23},"WorkID":"123456"}`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		got, _ := parseResponse(testCase.input)
+		require.EqualValues(t, testCase.expected, got)
+	}
+}
+
+func TestHexToInt(t *testing.T) {
+	testCases := []struct {
+		hexStr   string
+		expected uint64
+	}{
+		{"0x0", 0},
+		{"0x32424", 205860},
+		{"0x200", 512},
+		{"0x39", 57},
+	}
+
+	for _, testCase := range testCases {
+		got := HexToInt(testCase.hexStr)
 		require.EqualValues(t, testCase.expected, got)
 	}
 }
