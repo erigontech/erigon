@@ -35,6 +35,14 @@ func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 func (r *RemoteBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	panic("not implemented")
 }
+func (r *RemoteBlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
+	panic("not implemented")
+}
+
+func (r *RemoteBlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error) {
+	return rawdb.ReadBadHeaderNumber(tx, hash)
+}
+
 func (r *RemoteBlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
 	hash, err := r.CanonicalHash(ctx, db, number)
 	if err != nil {
@@ -87,9 +95,6 @@ func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blo
 func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
 	return &RemoteBlockReader{client}
 }
-func (r *RemoteBlockReader) TxsV3Enabled() bool {
-	panic("not implemented")
-}
 
 func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
 	reply, err := r.client.TxnLookup(ctx, &remote.TxnLookupRequest{TxnHash: gointerfaces.ConvertHashToH256(txnHash)})
@@ -126,6 +131,7 @@ func (r *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, b
 func (r *RemoteBlockReader) HasSenders(ctx context.Context, _ kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
 	panic("HasSenders is low-level method, don't use it in RPCDaemon")
 }
+
 func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	reply, err := r.client.Block(ctx, &remote.BlockRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockHeight: blockHeight})
 	if err != nil {
@@ -197,7 +203,7 @@ type BlockReader struct {
 }
 
 func NewBlockReader(snapshots services.BlockSnapshots) *BlockReader {
-	return &BlockReader{sn: snapshots.(*RoSnapshots), TransactionsV3: false}
+	return &BlockReader{sn: snapshots.(*RoSnapshots), TransactionsV3: true}
 }
 
 func (r *BlockReader) Snapshots() services.BlockSnapshots { return r.sn }
@@ -396,38 +402,21 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash c
 func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []common.Address, err error) {
 	blocksAvailable := r.sn.BlocksAvailable()
 	if blocksAvailable == 0 || blockHeight > blocksAvailable {
-		if r.TransactionsV3 {
-			if forceCanonical {
-				canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
-				if err != nil {
-					return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-				}
-				if canonicalHash != hash {
-					return nil, nil, nil
-				}
-			}
-
-			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
-			if err != nil {
-				return nil, nil, err
-			}
-			return block, senders, nil
-		}
-		canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
-		if err != nil {
-			return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-		}
-		if canonicalHash == hash {
-			block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
-			if err != nil {
-				return nil, nil, err
-			}
-			return block, senders, nil
-		}
 		if forceCanonical {
+			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+			if err != nil {
+				return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
+			}
+			if canonicalHash != hash {
+				return nil, nil, nil
+			}
+		}
+
+		block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+		if err != nil {
 			return nil, nil, err
 		}
-		return rawdb.NonCanonicalBlockWithSenders(tx, hash, blockHeight)
+		return block, senders, nil
 	}
 
 	view := r.sn.View()
@@ -714,7 +703,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 			return nil, nil
 		}
 
-		txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i), canonicalHash)
+		txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i))
 		if err != nil {
 			return nil, err
 		}
@@ -813,7 +802,9 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount u
 	}
 	return nil
 }
-func (r *BlockReader) TxsV3Enabled() bool { return r.TransactionsV3 }
+func (r *BlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error) {
+	return rawdb.ReadBadHeaderNumber(tx, hash)
+}
 func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
 	hash, err := rawdb.ReadCanonicalHash(db, number)
 	if err != nil {
@@ -844,4 +835,55 @@ func (r *BlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 }
 func (r *BlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	return rawdb.RawTransactionsRange(tx, fromBlock, toBlock)
+}
+func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
+	if ancestor > number {
+		return common.Hash{}, 0
+	}
+	if ancestor == 1 {
+		header, err := r.Header(context.Background(), db, hash, number)
+		if err != nil {
+			panic(err)
+		}
+		// in this case it is cheaper to just read the header
+		if header != nil {
+			return header.ParentHash, number - 1
+		}
+		return common.Hash{}, 0
+	}
+	for ancestor != 0 {
+		h, err := r.CanonicalHash(context.Background(), db, number)
+		if err != nil {
+			panic(err)
+		}
+		if h == hash {
+			ancestorHash, err := r.CanonicalHash(context.Background(), db, number-ancestor)
+			if err != nil {
+				panic(err)
+			}
+			h, err := r.CanonicalHash(context.Background(), db, number)
+			if err != nil {
+				panic(err)
+			}
+			if h == hash {
+				number -= ancestor
+				return ancestorHash, number
+			}
+		}
+		if *maxNonCanonical == 0 {
+			return common.Hash{}, 0
+		}
+		*maxNonCanonical--
+		ancestor--
+		header, err := r.Header(context.Background(), db, hash, number)
+		if err != nil {
+			panic(err)
+		}
+		if header == nil {
+			return common.Hash{}, 0
+		}
+		hash = header.ParentHash
+		number--
+	}
+	return hash, number
 }

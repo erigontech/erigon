@@ -51,6 +51,9 @@ func (back *RemoteBackend) CurrentBlock(db kv.Tx) (*types.Block, error) {
 func (back *RemoteBackend) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	panic("not implemented")
 }
+func (back *RemoteBackend) ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
+	panic("not implemented")
+}
 func (back *RemoteBackend) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
 	hash, err := back.CanonicalHash(ctx, db, number)
 	if err != nil {
@@ -204,6 +207,9 @@ func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash 
 }
 func (back *RemoteBackend) HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error) {
 	panic("HasSenders is low-level method, don't use it in RPCDaemon")
+}
+func (back *RemoteBackend) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockNum *uint64, err error) {
+	return back.blockReader.BadHeaderNumber(ctx, tx, hash)
 }
 func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error) {
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockNum)

@@ -112,18 +112,20 @@ func TestBodyStorage(t *testing.T) {
 	hasher := sha3.NewLegacyKeccak256()
 	_ = rlp.Encode(hasher, body)
 	hash := libcommon.BytesToHash(hasher.Sum(nil))
+	header := &types.Header{Number: libcommon.Big1}
 
-	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry != nil {
+	if entry, _ := br.BodyWithTransactions(ctx, tx, header.Hash(), 1); entry != nil {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
-	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 0))
-	require.NoError(bw.WriteBody(tx, hash, 0, body))
-	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
+	require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), 1))
+	require.NoError(bw.WriteHeader(tx, header))
+	require.NoError(bw.WriteBody(tx, header.Hash(), 1, body))
+	if entry, _ := br.BodyWithTransactions(ctx, tx, header.Hash(), 1); entry == nil {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(types.Transactions(body.Transactions)) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, body)
 	}
-	if entry := rawdb.ReadBodyRLP(tx, hash, 0); entry == nil {
+	if entry := rawdb.ReadBodyRLP(tx, header.Hash(), 1); entry == nil {
 		//if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
 		t.Fatalf("Stored body RLP not found")
 	} else {
@@ -139,8 +141,8 @@ func TestBodyStorage(t *testing.T) {
 		}
 	}
 	// Delete the body and verify the execution
-	rawdb.DeleteBody(tx, hash, 0)
-	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry != nil {
+	rawdb.DeleteBody(tx, hash, 1)
+	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 1); entry != nil {
 		t.Fatalf("Deleted body returned: %v", entry)
 	}
 }
@@ -148,8 +150,9 @@ func TestBodyStorage(t *testing.T) {
 // Tests block storage and retrieval operations.
 func TestBlockStorage(t *testing.T) {
 	m := stages.Mock(t)
+	require := require.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 	ctx := m.Ctx
 	br, bw := m.NewBlocksIO()
@@ -213,12 +216,45 @@ func TestBlockStorage(t *testing.T) {
 	}
 
 	// write again and delete it as old one
-	if err := bw.WriteBlock(tx, block); err != nil {
-		t.Fatalf("Could not write block: %v", err)
+	require.NoError(bw.WriteBlock(tx, block))
+
+	{
+		// mark chain as bad
+		//  - it must be not available by hash
+		//  - but available by hash+num - if read num from kv.BadHeaderNumber table
+		//  - prune blocks: must delete Canonical/NonCanonical/BadBlocks also
+		foundBn, _ := br.BadHeaderNumber(ctx, tx, block.Hash())
+		require.Nil(foundBn)
+		found, _ := br.BlockByHash(ctx, tx, block.Hash())
+		require.NotNil(found)
+
+		err = rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64())
+		require.NoError(err)
+		err = rawdb.TruncateCanonicalHash(tx, block.NumberU64(), true)
+		require.NoError(err)
+		foundBlock, _ := br.BlockByHash(ctx, tx, block.Hash())
+		require.Nil(foundBlock)
+
+		foundBn = rawdb.ReadHeaderNumber(tx, block.Hash())
+		require.Nil(foundBn)
+		foundBn, _ = br.BadHeaderNumber(ctx, tx, block.Hash())
+		require.NotNil(foundBn)
+		foundBlock, _ = br.BlockByNumber(ctx, tx, *foundBn)
+		require.Nil(foundBlock)
+		foundBlock, _, _ = br.BlockWithSenders(ctx, tx, block.Hash(), *foundBn)
+		require.NotNil(foundBlock)
 	}
-	if err := rawdb.DeleteAncientBlocks(tx, 0, 1); err != nil {
-		t.Fatal(err)
-	}
+
+	// prune: [1: N)
+	require.NoError(bw.PruneBlocks(ctx, tx, 0, 1))
+	entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NotNil(entry)
+	require.NoError(bw.PruneBlocks(ctx, tx, 1, 1))
+	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NotNil(entry)
+	require.NoError(bw.PruneBlocks(ctx, tx, 2, 1))
+	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.Nil(entry)
 }
 
 // Tests that partial block contents don't get reassembled into full blocks.
@@ -502,11 +538,11 @@ func TestBlockReceiptStorage(t *testing.T) {
 // Tests block storage and retrieval operations with withdrawals.
 func TestBlockWithdrawalsStorage(t *testing.T) {
 	m := stages.Mock(t)
+	require := require.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 	br, bw := m.NewBlocksIO()
-	require := require.New(t)
 	ctx := context.Background()
 
 	// create fake withdrawals
@@ -549,6 +585,9 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	// Write withdrawals to block
 	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals)
 
+	if err := bw.WriteHeader(tx, wBlock.HeaderNoCopy()); err != nil {
+		t.Fatalf("Could not write body: %v", err)
+	}
 	if err := bw.WriteBody(tx, wBlock.Hash(), wBlock.NumberU64(), wBlock.Body()); err != nil {
 		t.Fatalf("Could not write body: %v", err)
 	}
@@ -620,9 +659,16 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	if err := bw.WriteBlock(tx, block); err != nil {
 		t.Fatalf("Could not write block: %v", err)
 	}
-	if err := rawdb.DeleteAncientBlocks(tx, 0, 1); err != nil {
-		t.Fatal(err)
-	}
+	// prune: [1: N)
+	require.NoError(bw.PruneBlocks(ctx, tx, 0, 1))
+	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NotNil(entry)
+	require.NoError(bw.PruneBlocks(ctx, tx, 1, 1))
+	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NotNil(entry)
+	require.NoError(bw.PruneBlocks(ctx, tx, 2, 1))
+	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.Nil(entry)
 }
 
 // Tests pre-shanghai body to make sure withdrawals doesn't panic
