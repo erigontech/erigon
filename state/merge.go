@@ -518,7 +518,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		}
 		datFileName := fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 		datPath := filepath.Join(d.dir, datFileName)
-		if comp, err = compress.NewCompressor(ctx, "merge", datPath, d.tmpdir, compress.MinPatternScore, workers, log.LvlTrace); err != nil {
+		if comp, err = compress.NewCompressor(ctx, "merge", datPath, d.tmpdir, compress.MinPatternScore, workers, log.LvlTrace, d.logger); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s history compressor: %w", d.filenameBase, err)
 		}
 		p := ps.AddNew("merege "+datFileName, 1)
@@ -629,7 +629,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		ps.Delete(p)
 
 		//		if valuesIn.index, err = buildIndex(valuesIn.decompressor, idxPath, d.dir, keyCount, false /* values */); err != nil {
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, idxPath, d.tmpdir, keyCount, false /* values */, p); err != nil {
+		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, idxPath, d.tmpdir, keyCount, false /* values */, p, d.logger); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 
@@ -637,7 +637,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		p = ps.AddNew(btFileName, uint64(keyCount*2))
 		defer ps.Delete(p)
 		btPath := filepath.Join(d.dir, btFileName)
-		err = BuildBtreeIndexWithDecompressor(btPath, valuesIn.decompressor, p)
+		err = BuildBtreeIndexWithDecompressor(btPath, valuesIn.decompressor, p, d.logger)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
@@ -688,7 +688,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 
 	datFileName := fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep)
 	datPath := filepath.Join(ii.dir, datFileName)
-	if comp, err = compress.NewCompressor(ctx, "Snapshots merge", datPath, ii.tmpdir, compress.MinPatternScore, workers, log.LvlTrace); err != nil {
+	if comp, err = compress.NewCompressor(ctx, "Snapshots merge", datPath, ii.tmpdir, compress.MinPatternScore, workers, log.LvlTrace, ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", ii.filenameBase, err)
 	}
 	p := ps.AddNew("merge "+datFileName, 1)
@@ -783,7 +783,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	idxPath := filepath.Join(ii.dir, idxFileName)
 	p = ps.AddNew("merge "+idxFileName, uint64(outItem.decompressor.Count()*2))
 	defer ps.Delete(p)
-	if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, idxPath, ii.tmpdir, keyCount, false /* values */, p); err != nil {
+	if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, idxPath, ii.tmpdir, keyCount, false /* values */, p, ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", ii.filenameBase, startTxNum, endTxNum, err)
 	}
 	closeItem = false
@@ -847,7 +847,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 		idxFileName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep)
 		datPath := filepath.Join(h.dir, datFileName)
 		idxPath := filepath.Join(h.dir, idxFileName)
-		if comp, err = compress.NewCompressor(ctx, "merge", datPath, h.tmpdir, compress.MinPatternScore, workers, log.LvlTrace); err != nil {
+		if comp, err = compress.NewCompressor(ctx, "merge", datPath, h.tmpdir, compress.MinPatternScore, workers, log.LvlTrace, h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", h.filenameBase, err)
 		}
 		p := ps.AddNew("merge "+datFileName, 1)
@@ -940,7 +940,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 			LeafSize:   8,
 			TmpDir:     h.tmpdir,
 			IndexFile:  idxPath,
-		}); err != nil {
+		}, h.logger); err != nil {
 			return nil, nil, fmt.Errorf("create recsplit: %w", err)
 		}
 		rs.LogLvl(log.LvlTrace)

@@ -87,7 +87,8 @@ type Aggregator struct {
 	tmpdir          string
 	defaultCtx      *AggregatorContext
 
-	ps *background.ProgressSet
+	ps     *background.ProgressSet
+	logger log.Logger
 }
 
 //type exposedMetrics struct {
@@ -106,8 +107,8 @@ type Aggregator struct {
 //	e.PruneSize = metrics.GetOrCreateGauge("domain_prune_size", func() float64 { return e.lastPruneSize })
 //}
 
-func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode CommitmentMode, commitTrieVariant commitment.TrieVariant) (*Aggregator, error) {
-	a := &Aggregator{aggregationStep: aggregationStep, ps: background.NewProgressSet(), tmpdir: tmpdir, stepDoneNotice: make(chan [length.Hash]byte, 1)}
+func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode CommitmentMode, commitTrieVariant commitment.TrieVariant, logger log.Logger) (*Aggregator, error) {
+	a := &Aggregator{aggregationStep: aggregationStep, ps: background.NewProgressSet(), tmpdir: tmpdir, stepDoneNotice: make(chan [length.Hash]byte, 1), logger: logger}
 
 	closeAgg := true
 	defer func() {
@@ -119,32 +120,32 @@ func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode Co
 	if err != nil {
 		return nil, err
 	}
-	if a.accounts, err = NewDomain(dir, tmpdir, aggregationStep, "accounts", kv.AccountKeys, kv.AccountVals, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountIdx, false, false); err != nil {
+	if a.accounts, err = NewDomain(dir, tmpdir, aggregationStep, "accounts", kv.AccountKeys, kv.AccountVals, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountIdx, false, false, logger); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewDomain(dir, tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, false, false); err != nil {
+	if a.storage, err = NewDomain(dir, tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, false, false, logger); err != nil {
 		return nil, err
 	}
-	if a.code, err = NewDomain(dir, tmpdir, aggregationStep, "code", kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeIdx, true, true); err != nil {
+	if a.code, err = NewDomain(dir, tmpdir, aggregationStep, "code", kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeIdx, true, true, logger); err != nil {
 		return nil, err
 	}
 
-	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.CommitmentKeys, kv.CommitmentVals, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx, false, true)
+	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.CommitmentKeys, kv.CommitmentVals, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx, false, true, logger)
 	if err != nil {
 		return nil, err
 	}
 	a.commitment = NewCommittedDomain(commitd, commitmentMode, commitTrieVariant)
 
-	if a.logAddrs, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "logaddrs", kv.LogAddressKeys, kv.LogAddressIdx, false, nil); err != nil {
+	if a.logAddrs, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "logaddrs", kv.LogAddressKeys, kv.LogAddressIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.logTopics, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "logtopics", kv.LogTopicsKeys, kv.LogTopicsIdx, false, nil); err != nil {
+	if a.logTopics, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "logtopics", kv.LogTopicsKeys, kv.LogTopicsIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.tracesFrom, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "tracesfrom", kv.TracesFromKeys, kv.TracesFromIdx, false, nil); err != nil {
+	if a.tracesFrom, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "tracesfrom", kv.TracesFromKeys, kv.TracesFromIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.tracesTo, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "tracesto", kv.TracesToKeys, kv.TracesToIdx, false, nil); err != nil {
+	if a.tracesTo, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "tracesto", kv.TracesToKeys, kv.TracesToIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
 	closeAgg = false
@@ -409,7 +410,7 @@ func (a *Aggregator) mergeDomainSteps(ctx context.Context) error {
 	}
 
 	if upmerges > 1 {
-		log.Info("[stat] aggregation merged",
+		a.logger.Info("[stat] aggregation merged",
 			"upto_tx", maxEndTxNum,
 			"merge_took", time.Since(mergeStartedAt),
 			"merges_count", upmerges)
@@ -555,11 +556,11 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 	}()
 
 	for err := range errCh {
-		log.Warn("domain collate-buildFiles failed", "err", err)
+		a.logger.Warn("domain collate-buildFiles failed", "err", err)
 		return fmt.Errorf("domain collate-build failed: %w", err)
 	}
 
-	log.Info("[stat] aggregation is finished",
+	a.logger.Info("[stat] aggregation is finished",
 		"range", fmt.Sprintf("%.2fM-%.2fM", float64(txFrom)/10e5, float64(txTo)/10e5),
 		"took", time.Since(stepStartedAt))
 
@@ -602,7 +603,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, maxEndTxNum uint64, work
 		mxBuildTook.Update(s.LastFileBuildingTook.Seconds())
 	}
 
-	log.Info("[stat] finished merge step",
+	a.logger.Info("[stat] finished merge step",
 		"upto_tx", maxEndTxNum, "merge_step_took", time.Since(mergeStartedAt))
 
 	return true, nil
@@ -747,7 +748,7 @@ func (mf MergedFiles) Close() {
 func (a *Aggregator) mergeFiles(ctx context.Context, files SelectedStaticFiles, r Ranges, workers int) (MergedFiles, error) {
 	started := time.Now()
 	defer func(t time.Time) {
-		log.Info("[snapshots] domain files has been merged",
+		a.logger.Info("[snapshots] domain files has been merged",
 			"range", fmt.Sprintf("%d-%d", r.accounts.valuesStartTxNum/a.aggregationStep, r.accounts.valuesEndTxNum/a.aggregationStep),
 			"took", time.Since(t))
 	}(started)
@@ -1083,7 +1084,7 @@ func (a *Aggregator) Flush(ctx context.Context) error {
 		a.tracesFrom.Rotate(),
 		a.tracesTo.Rotate(),
 	}
-	defer func(t time.Time) { log.Debug("[snapshots] history flush", "took", time.Since(t)) }(time.Now())
+	defer func(t time.Time) { a.logger.Debug("[snapshots] history flush", "took", time.Since(t)) }(time.Now())
 	for _, f := range flushers {
 		if err := f.Flush(ctx, a.rwTx); err != nil {
 			return err

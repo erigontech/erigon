@@ -11,70 +11,37 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
-	btree2 "github.com/tidwall/btree"
-
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
-
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+	btree2 "github.com/tidwall/btree"
 )
 
-type KVList struct {
-	TxNum []uint64
-	Vals  [][]byte
+// KvList sort.Interface to sort write list by keys
+type KvList struct {
+	Keys []string
+	Vals [][]byte
 }
 
-func NewKVList() *KVList {
-	return &KVList{
-		TxNum: make([]uint64, 0, 16),
-		Vals:  make([][]byte, 0, 16),
-	}
+func (l *KvList) Push(key string, val []byte) {
+	l.Keys = append(l.Keys, key)
+	l.Vals = append(l.Vals, val)
 }
 
-func (l *KVList) Latest() (tx uint64, v []byte) {
-	sz := len(l.TxNum)
-	if sz == 0 {
-		return 0, nil
-	}
-	sz--
-
-	tx = l.TxNum[sz]
-	v = l.Vals[sz]
-	return tx, v
+func (l *KvList) Len() int {
+	return len(l.Keys)
 }
 
-func (l *KVList) Put(tx uint64, v []byte) (prevTx uint64, prevV []byte) {
-	prevTx, prevV = l.Latest()
-	l.TxNum = append(l.TxNum, tx)
-	l.Vals = append(l.Vals, common.Copy(v))
-	return
+func (l *KvList) Less(i, j int) bool {
+	return l.Keys[i] < l.Keys[j]
 }
 
-func (l *KVList) Len() int {
-	return len(l.TxNum)
-}
-
-func (l *KVList) Apply(f func(txn uint64, v []byte, isLatest bool) error) error {
-	for i, tx := range l.TxNum {
-		if err := f(tx, l.Vals[i], i == len(l.TxNum)-1); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (l *KVList) Reset() {
-	if len(l.TxNum) > 0 {
-		topNum := l.TxNum[len(l.TxNum)-1]
-		topVal := l.Vals[len(l.Vals)-1]
-		defer l.Put(topNum, topVal) // store the latest value
-	}
-	l.TxNum = l.TxNum[:0]
-	l.Vals = l.Vals[:0]
+func (l *KvList) Swap(i, j int) {
+	l.Keys[i], l.Keys[j] = l.Keys[j], l.Keys[i]
+	l.Vals[i], l.Vals[j] = l.Vals[j], l.Vals[i]
 }
 
 func splitKey(key []byte) (k1, k2 []byte) {
@@ -236,7 +203,7 @@ func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
 	return v, nil
 }
 
-func (sd *SharedDomains) ReadsValidBtree(table string, list *exec22.KvList) bool {
+func (sd *SharedDomains) ReadsValidBtree(table string, list *KvList) bool {
 	sd.muMaps.RLock()
 	defer sd.muMaps.RUnlock()
 
@@ -609,7 +576,7 @@ func (sd *SharedDomains) Close() {
 }
 
 func (sd *SharedDomains) flushMap(ctx context.Context, rwTx kv.RwTx, table string, m map[string][]byte, logPrefix string, logEvery *time.Ticker) error {
-	collector := etl.NewCollector(logPrefix, "", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collector := etl.NewCollector(logPrefix, "", etl.NewSortableBuffer(etl.BufferOptimalSize), log.New())
 	defer collector.Close()
 
 	var count int

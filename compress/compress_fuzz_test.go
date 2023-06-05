@@ -29,6 +29,7 @@ import (
 )
 
 func FuzzCompress(f *testing.F) {
+	logger := log.New()
 	f.Fuzz(func(t *testing.T, x []byte, pos []byte, workers int8) {
 		t.Helper()
 		t.Parallel()
@@ -51,7 +52,7 @@ func FuzzCompress(f *testing.F) {
 		ctx := context.Background()
 		tmpDir := t.TempDir()
 		file := filepath.Join(tmpDir, fmt.Sprintf("compressed-%d", rand.Int31()))
-		c, err := NewCompressor(ctx, t.Name(), file, tmpDir, 2, int(workers), log.LvlDebug)
+		c, err := NewCompressor(ctx, t.Name(), file, tmpDir, 2, int(workers), log.LvlDebug, logger)
 		if err != nil {
 			t.Fatal(err)
 		}

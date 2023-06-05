@@ -50,18 +50,21 @@ type LocalityIndex struct {
 
 	roFiles  atomic.Pointer[ctxItem]
 	roBmFile atomic.Pointer[bitmapdb.FixedSizeBitmaps]
+	logger   log.Logger
 }
 
 func NewLocalityIndex(
 	dir, tmpdir string,
 	aggregationStep uint64,
 	filenameBase string,
+	logger log.Logger,
 ) (*LocalityIndex, error) {
 	li := &LocalityIndex{
 		dir:             dir,
 		tmpdir:          tmpdir,
 		aggregationStep: aggregationStep,
 		filenameBase:    filenameBase,
+		logger:          logger,
 	}
 	return li, nil
 }
@@ -101,30 +104,30 @@ func (li *LocalityIndex) scanStateFiles(fNames []string) (uselessFiles []*filesI
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 3 {
 			if len(subs) != 0 {
-				log.Warn("File ignored by inverted index scan, more than 3 submatches", "name", name, "submatches", len(subs))
+				li.logger.Warn("File ignored by inverted index scan, more than 3 submatches", "name", name, "submatches", len(subs))
 			}
 			continue
 		}
 		var startStep, endStep uint64
 		if startStep, err = strconv.ParseUint(subs[1], 10, 64); err != nil {
-			log.Warn("File ignored by inverted index scan, parsing startTxNum", "error", err, "name", name)
+			li.logger.Warn("File ignored by inverted index scan, parsing startTxNum", "error", err, "name", name)
 			continue
 		}
 		if endStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
-			log.Warn("File ignored by inverted index scan, parsing endTxNum", "error", err, "name", name)
+			li.logger.Warn("File ignored by inverted index scan, parsing endTxNum", "error", err, "name", name)
 			continue
 		}
 		if startStep > endStep {
-			log.Warn("File ignored by inverted index scan, startTxNum > endTxNum", "name", name)
+			li.logger.Warn("File ignored by inverted index scan, startTxNum > endTxNum", "name", name)
 			continue
 		}
 
 		if startStep != 0 {
-			log.Warn("LocalityIndex must always starts from step 0")
+			li.logger.Warn("LocalityIndex must always starts from step 0")
 			continue
 		}
 		if endStep > StepsInBiggestFile*LocalityIndexUint64Limit {
-			log.Warn("LocalityIndex does store bitmaps as uint64, means it can't handle > 2048 steps. But it's possible to implement")
+			li.logger.Warn("LocalityIndex does store bitmaps as uint64, means it can't handle > 2048 steps. But it's possible to implement")
 			continue
 		}
 
@@ -209,27 +212,27 @@ func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
 	return x
 }
 
-func (out *ctxLocalityIdx) Close() {
+func (out *ctxLocalityIdx) Close(logger log.Logger) {
 	if out == nil || out.file == nil || out.file.src == nil {
 		return
 	}
 	refCnt := out.file.src.refcount.Add(-1)
 	if refCnt == 0 && out.file.src.canDelete.Load() {
-		closeLocalityIndexFilesAndRemove(out)
+		closeLocalityIndexFilesAndRemove(out, logger)
 	}
 }
 
-func closeLocalityIndexFilesAndRemove(i *ctxLocalityIdx) {
+func closeLocalityIndexFilesAndRemove(i *ctxLocalityIdx, logger log.Logger) {
 	if i.file.src != nil {
 		i.file.src.closeFilesAndRemove()
 		i.file.src = nil
 	}
 	if i.bm != nil {
 		if err := i.bm.Close(); err != nil {
-			log.Trace("close", "err", err, "file", i.bm.FileName())
+			logger.Trace("close", "err", err, "file", i.bm.FileName())
 		}
 		if err := os.Remove(i.bm.FilePath()); err != nil {
-			log.Trace("os.Remove", "err", err, "file", i.bm.FileName())
+			logger.Trace("os.Remove", "err", err, "file", i.bm.FileName())
 		}
 		i.bm = nil
 	}
@@ -311,7 +314,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, ic *InvertedIndexContex
 		LeafSize:   8,
 		TmpDir:     li.tmpdir,
 		IndexFile:  idxPath,
-	})
+	}, li.logger)
 	if err != nil {
 		return nil, fmt.Errorf("create recsplit: %w", err)
 	}
@@ -341,7 +344,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, ic *InvertedIndexContex
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			case <-logEvery.C:
-				log.Info("[LocalityIndex] build", "name", li.filenameBase, "progress", fmt.Sprintf("%.2f%%", 50+it.Progress()/2))
+				li.logger.Info("[LocalityIndex] build", "name", li.filenameBase, "progress", fmt.Sprintf("%.2f%%", 50+it.Progress()/2))
 			default:
 			}
 		}
@@ -352,7 +355,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, ic *InvertedIndexContex
 
 		if err = rs.Build(); err != nil {
 			if rs.Collision() {
-				log.Debug("Building recsplit. Collision happened. It's ok. Restarting...")
+				li.logger.Debug("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
 			} else {
 				return nil, fmt.Errorf("build idx: %w", err)

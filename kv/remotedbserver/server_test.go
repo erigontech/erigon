@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
@@ -43,7 +44,7 @@ func TestKvServer_renew(t *testing.T) {
 		return nil
 	}))
 
-	s := NewKvServer(ctx, db, nil, nil)
+	s := NewKvServer(ctx, db, nil, nil, log.New())
 	g, ctx := errgroup.WithContext(ctx)
 	testCase := func() error {
 		id, err := s.begin(ctx)

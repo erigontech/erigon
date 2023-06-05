@@ -105,10 +105,11 @@ type GrpcServer struct {
 	NewSlotsStreams *NewSlotsStreams
 
 	chainID uint256.Int
+	logger  log.Logger
 }
 
-func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, chainID uint256.Int) *GrpcServer {
-	return &GrpcServer{ctx: ctx, txPool: txPool, db: db, NewSlotsStreams: &NewSlotsStreams{}, chainID: chainID}
+func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, chainID uint256.Int, logger log.Logger) *GrpcServer {
+	return &GrpcServer{ctx: ctx, txPool: txPool, db: db, NewSlotsStreams: &NewSlotsStreams{}, chainID: chainID, logger: logger}
 }
 
 func (s *GrpcServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
@@ -246,7 +247,7 @@ func mapDiscardReasonToProto(reason DiscardReason) txpool_proto.ImportResult {
 }
 
 func (s *GrpcServer) OnAdd(req *txpool_proto.OnAddRequest, stream txpool_proto.Txpool_OnAddServer) error {
-	log.Info("New txs subscriber joined")
+	s.logger.Info("New txs subscriber joined")
 	//txpool.Loop does send messages to this streams
 	remove := s.NewSlotsStreams.Add(stream)
 	defer remove()
@@ -320,13 +321,13 @@ func (s *NewSlotsStreams) Add(stream txpool_proto.Txpool_OnAddServer) (remove fu
 	return func() { s.remove(id) }
 }
 
-func (s *NewSlotsStreams) Broadcast(reply *txpool_proto.OnAddReply) {
+func (s *NewSlotsStreams) Broadcast(reply *txpool_proto.OnAddReply, logger log.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
-			log.Debug("failed send to mined block stream", "err", err)
+			logger.Debug("failed send to mined block stream", "err", err)
 			select {
 			case <-stream.Context().Done():
 				delete(s.chans, id)
@@ -346,7 +347,7 @@ func (s *NewSlotsStreams) remove(id uint) {
 	delete(s.chans, id)
 }
 
-func StartGrpc(txPoolServer txpool_proto.TxpoolServer, miningServer txpool_proto.MiningServer, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
+func StartGrpc(txPoolServer txpool_proto.TxpoolServer, miningServer txpool_proto.MiningServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
@@ -402,9 +403,9 @@ func StartGrpc(txPoolServer txpool_proto.TxpoolServer, miningServer txpool_proto
 	go func() {
 		defer healthServer.Shutdown()
 		if err := grpcServer.Serve(lis); err != nil {
-			log.Error("private RPC server fail", "err", err)
+			logger.Error("private RPC server fail", "err", err)
 		}
 	}()
-	log.Info("Started gRPC server", "on", addr)
+	logger.Info("Started gRPC server", "on", addr)
 	return grpcServer, nil
 }

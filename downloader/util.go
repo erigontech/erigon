@@ -17,12 +17,9 @@
 package downloader
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha1" //nolint:gosec
-	"errors"
+	//nolint:gosec
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -36,8 +33,6 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/mmap_span"
-	"github.com/edsrzf/mmap-go"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
@@ -317,51 +312,6 @@ func segmentFileNameFromTorrentFileName(in string) string {
 	return in[0 : len(in)-len(ext)]
 }
 
-func mmapFile(name string) (mm mmap.MMap, err error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return
-	}
-	if fi.Size() == 0 {
-		return
-	}
-	return mmap.MapRegion(f, -1, mmap.RDONLY, mmap.COPY, 0)
-}
-
-func verifyTorrent(info *metainfo.Info, root string, consumer func(i int, good bool) error) error {
-	span := new(mmap_span.MMapSpan)
-	for _, file := range info.UpvertedFiles() {
-		filename := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
-		mm, err := mmapFile(filename)
-		if err != nil {
-			return err
-		}
-		if int64(len(mm)) != file.Length {
-			return fmt.Errorf("file %q has wrong length", filename)
-		}
-		span.Append(mm)
-	}
-	span.InitIndex()
-	for i, numPieces := 0, info.NumPieces(); i < numPieces; i += 1 {
-		p := info.Piece(i)
-		hash := sha1.New() //nolint:gosec
-		_, err := io.Copy(hash, io.NewSectionReader(span, p.Offset(), p.Length()))
-		if err != nil {
-			return err
-		}
-		good := bytes.Equal(hash.Sum(nil), p.Hash().Bytes())
-		if err := consumer(i, good); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // AddTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
@@ -395,68 +345,6 @@ func AddTorrentFile(torrentFilePath string, torrentClient *torrent.Client) (*tor
 }
 
 var ErrSkip = fmt.Errorf("skip")
-
-func VerifyDtaFiles(ctx context.Context, snapDir string) error {
-	logEvery := time.NewTicker(5 * time.Second)
-	defer logEvery.Stop()
-
-	files, err := AllTorrentPaths(snapDir)
-	if err != nil {
-		return err
-	}
-	totalPieces := 0
-	for _, f := range files {
-		metaInfo, err := metainfo.LoadFromFile(f)
-		if err != nil {
-			return err
-		}
-		info, err := metaInfo.UnmarshalInfo()
-		if err != nil {
-			return err
-		}
-		totalPieces += info.NumPieces()
-	}
-
-	j := 0
-	failsAmount := 0
-	for _, f := range files {
-		metaInfo, err := metainfo.LoadFromFile(f)
-		if err != nil {
-			return err
-		}
-		info, err := metaInfo.UnmarshalInfo()
-		if err != nil {
-			return err
-		}
-
-		if err = verifyTorrent(&info, snapDir, func(i int, good bool) error {
-			j++
-			if !good {
-				failsAmount++
-				log.Error("[snapshots] Verify hash mismatch", "at piece", i, "file", info.Name)
-				return ErrSkip
-			}
-			select {
-			case <-logEvery.C:
-				log.Info("[snapshots] Verify", "Progress", fmt.Sprintf("%.2f%%", 100*float64(j)/float64(totalPieces)))
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-			return nil
-		}); err != nil {
-			if errors.Is(ErrSkip, err) {
-				continue
-			}
-			return err
-		}
-	}
-	if failsAmount > 0 {
-		return fmt.Errorf("not all files are valid")
-	}
-	log.Info("[snapshots] Verify done")
-	return nil
-}
 
 func portMustBeTCPAndUDPOpen(port int) error {
 	tcpAddr := &net.TCPAddr{

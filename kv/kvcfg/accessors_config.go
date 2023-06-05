@@ -25,8 +25,7 @@ import (
 type ConfigKey []byte
 
 var (
-	HistoryV3      = ConfigKey("history.v3")
-	TransactionsV3 = ConfigKey("transactions.v3")
+	HistoryV3 = ConfigKey("history.v3")
 )
 
 func (k ConfigKey) Enabled(tx kv.Tx) (bool, error) { return kv.GetBool(tx, kv.DatabaseInfo, k) }

@@ -22,6 +22,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -302,7 +304,33 @@ func moveFromTmp(snapDir string) error {
 	return nil
 }
 
-func (d *Downloader) verify() error {
+func (d *Downloader) verifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.GotInfo():
+	}
+
+	g := &errgroup.Group{}
+	for i := 0; i < t.NumPieces(); i++ {
+		i := i
+		g.Go(func() error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
+			t.Piece(i).VerifyData()
+			completePieces.Add(1)
+			return nil
+		})
+		//<-t.Complete.On()
+	}
+	return g.Wait()
+}
+
+func (d *Downloader) VerifyData(ctx context.Context) error {
 	total := 0
 	for _, t := range d.torrentClient.Torrents() {
 		select {
@@ -312,33 +340,42 @@ func (d *Downloader) verify() error {
 			continue
 		}
 	}
-	logInterval := 20 * time.Second
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
 
-	wg := &sync.WaitGroup{}
-	j := atomic.Int64{}
+	completedPieces := &atomic.Uint64{}
+
+	{
+		log.Info("[snapshots] Verify start")
+		defer log.Info("[snapshots] Verify done")
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		logInterval := 20 * time.Second
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-logEvery.C:
+					log.Info("[snapshots] Verify", "progress", fmt.Sprintf("%.2f%%", 100*float64(completedPieces.Load())/float64(total)))
+				}
+			}
+		}()
+	}
+
+	g, ctx := errgroup.WithContext(ctx)
+	// torrent lib internally limiting amount of hashers per file
+	// set limit here just to make load predictable, not to control Disk/CPU consumption
+	g.SetLimit(runtime.GOMAXPROCS(-1) * 2)
 
 	for _, t := range d.torrentClient.Torrents() {
-		wg.Add(1)
-		go func(t *torrent.Torrent) {
-			defer wg.Done()
-			<-t.GotInfo()
-			for i := 0; i < t.NumPieces(); i++ {
-				j.Add(1)
-				t.Piece(i).VerifyData()
-
-				select {
-				case <-logEvery.C:
-					log.Info("[snapshots] Verifying", "progress", fmt.Sprintf("%.2f%%", 100*float64(j.Load())/float64(total)))
-				default:
-				}
-				//<-t.Complete.On()
-			}
-		}(t)
+		t := t
+		g.Go(func() error {
+			return d.verifyFile(ctx, t, completedPieces)
+		})
 	}
-	wg.Wait()
 
+	g.Wait()
 	// force fsync of db. to not loose results of validation on power-off
 	return d.db.Update(context.Background(), func(tx kv.RwTx) error { return nil })
 }
