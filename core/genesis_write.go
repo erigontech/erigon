@@ -201,8 +201,9 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	if ethconfig.EnableHistoryV4InTest {
 		agg := tx.(*temporal.Tx).Agg()
 		agg.SetTxNum(0)
-		stateWriter, _ = state.WrapStateIO(agg.SharedDomains())
-		//stateWriter = state.NewWriterV4(tx.(kv.TemporalTx))
+		//agg.SetTx(tx)
+		//stateWriter, _ = state.WrapStateIO(agg.SharedDomains())
+		stateWriter = state.NewWriterV4(tx.(kv.TemporalTx))
 
 		_ = tx.(*temporal.Tx).Agg().SharedDomains()
 		defer tx.(*temporal.Tx).Agg().StartUnbufferedWrites().FinishWrites()

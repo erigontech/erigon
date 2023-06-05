@@ -690,7 +690,6 @@ Loop:
 		if !parallel {
 			outputBlockNum.Set(blockNum)
 			// MA commitment
-			//if blockNum > 0 {
 			rh, err := agg.ComputeCommitment(true, false)
 			if err != nil {
 				return fmt.Errorf("StateV3.Apply: %w", err)
@@ -700,7 +699,6 @@ Loop:
 
 				return fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, header.Root.Bytes(), blockNum)
 			}
-			//}
 
 			select {
 			case <-logEvery.C:
