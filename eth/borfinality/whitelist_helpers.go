@@ -3,7 +3,6 @@ package borfinality
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/bor"
@@ -30,7 +29,7 @@ func handleWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, config *config
 	service := whitelist.GetWhitelistingService()
 
 	blockNum, blockHash, err := fetchWhitelistCheckpoint(ctx, bor, verifier, config)
-	fmt.Println("Handle Whitelist", blockNum)
+
 	// If the array is empty, we're bound to receive an error. Non-nill error and non-empty array
 	// means that array has partial elements and it failed for some block. We'll add those partial
 	// elements anyway.
@@ -48,9 +47,9 @@ func handleMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
 	// Create a new bor verifier, which will be used to verify checkpoints and milestones
 	verifier := newBorVerifier()
 
-	num, hash, err := fetchWhitelistMilestone(ctx, bor, verifier, config)
-	fmt.Println("Handle Whitelist Whitelist", num)
 	service := whitelist.GetWhitelistingService()
+
+	num, hash, err := fetchWhitelistMilestone(ctx, bor, verifier, config)
 
 	// If the current chain head is behind the received milestone, add it to the future milestone
 	// list. Also, the hash mismatch (end block hash) error will lead to rewind so also
@@ -62,7 +61,7 @@ func handleMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("Handle milestone : process milestone")
+
 	service.ProcessMilestone(num, hash)
 
 	return nil
@@ -70,6 +69,7 @@ func handleMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
 
 func handleNoAckMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
 	milestoneID, err := fetchNoAckMilestone(ctx, bor)
+
 	service := whitelist.GetWhitelistingService()
 
 	//If failed to fetch the no-ack milestone then it give the error.
@@ -84,6 +84,7 @@ func handleNoAckMilestone(ctx context.Context, bor *bor.Bor, config *config) err
 
 func handleNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, config *config) error {
 	service := whitelist.GetWhitelistingService()
+
 	milestoneIDs := service.GetMilestoneIDsList()
 
 	for _, milestoneID := range milestoneIDs {
@@ -141,11 +142,10 @@ func fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, verifier *borVer
 		log.Error("Failed to fetch latest milestone for whitelisting", "err", err)
 		return num, hash, errMilestone
 	}
-	fmt.Println("FEtch whitelitst")
+
 	num = milestone.EndBlock.Uint64()
 	hash = milestone.Hash
 
-	fmt.Println("FEtch whitelitst um jknsjfnskd: ", num)
 	// Verify if the milestone fetched can be added to the local whitelist entry or not
 	// If verified, it returns the hash of the end block of the milestone. If not,
 	// it will return appropriate error.

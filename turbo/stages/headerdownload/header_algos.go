@@ -534,10 +534,13 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			return true, false, 0, lastTime, nil
 		}
 		if !link.verified {
-			borFinality, borReorg := validateReorg(link.header)
-			fmt.Println("BorFinality: ", borFinality, "Error: ", borReorg)
-			if err := hd.VerifyHeader(link.header); err != nil || !borFinality || borReorg != nil {
-				// if err := hd.VerifyHeader(link.header); err != nil {
+			// Whitelist service is called to check if the bor chain is
+			// on the cannonical chain, returns true for every other chain
+			borReorg, err := validateReorg(link.header)
+
+			borfinality := !borReorg || err != nil
+
+			if err := hd.VerifyHeader(link.header); err != nil || borfinality {
 				hd.badPoSHeaders[link.hash] = link.header.ParentHash
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
@@ -1393,6 +1396,7 @@ func DecodeTips(encodings []string) (map[libcommon.Hash]HeaderRecord, error) {
 func validateReorg(current *types.Header) (bool, error) {
 	// Call the bor chain validator service
 	s := whitelist.GetWhitelistingService()
+
 	if s != nil {
 		return s.IsValidChain(current, []*types.Header{current})
 	}

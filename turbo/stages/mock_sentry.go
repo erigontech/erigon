@@ -547,7 +547,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 			return err
 		}
 	}
-	fmt.Println("POW")
+
 	// Send all the headers
 	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
 		RequestId:          1,
@@ -620,7 +620,6 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	SendPayloadStatus(ms.HeaderDownload(), headBlockHash, err)
 	ms.ReceivePayloadStatus()
 
-	fmt.Println("POS")
 	fc := engineapi.ForkChoiceMessage{
 		HeadBlockHash:      chain.TopBlock.Hash(),
 		SafeBlockHash:      chain.TopBlock.Hash(),
@@ -646,12 +645,10 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	}
 	// Check if the latest header was imported or rolled back
 	if err := ms.DB.View(ms.Ctx, func(tx kv.Tx) error {
-		fmt.Println(chain.TopBlock.Hash())
 		if rawdb.ReadHeader(tx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
 			return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 		}
 		execAt, err := stages.GetStageProgress(tx, stages.Execution)
-		fmt.Println("execAt: ", execAt)
 		if err != nil {
 			return err
 		}

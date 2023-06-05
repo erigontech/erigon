@@ -1177,7 +1177,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 		t.Fatalf("failed to insert original chain: %v", err)
 	}
 	// Import the competitor chain without exceeding the canonical's TD and ensure
-	// we have not processed any of the blocks (protection against malicious blocks)teturbg
+	// we have not processed any of the blocks (protection against malicious blocks)
 	if err := m2.InsertChain(competitor.Slice(0, competitor.Length()-2)); err != nil {
 		t.Fatalf("failed to insert competitor chain: %v", err)
 	}
@@ -1186,21 +1186,6 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	if err := m2.InsertChain(competitor.Slice(competitor.Length()-2, competitor.Length())); err != nil {
 		t.Fatalf("failed to finalize competitor chain: %v", err)
 	}
-
-	print("shared", shared.Headers)
-	print("original", original.Headers)
-	print("competitor", competitor.Headers)
-
-	tx, err := m2.DB.BeginRo(context.Background())
-	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
-	fmt.Println("Header: ", header.Number.Uint64(), header.Hash())
-}
-
-func print(prefix string, headers []*types.Header) {
-	fmt.Println("---"+prefix, ", length:", len(headers))
-	fmt.Printf("headers[0]: %d - %s\n", headers[0].Number.Uint64(), headers[0].Hash())
-	fmt.Printf("headers[n-1]: %d - %s\n", headers[len(headers)-1].Number.Uint64(), headers[len(headers)-1].Hash())
 }
 
 // Tests that importing a very large side fork, which is larger than the canon chain,

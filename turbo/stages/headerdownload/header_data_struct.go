@@ -275,22 +275,6 @@ type HeaderDownload struct {
 	logger               log.Logger
 }
 
-func (hd *HeaderDownload) GetChain() []*types.Header {
-	fmt.Println("Get Chain Called")
-	if hd.insertQueue.Len() == 0 {
-		return nil
-	}
-	chain := make([]*types.Header, 0, 100)
-	link := hd.insertQueue[0].fChild
-	for link != nil {
-		chain = append(chain, link.header)
-		link = link.next
-	}
-	fmt.Println("Insert Queue: ", hd.insertQueue)
-	fmt.Println("CHAIN: ", chain)
-	return chain
-}
-
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
 type HeaderRecord struct {
 	Header *types.Header

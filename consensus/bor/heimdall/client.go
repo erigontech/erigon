@@ -391,11 +391,13 @@ func lastNoAckMilestoneURL(urlString string) (*url.URL, error) {
 
 func noAckMilestoneURL(urlString string, id string) (*url.URL, error) {
 	url := fmt.Sprintf(fetchNoAckMilestone, id)
+
 	return makeURL(urlString, url, "")
 }
 
 func milestoneIDURL(urlString string, id string) (*url.URL, error) {
 	url := fmt.Sprintf(fetchMilestoneID, id)
+
 	return makeURL(urlString, url, "")
 }
 
