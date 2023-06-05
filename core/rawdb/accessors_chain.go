@@ -26,8 +26,6 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-
 	"github.com/gballet/go-verkle"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -36,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -409,17 +408,12 @@ func ReadStorageBody(db kv.Getter, hash libcommon.Hash, number uint64) (types.Bo
 	return *bodyForStorage, nil
 }
 
-func CanonicalTxnByID(db kv.Getter, id uint64, blockHash libcommon.Hash, transactionsV3 bool) (types.Transaction, error) {
+func CanonicalTxnByID(db kv.Getter, id uint64, blockHash libcommon.Hash) (types.Transaction, error) {
 	txIdKey := make([]byte, 8)
 	binary.BigEndian.PutUint64(txIdKey, id)
 	var v []byte
 	var err error
-	if transactionsV3 {
-		key := append(txIdKey, blockHash.Bytes()...)
-		v, err = db.GetOne(kv.EthTxV3, key)
-	} else {
-		v, err = db.GetOne(kv.EthTx, txIdKey)
-	}
+	v, err = db.GetOne(kv.EthTx, txIdKey)
 	if err != nil {
 		return nil, err
 	}
@@ -437,12 +431,9 @@ func CanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]type
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
-	txIdKey := make([]byte, 8)
 	txs := make([]types.Transaction, amount)
-	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
-
-	if err := db.ForAmount(kv.EthTx, txIdKey, amount, func(k, v []byte) error {
+	if err := db.ForAmount(kv.EthTx, hexutility.EncodeTs(baseTxId), amount, func(k, v []byte) error {
 		var decodeErr error
 		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v); decodeErr != nil {
 			return decodeErr
@@ -460,12 +451,9 @@ func NonCanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]t
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
-	txIdKey := make([]byte, 8)
 	txs := make([]types.Transaction, amount)
-	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
-
-	if err := db.ForAmount(kv.NonCanonicalTxs, txIdKey, amount, func(k, v []byte) error {
+	if err := db.ForAmount(kv.NonCanonicalTxs, hexutility.EncodeTs(baseTxId), amount, func(k, v []byte) error {
 		var decodeErr error
 		if txs[i], decodeErr = types.DecodeTransaction(v); decodeErr != nil {
 			return decodeErr
@@ -479,11 +467,11 @@ func NonCanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]t
 	return txs, nil
 }
 
-func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64, blockHash *libcommon.Hash) error {
+func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) error {
 	txId := baseTxId
+	txIdKey := make([]byte, 8)
 	buf := bytes.NewBuffer(nil)
 	for _, tx := range txs {
-		txIdKey := make([]byte, 8)
 		binary.BigEndian.PutUint64(txIdKey, txId)
 		txId++
 
@@ -492,36 +480,21 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64, blo
 			return fmt.Errorf("broken tx rlp: %w", err)
 		}
 
-		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
-		if blockHash != nil {
-			key := append(txIdKey, blockHash.Bytes()...)
-			if err := db.Append(kv.EthTxV3, key, common.CopyBytes(buf.Bytes())); err != nil {
-				return err
-			}
-		} else {
-			if err := db.Append(kv.EthTx, txIdKey, common.CopyBytes(buf.Bytes())); err != nil {
-				return err
-			}
+		if err := db.Append(kv.EthTx, txIdKey, buf.Bytes()); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func WriteRawTransactions(tx kv.RwTx, txs [][]byte, baseTxId uint64, blockHash *common2.Hash) error {
+func WriteRawTransactions(tx kv.RwTx, txs [][]byte, baseTxId uint64) error {
 	txId := baseTxId
+	txIdKey := make([]byte, 8)
 	for _, txn := range txs {
-		txIdKey := make([]byte, 8)
 		binary.BigEndian.PutUint64(txIdKey, txId)
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
-		if blockHash != nil {
-			if err := tx.Append(kv.EthTx, txIdKey, txn); err != nil {
-				return fmt.Errorf("txId=%d, baseTxId=%d, %w", txId, baseTxId, err)
-			}
-		} else {
-			key := append(txIdKey, blockHash.Bytes()...)
-			if err := tx.Append(kv.EthTxV3, key, txn); err != nil {
-				return fmt.Errorf("txId=%d, baseTxId=%d, %w", txId, baseTxId, err)
-			}
+		if err := tx.Append(kv.EthTx, txIdKey, txn); err != nil {
+			return fmt.Errorf("txId=%d, baseTxId=%d, %w", txId, baseTxId, err)
 		}
 		txId++
 	}
@@ -674,6 +647,10 @@ func ReadBody(db kv.Getter, hash libcommon.Hash, number uint64) (*types.Body, ui
 	return body, bodyForStorage.BaseTxId + 1, bodyForStorage.TxAmount - 2 // 1 system txn in the begining of block, and 1 at the end
 }
 
+func HasSenders(db kv.Getter, hash libcommon.Hash, number uint64) (bool, error) {
+	return db.Has(kv.Senders, dbutils.BlockBodyKey(number, hash))
+}
+
 func ReadSenders(db kv.Getter, hash libcommon.Hash, number uint64) ([]libcommon.Address, error) {
 	data, err := db.GetOne(kv.Senders, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
@@ -686,21 +663,21 @@ func ReadSenders(db kv.Getter, hash libcommon.Hash, number uint64) ([]libcommon.
 	return senders, nil
 }
 
-func WriteRawBodyIfNotExists(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnNum uint64, err error) {
+func WriteRawBodyIfNotExists(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.RawBody) (ok bool, err error) {
 	exists, err := db.Has(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
-		return false, 0, err
+		return false, err
 	}
 	if exists {
-		return false, 0, nil
+		return false, nil
 	}
 	return WriteRawBody(db, hash, number, body)
 }
 
-func WriteRawBody(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnID uint64, err error) {
+func WriteRawBody(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.RawBody) (ok bool, err error) {
 	baseTxnID, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions))+2)
 	if err != nil {
-		return false, 0, err
+		return false, err
 	}
 	data := types.BodyForStorage{
 		BaseTxId:    baseTxnID,
@@ -709,14 +686,13 @@ func WriteRawBody(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.Ra
 		Withdrawals: body.Withdrawals,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
-		return false, 0, fmt.Errorf("WriteBodyForStorage: %w", err)
+		return false, fmt.Errorf("WriteBodyForStorage: %w", err)
 	}
-	lastTxnID = baseTxnID + uint64(data.TxAmount) - 1
 	firstNonSystemTxnID := baseTxnID + 1
-	if err = WriteRawTransactions(db, body.Transactions, firstNonSystemTxnID, &hash); err != nil {
-		return false, 0, fmt.Errorf("WriteRawTransactions: %w", err)
+	if err = WriteRawTransactions(db, body.Transactions, firstNonSystemTxnID); err != nil {
+		return false, fmt.Errorf("WriteRawTransactions: %w", err)
 	}
-	return true, lastTxnID, nil
+	return true, nil
 }
 
 func WriteBody(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.Body) error {
@@ -735,12 +711,7 @@ func WriteBody(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.Body)
 	if err := WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
-	transactionV3, _ := kvcfg.TransactionsV3.Enabled(db.(kv.Tx))
-	if transactionV3 {
-		err = WriteTransactions(db, body.Transactions, baseTxId+1, &hash)
-	} else {
-		err = WriteTransactions(db, body.Transactions, baseTxId+1, nil)
-	}
+	err = WriteTransactions(db, body.Transactions, baseTxId+1)
 	if err != nil {
 		return fmt.Errorf("failed to WriteTransactions: %w", err)
 	}
@@ -765,8 +736,44 @@ func DeleteBody(db kv.Deleter, hash libcommon.Hash, number uint64) {
 	}
 }
 
+func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
+	nextBaseTxNum := uint64(0)
+	if from > 0 {
+		nextBaseTxNum, err = rawdbv3.TxNums.Max(tx, from-1)
+		if err != nil {
+			return err
+		}
+		nextBaseTxNum++
+	}
+	for blockNum := from; ; blockNum++ {
+		h, err := ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		if h == (libcommon.Hash{}) {
+			break
+		}
+
+		data := ReadStorageBodyRLP(tx, h, blockNum)
+		if len(data) == 0 {
+			break
+		}
+		bodyForStorage := new(types.BodyForStorage)
+		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
+			return err
+		}
+
+		nextBaseTxNum += uint64(bodyForStorage.TxAmount)
+		err = rawdbv3.TxNums.Append(tx, blockNum, nextBaseTxNum-1)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // MakeBodiesCanonical - move all txs of non-canonical blocks from NonCanonicalTxs table to EthTx table
-func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker, transactionsV3 bool, cb func(blockNum, lastTxnNum uint64) error) error {
+func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker, cb func(blockNum uint64, lastTxnNum uint64) error) error {
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -785,9 +792,6 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 			return err
 		}
 		ethTx := kv.EthTx
-		if transactionsV3 {
-			ethTx = kv.EthTxV3
-		}
 		newBaseId, err := tx.IncrementSequence(ethTx, uint64(bodyForStorage.TxAmount))
 		if err != nil {
 			return err
@@ -797,15 +801,8 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 		i := uint64(0)
 		if err := tx.ForAmount(kv.NonCanonicalTxs, hexutility.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
 			id := newBaseId + 1 + i
-			if transactionsV3 {
-				key := append(hexutility.EncodeTs(id), h.Bytes()...)
-				if err := tx.Put(kv.EthTxV3, key, v); err != nil {
-					return err
-				}
-			} else {
-				if err := tx.Put(kv.EthTx, hexutility.EncodeTs(id), v); err != nil {
-					return err
-				}
+			if err := tx.Put(kv.EthTx, hexutility.EncodeTs(id), v); err != nil {
+				return err
 			}
 			if err := tx.Delete(kv.NonCanonicalTxs, k); err != nil {
 				return err
@@ -872,6 +869,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx cont
 				return err
 			}
 		}
+
 		// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
 		i := uint64(0)
 		if err := tx.ForAmount(kv.EthTx, hexutility.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
@@ -926,6 +924,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx cont
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -1292,10 +1291,13 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
 		kCopy := common.CopyBytes(k)
-		if err = tx.Delete(kv.Headers, kCopy); err != nil {
+		if err = tx.Delete(kv.Senders, kCopy); err != nil {
 			return err
 		}
 		if err = tx.Delete(kv.BlockBody, kCopy); err != nil {
+			return err
+		}
+		if err = tx.Delete(kv.Headers, kCopy); err != nil {
 			return err
 		}
 	}

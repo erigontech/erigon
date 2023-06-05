@@ -35,7 +35,7 @@ func TestBodiesUnwind(t *testing.T) {
 
 	b := &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn, rlpTxn}}
 	for i := uint64(1); i <= 10; i++ {
-		_, _, err = bw.WriteRawBodyIfNotExists(tx, libcommon.Hash{byte(i)}, i, b)
+		_, err = bw.WriteRawBodyIfNotExists(tx, libcommon.Hash{byte(i)}, i, b)
 		require.NoError(err)
 		err = rawdb.WriteCanonicalHash(tx, libcommon.Hash{byte(i)}, i)
 		require.NoError(err)
@@ -55,7 +55,7 @@ func TestBodiesUnwind(t *testing.T) {
 		require.NoError(err)
 		require.Equal(2+10*(3+2), int(n))
 
-		_, _, err = bw.WriteRawBodyIfNotExists(tx, libcommon.Hash{11}, 11, b)
+		_, err = bw.WriteRawBodyIfNotExists(tx, libcommon.Hash{11}, 11, b)
 		require.NoError(err)
 		err = rawdb.WriteCanonicalHash(tx, libcommon.Hash{11}, 11)
 		require.NoError(err)

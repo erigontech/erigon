@@ -36,6 +36,7 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
@@ -1008,10 +1009,11 @@ type BlockRetire struct {
 	notifier    DBEventNotifier
 	logger      log.Logger
 	blockReader services.FullBlockReader
+	blockWriter *blockio.BlockWriter
 }
 
-func NewBlockRetire(workers int, tmpDir string, blockReader services.FullBlockReader, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier, logger log.Logger) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, blockReader: blockReader, db: db, downloader: downloader, notifier: notifier, logger: logger}
+func NewBlockRetire(workers int, tmpDir string, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier, logger log.Logger) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, blockReader: blockReader, blockWriter: blockWriter, db: db, downloader: downloader, notifier: notifier, logger: logger}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
 func (br *BlockRetire) NeedSaveFilesListInDB() bool {
@@ -1122,11 +1124,8 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 		return err
 	}
 	canDeleteTo := CanDeleteTo(currentProgress, blockSnapshots)
-	if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, limit); err != nil {
+	if err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
 		return nil
-	}
-	if err := rawdb.PruneTable(tx, kv.Senders, canDeleteTo, context.Background(), limit); err != nil {
-		return err
 	}
 	return nil
 }
@@ -1334,7 +1333,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	var prevTxID uint64
-	numBuf := make([]byte, binary.MaxVarintLen64)
+	numBuf := make([]byte, 8)
 	parseCtx := types2.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
 	slot := types2.TxSlot{}
@@ -1356,7 +1355,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 	valueBuf := make([]byte, 16*4096)
 	addSystemTx := func(tx kv.Tx, txId uint64) error {
 		binary.BigEndian.PutUint64(numBuf, txId)
-		tv, err := tx.GetOne(kv.EthTx, numBuf[:8])
+		tv, err := tx.GetOne(kv.EthTx, numBuf)
 		if err != nil {
 			return err
 		}
@@ -1424,7 +1423,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 			prevTxID = body.BaseTxId
 		}
 		binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
-		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount-2, func(tk, tv []byte) error {
+		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxAmount-2, func(tk, tv []byte) error {
 			id := binary.BigEndian.Uint64(tk)
 			if prevTxID != 0 && id != prevTxID+1 {
 				panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
@@ -1540,21 +1539,25 @@ func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, firs
 		}
 		copy(key, k)
 		copy(key[8:], v)
-		dataRLP, err := tx.GetOne(kv.BlockBody, key)
+
+		// Important: DB does store canonical and non-canonical txs in same table. And using same body.BaseTxID
+		// But snapshots using canonical TxNum in field body.BaseTxID
+		// So, we manually calc this field here and serialize again.
+		//
+		// FYI: we also have other table to map canonical BlockNum->TxNum: kv.MaxTxNum
+		body, err := rawdb.ReadBodyForStorageByKey(tx, key)
 		if err != nil {
 			return false, err
 		}
-		if dataRLP == nil {
-			logger.Warn("header missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
+		if body == nil {
+			logger.Warn("body missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
 			return true, nil
 		}
-		body := &types.BodyForStorage{}
-		if err = rlp.DecodeBytes(dataRLP, body); err != nil {
-			return false, err
-		}
+
 		body.BaseTxId = firstTxNum
 		firstTxNum += uint64(body.TxAmount)
-		dataRLP, err = rlp.EncodeToBytes(body)
+
+		dataRLP, err := rlp.EncodeToBytes(body)
 		if err != nil {
 			return false, err
 		}

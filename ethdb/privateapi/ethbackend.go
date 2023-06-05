@@ -334,11 +334,16 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 	}
 
 	if req.Version >= 3 {
-		header.ExcessDataGas = gointerfaces.ConvertH256ToUint256Int(req.ExcessDataGas).ToBig()
+		header.DataGasUsed = req.DataGasUsed
+		header.ExcessDataGas = req.ExcessDataGas
 	}
 
-	if !s.config.IsCancun(header.Time) && header.ExcessDataGas != nil || s.config.IsCancun(header.Time) && header.ExcessDataGas == nil {
-		return nil, &rpc.InvalidParamsError{Message: "excess data gas setting doesn't match sharding state"}
+	if !s.config.IsCancun(header.Time) && (header.DataGasUsed != nil || header.ExcessDataGas != nil) {
+		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas present before Cancun"}
+	}
+
+	if s.config.IsCancun(header.Time) && (header.DataGasUsed == nil || header.ExcessDataGas == nil) {
+		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas missing"}
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
@@ -598,11 +603,10 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		payload.Withdrawals = ConvertWithdrawalsToRpc(block.Withdrawals())
 	}
 
-	if block.ExcessDataGas() != nil {
+	if header.DataGasUsed != nil && header.ExcessDataGas != nil {
 		payload.Version = 3
-		var excessDataGas uint256.Int
-		excessDataGas.SetFromBig(block.Header().ExcessDataGas)
-		payload.ExcessDataGas = gointerfaces.ConvertUint256IntToH256(&excessDataGas)
+		payload.DataGasUsed = header.DataGasUsed
+		payload.ExcessDataGas = header.ExcessDataGas
 	}
 
 	blockValue := blockValue(blockWithReceipts, baseFee)
@@ -763,11 +767,10 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByHashV1(ctx context.Context, r
 
 	for hashIdx, hash := range request.Hashes {
 		h := gointerfaces.ConvertH256ToHash(hash)
-		block, err := rawdb.ReadBlockByHash(tx, h)
+		block, err := s.blockReader.BlockByHash(ctx, tx, h)
 		if err != nil {
 			return nil, err
 		}
-
 		body, err := extractPayloadBodyFromBlock(block)
 		if err != nil {
 			return nil, err
@@ -797,7 +800,10 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByRangeV1(ctx context.Context, 
 			break
 		}
 
-		block := rawdb.ReadBlock(tx, hash, request.Start+i)
+		block, _, err := s.blockReader.BlockWithSenders(ctx, tx, hash, request.Start+i)
+		if err != nil {
+			return nil, err
+		}
 		body, err := extractPayloadBodyFromBlock(block)
 		if err != nil {
 			return nil, err

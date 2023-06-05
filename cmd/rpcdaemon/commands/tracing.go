@@ -87,15 +87,6 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		config.BorTraceEnabled = newBoolPtr(false)
 	}
 
-	var excessDataGas *big.Int
-	parentBlock, err := api.blockWithSenders(ctx, tx, block.ParentHash(), block.NumberU64()-1)
-	if err != nil {
-		stream.WriteNil()
-		return err
-	}
-	if parentBlock != nil {
-		excessDataGas = parentBlock.ExcessDataGas()
-	}
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		stream.WriteNil()
@@ -133,7 +124,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, chainConfig, ibs, block.Header(), engine, true /* constCall */, excessDataGas)
+				return core.SysCallContract(contract, data, chainConfig, ibs, block.Header(), engine, true /* constCall */)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}

@@ -42,7 +42,8 @@ type ExecutionPayload struct {
 	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
 	Transactions  []hexutility.Bytes  `json:"transactions"  gencodec:"required"`
 	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
-	ExcessDataGas *hexutil.Big        `json:"excessDataGas"`
+	DataGasUsed   *hexutil.Uint64     `json:"dataGasUsed"`
+	ExcessDataGas *hexutil.Uint64     `json:"excessDataGas"`
 }
 
 // GetPayloadV2Response represents the response of the getPayloadV2 method
@@ -292,16 +293,12 @@ func (e *EngineImpl) newPayload(version uint32, ctx context.Context, payload *Ex
 		ep.Version = 2
 		ep.Withdrawals = privateapi.ConvertWithdrawalsToRpc(payload.Withdrawals)
 	}
-	if version >= 3 && payload.ExcessDataGas != nil {
+	if version >= 3 && payload.DataGasUsed != nil && payload.ExcessDataGas != nil {
 		ep.Version = 3
-		var excessDataGas *uint256.Int
-		var overflow bool
-		excessDataGas, overflow = uint256.FromBig((*big.Int)(payload.ExcessDataGas))
-		if overflow {
-			log.Warn("NewPayload ExcessDataGas overflow")
-			return nil, fmt.Errorf("invalid request, excess data gas overflow")
-		}
-		ep.ExcessDataGas = gointerfaces.ConvertUint256IntToH256(excessDataGas)
+		dataGasUsed := uint64(*payload.DataGasUsed)
+		ep.DataGasUsed = &dataGasUsed
+		excessDataGas := uint64(*payload.ExcessDataGas)
+		ep.ExcessDataGas = &excessDataGas
 	}
 
 	res, err := e.api.EngineNewPayload(ctx, ep)
@@ -342,8 +339,10 @@ func convertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 		res.Withdrawals = privateapi.ConvertWithdrawalsFromRpc(payload.Withdrawals)
 	}
 	if payload.Version >= 3 {
-		edg := gointerfaces.ConvertH256ToUint256Int(payload.ExcessDataGas).ToBig()
-		res.ExcessDataGas = (*hexutil.Big)(edg)
+		dataGasUsed := *payload.DataGasUsed
+		res.DataGasUsed = (*hexutil.Uint64)(&dataGasUsed)
+		excessDataGas := *payload.ExcessDataGas
+		res.ExcessDataGas = (*hexutil.Uint64)(&excessDataGas)
 	}
 	return res
 }

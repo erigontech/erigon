@@ -123,6 +123,9 @@ func (r *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, b
 	return b.Transactions[i], nil
 }
 
+func (r *RemoteBlockReader) HasSenders(ctx context.Context, _ kv.Getter, hash libcommon.Hash, blockHeight uint64) (bool, error) {
+	panic("HasSenders is low-level method, don't use it in RPCDaemon")
+}
 func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error) {
 	reply, err := r.client.Block(ctx, &remote.BlockRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockHeight: blockHeight})
 	if err != nil {
@@ -377,6 +380,14 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash libcommon.Has
 		return nil, 0, err
 	}
 	return body, txAmount, nil
+}
+
+func (r *BlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (bool, error) {
+	blocksAvailable := r.sn.BlocksAvailable()
+	if blocksAvailable == 0 || blockHeight > blocksAvailable {
+		return rawdb.HasSenders(tx, hash, blockHeight)
+	}
+	return true, nil
 }
 
 func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error) {
@@ -703,7 +714,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 			return nil, nil
 		}
 
-		txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i), canonicalHash, r.TransactionsV3)
+		txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i), canonicalHash)
 		if err != nil {
 			return nil, err
 		}
@@ -777,7 +788,7 @@ func (r *BlockReader) FirstTxNumNotInSnapshots() uint64 {
 	return lastTxnID
 }
 
-func (r *BlockReader) IterateBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error {
+func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error {
 	view := r.sn.View()
 	defer view.Close()
 
