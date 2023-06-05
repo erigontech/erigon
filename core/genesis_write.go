@@ -29,6 +29,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
@@ -75,7 +76,12 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overrideShanghaiTime, tmpDir, logger)
+	histV3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	blockWriter := blockio.NewBlockWriter(histV3)
+	c, b, err := WriteGenesisBlock(tx, genesis, overrideShanghaiTime, tmpDir, logger, blockWriter)
 	if err != nil {
 		return c, b, err
 	}
@@ -86,7 +92,8 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 	return c, b, nil
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime *big.Int, tmpDir string, logger log.Logger, blockWriter *blockio.BlockWriter) (*chain.Config, *types.Block, error) {
+	var storedBlock *types.Block
 	if genesis != nil && genesis.Config == nil {
 		return params.AllProtocolChanges, nil, types.ErrGenesisNoConfig
 	}
@@ -110,7 +117,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 			custom = false
 		}
 		applyOverrides(genesis.Config)
-		block, _, err1 := write(tx, genesis, tmpDir)
+		block, _, err1 := write(tx, genesis, tmpDir, blockWriter)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -131,9 +138,14 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 			return genesis.Config, block, &types.GenesisMismatchError{Stored: storedHash, New: hash}
 		}
 	}
-	storedBlock, err := rawdb.ReadBlockByHash(tx, storedHash)
-	if err != nil {
-		return genesis.Config, nil, err
+	blockReader := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()))
+	number := rawdb.ReadHeaderNumber(tx, storedHash)
+	if number != nil {
+		var err error
+		storedBlock, _, err = blockReader.BlockWithSenders(context.Background(), tx, storedHash, *number)
+		if err != nil {
+			return genesis.Config, nil, err
+		}
 	}
 	// Get the existing chain configuration.
 	newCfg := genesis.ConfigOrDefault(storedHash)
@@ -223,7 +235,12 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, tmpDir string) *types.Block
 		panic(err)
 	}
 	defer tx.Rollback()
-	block, _, err := write(tx, g, tmpDir)
+	histV3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		panic(err)
+	}
+	blockWriter := blockio.NewBlockWriter(histV3)
+	block, _, err := write(tx, g, tmpDir, blockWriter)
 	if err != nil {
 		panic(err)
 	}
@@ -236,7 +253,7 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, tmpDir string) *types.Block
 
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
+func write(tx kv.RwTx, g *types.Genesis, tmpDir string, blockWriter *blockio.BlockWriter) (*types.Block, *state.IntraBlockState, error) {
 	block, statedb, err2 := WriteGenesisState(g, tx, tmpDir)
 	if err2 != nil {
 		return block, statedb, err2
@@ -248,11 +265,6 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.In
 	if err := config.CheckConfigForkOrder(); err != nil {
 		return nil, nil, err
 	}
-	histV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		return nil, nil, err
-	}
-	blockWriter := blockio.NewBlockWriter(histV3)
 
 	if err := blockWriter.WriteBlock(tx, block); err != nil {
 		return nil, nil, err
