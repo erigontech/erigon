@@ -13,7 +13,7 @@ import (
 )
 
 // ProcessBlsToExecutionChange processes a BLSToExecutionChange message by updating a validator's withdrawal credentials.
-func ProcessBlsToExecutionChange(state *state.BeaconState, signedChange *cltypes.SignedBLSToExecutionChange, fullValidation bool) error {
+func (I *impl) ProcessBlsToExecutionChange(state *state.BeaconState, signedChange *cltypes.SignedBLSToExecutionChange) error {
 	change := signedChange.Message
 
 	beaconConfig := state.BeaconConfig()
@@ -24,7 +24,7 @@ func ProcessBlsToExecutionChange(state *state.BeaconState, signedChange *cltypes
 
 	// Perform full validation if requested.
 	wc := validator.WithdrawalCredentials()
-	if fullValidation {
+	if I.FullValidation {
 		// Check the validator's withdrawal credentials prefix.
 		if wc[0] != beaconConfig.BLSWithdrawalPrefixByte {
 			return fmt.Errorf("invalid withdrawal credentials prefix")

@@ -13,7 +13,7 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-func ProcessAttestations(s *state2.BeaconState, attestations *solid.ListSSZ[*solid.Attestation], fullValidation bool) error {
+func (I *impl) ProcessAttestations(s *state2.BeaconState, attestations *solid.ListSSZ[*solid.Attestation]) error {
 	attestingIndiciesSet := make([][]uint64, attestations.Len())
 	h := methelp.NewHistTimer("beacon_process_attestations")
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
@@ -33,7 +33,7 @@ func ProcessAttestations(s *state2.BeaconState, attestations *solid.ListSSZ[*sol
 	}
 	var valid bool
 	c.PutSince()
-	if fullValidation {
+	if I.FullValidation {
 		c = h.Tag("attestation_step", "validate")
 		valid, err = verifyAttestations(s, attestations, attestingIndiciesSet)
 		if err != nil {

@@ -19,8 +19,8 @@ func computeSigningRootEpoch(epoch uint64, domain []byte) (libcommon.Hash, error
 	return utils.Keccak256(b, domain), nil
 }
 
-func ProcessBlockHeader(s *state.BeaconState, block *cltypes.BeaconBlock, fullValidation bool) error {
-	if fullValidation {
+func (i *impl) ProcessBlockHeader(s *state.BeaconState, block *cltypes.BeaconBlock) error {
+	if i.FullValidation {
 		if block.Slot != s.Slot() {
 			return fmt.Errorf("state slot: %d, not equal to block slot: %d", s.Slot(), block.Slot)
 		}
@@ -65,13 +65,13 @@ func ProcessBlockHeader(s *state.BeaconState, block *cltypes.BeaconBlock, fullVa
 	return nil
 }
 
-func ProcessRandao(s *state.BeaconState, randao [96]byte, proposerIndex uint64, fullValidation bool) error {
+func (I *impl) ProcessRandao(s *state.BeaconState, randao [96]byte, proposerIndex uint64) error {
 	epoch := state.Epoch(s.BeaconState)
 	proposer, err := s.ValidatorForValidatorIndex(int(proposerIndex))
 	if err != nil {
 		return err
 	}
-	if fullValidation {
+	if I.FullValidation {
 		domain, err := s.GetDomain(s.BeaconConfig().DomainRandao, epoch)
 		if err != nil {
 			return fmt.Errorf("ProcessRandao: unable to get domain: %v", err)
@@ -100,7 +100,7 @@ func ProcessRandao(s *state.BeaconState, randao [96]byte, proposerIndex uint64, 
 	return nil
 }
 
-func ProcessEth1Data(state *state.BeaconState, eth1Data *cltypes.Eth1Data) error {
+func (I *impl) ProcessEth1Data(state *state.BeaconState, eth1Data *cltypes.Eth1Data) error {
 	state.AddEth1DataVote(eth1Data)
 	newVotes := state.Eth1DataVotes()
 

@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-func ProcessProposerSlashing(s *state2.BeaconState, propSlashing *cltypes.ProposerSlashing) error {
+func (I *impl) ProcessProposerSlashing(s *state2.BeaconState, propSlashing *cltypes.ProposerSlashing) error {
 	h1 := propSlashing.Header1.Header
 	h2 := propSlashing.Header2.Header
 
@@ -74,7 +74,7 @@ func ProcessProposerSlashing(s *state2.BeaconState, propSlashing *cltypes.Propos
 	return nil
 }
 
-func ProcessAttesterSlashing(s *state2.BeaconState, attSlashing *cltypes.AttesterSlashing) error {
+func (I *impl) ProcessAttesterSlashing(s *state2.BeaconState, attSlashing *cltypes.AttesterSlashing) error {
 	att1 := attSlashing.Attestation_1
 	att2 := attSlashing.Attestation_2
 
@@ -120,7 +120,7 @@ func ProcessAttesterSlashing(s *state2.BeaconState, attSlashing *cltypes.Atteste
 	return nil
 }
 
-func ProcessDeposit(s *state2.BeaconState, deposit *cltypes.Deposit, fullValidation bool) error {
+func (I *impl) ProcessDeposit(s *state2.BeaconState, deposit *cltypes.Deposit) error {
 	if deposit == nil {
 		return nil
 	}
@@ -136,7 +136,7 @@ func ProcessDeposit(s *state2.BeaconState, deposit *cltypes.Deposit, fullValidat
 		return true
 	})
 	// Validate merkle proof for deposit leaf.
-	if fullValidation && !utils.IsValidMerkleBranch(
+	if I.FullValidation && !utils.IsValidMerkleBranch(
 		depositLeaf,
 		rawProof,
 		s.BeaconConfig().DepositContractTreeDepth+1,
@@ -185,7 +185,7 @@ func ProcessDeposit(s *state2.BeaconState, deposit *cltypes.Deposit, fullValidat
 }
 
 // ProcessVoluntaryExit takes a voluntary exit and applies state transition.
-func ProcessVoluntaryExit(s *state2.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit, fullValidation bool) error {
+func (I *impl) ProcessVoluntaryExit(s *state2.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit) error {
 	// Sanity checks so that we know it is good.
 	voluntaryExit := signedVoluntaryExit.VolunaryExit
 	currentEpoch := state2.Epoch(s.BeaconState)
@@ -207,7 +207,7 @@ func ProcessVoluntaryExit(s *state2.BeaconState, signedVoluntaryExit *cltypes.Si
 	}
 
 	// We can skip it in some instances if we want to optimistically sync up.
-	if fullValidation {
+	if I.FullValidation {
 		domain, err := s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
 		if err != nil {
 			return err
@@ -231,14 +231,14 @@ func ProcessVoluntaryExit(s *state2.BeaconState, signedVoluntaryExit *cltypes.Si
 
 // ProcessWithdrawals processes withdrawals by decreasing the balance of each validator
 // and updating the next withdrawal index and validator index.
-func ProcessWithdrawals(s *state2.BeaconState, withdrawals *solid.ListSSZ[*types.Withdrawal], fullValidation bool) error {
+func (I *impl) ProcessWithdrawals(s *state2.BeaconState, withdrawals *solid.ListSSZ[*types.Withdrawal]) error {
 	// Get the list of withdrawals, the expected withdrawals (if performing full validation),
 	// and the beacon configuration.
 	beaconConfig := s.BeaconConfig()
 	numValidators := uint64(s.ValidatorLength())
 
 	// Check if full validation is required and verify expected withdrawals.
-	if fullValidation {
+	if I.FullValidation {
 		expectedWithdrawals := state2.ExpectedWithdrawals(s.BeaconState)
 		if len(expectedWithdrawals) != withdrawals.Len() {
 			return fmt.Errorf("ProcessWithdrawals: expected %d withdrawals, but got %d", len(expectedWithdrawals), withdrawals.Len())

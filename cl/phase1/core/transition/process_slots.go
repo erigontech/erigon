@@ -4,52 +4,23 @@ import (
 	"fmt"
 	"time"
 
-	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
-	"github.com/Giulio2002/bls"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/transition/machine"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func TransitionState(s *state2.BeaconState, block *cltypes.SignedBeaconBlock, fullValidation bool) error {
-	currentBlock := block.Block
-	if err := ProcessSlots(s, currentBlock.Slot); err != nil {
-		return err
-	}
-
-	if fullValidation {
-		valid, err := verifyBlockSignature(s, block)
-		if err != nil {
-			return fmt.Errorf("error validating block signature: %v", err)
-		}
-		if !valid {
-			return fmt.Errorf("block not valid")
-		}
-	}
-	// Transition block
-	if err := processBlock(s, block, fullValidation); err != nil {
-		return err
-	}
-	if fullValidation {
-		expectedStateRoot, err := s.HashSSZ()
-		if err != nil {
-			return fmt.Errorf("unable to generate state root: %v", err)
-		}
-		if expectedStateRoot != currentBlock.StateRoot {
-			return fmt.Errorf("expected state root differs from received state root")
-		}
-	}
-
-	s.SetPreviousStateRoot(currentBlock.StateRoot)
-	return nil
+func TransitionState(s *state.BeaconState, block *cltypes.SignedBeaconBlock, fullValidation bool) error {
+	cvm := &impl{FullValidation: fullValidation}
+	return machine.TransitionState(cvm, s, block)
 }
 
 // transitionSlot is called each time there is a new slot to process
-func transitionSlot(s *state2.BeaconState) error {
+func transitionSlot(s *state.BeaconState) error {
 	slot := s.Slot()
 	previousStateRoot := s.PreviousStateRoot()
 	var err error
@@ -79,7 +50,7 @@ func transitionSlot(s *state2.BeaconState) error {
 	return nil
 }
 
-func ProcessSlots(s *state2.BeaconState, slot uint64) error {
+func (I *impl) ProcessSlots(s *state.BeaconState, slot uint64) error {
 	beaconConfig := s.BeaconConfig()
 	sSlot := s.Slot()
 	if slot <= sSlot {
@@ -97,7 +68,7 @@ func ProcessSlots(s *state2.BeaconState, slot uint64) error {
 			if err := ProcessEpoch(s); err != nil {
 				return err
 			}
-			log.Debug("Processed new epoch successfully", "epoch", state2.Epoch(s.BeaconState), "process_epoch_elpsed", time.Since(start))
+			log.Debug("Processed new epoch successfully", "epoch", state.Epoch(s.BeaconState), "process_epoch_elpsed", time.Since(start))
 		}
 		// TODO: add logic to process epoch updates.
 		sSlot += 1
@@ -105,22 +76,22 @@ func ProcessSlots(s *state2.BeaconState, slot uint64) error {
 		if sSlot%beaconConfig.SlotsPerEpoch != 0 {
 			continue
 		}
-		if state2.Epoch(s.BeaconState) == beaconConfig.AltairForkEpoch {
+		if state.Epoch(s.BeaconState) == beaconConfig.AltairForkEpoch {
 			if err := s.UpgradeToAltair(); err != nil {
 				return err
 			}
 		}
-		if state2.Epoch(s.BeaconState) == beaconConfig.BellatrixForkEpoch {
+		if state.Epoch(s.BeaconState) == beaconConfig.BellatrixForkEpoch {
 			if err := s.UpgradeToBellatrix(); err != nil {
 				return err
 			}
 		}
-		if state2.Epoch(s.BeaconState) == beaconConfig.CapellaForkEpoch {
+		if state.Epoch(s.BeaconState) == beaconConfig.CapellaForkEpoch {
 			if err := s.UpgradeToCapella(); err != nil {
 				return err
 			}
 		}
-		if state2.Epoch(s.BeaconState) == beaconConfig.DenebForkEpoch {
+		if state.Epoch(s.BeaconState) == beaconConfig.DenebForkEpoch {
 			if err := s.UpgradeToDeneb(); err != nil {
 				return err
 			}
@@ -129,26 +100,9 @@ func ProcessSlots(s *state2.BeaconState, slot uint64) error {
 	return nil
 }
 
-func verifyBlockSignature(s *state2.BeaconState, block *cltypes.SignedBeaconBlock) (bool, error) {
-	proposer, err := s.ValidatorForValidatorIndex(int(block.Block.ProposerIndex))
-	if err != nil {
-		return false, err
-	}
-	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconProposer, state2.Epoch(s.BeaconState))
-	if err != nil {
-		return false, err
-	}
-	sigRoot, err := fork.ComputeSigningRoot(block.Block, domain)
-	if err != nil {
-		return false, err
-	}
-	pk := proposer.PublicKey()
-	return bls.Verify(block.Signature[:], sigRoot[:], pk[:])
-}
-
 // ProcessHistoricalRootsUpdate updates the historical root data structure by computing a new historical root batch when it is time to do so.
-func ProcessHistoricalRootsUpdate(s *state2.BeaconState) error {
-	nextEpoch := state2.Epoch(s.BeaconState) + 1
+func ProcessHistoricalRootsUpdate(s *state.BeaconState) error {
+	nextEpoch := state.Epoch(s.BeaconState) + 1
 	beaconConfig := s.BeaconConfig()
 	blockRoots := s.BlockRoots()
 	stateRoots := s.StateRoots()

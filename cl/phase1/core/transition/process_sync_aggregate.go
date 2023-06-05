@@ -64,12 +64,12 @@ func processSyncAggregate(s *state2.BeaconState, sync *cltypes.SyncAggregate) ([
 	return votedKeys, state2.IncreaseBalance(s.BeaconState, proposerIndex, earnedProposerReward)
 }
 
-func ProcessSyncAggregate(s *state2.BeaconState, sync *cltypes.SyncAggregate, fullValidation bool) error {
+func (I *impl) ProcessSyncAggregate(s *state2.BeaconState, sync *cltypes.SyncAggregate) error {
 	votedKeys, err := processSyncAggregate(s, sync)
 	if err != nil {
 		return err
 	}
-	if fullValidation {
+	if I.FullValidation {
 		previousSlot := s.PreviousSlot()
 
 		domain, err := fork.Domain(s.Fork(), state2.GetEpochAtSlot(s.BeaconConfig(), previousSlot), s.BeaconConfig().DomainSyncCommittee, s.GenesisValidatorsRoot())
