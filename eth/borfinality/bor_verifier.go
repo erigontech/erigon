@@ -42,7 +42,7 @@ func newBorVerifier() *borVerifier {
 }
 
 func borVerify(ctx context.Context, config *config, start uint64, end uint64, hash string, isCheckpoint bool) (string, error) {
-	roTx, err := config.chaindb.BeginRo(ctx)
+	roTx, err := config.chainDB.BeginRo(ctx)
 	if err != nil {
 		return hash, err
 	}
@@ -57,14 +57,12 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 
 	// check if we have the given blocks
 	currentBlock := rawdb.ReadCurrentBlock(roTx)
-	fmt.Println("CurrentBlock: ", currentBlock)
 	if currentBlock == nil {
 		log.Debug(fmt.Sprintf("Failed to fetch current block from blockchain while verifying incoming %s", str))
 		return hash, errMissingBlocks
 	}
 
 	head := currentBlock.Number().Uint64()
-	fmt.Println("CurrentBlock: head: ", head, "end: ", end)
 	if head < end {
 		log.Debug(fmt.Sprintf("Current head block behind incoming %s block", str), "head", head, "end block", end)
 		return hash, errMissingBlocks
@@ -173,7 +171,7 @@ func rewind(config *config, head uint64, rewindTo uint64) {
 		return
 	}
 
-	tx, err := config.chaindb.BeginRw(context.Background())
+	tx, err := config.chainDB.BeginRw(context.Background())
 	if err != nil {
 		log.Error("Failed to start a database transaction", "err", err)
 		return
@@ -182,7 +180,7 @@ func rewind(config *config, head uint64, rewindTo uint64) {
 
 	// rewind the chain
 	config.stagedSync.UnwindTo(rewindTo, block.Result.Hash)
-	err = config.stagedSync.RunUnwind(config.chaindb, tx)
+	err = config.stagedSync.RunUnwind(config.chainDB, tx)
 	if err != nil {
 		log.Error("Failed to unwind chain", "err", err)
 		return

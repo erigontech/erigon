@@ -7,12 +7,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/log/v3"
 )
-
-type BorAPI interface {
-	GetRootHash(start uint64, end uint64) (string, error)
-}
 
 var (
 	// errCheckpoint is returned when we are unable to fetch the
@@ -25,6 +22,80 @@ var (
 
 	ErrNotInRejectedList = errors.New("MilestoneID not in rejected list")
 )
+
+// handleWhitelistCheckpoint handles the checkpoint whitelist mechanism.
+func handleWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, config *config) error {
+	// Create a new bor verifier, which will be used to verify checkpoints and milestones
+	verifier := newBorVerifier()
+	service := whitelist.GetWhitelistingService()
+
+	blockNum, blockHash, err := fetchWhitelistCheckpoint(ctx, bor, verifier, config)
+	fmt.Println("Handle Whitelist", blockNum)
+	// If the array is empty, we're bound to receive an error. Non-nill error and non-empty array
+	// means that array has partial elements and it failed for some block. We'll add those partial
+	// elements anyway.
+	if err != nil {
+		return err
+	}
+
+	service.ProcessCheckpoint(blockNum, blockHash)
+
+	return nil
+}
+
+// handleMilestone handles the milestone mechanism.
+func handleMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
+	// Create a new bor verifier, which will be used to verify checkpoints and milestones
+	verifier := newBorVerifier()
+
+	num, hash, err := fetchWhitelistMilestone(ctx, bor, verifier, config)
+	fmt.Println("Handle Whitelist Whitelist", num)
+	service := whitelist.GetWhitelistingService()
+
+	// If the current chain head is behind the received milestone, add it to the future milestone
+	// list. Also, the hash mismatch (end block hash) error will lead to rewind so also
+	// add that milestone to the future milestone list.
+	if errors.Is(err, errMissingBlocks) || errors.Is(err, errHashMismatch) {
+		service.ProcessFutureMilestone(num, hash)
+	}
+
+	if err != nil {
+		return err
+	}
+	fmt.Println("Handle milestone : process milestone")
+	service.ProcessMilestone(num, hash)
+
+	return nil
+}
+
+func handleNoAckMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
+	milestoneID, err := fetchNoAckMilestone(ctx, bor)
+	service := whitelist.GetWhitelistingService()
+
+	//If failed to fetch the no-ack milestone then it give the error.
+	if err != nil {
+		return err
+	}
+
+	service.RemoveMilestoneID(milestoneID)
+
+	return nil
+}
+
+func handleNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, config *config) error {
+	service := whitelist.GetWhitelistingService()
+	milestoneIDs := service.GetMilestoneIDsList()
+
+	for _, milestoneID := range milestoneIDs {
+		// todo: check if we can ignore the error
+		err := fetchNoAckMilestoneByID(ctx, bor, milestoneID)
+		if err == nil {
+			service.RemoveMilestoneID(milestoneID)
+		}
+	}
+
+	return nil
+}
 
 // fetchWhitelistCheckpoint fetches the latest checkpoint from it's local heimdall
 // and verifies the data against bor data.
