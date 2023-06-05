@@ -389,25 +389,22 @@ func commitmentItemLess(i, j *CommitmentItem) bool {
 	return bytes.Compare(i.hashedKey, j.hashedKey) < 0
 }
 
-func (d *DomainCommitted) storeCommitmentState(blockNum uint64) error {
+func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error {
 	state, err := d.PatriciaState()
 	if err != nil {
 		return err
 	}
 	cs := &commitmentState{txNum: d.txNum, trieState: state, blockNum: blockNum}
+	copy(cs.rootHash[:], rh)
 	encoded, err := cs.Encode()
 	if err != nil {
 		return err
 	}
 
-	//var stepbuf [4]byte
-	////step := uint32(d.txNum / d.aggregationStep)
-	//binary.BigEndian.PutUint32(stepbuf[:], step)
-
 	var dbuf [8]byte
 	binary.BigEndian.PutUint64(dbuf[:], d.txNum)
 
-	fmt.Printf("commitment put %d\n", d.txNum)
+	fmt.Printf("commitment put %d rh %x\n", d.txNum, cs.rootHash[:])
 	if err := d.Domain.PutWithPrev(keyCommitmentState, dbuf[:], encoded, d.prevState); err != nil {
 		return err
 	}
@@ -416,7 +413,6 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64) error {
 }
 
 func (d *DomainCommitted) Restore(value []byte) (uint64, uint64, error) {
-	//if d.prevState != nil {
 	cs := new(commitmentState)
 	if err := cs.Decode(value); err != nil {
 		return 0, 0, fmt.Errorf("failed to decode previous stored commitment state: %w", err)
@@ -626,9 +622,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 				} else {
 					val, _ = g.NextUncompressed()
 				}
-				if d.trace {
-					fmt.Printf("merge: read value '%x'\n", key)
-				}
+				d.logger.Trace("mergeFiles", "key", key)
 				heap.Push(&cp, &CursorItem{
 					t:        FILE_CURSOR,
 					dg:       g,
@@ -818,6 +812,7 @@ type commitmentState struct {
 	txNum     uint64
 	blockNum  uint64
 	trieState []byte
+	rootHash  [length.Hash]byte
 }
 
 func (cs *commitmentState) Decode(buf []byte) error {
@@ -835,6 +830,7 @@ func (cs *commitmentState) Decode(buf []byte) error {
 		return nil
 	}
 	copy(cs.trieState, buf[pos:pos+len(cs.trieState)])
+	copy(cs.rootHash[:], buf[pos:pos+length.Hash])
 	return nil
 }
 
@@ -848,6 +844,9 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 		return nil, err
 	}
 	if _, err := buf.Write(cs.trieState); err != nil {
+		return nil, err
+	}
+	if _, err := buf.Write(cs.rootHash[:]); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil

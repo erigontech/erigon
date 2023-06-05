@@ -1583,7 +1583,6 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 		RootChecked:   hph.rootChecked,
 		RootTouched:   hph.rootTouched,
 		RootPresent:   hph.rootPresent,
-		Root:          make([]byte, 0),
 	}
 
 	s.Root = hph.root.Encode()

@@ -462,7 +462,7 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 
 	_ = updates
 
-	batchRoot, branchNodeUpdatesTwo, err := trieTwo.ReviewKeys(plainKeys, hashedKeys)
+	beforeRestore, branchNodeUpdatesTwo, err := trieTwo.ReviewKeys(plainKeys, hashedKeys)
 	require.NoError(t, err)
 	renderUpdates(branchNodeUpdatesTwo)
 	ms2.applyBranchNodeUpdates(branchNodeUpdatesTwo)
@@ -473,32 +473,12 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 
 	err = trieOne.SetState(buf)
 	require.NoError(t, err)
-	require.EqualValues(t, batchRoot[:], trieOne.root.h[:])
-	require.EqualValues(t, trieTwo.root.hl, trieOne.root.hl)
-	require.EqualValues(t, trieTwo.root.apl, trieOne.root.apl)
-	if trieTwo.root.apl > 0 {
-		require.EqualValues(t, trieTwo.root.apk, trieOne.root.apk)
-	}
-	require.EqualValues(t, trieTwo.root.spl, trieOne.root.spl)
-	if trieTwo.root.apl > 0 {
-		require.EqualValues(t, trieTwo.root.spk, trieOne.root.spk)
-	}
-	if trieTwo.root.downHashedLen > 0 {
-		require.EqualValues(t, trieTwo.root.downHashedKey, trieOne.root.downHashedKey)
-	}
-	require.EqualValues(t, trieTwo.root.Nonce, trieOne.root.Nonce)
-	//require.EqualValues(t, trieTwo.root.CodeHash, trieOne.root.CodeHash)
-	require.EqualValues(t, trieTwo.root.StorageLen, trieOne.root.StorageLen)
-	require.EqualValues(t, trieTwo.root.extension, trieOne.root.extension)
+	fmt.Printf("rh %x\n", trieOne.root.h[:])
+	require.EqualValues(t, beforeRestore[:], trieOne.root.h[:])
 
-	require.EqualValues(t, trieTwo.currentKey, trieOne.currentKey)
-	require.EqualValues(t, trieTwo.afterMap, trieOne.afterMap)
-	require.EqualValues(t, trieTwo.touchMap[:], trieOne.touchMap[:])
-	require.EqualValues(t, trieTwo.branchBefore[:], trieOne.branchBefore[:])
-	require.EqualValues(t, trieTwo.rootTouched, trieOne.rootTouched)
-	require.EqualValues(t, trieTwo.rootPresent, trieOne.rootPresent)
-	require.EqualValues(t, trieTwo.rootChecked, trieOne.rootChecked)
-	require.EqualValues(t, trieTwo.currentKeyLen, trieOne.currentKeyLen)
+	hashAfterRestore, err := trieOne.RootHash()
+	require.NoError(t, err)
+	require.EqualValues(t, beforeRestore, hashAfterRestore)
 }
 
 func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestore(t *testing.T) {

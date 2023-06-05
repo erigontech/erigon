@@ -11,13 +11,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-	btree2 "github.com/tidwall/btree"
 )
 
 // KvList sort.Interface to sort write list by keys
@@ -429,14 +430,10 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 	}
 
 	if saveStateAfter {
-		if err := sd.Commitment.storeCommitmentState(sd.blockNum.Load()); err != nil {
+		if err := sd.Commitment.storeCommitmentState(sd.blockNum.Load(), rootHash); err != nil {
 			return nil, err
 		}
 	}
-	if trace {
-		fmt.Printf("rootHash %x\n", rootHash)
-	}
-
 	return rootHash, nil
 }
 
