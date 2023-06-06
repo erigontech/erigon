@@ -115,7 +115,7 @@ func readTransactionByHash(db kv.Tx, hash libcommon.Hash, br services.FullBlockR
 	if blockNumber == nil {
 		return nil, libcommon.Hash{}, 0, 0, nil
 	}
-	blockHash, err := rawdb.ReadCanonicalHash(db, *blockNumber)
+	blockHash, err := br.CanonicalHash(context.Background(), db, *blockNumber)
 	if err != nil {
 		return nil, libcommon.Hash{}, 0, 0, err
 	}
