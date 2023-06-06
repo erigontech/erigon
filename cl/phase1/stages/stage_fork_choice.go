@@ -105,7 +105,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 	cfg.downloader.SetHighestProcessedSlot(cfg.state.Slot())
 	cfg.downloader.SetProcessFunction(func(highestSlotProcessed uint64, _ libcommon.Hash, newBlocks []*cltypes.SignedBeaconBlock) (uint64, libcommon.Hash, error) {
 		for _, block := range newBlocks {
-			if err := freezer.PutObjectSSZIntoFreezer("downloaded_signedBeaconBlock", "caplin_core", block.Block.Slot, block, cfg.caplinFreezer); err != nil {
+			if err := freezer.PutObjectSSZIntoFreezer("signedBeaconBlock", "caplin_core", block.Block.Slot, block, cfg.caplinFreezer); err != nil {
 				return highestSlotProcessed, libcommon.Hash{}, err
 			}
 

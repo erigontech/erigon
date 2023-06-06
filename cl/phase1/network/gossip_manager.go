@@ -91,7 +91,7 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 			"numGC", m.NumGC,
 		)
 
-		if err := freezer.PutObjectSSZIntoFreezer("gossip_signedBeaconBlock", "caplin_core", block.Block.Slot, block, g.recorder); err != nil {
+		if err := freezer.PutObjectSSZIntoFreezer("signedBeaconBlock", "caplin_core", block.Block.Slot, block, g.recorder); err != nil {
 			return err
 		}
 
