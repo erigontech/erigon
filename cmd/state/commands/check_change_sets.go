@@ -53,13 +53,13 @@ var checkChangeSetsCmd = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return err
 		}
-		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck)
+		return CheckChangeSets(genesis, block, chaindata, historyfile, nocheck, logger)
 	},
 }
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
+func CheckChangeSets(genesis *types.Genesis, blockNum uint64, chaindata string, historyfile string, nocheck bool, logger log.Logger) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}

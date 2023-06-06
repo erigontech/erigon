@@ -58,7 +58,7 @@ var opcodeTracerCmd = &cobra.Command{
 	Short: "Re-executes historical transactions in read-only mode and traces them at the opcode level",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New("opcode-tracer", genesis.Config.ChainID)
-		return OpcodeTracer(genesis, logger, block, chaindata, numBlocks, saveOpcodes, saveBBlocks)
+		return OpcodeTracer(genesis, block, chaindata, numBlocks, saveOpcodes, saveBBlocks, logger)
 	},
 }
 
@@ -397,8 +397,8 @@ type segPrefix struct {
 
 // OpcodeTracer re-executes historical transactions in read-only mode
 // and traces them at the opcode level
-func OpcodeTracer(genesis *types.Genesis, logger log.Logger, blockNum uint64, chaindata string, numBlocks uint64,
-	saveOpcodes bool, saveBblocks bool) error {
+func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, numBlocks uint64,
+	saveOpcodes bool, saveBblocks bool, logger log.Logger) error {
 	blockNumOrig := blockNum
 
 	startTime := time.Now()
