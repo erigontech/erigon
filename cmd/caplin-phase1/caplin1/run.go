@@ -25,6 +25,11 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
 	downloader := network2.NewForwardBeaconDownloader(ctx, beaconRpc)
 
+	if caplinFreezer != nil {
+		if err := freezer.PutObjectSSZIntoFreezer("beaconState", "caplin_core", 0, state, caplinFreezer); err != nil {
+			return err
+		}
+	}
 	forkChoice, err := forkchoice.NewForkChoiceStore(state, engine, caplinFreezer, true)
 	if err != nil {
 		log.Error("Could not create forkchoice", "err", err)

@@ -8,7 +8,12 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-func PutObjectSSZIntoFreezer(objectName, freezerNamespace string, numericalId uint64, object ssz.Marshaler, record Freezer) error {
+type marshalerHashable interface {
+	ssz.Marshaler
+	ssz.HashableSSZ
+}
+
+func PutObjectSSZIntoFreezer(objectName, freezerNamespace string, numericalId uint64, object marshalerHashable, record Freezer) error {
 	if record == nil {
 		return nil
 	}
@@ -21,6 +26,11 @@ func PutObjectSSZIntoFreezer(objectName, freezerNamespace string, numericalId ui
 		return err
 	}
 	id := fmt.Sprintf("%d", numericalId)
+	// put the hash of the object as the sidecar.
+	h, err := object.HashSSZ()
+	if err != nil {
+		return err
+	}
 
-	return record.Put(&buffer, nil, freezerNamespace, objectName, id)
+	return record.Put(&buffer, h[:], freezerNamespace, objectName, id)
 }
