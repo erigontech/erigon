@@ -82,20 +82,6 @@ type HexPatriciaHashed struct {
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 }
 
-// represents state of the tree
-type state struct {
-	Root          []byte      // encoded root cell
-	Depths        [128]int    // For each row, the depth of cells in that row
-	TouchMap      [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
-	AfterMap      [128]uint16 // For each row, bitmap of cells that were present after modification
-	BranchBefore  [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
-	CurrentKey    [128]byte   // For each row indicates which column is currently selected
-	CurrentKeyLen int8
-	RootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
-	RootTouched   bool
-	RootPresent   bool
-}
-
 func NewHexPatriciaHashed(accountKeyLen int,
 	branchFn func(prefix []byte) ([]byte, error),
 	accountFn func(plainKey []byte, cell *Cell) error,
@@ -1244,11 +1230,16 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte) *Cell {
 }
 
 func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
-	hash, err := hph.computeCellHash(&hph.root, 0, nil)
+	rh, err := hph.computeCellHash(&hph.root, 0, nil)
 	if err != nil {
 		return nil, err
 	}
-	return hash[1:], nil // first byte is 128+hash_len
+	//// set root hash field if it's not a cell to correctly encode trie state
+	//if hph.root.apl == 0 && hph.root.spl == 0 && !bytes.Equal(hph.root.h[:], rh) {
+	//	copy(hph.root.h[:], rh[1:])
+	//	hph.root.hl = len(rh) - 1
+	//}
+	return rh[1:], nil // first byte is 128+hash_len
 }
 
 func (hph *HexPatriciaHashed) ReviewKeys(plainKeys, hashedKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
@@ -1361,6 +1352,20 @@ var (
 	stateRootChecked stateRootFlag = 2
 	stateRootTouched stateRootFlag = 4
 )
+
+// represents state of the tree
+type state struct {
+	Root          []byte      // encoded root cell
+	Depths        [128]int    // For each row, the depth of cells in that row
+	TouchMap      [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
+	AfterMap      [128]uint16 // For each row, bitmap of cells that were present after modification
+	BranchBefore  [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
+	CurrentKey    [128]byte   // For each row indicates which column is currently selected
+	CurrentKeyLen int8
+	RootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
+	RootTouched   bool
+	RootPresent   bool
+}
 
 func (s *state) Encode(buf []byte) ([]byte, error) {
 	var rootFlags stateRootFlag
