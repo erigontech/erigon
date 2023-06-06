@@ -438,7 +438,7 @@ Loop:
 			}
 		}
 
-		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		blockHash, err := cfg.blockReader.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
 			return err
 		}
@@ -679,7 +679,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	if !initialCycle && cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.accumulator
 
-		hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
+		hash, err := cfg.blockReader.CanonicalHash(ctx, tx, u.UnwindPoint)
 		if err != nil {
 			return fmt.Errorf("read canonical hash of unwind point: %w", err)
 		}

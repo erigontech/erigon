@@ -232,6 +232,9 @@ func (back *RemoteBackend) HeaderByNumber(ctx context.Context, tx kv.Getter, blo
 func (back *RemoteBackend) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	return back.blockReader.HeaderByHash(ctx, tx, hash)
 }
+func (back *RemoteBackend) CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, error) {
+	return back.blockReader.CanonicalHash(ctx, tx, blockNum)
+}
 func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, error) {
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
 }

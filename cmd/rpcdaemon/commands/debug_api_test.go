@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	common2 "github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/tracers"
@@ -479,11 +478,11 @@ func TestAccountAt(t *testing.T) {
 
 	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash12 common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		blockHash0, _ = rawdb.ReadCanonicalHash(tx, 0)
-		blockHash1, _ = rawdb.ReadCanonicalHash(tx, 1)
-		blockHash3, _ = rawdb.ReadCanonicalHash(tx, 3)
-		blockHash10, _ = rawdb.ReadCanonicalHash(tx, 10)
-		blockHash12, _ = rawdb.ReadCanonicalHash(tx, 12)
+		blockHash0, _ = br.CanonicalHash(m.Ctx, tx, 0)
+		blockHash1, _ = br.CanonicalHash(m.Ctx, tx, 1)
+		blockHash3, _ = br.CanonicalHash(m.Ctx, tx, 3)
+		blockHash10, _ = br.CanonicalHash(m.Ctx, tx, 10)
+		blockHash12, _ = br.CanonicalHash(m.Ctx, tx, 12)
 		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHash12
 		return nil
 	})

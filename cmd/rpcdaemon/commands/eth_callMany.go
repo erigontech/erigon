@@ -9,7 +9,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -149,7 +148,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
 		}
-		hash, err := rawdb.ReadCanonicalHash(tx, i)
+		hash, err := api._blockReader.CanonicalHash(ctx, tx, i)
 		if err != nil {
 			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true)
 		}

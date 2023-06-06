@@ -44,7 +44,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	receipts := make([]map[string]interface{}, 0)
 
 	// Retrieve the transaction and assemble its EVM context
-	blockHash, err := rawdb.ReadCanonicalHash(dbtx, blockNum)
+	blockHash, err := api._blockReader.CanonicalHash(ctx, dbtx, blockNum)
 	if err != nil {
 		return false, nil, err
 	}

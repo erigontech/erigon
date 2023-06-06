@@ -15,7 +15,6 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -292,7 +291,7 @@ func Erigon4(genesis *types.Genesis, chainConfig *chain2.Config, logger log.Logg
 	for !interrupt {
 		blockNum++
 		trace = traceBlock > 0 && blockNum == uint64(traceBlock)
-		blockHash, err := rawdb.ReadCanonicalHash(historyTx, blockNum)
+		blockHash, err := blockReader.CanonicalHash(ctx, historyTx, blockNum)
 		if err != nil {
 			return err
 		}

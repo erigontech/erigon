@@ -598,7 +598,7 @@ func extractBodies(datadir string) error {
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := libcommon.BytesToHash(k[8:])
 		var hash libcommon.Hash
-		if hash, err = rawdb.ReadCanonicalHash(tx, blockNumber); err != nil {
+		if hash, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
 			return err
 		}
 		_, baseTxId, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
@@ -1056,7 +1056,7 @@ func scanReceipts2(chaindata string) error {
 			log.Info("Scanned", "block", blockNum, "fixed", fixedCount)
 		}
 		var hash libcommon.Hash
-		if hash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
+		if hash, err = br.CanonicalHash(context.Background(), tx, blockNum); err != nil {
 			return err
 		}
 		if hash == (libcommon.Hash{}) {

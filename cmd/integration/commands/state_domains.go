@@ -14,7 +14,6 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -479,7 +478,7 @@ func (b *blockProcessor) ProcessNext(ctx context.Context) error {
 	b.blockNum++
 	b.trace = traceFromTx > 0 && b.txNum == traceFromTx
 
-	blockHash, err := rawdb.ReadCanonicalHash(b.histTx, b.blockNum)
+	blockHash, err := b.blockReader.CanonicalHash(ctx, b.histTx, b.blockNum)
 	if err != nil {
 		return err
 	}

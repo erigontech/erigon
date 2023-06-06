@@ -296,7 +296,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 		if number == nil {
 			return nil, nil
 		}
-		canonicalHash, _ := rawdb.ReadCanonicalHash(tx, *number)
+		canonicalHash, _ := api._blockReader.CanonicalHash(ctx, tx, *number)
 		isCanonical := canonicalHash == blockHash
 		if !isCanonical {
 			return nil, fmt.Errorf("block hash is not canonical")
