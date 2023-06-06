@@ -138,6 +138,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	header := txTask.Header
 
 	switch {
+	case daoForkTx:
+		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
+		misc.ApplyDAOHardFork(ibs)
+		ibs.SoftFinalise()
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
 			// Genesis block
@@ -179,10 +183,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 				txTask.TraceTos[uncle.Coinbase] = struct{}{}
 			}
 		}
-	case daoForkTx:
-		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
-		misc.ApplyDAOHardFork(ibs)
-		ibs.SoftFinalise()
 	default:
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		txHash := txTask.Tx.Hash()
