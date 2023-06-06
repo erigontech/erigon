@@ -54,16 +54,16 @@ type ValidatorSet struct {
 // the new ValidatorSet will have an empty list of Validators.
 // The addresses of validators in `valz` must be unique otherwise the
 // function panics.
-func NewValidatorSet(valz []*Validator) *ValidatorSet {
+func NewValidatorSet(valz []*Validator, logger log.Logger) *ValidatorSet {
 	vals := &ValidatorSet{}
 
-	err := vals.updateWithChangeSet(valz, false)
+	err := vals.updateWithChangeSet(valz, false, logger)
 	if err != nil {
 		panic(fmt.Sprintf("cannot create validator set: %s", err))
 	}
 
 	if len(valz) > 0 {
-		vals.IncrementProposerPriority(1)
+		vals.IncrementProposerPriority(1, logger)
 	}
 
 	return vals
@@ -75,9 +75,9 @@ func (vals *ValidatorSet) IsNilOrEmpty() bool {
 }
 
 // Increment ProposerPriority and update the proposer on a copy, and return it.
-func (vals *ValidatorSet) CopyIncrementProposerPriority(times int) *ValidatorSet {
+func (vals *ValidatorSet) CopyIncrementProposerPriority(times int, logger log.Logger) *ValidatorSet {
 	validatorCopy := vals.Copy()
-	validatorCopy.IncrementProposerPriority(times)
+	validatorCopy.IncrementProposerPriority(times, logger)
 
 	return validatorCopy
 }
@@ -85,7 +85,7 @@ func (vals *ValidatorSet) CopyIncrementProposerPriority(times int) *ValidatorSet
 // IncrementProposerPriority increments ProposerPriority of each validator and updates the
 // proposer. Panics if validator set is empty.
 // `times` must be positive.
-func (vals *ValidatorSet) IncrementProposerPriority(times int) {
+func (vals *ValidatorSet) IncrementProposerPriority(times int, logger log.Logger) {
 	if vals.IsNilOrEmpty() {
 		panic("empty validator set")
 	}
@@ -97,14 +97,14 @@ func (vals *ValidatorSet) IncrementProposerPriority(times int) {
 	// Cap the difference between priorities to be proportional to 2*totalPower by
 	// re-normalizing priorities, i.e., rescale all priorities by multiplying with:
 	//  2*totalVotingPower/(maxPriority - minPriority)
-	diffMax := PriorityWindowSizeFactor * vals.TotalVotingPower()
+	diffMax := PriorityWindowSizeFactor * vals.TotalVotingPower(logger)
 	vals.RescalePriorities(diffMax)
 	vals.shiftByAvgProposerPriority()
 
 	var proposer *Validator
 	// Call IncrementProposerPriority(1) times times.
 	for i := 0; i < times; i++ {
-		proposer = vals.incrementProposerPriority()
+		proposer = vals.incrementProposerPriority(logger)
 	}
 
 	vals.Proposer = proposer
@@ -134,7 +134,7 @@ func (vals *ValidatorSet) RescalePriorities(diffMax int64) {
 	}
 }
 
-func (vals *ValidatorSet) incrementProposerPriority() *Validator {
+func (vals *ValidatorSet) incrementProposerPriority(logger log.Logger) *Validator {
 	for _, val := range vals.Validators {
 		// Check for overflow for sum.
 		newPrio := safeAddClip(val.ProposerPriority, val.VotingPower)
@@ -143,7 +143,7 @@ func (vals *ValidatorSet) incrementProposerPriority() *Validator {
 	// Decrement the validator with most ProposerPriority.
 	mostest := vals.getValWithMostPriority()
 	// Mind the underflow.
-	mostest.ProposerPriority = safeSubClip(mostest.ProposerPriority, vals.TotalVotingPower())
+	mostest.ProposerPriority = safeSubClip(mostest.ProposerPriority, vals.TotalVotingPower(logger))
 
 	return mostest
 }
@@ -303,9 +303,9 @@ func (vals *ValidatorSet) UpdateTotalVotingPower() error {
 
 // TotalVotingPower returns the sum of the voting powers of all validators.
 // It recomputes the total voting power if required.
-func (vals *ValidatorSet) TotalVotingPower() int64 {
+func (vals *ValidatorSet) TotalVotingPower(logger log.Logger) int64 {
 	if vals.totalVotingPower == 0 {
-		log.Info("invoking updateTotalVotingPower before returning it")
+		logger.Info("invoking updateTotalVotingPower before returning it")
 
 		if err := vals.UpdateTotalVotingPower(); err != nil {
 			// Can/should we do better?
@@ -427,8 +427,8 @@ func processChanges(origChanges []*Validator) (updates, removals []*Validator, e
 // 'updates' should be a list of proper validator changes, i.e. they have been verified
 // by processChanges for duplicates and invalid values.
 // No changes are made to the validator set 'vals'.
-func verifyUpdates(updates []*Validator, vals *ValidatorSet) (updatedTotalVotingPower int64, numNewValidators int, err error) {
-	updatedTotalVotingPower = vals.TotalVotingPower()
+func verifyUpdates(updates []*Validator, vals *ValidatorSet, logger log.Logger) (updatedTotalVotingPower int64, numNewValidators int, err error) {
+	updatedTotalVotingPower = vals.TotalVotingPower(logger)
 
 	for _, valUpdate := range updates {
 		address := valUpdate.Address
@@ -576,7 +576,7 @@ func (vals *ValidatorSet) applyRemovals(deletes []*Validator) {
 // If 'allowDeletes' is false then delete operations (identified by validators with voting power 0)
 // are not allowed and will trigger an error if present in 'changes'.
 // The 'allowDeletes' flag is set to false by NewValidatorSet() and to true by UpdateWithChangeSet().
-func (vals *ValidatorSet) updateWithChangeSet(changes []*Validator, allowDeletes bool) error {
+func (vals *ValidatorSet) updateWithChangeSet(changes []*Validator, allowDeletes bool, logger log.Logger) error {
 	if len(changes) < 1 {
 		return nil
 	}
@@ -597,7 +597,7 @@ func (vals *ValidatorSet) updateWithChangeSet(changes []*Validator, allowDeletes
 	}
 
 	// Verify that applying the 'updates' against 'vals' will not result in error.
-	updatedTotalVotingPower, numNewValidators, err := verifyUpdates(updates, vals)
+	updatedTotalVotingPower, numNewValidators, err := verifyUpdates(updates, vals, logger)
 	if err != nil {
 		return err
 	}
@@ -618,7 +618,7 @@ func (vals *ValidatorSet) updateWithChangeSet(changes []*Validator, allowDeletes
 	}
 
 	// Scale and center.
-	vals.RescalePriorities(PriorityWindowSizeFactor * vals.TotalVotingPower())
+	vals.RescalePriorities(PriorityWindowSizeFactor * vals.TotalVotingPower(logger))
 	vals.shiftByAvgProposerPriority()
 
 	return nil
@@ -652,8 +652,8 @@ func (vals *ValidatorSet) UpdateValidatorMap() {
 //
 // If an error is detected during verification steps, it is returned and the validator set
 // is not changed.
-func (vals *ValidatorSet) UpdateWithChangeSet(changes []*Validator) error {
-	return vals.updateWithChangeSet(changes, true)
+func (vals *ValidatorSet) UpdateWithChangeSet(changes []*Validator, logger log.Logger) error {
+	return vals.updateWithChangeSet(changes, true, logger)
 }
 
 //-----------------

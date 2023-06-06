@@ -48,7 +48,7 @@ var stateRootCmd = &cobra.Command{
 			logger.Error("Setting up", "error", err)
 			return err
 		}
-		return StateRoot(genesis, logger, block, datadirCli)
+		return StateRoot(genesis, block, datadirCli, logger)
 	},
 }
 
@@ -65,7 +65,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	return br, bw
 }
 
-func StateRoot(genesis *types.Genesis, logger log.Logger, blockNum uint64, datadir string) error {
+func StateRoot(genesis *types.Genesis, blockNum uint64, datadir string, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -157,7 +157,7 @@ func StateRoot(genesis *types.Genesis, logger log.Logger, blockNum uint64, datad
 			h, _ := blockReader.Header(ctx, historyTx, hash, number)
 			return h
 		}
-		if _, err = runBlock(ethash.NewFullFaker(), intraBlockState, noOpWriter, w, chainConfig, getHeader, b, vmConfig, false); err != nil {
+		if _, err = runBlock(ethash.NewFullFaker(), intraBlockState, noOpWriter, w, chainConfig, getHeader, b, vmConfig, false, logger); err != nil {
 			return fmt.Errorf("block %d: %w", block, err)
 		}
 		if block+1 == blockNum {
