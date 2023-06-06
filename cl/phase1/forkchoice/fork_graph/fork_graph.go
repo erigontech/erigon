@@ -183,7 +183,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 		f.highestSeen = newState.Slot()
 		f.currentState = newState
 		f.currentStateBlockRoot = blockRoot
-		if newState.Slot()%snapshotStateEverySlot == 0 && f.nextReferenceState.Slot() < f.beaconCfg.SlotsPerEpoch && f.enabledPruning {
+		if newState.Slot()%snapshotStateEverySlot == 0 && f.nextReferenceState.Slot() > f.beaconCfg.SlotsPerEpoch && f.enabledPruning {
 			if err := f.removeOldData(); err != nil {
 				return nil, LogisticError, err
 			}
