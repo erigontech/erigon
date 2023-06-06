@@ -876,8 +876,18 @@ Loop:
 		}
 		// Load headers into the database
 		var inSync bool
-		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix())); err != nil {
+		var borPenalties []headerdownload.PenaltyItem
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), borPenalties, cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix())); err != nil {
+			// If the bor whitelisting service invalidates the block header
+			if len(borPenalties) > 0 {
+				cfg.penalize(ctx, borPenalties)
+			}
 			return err
+		}
+
+		// If the bor whitelisting service invalidates the block header
+		if len(borPenalties) > 0 {
+			cfg.penalize(ctx, borPenalties)
 		}
 
 		if test {

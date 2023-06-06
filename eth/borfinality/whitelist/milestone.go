@@ -1,8 +1,6 @@
 package whitelist
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common/flags"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -60,7 +58,6 @@ func (m *milestone) IsValidChain(currentHeader *types.Header, chain []*types.Hea
 		return true, nil
 	}
 
-	fmt.Println("Locking - IsValidChain")
 	m.finality.RLock()
 	defer m.finality.RUnlock()
 
@@ -92,7 +89,6 @@ func (m *milestone) IsValidChain(currentHeader *types.Header, chain []*types.Hea
 	}
 
 	// isValid = true
-	fmt.Println("UnLocking - IsValidChain")
 	return true, nil
 }
 

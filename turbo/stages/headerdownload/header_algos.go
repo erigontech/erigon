@@ -512,7 +512,7 @@ func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
 
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64) (td *big.Int, err error)
 
-func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, uint64, error) {
+func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, borPenalties []PenaltyItem, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, uint64, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	var returnTd *big.Int
@@ -536,11 +536,13 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		if !link.verified {
 			// Whitelist service is called to check if the bor chain is
 			// on the cannonical chain, returns true for every other chain
-			borReorg, err := validateReorg(link.header)
+			borValidChain, err := validateReorg(link.header)
+			borInvalidChain := !borValidChain || err != nil
+			if borInvalidChain {
+				borPenalties = append(borPenalties, PenaltyItem{Penalty: BadBlockPenalty, PeerID: hd.anchors[link.hash].peerID})
+			}
 
-			borfinality := !borReorg || err != nil
-
-			if err := hd.VerifyHeader(link.header); err != nil || borfinality {
+			if err := hd.VerifyHeader(link.header); err != nil || borInvalidChain {
 				hd.badPoSHeaders[link.hash] = link.header.ParentHash
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
@@ -629,14 +631,14 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, borPenalties []PenaltyItem, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
 	var more = true
 	var err error
 	var force bool
 	var blocksToTTD uint64
 	var blockTime uint64
 	for more {
-		if more, force, blocksToTTD, blockTime, err = hd.InsertHeader(hf, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
+		if more, force, blocksToTTD, blockTime, err = hd.InsertHeader(hf, borPenalties, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
 			return false, err
 		}
 		if force {

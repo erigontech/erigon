@@ -125,7 +125,6 @@ func (s *Service) GetWhitelistedMilestone() (bool, uint64, common.Hash) {
 }
 
 func (s *Service) ProcessMilestone(endBlockNum uint64, endBlockHash common.Hash) {
-	fmt.Println("PRocess milestone called")
 	s.milestoneService.Process(endBlockNum, endBlockHash)
 }
 
@@ -134,16 +133,13 @@ func (s *Service) ProcessCheckpoint(endBlockNum uint64, endBlockHash common.Hash
 }
 
 func (s *Service) IsValidChain(currentHeader *types.Header, chain []*types.Header) (bool, error) {
-	fmt.Println("Service IsValidChain")
 	checkpointBool, err := s.checkpointService.IsValidChain(currentHeader, chain)
 	if !checkpointBool {
-		fmt.Println("Checkpoint Bool: ", checkpointBool, "error: ", err)
 		return checkpointBool, err
 	}
 
 	milestoneBool, err := s.milestoneService.IsValidChain(currentHeader, chain)
 	if !milestoneBool {
-		fmt.Println("Milestone Bool: ", milestoneBool, "error: ", err)
 		return milestoneBool, err
 	}
 
