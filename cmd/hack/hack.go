@@ -480,7 +480,7 @@ func extractHashes(chaindata string, blockStep uint64, blockTotalOrOffset int64,
 		blockTotal := getBlockTotal(tx, b, blockTotalOrOffset)
 		// Note: blockTotal used here as block number rather than block count
 		for b <= blockTotal {
-			hash, err := rawdb.ReadCanonicalHash(tx, b)
+			hash, err := br.CanonicalHash(context.Background(), tx, b)
 			if err != nil {
 				return err
 			}
