@@ -200,13 +200,8 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	var stateWriter state.StateWriter
 	if ethconfig.EnableHistoryV4InTest {
 		agg := tx.(*temporal.Tx).Agg()
-		agg.SetTxNum(0)
-		//agg.SetTx(tx)
-		//stateWriter, _ = state.WrapStateIO(agg.SharedDomains())
 		stateWriter = state.NewWriterV4(tx.(kv.TemporalTx))
-
-		_ = tx.(*temporal.Tx).Agg().SharedDomains()
-		defer tx.(*temporal.Tx).Agg().StartUnbufferedWrites().FinishWrites()
+		defer agg.StartUnbufferedWrites().FinishWrites()
 	} else {
 		for addr, account := range g.Alloc {
 			if len(account.Code) > 0 || len(account.Storage) > 0 {

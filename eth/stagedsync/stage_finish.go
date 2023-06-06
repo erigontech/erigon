@@ -154,7 +154,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		}
 		notifyTo = binary.BigEndian.Uint64(k)
 		var err error
-		if notifyToHash, err = rawdb.ReadCanonicalHash(tx, notifyTo); err != nil {
+		if notifyToHash, err = blockReader.CanonicalHash(ctx, tx, notifyTo); err != nil {
 			logger.Warn("[Finish] failed checking if header is cannonical")
 		}
 

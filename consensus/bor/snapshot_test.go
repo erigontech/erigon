@@ -7,6 +7,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
+	"github.com/ledgerwatch/log/v3"
 	crand "github.com/maticnetwork/crand"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +20,7 @@ func TestGetSignerSuccessionNumber_ProposerIsSigner(t *testing.T) {
 	t.Parallel()
 
 	validators := buildRandomValidatorSet(numVals)
-	validatorSet := valset.NewValidatorSet(validators)
+	validatorSet := valset.NewValidatorSet(validators, log.New())
 	snap := Snapshot{
 		ValidatorSet: validatorSet,
 	}
@@ -47,7 +48,7 @@ func TestGetSignerSuccessionNumber_SignerIndexIsLarger(t *testing.T) {
 	// give highest ProposerPriority to a particular val, so that they become the proposer
 	validators[proposerIndex].VotingPower = 200
 	snap := Snapshot{
-		ValidatorSet: valset.NewValidatorSet(validators),
+		ValidatorSet: valset.NewValidatorSet(validators, log.New()),
 	}
 
 	// choose a signer at an index greater than proposer index
@@ -69,7 +70,7 @@ func TestGetSignerSuccessionNumber_SignerIndexIsSmaller(t *testing.T) {
 	// give highest ProposerPriority to a particular val, so that they become the proposer
 	validators[proposerIndex].VotingPower = 200
 	snap := Snapshot{
-		ValidatorSet: valset.NewValidatorSet(validators),
+		ValidatorSet: valset.NewValidatorSet(validators, log.New()),
 	}
 
 	// choose a signer at an index greater than proposer index
@@ -87,7 +88,7 @@ func TestGetSignerSuccessionNumber_ProposerNotFound(t *testing.T) {
 
 	validators := buildRandomValidatorSet(numVals)
 	snap := Snapshot{
-		ValidatorSet: valset.NewValidatorSet(validators),
+		ValidatorSet: valset.NewValidatorSet(validators, log.New()),
 	}
 
 	dummyProposerAddress := randomAddress()
@@ -110,7 +111,7 @@ func TestGetSignerSuccessionNumber_SignerNotFound(t *testing.T) {
 
 	validators := buildRandomValidatorSet(numVals)
 	snap := Snapshot{
-		ValidatorSet: valset.NewValidatorSet(validators),
+		ValidatorSet: valset.NewValidatorSet(validators, log.New()),
 	}
 
 	dummySignerAddress := randomAddress()

@@ -61,7 +61,7 @@ type EthBackendServer struct {
 	eth         EthBackend
 	events      *shards.Events
 	db          kv.RoDB
-	blockReader services.BlockAndTxnReader
+	blockReader services.FullBlockReader
 	config      *chain.Config
 
 	// Block proposing for proof-of-stake
@@ -85,7 +85,7 @@ type EthBackend interface {
 	Peers(ctx context.Context) (*remote.PeersReply, error)
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.BlockAndTxnReader,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.FullBlockReader,
 	config *chain.Config, builderFunc builder.BlockBuilderFunc, hd *headerdownload.HeaderDownload, proposing bool, logger log.Logger,
 ) *EthBackendServer {
 	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
@@ -463,7 +463,7 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash libcommon.H
 
 	var canonicalHash libcommon.Hash
 	if header != nil {
-		canonicalHash, err = rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
+		canonicalHash, err = s.blockReader.CanonicalHash(context.Background(), tx, header.Number.Uint64())
 	}
 	if err != nil {
 		return nil, err
