@@ -245,6 +245,12 @@ func (a *AggregatorV3) CleanDir() {
 	ac.a.tracesTo.cleanAfterFreeze(ac.tracesTo.frozenTo())
 }
 
+func (a *AggregatorV3) CloseSharedDomains() {
+	if a.domains != nil {
+		a.domains.Close()
+		a.domains = nil
+	}
+}
 func (a *AggregatorV3) SharedDomains() *SharedDomains {
 	if a.domains == nil {
 		a.domains = NewSharedDomains(a.accounts, a.code, a.storage, a.commitment)
@@ -390,6 +396,9 @@ func (a *AggregatorV3) SetTx(tx kv.RwTx) {
 	a.tracesTo.SetTx(tx)
 }
 
+func (a *AggregatorV3) GetTxNum() uint64 {
+	return a.txNum.Load()
+}
 func (a *AggregatorV3) SetTxNum(txNum uint64) {
 	a.txNum.Store(txNum)
 	if a.domains != nil {
@@ -1704,20 +1713,19 @@ func (a *AggregatorV3) AddCodePrev(addr []byte, prev []byte) error {
 	return a.code.AddPrevValue(addr, nil, prev)
 }
 
-func (a *AggregatorV3) AddTraceFrom(addr []byte) error {
-	return a.tracesFrom.Add(addr)
-}
-
-func (a *AggregatorV3) AddTraceTo(addr []byte) error {
-	return a.tracesTo.Add(addr)
-}
-
-func (a *AggregatorV3) AddLogAddr(addr []byte) error {
-	return a.logAddrs.Add(addr)
-}
-
-func (a *AggregatorV3) AddLogTopic(topic []byte) error {
-	return a.logTopics.Add(topic)
+func (a *AggregatorV3) PutIdx(idx kv.InvertedIdx, key []byte) error {
+	switch idx {
+	case kv.TracesFromIdx:
+		return a.tracesFrom.Add(key)
+	case kv.TracesToIdx:
+		return a.tracesTo.Add(key)
+	case kv.LogAddressIdx:
+		return a.logAddrs.Add(key)
+	case kv.LogTopicIndex:
+		return a.logTopics.Add(key)
+	default:
+		panic(idx)
+	}
 }
 
 func (a *AggregatorV3) UpdateAccount(addr []byte, data, prevData []byte) error {
