@@ -684,12 +684,13 @@ func DeleteBody(db kv.Deleter, hash libcommon.Hash, number uint64) {
 }
 
 func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
-	nextBaseTxNum := uint64(0)
+	nextBaseTxNum := -1
 	if from > 0 {
-		nextBaseTxNum, err = rawdbv3.TxNums.Max(tx, from-1)
+		nextBaseTxNumFromDb, err := rawdbv3.TxNums.Max(tx, from-1)
 		if err != nil {
 			return err
 		}
+		nextBaseTxNum = int(nextBaseTxNumFromDb)
 		nextBaseTxNum++
 	}
 	for blockNum := from; ; blockNum++ {
@@ -710,8 +711,8 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 			return err
 		}
 
-		nextBaseTxNum += uint64(bodyForStorage.TxAmount)
-		err = rawdbv3.TxNums.Append(tx, blockNum, nextBaseTxNum-1)
+		nextBaseTxNum += int(bodyForStorage.TxAmount)
+		err = rawdbv3.TxNums.Append(tx, blockNum, uint64(nextBaseTxNum-1))
 		if err != nil {
 			return err
 		}
