@@ -47,7 +47,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	maps.Clear(bd.peerMap)
 	bd.ClearBodyCache()
 	headHeight = bodyProgress
-	headHash, err = bd.br.CanonicalHash(context.Background(), db, headHeight)
+	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
 	if err != nil {
 		return 0, 0, libcommon.Hash{}, nil, err
 	}
@@ -123,7 +123,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 				request = false
 			}
 		} else {
-			hash, err = blockReader.CanonicalHash(context.Background(), tx, blockNum)
+			hash, err = rawdb.ReadCanonicalHash(tx, blockNum)
 			if err != nil {
 				return nil, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}

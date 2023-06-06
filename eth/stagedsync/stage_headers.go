@@ -778,7 +778,7 @@ func HeadersPOW(
 	logPrefix := s.LogPrefix()
 
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
-	hash, err := cfg.blockReader.CanonicalHash(ctx, tx, headerProgress)
+	hash, err := rawdb.ReadCanonicalHash(tx, headerProgress)
 	if err != nil {
 		return err
 	}
@@ -969,7 +969,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 
 	var ch libcommon.Hash
 	var err error
-	for ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight) {
+	for ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight) {
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
 			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
 		}

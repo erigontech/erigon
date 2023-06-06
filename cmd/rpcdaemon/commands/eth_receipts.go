@@ -196,7 +196,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			continue
 		}
 
-		blockHash, err := api._blockReader.CanonicalHash(ctx, tx, blockNumber)
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}

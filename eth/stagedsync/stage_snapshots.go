@@ -242,7 +242,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 			if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 				return err
 			}
-			canonicalHash, err := blockReader.CanonicalHash(ctx, tx, blocksAvailable)
+			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blocksAvailable)
 			if err != nil {
 				return err
 			}

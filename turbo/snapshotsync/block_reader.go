@@ -108,7 +108,7 @@ func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash
 }
 
 func (r *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
-	canonicalHash, err := r.CanonicalHash(ctx, tx, blockNum)
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

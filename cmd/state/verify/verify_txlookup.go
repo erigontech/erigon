@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -63,7 +64,7 @@ func ValidateTxLookups(chaindata string, logger log.Logger) error {
 		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
-		blockHash, err := br.CanonicalHash(ctx, tx, blockNum)
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
 			return err
 		}
