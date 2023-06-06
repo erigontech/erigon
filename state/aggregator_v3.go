@@ -245,6 +245,12 @@ func (a *AggregatorV3) CleanDir() {
 	ac.a.tracesTo.cleanAfterFreeze(ac.tracesTo.frozenTo())
 }
 
+func (a *AggregatorV3) CloseSharedDomains() {
+	if a.domains != nil {
+		a.domains.Close()
+		a.domains = nil
+	}
+}
 func (a *AggregatorV3) SharedDomains() *SharedDomains {
 	if a.domains == nil {
 		a.domains = NewSharedDomains(a.accounts, a.code, a.storage, a.commitment)
@@ -390,6 +396,9 @@ func (a *AggregatorV3) SetTx(tx kv.RwTx) {
 	a.tracesTo.SetTx(tx)
 }
 
+func (a *AggregatorV3) GetTxNum() uint64 {
+	return a.txNum.Load()
+}
 func (a *AggregatorV3) SetTxNum(txNum uint64) {
 	a.txNum.Store(txNum)
 	if a.domains != nil {
