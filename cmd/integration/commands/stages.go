@@ -751,7 +751,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err = bw.TruncateTd(tx, progress+1); err != nil {
 			return err
 		}
-		hash, err := br.CanonicalHash(ctx, tx, progress-1)
+		hash, err := rawdb.ReadCanonicalHash(tx, progress-1)
 		if err != nil {
 			return err
 		}

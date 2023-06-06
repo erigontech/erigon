@@ -253,7 +253,7 @@ func (e *Eth1Execution) GetBody(ctx context.Context, req *execution.GetSegmentRe
 		body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, *blockNumber)
 
 	} else if req.BlockNumber != nil {
-		blockHash, err2 := e.blockReader.CanonicalHash(ctx, tx, *req.BlockNumber)
+		blockHash, err2 := rawdb.ReadCanonicalHash(tx, *req.BlockNumber)
 		if err2 != nil {
 			return nil, err
 		}

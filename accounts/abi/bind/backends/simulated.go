@@ -315,7 +315,7 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash libcomm
 	if !ok {
 		return nil, false, ethereum.NotFound
 	}
-	blockHash, err := b.BlockReader().CanonicalHash(ctx, tx, blockNumber)
+	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
 	if err != nil {
 		return nil, false, err
 	}
