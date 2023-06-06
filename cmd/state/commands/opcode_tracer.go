@@ -57,7 +57,8 @@ var opcodeTracerCmd = &cobra.Command{
 	Use:   "opcodeTracer",
 	Short: "Re-executes historical transactions in read-only mode and traces them at the opcode level",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return OpcodeTracer(genesis, block, chaindata, numBlocks, saveOpcodes, saveBBlocks)
+		logger := log.New("opcode-tracer", genesis.Config.ChainID)
+		return OpcodeTracer(genesis, block, chaindata, numBlocks, saveOpcodes, saveBBlocks, logger)
 	},
 }
 
@@ -397,7 +398,7 @@ type segPrefix struct {
 // OpcodeTracer re-executes historical transactions in read-only mode
 // and traces them at the opcode level
 func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, numBlocks uint64,
-	saveOpcodes bool, saveBblocks bool) error {
+	saveOpcodes bool, saveBblocks bool, logger log.Logger) error {
 	blockNumOrig := blockNum
 
 	startTime := time.Now()
@@ -595,7 +596,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 		getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 			return rawdb.ReadHeader(historyTx, hash, number)
 		}
-		receipts, err1 := runBlock(ethash.NewFullFaker(), intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, block, vmConfig, false)
+		receipts, err1 := runBlock(ethash.NewFullFaker(), intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, block, vmConfig, false, logger)
 		if err1 != nil {
 			return err1
 		}
@@ -706,7 +707,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 }
 
 func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
-	chainConfig *chain2.Config, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config, trace bool) (types.Receipts, error) {
+	chainConfig *chain2.Config, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config, trace bool, logger log.Logger) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
@@ -715,7 +716,7 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
-	systemcontracts.UpgradeBuildInSystemContract(chainConfig, header.Number, ibs)
+	systemcontracts.UpgradeBuildInSystemContract(chainConfig, header.Number, ibs, logger)
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	for i, tx := range block.Transactions() {
 		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
