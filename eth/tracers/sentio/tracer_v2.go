@@ -190,9 +190,9 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 		t.descended = true
 		return
 	case vm.JUMP, vm.JUMPDEST:
-		from := scope.Contract.Address()
+		from := scope.Contract.CodeAddr
 		jump := mergeBase(Trace{
-			From:  &from,
+			From:  from,
 			Stack: append([]uint256.Int(nil), scope.Stack.Data...), // TODO only need partial
 		})
 
@@ -218,7 +218,6 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 					// find a match, pop the stack, copy memory if needed
 					if t.callStack[i].function.OutputMemory {
 						jump.Memory = formatMemory()
-						//jump.Memory = scope.Memory.GetCopy(0, int64(scope.Memory.Len()))
 					}
 					t.traces = append(t.traces, *t.previousJump, jump)
 					t.callStack = t.callStack[0:i]
@@ -227,14 +226,14 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 				}
 			}
 
-			funcInfo := t.getFunctionInfo(from, pc)
+			funcInfo := t.getFunctionInfo(addressStr, pc)
 			//log.Info("function info" + fmt.Sprint(funcInfo))
 
 			if funcInfo != nil {
 				if funcInfo.InputSize >= scope.Stack.Len() {
 					// TODO check if this misses data
-					log.Error("Unexpected stack size" + "function:" + fmt.Sprint(funcInfo) + ", stack" + fmt.Sprint(scope.Stack.Data))
-					log.Info("previous jump" + fmt.Sprint(*t.previousJump))
+					log.Debug("Unexpected stack size" + "function:" + fmt.Sprint(funcInfo) + ", stack" + fmt.Sprint(scope.Stack.Data))
+					log.Debug("previous jump" + fmt.Sprint(*t.previousJump))
 					t.previousJump = nil
 					return
 				}
@@ -247,11 +246,11 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 				})
 				if funcInfo.InputMemory {
 					jump.Memory = formatMemory()
-
-					//jump.Memory = scope.Memory.GetCopy(0, int64(scope.Memory.Len()))
 				}
 				t.traces = append(t.traces, *t.previousJump, jump)
 			}
+
+			// reset previous jump regardless
 			t.previousJump = nil
 		}
 
@@ -370,8 +369,8 @@ func (t *sentioTracerV2) isPrecompiled(addr libcommon.Address) bool {
 	return false
 }
 
-func (t *sentioTracerV2) getFunctionInfo(address libcommon.Address, pc uint64) *functionInfo {
-	m, ok := t.functionMap[address.String()]
+func (t *sentioTracerV2) getFunctionInfo(address string, pc uint64) *functionInfo {
+	m, ok := t.functionMap[address]
 	if !ok || m == nil {
 		return nil
 	}
