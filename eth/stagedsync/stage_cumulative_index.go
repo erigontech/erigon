@@ -10,6 +10,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -20,12 +21,14 @@ import (
 )
 
 type CumulativeIndexCfg struct {
-	db kv.RwDB
+	db          kv.RwDB
+	blockReader services.FullBlockReader
 }
 
-func StageCumulativeIndexCfg(db kv.RwDB) CumulativeIndexCfg {
+func StageCumulativeIndexCfg(db kv.RwDB, blockReader services.FullBlockReader) CumulativeIndexCfg {
 	return CumulativeIndexCfg{
-		db: db,
+		db:          db,
+		blockReader: blockReader,
 	}
 }
 
@@ -79,7 +82,7 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 			return err
 		}
 
-		canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
+		canonicalHash, err := cfg.blockReader.CanonicalHash(ctx, tx, blockNumber)
 		if err != nil {
 			return err
 		}
