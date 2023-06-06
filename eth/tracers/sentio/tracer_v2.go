@@ -91,7 +91,11 @@ func (t *sentioTracerV2) CaptureEnter(typ vm.OpCode, from libcommon.Address, to 
 	if t.rootTrace.Type == "" {
 		t.rootTrace.Type = typ.String()
 	}
+	if typ == vm.CREATE || typ == vm.CREATE2 {
+		t.traces[len(t.traces)-1].To = &to
+	}
 }
+
 func (t *sentioTracerV2) CaptureExit(output []byte, usedGas uint64, err error) {}
 
 func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
@@ -141,8 +145,8 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 		// If a new contract is being created, add to the call stack
 		inputOffset := scope.Stack.Back(1)
 		inputSize := scope.Stack.Back(2)
-		// TODO calculate to
 		from := scope.Contract.Address()
+		// to will be captured later in CaptureEnter
 		trace := mergeBase(Trace{
 			From:  &from,
 			Input: copyMemory(inputOffset, inputSize).String(),
