@@ -1713,20 +1713,19 @@ func (a *AggregatorV3) AddCodePrev(addr []byte, prev []byte) error {
 	return a.code.AddPrevValue(addr, nil, prev)
 }
 
-func (a *AggregatorV3) AddTraceFrom(addr []byte) error {
-	return a.tracesFrom.Add(addr)
-}
-
-func (a *AggregatorV3) AddTraceTo(addr []byte) error {
-	return a.tracesTo.Add(addr)
-}
-
-func (a *AggregatorV3) AddLogAddr(addr []byte) error {
-	return a.logAddrs.Add(addr)
-}
-
-func (a *AggregatorV3) AddLogTopic(topic []byte) error {
-	return a.logTopics.Add(topic)
+func (a *AggregatorV3) PutIdx(idx kv.InvertedIdx, key []byte) error {
+	switch idx {
+	case kv.TracesFromIdx:
+		return a.tracesFrom.Add(key)
+	case kv.TracesToIdx:
+		return a.tracesTo.Add(key)
+	case kv.LogAddressIdx:
+		return a.logAddrs.Add(key)
+	case kv.LogTopicIndex:
+		return a.logTopics.Add(key)
+	default:
+		panic(idx)
+	}
 }
 
 func (a *AggregatorV3) UpdateAccount(addr []byte, data, prevData []byte) error {
