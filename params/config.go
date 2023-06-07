@@ -52,7 +52,6 @@ func readChainSpec(filename string) *chain.Config {
 var (
 	MainnetGenesisHash    = libcommon.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
 	SepoliaGenesisHash    = libcommon.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
-	RinkebyGenesisHash    = libcommon.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
 	GoerliGenesisHash     = libcommon.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
 	MumbaiGenesisHash     = libcommon.HexToHash("0x7b66506a9ebdbf30d32b43c5f15a3b1216269a1ec3a75aa3182b86176a2b1ca7")
 	BorMainnetGenesisHash = libcommon.HexToHash("0xa9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b")
@@ -72,9 +71,6 @@ var (
 
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
 	SepoliaChainConfig = readChainSpec("chainspecs/sepolia.json")
-
-	// RinkebyChainConfig contains the chain parameters to run a node on the Rinkeby test network.
-	RinkebyChainConfig = readChainSpec("chainspecs/rinkeby.json")
 
 	// GoerliChainConfig contains the chain parameters to run a node on the Görli test network.
 	GoerliChainConfig = readChainSpec("chainspecs/goerli.json")
@@ -196,8 +192,6 @@ func ChainConfigByChainName(chain string) *chain.Config {
 		return MainnetChainConfig
 	case networkname.SepoliaChainName:
 		return SepoliaChainConfig
-	case networkname.RinkebyChainName:
-		return RinkebyChainConfig
 	case networkname.GoerliChainName:
 		return GoerliChainConfig
 	case networkname.MumbaiChainName:
@@ -221,8 +215,6 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &MainnetGenesisHash
 	case networkname.SepoliaChainName:
 		return &SepoliaGenesisHash
-	case networkname.RinkebyChainName:
-		return &RinkebyGenesisHash
 	case networkname.GoerliChainName:
 		return &GoerliGenesisHash
 	case networkname.MumbaiChainName:
@@ -246,8 +238,6 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 		return MainnetChainConfig
 	case genesisHash == SepoliaGenesisHash:
 		return SepoliaChainConfig
-	case genesisHash == RinkebyGenesisHash:
-		return RinkebyChainConfig
 	case genesisHash == GoerliGenesisHash:
 		return GoerliChainConfig
 	case genesisHash == MumbaiGenesisHash:
