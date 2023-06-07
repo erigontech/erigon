@@ -1,4 +1,4 @@
-package beacon
+package handler
 
 import (
 	"encoding/json"
@@ -6,14 +6,15 @@ import (
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/beacon/types"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type genesisReponse struct {
-	GenesisTime          uint64      `json:"genesis_time,omitempty"`
-	GenesisValidatorRoot common.Hash `json:"genesis_validator_root,omitempty"`
-	GenesisForkVersion   [4]byte     `json:"genesis_fork_version,omitempty"`
+	GenesisTime          uint64       `json:"genesis_time,omitempty"`
+	GenesisValidatorRoot common.Hash  `json:"genesis_validator_root,omitempty"`
+	GenesisForkVersion   types.Bytes4 `json:"genesis_fork_version,omitempty"`
 }
 
 func (a *ApiHandler) getGenesis(w http.ResponseWriter, _ *http.Request) {
@@ -36,6 +37,6 @@ func (a *ApiHandler) getGenesis(w http.ResponseWriter, _ *http.Request) {
 	json.NewEncoder(w).Encode(genesisReponse{
 		GenesisTime:          a.genesisCfg.GenesisTime,
 		GenesisValidatorRoot: a.genesisCfg.GenesisValidatorRoot,
-		GenesisForkVersion:   digest,
+		GenesisForkVersion:   types.Bytes4(digest),
 	})
 }
