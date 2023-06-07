@@ -824,14 +824,15 @@ func HeadersPOW(
 Loop:
 	for !stopped {
 
-		if generics.BorMilestoneRewind != 0 {
-			s.state.UnwindTo(generics.BorMilestoneRewind, hash)
+		if generics.BorMilestoneRewind.Load() != nil && *generics.BorMilestoneRewind.Load() != 0 {
+			s.state.UnwindTo(*generics.BorMilestoneRewind.Load(), hash)
 			err := s.state.RunUnwind(nil, tx)
 			if err != nil {
 				log.Warn(fmt.Sprintf("Milestone block mismatch, automatic rewind failed due to err: %v. Please manually rewind the chain to block num: %d", err, generics.BorMilestoneRewind))
 				return err
 			}
-			generics.BorMilestoneRewind = 0
+			var reset uint64 = 0
+			generics.BorMilestoneRewind.Store(&reset)
 		}
 
 		transitionedToPoS, err := rawdb.Transitioned(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty)

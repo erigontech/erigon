@@ -159,5 +159,6 @@ func rewindBack(rewindTo uint64) {
 
 	// Chain cannot be rewinded from this routine
 	// hence we are using a shared variable
-	generics.BorMilestoneRewind = rewindTo
+
+	generics.BorMilestoneRewind.Store(&rewindTo)
 }
