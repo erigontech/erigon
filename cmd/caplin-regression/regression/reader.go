@@ -27,7 +27,7 @@ func (r *RegressionTester) readStartingState() (*state.BeaconState, error) {
 
 func (r *RegressionTester) initBlocks() error {
 	r.blockList = nil
-	if err := filepath.Walk(filepath.Join(r.testDirectory, regressionPath, signedBeaconBlockPath), func(path string, info fs.FileInfo, err error) error {
+	if err := filepath.Walk(filepath.Join(r.testDirectory, regressionPath, signedBeaconBlockPath), func(path string, info fs.FileInfo, _ error) error {
 		if info == nil || info.IsDir() || info.Name() != "data.bin" {
 			return nil
 		}

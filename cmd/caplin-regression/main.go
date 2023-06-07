@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/caplin-regression/regression"
 	"github.com/ledgerwatch/log/v3"
 
-	_ "net/http/pprof"
+	_ "net/http/pprof" //nolint:gosec
 )
 
 var nameTestsMap = map[string]func(*forkchoice.ForkChoiceStore, *cltypes.SignedBeaconBlock) error{
@@ -35,7 +35,7 @@ func main() {
 		// Server for pprof
 		go func() {
 			log.Info("Serving pprof on localhost:6060")
-			if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+			if err := http.ListenAndServe("localhost:6060", nil); err != nil { //nolint:gosec
 				log.Error("Could not serve pprof", "err", err)
 			}
 
