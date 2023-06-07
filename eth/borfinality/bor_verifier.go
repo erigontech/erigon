@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/erigon/common/generics"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/log/v3"
@@ -123,7 +124,7 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 			rewindTo = head - 255
 		}
 
-		rewindBack(config, head, rewindTo)
+		rewindBack(rewindTo)
 
 		return hash, errHashMismatch
 	}
@@ -141,7 +142,7 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 }
 
 // Stop the miner if the mining process is running and rewind back the chain
-func rewindBack(config *config, head uint64, rewindTo uint64) {
+func rewindBack(rewindTo uint64) {
 	// TODO: Uncomment once minning is added
 
 	// if eth.Miner().Mining() {
@@ -153,40 +154,10 @@ func rewindBack(config *config, head uint64, rewindTo uint64) {
 
 	// 	eth.Miner().Start(eth.etherbase)
 	// } else {
-	rewind(config, head, rewindTo)
-	// }
-}
-
-func rewind(config *config, head uint64, rewindTo uint64) {
-	log.Warn("Rewinding chain because it doesn't match the received milestone", "to", rewindTo)
-
-	reqGen := requests.NewRequestGenerator(config.logger)
-
-	// fetch the end block hash
-	block, err := requests.GetBlockByNumber(reqGen, head, false, config.logger)
-	if err != nil {
-		log.Debug("Failed to get end block hash while rewinding/unwinding", "err", err)
-		return
-	}
-
-	tx, err := config.chainDB.BeginRw(context.Background())
-	if err != nil {
-		log.Error("Failed to start a database transaction", "err", err)
-		return
-	}
-	defer tx.Rollback()
-
-	// rewind the chain
-	config.stagedSync.UnwindTo(rewindTo, block.Result.Hash)
-	err = config.stagedSync.RunUnwind(config.chainDB, tx)
-	if err != nil {
-		log.Error("Failed to unwind chain", "err", err)
-		return
-	}
-
-	// TODO: Uncomment once metrics is added
-	// else {
-	// 	rewindLengthMeter.Mark(int64(head - rewindTo))
+	// rewind(config, head, rewindTo)
 	// }
 
+	// Chain cannot be rewinded from this routine
+	// hence we are using a shared variable
+	generics.BorMilestoneRewind = rewindTo
 }

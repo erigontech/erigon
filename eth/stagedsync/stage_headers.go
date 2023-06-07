@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/generics"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -822,6 +823,16 @@ func HeadersPOW(
 
 Loop:
 	for !stopped {
+
+		if generics.BorMilestoneRewind != 0 {
+			s.state.UnwindTo(generics.BorMilestoneRewind, hash)
+			err := s.state.RunUnwind(nil, tx)
+			if err != nil {
+				log.Warn(fmt.Sprintf("Milestone block mismatch, automatic rewind failed due to err: %v. Please manually rewind the chain to block num: %d", err, generics.BorMilestoneRewind))
+				return err
+			}
+			generics.BorMilestoneRewind = 0
+		}
 
 		transitionedToPoS, err := rawdb.Transitioned(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty)
 		if err != nil {
