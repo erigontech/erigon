@@ -123,6 +123,8 @@ COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += erigon-el
 COMMANDS += caplin-phase1
+COMMANDS += caplin-regression
+
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
