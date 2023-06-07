@@ -455,8 +455,6 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	trieTwo := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	err = trieTwo.SetState(buf)
 	require.NoError(t, err)
-	fmt.Printf("rh %x\n", trieTwo.root.h[:])
-	require.EqualValues(t, beforeRestore[:], trieTwo.root.h[:])
 
 	hashAfterRestore, err := trieTwo.RootHash()
 	require.NoError(t, err)

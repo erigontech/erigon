@@ -883,6 +883,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	hph.afterMap[row] = 0
 	hph.branchBefore[row] = false
 	if upCell.downHashedLen == 0 {
+		// root unfolded
 		depth = upDepth + 1
 		if unfolded, err := hph.unfoldBranchNode(row, touched && !present /* deleted */, depth); err != nil {
 			return err
@@ -1627,6 +1628,16 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	copy(hph.branchBefore[:], s.BranchBefore[:])
 	copy(hph.touchMap[:], s.TouchMap[:])
 	copy(hph.afterMap[:], s.AfterMap[:])
+
+	if hph.root.apl > 0 {
+		if err := hph.accountFn(hph.root.apk[:hph.root.apl], &hph.root); err != nil {
+			return err
+		}
+	} else if hph.root.spl > 0 {
+		if err := hph.storageFn(hph.root.spk[:hph.root.spl], &hph.root); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }

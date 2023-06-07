@@ -395,7 +395,7 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 		return err
 	}
 	cs := &commitmentState{txNum: d.txNum, trieState: state, blockNum: blockNum}
-	copy(cs.rootHash[:], rh)
+	//copy(cs.rootHash[:], rh)
 	encoded, err := cs.Encode()
 	if err != nil {
 		return err
@@ -404,7 +404,7 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 	var dbuf [8]byte
 	binary.BigEndian.PutUint64(dbuf[:], d.txNum)
 
-	fmt.Printf("commitment put %d rh %x\n", d.txNum, cs.rootHash[:])
+	fmt.Printf("commitment put %d rh %x\n", d.txNum, rh)
 	if err := d.Domain.PutWithPrev(keyCommitmentState, dbuf[:], encoded, d.prevState); err != nil {
 		return err
 	}
