@@ -32,27 +32,16 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 	if !txn.Protected() {
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
-	hash := txn.Hash()
-	res, err := api.txPool.Add(ctx, &txPoolProto.AddRequest{RlpTxs: [][]byte{encodedTx}})
-	if err != nil {
-		return common.Hash{}, err
-	}
 
-	if res.Imported[0] != txPoolProto.ImportResult_SUCCESS {
-		return hash, fmt.Errorf("%s: %s", txPoolProto.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
-	}
-
+	// this has been moved to prior to adding of transactions to capture the
+	// pre state of the db - which is used for logging in the messages below
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return common.Hash{}, err
 	}
+
 	defer tx.Rollback()
 
-	// Print a log with full txn details for manual investigations and interventions
-	blockNum := rawdb.ReadCurrentBlockNumber(tx)
-	if blockNum == nil {
-		return common.Hash{}, err
-	}
 	cc, err := api.chainConfig(tx)
 	if err != nil {
 		return common.Hash{}, err
@@ -65,17 +54,41 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 		return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, *txnChainId)
 	}
 
-	signer := types.MakeSigner(cc, *blockNum)
-	from, err := txn.Sender(*signer)
+	hash := txn.Hash()
+	res, err := api.txPool.Add(ctx, &txPoolProto.AddRequest{RlpTxs: [][]byte{encodedTx}})
 	if err != nil {
 		return common.Hash{}, err
 	}
 
+	if res.Imported[0] != txPoolProto.ImportResult_SUCCESS {
+		return hash, fmt.Errorf("%s: %s", txPoolProto.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
+	}
+
+	var sender *common.Address
+
+	// ReadCurrentBlockNumber may fail during block transitions.  The root cause is the fact that  rawdb.WriteHeadHeaderHash is called
+	// prior WriteHeader - which can leave the DB in a state where the header hash has no block number mapping.  This
+	// is transient but can happen during transaction insertion.  If this happens log an unknown sender rath erth an failing, otherwise
+	// we send a false error to the user - as the transaction has been sent to the tx pool and will be processed
+
+	if blockNum := rawdb.ReadCurrentBlockNumber(tx); blockNum != nil {
+		signer := types.MakeSigner(cc, *blockNum)
+
+		if s, err := txn.Sender(*signer); err == nil {
+			sender = &s
+		}
+	}
+
 	if txn.GetTo() == nil {
-		addr := crypto.CreateAddress(from, txn.GetNonce())
-		api.logger.Info("Submitted contract creation", "hash", txn.Hash().Hex(), "from", from, "nonce", txn.GetNonce(), "contract", addr.Hex(), "value", txn.GetValue())
+		addr := "undefined"
+
+		if sender != nil {
+			addr = crypto.CreateAddress(*sender, txn.GetNonce()).Hex()
+		}
+
+		api.logger.Info("Submitted contract creation", "hash", txn.Hash().Hex(), "from", sender, "nonce", txn.GetNonce(), "contract", addr, "value", txn.GetValue())
 	} else {
-		api.logger.Info("Submitted transaction", "hash", txn.Hash().Hex(), "from", from, "nonce", txn.GetNonce(), "recipient", txn.GetTo(), "value", txn.GetValue())
+		api.logger.Info("Submitted transaction", "hash", txn.Hash().Hex(), "from", sender, "nonce", txn.GetNonce(), "recipient", txn.GetTo(), "value", txn.GetValue())
 	}
 
 	return txn.Hash(), nil
