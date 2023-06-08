@@ -716,6 +716,10 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 }
 
 func (ss *GrpcServer) startSync(ctx context.Context, bestHash libcommon.Hash, peerID [64]byte) error {
+	// It will perform a peer validation and remove peer in case of milestone mismatch
+	// Relavant only in case of bor consensus
+	go validatePeer(ss, peerID, ctx)
+
 	b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
 		RequestId: rand.Uint64(), // nolint: gosec
 		GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{

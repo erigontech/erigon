@@ -1,6 +1,11 @@
 package generics
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/core/types"
+)
 
 func Empty[T any]() (t T) {
 	return
@@ -10,3 +15,10 @@ func Empty[T any]() (t T) {
 // Flag: if equals 0, no rewind according to bor whitelisting service
 // Variable: if not equals 0, rewind chain back to BorMilestoneRewind
 var BorMilestoneRewind atomic.Pointer[uint64]
+
+type Response struct {
+	Headers []*types.Header
+	Hashes  []libcommon.Hash
+}
+
+var Header66RequestIdMap map[uint64]chan (Response)
