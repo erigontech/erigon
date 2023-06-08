@@ -90,6 +90,8 @@ package {{.Package}}
 import (
 	"math/big"
 	"strings"
+	"fmt"
+	"reflect"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -335,7 +337,7 @@ var (
 		func (_{{$contract.Type}} *{{$contract.Type}}CallerSession) {{.Normalized.Name}}({{range $i, $_ := .Normalized.Inputs}}{{if ne $i 0}},{{end}} {{.Name}} {{bindtype .Type $structs}} {{end}}) ({{if .Structured}}struct{ {{range .Normalized.Outputs}}{{.Name}} {{bindtype .Type $structs}};{{end}} }, {{else}} {{range .Normalized.Outputs}}{{bindtype .Type $structs}},{{end}} {{end}} error) {
 		  return _{{$contract.Type}}.Contract.{{.Normalized.Name}}(&_{{$contract.Type}}.CallOpts {{range .Normalized.Inputs}}, {{.Name}}{{end}})
 		}
-	{{end}}
+	{{end}}  
 
 	{{range .Transacts}}
 		// {{.Normalized.Name}} is a paid mutator transaction binding the contract method 0x{{printf "%x" .Original.ID}}.
@@ -358,6 +360,52 @@ var (
 		func (_{{$contract.Type}} *{{$contract.Type}}TransactorSession) {{.Normalized.Name}}({{range $i, $_ := .Normalized.Inputs}}{{if ne $i 0}},{{end}} {{.Name}} {{bindtype .Type $structs}} {{end}}) (types.Transaction, error) {
 		  return _{{$contract.Type}}.Contract.{{.Normalized.Name}}(&_{{$contract.Type}}.TransactOpts {{range $i, $_ := .Normalized.Inputs}}, {{.Name}}{{end}})
 		}
+	{{end}}
+
+	{{$metaType := .Type}}
+	{{range .Transacts}}
+		{{if ne (len .Normalized.Inputs) 0}}
+
+		// {{.Normalized.Name}}Params is an auto generated read-only Go binding of transcaction calldata params
+		type {{.Normalized.Name}}Params struct {
+			{{range $i, $_ := .Normalized.Inputs}} Param_{{.Name}} {{bindtype .Type $structs}}
+			{{end}}
+		}
+
+		// Parse {{.Normalized.Name}} method from calldata of a transaction
+		// 
+		// Solidity: {{.Original.String}}
+		func Parse{{.Normalized.Name}}(calldata []byte) (*{{.Normalized.Name}}Params, error) {
+			if len(calldata) <= 4 {
+				return nil, fmt.Errorf("invalid calldata input")
+			}
+
+			_abi, err := abi.JSON(strings.NewReader({{$metaType}}ABI))
+			if err != nil {
+				return nil, fmt.Errorf("failed to get abi of registry metadata: %w", err)
+			}
+
+			out, err := _abi.Methods["{{.Original.Name}}"].Inputs.Unpack(calldata[4:])
+			if err != nil {
+				return nil, fmt.Errorf("failed to unpack {{.Original.Name}} params data: %w", err)
+			}		
+
+			var paramsResult = new({{.Normalized.Name}}Params)
+			value := reflect.ValueOf(paramsResult).Elem()
+
+			if value.NumField() != len(out) {
+				return nil, fmt.Errorf("failed to match calldata with param field number")
+			}
+		
+			{{range $i, $t := .Normalized.Inputs}}
+			out{{$i}} := *abi.ConvertType(out[{{$i}}], new({{bindtype .Type $structs}})).(*{{bindtype .Type $structs}}){{end}}
+
+			return &{{.Normalized.Name}}Params{
+				{{range $i, $_ := .Normalized.Inputs}} Param_{{.Name}} : out{{$i}},{{end}} 
+			}, nil 
+		}
+
+		{{end}}
 	{{end}}
 
 	{{if .Fallback}} 

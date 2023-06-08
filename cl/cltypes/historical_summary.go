@@ -2,9 +2,10 @@ package cltypes
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 type HistoricalSummary struct {
@@ -13,24 +14,15 @@ type HistoricalSummary struct {
 }
 
 func (h *HistoricalSummary) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, append(h.BlockSummaryRoot[:], h.StateSummaryRoot[:]...)...), nil
+	return ssz2.MarshalSSZ(buf, h.BlockSummaryRoot[:], h.StateSummaryRoot[:])
 }
 
-func (h *HistoricalSummary) DecodeSSZ(buf []byte) error {
-	if len(buf) < h.EncodingSizeSSZ() {
-		return ssz.ErrLowBufferSize
-	}
-	copy(h.BlockSummaryRoot[:], buf)
-	copy(h.StateSummaryRoot[:], buf[length.Hash:])
-	return nil
-}
-
-func (h *HistoricalSummary) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return h.DecodeSSZ(buf)
+func (h *HistoricalSummary) DecodeSSZ(buf []byte, _ int) error {
+	return ssz2.UnmarshalSSZ(buf, 0, h.BlockSummaryRoot[:], h.StateSummaryRoot[:])
 }
 
 func (h *HistoricalSummary) HashSSZ() ([32]byte, error) {
-	return merkle_tree.ArraysRoot([][32]byte{h.BlockSummaryRoot, h.StateSummaryRoot}, 2)
+	return merkle_tree.HashTreeRoot(h.BlockSummaryRoot[:], h.StateSummaryRoot[:])
 }
 
 func (*HistoricalSummary) EncodingSizeSSZ() int {

@@ -23,7 +23,9 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
@@ -41,7 +43,7 @@ func init() {
 type callLog struct {
 	Address libcommon.Address `json:"address"`
 	Topics  []libcommon.Hash  `json:"topics"`
-	Data    hexutil.Bytes     `json:"data"`
+	Data    hexutility.Bytes  `json:"data"`
 }
 
 type callFrame struct {
@@ -96,8 +98,8 @@ type callFrameMarshaling struct {
 	Gas        hexutil.Uint64
 	GasUsed    hexutil.Uint64
 	Value      *hexutil.Big
-	Input      hexutil.Bytes
-	Output     hexutil.Bytes
+	Input      hexutility.Bytes
+	Output     hexutility.Bytes
 }
 
 type callTracer struct {
@@ -181,7 +183,7 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 		}
 
 		data := scope.Memory.GetCopy(int64(mStart.Uint64()), int64(mSize.Uint64()))
-		log := callLog{Address: scope.Contract.Address(), Topics: topics, Data: hexutil.Bytes(data)}
+		log := callLog{Address: scope.Contract.Address(), Topics: topics, Data: hexutility.Bytes(data)}
 		t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, log)
 	}
 }

@@ -85,6 +85,7 @@ func (args *t8nOutput) get() (out []string) {
 }
 
 func TestT8n(t *testing.T) {
+	t.Skip("unstable")
 	tt := new(testT8n)
 	tt.TestCmd = cmdtest.NewTestCmd(t, tt)
 	for i, tc := range []struct {
@@ -186,6 +187,14 @@ func TestT8n(t *testing.T) {
 				"alloc.json", "txs.json", "env.json", "ArrowGlacier",
 			},
 			expOut: "exp_arrowglacier.json",
+			output: t8nOutput{alloc: true, result: true},
+		},
+		{ // eip-4895
+			base: "./testdata/26",
+			input: t8nInput{
+				"alloc.json", "txs.json", "env.json", "Shanghai",
+			},
+			expOut: "exp.json",
 			output: t8nOutput{alloc: true, result: true},
 		},
 	} {

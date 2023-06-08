@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
@@ -18,7 +19,7 @@ func (l ErigonLog) MarshalJSON() ([]byte, error) {
 	type ErigonLog struct {
 		Address     libcommon.Address `json:"address" gencodec:"required"`
 		Topics      []libcommon.Hash  `json:"topics" gencodec:"required"`
-		Data        hexutil.Bytes     `json:"data" gencodec:"required"`
+		Data        hexutility.Bytes  `json:"data" gencodec:"required"`
 		BlockNumber hexutil.Uint64    `json:"blockNumber"`
 		TxHash      libcommon.Hash    `json:"transactionHash" gencodec:"required"`
 		TxIndex     hexutil.Uint      `json:"transactionIndex"`
@@ -48,7 +49,7 @@ func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 	type ErigonLog struct {
 		Address     *libcommon.Address `json:"address" gencodec:"required"`
 		Topics      []libcommon.Hash   `json:"topics" gencodec:"required"`
-		Data        *hexutil.Bytes     `json:"data" gencodec:"required"`
+		Data        *hexutility.Bytes  `json:"data" gencodec:"required"`
 		BlockNumber *hexutil.Uint64    `json:"blockNumber"`
 		TxHash      *libcommon.Hash    `json:"transactionHash" gencodec:"required"`
 		TxIndex     *hexutil.Uint      `json:"transactionIndex"`

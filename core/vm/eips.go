@@ -22,18 +22,22 @@ import (
 
 	"github.com/holiman/uint256"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/params"
 )
 
 var activators = map[int]func(*JumpTable){
-	3855: enable3855,
+	4844: enable4844,
 	3860: enable3860,
+	3855: enable3855,
 	3529: enable3529,
 	3198: enable3198,
 	2929: enable2929,
 	2200: enable2200,
 	1884: enable1884,
 	1344: enable1344,
+	1153: enable1153,
 }
 
 // EnableEIP enables the given EIP on the config.
@@ -168,6 +172,45 @@ func enable3198(jt *JumpTable) {
 	}
 }
 
+// enable1153 applies EIP-1153 "Transient Storage"
+// - Adds TLOAD that reads from transient storage
+// - Adds TSTORE that writes to transient storage
+func enable1153(jt *JumpTable) {
+	jt[TLOAD] = &operation{
+		execute:     opTload,
+		constantGas: params.WarmStorageReadCostEIP2929,
+		numPop:      1,
+		numPush:     1,
+	}
+
+	jt[TSTORE] = &operation{
+		execute:     opTstore,
+		constantGas: params.WarmStorageReadCostEIP2929,
+		numPop:      2,
+		numPush:     0,
+	}
+}
+
+// opTload implements TLOAD opcode
+func opTload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	loc := scope.Stack.Peek()
+	hash := libcommon.Hash(loc.Bytes32())
+	val := interpreter.evm.IntraBlockState().GetTransientState(scope.Contract.Address(), hash)
+	loc.SetBytes(val.Bytes())
+	return nil, nil
+}
+
+// opTstore implements TSTORE opcode
+func opTstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	if interpreter.readOnly {
+		return nil, ErrWriteProtection
+	}
+	loc := scope.Stack.Pop()
+	val := scope.Stack.Pop()
+	interpreter.evm.IntraBlockState().SetTransientState(scope.Contract.Address(), loc.Bytes32(), val)
+	return nil, nil
+}
+
 // opBaseFee implements BASEFEE opcode
 func opBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
 	baseFee := interpreter.evm.Context().BaseFee
@@ -199,13 +242,13 @@ func enable3860(jt *JumpTable) {
 	jt[CREATE2].dynamicGas = gasCreate2Eip3860
 }
 
-// enableSharding applies mini-danksharding (DATAHASH Opcode)
+// enable4844 applies mini-danksharding (DATAHASH Opcode)
 // - Adds an opcode that returns the versioned data hash of the tx at a index.
-func enableSharding(jt *JumpTable) {
+func enable4844(jt *JumpTable) {
 	jt[DATAHASH] = &operation{
 		execute:     opDataHash,
 		constantGas: GasFastestStep,
-		numPop:      0,
+		numPop:      1,
 		numPush:     1,
 	}
 }

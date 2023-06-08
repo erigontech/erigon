@@ -29,10 +29,8 @@ const StatusTopic = "/status"
 const GoodbyeTopic = "/goodbye"
 const BeaconBlocksByRangeTopic = "/beacon_blocks_by_range"
 const BeaconBlocksByRootTopic = "/beacon_blocks_by_root"
-const LightClientFinalityUpdateTopic = "/light_client_finality_update"
-const LightClientOptimisticUpdateTopic = "/light_client_optimistic_update"
-const LightClientBootstrapTopic = "/light_client_bootstrap"
-const LightClientUpdatesByRangeTopic = "/light_client_updates_by_range"
+const BlobSidecarByRootTopic = "/blob_sidecars_by_root"
+const BlobSidecarByRangeTopic = "/blob_sidecars_by_range"
 
 // Request and Response protocol ids
 var (
@@ -50,8 +48,7 @@ var (
 	BeaconBlocksByRootProtocolV1 = ProtocolPrefix + BeaconBlocksByRootTopic + Schema1 + EncodingProtocol
 	BeaconBlocksByRootProtocolV2 = ProtocolPrefix + BeaconBlocksByRootTopic + Schema2 + EncodingProtocol
 
-	LightClientFinalityUpdateV1   = ProtocolPrefix + LightClientFinalityUpdateTopic + Schema1 + EncodingProtocol
-	LightClientOptimisticUpdateV1 = ProtocolPrefix + LightClientOptimisticUpdateTopic + Schema1 + EncodingProtocol
-	LightClientBootstrapV1        = ProtocolPrefix + LightClientBootstrapTopic + Schema1 + EncodingProtocol
-	LightClientUpdatesByRangeV1   = ProtocolPrefix + LightClientUpdatesByRangeTopic + Schema1 + EncodingProtocol
+	BlobSidecarByRootProtocolV1 = ProtocolPrefix + BlobSidecarByRootTopic + Schema1 + EncodingProtocol
+
+	BlobSidecarByRangeProtocolV1 = ProtocolPrefix + BlobSidecarByRangeTopic + Schema1 + EncodingProtocol
 )

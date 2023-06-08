@@ -18,8 +18,8 @@ package misc
 
 import (
 	"fmt"
-	"math/big"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 
 	"github.com/ledgerwatch/erigon/core/types"
@@ -27,34 +27,47 @@ import (
 )
 
 // CalcExcessDataGas implements calc_excess_data_gas from EIP-4844
-func CalcExcessDataGas(parentExcessDataGas *big.Int, newBlobs int) *big.Int {
-	excessDataGas := new(big.Int)
-	if parentExcessDataGas != nil {
-		excessDataGas.Set(parentExcessDataGas)
+func CalcExcessDataGas(parent *types.Header) uint64 {
+	var excessDataGas, dataGasUsed uint64
+	if parent.ExcessDataGas != nil {
+		excessDataGas = *parent.ExcessDataGas
 	}
-	consumedGas := big.NewInt(params.DataGasPerBlob)
-	consumedGas.Mul(consumedGas, big.NewInt(int64(newBlobs)))
+	if parent.DataGasUsed != nil {
+		dataGasUsed = *parent.DataGasUsed
+	}
 
-	excessDataGas.Add(excessDataGas, consumedGas)
-	targetGas := big.NewInt(params.TargetDataGasPerBlock)
-	if excessDataGas.Cmp(targetGas) < 0 {
-		return new(big.Int)
+	if excessDataGas+dataGasUsed < params.TargetDataGasPerBlock {
+		return 0
 	}
-	return new(big.Int).Set(excessDataGas.Sub(excessDataGas, targetGas))
+	return excessDataGas + dataGasUsed - params.TargetDataGasPerBlock
 }
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
 // as described in the EIP-4844 spec.
-func FakeExponential(factor, num, denom *big.Int) *big.Int {
-	output := new(big.Int)
-	numAccum := new(big.Int).Mul(factor, denom)
-	for i := 1; numAccum.Sign() > 0; i++ {
-		output.Add(output, numAccum)
-		numAccum.Mul(numAccum, num)
-		iBig := big.NewInt(int64(i))
-		numAccum.Div(numAccum, iBig.Mul(iBig, denom))
+func FakeExponential(factor, denom *uint256.Int, excessDataGas uint64) (*uint256.Int, error) {
+	numerator := uint256.NewInt(excessDataGas)
+	output := uint256.NewInt(0)
+	numeratorAccum := new(uint256.Int)
+	_, overflow := numeratorAccum.MulOverflow(factor, denom)
+	if overflow {
+		return nil, fmt.Errorf("FakeExponential: overflow in MulOverflow(factor=%v, denom=%v)", factor, denom)
 	}
-	return output.Div(output, denom)
+	divisor := new(uint256.Int)
+	for i := 1; numeratorAccum.Sign() > 0; i++ {
+		_, overflow = output.AddOverflow(output, numeratorAccum)
+		if overflow {
+			return nil, fmt.Errorf("FakeExponential: overflow in AddOverflow(output=%v, numeratorAccum=%v)", output, numeratorAccum)
+		}
+		_, overflow = divisor.MulOverflow(denom, uint256.NewInt(uint64(i)))
+		if overflow {
+			return nil, fmt.Errorf("FakeExponential: overflow in MulOverflow(denom=%v, i=%v)", denom, i)
+		}
+		_, overflow = numeratorAccum.MulDivOverflow(numeratorAccum, numerator, divisor)
+		if overflow {
+			return nil, fmt.Errorf("FakeExponential: overflow in MulDivOverflow(numeratorAccum=%v, numerator=%v, divisor=%v)", numeratorAccum, numerator, divisor)
+		}
+	}
+	return output.Div(output, denom), nil
 }
 
 // CountBlobs returns the number of blob transactions in txs
@@ -68,6 +81,9 @@ func CountBlobs(txs []types.Transaction) int {
 
 // VerifyEip4844Header verifies that the header is not malformed
 func VerifyEip4844Header(config *chain.Config, parent, header *types.Header) error {
+	if header.DataGasUsed == nil {
+		return fmt.Errorf("header is missing dataGasUsed")
+	}
 	if header.ExcessDataGas == nil {
 		return fmt.Errorf("header is missing excessDataGas")
 	}
@@ -75,6 +91,10 @@ func VerifyEip4844Header(config *chain.Config, parent, header *types.Header) err
 }
 
 // GetDataGasPrice implements get_data_gas_price from EIP-4844
-func GetDataGasPrice(excessDataGas *big.Int) *big.Int {
-	return FakeExponential(big.NewInt(params.MinDataGasPrice), excessDataGas, big.NewInt(params.DataGasPriceUpdateFraction))
+func GetDataGasPrice(excessDataGas uint64) (*uint256.Int, error) {
+	return FakeExponential(uint256.NewInt(params.MinDataGasPrice), uint256.NewInt(params.DataGasPriceUpdateFraction), excessDataGas)
+}
+
+func GetDataGasUsed(numBlobs int) uint64 {
+	return uint64(numBlobs) * params.DataGasPerBlob
 }

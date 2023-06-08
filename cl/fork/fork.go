@@ -22,17 +22,20 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
+var NO_GENESIS_TIME_ERR error = errors.New("genesis time is not set")
+var NO_VALIDATOR_ROOT_HASH error = errors.New("genesis validators root is not set")
+
 func ForkDigestVersion(digest [4]byte, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) (clparams.StateVersion, error) {
 	var (
-		phase0ForkDigest, altairForkDigest, bellatrixForkDigest, capellaForkDigest [4]byte
-		err                                                                        error
+		phase0ForkDigest, altairForkDigest, bellatrixForkDigest, capellaForkDigest, denebForkDigest [4]byte
+		err                                                                                         error
 	)
 	phase0ForkDigest, err = ComputeForkDigestForVersion(
 		utils.Uint32ToBytes4(b.GenesisForkVersion),
@@ -65,6 +68,14 @@ func ForkDigestVersion(digest [4]byte, b *clparams.BeaconChainConfig, genesisVal
 	if err != nil {
 		return 0, err
 	}
+
+	denebForkDigest, err = ComputeForkDigestForVersion(
+		utils.Uint32ToBytes4(b.DenebForkVersion),
+		genesisValidatorRoot,
+	)
+	if err != nil {
+		return 0, err
+	}
 	switch digest {
 	case phase0ForkDigest:
 		return clparams.Phase0Version, nil
@@ -74,6 +85,8 @@ func ForkDigestVersion(digest [4]byte, b *clparams.BeaconChainConfig, genesisVal
 		return clparams.BellatrixVersion, nil
 	case capellaForkDigest:
 		return clparams.CapellaVersion, nil
+	case denebForkDigest:
+		return clparams.DenebVersion, nil
 	}
 	return 0, fmt.Errorf("invalid state version")
 }
@@ -83,10 +96,10 @@ func ComputeForkDigest(
 	genesisConfig *clparams.GenesisConfig,
 ) ([4]byte, error) {
 	if genesisConfig.GenesisTime == 0 {
-		return [4]byte{}, errors.New("genesis time is not set")
+		return [4]byte{}, NO_GENESIS_TIME_ERR
 	}
 	if genesisConfig.GenesisValidatorRoot == (libcommon.Hash{}) {
-		return [4]byte{}, errors.New("genesis validators root is not set")
+		return [4]byte{}, NO_VALIDATOR_ROOT_HASH
 	}
 
 	currentEpoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
@@ -99,7 +112,6 @@ func ComputeForkDigest(
 		}
 		break
 	}
-
 	return ComputeForkDigestForVersion(currentForkVersion, genesisConfig.GenesisValidatorRoot)
 }
 
@@ -108,16 +120,17 @@ func ComputeNextForkDigest(
 	genesisConfig *clparams.GenesisConfig,
 ) ([4]byte, error) {
 	if genesisConfig.GenesisTime == 0 {
-		return [4]byte{}, errors.New("genesis time is not set")
+		return [4]byte{}, NO_GENESIS_TIME_ERR
 	}
 	if genesisConfig.GenesisValidatorRoot == (libcommon.Hash{}) {
-		return [4]byte{}, errors.New("genesis validators root is not set")
+		return [4]byte{}, NO_VALIDATOR_ROOT_HASH
 	}
 
 	currentEpoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
 	// Retrieve next fork version.
 	nextForkIndex := 0
 	forkList := forkList(beaconConfig.ForkVersionSchedule)
+	fmt.Println(forkList, beaconConfig.ForkVersionSchedule)
 	for _, fork := range forkList {
 		if currentEpoch >= fork.epoch {
 			nextForkIndex++
@@ -130,7 +143,7 @@ func ComputeNextForkDigest(
 		return [4]byte{}, nil
 	}
 	nextForkIndex++
-
+	fmt.Println(forkList[nextForkIndex].version)
 	return ComputeForkDigestForVersion(forkList[nextForkIndex].version, genesisConfig.GenesisValidatorRoot)
 }
 

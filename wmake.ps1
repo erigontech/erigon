@@ -413,7 +413,7 @@ $Erigon.Commit     = [string]@(git.exe rev-list -1 HEAD)
 $Erigon.Branch     = [string]@(git.exe rev-parse --abbrev-ref HEAD)
 $Erigon.Tag        = [string]@(git.exe describe --tags)
 
-$Erigon.BuildTags = "nosqlite,noboltdb,netgo"
+$Erigon.BuildTags = "nosqlite,noboltdb"
 $Erigon.Package = "github.com/ledgerwatch/erigon"
 
 $Erigon.BuildFlags = "-trimpath -tags $($Erigon.BuildTags) -buildvcs=false -v"

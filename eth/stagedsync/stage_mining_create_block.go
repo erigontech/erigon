@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -9,6 +10,7 @@ import (
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -69,9 +71,10 @@ type MiningCreateBlockCfg struct {
 	txPool2DB              kv.RoDB
 	tmpdir                 string
 	blockBuilderParameters *core.BlockBuilderParameters
+	blockReader            services.FullBlockReader
 }
 
-func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig chain.Config, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, blockBuilderParameters *core.BlockBuilderParameters, tmpdir string) MiningCreateBlockCfg {
+func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig chain.Config, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, blockBuilderParameters *core.BlockBuilderParameters, tmpdir string, blockReader services.FullBlockReader) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
 		db:                     db,
 		miner:                  miner,
@@ -81,6 +84,7 @@ func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig chain.
 		txPool2DB:              txPool2DB,
 		tmpdir:                 tmpdir,
 		blockBuilderParameters: blockBuilderParameters,
+		blockReader:            blockReader,
 	}
 }
 
@@ -89,7 +93,7 @@ var maxTransactions uint16 = 1000
 // SpawnMiningCreateBlockStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}) (err error) {
+func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
 	current := cfg.miner.MiningBlock
 	txPoolLocals := []libcommon.Address{} //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := cfg.miner.MiningConfig.Etherbase
@@ -127,14 +131,14 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	if err != nil {
 		return err
 	}
-	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx}
+	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader}
 	var GetBlocksFromHash = func(hash libcommon.Hash, n int) (blocks []*types.Block) {
 		number := rawdb.ReadHeaderNumber(tx, hash)
 		if number == nil {
 			return nil
 		}
 		for i := 0; i < n; i++ {
-			block := rawdb.ReadBlock(tx, hash, *number)
+			block, _, _ := cfg.blockReader.BlockWithSenders(context.Background(), tx, hash, *number)
 			if block == nil {
 				break
 			}
@@ -174,13 +178,13 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	header.Coinbase = coinbase
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
-	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
+	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
-		log.Error("Failed to prepare header for mining",
+		logger.Error("Failed to prepare header for mining",
 			"err", err,
 			"headerNumber", header.Number.Uint64(),
 			"headerRoot", header.Root.String(),
@@ -272,9 +276,9 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 				break
 			}
 			if err = commitUncle(env, uncle); err != nil {
-				log.Trace("Possible uncle rejected", "hash", hash, "reason", err)
+				logger.Trace("Possible uncle rejected", "hash", hash, "reason", err)
 			} else {
-				log.Trace("Committing new uncle to block", "hash", hash)
+				logger.Trace("Committing new uncle to block", "hash", hash)
 				uncles = append(uncles, uncle)
 			}
 		}

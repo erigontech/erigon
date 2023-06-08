@@ -34,6 +34,7 @@ import (
 	"github.com/gorilla/websocket"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -68,6 +69,7 @@ type Service struct {
 	pongCh chan struct{} // Pong notifications are fed into this channel
 	histCh chan []uint64 // History request block numbers are fed into this channel
 
+	blockReader services.FullBlockReader
 }
 
 // connWrapper is a wrapper to prevent concurrent-write or concurrent-read on the
@@ -120,7 +122,7 @@ func (w *connWrapper) Close() error {
 }
 
 // New returns a monitoring service ready for stats reporting.
-func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte) error {
+func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, blockReader services.FullBlockReader, engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte) error {
 	// Parse the netstats connection url
 	re := regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
 	parts := re.FindStringSubmatch(url)
@@ -128,17 +130,18 @@ func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, engine 
 		return fmt.Errorf("invalid netstats url: \"%s\", should be nodename:secret@host:port", url)
 	}
 	ethstats := &Service{
-		engine:    engine,
-		servers:   servers,
-		node:      parts[1],
-		pass:      parts[3],
-		host:      parts[4],
-		pongCh:    make(chan struct{}),
-		histCh:    make(chan []uint64, 1),
-		networkid: networkid,
-		chaindb:   chainDB,
-		headCh:    headCh,
-		quitCh:    quitCh,
+		blockReader: blockReader,
+		engine:      engine,
+		servers:     servers,
+		node:        parts[1],
+		pass:        parts[3],
+		host:        parts[4],
+		pongCh:      make(chan struct{}),
+		histCh:      make(chan []uint64, 1),
+		networkid:   networkid,
+		chaindb:     chainDB,
+		headCh:      headCh,
+		quitCh:      quitCh,
 	}
 
 	node.RegisterLifecycle(ethstats)
@@ -508,7 +511,10 @@ func (s *Service) reportBlock(conn *connWrapper) error {
 	}
 	defer roTx.Rollback()
 
-	block := rawdb.ReadCurrentBlock(roTx)
+	block, err := s.blockReader.CurrentBlock(roTx)
+	if err != nil {
+		return err
+	}
 	if block == nil {
 		return nil
 	}
@@ -596,7 +602,7 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 	history := make([]*blockStats, len(indexes))
 	for i, number := range indexes {
 		// Retrieve the next block if it's known to us
-		block, err := rawdb.ReadBlockByNumber(roTx, number)
+		block, err := s.blockReader.BlockByNumber(context.Background(), roTx, number)
 		if err != nil {
 			return err
 		}

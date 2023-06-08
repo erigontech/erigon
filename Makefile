@@ -28,7 +28,8 @@ CGO_CFLAGS += -Wno-error=strict-prototypes # for Clang15, remove it when can htt
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
-BUILD_TAGS = nosqlite,noboltdb,netgo # about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125
+# about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
+BUILD_TAGS = nosqlite,noboltdb
 PACKAGE = github.com/ledgerwatch/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
@@ -108,7 +109,6 @@ erigon: go-version erigon.cmd
 COMMANDS += devnet
 COMMANDS += erigon-el-mock
 COMMANDS += downloader
-COMMANDS += erigon-cl
 COMMANDS += hack
 COMMANDS += integration
 COMMANDS += observer
@@ -120,9 +120,11 @@ COMMANDS += state
 COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
-COMMANDS += lightclient
 COMMANDS += sentinel
 COMMANDS += erigon-el
+COMMANDS += caplin-phase1
+COMMANDS += caplin-regression
+
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -136,6 +138,7 @@ db-tools:
 
 	go mod vendor
 	cd vendor/github.com/torquem-ch/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
+	mkdir -p $(GOBIN)
 	cd vendor/github.com/torquem-ch/mdbx-go/mdbxdist && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
@@ -166,7 +169,7 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.52.1
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.53.2
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
@@ -214,7 +217,7 @@ git-submodules:
 	@git submodule update --quiet --init --recursive --force || true
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.20.2
+GOLANG_CROSS_VERSION  ?= v1.20.4
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules

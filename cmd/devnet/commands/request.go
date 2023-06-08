@@ -1,16 +1,14 @@
 package commands
 
 import (
-	"fmt"
-
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/erigon/cmd/devnet/node"
+	"github.com/ledgerwatch/log/v3"
 )
 
-func pingErigonRpc() error {
-	err := requests.PingErigonRpc(models.ReqId)
+func pingErigonRpc(node *node.Node, logger log.Logger) error {
+	err := node.PingErigonRpc().Err
 	if err != nil {
-		fmt.Printf("FAILURE => %v\n", err)
+		logger.Error("FAILURE", "error", err)
 	}
 	return err
 }

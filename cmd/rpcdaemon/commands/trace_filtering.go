@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -34,7 +34,10 @@ import (
 )
 
 // Transaction implements trace_transaction
-func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error) {
+func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, gasBailOut *bool) (ParityTraces, error) {
+	if gasBailOut == nil {
+		gasBailOut = new(bool) // false by default
+	}
 	tx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -63,7 +66,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 		}
 		blockNumber = *blockNumPtr
 	}
-	block, err := api.blockByNumberWithSenders(tx, blockNumber)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -71,14 +74,6 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 		return nil, nil
 	}
 
-	// Extract transactions from block
-	block, bErr := api.blockByNumberWithSenders(tx, blockNumber)
-	if bErr != nil {
-		return nil, bErr
-	}
-	if block == nil {
-		return nil, fmt.Errorf("could not find block  %d", blockNumber)
-	}
 	var txIndex int
 	for idx, txn := range block.Transactions() {
 		if txn.Hash() == txHash {
@@ -91,7 +86,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	hash := block.Hash()
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txIndex, types.MakeSigner(chainConfig, blockNumber), chainConfig)
+	traces, _, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txIndex, *gasBailOut, types.MakeSigner(chainConfig, blockNumber), chainConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -117,13 +112,12 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 }
 
 // Get implements trace_get
-func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64) (*ParityTrace, error) {
+func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64, gasBailOut *bool) (*ParityTrace, error) {
 	// Parity fails if it gets more than a single index. It returns nothing in this case. Must we?
 	if len(indicies) > 1 {
 		return nil, nil
 	}
-
-	traces, err := api.Transaction(ctx, txHash)
+	traces, err := api.Transaction(ctx, txHash, gasBailOut)
 	if err != nil {
 		return nil, err
 	}
@@ -138,8 +132,26 @@ func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies [
 	return nil, err
 }
 
+func rewardKindToString(kind consensus.RewardKind) string {
+	switch kind {
+	case consensus.RewardAuthor:
+		return "block"
+	case consensus.RewardEmptyStep:
+		return "emptyStep"
+	case consensus.RewardExternal:
+		return "external"
+	case consensus.RewardUncle:
+		return "uncle"
+	default:
+		return "unknown"
+	}
+}
+
 // Block implements trace_block
-func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error) {
+func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool) (ParityTraces, error) {
+	if gasBailOut == nil {
+		gasBailOut = new(bool) // false by default
+	}
 	tx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -155,7 +167,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	bn := hexutil.Uint64(blockNum)
 
 	// Extract transactions from block
-	block, bErr := api.blockByNumberWithSenders(tx, blockNum)
+	block, bErr := api.blockWithSenders(ctx, tx, hash, blockNum)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -163,68 +175,47 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		return nil, fmt.Errorf("could not find block %d", uint64(bn))
 	}
 
-	chainConfig, err := api.chainConfig(tx)
+	cfg, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
-	traces, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNum), chainConfig)
+	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut /* gasBailOut */, types.MakeSigner(cfg, blockNum), cfg)
 	if err != nil {
 		return nil, err
 	}
 
 	out := make([]ParityTrace, 0, len(traces))
-	blockno := uint64(bn)
 	for txno, trace := range traces {
 		txhash := block.Transactions()[txno].Hash()
 		txpos := uint64(txno)
 		for _, pt := range trace.Trace {
 			pt.BlockHash = &hash
-			pt.BlockNumber = &blockno
+			pt.BlockNumber = &blockNum
 			pt.TransactionHash = &txhash
 			pt.TransactionPosition = &txpos
 			out = append(out, *pt)
 		}
 	}
 
-	difficulty := block.Difficulty()
-
-	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
-	var tr ParityTrace
-	var rewardAction = &RewardTraceAction{}
-	rewardAction.Author = block.Coinbase()
-	rewardAction.RewardType = "block" // nolint: goconst
-	if difficulty.Cmp(big.NewInt(0)) != 0 {
-		// block reward is not returned in POS
-		rewardAction.Value.ToInt().Set(minerReward.ToBig())
+	rewards, err := api.engine().CalculateRewards(cfg, block.Header(), block.Uncles(), syscall)
+	if err != nil {
+		return nil, err
 	}
-	tr.Action = rewardAction
-	tr.BlockHash = &common.Hash{}
-	copy(tr.BlockHash[:], block.Hash().Bytes())
-	tr.BlockNumber = new(uint64)
-	*tr.BlockNumber = block.NumberU64()
-	tr.Type = "reward" // nolint: goconst
-	tr.TraceAddress = []int{}
-	out = append(out, tr)
 
-	// Uncles are not returned in POS
-	if difficulty.Cmp(big.NewInt(0)) != 0 {
-		for i, uncle := range block.Uncles() {
-			if i < len(uncleRewards) {
-				var tr ParityTrace
-				rewardAction = &RewardTraceAction{}
-				rewardAction.Author = uncle.Coinbase
-				rewardAction.RewardType = "uncle" // nolint: goconst
-				rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
-				tr.Action = rewardAction
-				tr.BlockHash = &common.Hash{}
-				copy(tr.BlockHash[:], block.Hash().Bytes())
-				tr.BlockNumber = new(uint64)
-				*tr.BlockNumber = block.NumberU64()
-				tr.Type = "reward" // nolint: goconst
-				tr.TraceAddress = []int{}
-				out = append(out, tr)
-			}
-		}
+	for _, r := range rewards {
+		var tr ParityTrace
+		rewardAction := &RewardTraceAction{}
+		rewardAction.Author = r.Beneficiary
+		rewardAction.RewardType = rewardKindToString(r.Kind)
+		rewardAction.Value.ToInt().Set(r.Amount.ToBig())
+		tr.Action = rewardAction
+		tr.BlockHash = &common.Hash{}
+		copy(tr.BlockHash[:], block.Hash().Bytes())
+		tr.BlockNumber = new(uint64)
+		*tr.BlockNumber = block.NumberU64()
+		tr.Type = "reward" // nolint: goconst
+		tr.TraceAddress = []int{}
+		out = append(out, tr)
 	}
 
 	return out, err
@@ -333,7 +324,10 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
-func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error {
+func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, stream *jsoniter.Stream) error {
+	if gasBailOut == nil {
+		gasBailOut = new(bool) // false by default
+	}
 	dbtx, err1 := api.kv.BeginRo(ctx)
 	if err1 != nil {
 		return fmt.Errorf("traceFilter cannot open tx: %w", err1)
@@ -389,24 +383,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	nExported := uint64(0)
 
 	it := allBlocks.Iterator()
-	isPos := false
 	for it.HasNext() {
 		b := it.Next()
 		// Extract transactions from block
-		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
-		if hashErr != nil {
-			if first {
-				first = false
-			} else {
-				stream.WriteMore()
-			}
-			stream.WriteObjectStart()
-			rpc.HandleError(hashErr, stream)
-			stream.WriteObjectEnd()
-			continue
-		}
-
-		block, bErr := api.blockWithSenders(dbtx, hash, b)
+		block, bErr := api.blockByNumberWithSenders(ctx, dbtx, b)
 		if bErr != nil {
 			if first {
 				first = false
@@ -425,19 +405,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				stream.WriteMore()
 			}
 			stream.WriteObjectStart()
-			rpc.HandleError(fmt.Errorf("could not find block %x %d", hash, b), stream)
+			rpc.HandleError(fmt.Errorf("could not find block %d", b), stream)
 			stream.WriteObjectEnd()
 			continue
 		}
 
 		blockHash := block.Hash()
 		blockNumber := block.NumberU64()
-		if !isPos && chainConfig.TerminalTotalDifficulty != nil {
-			header := block.Header()
-			isPos = header.Difficulty.Cmp(common.Big0) == 0 || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
-		}
 		txs := block.Transactions()
-		t, tErr := api.callManyTransactions(ctx, dbtx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, types.MakeSigner(chainConfig, b), chainConfig)
+		t, syscall, tErr := api.callManyTransactions(ctx, dbtx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut, types.MakeSigner(chainConfig, b), chainConfig)
 		if tErr != nil {
 			if first {
 				first = false
@@ -449,13 +425,14 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.WriteObjectEnd()
 			continue
 		}
+		isIntersectionMode := req.Mode == TraceFilterModeIntersection
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
 		for i, trace := range t {
 			txPosition := uint64(i)
 			txHash := txs[i].Hash()
 			// Check if transaction concerns any of the addresses we wanted
 			for _, pt := range trace.Trace {
-				if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
+				if includeAll || filter_trace(pt, fromAddresses, toAddresses, isIntersectionMode) {
 					nSeen++
 					pt.BlockHash = &blockHash
 					pt.BlockNumber = &blockNumber
@@ -486,86 +463,46 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			}
 		}
 
-		// if we are in POS
-		// we dont check for uncles or block rewards
-		if isPos {
-			continue
+		rewards, err := api.engine().CalculateRewards(chainConfig, block.Header(), block.Uncles(), syscall)
+		if err != nil {
+			return err
 		}
 
-		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
-		if _, ok := toAddresses[block.Coinbase()]; ok || includeAll {
-			nSeen++
-			var tr ParityTrace
-			var rewardAction = &RewardTraceAction{}
-			rewardAction.Author = block.Coinbase()
-			rewardAction.RewardType = "block" // nolint: goconst
-			rewardAction.Value.ToInt().Set(minerReward.ToBig())
-			tr.Action = rewardAction
-			tr.BlockHash = &common.Hash{}
-			copy(tr.BlockHash[:], block.Hash().Bytes())
-			tr.BlockNumber = new(uint64)
-			*tr.BlockNumber = block.NumberU64()
-			tr.Type = "reward" // nolint: goconst
-			tr.TraceAddress = []int{}
-			b, err := json.Marshal(tr)
-			if err != nil {
-				if first {
-					first = false
-				} else {
-					stream.WriteMore()
-				}
-				stream.WriteObjectStart()
-				rpc.HandleError(err, stream)
-				stream.WriteObjectEnd()
-				continue
-			}
-			if nSeen > after && nExported < count {
-				if first {
-					first = false
-				} else {
-					stream.WriteMore()
-				}
-				stream.Write(b)
-				nExported++
-			}
-		}
-		for i, uncle := range block.Uncles() {
-			if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
-				if i < len(uncleRewards) {
-					nSeen++
-					var tr ParityTrace
-					rewardAction := &RewardTraceAction{}
-					rewardAction.Author = uncle.Coinbase
-					rewardAction.RewardType = "uncle" // nolint: goconst
-					rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
-					tr.Action = rewardAction
-					tr.BlockHash = &common.Hash{}
-					copy(tr.BlockHash[:], block.Hash().Bytes())
-					tr.BlockNumber = new(uint64)
-					*tr.BlockNumber = block.NumberU64()
-					tr.Type = "reward" // nolint: goconst
-					tr.TraceAddress = []int{}
-					b, err := json.Marshal(tr)
-					if err != nil {
-						if first {
-							first = false
-						} else {
-							stream.WriteMore()
-						}
-						stream.WriteObjectStart()
-						rpc.HandleError(err, stream)
-						stream.WriteObjectEnd()
-						continue
+		for _, r := range rewards {
+			if _, ok := toAddresses[r.Beneficiary]; ok || includeAll {
+				nSeen++
+				var tr ParityTrace
+				rewardAction := &RewardTraceAction{}
+				rewardAction.Author = r.Beneficiary
+				rewardAction.RewardType = rewardKindToString(r.Kind)
+				rewardAction.Value.ToInt().Set(r.Amount.ToBig())
+				tr.Action = rewardAction
+				tr.BlockHash = &common.Hash{}
+				copy(tr.BlockHash[:], block.Hash().Bytes())
+				tr.BlockNumber = new(uint64)
+				*tr.BlockNumber = block.NumberU64()
+				tr.Type = "reward" // nolint: goconst
+				tr.TraceAddress = []int{}
+				b, err := json.Marshal(tr)
+				if err != nil {
+					if first {
+						first = false
+					} else {
+						stream.WriteMore()
 					}
-					if nSeen > after && nExported < count {
-						if first {
-							first = false
-						} else {
-							stream.WriteMore()
-						}
-						stream.Write(b)
-						nExported++
+					stream.WriteObjectStart()
+					rpc.HandleError(err, stream)
+					stream.WriteObjectEnd()
+					continue
+				}
+				if nSeen > after && nExported < count {
+					if first {
+						first = false
+					} else {
+						stream.WriteMore()
 					}
+					stream.Write(b)
+					nExported++
 				}
 			}
 		}
@@ -675,6 +612,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)
 		}
 		if isFnalTxn {
+			// TODO(yperbasis) proper rewards for Gnosis
+
 			// if we are in POS
 			// we dont check for uncles or block rewards
 			if isPos {
@@ -826,8 +765,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		txCtx := core.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
-		gp := new(core.GasPool).AddGas(msg.Gas())
-		ibs.Prepare(txHash, lastBlockHash, txIndex)
+		gp := new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas())
+		ibs.SetTxContext(txHash, lastBlockHash, txIndex)
 		var execResult *core.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
@@ -864,8 +803,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectEnd()
 			continue
 		}
+		isIntersectionMode := req.Mode == TraceFilterModeIntersection
 		for _, pt := range traceResult.Trace {
-			if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
+			if includeAll || filter_trace(pt, fromAddresses, toAddresses, isIntersectionMode) {
 				nSeen++
 				pt.BlockHash = &lastBlockHash
 				pt.BlockNumber = &blockNum
@@ -899,37 +839,30 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	return stream.Flush()
 }
 
-func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}) bool {
+func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}, isIntersectionMode bool) bool {
+	f, t := false, false
 	switch action := pt.Action.(type) {
 	case *CallTraceAction:
-		_, f := fromAddresses[action.From]
-		_, t := toAddresses[action.To]
-
-		if f || t {
-			return true
-		}
+		_, f = fromAddresses[action.From]
+		_, t = toAddresses[action.To]
 	case *CreateTraceAction:
-		_, f := fromAddresses[action.From]
-		if f {
-			return true
-		}
+		_, f = fromAddresses[action.From]
 
 		if res, ok := pt.Result.(*CreateTraceResult); ok {
 			if res.Address != nil {
-				if _, t := toAddresses[*res.Address]; t {
-					return true
-				}
+				_, t = toAddresses[*res.Address]
 			}
 		}
 	case *SuicideTraceAction:
-		_, f := fromAddresses[action.Address]
-		_, t := toAddresses[action.RefundAddress]
-		if f || t {
-			return true
-		}
+		_, f = fromAddresses[action.Address]
+		_, t = toAddresses[action.RefundAddress]
 	}
 
-	return false
+	if isIntersectionMode {
+		return f && t
+	} else {
+		return f || t
+	}
 }
 
 func (api *TraceAPIImpl) callManyTransactions(
@@ -938,9 +871,10 @@ func (api *TraceAPIImpl) callManyTransactions(
 	block *types.Block,
 	traceTypes []string,
 	txIndex int,
+	gasBailOut bool,
 	signer *types.Signer,
 	cfg *chain.Config,
-) ([]*TraceCallResult, error) {
+) ([]*TraceCallResult, consensus.SystemCall, error) {
 	blockNumber := block.NumberU64()
 	pNo := blockNumber
 	if pNo > 0 {
@@ -953,17 +887,17 @@ func (api *TraceAPIImpl) callManyTransactions(
 	callParams := make([]TraceCallParam, 0, len(txs))
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNumber, txIndex, api.historyV3(dbtx), cfg.ChainName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	stateDb := state.New(reader)
+	initialState := state.New(reader)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	engine := api.engine()
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), block.Transactions(), block.Uncles(), cfg, stateDb, nil)
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), block.Transactions(), block.Uncles(), cfg, initialState)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	msgs := make([]types.Message, len(txs))
 	for i, tx := range txs {
@@ -976,13 +910,13 @@ func (api *TraceAPIImpl) callManyTransactions(
 
 		msg, err := tx.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
-			return nil, fmt.Errorf("convert tx into msg: %w", err)
+			return nil, nil, fmt.Errorf("convert tx into msg: %w", err)
 		}
 
 		// gnosis might have a fee free account here
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *cfg, stateDb, header, engine, true /* constCall */, nil /*excessDataGas*/)
+				return core.SysCallContract(contract, data, cfg, initialState, header, engine, true /* constCall */)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
@@ -992,17 +926,22 @@ func (api *TraceAPIImpl) callManyTransactions(
 
 	parentHash := block.ParentHash()
 
-	traces, cmErr := api.doCallMany(ctx, dbtx, msgs, callParams, &rpc.BlockNumberOrHash{
+	traces, lastState, cmErr := api.doCallMany(ctx, dbtx, msgs, callParams, &rpc.BlockNumberOrHash{
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
-	}, header, false /* gasBailout */, txIndex)
+	}, header, gasBailOut /* gasBailout */, txIndex)
 
 	if cmErr != nil {
-		return nil, cmErr
+		return nil, nil, cmErr
 	}
 
-	return traces, nil
+	syscall := func(contract common.Address, data []byte) ([]byte, error) {
+		constCall := false // this syscall is used for calculating rewards, which is not constant
+		return core.SysCallContract(contract, data, cfg, lastState, header, engine, constCall)
+	}
+
+	return traces, syscall, nil
 }
 
 // TraceFilterRequest represents the arguments for trace_filter

@@ -5,50 +5,77 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sort"
+	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/state/historyv2read"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/log/v3"
 )
 
 //Variables Naming:
-//  ts - TimeStamp
 //  tx - Database Transaction
 //  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
-//  RoTx - Read-Only Database Transaction
-//  RwTx - Read-Write Database Transaction
-//  k - key
-//  v - value
+//  RoTx - Read-Only Database Transaction. RwTx - read-write
+//  k, v - key, value
+//  ts - TimeStamp. Usually it's Etherum's TransactionNumber (auto-increment ID). Or BlockNumber.
+//  Cursor - low-level mdbx-tide api to navigate over Table
+//  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Has less features than Cursor. See package `iter`
 
 //Methods Naming:
-// Get: exact match of criterias
-// Range: [from, to)
-// Each: [from, INF)
-// Prefix: Has(k, prefix)
-// Limit: [from, INF) AND maximum N records
+//  Get: exact match of criterias
+//  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
+//  Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
+
+//Abstraction Layers:
+// LowLevel:
+//      1. DB/Tx - low-level key-value database
+//      2. Snapshots/Freeze - immutable files with historical data. May be downloaded at first App
+//              start or auto-generate by moving old data from DB to Snapshots.
+// MediumLevel:
+//      1. TemporalDB - abstracting DB+Snapshots. Target is:
+//              - provide 'time-travel' API for data: consistan snapshot of data as of given Timestamp.
+//              - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
+//              - using next entities:
+//                      - InvertedIndex: supports range-scans
+//                      - History: can return value of key K as of given TimeStamp. Doesn't know about latest/current
+//                          value of key K. Returns NIL if K not changed after TimeStamp.
+//                      - Domain: as History but also aware about latest/current value of key K. Can move
+//                          cold (updated long time ago) parts of state from db to snapshots.
+
+// HighLevel:
+//      1. Application - rely on TemporalDB (Ex: ExecutionLayer) or just DB (Ex: TxPool, Sentry, Downloader).
 
 type tRestoreCodeHash func(tx kv.Getter, key, v []byte, force *common.Hash) ([]byte, error)
-type tConvertV3toV2 func(v []byte) ([]byte, error)
+type tConvertAccount func(v []byte) ([]byte, error)
 type tParseIncarnation func(v []byte) (uint64, error)
 
 type DB struct {
 	kv.RwDB
 	agg *state.AggregatorV3
 
-	convertV3toV2        tConvertV3toV2
+	convertV3toV2        tConvertAccount
+	convertV2toV3        tConvertAccount
 	restoreCodeHash      tRestoreCodeHash
 	parseInc             tParseIncarnation
 	systemContractLookup map[common.Address][]common.CodeRecord
 }
 
-func New(db kv.RwDB, agg *state.AggregatorV3, cb1 tConvertV3toV2, cb2 tRestoreCodeHash, cb3 tParseIncarnation, systemContractLookup map[common.Address][]common.CodeRecord) (*DB, error) {
+func New(db kv.RwDB, agg *state.AggregatorV3, systemContractLookup map[common.Address][]common.CodeRecord) (*DB, error) {
 	if !kvcfg.HistoryV3.FromDB(db) {
 		panic("not supported")
 	}
@@ -69,9 +96,14 @@ func New(db kv.RwDB, agg *state.AggregatorV3, cb1 tConvertV3toV2, cb2 tRestoreCo
 		}
 	}
 
-	return &DB{RwDB: db, agg: agg, convertV3toV2: cb1, restoreCodeHash: cb2, parseInc: cb3, systemContractLookup: systemContractLookup}, nil
+	return &DB{RwDB: db, agg: agg,
+		convertV3toV2: accounts.ConvertV3toV2, convertV2toV3: accounts.ConvertV2toV3,
+		restoreCodeHash: historyv2read.RestoreCodeHash, parseInc: accounts.DecodeIncarnationFromStorage,
+		systemContractLookup: systemContractLookup,
+	}, nil
 }
 func (db *DB) Agg() *state.AggregatorV3 { return db.agg }
+func (db *DB) InternalDB() kv.RwDB      { return db.RwDB }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx)
@@ -80,7 +112,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
-	tx.agg = db.agg.MakeContext()
+	tx.aggCtx = db.agg.MakeContext()
 	return tx, nil
 }
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
@@ -112,7 +144,7 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
-	tx.agg = db.agg.MakeContext()
+	tx.aggCtx = db.agg.MakeContext()
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -137,7 +169,7 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	}
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
-	tx.agg = db.agg.MakeContext()
+	tx.aggCtx = db.agg.MakeContext()
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -158,26 +190,26 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 type Tx struct {
 	*mdbx.MdbxTx
 	db               *DB
-	agg              *state.AggregatorV3Context
+	aggCtx           *state.AggregatorV3Context
 	resourcesToClose []kv.Closer
 }
 
-func (tx *Tx) AggCtx() *state.AggregatorV3Context { return tx.agg }
+func (tx *Tx) AggCtx() *state.AggregatorV3Context { return tx.aggCtx }
 func (tx *Tx) Agg() *state.AggregatorV3           { return tx.db.agg }
 func (tx *Tx) Rollback() {
-	for _, closer := range tx.resourcesToClose {
-		closer.Close()
-	}
-	if tx.agg != nil {
-		tx.agg.Close()
-	}
+	tx.autoClose()
 	tx.MdbxTx.Rollback()
 }
-
-func (tx *Tx) Commit() error {
+func (tx *Tx) autoClose() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
+	if tx.aggCtx != nil {
+		tx.aggCtx.Close()
+	}
+}
+func (tx *Tx) Commit() error {
+	tx.autoClose()
 	return tx.MdbxTx.Commit()
 }
 
@@ -210,7 +242,7 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	}
 	switch name {
 	case AccountsDomain:
-		histStateIt := tx.agg.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx)
+		histStateIt := tx.aggCtx.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx)
 		// TODO: somehow avoid common.Copy(k) - WalkAsOfIter is not zero-copy
 		// Is histStateIt possible to increase keys lifetime to: 2 .Next() calls??
 		histStateIt2 := iter.TransformKV(histStateIt, func(k, v []byte) ([]byte, []byte, error) {
@@ -247,7 +279,7 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 		})
 		it = iter.UnionKV(histStateIt2, latestStateIt2, limit)
 	case StorageDomain:
-		storageIt := tx.agg.StorageHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx)
+		storageIt := tx.aggCtx.StorageHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx)
 		storageIt1 := iter.TransformKV(storageIt, func(k, v []byte) ([]byte, []byte, error) {
 			return k, v, nil
 		})
@@ -321,6 +353,12 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 			return v, true, nil
 		}
 		v, err = tx.GetOne(kv.PlainState, key)
+		if len(v) > 0 {
+			v, err = accounts.ConvertV2toV3(v)
+			if err != nil {
+				return nil, false, err
+			}
+		}
 		return v, v != nil, err
 	case StorageDomain:
 		v, ok, err = tx.HistoryGet(StorageHistory, append(key[:20], key2...), ts)
@@ -350,7 +388,7 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case AccountsHistory:
-		v, ok, err = tx.agg.ReadAccountDataNoStateWithRecent(key, ts, tx.MdbxTx)
+		v, ok, err = tx.aggCtx.ReadAccountDataNoStateWithRecent(key, ts, tx.MdbxTx)
 		if err != nil {
 			return nil, false, err
 		}
@@ -375,11 +413,17 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 		if err != nil {
 			return nil, false, err
 		}
+		if len(v) > 0 {
+			v, err = tx.db.convertV2toV3(v)
+			if err != nil {
+				return nil, false, err
+			}
+		}
 		return v, true, nil
 	case StorageHistory:
-		return tx.agg.ReadAccountStorageNoStateWithRecent2(key, ts, tx.MdbxTx)
+		return tx.aggCtx.ReadAccountStorageNoStateWithRecent2(key, ts, tx.MdbxTx)
 	case CodeHistory:
-		return tx.agg.ReadAccountCodeNoStateWithRecent(key, ts, tx.MdbxTx)
+		return tx.aggCtx.ReadAccountCodeNoStateWithRecent(key, ts, tx.MdbxTx)
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
@@ -388,19 +432,19 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
 	switch name {
 	case AccountsHistoryIdx:
-		timestamps, err = tx.agg.AccountHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.aggCtx.AccountHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
 	case StorageHistoryIdx:
-		timestamps, err = tx.agg.StorageHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.aggCtx.StorageHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
 	case CodeHistoryIdx:
-		timestamps, err = tx.agg.CodeHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.aggCtx.CodeHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
 	case LogTopicIdx:
-		timestamps, err = tx.agg.LogTopicRange(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.aggCtx.LogTopicRange(k, fromTs, toTs, asc, limit, tx)
 	case LogAddrIdx:
-		timestamps, err = tx.agg.LogAddrRange(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.aggCtx.LogAddrRange(k, fromTs, toTs, asc, limit, tx)
 	case TracesFromIdx:
-		timestamps, err = tx.agg.TraceFromRange(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.aggCtx.TraceFromRange(k, fromTs, toTs, asc, limit, tx)
 	case TracesToIdx:
-		timestamps, err = tx.agg.TraceToRange(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.aggCtx.TraceToRange(k, fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}
@@ -422,11 +466,11 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 	}
 	switch name {
 	case AccountsHistory:
-		it, err = tx.agg.AccountHistoryRange(fromTs, toTs, asc, limit, tx)
+		it, err = tx.aggCtx.AccountHistoryRange(fromTs, toTs, asc, limit, tx)
 	case StorageHistory:
-		it, err = tx.agg.StorageHistoryRange(fromTs, toTs, asc, limit, tx)
+		it, err = tx.aggCtx.StorageHistoryRange(fromTs, toTs, asc, limit, tx)
 	case CodeHistory:
-		it, err = tx.agg.CodeHistoryRange(fromTs, toTs, asc, limit, tx)
+		it, err = tx.aggCtx.CodeHistoryRange(fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}
@@ -437,4 +481,42 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 		tx.resourcesToClose = append(tx.resourcesToClose, closer)
 	}
 	return it, err
+}
+
+// TODO: need remove `gspec` param (move SystemContractCodeLookup feature somewhere)
+func NewTestDB(tb testing.TB, ctx context.Context, dirs datadir.Dirs, gspec *types.Genesis, logger log.Logger) (histV3 bool, db kv.RwDB, agg *state.AggregatorV3) {
+	historyV3 := ethconfig.EnableHistoryV3InTest
+
+	if tb != nil {
+		db = memdb.NewTestDB(tb)
+	} else {
+		db = memdb.New(dirs.DataDir)
+	}
+	_ = db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+		_, _ = kvcfg.HistoryV3.WriteOnce(tx, historyV3)
+		return nil
+	})
+
+	if historyV3 {
+		var err error
+		dir.MustExist(dirs.SnapHistory)
+		agg, err = state.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
+		if err != nil {
+			panic(err)
+		}
+		if err := agg.OpenFolder(); err != nil {
+			panic(err)
+		}
+
+		var sc map[common.Address][]common.CodeRecord
+		if gspec != nil {
+			sc = systemcontracts.SystemContractCodeLookup[gspec.Config.ChainName]
+		}
+
+		db, err = New(db, agg, sc)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return historyV3, db, agg
 }

@@ -17,8 +17,9 @@ import (
 	"encoding/binary"
 	"math/bits"
 
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
+
 	"github.com/golang/snappy"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 )
 
 func Uint32ToBytes4(n uint32) (ret [4]byte) {
@@ -69,42 +70,18 @@ func EncodeSSZSnappy(data ssz.Marshaler) ([]byte, error) {
 	return snappy.Encode(nil, enc), nil
 }
 
-func DecodeSSZSnappy(dst ssz.Unmarshaler, src []byte) error {
+func DecodeSSZSnappy(dst ssz.Unmarshaler, src []byte, version int) error {
 	dec, err := snappy.Decode(nil, src)
 	if err != nil {
 		return err
 	}
 
-	err = dst.DecodeSSZ(dec)
+	err = dst.DecodeSSZ(dec, version)
 	if err != nil {
 		return err
 	}
 
 	return nil
-}
-
-func DecodeSSZSnappyWithVersion(dst ssz.Unmarshaler, src []byte, version int) error {
-	dec, err := snappy.Decode(nil, src)
-	if err != nil {
-		return err
-	}
-
-	err = dst.DecodeSSZWithVersion(dec, version)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// Check if it is sorted and check if there are duplicates. O(N) complexity.
-func IsSliceSortedSet(vals []uint64) bool {
-	for i := 0; i < len(vals)-1; i++ {
-		if vals[i] >= vals[i+1] {
-			return false
-		}
-	}
-	return true
 }
 
 // getBitlistLength return the amount of bits in given bitlist.

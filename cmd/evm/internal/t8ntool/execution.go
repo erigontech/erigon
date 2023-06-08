@@ -46,6 +46,7 @@ type stEnv struct {
 	Coinbase         libcommon.Address                      `json:"currentCoinbase"   gencodec:"required"`
 	Difficulty       *big.Int                               `json:"currentDifficulty"`
 	Random           *big.Int                               `json:"currentRandom"`
+	MixDigest        libcommon.Hash                         `json:"mixHash,omitempty"`
 	ParentDifficulty *big.Int                               `json:"parentDifficulty"`
 	GasLimit         uint64                                 `json:"currentGasLimit"   gencodec:"required"`
 	Number           uint64                                 `json:"currentNumber"     gencodec:"required"`
@@ -55,7 +56,9 @@ type stEnv struct {
 	Ommers           []ommer                                `json:"ommers,omitempty"`
 	BaseFee          *big.Int                               `json:"currentBaseFee,omitempty"`
 	ParentUncleHash  libcommon.Hash                         `json:"parentUncleHash"`
+	UncleHash        libcommon.Hash                         `json:"uncleHash,omitempty"`
 	Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
+	WithdrawalsHash  *libcommon.Hash                        `json:"withdrawalsRoot,omitempty"`
 }
 
 type stEnvMarshaling struct {

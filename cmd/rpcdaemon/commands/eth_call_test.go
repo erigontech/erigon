@@ -7,18 +7,12 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/turbo/trie"
-
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
-
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
@@ -30,24 +24,26 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestEstimateGas(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
-	ff := rpchelper.New(ctx, nil, nil, mining, func() {})
-	api := NewEthAPI(NewBaseApi(ff, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000)
+	ff := rpchelper.New(ctx, nil, nil, mining, func() {}, m.Log)
+	api := NewEthAPI(NewBaseApi(ff, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 	var from = libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = libcommon.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
@@ -61,9 +57,9 @@ func TestEstimateGas(t *testing.T) {
 func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 	var from = libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = libcommon.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
@@ -81,17 +77,17 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	ethCallBlockNumber := rpc.BlockNumber(2)
 
 	m, bankAddress, contractAddress := chainWithDeployedContract(t)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 
 	doPrune(t, m.DB, pruneTo)
 
 	agg := m.HistoryV3Components()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 
 	callData := hexutil.MustDecode("0x2e64cec1")
-	callDataBytes := hexutil.Bytes(callData)
+	callDataBytes := hexutility.Bytes(callData)
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &bankAddress,
@@ -102,165 +98,11 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	}
 }
 
-type valueNode []byte
-type hashNode libcommon.Hash
-
-type shortNode struct {
-	Key trie.Keybytes
-	Val any
-}
-
-type fullNode struct {
-	Children [17]any
-}
-
-func decodeRef(t *testing.T, buf []byte) (any, []byte) {
-	t.Helper()
-	kind, val, rest, err := rlp.Split(buf)
-	require.NoError(t, err)
-	switch {
-	case kind == rlp.List:
-		require.Less(t, len(buf)-len(rest), length.Hash, "embedded nodes must be less than hash size")
-		return decodeNode(t, buf), rest
-	case kind == rlp.String && len(val) == 0:
-		return nil, rest
-	case kind == rlp.String && len(val) == 32:
-		return hashNode(libcommon.CastToHash(val)), rest
-	default:
-		t.Fatalf("invalid RLP string size %d (want 0 through 32)", len(val))
-		return nil, rest
-	}
-}
-
-func decodeFull(t *testing.T, elems []byte) fullNode {
-	t.Helper()
-	n := fullNode{}
-	for i := 0; i < 16; i++ {
-		n.Children[i], elems = decodeRef(t, elems)
-	}
-	val, _, err := rlp.SplitString(elems)
-	require.NoError(t, err)
-	if len(val) > 0 {
-		n.Children[16] = valueNode(val)
-	}
-	return n
-}
-
-func decodeShort(t *testing.T, elems []byte) shortNode {
-	t.Helper()
-	kbuf, rest, err := rlp.SplitString(elems)
-	require.NoError(t, err)
-	kb := trie.CompactToKeybytes(kbuf)
-	if kb.Terminating {
-		val, _, err := rlp.SplitString(rest)
-		require.NoError(t, err)
-		return shortNode{
-			Key: kb,
-			Val: valueNode(val),
-		}
-	}
-
-	val, _ := decodeRef(t, rest)
-	return shortNode{
-		Key: kb,
-		Val: val,
-	}
-}
-
-func decodeNode(t *testing.T, encoded []byte) any {
-	t.Helper()
-	require.NotEmpty(t, encoded)
-	elems, _, err := rlp.SplitList(encoded)
-	require.NoError(t, err)
-	switch c, _ := rlp.CountValues(elems); c {
-	case 2:
-		return decodeShort(t, elems)
-	case 17:
-		return decodeFull(t, elems)
-	default:
-		t.Fatalf("invalid number of list elements: %v", c)
-		return nil // unreachable
-	}
-}
-
-// proofMap creates a map from hash to proof node
-func proofMap(t *testing.T, proof []hexutil.Bytes) (map[libcommon.Hash]any, map[libcommon.Hash][]byte) {
-	res := map[libcommon.Hash]any{}
-	raw := map[libcommon.Hash][]byte{}
-	for _, proofB := range proof {
-		hash := crypto.Keccak256Hash(proofB)
-		res[hash] = decodeNode(t, proofB)
-		raw[hash] = proofB
-	}
-	return res, raw
-}
-
-func verifyProof(t *testing.T, root libcommon.Hash, key []byte, proofs map[libcommon.Hash]any, used map[libcommon.Hash][]byte) []byte {
-	t.Helper()
-	key = (&trie.Keybytes{Data: key}).ToHex()
-	var node any = hashNode(root)
-	for {
-		switch nt := node.(type) {
-		case fullNode:
-			require.NotEmpty(t, key, "full nodes should not have values")
-			node, key = nt.Children[key[0]], key[1:]
-		case shortNode:
-			shortHex := nt.Key.ToHex()[:nt.Key.Nibbles()] // There is a trailing 0 on odd otherwise
-			require.LessOrEqual(t, len(shortHex), len(key))
-			require.Equal(t, shortHex, key[:len(shortHex)])
-			node, key = nt.Val, key[len(shortHex):]
-		case hashNode:
-			var ok bool
-			node, ok = proofs[libcommon.Hash(nt)]
-			require.True(t, ok, "missing hash %x", nt)
-			delete(used, libcommon.Hash(nt))
-		case valueNode:
-			require.Len(t, key, 0)
-			for hash, raw := range used {
-				require.Failf(t, "not all proof elements were used", "hash=%x value=%x decoded=%#v", hash, raw, proofs[hash])
-			}
-			return nt
-		default:
-			t.Fatalf("unexpected type: %T", node)
-		}
-	}
-}
-
-func verifyAccountProof(t *testing.T, stateRoot libcommon.Hash, proof *accounts.AccProofResult) {
-	t.Helper()
-	accountKey := crypto.Keccak256(proof.Address[:])
-	pm, used := proofMap(t, proof.AccountProof)
-	value := verifyProof(t, stateRoot, accountKey, pm, used)
-
-	expected, err := rlp.EncodeToBytes([]any{
-		uint64(proof.Nonce),
-		proof.Balance.ToInt().Bytes(),
-		proof.StorageHash,
-		proof.CodeHash,
-	})
-	require.NoError(t, err)
-
-	require.Equal(t, expected, value)
-}
-
-func verifyStorageProof(t *testing.T, storageRoot libcommon.Hash, proof accounts.StorProofResult) {
-	t.Helper()
-
-	storageKey := crypto.Keccak256(proof.Key[:])
-	pm, used := proofMap(t, proof.Proof)
-	value := verifyProof(t, storageRoot, storageKey, pm, used)
-
-	expected, err := rlp.EncodeToBytes(proof.Value.ToInt().Bytes())
-	require.NoError(t, err)
-
-	require.Equal(t, expected, value)
-}
-
 func TestGetProof(t *testing.T) {
 	maxGetProofRewindBlockCount = 1 // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 
 	m, bankAddr, contractAddr := chainWithDeployedContract(t)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 
 	if m.HistoryV3 {
 		t.Skip("not supported by Erigon3")
@@ -268,7 +110,7 @@ func TestGetProof(t *testing.T) {
 	agg := m.HistoryV3Components()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 
 	key := func(b byte) libcommon.Hash {
 		result := libcommon.Hash{}
@@ -295,11 +137,37 @@ func TestGetProof(t *testing.T) {
 			blockNum: 3,
 		},
 		{
+			name:     "currentBlockNoAccount",
+			addr:     libcommon.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
+			blockNum: 3,
+		},
+		{
 			name:        "currentBlockWithState",
 			addr:        contractAddr,
 			blockNum:    3,
 			storageKeys: []libcommon.Hash{key(0), key(4), key(8), key(10)},
 			stateVal:    2,
+		},
+		{
+			name:        "currentBlockWithMissingState",
+			addr:        contractAddr,
+			storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
+			blockNum:    3,
+			stateVal:    0,
+		},
+		{
+			name:        "currentBlockEOAMissingState",
+			addr:        bankAddr,
+			storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
+			blockNum:    3,
+			stateVal:    0,
+		},
+		{
+			name:        "currentBlockNoAccountMissingState",
+			addr:        libcommon.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
+			storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
+			blockNum:    3,
+			stateVal:    0,
 		},
 		{
 			name:        "olderBlockWithState",
@@ -339,7 +207,8 @@ func TestGetProof(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Equal(t, tt.addr, proof.Address)
-			verifyAccountProof(t, header.Root, proof)
+			err = trie.VerifyAccountProof(header.Root, proof)
+			require.NoError(t, err)
 
 			require.Equal(t, len(tt.storageKeys), len(proof.StorageProof))
 			for _, storageKey := range tt.storageKeys {
@@ -349,8 +218,9 @@ func TestGetProof(t *testing.T) {
 						continue
 					}
 					found = true
-					require.Equal(t, uint256.NewInt(tt.stateVal).ToBig(), (*big.Int)(storageProof.Value))
-					verifyStorageProof(t, proof.StorageHash, storageProof)
+					require.Equal(t, tt.stateVal, (*big.Int)(storageProof.Value).Uint64())
+					err = trie.VerifyStorageProof(proof.StorageHash, storageProof)
+					require.NoError(t, err)
 				}
 				require.True(t, found, "did not find storage proof for key=%x", storageKey)
 			}
@@ -362,7 +232,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -372,7 +242,8 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
-	latestBlock := rawdb.ReadCurrentBlock(tx)
+	latestBlock, err := br.CurrentBlock(tx)
+	require.NoError(t, err)
 	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
 
 	if err != nil {
@@ -400,7 +271,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("failed at beginning tx")
@@ -410,7 +281,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
-	oldestBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+	oldestBlock, err := br.BlockByNumber(m.Ctx, tx, 0)
 	if err != nil {
 		t.Error("couldn't retrieve oldest block")
 	}
@@ -442,7 +313,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -452,7 +323,8 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
-	latestBlock := rawdb.ReadCurrentBlock(tx)
+	latestBlock, err := br.CurrentBlock(tx)
+	require.NoError(t, err)
 
 	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
 
@@ -481,7 +353,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -501,7 +373,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	}
 
 	middleNumber := (currentHeader.Number.Uint64() + oldestHeader.Number.Uint64()) / 2
-	middleBlock, err := rawdb.ReadBlockByNumber(tx, middleNumber)
+	middleBlock, err := br.BlockByNumber(m.Ctx, tx, middleNumber)
 	if err != nil {
 		t.Error("couldn't retrieve middle block")
 	}
@@ -532,7 +404,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
+	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -543,7 +415,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
 	highestBlockNumber := rawdb.ReadCurrentHeader(tx).Number
-	pickedBlock, err := rawdb.ReadBlockByNumber(tx, highestBlockNumber.Uint64()/3)
+	pickedBlock, err := br.BlockByNumber(m.Ctx, tx, highestBlockNumber.Uint64()/3)
 	if err != nil {
 		t.Errorf("couldn't get block %v", pickedBlock.Number())
 	}

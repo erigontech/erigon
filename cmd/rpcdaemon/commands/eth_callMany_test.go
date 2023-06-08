@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands/contracts"
@@ -20,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // block 1 contains 3 Transactions
@@ -56,11 +59,11 @@ func TestCallMany(t *testing.T) {
 	)
 
 	hexBytes, _ := hex.DecodeString(addr2BalanceCheck)
-	balanceCallAddr2 := hexutil.Bytes(hexBytes)
+	balanceCallAddr2 := hexutility.Bytes(hexBytes)
 	hexBytes, _ = hex.DecodeString(addr1BalanceCheck)
-	balanceCallAddr1 := hexutil.Bytes(hexBytes)
+	balanceCallAddr1 := hexutility.Bytes(hexBytes)
 	hexBytes, _ = hex.DecodeString(transferAddr2)
-	transferCallData := hexutil.Bytes(hexBytes)
+	transferCallData := hexutility.Bytes(hexBytes)
 
 	//submit 3 Transactions and commit the results
 	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, chainID)
@@ -80,7 +83,8 @@ func TestCallMany(t *testing.T) {
 
 	db := contractBackend.DB()
 	engine := contractBackend.Engine()
-	api := NewEthAPI(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), contractBackend.Agg(), false, rpccfg.DefaultEvmCallTimeout, engine, datadir.New(t.TempDir())), db, nil, nil, nil, 5000000, 100_000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), contractBackend.Agg(), false, rpccfg.DefaultEvmCallTimeout, engine,
+		datadir.New(t.TempDir())), db, nil, nil, nil, 5000000, 100_000, log.New())
 
 	callArgAddr1 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &nonce,
 		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),

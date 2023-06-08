@@ -21,6 +21,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -30,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -48,7 +50,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 	}
 
 	usedGas := new(uint64)
-	gp := new(core.GasPool).AddGas(block.GasLimit())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
 	noopWriter := state.NewNoopWriter()
 
@@ -61,10 +63,10 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 		}
 		return h
 	}
+	header := block.Header()
 	for i, txn := range block.Transactions() {
-		ibs.Prepare(txn.Hash(), block.Hash(), i)
-		header := block.Header()
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{}, nil /*excessDataGas*/)
+		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{})
 		if err != nil {
 			return nil, err
 		}
@@ -87,15 +89,16 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	defer tx.Rollback()
 
 	if crit.BlockHash != nil {
-		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
-		if err != nil {
-			return nil, err
-		}
-		if header == nil {
+		num := rawdb.ReadHeaderNumber(tx, *crit.BlockHash)
+		//header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
+		//if err != nil {
+		//	return nil, err
+		//}
+		if num == nil {
 			return nil, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
-		begin = header.Number.Uint64()
-		end = header.Number.Uint64()
+		begin = *num
+		end = *num
 	} else {
 		// Convert the RPC block numbers into internal representations
 		latest, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, nil)
@@ -193,7 +196,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			continue
 		}
 
-		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
+		blockHash, err := api._blockReader.CanonicalHash(ctx, tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -482,6 +485,7 @@ func txnExecutor(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.E
 	stateReader.SetTx(tx)
 
 	ie := &intraBlockExec{
+		tx:          tx,
 		engine:      engine,
 		chainConfig: chainConfig,
 		br:          br,
@@ -512,8 +516,8 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 	e.stateReader.SetTxNum(txNum)
 	txHash := txn.Hash()
 	e.ibs.Reset()
-	e.ibs.Prepare(txHash, e.blockHash, txIndex)
-	gp := new(core.GasPool).AddGas(txn.GetGas())
+	e.ibs.SetTxContext(txHash, e.blockHash, txIndex)
+	gp := new(core.GasPool).AddGas(txn.GetGas()).AddDataGas(txn.GetDataGas())
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {
 		return nil, nil, err
@@ -613,7 +617,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		blockNum = *blockNumPtr
 	}
 
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -671,11 +675,11 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	}
 	defer tx.Rollback()
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -723,6 +727,10 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		chainId = t.ChainID.ToBig()
 	case *types.DynamicFeeTransaction:
 		chainId = t.ChainID.ToBig()
+		// case *types.SignedBlobTx: // TODO: needs eip-4844 signer
+		// 	chainId = t.GetChainID().ToBig()
+	default:
+		chainId = txn.GetChainID().ToBig()
 	}
 
 	var from common.Address
@@ -761,6 +769,20 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
+	}
+	// Set derived blob related fields
+	numBlobs := len(txn.GetDataHashes())
+	if numBlobs > 0 {
+		if header.ExcessDataGas == nil {
+			log.Warn("excess data gas not set when trying to marshal blob tx")
+		} else {
+			dataGasPrice, err := misc.GetDataGasPrice(*header.ExcessDataGas)
+			if err != nil {
+				log.Error(err.Error())
+			}
+			fields["dataGasPrice"] = dataGasPrice
+			fields["dataGasUsed"] = misc.GetDataGasUsed(numBlobs)
+		}
 	}
 	return fields
 }

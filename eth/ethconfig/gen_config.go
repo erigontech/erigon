@@ -35,7 +35,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Ethash                         ethashcfg.Config
 		Clique                         params.ConsensusSnapshotConfig
 		Aura                           chain.AuRaConfig
-		Parlia                         chain.ParliaConfig
 		TxPool                         DeprecatedTxPoolConfig
 		GPO                            gaspricecfg.Config
 		RPCGasCap                      uint64  `toml:",omitempty"`
@@ -60,7 +59,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Ethash = c.Ethash
 	enc.Clique = c.Clique
 	enc.Aura = c.Aura
-	enc.Parlia = c.Parlia
 	enc.TxPool = c.DeprecatedTxPool
 	enc.GPO = c.GPO
 	enc.RPCGasCap = c.RPCGasCap
@@ -88,7 +86,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Ethash                         *ethashcfg.Config
 		Clique                         *params.ConsensusSnapshotConfig
 		Aura                           *chain.AuRaConfig
-		Parlia                         *chain.ParliaConfig
 		TxPool                         *DeprecatedTxPoolConfig
 		GPO                            *gaspricecfg.Config
 		RPCGasCap                      *uint64  `toml:",omitempty"`
@@ -145,9 +142,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.Aura != nil {
 		c.Aura = *dec.Aura
-	}
-	if dec.Parlia != nil {
-		c.Parlia = *dec.Parlia
 	}
 	if dec.TxPool != nil {
 		c.DeprecatedTxPool = *dec.TxPool

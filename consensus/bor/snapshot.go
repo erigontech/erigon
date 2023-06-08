@@ -5,12 +5,13 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Snapshot is the state of the authorization voting at a given point in time.
@@ -42,13 +43,14 @@ func newSnapshot(
 	number uint64,
 	hash common.Hash,
 	validators []*valset.Validator,
+	logger log.Logger,
 ) *Snapshot {
 	snap := &Snapshot{
 		config:       config,
 		sigcache:     sigcache,
 		Number:       number,
 		Hash:         hash,
-		ValidatorSet: valset.NewValidatorSet(validators),
+		ValidatorSet: valset.NewValidatorSet(validators, logger),
 		Recents:      make(map[uint64]common.Address),
 	}
 	return snap
@@ -116,7 +118,7 @@ func (s *Snapshot) copy() *Snapshot {
 	return cpy
 }
 
-func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
+func (s *Snapshot) apply(headers []*types.Header, logger log.Logger) (*Snapshot, error) {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return s, nil
@@ -170,8 +172,8 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 
 			// get validators from headers and use that for new validator set
 			newVals, _ := valset.ParseValidators(validatorBytes)
-			v := getUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals)
-			v.IncrementProposerPriority(1)
+			v := getUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals, logger)
+			v.IncrementProposerPriority(1, logger)
 			snap.ValidatorSet = v
 		}
 	}

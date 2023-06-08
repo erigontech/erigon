@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -27,6 +28,7 @@ import (
 )
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
+	logger := log.New()
 	db := kv2.NewTestDB(t)
 	cfg := StageHistoryCfg(db, prune.DefaultMode, t.TempDir())
 	test := func(blocksNum int, csBucket string) func(t *testing.T) {
@@ -43,9 +45,9 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			cfgCopy := cfg
 			cfgCopy.bufLimit = 10
 			cfgCopy.flushEvery = time.Microsecond
-			err = promoteHistory("logPrefix", tx, csBucket, 0, uint64(blocksNum/2), cfgCopy, nil)
+			err = promoteHistory("logPrefix", tx, csBucket, 0, uint64(blocksNum/2), cfgCopy, nil, logger)
 			require.NoError(t, err)
-			err = promoteHistory("logPrefix", tx, csBucket, uint64(blocksNum/2), uint64(blocksNum), cfgCopy, nil)
+			err = promoteHistory("logPrefix", tx, csBucket, uint64(blocksNum/2), uint64(blocksNum), cfgCopy, nil, logger)
 			require.NoError(t, err)
 
 			checkIndex(t, tx, csInfo.IndexBucket, addrs[0], expecedIndexes[string(addrs[0])])
@@ -61,6 +63,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 }
 
 func TestIndexGenerator_Truncate(t *testing.T) {
+	logger := log.New()
 	buckets := []string{kv.AccountChangeSet, kv.StorageChangeSet}
 	tmpDir, ctx := t.TempDir(), context.Background()
 	kv := kv2.NewTestDB(t)
@@ -78,7 +81,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		cfgCopy := cfg
 		cfgCopy.bufLimit = 10
 		cfgCopy.flushEvery = time.Microsecond
-		err = promoteHistory("logPrefix", tx, csbucket, 0, uint64(2100), cfgCopy, nil)
+		err = promoteHistory("logPrefix", tx, csbucket, 0, uint64(2100), cfgCopy, nil, logger)
 		require.NoError(t, err)
 
 		reduceSlice := func(arr []uint64, timestamtTo uint64) []uint64 {
@@ -161,12 +164,12 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
 
 		//})
-		err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx)
+		err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx, logger)
 		assert.NoError(t, err)
 		expectNoHistoryBefore(t, tx, csbucket, 128)
 
 		// double prune is safe
-		err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx)
+		err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx, logger)
 		assert.NoError(t, err)
 		expectNoHistoryBefore(t, tx, csbucket, 128)
 		tx.Rollback()

@@ -206,7 +206,6 @@ type Config struct {
 
 	Clique params.ConsensusSnapshotConfig
 	Aura   chain.AuRaConfig
-	Parlia chain.ParliaConfig
 	Bor    chain.BorConfig
 
 	// Transaction pool options
@@ -231,9 +230,6 @@ type Config struct {
 	// gRPC Address to connect to Heimdall node
 	HeimdallgRPCAddress string
 
-	//  New DB table for storing transactions allows: keeping multiple branches of block bodies in the DB simultaneously
-	TransactionsV3 bool
-
 	// URL to connect to Heimdall node
 	HeimdallURL string
 
@@ -242,7 +238,7 @@ type Config struct {
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
-	ExternalCL                  bool
+	InternalCL                  bool
 	LightClientDiscoveryAddr    string
 	LightClientDiscoveryPort    uint64
 	LightClientDiscoveryTCPPort uint64

@@ -1,9 +1,9 @@
 package cltypes
 
 import (
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
 /*
@@ -12,39 +12,25 @@ import (
  */
 type AggregateAndProof struct {
 	AggregatorIndex uint64
-	Aggregate       *Attestation
+	Aggregate       *solid.Attestation
 	SelectionProof  [96]byte
 }
 
 func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-
-	var err error
-	buf = append(buf, ssz.Uint64SSZ(a.AggregatorIndex)...)
-	buf = append(buf, ssz.OffsetSSZ(108)...)
-	buf = append(buf, a.SelectionProof[:]...)
-	buf, err = a.Aggregate.EncodeSSZ(buf)
-	if err != nil {
-		return nil, err
-	}
-	return buf, nil
+	return ssz2.MarshalSSZ(dst, a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
-func (a *AggregateAndProof) DecodeSSZ(buf []byte) error {
-	a.AggregatorIndex = ssz.UnmarshalUint64SSZ(buf)
-	if a.Aggregate == nil {
-		a.Aggregate = new(Attestation)
-	}
-
-	copy(a.SelectionProof[:], buf[12:])
-	if err := a.Aggregate.DecodeSSZ(buf[108:]); err != nil {
-		return err
-	}
-	return nil
+func (a *AggregateAndProof) DecodeSSZ(buf []byte, version int) error {
+	a.Aggregate = new(solid.Attestation)
+	return ssz2.UnmarshalSSZ(buf, version, &a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
 func (a *AggregateAndProof) EncodingSizeSSZ() int {
 	return 108 + a.Aggregate.EncodingSizeSSZ()
+}
+
+func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
 
 type SignedAggregateAndProof struct {
@@ -52,35 +38,13 @@ type SignedAggregateAndProof struct {
 	Signature [96]byte
 }
 
-func (a *SignedAggregateAndProof) EncodedSSZ(dst []byte) ([]byte, error) {
-	buf := dst
-	var err error
-	buf = append(buf, ssz.OffsetSSZ(100)...)
-
-	buf = append(buf, a.Signature[:]...)
-	buf, err = a.Message.EncodeSSZ(buf)
-	if err != nil {
-		return nil, err
-	}
-
-	return buf, nil
+func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(dst, a.Message, a.Signature[:])
 }
 
-func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte) error {
-	if a.Message == nil {
-		a.Message = new(AggregateAndProof)
-	}
-
-	copy(a.Signature[:], buf[4:])
-
-	if err := a.Message.DecodeSSZ(buf[100:]); err != nil {
-		return err
-	}
-
-	return nil
-}
-func (a *SignedAggregateAndProof) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return a.DecodeSSZ(buf)
+func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte, version int) error {
+	a.Message = new(AggregateAndProof)
+	return ssz2.UnmarshalSSZ(buf, version, a.Message, a.Signature[:])
 }
 
 func (a *SignedAggregateAndProof) EncodingSizeSSZ() int {
@@ -109,18 +73,16 @@ func (agg *SyncAggregate) Sum() int {
 	return ret
 }
 
-func (agg *SyncAggregate) EncodeSSZ(buf []byte) []byte {
-	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...)
+func (agg *SyncAggregate) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...), nil
 }
 
-func (agg *SyncAggregate) DecodeSSZ(buf []byte) error {
-	copy(agg.SyncCommiteeBits[:], buf)
-	copy(agg.SyncCommiteeSignature[:], buf[64:])
-	return nil
+func (*SyncAggregate) Static() bool {
+	return true
 }
 
-func (agg *SyncAggregate) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return agg.DecodeSSZ(buf)
+func (agg *SyncAggregate) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 }
 
 func (agg *SyncAggregate) EncodingSizeSSZ() int {
@@ -128,15 +90,6 @@ func (agg *SyncAggregate) EncodingSizeSSZ() int {
 }
 
 func (agg *SyncAggregate) HashSSZ() ([32]byte, error) {
-	var (
-		leaves = make([][32]byte, 2)
-		err    error
-	)
-	leaves[0] = utils.Keccak256(agg.SyncCommiteeBits[:32], agg.SyncCommiteeBits[32:])
-	leaves[1], err = merkle_tree.SignatureRoot(agg.SyncCommiteeSignature)
-	if err != nil {
-		return [32]byte{}, err
-	}
+	return merkle_tree.HashTreeRoot(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 
-	return merkle_tree.ArraysRoot(leaves, 2)
 }

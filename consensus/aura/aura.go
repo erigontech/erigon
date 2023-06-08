@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"container/list"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -28,22 +28,22 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -275,7 +275,6 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, e *NonTransactionalEp
 // AuRa
 // nolint
 type AuRa struct {
-	db     kv.RwDB // Database to store and retrieve snapshot checkpoints
 	e      *NonTransactionalEpochReader
 	exitCh chan struct{}
 	lock   sync.RWMutex // Protects the signer fields
@@ -284,10 +283,9 @@ type AuRa struct {
 	// History of step hashes recently received from peers.
 	receivedStepHashes ReceivedStepHashes
 
-	OurSigningAddress libcommon.Address // Same as Etherbase in Mining
-	cfg               AuthorityRoundParams
-	EmptyStepsSet     *EmptyStepSet
-	EpochManager      *EpochManager // Mutex<EpochManager>,
+	cfg           AuthorityRoundParams
+	EmptyStepsSet *EmptyStepSet
+	EpochManager  *EpochManager // Mutex<EpochManager>,
 
 	certifier     *libcommon.Address // certifies service transactions
 	certifierLock sync.RWMutex
@@ -323,12 +321,7 @@ func (pb *GasLimitOverride) Add(hash libcommon.Hash, b *uint256.Int) {
 	pb.cache.ContainsOrAdd(hash, b)
 }
 
-func NewAuRa(config *chain.AuRaConfig, db kv.RwDB, ourSigningAddress libcommon.Address, engineParamsJson []byte) (*AuRa, error) {
-	spec := JsonSpec{}
-	err := json.Unmarshal(engineParamsJson, &spec)
-	if err != nil {
-		return nil, err
-	}
+func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 	auraParams, err := FromJson(spec)
 	if err != nil {
 		return nil, err
@@ -395,17 +388,14 @@ func NewAuRa(config *chain.AuRaConfig, db kv.RwDB, ourSigningAddress libcommon.A
 	exitCh := make(chan struct{})
 
 	c := &AuRa{
-		db:                 db,
 		e:                  newEpochReader(db),
 		exitCh:             exitCh,
 		step:               PermissionedStep{inner: step},
-		OurSigningAddress:  ourSigningAddress,
 		cfg:                auraParams,
 		receivedStepHashes: ReceivedStepHashes{},
 		EpochManager:       NewEpochManager(),
 	}
 	c.step.canPropose.Store(true)
-	_ = config
 
 	return c, nil
 }
@@ -503,7 +493,11 @@ func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 		log.Error("consensus.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
 		return consensus.ErrUnknownAncestor
 	}
-	return ethash.VerifyHeaderBasics(chain, header, parent, false)
+	return ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/, c.HasGasLimitContract() /*skipGasLimit*/)
+}
+
+func (c *AuRa) HasGasLimitContract() bool {
+	return len(c.cfg.BlockRewardContractTransitions) != 0
 }
 
 // nolint
@@ -816,21 +810,23 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 
 }
 
-func (c *AuRa) ApplyRewards(header *types.Header, state *state.IntraBlockState, syscall consensus.SystemCall) error {
-	beneficiaries, _, rewards, err := calculateRewards(c, header, syscall)
+func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, syscall consensus.SystemCall) error {
+	rewards, err := c.CalculateRewards(nil, header, nil, syscall)
 	if err != nil {
 		return err
 	}
-	for i := range beneficiaries {
-		//fmt.Printf("beneficiary: n=%d, %x,%d\n", header.Number.Uint64(), beneficiaries[i], rewards[i])
-		state.AddBalance(beneficiaries[i], rewards[i])
+	for _, r := range rewards {
+		state.AddBalance(r.Beneficiary, &r.Amount)
 	}
 	return nil
 }
 
 // word `signal epoch` == word `pending epoch`
-func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) (types.Transactions, types.Receipts, error) {
-	if err := c.ApplyRewards(header, state, syscall); err != nil {
+func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+) (types.Transactions, types.Receipts, error) {
+	if err := c.applyRewards(header, state, syscall); err != nil {
 		return nil, nil, err
 	}
 
@@ -1289,13 +1285,11 @@ func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash libcommon.Hash) []
 	return res
 }
 
-func calculateRewards(aura *AuRa, header *types.Header, syscall consensus.SystemCall) (beneficiaries []libcommon.Address, rewardKind []aurainterfaces.RewardKind, rewards []*uint256.Int, err error) {
-	beneficiaries = append(beneficiaries, header.Coinbase)
-	rewardKind = append(rewardKind, aurainterfaces.RewardAuthor)
-
+func (c *AuRa) CalculateRewards(_ *chain.Config, header *types.Header, _ []*types.Header, syscall consensus.SystemCall,
+) ([]consensus.Reward, error) {
 	var rewardContractAddress BlockRewardContract
 	var foundContract bool
-	for _, c := range aura.cfg.BlockRewardContractTransitions {
+	for _, c := range c.cfg.BlockRewardContractTransitions {
 		if c.blockNum > header.Number.Uint64() {
 			break
 		}
@@ -1303,39 +1297,38 @@ func calculateRewards(aura *AuRa, header *types.Header, syscall consensus.System
 		rewardContractAddress = c
 	}
 	if foundContract {
-		beneficiaries, rewards = callBlockRewardAbi(rewardContractAddress.address, syscall, beneficiaries, rewardKind)
-		rewardKind = make([]aurainterfaces.RewardKind, len(beneficiaries))
-		for i := 0; i < len(rewardKind); i++ {
-			rewardKind[i] = aurainterfaces.RewardExternal
+		beneficiaries := []libcommon.Address{header.Coinbase}
+		rewardKind := []consensus.RewardKind{consensus.RewardAuthor}
+		var amounts []*uint256.Int
+		beneficiaries, amounts = callBlockRewardAbi(rewardContractAddress.address, syscall, beneficiaries, rewardKind)
+		rewards := make([]consensus.Reward, len(amounts))
+		for i, amount := range amounts {
+			rewards[i].Beneficiary = beneficiaries[i]
+			rewards[i].Kind = consensus.RewardExternal
+			rewards[i].Amount = *amount
 		}
-	} else {
-		// block_reward.iter.rev().find(|&(block, _)| *block <= number)
-		var reward BlockReward
-		var found bool
-		for i := range aura.cfg.BlockReward {
-			if aura.cfg.BlockReward[i].blockNum > header.Number.Uint64() {
-				break
-			}
-			found = true
-			reward = aura.cfg.BlockReward[i]
-		}
-		if !found {
-			panic("Current block's reward is not found; this indicates a chain config error")
-		}
-
-		for range beneficiaries {
-			rewards = append(rewards, reward.amount)
-		}
+		return rewards, nil
 	}
 
-	//err = aura.cfg.Validators.onCloseBlock(header, aura.OurSigningAddress)
-	//if err != nil {
-	//	return
-	//}
-	return
+	// block_reward.iter.rev().find(|&(block, _)| *block <= number)
+	var reward BlockReward
+	var found bool
+	for i := range c.cfg.BlockReward {
+		if c.cfg.BlockReward[i].blockNum > header.Number.Uint64() {
+			break
+		}
+		found = true
+		reward = c.cfg.BlockReward[i]
+	}
+	if !found {
+		return nil, errors.New("Current block's reward is not found; this indicates a chain config error")
+	}
+
+	r := consensus.Reward{Beneficiary: header.Coinbase, Kind: consensus.RewardAuthor, Amount: *reward.amount}
+	return []consensus.Reward{r}, nil
 }
 
-func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.SystemCall, beneficiaries []libcommon.Address, rewardKind []aurainterfaces.RewardKind) ([]libcommon.Address, []*uint256.Int) {
+func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.SystemCall, beneficiaries []libcommon.Address, rewardKind []consensus.RewardKind) ([]libcommon.Address, []*uint256.Int) {
 	castedKind := make([]uint16, len(rewardKind))
 	for i := range rewardKind {
 		castedKind[i] = uint16(rewardKind[i])

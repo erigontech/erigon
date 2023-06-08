@@ -33,7 +33,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 		return nil, err
 	}
 
-	block, err := api.blockByHashWithSenders(tx, hash)
+	block, err := api.blockByHashWithSenders(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +250,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	}
 	topicsMap := make(map[common.Hash]struct{})
 	for i := range crit.Topics {
-		for j := range crit.Topics {
+		for j := range crit.Topics[i] {
 			topicsMap[crit.Topics[i][j]] = struct{}{}
 		}
 	}
@@ -363,20 +363,25 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	}
 	defer tx.Rollback()
 
-	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, cannonicalBlockHash)
-	if err != nil {
-		return nil, err
-	}
-
-	if !isCanonicalHash {
-		return nil, fmt.Errorf("the hash %s is not cannonical", cannonicalBlockHash)
+	{
+		blockNum := rawdb.ReadHeaderNumber(tx, cannonicalBlockHash)
+		if blockNum == nil {
+			return nil, fmt.Errorf("the hash %s is not cannonical", cannonicalBlockHash)
+		}
+		isCanonicalHash, err := rawdb.IsCanonicalHash(tx, cannonicalBlockHash, *blockNum)
+		if err != nil {
+			return nil, err
+		}
+		if !isCanonicalHash {
+			return nil, fmt.Errorf("the hash %s is not cannonical", cannonicalBlockHash)
+		}
 	}
 
 	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithHash(cannonicalBlockHash, true), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockWithSenders(ctx, tx, cannonicalBlockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -391,6 +396,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
+
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]

@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/node"
 )
 
@@ -33,7 +33,7 @@ func main() {
 		os.Exit(1)
 	}()
 
-	app := erigonapp.MakeApp(runErigon, erigoncli.DefaultFlags)
+	app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -51,13 +51,17 @@ func runErigon(cliCtx *cli.Context) error {
 		}
 	}
 
-	logger := logging.GetLoggerCtx("erigon", cliCtx)
+	var logger log.Logger
+	var err error
+	if logger, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+		return err
+	}
 
 	// initializing the node and providing the current git commit there
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
-	nodeCfg := node.NewNodConfigUrfave(cliCtx)
-	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg)
+	nodeCfg := node.NewNodConfigUrfave(cliCtx, logger)
+	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
 	ethNode, err := node.New(nodeCfg, ethCfg, logger)
 	if err != nil {

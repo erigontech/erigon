@@ -34,10 +34,6 @@ var rootCmd = &cobra.Command{
 	Use:   "state",
 	Short: "state is a utility for Stateless ethereum clients",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if err := debug.SetupCobra(cmd); err != nil {
-			panic(err)
-		}
-
 		genesis, chainConfig = getChainGenesisAndConfig()
 		if genesisPath != "" {
 			genesis = genesisFromFile(genesisPath)
@@ -45,10 +41,6 @@ var rootCmd = &cobra.Command{
 		if genesis.Config != nil && genesis.Config.ChainID.Cmp(chainConfig.ChainID) != 0 {
 			utils.Fatalf("provided genesis.json chain configuration is invalid: expected chainId to be %v, got %v",
 				chainConfig.ChainID.String(), genesis.Config.ChainID.String())
-		}
-		// Apply special hacks for BSC params
-		if chainConfig.Parlia != nil {
-			params.ApplyBinanceSmartChainParams()
 		}
 
 		if chaindata == "" {
