@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon/cl/beacon"
+	"github.com/ledgerwatch/erigon/cl/beacon/handler"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -112,6 +114,15 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		defer cc.Close()
 		engine = execution_client.NewExecutionEnginePhase1FromClient(ctx, remote.NewETHBACKENDClient(cc))
 	}
+
+	apiHandler := handler.NewApiHandler(cfg.GenesisCfg, cfg.BeaconCfg)
+	go beacon.ListenAndServe(apiHandler, &beacon.RouterConfiguration{
+		Protocol: cfg.BeaconProtocol,
+		Address:  cfg.BeaconAddr,
+		// TODO(enriavil1): Make timeouts configurable via flags
+	})
+	log.Info("Beacon API started", "addr", cfg.BeaconAddr)
+
 	var caplinFreezer freezer.Freezer
 	if cfg.RecordMode {
 		caplinFreezer = &freezer.RootPathOsFs{
