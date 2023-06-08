@@ -7,6 +7,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -96,7 +97,27 @@ func (t *sentioTracerV2) CaptureEnter(typ vm.OpCode, from libcommon.Address, to 
 	}
 }
 
-func (t *sentioTracerV2) CaptureExit(output []byte, usedGas uint64, err error) {}
+func (t *sentioTracerV2) CaptureExit(output []byte, usedGas uint64, err error) {
+	//if depth == t.callsNumber-1 {
+	output = common.CopyBytes(output)
+	t.callsNumber--
+	trace := Trace{
+		Type: "CALLEND",
+		//GasIn: math.HexOrDecimal64(gas),
+		GasUsed: math.HexOrDecimal64(usedGas),
+		Value:   output,
+	}
+	//if unpacked, err := abi.UnpackRevert(output); err == nil {
+	//	f.Revertal = unpacked
+	//}
+
+	if t.currentGas != 0 {
+		trace.Gas = t.currentGas
+		t.currentGas = 0
+	}
+	t.traces = append(t.traces, trace)
+	//}
+}
 
 func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 	// Capture any errors immediately
@@ -301,19 +322,6 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 		return
 	}
 
-	if depth == t.callsNumber-1 {
-		t.callsNumber--
-		trace := Trace{
-			Type:  "CALLEND",
-			GasIn: math.HexOrDecimal64(gas),
-			Value: scope.Stack.Peek().Bytes(),
-		}
-		if t.currentGas != 0 {
-			trace.Gas = t.currentGas
-			t.currentGas = 0
-		}
-		t.traces = append(t.traces, trace)
-	}
 }
 
 func (t *sentioTracerV2) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
