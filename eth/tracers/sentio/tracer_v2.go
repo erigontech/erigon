@@ -15,6 +15,39 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+type TraceV2 struct {
+	//op      vm.OpCode
+	Type    string              `json:"type"`
+	Pc      uint64              `json:"pc"`
+	Index   int                 `json:"index"` // TODO No need
+	GasIn   math.HexOrDecimal64 `json:"gasIn"` // TODO this should be hex
+	Gas     math.HexOrDecimal64 `json:"gas"`
+	GasCost math.HexOrDecimal64 `json:"gasCost"`
+	GasUsed math.HexOrDecimal64 `json:"gasUsed"`
+	Output  hexutil.Bytes       `json:"output,omitempty"`
+	From    *libcommon.Address  `json:"from,omitempty"`
+
+	// Used by call
+	To          *libcommon.Address `json:"to,omitempty"`
+	Input       string             `json:"input,omitempty"` // TODO better struct it and make it bytes
+	Value       hexutil.Bytes      `json:"value,omitempty"`
+	ErrorString string             `json:"error,omitempty"`
+
+	// Used by jump
+	Stack []uint256.Int `json:"stack,omitempty"`
+	//Stack  [][4]uint64 `json:"stack,omitempty"`
+	//Memory []byte `json:"memory,omitempty"`
+	Memory *[]string `json:"memory,omitempty"`
+
+	// Used by log
+	Address *libcommon.Address `json:"address,omitempty"`
+	Data    hexutil.Bytes      `json:"data,omitempty"`
+	Topics  []hexutil.Bytes    `json:"topics,omitempty"`
+
+	// Only used by root
+	Traces []TraceV2 `json:"traces,omitempty"`
+}
+
 func init() {
 	tracers.RegisterLookup(false, newSentioTracerV2)
 }
@@ -46,16 +79,16 @@ type sentioTracerV2 struct {
 	activePrecompiles []libcommon.Address
 	functionMap       map[string]map[uint64]functionInfo
 
-	previousJump *Trace
+	previousJump *TraceV2
 	callStack    []internalCallStack
 
-	traces    []Trace
+	traces    []TraceV2
 	descended bool
 	index     int
 	//currentDepth int
 	currentGas  math.HexOrDecimal64
 	callsNumber int
-	rootTrace   Trace
+	rootTrace   TraceV2
 	gasLimit    uint64
 }
 
@@ -73,7 +106,7 @@ func (t *sentioTracerV2) CaptureStart(env vm.VMInterface, from libcommon.Address
 	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 
-	t.rootTrace = Trace{
+	t.rootTrace = TraceV2{
 		Index: 0,
 		//Type:  typ.String(),
 		From:  &from,
@@ -101,7 +134,7 @@ func (t *sentioTracerV2) CaptureExit(output []byte, usedGas uint64, err error) {
 	//if depth == t.callsNumber-1 {
 	output = common.CopyBytes(output)
 	t.callsNumber--
-	trace := Trace{
+	trace := TraceV2{
 		Type: "CALLEND",
 		//GasIn: math.HexOrDecimal64(gas),
 		GasUsed: math.HexOrDecimal64(usedGas),
@@ -122,7 +155,7 @@ func (t *sentioTracerV2) CaptureExit(output []byte, usedGas uint64, err error) {
 func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 	// Capture any errors immediately
 	if err != nil {
-		t.traces = append(t.traces, Trace{
+		t.traces = append(t.traces, TraceV2{
 			Type:        "ERROR",
 			ErrorString: err.Error(), //TODO ask pengcheng
 		})
@@ -130,7 +163,7 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 	}
 
 	t.index++
-	var mergeBase = func(trace Trace) Trace {
+	var mergeBase = func(trace TraceV2) TraceV2 {
 		//trace.op = op
 		trace.Pc = pc
 		trace.Type = op.String()
@@ -157,7 +190,7 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 	case vm.RETURN:
 		outputOffset := scope.Stack.Peek()
 		outputSize := scope.Stack.Back(1)
-		trace := mergeBase(Trace{
+		trace := mergeBase(TraceV2{
 			Value: copyMemory(outputOffset, outputSize),
 		})
 		t.traces = append(t.traces, trace)
@@ -168,7 +201,7 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 		inputSize := scope.Stack.Back(2)
 		from := scope.Contract.Address()
 		// to will be captured later in CaptureEnter
-		trace := mergeBase(Trace{
+		trace := mergeBase(TraceV2{
 			From:  &from,
 			Input: copyMemory(inputOffset, inputSize).String(),
 			Value: scope.Stack.Peek().Bytes(),
@@ -181,7 +214,7 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 		// If a contract is being self destructed, gather that as a subcall too
 		from := scope.Contract.Address()
 		to := libcommon.BytesToAddress(scope.Stack.Peek().Bytes())
-		trace := mergeBase(Trace{
+		trace := mergeBase(TraceV2{
 			From:  &from,
 			To:    &to,
 			Value: t.env.IntraBlockState().GetBalance(from).Bytes(),
@@ -202,7 +235,7 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 		inputOffset := scope.Stack.Back(offset + 2)
 		inputSize := scope.Stack.Back(offset + 3)
 		from := scope.Contract.Address()
-		trace := mergeBase(Trace{
+		trace := mergeBase(TraceV2{
 			From:  &from,
 			To:    &to,
 			Input: copyMemory(inputOffset, inputSize).String(),
@@ -216,7 +249,7 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 		return
 	case vm.JUMP, vm.JUMPDEST:
 		from := scope.Contract.CodeAddr
-		jump := mergeBase(Trace{
+		jump := mergeBase(TraceV2{
 			From:  from,
 			Stack: append([]uint256.Int(nil), scope.Stack.Data...), // TODO only need partial
 		})
@@ -291,7 +324,7 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 			topics = append(topics, scope.Stack.Back(2+i).Bytes())
 		}
 		addr := scope.Contract.Address()
-		l := mergeBase(Trace{
+		l := mergeBase(TraceV2{
 			Address: &addr,
 			Data:    data,
 			Topics:  topics,
@@ -315,7 +348,7 @@ func (t *sentioTracerV2) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 		t.descended = false
 	}
 	if op == vm.REVERT {
-		trace := mergeBase(Trace{
+		trace := mergeBase(TraceV2{
 			ErrorString: "execution reverted",
 		})
 		t.traces = append(t.traces, trace)
