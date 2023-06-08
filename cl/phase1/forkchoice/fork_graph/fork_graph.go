@@ -153,8 +153,8 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 		// Add block to list of invalid blocks
 		log.Debug("Invalid beacon block", "reason", invalidBlockErr)
 		f.badBlocks[blockRoot] = struct{}{}
-		f.currentReferenceState.CopyInto(f.currentState)
-		f.currentStateBlockRoot, err = f.currentReferenceState.BlockRoot()
+		f.nextReferenceState.CopyInto(f.currentState)
+		f.currentStateBlockRoot, err = f.nextReferenceState.BlockRoot()
 		if err != nil {
 			log.Error("[Caplin] Could not recover from invalid block")
 		}
