@@ -41,6 +41,8 @@ import (
 )
 
 const (
+	spanLength         = 6400 // Number of blocks in a span
+	zerothSpanEnd      = 255  // End block of 0th span
 	checkpointInterval = 1024 // Number of blocks after which to save the vote snapshot to the database
 	inmemorySnapshots  = 128  // Number of recent vote snapshots to keep in memory
 	inmemorySignatures = 4096 // Number of recent block signatures to keep in memory
@@ -481,7 +483,14 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	}
 
 	// Verify the validator list match the local contract
-	if isSprintStart(number+1, c.config.CalculateSprint(number)) {
+	//
+	// Note: Here we fetch the data from span instead of contract
+	// as done in bor client. The contract (validator set) returns
+	// a fixed span for 0th span i.e. 0 - 255 blocks. Hence, the
+	// contract data and span data won't match for that. Skip validating
+	// for 0th span. TODO: Remove `number > zerothSpanEnd` check
+	// once we start fetching validator data from contract.
+	if number > zerothSpanEnd && isSprintStart(number+1, c.config.CalculateSprint(number)) {
 		producerSet, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
 
 		if err != nil {
@@ -738,8 +747,12 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	header.Extra = header.Extra[:extraVanity]
 
 	// get validator set if number
+	// Note: headers.Extra has producer set and not validator set. The bor
+	// client calls `GetCurrentValidators` because it makes a contract call
+	// where it fetches producers internally. As we fetch data from span
+	// in Erigon, use directly the `GetCurrentProducers` function.
 	if isSprintStart(number+1, c.config.CalculateSprint(number)) {
-		newValidators, err := c.spanner.GetCurrentValidators(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
+		newValidators, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
 		if err != nil {
 			return errUnknownValidators
 		}
@@ -1103,7 +1116,7 @@ func (c *Bor) needToCommitSpan(currentSpan *span.Span, headerNumber uint64) bool
 }
 
 func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
-	c.logger.Info("Getting span", "for block", blockNum)
+	c.logger.Debug("Getting span", "for block", blockNum)
 	var borSpan *span.HeimdallSpan
 	c.spanCache.AscendGreaterOrEqual(&span.HeimdallSpan{Span: span.Span{EndBlock: blockNum}}, func(item btree.Item) bool {
 		borSpan = item.(*span.HeimdallSpan)
@@ -1116,28 +1129,53 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
 		if c.spanCache.Len() > 0 {
 			spanID = c.spanCache.Max().(*span.HeimdallSpan).ID + 1
 		}
-		for borSpan == nil || borSpan.EndBlock < blockNum {
+
+		c.logger.Info("Span with high enough block number is not loaded", "fetching span", spanID)
+
+		// Fetch span once
+		if borSpan == nil {
+			response, err := c.HeimdallClient.Span(c.execCtx, spanID)
+			if err != nil {
+				return nil, err
+			}
+			borSpan = response
+		}
+
+		endBlock := borSpan.EndBlock
+		for endBlock < blockNum {
+			// Fast forward till we reach the last spanId
+			spanID++
+			endBlock += spanLength
+		}
+
+		if endBlock != borSpan.EndBlock {
+			// We're at the last span ID. Fetch it.
 			c.logger.Info("Span with high enough block number is not loaded", "fetching span", spanID)
 			response, err := c.HeimdallClient.Span(c.execCtx, spanID)
 			if err != nil {
 				return nil, err
 			}
 			borSpan = response
-			c.spanCache.ReplaceOrInsert(borSpan)
-			spanID++
 		}
+
+		c.spanCache.ReplaceOrInsert(borSpan)
 	} else {
-		for borSpan.StartBlock > blockNum {
-			// Span wit low enough block number is not loaded
-			var spanID = borSpan.ID - 1
+		startBlock := borSpan.StartBlock
+		spanID := borSpan.ID
+		for startBlock > blockNum {
+			spanID--
+			startBlock -= spanLength
+		}
+
+		if startBlock != borSpan.StartBlock {
 			c.logger.Info("Span with low enough block number is not loaded", "fetching span", spanID)
 			response, err := c.HeimdallClient.Span(c.execCtx, spanID)
 			if err != nil {
 				return nil, err
 			}
 			borSpan = response
-			c.spanCache.ReplaceOrInsert(borSpan)
 		}
+		c.spanCache.ReplaceOrInsert(borSpan)
 	}
 
 	for c.spanCache.Len() > 128 {
