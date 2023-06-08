@@ -7,6 +7,8 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -24,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/log/v3"
 )
 
 //Variables Naming:
@@ -145,8 +146,8 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
 	tx.aggCtx = db.agg.MakeContext()
-	db.agg.StartUnbufferedWrites()
-	db.agg.SetTx(tx.MdbxTx)
+	//db.agg.StartUnbufferedWrites()
+	//db.agg.SetTx(tx.MdbxTx)
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -172,8 +173,8 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
 	tx.aggCtx = db.agg.MakeContext()
-	db.agg.StartUnbufferedWrites()
-	db.agg.SetTx(tx.MdbxTx)
+	//db.agg.StartUnbufferedWrites()
+	//db.agg.SetTx(tx.MdbxTx)
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -208,8 +209,8 @@ func (tx *Tx) autoClose() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
-	tx.db.agg.FinishWrites()
-	tx.db.agg.SetTx(nil)
+	//tx.db.agg.FinishWrites()
+	//tx.db.agg.SetTx(nil)
 	if tx.aggCtx != nil {
 		tx.aggCtx.Close()
 	}

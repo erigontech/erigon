@@ -726,9 +726,9 @@ Loop:
 					if !bytes.Equal(rh, header.Root.Bytes()) {
 						return fmt.Errorf("root hash mismatch: %x != %x, bn=%d", rh, header.Root.Bytes(), blockNum)
 					}
-					//if err := agg.Flush(ctx, applyTx); err != nil {
-					//	return err
-					//}
+					if err := agg.Flush(ctx, applyTx); err != nil {
+						return err
+					}
 					t3 = time.Since(tt)
 
 					if err = execStage.Update(applyTx, outputBlockNum.Get()); err != nil {
