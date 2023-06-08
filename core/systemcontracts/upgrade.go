@@ -73,12 +73,10 @@ func init() {
 	}
 }
 
-func UpgradeBuildInSystemContract(config *chain.Config, blockNumber *big.Int, statedb evmtypes.IntraBlockState) {
+func UpgradeBuildInSystemContract(config *chain.Config, blockNumber *big.Int, statedb evmtypes.IntraBlockState, logger log.Logger) {
 	if config == nil || blockNumber == nil || statedb == nil {
 		return
 	}
-
-	logger := log.New("system-contract-upgrade", config.ChainName)
 
 	if config.Bor != nil && config.Bor.IsOnCalcutta(blockNumber) {
 		applySystemContractUpgrade(CalcuttaUpgrade[config.ChainName], blockNumber, statedb, logger)

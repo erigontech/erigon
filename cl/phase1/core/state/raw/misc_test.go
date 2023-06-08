@@ -9,7 +9,6 @@ import (
 )
 
 func TestGetters(t *testing.T) {
-	t.Skip("Need to update due to data_gas_used")
 	state := GetTestState()
 	require.NotNil(t, state.BeaconConfig())
 	valLength := state.ValidatorLength()
@@ -21,12 +20,12 @@ func TestGetters(t *testing.T) {
 
 	root, err := state.BlockRoot()
 	require.NoError(t, err)
-	require.Equal(t, common.Hash(root), common.HexToHash("0xa33e9a962fe153b2ed0174d30d5c657b9eaca2fba666df40e31ce8cf1a988961"))
+	require.Equal(t, common.Hash(root), common.HexToHash("0x9f1620db18ee06b9cbdf1b7fa9658701063d2bd05d54b09780f6c0a074b4ce5f"))
 
 	copied, err := state.Copy()
 	require.NoError(t, err)
 
 	root, err = copied.BlockRoot()
 	require.NoError(t, err)
-	require.Equal(t, common.Hash(root), common.HexToHash("0xa33e9a962fe153b2ed0174d30d5c657b9eaca2fba666df40e31ce8cf1a988961"))
+	require.Equal(t, common.Hash(root), common.HexToHash("0x9f1620db18ee06b9cbdf1b7fa9658701063d2bd05d54b09780f6c0a074b4ce5f"))
 }

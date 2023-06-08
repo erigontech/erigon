@@ -21,4 +21,6 @@ var CLDefaultFlags = []cli.Flag{
 	&SentinelStaticPeersFlag,
 	&TransitionChainFlag,
 	&InitSyncFlag,
+	&RecordModeDir,
+	&RecordModeFlag,
 }

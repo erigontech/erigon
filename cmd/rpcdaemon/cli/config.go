@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"crypto/rand"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -204,38 +203,35 @@ func subscribeToStateChanges(ctx context.Context, client StateChangesClient, cac
 
 func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	// DB schema version compatibility check
-	var version []byte
 	var compatErr error
 	var compatTx kv.Tx
 	if compatTx, compatErr = db.BeginRo(ctx); compatErr != nil {
 		return fmt.Errorf("open Ro Tx for DB schema compability check: %w", compatErr)
 	}
 	defer compatTx.Rollback()
-	if version, compatErr = compatTx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey); compatErr != nil {
+	major, minor, patch, ok, err := rawdb.ReadDBSchemaVersion(compatTx)
+	if err != nil {
 		return fmt.Errorf("read version for DB schema compability check: %w", compatErr)
 	}
-	if len(version) != 12 {
-		return fmt.Errorf("database does not have major schema version. upgrade and restart Erigon core")
+	if ok {
+		var compatible bool
+		dbSchemaVersion := &kv.DBSchemaVersion
+		if major != dbSchemaVersion.Major {
+			compatible = false
+		} else if minor != dbSchemaVersion.Minor {
+			compatible = false
+		} else {
+			compatible = true
+		}
+		if !compatible {
+			return fmt.Errorf("incompatible DB Schema versions: reader %d.%d.%d, database %d.%d.%d",
+				dbSchemaVersion.Major, dbSchemaVersion.Minor, dbSchemaVersion.Patch,
+				major, minor, patch)
+		}
+		log.Info("DB schemas compatible", "reader", fmt.Sprintf("%d.%d.%d", dbSchemaVersion.Major, dbSchemaVersion.Minor, dbSchemaVersion.Patch),
+			"database", fmt.Sprintf("%d.%d.%d", major, minor, patch))
 	}
-	major := binary.BigEndian.Uint32(version)
-	minor := binary.BigEndian.Uint32(version[4:])
-	patch := binary.BigEndian.Uint32(version[8:])
-	var compatible bool
-	dbSchemaVersion := &kv.DBSchemaVersion
-	if major != dbSchemaVersion.Major {
-		compatible = false
-	} else if minor != dbSchemaVersion.Minor {
-		compatible = false
-	} else {
-		compatible = true
-	}
-	if !compatible {
-		return fmt.Errorf("incompatible DB Schema versions: reader %d.%d.%d, database %d.%d.%d",
-			dbSchemaVersion.Major, dbSchemaVersion.Minor, dbSchemaVersion.Patch,
-			major, minor, patch)
-	}
-	log.Info("DB schemas compatible", "reader", fmt.Sprintf("%d.%d.%d", dbSchemaVersion.Major, dbSchemaVersion.Minor, dbSchemaVersion.Patch),
-		"database", fmt.Sprintf("%d.%d.%d", major, minor, patch))
+
 	return nil
 }
 
@@ -312,14 +308,11 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 		var cc *chain.Config
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			genesisBlock, err := blockReader.BlockByNumber(ctx, tx, 0)
+			genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 			if err != nil {
 				return err
 			}
-			if genesisBlock == nil {
-				return fmt.Errorf("genesis not found in DB. Likely Erigon was never started on this datadir")
-			}
-			cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+			cc, err = rawdb.ReadChainConfig(tx, genesisHash)
 			if err != nil {
 				return err
 			}

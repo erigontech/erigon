@@ -24,7 +24,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 				return nil
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return SnapshotsPrune(p, snapshots, ctx, tx)
+				return SnapshotsPrune(p, firstCycle, snapshots, ctx, tx)
 			},
 		},
 		{

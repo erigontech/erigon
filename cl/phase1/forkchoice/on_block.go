@@ -3,6 +3,7 @@ package forkchoice
 import (
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 
@@ -57,6 +58,11 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	isBeforeAttestingInterval := timeIntoSlot < config.SecondsPerSlot/config.IntervalsPerSlot
 	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval {
 		f.proposerBoostRoot = blockRoot
+	}
+	if lastProcessedState.Slot()%f.forkGraph.Config().SlotsPerEpoch == 0 {
+		if err := freezer.PutObjectSSZIntoFreezer("beaconState", "caplin_core", lastProcessedState.Slot(), lastProcessedState, f.recorder); err != nil {
+			return err
+		}
 	}
 	// Update checkpoints
 	f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())

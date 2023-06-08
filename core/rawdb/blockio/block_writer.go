@@ -3,9 +3,7 @@ package blockio
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"math/big"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -33,18 +31,11 @@ type BlockWriter struct {
 }
 
 func NewBlockWriter(historyV3 bool) *BlockWriter {
-	return &BlockWriter{historyV3: historyV3, txsV3: false}
+	return &BlockWriter{historyV3: historyV3, txsV3: true}
 }
 
-func (w *BlockWriter) TxsV3Enabled() bool { return w.txsV3 }
 func (w *BlockWriter) WriteBlock(tx kv.RwTx, block *types.Block) error {
-	if err := rawdb.WriteHeader(tx, block.HeaderNoCopy()); err != nil {
-		return err
-	}
-	if err := rawdb.WriteBody(tx, block.Hash(), block.NumberU64(), block.Body()); err != nil {
-		return err
-	}
-	return nil
+	return rawdb.WriteBlock(tx, block)
 }
 func (w *BlockWriter) WriteHeader(tx kv.RwTx, header *types.Header) error {
 	return rawdb.WriteHeader(tx, header)
@@ -81,23 +72,7 @@ func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir
 	)
 }
 
-func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
-	if !w.txsV3 {
-		// Property of blockchain: same block in different forks will have different hashes.
-		// Means - can mark all canonical blocks as non-canonical on unwind, and
-		// do opposite here - without storing any meta-info.
-		if err := rawdb.MakeBodiesCanonical(tx, from, ctx, logPrefix, logEvery, func(blockNum, lastTxnNum uint64) error {
-			if w.historyV3 {
-				if err := rawdbv3.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
-			return fmt.Errorf("make block canonical: %w", err)
-		}
-		return nil
-	}
+func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64) error {
 	if w.historyV3 {
 		if err := rawdb.AppendCanonicalTxNums(tx, from); err != nil {
 			return err
@@ -105,24 +80,7 @@ func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.C
 	}
 	return nil
 }
-func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
-	if !w.txsV3 {
-		if err := rawdb.MakeBodiesNonCanonical(tx, from, deleteBodies, ctx, logPrefix, logEvery); err != nil {
-			return err
-		}
-		if w.historyV3 {
-			if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	//if deleteBodies {
-	//if err := rawdb.MakeBodiesNonCanonical(tx, from, deleteBodies, ctx, logPrefix, logEvery); err != nil {
-	//	return err
-	//}
-	//}
+func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64) error {
 	if w.historyV3 {
 		if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
 			return err
@@ -183,5 +141,5 @@ func (w *BlockWriter) ResetSenders(ctx context.Context, db kv.RoDB, tx kv.RwTx) 
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
-	return rawdb.DeleteAncientBlocks(tx, blockTo, blocksDeleteLimit)
+	return rawdb.PruneBlocks(tx, blockTo, blocksDeleteLimit)
 }

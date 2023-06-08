@@ -4,16 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	dbg "runtime/debug"
-	"sync"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/commands"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/node"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
@@ -34,8 +32,9 @@ type PanicHandler struct {
 }
 
 func (ph PanicHandler) Log(r *log.Record) error {
-	fmt.Printf("Stack: %s\n", dbg.Stack())
-	os.Exit(1)
+	fmt.Println("LEGACY LOG:", r.Msg)
+	//fmt.Printf("Stack: %s\n", dbg.Stack())
+	//os.Exit(1)
 	return nil
 }
 
@@ -69,7 +68,6 @@ func action(ctx *cli.Context) error {
 		return err
 	}
 	logger := logging.SetupLoggerCtx("devnet", ctx, false /* rootLogger */)
-	reqGen := requests.NewRequestGenerator(logger)
 
 	// Make root logger fail
 	log.Root().SetHandler(PanicHandler{})
@@ -78,25 +76,34 @@ func action(ctx *cli.Context) error {
 	if err := devnetutils.ClearDevDB(dataDir, logger); err != nil {
 		return err
 	}
-	// wait group variable to prevent main function from terminating until routines are finished
-	var wg sync.WaitGroup
 
-	// start the first erigon node in a go routine
-	node.Start(reqGen, &wg, dataDir, logger)
+	network := &node.Network{
+		DataDir: dataDir,
+		Chain:   networkname.DevChainName,
+		//Chain:              networkname.BorDevnetChainName,
+		Logger:             logger,
+		BasePrivateApiAddr: "localhost:9090",
+		BaseRPCAddr:        "localhost:8545",
+		Nodes: []node.NetworkNode{
+			&node.Miner{},
+			&node.NonMiner{},
+		},
+	}
 
-	// send a quit signal to the quit channels when done making checks
-	node.QuitOnSignal(&wg)
+	// start the network with each node in a go routine
+	network.Start()
 
 	// sleep for seconds to allow the nodes fully start up
 	time.Sleep(time.Second * 10)
 
 	// start up the subscription services for the different sub methods
-	services.InitSubscriptions([]models.SubMethod{models.ETHNewHeads}, logger)
+	services.InitSubscriptions([]requests.SubMethod{requests.Methods.ETHNewHeads}, logger)
 
 	// execute all rpc methods amongst the two nodes
-	commands.ExecuteAllMethods(reqGen, logger)
+	commands.ExecuteAllMethods(network, logger)
 
 	// wait for all goroutines to complete before exiting
-	wg.Wait()
+	network.Wait()
+
 	return nil
 }
