@@ -976,7 +976,7 @@ func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Unwind domains to block %d, txn %d\n", bn, txn)
+	fmt.Printf("Unwind domains to block %d, txn %d wanted to %d\n", bn, txn, txUnwindTo)
 
 	//if err := stateChanges.Load(a.rwTx, kv.PlainState, stateLoad, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 	//	return err

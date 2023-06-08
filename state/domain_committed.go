@@ -795,16 +795,19 @@ func (d *DomainCommitted) SeekCommitment(sinceTx uint64) (blockNum, txNum uint64
 	ctx := d.MakeContext()
 	defer ctx.Close()
 
+	fmt.Printf("seek tx %d\n", sinceTx)
 	d.defaultDc.IteratePrefix(keyCommitmentState, func(key, value []byte) {
 		txn := binary.BigEndian.Uint64(value)
-		if txn == latestTxNum || len(latestState) != 0 {
-			fmt.Printf("found state txn: %d, value: %x\n", txn, value[:])
-			return
+		if txn == sinceTx {
+			latestState = value
 		}
-		hk := bytes.TrimPrefix(key, keyCommitmentState)
-		fmt.Printf("txn: %d, value: %x\n", binary.BigEndian.Uint64(hk), value[:])
-		latestTxNum, latestState = txn, value
+		latestTxNum = txn
+		fmt.Printf("found state txn: %d, value: %x\n", txn, value[:])
+		//latestTxNum, latestState = txn, value
 	})
+	txn := binary.BigEndian.Uint64(latestState)
+	fmt.Printf("restoring state as of tx %d\n", txn)
+
 	return d.Restore(latestState)
 }
 
