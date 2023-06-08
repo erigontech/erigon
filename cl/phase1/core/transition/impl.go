@@ -14,6 +14,7 @@ import (
 var _ machine.Interface = (*impl)(nil)
 
 var DefaultMachine = &impl{}
+var ValidatingMachine = &impl{FullValidation: true}
 
 type impl struct {
 	FullValidation bool

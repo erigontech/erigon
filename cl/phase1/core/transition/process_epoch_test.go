@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	transition2 "github.com/ledgerwatch/erigon/cl/phase1/core/transition"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -91,64 +91,64 @@ var startingSlashingsResetState []byte
 
 func TestProcessRewardsAndPenalties(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingRewardsPenaltyState, expectedRewardsPenaltyState, func(s *state.BeaconState) error {
-		return transition2.ProcessRewardsAndPenalties(s)
+		return transition.ProcessRewardsAndPenalties(s)
 	})
 }
 
 func TestProcessRegistryUpdates(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingRegistryUpdatesState, expectedRegistryUpdatesState, func(s *state.BeaconState) error {
-		return transition2.ProcessRegistryUpdates(s)
+		return transition.ProcessRegistryUpdates(s)
 	})
 }
 
 func TestProcessEffectiveBalances(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingEffectiveBalancesState, expectedEffectiveBalancesState, func(s *state.BeaconState) error {
-		return transition2.ProcessEffectiveBalanceUpdates(s)
+		return transition.ProcessEffectiveBalanceUpdates(s)
 	})
 }
 
 func TestProcessHistoricalRoots(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingHistoricalRootsState, expectedHistoricalRootsState, func(s *state.BeaconState) error {
-		return transition2.ProcessHistoricalRootsUpdate(s)
+		return transition.ProcessHistoricalRootsUpdate(s)
 	})
 }
 
 func TestProcessParticipationFlagUpdates(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingParticipationFlagState, expectedParticipationFlagState, func(s *state.BeaconState) error {
-		transition2.ProcessParticipationFlagUpdates(s)
+		transition.ProcessParticipationFlagUpdates(s)
 		return nil
 	})
 }
 
 func TestProcessSlashings(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingSlashingsState, expectedSlashingsState, func(s *state.BeaconState) error {
-		return transition2.ProcessSlashings(s)
+		return transition.ProcessSlashings(s)
 	})
 }
 
 func TestProcessJustificationAndFinality(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingJustificationAndFinalityState, expectedJustificationAndFinalityState, func(s *state.BeaconState) error {
-		return transition2.ProcessJustificationBitsAndFinality(s)
+		return transition.ProcessJustificationBitsAndFinality(s)
 	})
 }
 
 func TestEth1DataReset(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingEth1DataResetState, expectedEth1DataResetState, func(s *state.BeaconState) error {
-		transition2.ProcessEth1DataReset(s)
+		transition.ProcessEth1DataReset(s)
 		return nil
 	})
 }
 
 func TestRandaoMixesReset(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingRandaoMixesResetState, expectedRandaoMixesResetState, func(s *state.BeaconState) error {
-		transition2.ProcessRandaoMixesReset(s)
+		transition.ProcessRandaoMixesReset(s)
 		return nil
 	})
 }
 
 func TestSlashingsReset(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingSlashingsResetState, expectedSlashingsResetState, func(s *state.BeaconState) error {
-		transition2.ProcessSlashingsReset(s)
+		transition.ProcessSlashingsReset(s)
 		return nil
 	})
 }
@@ -161,6 +161,6 @@ var startingInactivityScoresState []byte
 
 func TestInactivityScores(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingInactivityScoresState, expectedInactivityScoresState, func(s *state.BeaconState) error {
-		return transition2.ProcessInactivityScores(s)
+		return transition.ProcessInactivityScores(s)
 	})
 }
