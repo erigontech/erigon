@@ -385,13 +385,14 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		transactionIndex = *simulateContext.TransactionIndex
 	}
 
-	if transactionIndex == -1 {
-		transactionIndex = len(block.Transactions())
+	stateBlockNum := blockNum
+	
+	if transactionIndex != -1 {
+		stateBlockNum = blockNum-1
+		replayTransactions = block.Transactions()[:transactionIndex]
 	}
 
-	replayTransactions = block.Transactions()[:transactionIndex]
-
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api.historyV3(tx), chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(stateBlockNum)), 0, api.filters, api.stateCache, api.historyV3(tx), chainConfig.ChainName)
 	if err != nil {
 		stream.WriteNil()
 		return err
