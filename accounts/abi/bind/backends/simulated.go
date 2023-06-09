@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
@@ -184,13 +183,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 		panic(err)
 	}
 	b.pendingReaderTx = tx
-
-	if ethconfig.EnableHistoryV4InTest {
-		panic("implement me")
-		//b.pendingReader = state.NewReaderV4(b.pendingReaderTx.(kv.TemporalTx))
-	} else {
-		b.pendingReader = state.NewPlainStateReader(b.pendingReaderTx)
-	}
+	b.pendingReader = b.m.NewStateReader(b.pendingReaderTx)
 	b.pendingState = state.New(b.pendingReader)
 }
 

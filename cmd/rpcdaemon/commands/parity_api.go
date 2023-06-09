@@ -9,8 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -46,7 +46,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
 	}
 	defer tx.Rollback()
-	a, err := state.NewPlainStateReader(tx).ReadAccountData(account)
+	a, err := rpchelper.NewLatestStateReader(tx).ReadAccountData(account)
 	if err != nil {
 		return nil, err
 	} else if a == nil {

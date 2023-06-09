@@ -45,6 +45,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -194,12 +195,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	var r state.StateReader
-	if ethconfig.EnableHistoryV4InTest {
-		panic("implement me")
-	} else {
-		r = state.NewPlainStateReader(tx)
-	}
+	r := rpchelper.NewLatestStateReader(tx)
 	statedb := state.New(r)
 
 	var w state.StateWriter
@@ -311,12 +307,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 }
 
 func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	var r state.StateReader
-	if ethconfig.EnableHistoryV4InTest {
-		panic("implement me")
-	} else {
-		r = state.NewPlainStateReader(tx)
-	}
+	r := rpchelper.NewLatestStateReader(tx)
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
