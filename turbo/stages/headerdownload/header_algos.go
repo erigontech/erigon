@@ -336,6 +336,10 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 			if err != nil {
 				return err
 			}
+			var peerID [64]byte
+			if err = rlp.DecodeBytes(v, &peerID); err != nil {
+				return err
+			}
 			var header types.Header
 			if err = rlp.DecodeBytes(v, &header); err != nil {
 				return err
@@ -347,7 +351,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 					Hash:      types.RawRlpHash(v),
 					Number:    header.Number.Uint64(),
 				}
-				hd.addHeaderAsLink(h, true /* persisted */)
+				hd.addHeaderAsLink(peerID, h, true /* persisted */)
 			}
 
 			select {
@@ -539,7 +543,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, borPenalties []Penalty
 			borValidChain, err := validateReorg(link.header)
 			borInvalidChain := !borValidChain || err != nil
 			if borInvalidChain {
-				borPenalties = append(borPenalties, PenaltyItem{Penalty: BadBlockPenalty, PeerID: hd.anchors[link.fChild.hash].peerID})
+				borPenalties = append(borPenalties, PenaltyItem{Penalty: BadBlockPenalty, PeerID: link.peerID})
 			}
 
 			if err := hd.VerifyHeader(link.header); err != nil || borInvalidChain {
@@ -785,8 +789,9 @@ func (hd *HeaderDownload) getLink(linkHash libcommon.Hash) (*Link, bool) {
 }
 
 // addHeaderAsLink wraps header into a link and adds it to either queue of persisted links or queue of non-persisted links
-func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) *Link {
+func (hd *HeaderDownload) addHeaderAsLink(peerID [64]byte, h ChainSegmentHeader, persisted bool) *Link {
 	link := &Link{
+		peerID:      peerID,
 		blockHeight: h.Number,
 		hash:        h.Hash,
 		header:      h.Header,
@@ -1000,7 +1005,7 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 			return false
 		}
 	}
-	link := hd.addHeaderAsLink(sh, false /* persisted */)
+	link := hd.addHeaderAsLink(peerID, sh, false /* persisted */)
 	if foundAnchor {
 		// The new link is what anchor was pointing to, so the link takes over the child links of the anchor and the anchor is removed
 		link.fChild = anchor.fLink
@@ -1254,7 +1259,7 @@ func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, n uint64, r services.
 			Hash:      header.Hash(),
 			Number:    header.Number.Uint64(),
 		}
-		link := hd.addHeaderAsLink(h, true /* persisted */)
+		link := hd.addHeaderAsLink([64]byte{}, h, true /* persisted */)
 		link.verified = true
 	}
 	if hd.highestInDb < n {

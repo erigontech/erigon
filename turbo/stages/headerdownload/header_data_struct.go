@@ -36,6 +36,7 @@ const (
 // Links can be either persistent or not. Persistent links encapsule headers that have already been saved to the database, but these links are still
 // present to allow potential reorgs
 type Link struct {
+	peerID      [64]byte // peerID from which header was fetched, blank if the syncing took place using a snapshot
 	header      *types.Header
 	headerRaw   []byte
 	fChild      *Link       // Pointer to the first child, further children can be found by following `next` pointers to the siblings
