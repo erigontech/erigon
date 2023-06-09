@@ -539,7 +539,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, borPenalties []Penalty
 			borValidChain, err := validateReorg(link.header)
 			borInvalidChain := !borValidChain || err != nil
 			if borInvalidChain {
-				borPenalties = append(borPenalties, PenaltyItem{Penalty: BadBlockPenalty, PeerID: hd.anchors[link.hash].peerID})
+				borPenalties = append(borPenalties, PenaltyItem{Penalty: BadBlockPenalty, PeerID: hd.anchors[link.fChild.hash].peerID})
 			}
 
 			if err := hd.VerifyHeader(link.header); err != nil || borInvalidChain {

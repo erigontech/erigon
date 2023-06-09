@@ -405,7 +405,6 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 }
 
 func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, reqID uint64, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
-	peer := ConvertH512ToPeerID(peerID)
 	if cs.dropUselessPeers && len(pkt) == 0 {
 		outreq := proto_sentry.PenalizePeerRequest{
 			PeerId: peerID,
@@ -413,7 +412,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		if _, err := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
 			return fmt.Errorf("sending peer useless request: %v", err)
 		}
-		cs.logger.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", peer)[:8])
+		cs.logger.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8])
 		// No point processing empty response
 		return nil
 	}
@@ -452,6 +451,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			res.Hashes = append(res.Hashes, cs.Hash)
 		}
 		ch <- res
+		return nil
 	}
 
 	//sort.Ints(blockNums)

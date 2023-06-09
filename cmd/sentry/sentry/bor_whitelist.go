@@ -63,7 +63,7 @@ func fetchHeadersByNumber(ss *GrpcServer, peerID [64]byte, ctx context.Context, 
 		generics.Header66RequestIdMap = make(map[uint64]chan generics.Response)
 	}
 
-	generics.Header66RequestIdMap[reqID] = make(chan generics.Response)
+	generics.Header66RequestIdMap[reqID] = make(chan generics.Response, 1)
 	defer delete(generics.Header66RequestIdMap, reqID)
 
 	response := <-generics.Header66RequestIdMap[reqID]

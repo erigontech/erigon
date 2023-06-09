@@ -890,10 +890,6 @@ Loop:
 		var inSync bool
 		borPenalties := make([]headerdownload.PenaltyItem, 0, 1)
 		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), borPenalties, cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix())); err != nil {
-			// If the bor whitelisting service invalidates the block header
-			if len(borPenalties) > 0 {
-				cfg.penalize(ctx, borPenalties)
-			}
 			return err
 		}
 
