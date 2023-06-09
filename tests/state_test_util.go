@@ -28,6 +28,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -195,12 +196,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	var r state.StateReader
-	if ethconfig.EnableHistoryV4InTest {
-		r = state.NewReaderV4(tx.(kv.TemporalTx))
-	} else {
-		r = state.NewPlainStateReader(tx)
-	}
+	r := rpchelper.NewLatestStateReader(tx)
 	statedb := state.New(r)
 
 	var w state.StateWriter
@@ -354,12 +350,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		}
 	}
 
-	var w state.StateWriter
-	if ethconfig.EnableHistoryV4InTest {
-		w = state.NewWriterV4(tx.(kv.TemporalTx))
-	} else {
-		w = state.NewPlainStateWriter(tx, nil, blockNr+1)
-	}
+	w := rpchelper.NewLatestStateWriter(tx, blockNr-1)
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, w); err != nil {
 		return nil, err

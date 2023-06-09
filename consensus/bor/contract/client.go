@@ -56,10 +56,7 @@ func NewGenesisContractsClient(
 	}
 }
 
-func (gc *GenesisContractsClient) CommitState(
-	event *clerk.EventRecordWithTime,
-	syscall consensus.SystemCall,
-) error {
+func (gc *GenesisContractsClient) CommitState(event *clerk.EventRecordWithTime, syscall consensus.SystemCall) error {
 	eventRecord := event.BuildEventRecord()
 
 	recordBytes, err := rlp.EncodeToBytes(eventRecord)
@@ -77,17 +74,13 @@ func (gc *GenesisContractsClient) CommitState(
 		return err
 	}
 
-	gc.logger.Trace("→ committing new state", "eventRecord", event.String())
+	gc.logger.Debug("→ committing new state", "eventRecord", event.String())
 	_, err = syscall(libcommon.HexToAddress(gc.StateReceiverContract), data)
 
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
-func (gc *GenesisContractsClient) LastStateId(syscall consensus.SystemCall,
-) (*big.Int, error) {
+func (gc *GenesisContractsClient) LastStateId(syscall consensus.SystemCall) (*big.Int, error) {
 	const method = "lastStateId"
 
 	data, err := gc.stateReceiverABI.Pack(method)

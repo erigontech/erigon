@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -137,10 +138,13 @@ func TestCreateGas(t *testing.T) {
 		address := libcommon.BytesToAddress([]byte("contract"))
 		_, tx := memdb.NewTestTx(t)
 
-		s := state.New(state.NewPlainStateReader(tx))
+		stateReader := rpchelper.NewLatestStateReader(tx)
+		stateWriter := rpchelper.NewLatestStateWriter(tx, 0)
+
+		s := state.New(stateReader)
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.code))
-		_ = s.CommitBlock(params.TestChainConfig.Rules(0, 0), state.NewPlainStateWriter(tx, tx, 0))
+		_ = s.CommitBlock(params.TestChainConfig.Rules(0, 0), stateWriter)
 
 		vmctx := evmtypes.BlockContext{
 			CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },

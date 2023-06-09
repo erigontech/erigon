@@ -3,7 +3,6 @@ package snapshotsync
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -685,29 +684,14 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf
 
 // TxnByIdxInBlock - doesn't include system-transactions in the begin/end of block
 // return nil if 0 < i < body.TxAmount
-func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
+func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (txn types.Transaction, err error) {
 	blocksAvailable := r.sn.BlocksAvailable()
 	if blocksAvailable == 0 || blockNum > blocksAvailable {
 		canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
-		var k [8 + 32]byte
-		binary.BigEndian.PutUint64(k[:], blockNum)
-		copy(k[8:], canonicalHash[:])
-		b, err := rawdb.ReadBodyForStorageByKey(tx, k[:])
-		if err != nil {
-			return nil, err
-		}
-		if b == nil {
-			return nil, nil
-		}
-
-		txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i))
-		if err != nil {
-			return nil, err
-		}
-		return txn, nil
+		return rawdb.TxnByIdxInBlock(tx, canonicalHash, blockNum, txIdxInBlock)
 	}
 
 	view := r.sn.View()
@@ -727,7 +711,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 	}
 
 	// if block has no transactions, or requested txNum out of non-system transactions length
-	if b.TxAmount == 2 || i == -1 || i >= int(b.TxAmount-2) {
+	if b.TxAmount == 2 || txIdxInBlock == -1 || txIdxInBlock >= int(b.TxAmount-2) {
 		return nil, nil
 	}
 
@@ -736,7 +720,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 		return
 	}
 	// +1 because block has system-txn in the beginning of block
-	return r.txnByID(b.BaseTxId+1+uint64(i), txnSeg, nil)
+	return r.txnByID(b.BaseTxId+1+uint64(txIdxInBlock), txnSeg, nil)
 }
 
 // TxnLookup - find blockNumber and txnID by txnHash

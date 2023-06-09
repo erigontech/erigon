@@ -10,9 +10,9 @@ import (
 
 func TestAttestationsCache(t *testing.T) {
 	input := []uint64{1}
-	a := &solid.AttestationData{}
-	cache.StoreAttestation(a, []uint64{1})
-	output, valid := cache.LoadAttestatingIndicies(a)
+	a := solid.NewAttestationData()
+	cache.StoreAttestation(&a, []byte{2}, []uint64{1})
+	output, valid := cache.LoadAttestatingIndicies(&a, []byte{2})
 	require.True(t, valid)
 	require.Equal(t, input, output)
 }

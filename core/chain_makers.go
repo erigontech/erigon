@@ -38,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -356,18 +357,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 
 	var txNum uint64
 	for i := 0; i < n; i++ {
-		var stateReader state.StateReader
-		var stateWriter state.StateWriter
-
 		if ethconfig.EnableHistoryV4InTest {
 			tx.(*temporal.Tx).Agg().SetTxNum(txNum)
-			stateReader = state.NewReaderV4(tx.(kv.TemporalTx))
-			stateWriter = state.NewWriterV4(tx.(kv.TemporalTx))
 			defer tx.(*temporal.Tx).Agg().StartUnbufferedWrites().FinishWrites()
-		} else {
-			stateReader = state.NewPlainStateReader(tx)
-			stateWriter = state.NewPlainStateWriter(tx, nil, parent.NumberU64()+uint64(i)+1)
 		}
+		stateReader := rpchelper.NewLatestStateReader(tx)
+		stateWriter := rpchelper.NewLatestStateWriter(tx, parent.NumberU64()+uint64(i)+1)
+
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		if err != nil {

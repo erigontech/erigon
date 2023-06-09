@@ -30,7 +30,7 @@ var (
 	pruneHBefore, pruneRBefore     uint64
 	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
-	chain                          string // Which chain to use (mainnet, rinkeby, goerli, etc.)
+	chain                          string // Which chain to use (mainnet, goerli, sepolia, etc.)
 
 	commitmentMode string
 	commitmentTrie string

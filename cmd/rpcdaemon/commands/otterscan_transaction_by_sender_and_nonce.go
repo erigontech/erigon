@@ -62,7 +62,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 				continue
 			}
 
-			if err := acc.DecodeForStorage(v); err != nil {
+			if err := accounts.DeserialiseV3(&acc, v); err != nil {
 				return nil, err
 			}
 			// Desired nonce was found in this chunk
@@ -99,10 +99,11 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 				return false
 			}
 
-			if err := acc.DecodeForStorage(v); err != nil {
+			if err := accounts.DeserialiseV3(&acc, v); err != nil {
 				searchErr = err
 				return false
 			}
+
 			// Since the state contains the nonce BEFORE the block changes, we look for
 			// the block when the nonce changed to be > the desired once, which means the
 			// previous history block contains the actual change; it may contain multiple
