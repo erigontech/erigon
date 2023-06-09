@@ -469,6 +469,21 @@ type RwCursor interface {
 	DeleteCurrent() error
 }
 
+// CursorDupSort
+//
+// Example:
+//
+//	for k, v, err = cursor.First(); k != nil; k, v, err = cursor.NextNoDup() {
+//		if err != nil {
+//			return err
+//		}
+//		for ; v != nil; _, v, err = cursor.NextDup() {
+//			if err != nil {
+//				return err
+//			}
+//
+//		}
+//	}
 type CursorDupSort interface {
 	Cursor
 
