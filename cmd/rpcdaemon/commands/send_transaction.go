@@ -10,9 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -62,33 +60,6 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 
 	if res.Imported[0] != txPoolProto.ImportResult_SUCCESS {
 		return hash, fmt.Errorf("%s: %s", txPoolProto.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
-	}
-
-	var sender *common.Address
-
-	// ReadCurrentBlockNumber may fail during block transitions.  The root cause is the fact that  rawdb.WriteHeadHeaderHash is called
-	// prior WriteHeader - which can leave the DB in a state where the header hash has no block number mapping.  This
-	// is transient but can happen during transaction insertion.  If this happens log an unknown sender rath erth an failing, otherwise
-	// we send a false error to the user - as the transaction has been sent to the tx pool and will be processed
-
-	if blockNum := rawdb.ReadCurrentBlockNumber(tx); blockNum != nil {
-		signer := types.MakeSigner(cc, *blockNum)
-
-		if s, err := txn.Sender(*signer); err == nil {
-			sender = &s
-		}
-	}
-
-	if txn.GetTo() == nil {
-		addr := "undefined"
-
-		if sender != nil {
-			addr = crypto.CreateAddress(*sender, txn.GetNonce()).Hex()
-		}
-
-		api.logger.Info("Submitted contract creation", "hash", txn.Hash().Hex(), "from", sender, "nonce", txn.GetNonce(), "contract", addr, "value", txn.GetValue())
-	} else {
-		api.logger.Info("Submitted transaction", "hash", txn.Hash().Hex(), "from", sender, "nonce", txn.GetNonce(), "recipient", txn.GetTo(), "value", txn.GetValue())
 	}
 
 	return txn.Hash(), nil
