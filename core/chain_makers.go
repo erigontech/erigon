@@ -25,8 +25,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -34,9 +32,12 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -355,13 +356,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 
 	var txNum uint64
 	for i := 0; i < n; i++ {
-		var stateReader state.StateReader
+		stateReader := rpchelper.NewLatestStateReader(tx)
 		var stateWriter state.StateWriter
-
 		if ethconfig.EnableHistoryV4InTest {
 			panic("implement me on v4")
 		} else {
-			stateReader = state.NewPlainStateReader(tx)
 			stateWriter = state.NewPlainStateWriter(tx, nil, parent.NumberU64()+uint64(i)+1)
 		}
 		ibs := state.New(stateReader)

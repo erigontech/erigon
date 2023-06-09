@@ -384,10 +384,16 @@ func ReadStorageBody(db kv.Getter, hash libcommon.Hash, number uint64) (types.Bo
 	return *bodyForStorage, nil
 }
 
-func CanonicalTxnByID(db kv.Getter, id uint64) (types.Transaction, error) {
-	txIdKey := make([]byte, 8)
-	binary.BigEndian.PutUint64(txIdKey, id)
-	v, err := db.GetOne(kv.EthTx, txIdKey)
+func TxnByIdxInBlock(db kv.Getter, blockHash libcommon.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, error) {
+	b, err := ReadBodyForStorageByKey(db, dbutils.BlockBodyKey(blockNum, blockHash))
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, nil
+	}
+
+	v, err := db.GetOne(kv.EthTx, hexutility.EncodeTs(b.BaseTxId+1+uint64(txIdxInBlock)))
 	if err != nil {
 		return nil, err
 	}
