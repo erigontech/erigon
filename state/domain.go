@@ -1301,13 +1301,9 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 		}
 		pos.Add(1)
 
-		if ctx.Err() != nil {
-			d.logger.Warn("[snapshots] prune domain cancelled", "name", d.filenameBase, "err", ctx.Err())
-			return ctx.Err()
-		}
-
 		select {
 		case <-ctx.Done():
+			d.logger.Warn("[snapshots] prune domain cancelled", "name", d.filenameBase, "err", ctx.Err())
 			return ctx.Err()
 		case <-logEvery.C:
 			d.logger.Info("[snapshots] prune domain", "name", d.filenameBase,
