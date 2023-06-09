@@ -3,13 +3,12 @@ package main
 import (
 	"flag"
 	"net/http"
+	_ "net/http/pprof" //nolint:gosec
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cmd/caplin-regression/regression"
 	"github.com/ledgerwatch/log/v3"
-
-	_ "net/http/pprof" //nolint:gosec
 )
 
 var nameTestsMap = map[string]func(*forkchoice.ForkChoiceStore, *cltypes.SignedBeaconBlock) error{

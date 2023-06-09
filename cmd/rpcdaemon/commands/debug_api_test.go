@@ -153,7 +153,7 @@ func TestTraceTransaction(t *testing.T) {
 		}
 		var er ethapi.ExecutionResult
 		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
-			t.Fatalf("parsing result: %v", err)
+			t.Fatalf("parsing result: %v, %s", err, buf.String())
 		}
 		if er.Gas != tt.gas {
 			t.Errorf("wrong gas for transaction %s, got %d, expected %d", tt.txHash, er.Gas, tt.gas)
