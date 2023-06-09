@@ -26,6 +26,8 @@ type Trace struct {
 
 	Type string `json:"type"`
 	Pc   uint64 `json:"pc"`
+	// Global index of the trace
+	Index int `json:"index"`
 
 	// Gas remaining before the OP
 	Gas math.HexOrDecimal64 `json:"gas"`
@@ -51,6 +53,7 @@ type Trace struct {
 	InputMemory  *[]string     `json:"inputMemory,omitempty"`
 	OutputStack  []uint256.Int `json:"outputStack,omitempty"`
 	OutputMemory *[]string     `json:"outputMemory,omitempty"`
+	FunctionPc   uint64        `json:"functionPc,omitempty"`
 
 	// Used by log
 	Address *libcommon.Address `json:"address,omitempty"`
@@ -72,15 +75,6 @@ type Trace struct {
 	function *functionInfo
 }
 
-type traceMarshaling struct {
-	TypeString string `json:"type"`
-	Gas        hexutil.Uint64
-	GasUsed    hexutil.Uint64
-	Value      *hexutil.Big
-	Input      hexutil.Bytes
-	Output     hexutil.Bytes
-}
-
 type sentioTracer struct {
 	config      sentioTracerConfig
 	env         vm.VMInterface
@@ -88,6 +82,7 @@ type sentioTracer struct {
 	callMap     map[string]map[uint64]bool
 
 	previousJump *Trace
+	index        int
 
 	callstack []Trace
 	gasLimit  uint64
@@ -108,7 +103,7 @@ func (t *sentioTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, 
 	//t.activePrecompiles = vm.ActivePrecompiles(rules)
 
 	t.callstack = append(t.callstack, Trace{
-		//Index: 0,
+		Index: 0,
 		Type:  vm.CALL.String(),
 		From:  &from,
 		To:    &to,
@@ -123,23 +118,32 @@ func (t *sentioTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, 
 		t.callstack[0].Type = vm.CREATE.String()
 	}
 }
-func (t *sentioTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	call := Trace{
-		Type:  typ.String(),
-		From:  &from,
-		To:    &to,
-		Input: hexutil.Bytes(input).String(),
-		Gas:   math.HexOrDecimal64(gas),
-	}
-	if value != nil {
-		call.Value = value.Bytes()
-	}
-	t.callstack = append(t.callstack, call)
-}
 
 func (t *sentioTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 	t.callstack[0].GasUsed = math.HexOrDecimal64(usedGas)
 	t.callstack[0].Output = common.CopyBytes(output)
+
+	stackSize := len(t.callstack)
+	currentGas := uint64(t.callstack[stackSize-1].Gas) - usedGas
+	for j := stackSize - 1; j > 0; j-- {
+		t.callstack[j].Output = common.CopyBytes(output)
+		t.callstack[j].GasUsed = math.HexOrDecimal64(uint64(t.callstack[j].Gas) - currentGas + t.callstack[j].gasCost)
+		t.callstack[j-1].Traces = append(t.callstack[j-1].Traces, t.callstack[j])
+	}
+	t.callstack = t.callstack[:1]
+}
+
+func (t *sentioTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	size := len(t.callstack)
+
+	t.callstack[size-1].From = &from
+	t.callstack[size-1].To = &to
+	t.callstack[size-1].Input = hexutil.Bytes(input).String()
+	t.callstack[size-1].Gas = math.HexOrDecimal64(gas)
+
+	if value != nil {
+		t.callstack[size-1].Value = value.Bytes()
+	}
 }
 
 func (t *sentioTracer) CaptureExit(output []byte, usedGas uint64, err error) {
@@ -147,6 +151,8 @@ func (t *sentioTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	if size <= 1 {
 		return
 	}
+
+	log.Info(fmt.Sprintf("CaptureExit pop frame %s", t.callstack[size-1].Type))
 
 	stackSize := len(t.callstack)
 	for i := stackSize - 1; i >= 0; i-- {
@@ -172,14 +178,21 @@ func (t *sentioTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 
 		return
 	}
+
+	log.Error(fmt.Sprintf("failed to pop stack"))
+
 }
 
 func (t *sentioTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+	t.index++
+
 	var mergeBase = func(trace Trace) Trace {
 		trace.Pc = pc
 		trace.Type = op.String()
 		trace.Gas = math.HexOrDecimal64(gas)
 		trace.gasCost = cost
+		trace.Index = t.index - 1
+
 		// Assume it's single instruction, adjust it for jump and call
 		trace.GasUsed = math.HexOrDecimal64(cost)
 		if err != nil {
@@ -204,12 +217,16 @@ func (t *sentioTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 
 	switch op {
 	case vm.CREATE, vm.CREATE2, vm.CALL, vm.CALLCODE, vm.DELEGATECALL, vm.STATICCALL, vm.SELFDESTRUCT:
-		return
+		// more info to be add at CaptureEnter
+		call := mergeBase(Trace{
+			Type: op.String(),
+		})
+		t.callstack = append(t.callstack, call)
 	case vm.JUMP:
 		from := scope.Contract.CodeAddr
 		jump := mergeBase(Trace{
-			From:       from,
-			InputStack: append([]uint256.Int(nil), scope.Stack.Data...), // TODO only need partial
+			From: from,
+			//InputStack: append([]uint256.Int(nil), scope.Stack.Data...), // TODO only need partial
 		})
 		if t.previousJump != nil {
 			log.Error("Unexpected previous jump", t.previousJump)
@@ -221,16 +238,18 @@ func (t *sentioTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 			// error happend, attach to current frame
 			t.callstack[len(t.callstack)-1].Traces = append(t.callstack[len(t.callstack)-1].Traces, jump)
 		}
-		return
 	case vm.JUMPDEST:
 		from := scope.Contract.CodeAddr
 		fromStr := from.String()
 
 		if t.previousJump != nil { // vm.JumpDest and match with a previous jump (otherwise it's a jumpi)
+			t.previousJump.InputStack = append([]uint256.Int(nil), scope.Stack.Data...)
+
 			// Check if this is return
 			// TODO pontentially maintain a map for fast filtering
 			//log.Info("fromStr" + fromStr + ", callstack size" + fmt.Sprint(len(t.callStack)))
 			stackSize := len(t.callstack)
+
 			for i := stackSize - 1; i >= 0; i-- {
 				//log.Info("callstack" + fmt.Sprint(t.callStack[i]))
 				functionInfo := t.callstack[i].function
@@ -291,6 +310,7 @@ func (t *sentioTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 				//jump.enterPc = t.previousJump.Pc
 				t.previousJump.exitPc = scope.Stack.Back(funcInfo.InputSize).Uint64()
 				t.previousJump.function = funcInfo
+				t.previousJump.FunctionPc = pc
 				if t.config.Debug {
 					t.previousJump.Name = funcInfo.Name
 				}
@@ -304,8 +324,6 @@ func (t *sentioTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 			// reset previous jump regardless
 			t.previousJump = nil
 		}
-
-		return
 	case vm.LOG0, vm.LOG1, vm.LOG2, vm.LOG3, vm.LOG4:
 		topicCount := int(op - vm.LOG0)
 		logOffset := scope.Stack.Peek()
@@ -323,7 +341,6 @@ func (t *sentioTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 			Topics:  topics,
 		})
 		t.callstack[len(t.callstack)-1].Traces = append(t.callstack[len(t.callstack)-1].Traces, l)
-		return
 	case vm.REVERT:
 		logOffset := scope.Stack.Peek()
 		logSize := scope.Stack.Back(1)
@@ -357,7 +374,7 @@ func (t *sentioTracer) GetResult() (json.RawMessage, error) {
 	}
 
 	if len(t.callstack) != 1 {
-		log.Error("callstack length is not 1" + fmt.Sprint(t.callstack))
+		log.Error("callstack length is not 1, is " + fmt.Sprint(len(t.callstack)))
 	}
 
 	return json.Marshal(t.callstack[0])
