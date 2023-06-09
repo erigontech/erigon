@@ -2,7 +2,6 @@ package exec3
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"sync"
 
@@ -179,10 +178,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			//rw.callTracer.AddCoinbase(txTask.Coinbase, txTask.Uncles)
 			//txTask.TraceTos = rw.callTracer.Tos()
 			txTask.TraceTos = map[libcommon.Address]struct{}{}
-			fmt.Printf("coninbase: %x\n", txTask.Coinbase)
 			txTask.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
-				fmt.Printf("uncle.coninbase: %x\n", uncle.Coinbase)
 				txTask.TraceTos[uncle.Coinbase] = struct{}{}
 			}
 		}
