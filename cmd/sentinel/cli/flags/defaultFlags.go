@@ -7,6 +7,8 @@ var CLDefaultFlags = []cli.Flag{
 	&SentinelDiscoveryAddr,
 	&SentinelServerPort,
 	&SentinelServerAddr,
+	&BeaconApiPort,
+	&BeaconApiAddr,
 	&Chain,
 	&SentinelTcpPort,
 	&NoDiscovery,

@@ -1220,7 +1220,7 @@ func (c *Bor) CommitStates(
 	lastStateID := lastStateIDBig.Uint64()
 	from = lastStateID + 1
 
-	c.logger.Info(
+	c.logger.Debug(
 		"Fetching state updates from Heimdall",
 		"fromID", from,
 		"to", to.Format(time.RFC3339),
@@ -1269,7 +1269,7 @@ func (c *Bor) CommitStates(
 
 	processTime := time.Since(processStart)
 
-	c.logger.Info("StateSyncData", "number", number, "lastStateID", lastStateID, "total records", len(eventRecords), "fetch time", int(fetchTime.Milliseconds()), "process time", int(processTime.Milliseconds()))
+	c.logger.Debug("StateSyncData", "number", number, "lastStateID", lastStateID, "total records", len(eventRecords), "fetch time", int(fetchTime.Milliseconds()), "process time", int(processTime.Milliseconds()))
 
 	return stateSyncs, nil
 }
