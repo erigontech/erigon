@@ -19,84 +19,8 @@ var (
 	// latest milestone from the local heimdall.
 	errMilestone = errors.New("failed to fetch latest milestone")
 
-	ErrNotInRejectedList = errors.New("MilestoneID not in rejected list")
+	ErrNotInRejectedList = errors.New("milestoneID doesn't exist in rejected list")
 )
-
-// handleWhitelistCheckpoint handles the checkpoint whitelist mechanism.
-func handleWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, config *config) error {
-	// Create a new bor verifier, which will be used to verify checkpoints and milestones
-	verifier := newBorVerifier()
-	service := whitelist.GetWhitelistingService()
-
-	blockNum, blockHash, err := fetchWhitelistCheckpoint(ctx, bor, verifier, config)
-
-	// If the array is empty, we're bound to receive an error. Non-nill error and non-empty array
-	// means that array has partial elements and it failed for some block. We'll add those partial
-	// elements anyway.
-	if err != nil {
-		return err
-	}
-
-	service.ProcessCheckpoint(blockNum, blockHash)
-
-	return nil
-}
-
-// handleMilestone handles the milestone mechanism.
-func handleMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
-	// Create a new bor verifier, which will be used to verify checkpoints and milestones
-	verifier := newBorVerifier()
-
-	service := whitelist.GetWhitelistingService()
-
-	num, hash, err := fetchWhitelistMilestone(ctx, bor, verifier, config)
-
-	// If the current chain head is behind the received milestone, add it to the future milestone
-	// list. Also, the hash mismatch (end block hash) error will lead to rewind so also
-	// add that milestone to the future milestone list.
-	if errors.Is(err, errMissingBlocks) || errors.Is(err, errHashMismatch) {
-		service.ProcessFutureMilestone(num, hash)
-	}
-
-	if err != nil {
-		return err
-	}
-
-	service.ProcessMilestone(num, hash)
-
-	return nil
-}
-
-func handleNoAckMilestone(ctx context.Context, bor *bor.Bor, config *config) error {
-	milestoneID, err := fetchNoAckMilestone(ctx, bor)
-
-	service := whitelist.GetWhitelistingService()
-
-	//If failed to fetch the no-ack milestone then it give the error.
-	if err != nil {
-		return err
-	}
-
-	service.RemoveMilestoneID(milestoneID)
-
-	return nil
-}
-
-func handleNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, config *config) error {
-	service := whitelist.GetWhitelistingService()
-
-	milestoneIDs := service.GetMilestoneIDsList()
-
-	for _, milestoneID := range milestoneIDs {
-		// todo: check if we can ignore the error
-		err := fetchNoAckMilestoneByID(ctx, bor, milestoneID)
-		if err == nil {
-			service.RemoveMilestoneID(milestoneID)
-		}
-	}
-
-	return nil
-}
 
 // fetchWhitelistCheckpoint fetches the latest checkpoint from it's local heimdall
 // and verifies the data against bor data.
@@ -151,7 +75,7 @@ func fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, verifier *borVer
 	// it will return appropriate error.
 	_, err = verifier.verify(ctx, config, milestone.StartBlock.Uint64(), milestone.EndBlock.Uint64(), milestone.Hash.String()[2:], false)
 	if err != nil {
-		// h.downloader.UnlockSprint(milestone.EndBlock.Uint64())
+		whitelist.GetWhitelistingService().UnlockSprint(milestone.EndBlock.Uint64())
 		return num, hash, err
 	}
 
@@ -167,7 +91,6 @@ func fetchNoAckMilestone(ctx context.Context, bor *bor.Bor) (string, error) {
 	milestoneID, err := bor.HeimdallClient.FetchLastNoAckMilestone(ctx)
 	if err != nil {
 		log.Error("Failed to fetch latest no-ack milestone", "err", err)
-
 		return milestoneID, errMilestone
 	}
 
@@ -186,7 +109,6 @@ func fetchNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, milestoneID stri
 
 	if err != nil {
 		log.Error("Failed to fetch no-ack milestone by ID ", "milestoneID", milestoneID, "err", err)
-
 		return errMilestone
 	}
 

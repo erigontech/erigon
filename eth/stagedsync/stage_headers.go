@@ -20,10 +20,10 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/generics"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/borfinality/generics"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -820,10 +820,10 @@ func HeadersPOW(
 	var lastSkeletonTime time.Time
 	var peer [64]byte
 	var sentToPeer bool
-
 Loop:
 	for !stopped {
 
+		// Only relevant to bor chain, called in case of milestone mismatch
 		if generics.BorMilestoneRewind.Load() != nil && *generics.BorMilestoneRewind.Load() != 0 {
 			s.state.UnwindTo(*generics.BorMilestoneRewind.Load(), hash)
 			err := s.state.RunUnwind(nil, tx)
@@ -831,6 +831,7 @@ Loop:
 				log.Warn(fmt.Sprintf("Milestone block mismatch, automatic rewind failed due to err: %v. Please manually rewind the chain to block num: %d", err, generics.BorMilestoneRewind))
 				return err
 			}
+
 			var reset uint64 = 0
 			generics.BorMilestoneRewind.Store(&reset)
 

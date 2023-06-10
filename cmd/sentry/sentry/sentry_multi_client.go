@@ -31,10 +31,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 
-	"github.com/ledgerwatch/erigon/common/generics"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/borfinality/generics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -443,7 +443,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		//blockNums = append(blockNums, int(number))
 	}
 
-	if ch, ok := generics.Header66RequestIdMap[reqID]; ok {
+	if ch, ok := generics.BorMilestonePeerVerification[reqID]; ok {
 		sort.Sort(headerdownload.HeadersReverseSort(csHeaders)) // Sorting by reverse order of block heights
 		res := generics.Response{}
 		for _, cs := range csHeaders {

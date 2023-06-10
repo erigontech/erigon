@@ -404,9 +404,11 @@ func (api *APIImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	}
 
 	bor, ok := api._engine.(*bor.Bor)
+
 	if !ok {
 		return false, errors.New("bor engine not available")
 	}
+
 	err = bor.HeimdallClient.FetchMilestoneID(ctx, milestoneId)
 
 	if err != nil {

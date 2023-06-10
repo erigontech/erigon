@@ -13,10 +13,6 @@ import (
 var (
 	ErrMismatch = errors.New("mismatch error")
 	ErrNoRemote = errors.New("remote peer doesn't have a target block number")
-
-	ErrCheckpointMismatch = errors.New("checkpoint mismatch")
-	ErrLongFutureChain    = errors.New("received future chain of unacceptable length")
-	ErrNoRemoteCheckoint  = errors.New("remote peer doesn't have a checkoint")
 )
 
 type Service struct {

@@ -146,7 +146,7 @@ type Ethereum struct {
 	pendingBlocks     chan *types.Block
 	minedBlocks       chan *types.Block
 
-	// downloader
+	// downloader fields
 	sentryCtx      context.Context
 	sentryCancel   context.CancelFunc
 	sentriesClient *sentry.MultiClient
@@ -180,9 +180,9 @@ type Ethereum struct {
 	blockReader    services.FullBlockReader
 	blockWriter    *blockio.BlockWriter
 	kvRPC          *remotedbserver.KvServer
+	logger         log.Logger
 
 	closeCh chan struct{} // Channel to signal the background processes to exit
-	logger  log.Logger
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {

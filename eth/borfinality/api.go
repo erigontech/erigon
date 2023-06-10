@@ -1,7 +1,7 @@
 package borfinality
 
 import (
-	"fmt"
+	"errors"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -46,7 +46,7 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
-	return 0, fmt.Errorf("no finalized block")
+	return 0, errors.New("no finalized block")
 }
 
 // CurrentFinalizedBlock retrieves the current finalized block of the canonical

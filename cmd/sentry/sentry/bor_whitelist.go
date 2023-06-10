@@ -7,8 +7,8 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/common/generics"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/borfinality/generics"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -59,14 +59,14 @@ func fetchHeadersByNumber(ss *GrpcServer, peerID [64]byte, ctx context.Context, 
 		return nil, nil, err
 	}
 
-	if generics.Header66RequestIdMap == nil {
-		generics.Header66RequestIdMap = make(map[uint64]chan generics.Response)
+	if generics.BorMilestonePeerVerification == nil {
+		generics.BorMilestonePeerVerification = make(map[uint64]chan generics.Response)
 	}
 
-	generics.Header66RequestIdMap[reqID] = make(chan generics.Response, 1)
-	defer delete(generics.Header66RequestIdMap, reqID)
+	generics.BorMilestonePeerVerification[reqID] = make(chan generics.Response, 1)
+	defer delete(generics.BorMilestonePeerVerification, reqID)
 
-	response := <-generics.Header66RequestIdMap[reqID]
+	response := <-generics.BorMilestonePeerVerification[reqID]
 
 	return response.Headers, response.Hashes, nil
 }
