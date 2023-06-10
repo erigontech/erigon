@@ -28,6 +28,7 @@ func main() {
 	pprof := flag.Bool("pprof", true, "turn on profiling")
 	loop := flag.Bool("loop", true, "loop the test in an infinite loop")
 	testsDir := flag.String("testsDir", "cmd/caplin-regression/caplin-tests", "directory to the tests")
+
 	all := flag.Bool("all", true, "loop trhough all the test")
 
 	flag.Parse()
