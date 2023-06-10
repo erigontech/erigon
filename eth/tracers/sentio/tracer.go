@@ -83,6 +83,7 @@ type sentioTracer struct {
 
 	previousJump *Trace
 	index        int
+	entryPc      map[uint64]bool
 
 	callstack []Trace
 	gasLimit  uint64
@@ -94,29 +95,43 @@ func (t *sentioTracer) CaptureTxStart(gasLimit uint64) {
 
 func (t *sentioTracer) CaptureTxEnd(restGas uint64) {
 	t.callstack[0].GasUsed = math.HexOrDecimal64(t.gasLimit - restGas)
+	if t.callstack[0].Index == -1 {
+		// It's possible that we can't correctly locate the PC that match the entry function (check why), in this case we need to 0 for the user
+		t.callstack[0].Index = 0
+	}
 }
 
 func (t *sentioTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.env = env
-	// Update list of precompiles based on current block
-	//rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
-	//t.activePrecompiles = vm.ActivePrecompiles(rules)
 
-	t.callstack = append(t.callstack, Trace{
-		Index: 0,
+	root := Trace{
+		Index: -1,
 		Type:  vm.CALL.String(),
 		From:  &from,
 		To:    &to,
 		Gas:   math.HexOrDecimal64(gas),
 		Input: hexutil.Bytes(input).String(),
-	})
-
+	}
 	if value != nil {
-		t.callstack[0].Value = value.Bytes()
+		root.Value = value.Bytes()
 	}
 	if create {
-		t.callstack[0].Type = vm.CREATE.String()
+		root.Type = vm.CREATE.String()
 	}
+
+	if !create && !precompile && len(input) >= 4 {
+		m, ok := t.functionMap[to.String()]
+		if ok {
+			sigHash := "0x" + common.Bytes2Hex(input[0:4])
+			for pc, fn := range m {
+				if fn.SignatureHash == sigHash {
+					t.entryPc[pc] = true
+				}
+			}
+			log.Info(fmt.Sprintf("entry pc match %s (%d times) ", sigHash, len(t.entryPc)))
+		}
+	}
+	t.callstack = append(t.callstack, root)
 }
 
 func (t *sentioTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
@@ -152,7 +167,7 @@ func (t *sentioTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 		return
 	}
 
-	log.Info(fmt.Sprintf("CaptureExit pop frame %s", t.callstack[size-1].Type))
+	//log.Info(fmt.Sprintf("CaptureExit pop frame %s", t.callstack[size-1].Type))
 
 	stackSize := len(t.callstack)
 	for i := stackSize - 1; i >= 0; i-- {
@@ -185,6 +200,14 @@ func (t *sentioTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 
 func (t *sentioTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 	t.index++
+
+	if t.callstack[0].Index == -1 && t.entryPc[pc] {
+		//fillback the index and PC for root
+		t.callstack[0].Pc = pc
+		t.callstack[0].Index = t.index - 1
+		t.previousJump = nil
+		return
+	}
 
 	var mergeBase = func(trace Trace) Trace {
 		trace.Pc = pc
@@ -244,7 +267,6 @@ func (t *sentioTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 
 		if t.previousJump != nil { // vm.JumpDest and match with a previous jump (otherwise it's a jumpi)
 			t.previousJump.InputStack = append([]uint256.Int(nil), scope.Stack.Data...)
-
 			// Check if this is return
 			// TODO pontentially maintain a map for fast filtering
 			//log.Info("fromStr" + fromStr + ", callstack size" + fmt.Sprint(len(t.callStack)))
@@ -424,6 +446,7 @@ func newSentioTracer(name string, ctx *tracers.Context, cfg json.RawMessage) (tr
 		config:      config,
 		functionMap: functionMap,
 		callMap:     callMap,
+		entryPc:     map[uint64]bool{},
 	}, nil
 }
 

@@ -53,11 +53,14 @@ func init() {
 }
 
 type functionInfo struct {
-	address      string
-	Name         string `json:"name"`
+	address       string
+	Name          string `json:"name"`
+	SignatureHash string `json:"signatureHash"`
+
 	Pc           uint64 `json:"pc"`
 	InputSize    int    `json:"inputSize"`
 	InputMemory  bool   `json:"inputMemory"`
+	OutputSize   int    `json:"outputSize"`
 	OutputMemory bool   `json:"outputMemory"`
 }
 
