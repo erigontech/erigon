@@ -833,6 +833,11 @@ Loop:
 			}
 			var reset uint64 = 0
 			generics.BorMilestoneRewind.Store(&reset)
+
+			// Update highest in db field after the rewind
+			if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
+				return err
+			}
 		}
 
 		transitionedToPoS, err := rawdb.Transitioned(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty)
@@ -889,7 +894,7 @@ Loop:
 		// Load headers into the database
 		var inSync bool
 		borPenalties := make([]headerdownload.PenaltyItem, 0, 1)
-		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), borPenalties, cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix())); err != nil {
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), &borPenalties, cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix())); err != nil {
 			return err
 		}
 

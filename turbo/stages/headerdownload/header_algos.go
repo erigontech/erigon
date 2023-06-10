@@ -336,10 +336,6 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 			if err != nil {
 				return err
 			}
-			var peerID [64]byte
-			if err = rlp.DecodeBytes(v, &peerID); err != nil {
-				return err
-			}
 			var header types.Header
 			if err = rlp.DecodeBytes(v, &header); err != nil {
 				return err
@@ -351,7 +347,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 					Hash:      types.RawRlpHash(v),
 					Number:    header.Number.Uint64(),
 				}
-				hd.addHeaderAsLink(peerID, h, true /* persisted */)
+				hd.addHeaderAsLink([64]byte{0x0}, h, true /* persisted */)
 			}
 
 			select {
@@ -516,7 +512,7 @@ func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
 
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64) (td *big.Int, err error)
 
-func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, borPenalties []PenaltyItem, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, uint64, error) {
+func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, borPenalties *[]PenaltyItem, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, uint64, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	var returnTd *big.Int
@@ -543,7 +539,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, borPenalties []Penalty
 			borValidChain, err := validateReorg(link.header)
 			borInvalidChain := !borValidChain || err != nil
 			if borInvalidChain {
-				borPenalties = append(borPenalties, PenaltyItem{Penalty: BadBlockPenalty, PeerID: link.peerID})
+				*borPenalties = append(*borPenalties, PenaltyItem{Penalty: BadBlockPenalty, PeerID: link.peerID})
 			}
 
 			if err := hd.VerifyHeader(link.header); err != nil || borInvalidChain {
@@ -635,7 +631,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, borPenalties []Penalty
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, borPenalties []PenaltyItem, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, borPenalties *[]PenaltyItem, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
 	var more = true
 	var err error
 	var force bool
@@ -1259,7 +1255,7 @@ func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, n uint64, r services.
 			Hash:      header.Hash(),
 			Number:    header.Number.Uint64(),
 		}
-		link := hd.addHeaderAsLink([64]byte{}, h, true /* persisted */)
+		link := hd.addHeaderAsLink([64]byte{0x0}, h, true /* persisted */)
 		link.verified = true
 	}
 	if hd.highestInDb < n {
