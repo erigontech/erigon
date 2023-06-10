@@ -386,9 +386,9 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	}
 
 	stateBlockNum := blockNum
-	
+
 	if transactionIndex != -1 {
-		stateBlockNum = blockNum-1
+		stateBlockNum = blockNum - 1
 		replayTransactions = block.Transactions()[:transactionIndex]
 	}
 
