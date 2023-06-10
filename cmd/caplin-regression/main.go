@@ -27,6 +27,8 @@ func main() {
 	step := flag.Int("step", 32, "how often to log performance")
 	pprof := flag.Bool("pprof", true, "turn on profiling")
 	loop := flag.Bool("loop", true, "loop the test in an infinite loop")
+	testsDir := flag.String("testsDir", "cmd/caplin-regression/caplin-tests", "directory to the tests")
+
 	all := flag.Bool("all", true, "loop trhough all the test")
 
 	flag.Parse()
@@ -35,7 +37,7 @@ func main() {
 		return
 	}
 	r, err := regression.NewRegressionTester(
-		"cmd/caplin-regression/caplin-tests",
+		*testsDir,
 	)
 	if *pprof {
 		// Server for pprof
