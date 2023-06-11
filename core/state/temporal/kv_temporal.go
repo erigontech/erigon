@@ -248,15 +248,22 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	}
 	switch name {
 	case AccountsDomain:
-		histStateIt := tx.aggCtx.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
-		lastestStateIt, err := tx.aggCtx.DomainIterLatest(tx.MdbxTx, kv.AccountDomain, fromKey, toKey, limit)
+		histStateIt, err := tx.aggCtx.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
+		if err != nil {
+			return nil, err
+		}
+		lastestStateIt, err := tx.aggCtx.DomainRangeLatest(tx.MdbxTx, kv.AccountDomain, fromKey, toKey, limit)
 		if err != nil {
 			return nil, err
 		}
 		it = iter.UnionKV(histStateIt, lastestStateIt, limit)
 	case StorageDomain:
-		storageIt := tx.aggCtx.StorageHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
-		lastestStateIt, err := tx.aggCtx.DomainIterLatest(tx.MdbxTx, kv.StorageDomain, fromKey, toKey, limit)
+		storageIt, err := tx.aggCtx.StorageHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
+		if err != nil {
+			return nil, err
+		}
+
+		lastestStateIt, err := tx.aggCtx.DomainRangeLatest(tx.MdbxTx, kv.StorageDomain, fromKey, toKey, limit)
 		if err != nil {
 			return nil, err
 		}
