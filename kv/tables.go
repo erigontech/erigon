@@ -368,11 +368,6 @@ const (
 	// Domains/Histry/InvertedIndices
 	// Contants have "Tbl" prefix, to avoid collision with actual Domain names
 	// This constants is very rarely used in APP, but Domain/History/Idx names are widely used
-	DeprecatedAccountDomain    = "AccountsDomain"
-	DeprecatedStorageDomain    = "StorageDomain"
-	DeprecatedCodeDomain       = "CodeDomain"
-	DeprecatedCommitmentDomain = "CommitmentDomain"
-
 	TblAccountKeys        = "AccountKeys"
 	TblAccountVals        = "AccountVals"
 	TblAccountHistoryKeys = "AccountHistoryKeys"
@@ -810,4 +805,11 @@ const (
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
 	TracesFromIdx InvertedIdx = "TracesFromIdx"
 	TracesToIdx   InvertedIdx = "TracesToIdx"
+)
+
+const (
+	DeprecatedAccountDomain    = "AccountsDomain"
+	DeprecatedStorageDomain    = "StorageDomain"
+	DeprecatedCodeDomain       = "CodeDomain"
+	DeprecatedCommitmentDomain = "CommitmentDomain"
 )
