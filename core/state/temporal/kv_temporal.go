@@ -2,7 +2,6 @@ package temporal
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"testing"
 
@@ -11,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
@@ -250,75 +248,19 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	}
 	switch name {
 	case AccountsDomain:
-		histStateIt := tx.aggCtx.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx)
-		// TODO: somehow avoid common.Copy(k) - WalkAsOfIter is not zero-copy
-		// Is histStateIt possible to increase keys lifetime to: 2 .Next() calls??
-		histStateIt2 := iter.TransformKV(histStateIt, func(k, v []byte) ([]byte, []byte, error) {
-			if len(v) == 0 {
-				return k[:20], v, nil
-			}
-			v, err = tx.db.convertV3toV2(v)
-			if err != nil {
-				return nil, nil, err
-			}
-			/*
-				var force *common.Hash
-				if tx.db.systemContractLookup != nil {
-					if records, ok := tx.db.systemContractLookup[common.BytesToAddress(k)]; ok {
-						p := sort.Search(len(records), func(i int) bool {
-							return records[i].TxNumber > asOfTs
-						})
-						hash := records[p-1].CodeHash
-						force = &hash
-					}
-				}
-				v, err = tx.db.restoreCodeHash(tx.MdbxTx, k, v, force)
-				if err != nil {
-					return nil, nil, err
-				}
-			*/
-			return k[:20], common.Copy(v), nil
-		})
-		lastestStateIt, err := tx.RangeAscend(kv.PlainState, fromKey, toKey, -1) // don't apply limit, because need filter
+		histStateIt := tx.aggCtx.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
+		lastestStateIt, err := tx.aggCtx.DomainIterLatest(tx.MdbxTx, kv.AccountDomain, fromKey, toKey, limit)
 		if err != nil {
 			return nil, err
 		}
-		// TODO: instead of iterate over whole storage, need implement iterator which does cursor.Seek(nextAccount)
-		latestStateIt2 := iter.FilterKV(lastestStateIt, func(k, v []byte) bool {
-			return len(k) == 20
-		})
-		it = iter.UnionKV(histStateIt2, latestStateIt2, limit)
+		it = iter.UnionKV(histStateIt, lastestStateIt, limit)
 	case StorageDomain:
-		storageIt := tx.aggCtx.StorageHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx)
-		storageIt1 := iter.TransformKV(storageIt, func(k, v []byte) ([]byte, []byte, error) {
-			return k, v, nil
-		})
-
-		accData, err := tx.GetOne(kv.PlainState, fromKey[:20])
+		storageIt := tx.aggCtx.StorageHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
+		lastestStateIt, err := tx.aggCtx.DomainIterLatest(tx.MdbxTx, kv.StorageDomain, fromKey, toKey, limit)
 		if err != nil {
 			return nil, err
 		}
-		inc, err := tx.db.parseInc(accData)
-		if err != nil {
-			return nil, err
-		}
-		startkey := make([]byte, length.Addr+length.Incarnation+length.Hash)
-		copy(startkey, fromKey[:20])
-		binary.BigEndian.PutUint64(startkey[length.Addr:], inc)
-		copy(startkey[length.Addr+length.Incarnation:], fromKey[20:])
-
-		toPrefix := make([]byte, length.Addr+length.Incarnation)
-		copy(toPrefix, fromKey[:20])
-		binary.BigEndian.PutUint64(toPrefix[length.Addr:], inc+1)
-
-		it2, err := tx.RangeAscend(kv.PlainState, startkey, toPrefix, limit)
-		if err != nil {
-			return nil, err
-		}
-		it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte, error) {
-			return append(append([]byte{}, k[:20]...), k[28:]...), v, nil
-		})
-		it = iter.UnionKV(storageIt1, it3, limit)
+		it = iter.UnionKV(storageIt, lastestStateIt, limit)
 	case CodeDomain:
 		panic("not implemented yet")
 	default:
@@ -428,32 +370,6 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 		if !ok || len(v) == 0 {
 			return v, ok, nil
 		}
-		/*
-			v, err = tx.db.convertV3toV2(v)
-			if err != nil {
-				return nil, false, err
-			}
-			var force *common.Hash
-			if tx.db.systemContractLookup != nil {
-				if records, ok := tx.db.systemContractLookup[common.BytesToAddress(key)]; ok {
-					p := sort.Search(len(records), func(i int) bool {
-						return records[i].TxNumber > ts
-					})
-					hash := records[p-1].CodeHash
-					force = &hash
-				}
-			}
-			v, err = tx.db.restoreCodeHash(tx.MdbxTx, key, v, force)
-			if err != nil {
-				return nil, false, err
-			}
-			if len(v) > 0 {
-				v, err = tx.db.convertV2toV3(v)
-				if err != nil {
-					return nil, false, err
-				}
-			}
-		*/
 		return v, true, nil
 	case StorageHistory:
 		return tx.aggCtx.ReadAccountStorageNoStateWithRecent2(key, ts, tx.MdbxTx)
