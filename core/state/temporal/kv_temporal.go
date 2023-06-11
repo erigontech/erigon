@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"sort"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -253,21 +252,23 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 			if err != nil {
 				return nil, nil, err
 			}
-			var force *common.Hash
-			if tx.db.systemContractLookup != nil {
-				if records, ok := tx.db.systemContractLookup[common.BytesToAddress(k)]; ok {
-					p := sort.Search(len(records), func(i int) bool {
-						return records[i].TxNumber > asOfTs
-					})
-					hash := records[p-1].CodeHash
-					force = &hash
+			/*
+				var force *common.Hash
+				if tx.db.systemContractLookup != nil {
+					if records, ok := tx.db.systemContractLookup[common.BytesToAddress(k)]; ok {
+						p := sort.Search(len(records), func(i int) bool {
+							return records[i].TxNumber > asOfTs
+						})
+						hash := records[p-1].CodeHash
+						force = &hash
+					}
 				}
-			}
-			v, err = tx.db.restoreCodeHash(tx.MdbxTx, k, v, force)
-			if err != nil {
-				return nil, nil, err
-			}
-			return k[:20], v, nil
+				v, err = tx.db.restoreCodeHash(tx.MdbxTx, k, v, force)
+				if err != nil {
+					return nil, nil, err
+				}
+			*/
+			return k[:20], common.Copy(v), nil
 		})
 		lastestStateIt, err := tx.RangeAscend(kv.PlainState, fromKey, toKey, -1) // don't apply limit, because need filter
 		if err != nil {
@@ -395,30 +396,32 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 		if !ok || len(v) == 0 {
 			return v, ok, nil
 		}
-		v, err = tx.db.convertV3toV2(v)
-		if err != nil {
-			return nil, false, err
-		}
-		var force *common.Hash
-		if tx.db.systemContractLookup != nil {
-			if records, ok := tx.db.systemContractLookup[common.BytesToAddress(key)]; ok {
-				p := sort.Search(len(records), func(i int) bool {
-					return records[i].TxNumber > ts
-				})
-				hash := records[p-1].CodeHash
-				force = &hash
-			}
-		}
-		v, err = tx.db.restoreCodeHash(tx.MdbxTx, key, v, force)
-		if err != nil {
-			return nil, false, err
-		}
-		if len(v) > 0 {
-			v, err = tx.db.convertV2toV3(v)
+		/*
+			v, err = tx.db.convertV3toV2(v)
 			if err != nil {
 				return nil, false, err
 			}
-		}
+			var force *common.Hash
+			if tx.db.systemContractLookup != nil {
+				if records, ok := tx.db.systemContractLookup[common.BytesToAddress(key)]; ok {
+					p := sort.Search(len(records), func(i int) bool {
+						return records[i].TxNumber > ts
+					})
+					hash := records[p-1].CodeHash
+					force = &hash
+				}
+			}
+			v, err = tx.db.restoreCodeHash(tx.MdbxTx, key, v, force)
+			if err != nil {
+				return nil, false, err
+			}
+			if len(v) > 0 {
+				v, err = tx.db.convertV2toV3(v)
+				if err != nil {
+					return nil, false, err
+				}
+			}
+		*/
 		return v, true, nil
 	case StorageHistory:
 		return tx.aggCtx.ReadAccountStorageNoStateWithRecent2(key, ts, tx.MdbxTx)

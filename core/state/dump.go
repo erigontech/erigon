@@ -172,16 +172,15 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			if err != nil {
 				return nil, err
 			}
-			//TODO: what to do in this case? maybe iterator must skip this values??
-			if len(v) == 0 {
-				continue
-			}
 			if maxResults > 0 && numberOfResults >= maxResults {
 				if nextKey == nil {
 					nextKey = make([]byte, len(k))
 				}
 				copy(nextKey, k)
 				break
+			}
+			if len(v) == 0 {
+				continue
 			}
 
 			if e := acc.DecodeForStorage(v); e != nil {

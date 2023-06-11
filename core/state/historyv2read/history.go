@@ -19,10 +19,13 @@ func RestoreCodeHash(tx kv.Getter, key, v []byte, force *libcommon.Hash) ([]byte
 	}
 	if force != nil {
 		acc.CodeHash = *force
-	} else if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+		v = make([]byte, acc.EncodingLengthForStorage())
+		acc.EncodeForStorage(v)
+		return v, nil
+	}
+	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 		var codeHash []byte
 		var err error
-
 		prefix := make([]byte, length.Addr+length.BlockNum)
 		copy(prefix, key)
 		binary.BigEndian.PutUint64(prefix[length.Addr:], acc.Incarnation)
@@ -33,9 +36,9 @@ func RestoreCodeHash(tx kv.Getter, key, v []byte, force *libcommon.Hash) ([]byte
 		}
 		if len(codeHash) > 0 {
 			acc.CodeHash.SetBytes(codeHash)
+			v = make([]byte, acc.EncodingLengthForStorage())
+			acc.EncodeForStorage(v)
 		}
-		v = make([]byte, acc.EncodingLengthForStorage())
-		acc.EncodeForStorage(v)
 	}
 	return v, nil
 }
