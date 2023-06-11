@@ -112,16 +112,16 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 		logger:           logger,
 	}
 	var err error
-	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountDomain, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, false, false, logger); err != nil {
+	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, false, false, logger); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageDomain, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, true, true, logger); err != nil {
+	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, true, true, logger); err != nil {
 		return nil, err
 	}
-	if a.code, err = NewDomain(dir, a.tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeDomain, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, true, true, logger); err != nil {
+	if a.code, err = NewDomain(dir, a.tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, true, true, logger); err != nil {
 		return nil, err
 	}
-	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentDomain, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, true, true, logger)
+	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, true, true, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -2055,7 +2055,7 @@ func (ac *AggregatorV3Context) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, 
 		return ac.storage.DomainRange(tx, fromKey, toKey, ts, asc, limit)
 	case kv.CodeDomain:
 		return ac.code.DomainRange(tx, fromKey, toKey, ts, asc, limit)
-	case kv.TblCommitmentDomain:
+	case kv.DeprecatedCommitmentDomain:
 		return ac.commitment.DomainRange(tx, fromKey, toKey, ts, asc, limit)
 	default:
 		panic(domain)

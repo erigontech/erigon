@@ -110,25 +110,25 @@ func (sd *SharedDomains) put(table string, key, val []byte) {
 
 func (sd *SharedDomains) puts(table string, key string, val []byte) {
 	switch table {
-	case kv.TblAccountDomain:
+	case kv.DeprecatedAccountDomain:
 		if old, ok := sd.account.Set(key, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
-	case kv.TblCodeDomain:
+	case kv.DeprecatedCodeDomain:
 		if old, ok := sd.code.Set(key, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
-	case kv.TblStorageDomain:
+	case kv.DeprecatedStorageDomain:
 		if old, ok := sd.storage.Set(key, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
-	case kv.TblCommitmentDomain:
+	case kv.DeprecatedCommitmentDomain:
 		if old, ok := sd.commitment.Set(key, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
@@ -150,13 +150,13 @@ func (sd *SharedDomains) get(table string, key []byte) (v []byte, ok bool) {
 	//keyS := *(*string)(unsafe.Pointer(&key))
 	keyS := hex.EncodeToString(key)
 	switch table {
-	case kv.TblAccountDomain:
+	case kv.DeprecatedAccountDomain:
 		v, ok = sd.account.Get(keyS)
-	case kv.TblCodeDomain:
+	case kv.DeprecatedCodeDomain:
 		v, ok = sd.code.Get(keyS)
-	case kv.TblStorageDomain:
+	case kv.DeprecatedStorageDomain:
 		v, ok = sd.storage.Get(keyS)
-	case kv.TblCommitmentDomain:
+	case kv.DeprecatedCommitmentDomain:
 		v, ok = sd.commitment.Get(keyS)
 	default:
 		panic(table)
@@ -169,7 +169,7 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.TblCommitmentDomain, prefix)
+	v0, ok := sd.Get(kv.DeprecatedCommitmentDomain, prefix)
 	if ok {
 		return v0, nil
 	}
@@ -181,7 +181,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, error) {
 }
 
 func (sd *SharedDomains) LatestCode(addr []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.TblCodeDomain, addr)
+	v0, ok := sd.Get(kv.DeprecatedCodeDomain, addr)
 	if ok {
 		return v0, nil
 	}
@@ -193,7 +193,7 @@ func (sd *SharedDomains) LatestCode(addr []byte) ([]byte, error) {
 }
 
 func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.TblAccountDomain, addr)
+	v0, ok := sd.Get(kv.DeprecatedAccountDomain, addr)
 	if ok {
 		return v0, nil
 	}
@@ -210,11 +210,11 @@ func (sd *SharedDomains) ReadsValidBtree(table string, list *KvList) bool {
 
 	var m *btree2.Map[string, []byte]
 	switch table {
-	case kv.TblAccountDomain:
+	case kv.DeprecatedAccountDomain:
 		m = sd.account
-	case kv.TblCodeDomain:
+	case kv.DeprecatedCodeDomain:
 		m = sd.code
-	case kv.TblStorageDomain:
+	case kv.DeprecatedStorageDomain:
 		m = sd.storage
 	default:
 		panic(table)
@@ -231,7 +231,7 @@ func (sd *SharedDomains) ReadsValidBtree(table string, list *KvList) bool {
 }
 
 func (sd *SharedDomains) LatestStorage(addr, loc []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.TblStorageDomain, common.Append(addr, loc))
+	v0, ok := sd.Get(kv.DeprecatedStorageDomain, common.Append(addr, loc))
 	if ok {
 		return v0, nil
 	}
@@ -304,7 +304,7 @@ func (sd *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error
 
 func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []byte) error {
 	sd.Commitment.TouchPlainKey(addr, account, sd.Commitment.TouchAccount)
-	sd.put(kv.TblAccountDomain, addr, account)
+	sd.put(kv.DeprecatedAccountDomain, addr, account)
 	return sd.Account.PutWithPrev(addr, nil, account, prevAccount)
 }
 
@@ -314,7 +314,7 @@ func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, codeHash []byte) e
 	if bytes.Equal(prevCode, code) {
 		return nil
 	}
-	sd.put(kv.TblCodeDomain, addr, code)
+	sd.put(kv.DeprecatedCodeDomain, addr, code)
 	if len(code) == 0 {
 		return sd.Code.DeleteWithPrev(addr, nil, prevCode)
 	}
@@ -322,19 +322,19 @@ func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, codeHash []byte) e
 }
 
 func (sd *SharedDomains) UpdateCommitmentData(prefix []byte, data []byte) error {
-	sd.put(kv.TblCommitmentDomain, prefix, data)
+	sd.put(kv.DeprecatedCommitmentDomain, prefix, data)
 	return sd.Commitment.Put(prefix, nil, data)
 }
 
 func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	sd.Commitment.TouchPlainKey(addr, nil, sd.Commitment.TouchAccount)
 
-	sd.put(kv.TblAccountDomain, addr, nil)
+	sd.put(kv.DeprecatedAccountDomain, addr, nil)
 	if err := sd.Account.DeleteWithPrev(addr, nil, prev); err != nil {
 		return err
 	}
 
-	sd.put(kv.TblCodeDomain, addr, nil)
+	sd.put(kv.DeprecatedCodeDomain, addr, nil)
 	// commitment delete already has been applied via account
 	if err := sd.Code.Delete(addr, nil); err != nil {
 		return err
@@ -347,7 +347,7 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 		if !bytes.HasPrefix(k, addr) {
 			return
 		}
-		sd.put(kv.TblStorageDomain, k, nil)
+		sd.put(kv.DeprecatedStorageDomain, k, nil)
 		sd.Commitment.TouchPlainKey(k, nil, sd.Commitment.TouchStorage)
 		err = sd.Storage.DeleteWithPrev(k, nil, v)
 
@@ -365,7 +365,7 @@ func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value, preVal []b
 	composite := common.Append(addr, loc)
 
 	sd.Commitment.TouchPlainKey(composite, value, sd.Commitment.TouchStorage)
-	sd.put(kv.TblStorageDomain, composite, value)
+	sd.put(kv.DeprecatedStorageDomain, composite, value)
 	if len(value) == 0 {
 		return sd.Storage.DeleteWithPrev(addr, loc, preVal)
 	}
@@ -642,19 +642,19 @@ func (sd *SharedDomains) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix stri
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
 
-	if err := sd.flushBtree(ctx, rwTx, kv.TblAccountDomain, sd.account, logPrefix, logEvery); err != nil {
+	if err := sd.flushBtree(ctx, rwTx, kv.DeprecatedAccountDomain, sd.account, logPrefix, logEvery); err != nil {
 		return err
 	}
 	sd.account.Clear()
-	if err := sd.flushBtree(ctx, rwTx, kv.TblStorageDomain, sd.storage, logPrefix, logEvery); err != nil {
+	if err := sd.flushBtree(ctx, rwTx, kv.DeprecatedStorageDomain, sd.storage, logPrefix, logEvery); err != nil {
 		return err
 	}
 	sd.storage.Clear()
-	if err := sd.flushBtree(ctx, rwTx, kv.TblCodeDomain, sd.code, logPrefix, logEvery); err != nil {
+	if err := sd.flushBtree(ctx, rwTx, kv.DeprecatedCodeDomain, sd.code, logPrefix, logEvery); err != nil {
 		return err
 	}
 	sd.code.Clear()
-	if err := sd.flushBtree(ctx, rwTx, kv.TblCommitmentDomain, sd.commitment, logPrefix, logEvery); err != nil {
+	if err := sd.flushBtree(ctx, rwTx, kv.DeprecatedCommitmentDomain, sd.commitment, logPrefix, logEvery); err != nil {
 		return err
 	}
 	sd.commitment.Clear()

@@ -368,10 +368,10 @@ const (
 	// Domains/Histry/InvertedIndices
 	// Contants have "Tbl" prefix, to avoid collision with actual Domain names
 	// This constants is very rarely used in APP, but Domain/History/Idx names are widely used
-	TblAccountDomain    = "AccountsDomain"
-	TblStorageDomain    = "StorageDomain"
-	TblCodeDomain       = "CodeDomain"
-	TblCommitmentDomain = "CommitmentDomain"
+	DeprecatedAccountDomain    = "AccountsDomain"
+	DeprecatedStorageDomain    = "StorageDomain"
+	DeprecatedCodeDomain       = "CodeDomain"
+	DeprecatedCommitmentDomain = "CommitmentDomain"
 
 	TblAccountKeys        = "AccountKeys"
 	TblAccountVals        = "AccountVals"
@@ -535,30 +535,27 @@ var ChaindataTables = []string{
 	BorReceipts,
 	BorTxLookup,
 	BorSeparate,
+
 	TblAccountKeys,
 	TblAccountVals,
-	TblAccountDomain,
 	TblAccountHistoryKeys,
 	TblAccountHistoryVals,
 	TblAccountIdx,
 
 	TblStorageKeys,
 	TblStorageVals,
-	TblStorageDomain,
 	TblStorageHistoryKeys,
 	TblStorageHistoryVals,
 	TblStorageIdx,
 
 	TblCodeKeys,
 	TblCodeVals,
-	TblCodeDomain,
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
 
 	TblCommitmentKeys,
 	TblCommitmentVals,
-	TblCommitmentDomain,
 	TblCommitmentHistoryKeys,
 	TblCommitmentHistoryVals,
 	TblCommitmentIdx,
