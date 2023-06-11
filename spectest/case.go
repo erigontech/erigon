@@ -7,6 +7,7 @@ import (
 
 	"gfx.cafe/util/go/generic"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/transition/machine"
 )
 
 type TestCase struct {
@@ -16,6 +17,8 @@ type TestCase struct {
 	HandlerName   string
 	SuiteName     string
 	CaseName      string
+
+	Machine machine.Interface
 }
 
 func (t *TestCase) Version() clparams.StateVersion {

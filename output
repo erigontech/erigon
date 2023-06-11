@@ -1,0 +1,220 @@
+?   	github.com/ledgerwatch/erigon	[no test files]
+ok  	github.com/ledgerwatch/erigon/accounts/abi	(cached)
+ok  	github.com/ledgerwatch/erigon/accounts/abi/bind	(cached)
+?   	github.com/ledgerwatch/erigon/cl/beacon	[no test files]
+ok  	github.com/ledgerwatch/erigon/accounts/abi/bind/backends	(cached)
+?   	github.com/ledgerwatch/erigon/cl/phase1	[no test files]
+ok  	github.com/ledgerwatch/erigon/cl/clparams	(cached)
+ok  	github.com/ledgerwatch/erigon/cl/clparams/initial_state	(cached)
+ok  	github.com/ledgerwatch/erigon/cl/cltypes	(cached)
+ok  	github.com/ledgerwatch/erigon/cl/cltypes/solid	(cached)
+ok  	github.com/ledgerwatch/erigon/cl/fork	(cached)
+ok  	github.com/ledgerwatch/erigon/cl/freezer	(cached)
+ok  	github.com/ledgerwatch/erigon/cl/merkle_tree	(cached)
+ok  	github.com/ledgerwatch/erigon/cl/phase1/cache	(cached)
+?   	github.com/ledgerwatch/erigon/cl/phase1/core	[no test files]
+ok  	github.com/ledgerwatch/erigon/cl/phase1/core/rawdb	(cached)
+?   	github.com/ledgerwatch/erigon/cl/phase1/core/state/lru	[no test files]
+ok  	github.com/ledgerwatch/erigon/cl/phase1/core/state	(cached)
+ok  	github.com/ledgerwatch/erigon/cl/phase1/core/state/raw	(cached)
+ok  	github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling	(cached)
+?   	github.com/ledgerwatch/erigon/cl/phase1/core/transition/machine	[no test files]
+ok  	github.com/ledgerwatch/erigon/cl/phase1/core/transition	(cached)
+?   	github.com/ledgerwatch/erigon/cl/phase1/execution_client	[no test files]
+ok  	github.com/ledgerwatch/erigon/cl/phase1/forkchoice	(cached)
+ok  	github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph	(cached)
+?   	github.com/ledgerwatch/erigon/cl/phase1/network	[no test files]
+?   	github.com/ledgerwatch/erigon/cl/phase1/stages	[no test files]
+?   	github.com/ledgerwatch/erigon/cl/rpc	[no test files]
+?   	github.com/ledgerwatch/erigon/cl/spectest/consensus_tests	[no test files]
+?   	github.com/ledgerwatch/erigon/cl/sentinel/peers	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/abigen	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/bootnode	[no test files]
+ok  	github.com/ledgerwatch/erigon/cl/ssz	(cached)
+ok  	github.com/ledgerwatch/erigon/cl/utils	(cached)
+?   	github.com/ledgerwatch/erigon/cmd/caplin-phase1	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/caplin-phase1/caplin1	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/devnet	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/devnet/commands	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/devnet/contracts	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/devnet/models	[no test files]
+ok  	github.com/ledgerwatch/erigon/cmd/devnet/devnetutils	(cached)
+?   	github.com/ledgerwatch/erigon/cmd/devnet/services	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/downloader	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/downloader/downloadernat	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/erigon	[no test files]
+ok  	github.com/ledgerwatch/erigon/cmd/devnet/node	(cached)
+ok  	github.com/ledgerwatch/erigon/cmd/devnet/requests	(cached)
+?   	github.com/ledgerwatch/erigon/cmd/erigon-el	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/erigon-el/backend	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/erigon-el/eth1	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/erigoncustom	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/erigon-el-mock	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/erigon-el/stages	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/evm/internal/compiler	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/evm/internal/t8ntool	[no test files]
+ok  	github.com/ledgerwatch/erigon/cmd/evm	(cached)
+?   	github.com/ledgerwatch/erigon/cmd/hack	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/hack/db	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/hack/flow	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/hack/tool	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/integration	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/integration/commands	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/observer	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/observer/observer/node_utils	[no test files]
+ok  	github.com/ledgerwatch/erigon/cmd/observer/database	(cached)
+ok  	github.com/ledgerwatch/erigon/cmd/observer/observer	(cached)
+?   	github.com/ledgerwatch/erigon/cmd/observer/reports	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/observer/utils	[no test files]
+ok  	github.com/ledgerwatch/erigon/cmd/observer/observer/sentry_candidates	(cached)
+?   	github.com/ledgerwatch/erigon/cmd/p2psim	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/pics	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/pics/contracts	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/rlpdump	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/rpcdaemon	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands/contracts	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql/graph	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql/graph/model	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/rpctest	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/sentinel/cli	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/sentinel	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/sentry	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/state	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/state/commands	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/state/exec22	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/state/exec3	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/state/stats	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/state/verify	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/txpool	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/verkle	[no test files]
+?   	github.com/ledgerwatch/erigon/cmd/verkle/verkletrie	[no test files]
+ok  	github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands	(cached)
+ok  	github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql	(cached)
+ok  	github.com/ledgerwatch/erigon/cmd/rpcdaemon/health	(cached)
+ok  	github.com/ledgerwatch/erigon/cmd/rpctest/rpctest	(cached)
+ok  	github.com/ledgerwatch/erigon/cmd/sentinel/sentinel	(cached)
+ok  	github.com/ledgerwatch/erigon/cmd/sentry/sentry	(cached)
+ok  	github.com/ledgerwatch/erigon/cmd/utils	(cached)
+ok  	github.com/ledgerwatch/erigon/cmd/utils/flags	(cached)
+ok  	github.com/ledgerwatch/erigon/common	(cached)
+ok  	github.com/ledgerwatch/erigon/common/bitutil	(cached)
+ok  	github.com/ledgerwatch/erigon/common/changeset	(cached)
+?   	github.com/ledgerwatch/erigon/common/debug	[no test files]
+ok  	github.com/ledgerwatch/erigon/common/compiler	(cached)
+?   	github.com/ledgerwatch/erigon/common/debugprint	[no test files]
+ok  	github.com/ledgerwatch/erigon/common/dbutils	(cached)
+?   	github.com/ledgerwatch/erigon/common/paths	[no test files]
+?   	github.com/ledgerwatch/erigon/common/u256	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus	[no test files]
+ok  	github.com/ledgerwatch/erigon/common/eth2shuffle	(cached)
+ok  	github.com/ledgerwatch/erigon/common/fdlimit	(cached)
+ok  	github.com/ledgerwatch/erigon/common/hexutil	(cached)
+ok  	github.com/ledgerwatch/erigon/common/math	(cached)
+ok  	github.com/ledgerwatch/erigon/common/mclock	(cached)
+ok  	github.com/ledgerwatch/erigon/common/prque	(cached)
+?   	github.com/ledgerwatch/erigon/consensus/aura/auraabi	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus/aura/contracts	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus/bor/abi	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus/bor/contract	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus/bor/clerk	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus/bor/statefull	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus/bor/heimdall/span	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus/bor/valset	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus/db	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg	[no test files]
+?   	github.com/ledgerwatch/erigon/consensus/bor/heimdall	[no test files]
+ok  	github.com/ledgerwatch/erigon/consensus/aura	(cached)
+ok  	github.com/ledgerwatch/erigon/consensus/bor	(cached)
+ok  	github.com/ledgerwatch/erigon/consensus/clique	(cached)
+ok  	github.com/ledgerwatch/erigon/consensus/ethash	(cached)
+?   	github.com/ledgerwatch/erigon/core/rawdb/blockio	[no test files]
+?   	github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers	[no test files]
+?   	github.com/ledgerwatch/erigon/core/rawdb/rawdbreset	[no test files]
+?   	github.com/ledgerwatch/erigon/core/state/contracts	[no test files]
+?   	github.com/ledgerwatch/erigon/core/state/historyv2read	[no test files]
+?   	github.com/ledgerwatch/erigon/core/state/temporal	[no test files]
+?   	github.com/ledgerwatch/erigon/core/systemcontracts	[no test files]
+?   	github.com/ledgerwatch/erigon/core/vm/evmtypes	[no test files]
+?   	github.com/ledgerwatch/erigon/core/vm/stack	[no test files]
+?   	github.com/ledgerwatch/erigon/crypto/bn256	[no test files]
+?   	github.com/ledgerwatch/erigon/crypto/cryptopool	[no test files]
+?   	github.com/ledgerwatch/erigon/crypto/kzg	[no test files]
+?   	github.com/ledgerwatch/erigon/dataflow	[no test files]
+?   	github.com/ledgerwatch/erigon/diagnostics	[no test files]
+?   	github.com/ledgerwatch/erigon/eth	[no test files]
+?   	github.com/ledgerwatch/erigon/eth/calltracer	[no test files]
+?   	github.com/ledgerwatch/erigon/eth/ethconfig	[no test files]
+?   	github.com/ledgerwatch/erigon/eth/ethconfig/estimate	[no test files]
+?   	github.com/ledgerwatch/erigon/eth/ethconsensusconfig	[no test files]
+?   	github.com/ledgerwatch/erigon/eth/ethutils	[no test files]
+ok  	github.com/ledgerwatch/erigon/consensus/merge	0.196s
+ok  	github.com/ledgerwatch/erigon/consensus/misc	(cached)
+ok  	github.com/ledgerwatch/erigon/core	(cached)
+ok  	github.com/ledgerwatch/erigon/core/asm	(cached)
+ok  	github.com/ledgerwatch/erigon/core/forkid	(cached)
+ok  	github.com/ledgerwatch/erigon/core/rawdb	(cached)
+ok  	github.com/ledgerwatch/erigon/core/state	(cached)
+ok  	github.com/ledgerwatch/erigon/core/types	(cached)
+ok  	github.com/ledgerwatch/erigon/core/types/accounts	(cached)
+ok  	github.com/ledgerwatch/erigon/core/vm	(cached)
+ok  	github.com/ledgerwatch/erigon/core/vm/runtime	(cached)
+ok  	github.com/ledgerwatch/erigon/crypto	(cached)
+ok  	github.com/ledgerwatch/erigon/crypto/blake2b	(cached)
+ok  	github.com/ledgerwatch/erigon/crypto/bls12381	(cached)
+ok  	github.com/ledgerwatch/erigon/crypto/bn256/cloudflare	(cached)
+ok  	github.com/ledgerwatch/erigon/crypto/bn256/google	(cached)
+ok  	github.com/ledgerwatch/erigon/crypto/ecies	(cached)
+ok  	github.com/ledgerwatch/erigon/eth/filters	(cached)
+?   	github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg	[no test files]
+?   	github.com/ledgerwatch/erigon/eth/integrity	[no test files]
+?   	github.com/ledgerwatch/erigon/eth/stagedsync/stages	[no test files]
+?   	github.com/ledgerwatch/erigon/eth/tracers/js/internal/tracers	[no test files]
+?   	github.com/ledgerwatch/erigon/eth/tracers/native	[no test files]
+?   	github.com/ledgerwatch/erigon/ethdb	[no test files]
+?   	github.com/ledgerwatch/erigon/ethdb/cbor	[no test files]
+?   	github.com/ledgerwatch/erigon/ethstats	[no test files]
+?   	github.com/ledgerwatch/erigon/metrics/exp	[no test files]
+?   	github.com/ledgerwatch/erigon/metrics/methelp	[no test files]
+?   	github.com/ledgerwatch/erigon/p2p/simulations	[no test files]
+?   	github.com/ledgerwatch/erigon/p2p/simulations/pipes	[no test files]
+ok  	github.com/ledgerwatch/erigon/eth/gasprice	2.160s
+ok  	github.com/ledgerwatch/erigon/eth/protocols/eth	1.915s
+ok  	github.com/ledgerwatch/erigon/eth/stagedsync	3.374s
+ok  	github.com/ledgerwatch/erigon/eth/tracers	1.593s
+ok  	github.com/ledgerwatch/erigon/eth/tracers/internal/tracetest	3.496s
+ok  	github.com/ledgerwatch/erigon/eth/tracers/js	3.610s
+ok  	github.com/ledgerwatch/erigon/eth/tracers/logger	2.290s
+ok  	github.com/ledgerwatch/erigon/ethdb/olddb	0.087s
+ok  	github.com/ledgerwatch/erigon/ethdb/privateapi	3.956s
+ok  	github.com/ledgerwatch/erigon/ethdb/prune	0.041s
+ok  	github.com/ledgerwatch/erigon/event	0.484s
+ok  	github.com/ledgerwatch/erigon/metrics	0.110s
+ok  	github.com/ledgerwatch/erigon/migrations	0.458s
+ok  	github.com/ledgerwatch/erigon/node	2.832s
+ok  	github.com/ledgerwatch/erigon/node/nodecfg	2.141s
+ok  	github.com/ledgerwatch/erigon/p2p	0.659s
+ok  	github.com/ledgerwatch/erigon/p2p/discover	4.553s
+ok  	github.com/ledgerwatch/erigon/p2p/discover/v4wire	0.167s
+ok  	github.com/ledgerwatch/erigon/p2p/discover/v5wire	0.692s
+ok  	github.com/ledgerwatch/erigon/p2p/dnsdisc	0.898s
+ok  	github.com/ledgerwatch/erigon/p2p/enode	0.765s
+ok  	github.com/ledgerwatch/erigon/p2p/enr	0.014s
+ok  	github.com/ledgerwatch/erigon/p2p/nat	0.507s
+ok  	github.com/ledgerwatch/erigon/p2p/netutil	0.014s
+ok  	github.com/ledgerwatch/erigon/p2p/rlpx	0.431s
+ok  	github.com/ledgerwatch/erigon/p2p/simulations/adapters	1.018s

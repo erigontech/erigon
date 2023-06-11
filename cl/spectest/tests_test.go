@@ -8,11 +8,12 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 	"github.com/ledgerwatch/erigon/cl/spectest/consensus_tests"
 
 	"github.com/ledgerwatch/erigon/spectest"
 )
 
 func Test(t *testing.T) {
-	spectest.RunCases(t, consensus_tests.TestFormats, os.DirFS("./tests"))
+	spectest.RunCases(t, consensus_tests.TestFormats, transition.DefaultMachine, os.DirFS("./tests"))
 }
