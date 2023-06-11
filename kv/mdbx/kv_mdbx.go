@@ -554,7 +554,7 @@ type MdbxTx struct {
 	db               *MdbxKV
 	cursors          map[uint64]*mdbx.Cursor
 	streams          []kv.Closer
-	statelessCursors map[string]kv.Cursor
+	statelessCursors map[string]kv.RwCursor
 	readOnly         bool
 	cursorID         uint64
 	ctx              context.Context
@@ -897,18 +897,18 @@ func (tx *MdbxTx) closeCursors() {
 
 func (tx *MdbxTx) statelessCursor(bucket string) (kv.RwCursor, error) {
 	if tx.statelessCursors == nil {
-		tx.statelessCursors = make(map[string]kv.Cursor)
+		tx.statelessCursors = make(map[string]kv.RwCursor)
 	}
 	c, ok := tx.statelessCursors[bucket]
 	if !ok {
 		var err error
-		c, err = tx.Cursor(bucket)
+		c, err = tx.RwCursor(bucket)
 		if err != nil {
 			return nil, err
 		}
 		tx.statelessCursors[bucket] = c
 	}
-	return c.(kv.RwCursor), nil
+	return c, nil
 }
 
 func (tx *MdbxTx) Put(table string, k, v []byte) error {
@@ -1099,9 +1099,6 @@ func (c *MdbxCursor) delAllDupData() error                 { return c.c.Del(mdbx
 func (c *MdbxCursor) put(k, v []byte) error                { return c.c.Put(k, v, 0) }
 func (c *MdbxCursor) putCurrent(k, v []byte) error         { return c.c.Put(k, v, mdbx.Current) }
 func (c *MdbxCursor) putNoOverwrite(k, v []byte) error     { return c.c.Put(k, v, mdbx.NoOverwrite) }
-func (c *MdbxCursor) putNoDupData(k, v []byte) error       { return c.c.Put(k, v, mdbx.NoDupData) }
-func (c *MdbxCursor) append(k, v []byte) error             { return c.c.Put(k, v, mdbx.Append) }
-func (c *MdbxCursor) appendDup(k, v []byte) error          { return c.c.Put(k, v, mdbx.AppendDup) }
 func (c *MdbxCursor) getBoth(k, v []byte) ([]byte, error) {
 	_, v, err := c.c.Get(k, v, mdbx.GetBoth)
 	return v, err
@@ -1447,11 +1444,8 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 // Cast your cursor to *MdbxCursor to use this method.
 // Return error - if provided data will not sorted (or bucket have old records which mess with new in sorting manner).
 func (c *MdbxCursor) Append(k []byte, v []byte) error {
-	if len(k) == 0 {
-		return fmt.Errorf("mdbx doesn't support empty keys. bucket: %s", c.bucketName)
-	}
-	b := c.bucketCfg
-	if b.AutoDupSortKeysConversion {
+	if c.bucketCfg.AutoDupSortKeysConversion {
+		b := c.bucketCfg
 		from, to := b.DupFromLen, b.DupToLen
 		if len(k) != from && len(k) >= to {
 			return fmt.Errorf("append dupsort bucket: %s, can have keys of len==%d and len<%d. key: %x,%d", c.bucketName, from, to, k, len(k))
@@ -1463,13 +1457,14 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 		}
 	}
 
-	if b.Flags&mdbx.DupSort != 0 {
-		if err := c.appendDup(k, v); err != nil {
+	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
+		if err := c.c.Put(k, v, mdbx.AppendDup); err != nil {
 			return fmt.Errorf("bucket: %s, %w", c.bucketName, err)
 		}
 		return nil
 	}
-	if err := c.append(k, v); err != nil {
+
+	if err := c.c.Put(k, v, mdbx.Append); err != nil {
 		return fmt.Errorf("bucket: %s, %w", c.bucketName, err)
 	}
 	return nil
@@ -1601,14 +1596,14 @@ func (c *MdbxDupSortCursor) Append(k []byte, v []byte) error {
 }
 
 func (c *MdbxDupSortCursor) AppendDup(k []byte, v []byte) error {
-	if err := c.appendDup(k, v); err != nil {
+	if err := c.c.Put(k, v, mdbx.AppendDup); err != nil {
 		return fmt.Errorf("in AppendDup: bucket=%s, %w", c.bucketName, err)
 	}
 	return nil
 }
 
-func (c *MdbxDupSortCursor) PutNoDupData(key, value []byte) error {
-	if err := c.putNoDupData(key, value); err != nil {
+func (c *MdbxDupSortCursor) PutNoDupData(k, v []byte) error {
+	if err := c.c.Put(k, v, mdbx.NoDupData); err != nil {
 		return fmt.Errorf("in PutNoDupData: %w", err)
 	}
 
