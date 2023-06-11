@@ -248,28 +248,25 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	}
 	switch name {
 	case AccountsDomain:
-		histStateIt, err := tx.aggCtx.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
+		it, err = tx.aggCtx.DomainRange(tx.MdbxTx, kv.AccountDomain, fromKey, toKey, asOfTs, order.Asc, limit)
 		if err != nil {
 			return nil, err
 		}
-		lastestStateIt, err := tx.aggCtx.DomainRangeLatest(tx.MdbxTx, kv.AccountDomain, fromKey, toKey, limit)
-		if err != nil {
-			return nil, err
-		}
-		it = iter.UnionKV(histStateIt, lastestStateIt, limit)
 	case StorageDomain:
-		storageIt, err := tx.aggCtx.StorageHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
+		it, err = tx.aggCtx.DomainRange(tx.MdbxTx, kv.StorageDomain, fromKey, toKey, asOfTs, order.Asc, limit)
 		if err != nil {
 			return nil, err
 		}
-
-		lastestStateIt, err := tx.aggCtx.DomainRangeLatest(tx.MdbxTx, kv.StorageDomain, fromKey, toKey, limit)
-		if err != nil {
-			return nil, err
-		}
-		it = iter.UnionKV(storageIt, lastestStateIt, limit)
 	case CodeDomain:
-		panic("not implemented yet")
+		it, err = tx.aggCtx.DomainRange(tx.MdbxTx, kv.Code, fromKey, toKey, asOfTs, order.Asc, limit)
+		if err != nil {
+			return nil, err
+		}
+	case CommitmentDomain:
+		it, err = tx.aggCtx.DomainRange(tx.MdbxTx, kv.CommitmentDomain, fromKey, toKey, asOfTs, order.Asc, limit)
+		if err != nil {
+			return nil, err
+		}
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
