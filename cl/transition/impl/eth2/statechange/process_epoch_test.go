@@ -1,4 +1,4 @@
-package statechange_test
+package statechange
 
 import (
 	_ "embed"

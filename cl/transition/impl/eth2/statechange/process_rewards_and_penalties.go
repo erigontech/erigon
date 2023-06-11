@@ -184,7 +184,7 @@ func processRewardsAndPenaltiesPhase0(s *state.BeaconState) (err error) {
 			}
 			if currentValidator.Slashed() || !previousMatchingTargetAttester {
 				// Increase penalities linearly if network is leaking.
-				if state.DecreaseBalance(s.BeaconState, index, currentValidator.EffectiveBalance()*state2.FinalityDelay(s.BeaconState)/beaconConfig.InactivityPenaltyQuotient); err != nil {
+				if state.DecreaseBalance(s.BeaconState, index, currentValidator.EffectiveBalance()*state.FinalityDelay(s.BeaconState)/beaconConfig.InactivityPenaltyQuotient); err != nil {
 					return err
 				}
 			}

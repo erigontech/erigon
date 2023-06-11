@@ -1,4 +1,4 @@
-package eth2
+package eth2_test
 
 import (
 	_ "embed"
