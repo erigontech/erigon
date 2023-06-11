@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -624,6 +625,7 @@ type CursorItem struct {
 	iter     btree2.MapIter[string, []byte]
 	dg       *compress.Getter
 	dg2      *compress.Getter
+	btCursor *Cursor
 	key      []byte
 	val      []byte
 	endTxNum uint64
@@ -1655,7 +1657,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	return v, b, err
 }
 
-func (sd *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
+func (sd *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v []byte)) error {
 	sd.d.stats.FilesQueries.Add(1)
 
 	var cp CursorHeap
@@ -1663,7 +1665,7 @@ func (sd *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 	var k, v []byte
 	var err error
 
-	keysCursor, err := sd.d.tx.CursorDupSort(sd.d.keysTable)
+	keysCursor, err := roTx.CursorDupSort(sd.d.keysTable)
 	if err != nil {
 		return err
 	}
@@ -1677,7 +1679,7 @@ func (sd *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 		copy(keySuffix[len(k):], v)
 		step := ^binary.BigEndian.Uint64(v)
 		txNum := step * sd.d.aggregationStep
-		if v, err = sd.d.tx.GetOne(sd.d.valsTable, keySuffix); err != nil {
+		if v, err = roTx.GetOne(sd.d.valsTable, keySuffix); err != nil {
 			return err
 		}
 		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
@@ -1705,6 +1707,7 @@ func (sd *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 	for cp.Len() > 0 {
 		lastKey := common.Copy(cp[0].key)
 		lastVal := common.Copy(cp[0].val)
+
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := cp[0]
@@ -1731,7 +1734,7 @@ func (sd *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)
-					if v, err = sd.d.tx.GetOne(sd.d.valsTable, keySuffix); err != nil {
+					if v, err = roTx.GetOne(sd.d.valsTable, keySuffix); err != nil {
 						return err
 					}
 					ci1.val = common.Copy(v)
@@ -1746,4 +1749,140 @@ func (sd *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 		}
 	}
 	return nil
+}
+
+func (sd *DomainContext) IteratePrefix2(from, to []byte, roTx kv.Tx, limit int) (iter.KV, error) {
+	fit := &DomainLatestIterFile{from: from, to: to, limit: limit, dc: sd,
+		roTx:         roTx,
+		idxKeysTable: sd.d.keysTable,
+		h:            &CursorHeap{},
+	}
+	if err := fit.init(sd); err != nil {
+		return nil, err
+	}
+	return fit, nil
+}
+
+type DomainLatestIterFile struct {
+	dc *DomainContext
+
+	roTx          kv.Tx
+	idxKeysTable  string
+	txNum2kCursor kv.CursorDupSort
+
+	limit int
+
+	from, to []byte
+	nextVal  []byte
+	nextKey  []byte
+
+	h *CursorHeap
+
+	k, v, kBackup, vBackup []byte
+}
+
+func (hi *DomainLatestIterFile) Close() {
+}
+func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
+	heap.Init(hi.h)
+	var k, v []byte
+	var err error
+
+	keysCursor, err := hi.roTx.CursorDupSort(dc.d.keysTable)
+	if err != nil {
+		return err
+	}
+	if k, v, err = keysCursor.Seek(hi.from); err != nil {
+		return err
+	}
+	if k != nil && (hi.to == nil || bytes.Compare(k, hi.to) < 0) {
+		keySuffix := make([]byte, len(k)+8)
+		copy(keySuffix, k)
+		copy(keySuffix[len(k):], v)
+		step := ^binary.BigEndian.Uint64(v)
+		txNum := step * dc.d.aggregationStep
+		if v, err = hi.roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
+			return err
+		}
+		heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
+	}
+
+	for i, item := range dc.files {
+		bg := dc.statelessBtree(i)
+		if bg.Empty() {
+			continue
+		}
+
+		btCursor, err := bg.Seek(hi.from)
+		if err != nil {
+			return err
+		}
+
+		key := btCursor.Key()
+		if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
+			val := btCursor.Value()
+			heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: btCursor, endTxNum: item.endTxNum, reverse: true})
+		}
+	}
+	return hi.advanceInFiles()
+}
+
+func (hi *DomainLatestIterFile) advanceInFiles() error {
+	for hi.h.Len() > 0 {
+		lastKey := common.Copy((*hi.h)[0].key)
+		lastVal := common.Copy((*hi.h)[0].val)
+
+		// Advance all the items that have this key (including the top)
+		for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {
+			ci1 := heap.Pop(hi.h).(*CursorItem)
+			switch ci1.t {
+			case FILE_CURSOR:
+				if ci1.btCursor.Next() {
+					ci1.key = ci1.btCursor.Key()
+					ci1.val = ci1.btCursor.Value()
+					if ci1.key != nil && (hi.to == nil || bytes.Compare(ci1.key, hi.to) < 0) {
+						heap.Push(hi.h, ci1)
+					}
+				}
+			case DB_CURSOR:
+				k, v, err := ci1.c.NextNoDup()
+				if err != nil {
+					return err
+				}
+				if k != nil && (hi.to == nil || bytes.Compare(k, hi.to) < 0) {
+					ci1.key = common.Copy(k)
+					keySuffix := make([]byte, len(k)+8)
+					copy(keySuffix, k)
+					copy(keySuffix[len(k):], v)
+					if v, err = hi.roTx.GetOne(hi.dc.d.valsTable, keySuffix); err != nil {
+						return err
+					}
+					ci1.val = common.Copy(v)
+					heap.Push(hi.h, ci1)
+				}
+			}
+		}
+		if len(lastVal) > 0 {
+			hi.nextKey, hi.nextVal = lastKey, lastVal
+			return nil // founc
+		}
+	}
+	hi.nextKey = nil
+	return nil
+}
+
+func (hi *DomainLatestIterFile) HasNext() bool {
+	return hi.limit != 0 && hi.nextKey != nil
+}
+
+func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
+	hi.limit--
+	hi.k, hi.v = append(hi.k[:0], hi.nextKey...), append(hi.v[:0], hi.nextVal...)
+
+	// Satisfy iter.Dual Invariant 2
+	hi.k, hi.kBackup, hi.v, hi.vBackup = hi.kBackup, hi.k, hi.vBackup, hi.v
+	if err := hi.advanceInFiles(); err != nil {
+		return nil, nil, err
+	}
+	return hi.kBackup, hi.vBackup, nil
 }

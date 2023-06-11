@@ -990,7 +990,7 @@ func (a *Aggregator) DeleteAccount(addr []byte) error {
 		return err
 	}
 	var e error
-	if err := a.storage.defaultDc.IteratePrefix(addr, func(k, _ []byte) {
+	if err := a.storage.defaultDc.IteratePrefix(a.storage.tx, addr, func(k, _ []byte) {
 		if !bytes.HasPrefix(k, addr) {
 			return
 		}

@@ -163,16 +163,32 @@ func TestIterationBasic(t *testing.T) {
 	err = d.Put([]byte("addr3"), []byte("loc2"), []byte("value1"))
 	require.NoError(t, err)
 
-	var keys, vals []string
 	dc := d.MakeContext()
 	defer dc.Close()
-	err = dc.IteratePrefix([]byte("addr2"), func(k, v []byte) {
-		keys = append(keys, string(k))
-		vals = append(vals, string(v))
-	})
-	require.NoError(t, err)
-	require.Equal(t, []string{"addr2loc1", "addr2loc2"}, keys)
-	require.Equal(t, []string{"value1", "value1"}, vals)
+
+	{
+		var keys, vals []string
+		err = dc.IteratePrefix(tx, []byte("addr2"), func(k, v []byte) {
+			keys = append(keys, string(k))
+			vals = append(vals, string(v))
+		})
+		require.NoError(t, err)
+		require.Equal(t, []string{"addr2loc1", "addr2loc2"}, keys)
+		require.Equal(t, []string{"value1", "value1"}, vals)
+	}
+	{
+		var keys, vals []string
+		iter2, err := dc.IteratePrefix2([]byte("addr2"), []byte("addr3"), tx, -1)
+		require.NoError(t, err)
+		for iter2.HasNext() {
+			k, v, err := iter2.Next()
+			require.NoError(t, err)
+			keys = append(keys, string(k))
+			vals = append(vals, string(v))
+		}
+		require.Equal(t, []string{"addr2loc1", "addr2loc2"}, keys)
+		require.Equal(t, []string{"value1", "value1"}, vals)
+	}
 }
 
 func TestAfterPrune(t *testing.T) {
@@ -409,17 +425,32 @@ func TestIterationMultistep(t *testing.T) {
 		}()
 	}
 
-	var keys []string
-	var vals []string
 	dc := d.MakeContext()
 	defer dc.Close()
-	err = dc.IteratePrefix([]byte("addr2"), func(k, v []byte) {
-		keys = append(keys, string(k))
-		vals = append(vals, string(v))
-	})
-	require.NoError(t, err)
-	require.Equal(t, []string{"addr2loc2", "addr2loc3", "addr2loc4"}, keys)
-	require.Equal(t, []string{"value1", "value1", "value1"}, vals)
+
+	{
+		var keys, vals []string
+		err = dc.IteratePrefix(tx, []byte("addr2"), func(k, v []byte) {
+			keys = append(keys, string(k))
+			vals = append(vals, string(v))
+		})
+		require.NoError(t, err)
+		require.Equal(t, []string{"addr2loc2", "addr2loc3", "addr2loc4"}, keys)
+		require.Equal(t, []string{"value1", "value1", "value1"}, vals)
+	}
+	{
+		var keys, vals []string
+		iter2, err := dc.IteratePrefix2([]byte("addr2"), []byte("addr3"), tx, -1)
+		require.NoError(t, err)
+		for iter2.HasNext() {
+			k, v, err := iter2.Next()
+			require.NoError(t, err)
+			keys = append(keys, string(k))
+			vals = append(vals, string(v))
+		}
+		require.Equal(t, []string{"addr2loc2", "addr2loc3", "addr2loc4"}, keys)
+		require.Equal(t, []string{"value1", "value1", "value1"}, vals)
+	}
 }
 
 func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64) {
@@ -796,7 +827,7 @@ func TestScanStaticFilesD(t *testing.T) {
 func TestCollationBuildInMem(t *testing.T) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	_, db, d := testDbAndDomain(t)
+	_, db, d := testDbAndDomain(t, log.New())
 	ctx := context.Background()
 	defer d.Close()
 
@@ -892,7 +923,7 @@ func TestCollationBuildInMem(t *testing.T) {
 }
 
 func TestDomainContext_IteratePrefix(t *testing.T) {
-	_, db, d := testDbAndDomain(t)
+	_, db, d := testDbAndDomain(t, log.New())
 	defer db.Close()
 	defer d.Close()
 
@@ -925,16 +956,34 @@ func TestDomainContext_IteratePrefix(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	counter := 0
-	err = dctx.IteratePrefix(key[:2], func(kx, vx []byte) {
-		if !bytes.HasPrefix(kx, key[:2]) {
-			return
+	{
+		counter := 0
+		err = dctx.IteratePrefix(tx, key[:2], func(kx, vx []byte) {
+			if !bytes.HasPrefix(kx, key[:2]) {
+				return
+			}
+			counter++
+			v, ok := values[hex.EncodeToString(kx)]
+			require.True(t, ok)
+			require.Equal(t, v, vx)
+		})
+		require.NoError(t, err)
+		require.EqualValues(t, len(values), counter)
+	}
+	{
+		counter := 0
+		iter2, err := dctx.IteratePrefix2([]byte("addr2"), []byte("addr3"), tx, -1)
+		require.NoError(t, err)
+		for iter2.HasNext() {
+			kx, vx, err := iter2.Next()
+			require.NoError(t, err)
+			if !bytes.HasPrefix(kx, key[:2]) {
+				return
+			}
+			counter++
+			v, ok := values[hex.EncodeToString(kx)]
+			require.True(t, ok)
+			require.Equal(t, v, vx)
 		}
-		counter++
-		v, ok := values[hex.EncodeToString(kx)]
-		require.True(t, ok)
-		require.Equal(t, v, vx)
-	})
-	require.NoError(t, err)
-	require.EqualValues(t, len(values), counter)
+	}
 }

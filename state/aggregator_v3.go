@@ -2047,8 +2047,23 @@ func (ac *AggregatorV3Context) storageFn(plainKey []byte, cell *commitment.Cell)
 	return nil
 }
 
-func (ac *AggregatorV3Context) IterateAccounts(pref []byte, fn func(key, value []byte)) error {
-	return ac.accounts.IteratePrefix(pref, fn)
+func (ac *AggregatorV3Context) DomainIterLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (iter.KV, error) {
+	switch domain {
+	case kv.AccountDomain:
+		return ac.accounts.IteratePrefix2(from, to, tx, limit)
+	case kv.StorageDomain:
+		return ac.storage.IteratePrefix2(from, to, tx, limit)
+	case kv.CodeDomain:
+		return ac.code.IteratePrefix2(from, to, tx, limit)
+	case kv.CommitmentDomain:
+		return ac.commitment.IteratePrefix2(from, to, tx, limit)
+	default:
+		panic(domain)
+	}
+}
+
+func (ac *AggregatorV3Context) IterateAccounts(tx kv.Tx, pref []byte, fn func(key, value []byte)) error {
+	return ac.accounts.IteratePrefix(tx, pref, fn)
 }
 func (ac *AggregatorV3Context) AccountLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
 	return ac.accounts.GetLatest(addr, nil, roTx)

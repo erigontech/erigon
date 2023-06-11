@@ -796,7 +796,7 @@ func (d *DomainCommitted) SeekCommitment(sinceTx uint64) (blockNum, txNum uint64
 	defer ctx.Close()
 
 	fmt.Printf("seek tx %d\n", sinceTx)
-	d.defaultDc.IteratePrefix(keyCommitmentState, func(key, value []byte) {
+	d.defaultDc.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) {
 		txn := binary.BigEndian.Uint64(value)
 		if txn == sinceTx {
 			latestState = value

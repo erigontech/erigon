@@ -343,7 +343,7 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	var err error
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
-	err = sd.IterateStoragePrefix(addr, func(k, v []byte) {
+	err = sd.IterateStoragePrefix(sd.roTx, addr, func(k, v []byte) {
 		if !bytes.HasPrefix(k, addr) {
 			return
 		}
@@ -441,7 +441,7 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 // Such iteration is not intended to be used in public API, therefore it uses read-write transaction
 // inside the domain. Another version of this for public API use needs to be created, that uses
 // roTx instead and supports ending the iterations before it reaches the end.
-func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k, v []byte)) error {
+func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func(k, v []byte)) error {
 	sd.Storage.stats.FilesQueries.Add(1)
 
 	var cp CursorHeap
@@ -463,7 +463,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k, v []byte
 		}
 	}
 
-	keysCursor, err := sd.roTx.CursorDupSort(sd.Storage.keysTable)
+	keysCursor, err := roTx.CursorDupSort(sd.Storage.keysTable)
 	if err != nil {
 		return err
 	}
@@ -477,7 +477,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k, v []byte
 		copy(keySuffix[len(k):], v)
 		step := ^binary.BigEndian.Uint64(v)
 		txNum := step * sd.Storage.aggregationStep
-		if v, err = sd.roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
+		if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
 			return err
 		}
 		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
@@ -499,7 +499,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k, v []byte
 		key := cursor.Key()
 		if key != nil && bytes.HasPrefix(key, prefix) {
 			val := cursor.Value()
-			heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: g, endTxNum: item.endTxNum, reverse: true})
+			heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: g, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
 		}
 	}
 
@@ -522,10 +522,10 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k, v []byte
 					heap.Pop(&cp)
 				}
 			case FILE_CURSOR:
-				if ci1.dg.HasNext() {
-					ci1.key, _ = ci1.dg.Next(ci1.key[:0])
+				if ci1.btCursor.Next() {
+					ci1.key = ci1.btCursor.Key()
 					if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
-						ci1.val, _ = ci1.dg.Next(ci1.val[:0])
+						ci1.val = ci1.btCursor.Value()
 						heap.Fix(&cp, 0)
 					} else {
 						heap.Pop(&cp)
@@ -533,6 +533,18 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k, v []byte
 				} else {
 					heap.Pop(&cp)
 				}
+
+				//if ci1.dg.HasNext() {
+				//	ci1.key, _ = ci1.dg.Next(ci1.key[:0])
+				//	if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
+				//		ci1.val, _ = ci1.dg.Next(ci1.val[:0])
+				//		heap.Fix(&cp, 0)
+				//	} else {
+				//		heap.Pop(&cp)
+				//	}
+				//} else {
+				//	heap.Pop(&cp)
+				//}
 			case DB_CURSOR:
 				k, v, err = ci1.c.NextNoDup()
 				if err != nil {
@@ -543,7 +555,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k, v []byte
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)
-					if v, err = sd.roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
+					if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
 						return err
 					}
 					ci1.val = common.Copy(v)
