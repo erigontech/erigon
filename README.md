@@ -287,7 +287,7 @@ http.api : ["eth","debug","net"]
 Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK.
 
 If your CL client is on a different device, add `--authrpc.addr 0.0.0.0` ([Engine API] listens on localhost by default)
-as well as `--authrpc.vhosts <CL host>`.
+as well as `--authrpc.vhosts <CL host>` where `<CL host>` is your source host or `any`.
 
 [Engine API]: https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md
 

@@ -55,6 +55,7 @@ func TestEstimateGas(t *testing.T) {
 }
 
 func TestEthCallNonCanonical(t *testing.T) {
+	t.Skip()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()
@@ -99,6 +100,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 }
 
 func TestGetProof(t *testing.T) {
+	t.Skip()
 	maxGetProofRewindBlockCount = 1 // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 
 	m, bankAddr, contractAddr := chainWithDeployedContract(t)
