@@ -202,6 +202,7 @@ var stateHistoryV3Buckets = []string{
 }
 var stateHistoryV4Buckets = []string{
 	kv.AccountKeys, kv.StorageKeys, kv.CodeKeys, kv.CommitmentKeys,
+	kv.AccountVals, kv.StorageVals, kv.CodeVals, kv.CommitmentVals,
 	kv.TblCommitmentDomain, kv.TblAccountDomain, kv.TblStorageDomain, kv.TblCodeDomain,
 	kv.CommitmentVals, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx,
 }
