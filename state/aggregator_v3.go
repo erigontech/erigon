@@ -2079,6 +2079,24 @@ func (ac *AggregatorV3Context) DomainRangeLatest(tx kv.Tx, domain kv.Domain, fro
 func (ac *AggregatorV3Context) IterateAccounts(tx kv.Tx, pref []byte, fn func(key, value []byte)) error {
 	return ac.accounts.IteratePrefix(tx, pref, fn)
 }
+
+func (ac *AggregatorV3Context) DomainGet(tx kv.Tx, domain kv.Domain, k, k2 []byte) (v []byte, ok bool, err error) {
+	panic(1)
+	/*
+		switch domain {
+		case temporal.AccountsDomain:
+			return ac.accounts.GetLatest(k, k2, tx)
+		case temporal.StorageDomain:
+			return ac.storage.GetLatest(k, k2, tx)
+		case temporal.CodeDomain:
+			return ac.code.GetLatest(k, k2, tx)
+		case temporal.CommitmentDomain:
+			return ac.commitment.GetLatest(k, k2, tx)
+		default:
+			panic(fmt.Sprintf("unexpected: %s", domain))
+		}
+	*/
+}
 func (ac *AggregatorV3Context) AccountLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
 	return ac.accounts.GetLatest(addr, nil, roTx)
 }
