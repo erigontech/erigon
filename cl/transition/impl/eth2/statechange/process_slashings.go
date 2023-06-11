@@ -3,7 +3,7 @@ package statechange
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	state "github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
 func processSlashings(s *state.BeaconState, slashingMultiplier uint64) error {
