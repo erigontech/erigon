@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"reflect"
+	"time"
+
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/ledgerwatch/erigon/metrics/methelp"
 	"golang.org/x/exp/slices"
-	"reflect"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -704,21 +705,43 @@ func processAttestation(s *state.BeaconState, attestation *solid.Attestation, ba
 }
 
 func verifyAttestations(s *state.BeaconState, attestations *solid.ListSSZ[*solid.Attestation], attestingIndicies [][]uint64) (bool, error) {
-	var err error
-	valid := true
+	indexedAttestations := make([]*cltypes.IndexedAttestation, 0, attestations.Len())
 	attestations.Range(func(idx int, a *solid.Attestation, _ int) bool {
-		indexedAttestation := state.GetIndexedAttestation(a, attestingIndicies[idx])
-		valid, err = state.IsValidIndexedAttestation(s.BeaconState, indexedAttestation)
-		if err != nil {
-			return false
-		}
-		if !valid {
-			return false
-		}
+		indexedAttestations = append(indexedAttestations, state.GetIndexedAttestation(a, attestingIndicies[idx]))
 		return true
 	})
 
-	return valid, err
+	return batchVerifyAttestations(s, indexedAttestations)
+}
+
+type indexedAttestationVerificationResult struct {
+	valid bool
+	err   error
+}
+
+// Concurrent verification of BLS.
+func batchVerifyAttestations(s *state.BeaconState, indexedAttestations []*cltypes.IndexedAttestation) (valid bool, err error) {
+	c := make(chan indexedAttestationVerificationResult, 1)
+
+	for idx := range indexedAttestations {
+		go func(idx int) {
+			valid, err := state.IsValidIndexedAttestation(s.BeaconState, indexedAttestations[idx])
+			c <- indexedAttestationVerificationResult{
+				valid: valid,
+				err:   err,
+			}
+		}(idx)
+	}
+	for i := 0; i < len(indexedAttestations); i++ {
+		result := <-c
+		if result.err != nil {
+			return false, err
+		}
+		if !result.valid {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (I *impl) ProcessBlockHeader(s *state.BeaconState, block *cltypes.BeaconBlock) error {

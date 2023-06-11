@@ -160,6 +160,8 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	b.Extra = solid.NewExtraData()
 	b.Transactions = &solid.TransactionsSSZ{}
 	b.Withdrawals = solid.NewStaticListSSZ[*types.Withdrawal](16, 44)
+	b.DataGasUsed = new(uint64)
+	b.ExcessDataGas = new(uint64)
 	b.version = clparams.StateVersion(version)
 	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
 }
@@ -181,7 +183,7 @@ func (b *Eth1Block) getSchema() []interface{} {
 		s = append(s, b.Withdrawals)
 	}
 	if b.version >= clparams.DenebVersion {
-		s = append(s, &b.DataGasUsed, &b.ExcessDataGas)
+		s = append(s, b.DataGasUsed, b.ExcessDataGas)
 	}
 	return s
 }
