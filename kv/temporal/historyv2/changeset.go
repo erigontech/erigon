@@ -223,7 +223,7 @@ type CSMapper struct {
 
 var Mapper = map[string]CSMapper{
 	kv.AccountChangeSet: {
-		IndexBucket:   kv.AccountsHistory,
+		IndexBucket:   kv.E2AccountsHistory,
 		IndexChunkKey: AccountIndexChunkKey,
 		New:           NewAccountChangeSet,
 		Find:          FindAccount,
@@ -231,7 +231,7 @@ var Mapper = map[string]CSMapper{
 		Decode:        DecodeAccounts,
 	},
 	kv.StorageChangeSet: {
-		IndexBucket:   kv.StorageHistory,
+		IndexBucket:   kv.E2StorageHistory,
 		IndexChunkKey: StorageIndexChunkKey,
 		Find:          FindStorage,
 		New:           NewStorageChangeSet,

@@ -158,8 +158,8 @@ StorageHistory
 	key - address + storage_key + shard_id_u64
 	value - roaring bitmap - list of block where it changed
 */
-const AccountsHistory = "AccountHistory"
-const StorageHistory = "StorageHistory"
+const E2AccountsHistory = "AccountHistory"
+const E2StorageHistory = "StorageHistory"
 
 const (
 
@@ -365,48 +365,51 @@ const (
 	BittorrentCompletion = "BittorrentCompletion"
 	BittorrentInfo       = "BittorrentInfo"
 
-	// Domains and Inverted Indices
+	// Domains/Histry/InvertedIndices
+	// Contants have "Tbl" prefix, to avoid collision with actual Domain names
+	// This constants is very rarely used in APP, but Domain/History/Idx names are widely used
 	TblAccountDomain    = "AccountsDomain"
 	TblStorageDomain    = "StorageDomain"
 	TblCodeDomain       = "CodeDomain"
 	TblCommitmentDomain = "CommitmentDomain"
 
-	AccountKeys        = "AccountKeys"
-	AccountVals        = "AccountVals"
-	AccountHistoryKeys = "AccountHistoryKeys"
-	AccountHistoryVals = "AccountHistoryVals"
-	AccountIdx         = "AccountIdx"
+	TblAccountKeys        = "AccountKeys"
+	TblAccountVals        = "AccountVals"
+	TblAccountHistoryKeys = "AccountHistoryKeys"
+	TblAccountHistoryVals = "AccountHistoryVals"
+	TblAccountIdx         = "AccountIdx"
 
-	StorageKeys        = "StorageKeys"
-	StorageVals        = "StorageVals"
-	StorageHistoryKeys = "StorageHistoryKeys"
-	StorageHistoryVals = "StorageHistoryVals"
-	StorageIdx         = "StorageIdx"
+	TblStorageKeys        = "StorageKeys"
+	TblStorageVals        = "StorageVals"
+	TblStorageHistoryKeys = "StorageHistoryKeys"
+	TblStorageHistoryVals = "StorageHistoryVals"
+	TblStorageIdx         = "StorageIdx"
 
-	CodeKeys        = "CodeKeys"
-	CodeVals        = "CodeVals"
-	CodeHistoryKeys = "CodeHistoryKeys"
-	CodeHistoryVals = "CodeHistoryVals"
-	CodeIdx         = "CodeIdx"
+	TblCodeKeys        = "CodeKeys"
+	TblCodeVals        = "CodeVals"
+	TblCodeHistoryKeys = "CodeHistoryKeys"
+	TblCodeHistoryVals = "CodeHistoryVals"
+	TblCodeIdx         = "CodeIdx"
 
-	CommitmentKeys        = "CommitmentKeys"
-	CommitmentVals        = "CommitmentVals"
-	CommitmentHistoryKeys = "CommitmentHistoryKeys"
-	CommitmentHistoryVals = "CommitmentHistoryVals"
-	CommitmentIdx         = "CommitmentIdx"
+	TblCommitmentKeys        = "CommitmentKeys"
+	TblCommitmentVals        = "CommitmentVals"
+	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
+	TblCommitmentHistoryVals = "CommitmentHistoryVals"
+	TblCommitmentIdx         = "CommitmentIdx"
 
-	LogAddressKeys = "LogAddressKeys"
-	LogAddressIdx  = "LogAddressIdx"
-	LogTopicsKeys  = "LogTopicsKeys"
-	LogTopicsIdx   = "LogTopicsIdx"
+	TblLogAddressKeys = "LogAddressKeys"
+	TblLogAddressIdx  = "LogAddressIdx"
+	TblLogTopicsKeys  = "LogTopicsKeys"
+	TblLogTopicsIdx   = "LogTopicsIdx"
 
-	TracesFromKeys = "TracesFromKeys"
-	TracesFromIdx  = "TracesFromIdx"
-	TracesToKeys   = "TracesToKeys"
-	TracesToIdx    = "TracesToIdx"
+	TblTracesFromKeys = "TracesFromKeys"
+	TblTracesFromIdx  = "TracesFromIdx"
+	TblTracesToKeys   = "TracesToKeys"
+	TblTracesToIdx    = "TracesToIdx"
 
 	Snapshots = "Snapshots" // name -> hash
 
+	//State Reconstitution
 	RAccountKeys = "RAccountKeys"
 	RAccountIdx  = "RAccountIdx"
 	RStorageKeys = "RStorageKeys"
@@ -477,8 +480,8 @@ var (
 // This list will be sorted in `init` method.
 // ChaindataTablesCfg - can be used to find index in sorted version of ChaindataTables list by name
 var ChaindataTables = []string{
-	AccountsHistory,
-	StorageHistory,
+	E2AccountsHistory,
+	E2StorageHistory,
 	Code,
 	ContractCode,
 	HeaderNumber,
@@ -532,43 +535,43 @@ var ChaindataTables = []string{
 	BorReceipts,
 	BorTxLookup,
 	BorSeparate,
-	AccountKeys,
-	AccountVals,
+	TblAccountKeys,
+	TblAccountVals,
 	TblAccountDomain,
-	AccountHistoryKeys,
-	AccountHistoryVals,
-	AccountIdx,
+	TblAccountHistoryKeys,
+	TblAccountHistoryVals,
+	TblAccountIdx,
 
-	StorageKeys,
-	StorageVals,
+	TblStorageKeys,
+	TblStorageVals,
 	TblStorageDomain,
-	StorageHistoryKeys,
-	StorageHistoryVals,
-	StorageIdx,
+	TblStorageHistoryKeys,
+	TblStorageHistoryVals,
+	TblStorageIdx,
 
-	CodeKeys,
-	CodeVals,
+	TblCodeKeys,
+	TblCodeVals,
 	TblCodeDomain,
-	CodeHistoryKeys,
-	CodeHistoryVals,
-	CodeIdx,
+	TblCodeHistoryKeys,
+	TblCodeHistoryVals,
+	TblCodeIdx,
 
-	CommitmentKeys,
-	CommitmentVals,
+	TblCommitmentKeys,
+	TblCommitmentVals,
 	TblCommitmentDomain,
-	CommitmentHistoryKeys,
-	CommitmentHistoryVals,
-	CommitmentIdx,
+	TblCommitmentHistoryKeys,
+	TblCommitmentHistoryVals,
+	TblCommitmentIdx,
 
-	LogAddressKeys,
-	LogAddressIdx,
-	LogTopicsKeys,
-	LogTopicsIdx,
+	TblLogAddressKeys,
+	TblLogAddressIdx,
+	TblLogTopicsKeys,
+	TblLogTopicsIdx,
 
-	TracesFromKeys,
-	TracesFromIdx,
-	TracesToKeys,
-	TracesToIdx,
+	TblTracesFromKeys,
+	TblTracesFromIdx,
+	TblTracesToKeys,
+	TblTracesToIdx,
 
 	Snapshots,
 	MaxTxNum,
@@ -674,34 +677,34 @@ var ChaindataTablesCfg = TableCfg{
 	},
 	CallTraceSet: {Flags: DupSort},
 
-	AccountKeys:           {Flags: DupSort},
-	AccountHistoryKeys:    {Flags: DupSort},
-	AccountHistoryVals:    {Flags: DupSort},
-	AccountIdx:            {Flags: DupSort},
-	StorageKeys:           {Flags: DupSort},
-	StorageHistoryKeys:    {Flags: DupSort},
-	StorageHistoryVals:    {Flags: DupSort},
-	StorageIdx:            {Flags: DupSort},
-	CodeKeys:              {Flags: DupSort},
-	CodeHistoryKeys:       {Flags: DupSort},
-	CodeIdx:               {Flags: DupSort},
-	CommitmentKeys:        {Flags: DupSort},
-	CommitmentHistoryKeys: {Flags: DupSort},
-	CommitmentIdx:         {Flags: DupSort},
-	LogAddressKeys:        {Flags: DupSort},
-	LogAddressIdx:         {Flags: DupSort},
-	LogTopicsKeys:         {Flags: DupSort},
-	LogTopicsIdx:          {Flags: DupSort},
-	TracesFromKeys:        {Flags: DupSort},
-	TracesFromIdx:         {Flags: DupSort},
-	TracesToKeys:          {Flags: DupSort},
-	TracesToIdx:           {Flags: DupSort},
-	RAccountKeys:          {Flags: DupSort},
-	RAccountIdx:           {Flags: DupSort},
-	RStorageKeys:          {Flags: DupSort},
-	RStorageIdx:           {Flags: DupSort},
-	RCodeKeys:             {Flags: DupSort},
-	RCodeIdx:              {Flags: DupSort},
+	TblAccountKeys:           {Flags: DupSort},
+	TblAccountHistoryKeys:    {Flags: DupSort},
+	TblAccountHistoryVals:    {Flags: DupSort},
+	TblAccountIdx:            {Flags: DupSort},
+	TblStorageKeys:           {Flags: DupSort},
+	TblStorageHistoryKeys:    {Flags: DupSort},
+	TblStorageHistoryVals:    {Flags: DupSort},
+	TblStorageIdx:            {Flags: DupSort},
+	TblCodeKeys:              {Flags: DupSort},
+	TblCodeHistoryKeys:       {Flags: DupSort},
+	TblCodeIdx:               {Flags: DupSort},
+	TblCommitmentKeys:        {Flags: DupSort},
+	TblCommitmentHistoryKeys: {Flags: DupSort},
+	TblCommitmentIdx:         {Flags: DupSort},
+	TblLogAddressKeys:        {Flags: DupSort},
+	TblLogAddressIdx:         {Flags: DupSort},
+	TblLogTopicsKeys:         {Flags: DupSort},
+	TblLogTopicsIdx:          {Flags: DupSort},
+	TblTracesFromKeys:        {Flags: DupSort},
+	TblTracesFromIdx:         {Flags: DupSort},
+	TblTracesToKeys:          {Flags: DupSort},
+	TblTracesToIdx:           {Flags: DupSort},
+	RAccountKeys:             {Flags: DupSort},
+	RAccountIdx:              {Flags: DupSort},
+	RStorageKeys:             {Flags: DupSort},
+	RStorageIdx:              {Flags: DupSort},
+	RCodeKeys:                {Flags: DupSort},
+	RCodeIdx:                 {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}
@@ -785,3 +788,28 @@ func reinit() {
 		}
 	}
 }
+
+// Temporal
+
+const (
+	AccountsDomain Domain = "AccountsDomain"
+	StorageDomain  Domain = "StorageDomain"
+	CodeDomain     Domain = "CodeDomain"
+)
+
+const (
+	AccountsHistory History = "AccountsHistory"
+	StorageHistory  History = "StorageHistory"
+	CodeHistory     History = "CodeHistory"
+)
+
+const (
+	AccountsHistoryIdx InvertedIdx = "AccountsHistoryIdx"
+	StorageHistoryIdx  InvertedIdx = "StorageHistoryIdx"
+	CodeHistoryIdx     InvertedIdx = "CodeHistoryIdx"
+
+	LogTopicIdx   InvertedIdx = "LogTopicIdx"
+	LogAddrIdx    InvertedIdx = "LogAddrIdx"
+	TracesFromIdx InvertedIdx = "TracesFromIdx"
+	TracesToIdx   InvertedIdx = "TracesToIdx"
+)

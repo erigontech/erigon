@@ -112,30 +112,30 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 		logger:           logger,
 	}
 	var err error
-	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.AccountKeys, kv.TblAccountDomain, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountIdx, false, false, logger); err != nil {
+	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountDomain, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, false, false, logger); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.TblStorageDomain, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, true, true, logger); err != nil {
+	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageDomain, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, true, true, logger); err != nil {
 		return nil, err
 	}
-	if a.code, err = NewDomain(dir, a.tmpdir, aggregationStep, "code", kv.CodeKeys, kv.TblCodeDomain, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeIdx, true, true, logger); err != nil {
+	if a.code, err = NewDomain(dir, a.tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeDomain, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, true, true, logger); err != nil {
 		return nil, err
 	}
-	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.CommitmentKeys, kv.TblCommitmentDomain, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx, true, true, logger)
+	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentDomain, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, true, true, logger)
 	if err != nil {
 		return nil, err
 	}
 	a.commitment = NewCommittedDomain(commitd, CommitmentModeUpdate, commitment.VariantHexPatriciaTrie)
-	if a.logAddrs, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logaddrs", kv.LogAddressKeys, kv.LogAddressIdx, false, nil, logger); err != nil {
+	if a.logAddrs, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.logTopics, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logtopics", kv.LogTopicsKeys, kv.LogTopicsIdx, false, nil, logger); err != nil {
+	if a.logTopics, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.tracesFrom, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesfrom", kv.TracesFromKeys, kv.TracesFromIdx, false, nil, logger); err != nil {
+	if a.tracesFrom, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.tracesTo, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesto", kv.TracesToKeys, kv.TracesToIdx, false, nil, logger); err != nil {
+	if a.tracesTo, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
 	a.recalcMaxTxNum()
@@ -1129,8 +1129,8 @@ func (a *AggregatorV3) CanPrune(tx kv.Tx) bool {
 	return a.CanPruneFrom(tx) < a.minimaxTxNumInFiles.Load()
 }
 func (a *AggregatorV3) CanPruneFrom(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, kv.TracesToKeys)
-	fst2, _ := kv.FirstKey(tx, kv.StorageHistoryKeys)
+	fst, _ := kv.FirstKey(tx, kv.TblTracesToKeys)
+	fst2, _ := kv.FirstKey(tx, kv.TblStorageHistoryKeys)
 	if len(fst) > 0 && len(fst2) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
 		fstInDb2 := binary.BigEndian.Uint64(fst2)
@@ -1715,11 +1715,11 @@ func (a *AggregatorV3) AddCodePrev(addr []byte, prev []byte) error {
 
 func (a *AggregatorV3) PutIdx(idx kv.InvertedIdx, key []byte) error {
 	switch idx {
-	case kv.TracesFromIdx:
+	case kv.TblTracesFromIdx:
 		return a.tracesFrom.Add(key)
-	case kv.TracesToIdx:
+	case kv.TblTracesToIdx:
 		return a.tracesTo.Add(key)
-	case kv.LogAddressIdx:
+	case kv.TblLogAddressIdx:
 		return a.logAddrs.Add(key)
 	case kv.LogTopicIndex:
 		return a.logTopics.Add(key)

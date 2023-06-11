@@ -120,32 +120,32 @@ func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode Co
 	if err != nil {
 		return nil, err
 	}
-	if a.accounts, err = NewDomain(dir, tmpdir, aggregationStep, "accounts", kv.AccountKeys, kv.AccountVals, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountIdx, false, false, logger); err != nil {
+	if a.accounts, err = NewDomain(dir, tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, false, false, logger); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewDomain(dir, tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, false, false, logger); err != nil {
+	if a.storage, err = NewDomain(dir, tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, false, false, logger); err != nil {
 		return nil, err
 	}
-	if a.code, err = NewDomain(dir, tmpdir, aggregationStep, "code", kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeIdx, true, true, logger); err != nil {
+	if a.code, err = NewDomain(dir, tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, true, true, logger); err != nil {
 		return nil, err
 	}
 
-	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.CommitmentKeys, kv.CommitmentVals, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx, false, true, logger)
+	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, false, true, logger)
 	if err != nil {
 		return nil, err
 	}
 	a.commitment = NewCommittedDomain(commitd, commitmentMode, commitTrieVariant)
 
-	if a.logAddrs, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "logaddrs", kv.LogAddressKeys, kv.LogAddressIdx, false, nil, logger); err != nil {
+	if a.logAddrs, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.logTopics, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "logtopics", kv.LogTopicsKeys, kv.LogTopicsIdx, false, nil, logger); err != nil {
+	if a.logTopics, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.tracesFrom, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "tracesfrom", kv.TracesFromKeys, kv.TracesFromIdx, false, nil, logger); err != nil {
+	if a.tracesFrom, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.tracesTo, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "tracesto", kv.TracesToKeys, kv.TracesToIdx, false, nil, logger); err != nil {
+	if a.tracesTo, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
 	closeAgg = false
