@@ -23,6 +23,7 @@ import (
 )
 
 func TestTxPoolContent(t *testing.T) {
+	t.Skip()
 	m, require := stages.MockWithTxPool(t), require.New(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})

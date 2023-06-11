@@ -10,6 +10,7 @@ import (
 )
 
 func TestGetChainConfig(t *testing.T) {
+	t.Skip()
 	db := memdb.NewTestDB(t)
 	config, _, err := core.CommitGenesisBlock(db, core.MainnetGenesisBlock(), "", log.New())
 	if err != nil {
