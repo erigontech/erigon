@@ -5,10 +5,10 @@
 package spectest
 
 import (
+	"github.com/ledgerwatch/erigon/cl/transition"
 	"os"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 	"github.com/ledgerwatch/erigon/cl/spectest/consensus_tests"
 
 	"github.com/ledgerwatch/erigon/spectest"

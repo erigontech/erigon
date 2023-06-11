@@ -1,14 +1,13 @@
-package transition_test
+package statechange_test
 
 import (
 	"encoding/binary"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
-
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/stretchr/testify/require"
 )
@@ -34,7 +33,7 @@ func TestProcessSyncCommittee(t *testing.T) {
 	state.SetNextSyncCommittee(nextCommittee)
 	prevNextSyncCommittee := state.NextSyncCommittee()
 	state.SetSlot(8160)
-	require.NoError(t, transition.ProcessSyncCommitteeUpdate(state))
+	require.NoError(t, statechange.ProcessSyncCommitteeUpdate(state))
 	require.Equal(t, state.CurrentSyncCommittee(), prevNextSyncCommittee)
 	require.NotEqual(t, state.NextSyncCommittee(), prevNextSyncCommittee)
 }

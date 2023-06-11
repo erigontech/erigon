@@ -1,4 +1,4 @@
-package transition
+package statechange
 
 import (
 	"sort"

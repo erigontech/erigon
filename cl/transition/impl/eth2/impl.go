@@ -1,4 +1,4 @@
-package transition
+package eth2
 
 import (
 	"fmt"
@@ -8,13 +8,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/transition/machine"
 )
 
-var _ machine.Interface = (*impl)(nil)
-
-var DefaultMachine = &impl{}
-var ValidatingMachine = &impl{FullValidation: true}
+type Impl = impl
 
 type impl struct {
 	FullValidation bool
