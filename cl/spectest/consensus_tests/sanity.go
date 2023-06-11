@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/transition/machine"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/spectest"
@@ -65,7 +65,7 @@ var SanityBlocks = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectes
 
 	var block *cltypes.SignedBeaconBlock
 	for _, block = range blocks {
-		err = transition.TransitionState(testState, block, true)
+		err = machine.TransitionState(c.Machine, testState, block)
 		if err != nil {
 			break
 		}

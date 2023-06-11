@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	transition2 "github.com/ledgerwatch/erigon/cl/phase1/core/transition"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 
 	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/assert"
@@ -52,58 +52,58 @@ func (b *EpochProcessing) Run(t *testing.T, root fs.FS, c spectest.TestCase) (er
 }
 
 var effectiveBalancesUpdateTest = NewEpochProcessing(func(s *state.BeaconState) error {
-	return transition2.ProcessEffectiveBalanceUpdates(s)
+	return transition.ProcessEffectiveBalanceUpdates(s)
 })
 
 var eth1DataResetTest = NewEpochProcessing(func(s *state.BeaconState) error {
-	transition2.ProcessEth1DataReset(s)
+	transition.ProcessEth1DataReset(s)
 	return nil
 })
 
 var historicalRootsUpdateTest = NewEpochProcessing(func(s *state.BeaconState) error {
-	transition2.ProcessHistoricalRootsUpdate(s)
+	transition.ProcessHistoricalRootsUpdate(s)
 	return nil
 })
 
 var inactivityUpdateTest = NewEpochProcessing(func(s *state.BeaconState) error {
-	return transition2.ProcessInactivityScores(s)
+	return transition.ProcessInactivityScores(s)
 })
 
 var justificationFinalizationTest = NewEpochProcessing(func(s *state.BeaconState) error {
-	return transition2.ProcessJustificationBitsAndFinality(s)
+	return transition.ProcessJustificationBitsAndFinality(s)
 })
 
 var participationFlagUpdatesTest = NewEpochProcessing(func(s *state.BeaconState) error {
-	transition2.ProcessParticipationFlagUpdates(s)
+	transition.ProcessParticipationFlagUpdates(s)
 	return nil
 })
 var participationRecordUpdatesTest = NewEpochProcessing(func(s *state.BeaconState) error {
-	return transition2.ProcessParticipationRecordUpdates(s)
+	return transition.ProcessParticipationRecordUpdates(s)
 })
 
 var randaoMixesTest = NewEpochProcessing(func(s *state.BeaconState) error {
-	transition2.ProcessRandaoMixesReset(s)
+	transition.ProcessRandaoMixesReset(s)
 	return nil
 })
 
 var registryUpdatesTest = NewEpochProcessing(func(s *state.BeaconState) error {
-	return transition2.ProcessRegistryUpdates(s)
+	return transition.ProcessRegistryUpdates(s)
 })
 
 var rewardsAndPenaltiesTest = NewEpochProcessing(func(s *state.BeaconState) error {
-	return transition2.ProcessRewardsAndPenalties(s)
+	return transition.ProcessRewardsAndPenalties(s)
 })
 
 var slashingsTest = NewEpochProcessing(func(s *state.BeaconState) error {
-	return transition2.ProcessSlashings(s)
+	return transition.ProcessSlashings(s)
 })
 
 var slashingsResetTest = NewEpochProcessing(func(s *state.BeaconState) error {
-	transition2.ProcessSlashingsReset(s)
+	transition.ProcessSlashingsReset(s)
 	return nil
 })
 
 var recordsResetTest = NewEpochProcessing(func(s *state.BeaconState) error {
-	transition2.ProcessParticipationRecordUpdates(s)
+	transition.ProcessParticipationRecordUpdates(s)
 	return nil
 })

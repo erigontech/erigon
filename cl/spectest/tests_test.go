@@ -15,5 +15,5 @@ import (
 )
 
 func Test(t *testing.T) {
-	spectest.RunCases(t, consensus_tests.TestFormats, transition.DefaultMachine, os.DirFS("./tests"))
+	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS("./tests"))
 }

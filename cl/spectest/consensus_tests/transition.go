@@ -5,10 +5,9 @@ import (
 	"io/fs"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
-
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/transition/machine"
 	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -60,7 +59,7 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 			break
 		}
 		blockIndex++
-		if err := transition.TransitionState(startState, block, true); err != nil {
+		if err := machine.TransitionState(c.Machine, startState, block); err != nil {
 			return fmt.Errorf("cannot transition state: %s. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
 		}
 	}
