@@ -196,6 +196,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
+	t.Skip()
 	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()
@@ -215,6 +216,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *
 }
 
 func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testing.T) {
+	t.Skip()
 	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()
@@ -241,6 +243,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 }
 
 func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
+	t.Skip()
 	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()

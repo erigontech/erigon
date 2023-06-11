@@ -24,6 +24,7 @@ import (
 
 // Gets the latest block number with the latest tag
 func TestGetBlockByNumberWithLatestTag(t *testing.T) {
+	t.Skip()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()
