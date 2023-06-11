@@ -105,25 +105,25 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 		logger:           logger,
 	}
 	var err error
-	if a.accounts, err = NewHistory(dir, a.tmpdir, aggregationStep, "accounts", kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, false, nil, false, logger); err != nil {
+	if a.accounts, err = NewHistory(dir, a.tmpdir, aggregationStep, "accounts", kv.TblAccountHistoryKeys, kv.TblAccountIdx, kv.TblAccountHistoryVals, false, nil, false, logger); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewHistory(dir, a.tmpdir, aggregationStep, "storage", kv.StorageHistoryKeys, kv.StorageIdx, kv.StorageHistoryVals, false, nil, false, logger); err != nil {
+	if a.storage, err = NewHistory(dir, a.tmpdir, aggregationStep, "storage", kv.TblStorageHistoryKeys, kv.TblStorageIdx, kv.TblStorageHistoryVals, false, nil, false, logger); err != nil {
 		return nil, err
 	}
-	if a.code, err = NewHistory(dir, a.tmpdir, aggregationStep, "code", kv.CodeHistoryKeys, kv.CodeIdx, kv.CodeHistoryVals, true, nil, true, logger); err != nil {
+	if a.code, err = NewHistory(dir, a.tmpdir, aggregationStep, "code", kv.TblCodeHistoryKeys, kv.TblCodeIdx, kv.TblCodeHistoryVals, true, nil, true, logger); err != nil {
 		return nil, err
 	}
-	if a.logAddrs, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logaddrs", kv.LogAddressKeys, kv.LogAddressIdx, false, nil, logger); err != nil {
+	if a.logAddrs, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.logTopics, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logtopics", kv.LogTopicsKeys, kv.LogTopicsIdx, false, nil, logger); err != nil {
+	if a.logTopics, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.tracesFrom, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesfrom", kv.TracesFromKeys, kv.TracesFromIdx, false, nil, logger); err != nil {
+	if a.tracesFrom, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	if a.tracesTo, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesto", kv.TracesToKeys, kv.TracesToIdx, false, nil, logger); err != nil {
+	if a.tracesTo, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
 	a.recalcMaxTxNum()
@@ -804,8 +804,8 @@ func (a *AggregatorV3) CanPrune(tx kv.Tx) bool {
 	return a.CanPruneFrom(tx) < a.minimaxTxNumInFiles.Load()
 }
 func (a *AggregatorV3) CanPruneFrom(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, kv.TracesToKeys)
-	fst2, _ := kv.FirstKey(tx, kv.StorageHistoryKeys)
+	fst, _ := kv.FirstKey(tx, kv.TblTracesToKeys)
+	fst2, _ := kv.FirstKey(tx, kv.TblStorageHistoryKeys)
 	if len(fst) > 0 && len(fst2) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
 		fstInDb2 := binary.BigEndian.Uint64(fst2)
@@ -1293,11 +1293,11 @@ func (a *AggregatorV3) AddCodePrev(addr []byte, prev []byte) error {
 
 func (a *AggregatorV3) PutIdx(idx kv.InvertedIdx, key []byte) error {
 	switch idx {
-	case kv.TracesFromIdx:
+	case kv.TblTracesFromIdx:
 		return a.tracesFrom.Add(key)
-	case kv.TracesToIdx:
+	case kv.TblTracesToIdx:
 		return a.tracesTo.Add(key)
-	case kv.LogAddressIdx:
+	case kv.TblLogAddressIdx:
 		return a.logAddrs.Add(key)
 	case kv.LogTopicIndex:
 		return a.logTopics.Add(key)
