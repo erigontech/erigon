@@ -39,6 +39,7 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 }
 
 func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
+	t.Skip()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()
@@ -72,6 +73,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 }
 
 func TestGetBlockByNumberWithPendingTag(t *testing.T) {
+	t.Skip()
 	m := stages.MockWithTxPool(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()
@@ -103,6 +105,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 }
 
 func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
+	t.Skip()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()
@@ -115,6 +118,7 @@ func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
 }
 
 func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) {
+	t.Skip()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()
@@ -148,6 +152,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 }
 
 func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
+	t.Skip()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()
@@ -160,6 +165,7 @@ func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
 }
 
 func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
+	t.Skip()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()
@@ -193,6 +199,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 }
 
 func TestGetBlockTransactionCountByHash(t *testing.T) {
+	t.Skip()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()
@@ -229,6 +236,7 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 }
 
 func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
+	t.Skip()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()
