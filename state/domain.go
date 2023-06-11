@@ -1753,13 +1753,18 @@ func (dc *DomainContext) DomainRange(tx kv.Tx, fromKey, toKey []byte, ts uint64,
 	if err != nil {
 		return nil, err
 	}
-	lastestStateIt, err := dc.IteratePrefix2(fromKey, toKey, tx, limit)
+	lastestStateIt, err := dc.DomainRangeLatest(tx, fromKey, toKey, limit)
 	if err != nil {
 		return nil, err
 	}
 	return iter.UnionKV(histStateIt, lastestStateIt, limit), nil
 }
-func (dc *DomainContext) IteratePrefix2(fromKey, toKey []byte, roTx kv.Tx, limit int) (iter.KV, error) {
+
+func (dc *DomainContext) IteratePrefix2(roTx kv.Tx, fromKey, toKey []byte, limit int) (iter.KV, error) {
+	return dc.DomainRangeLatest(roTx, fromKey, toKey, limit)
+}
+
+func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (iter.KV, error) {
 	fit := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: dc,
 		roTx:         roTx,
 		idxKeysTable: dc.d.keysTable,

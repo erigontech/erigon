@@ -2064,13 +2064,13 @@ func (ac *AggregatorV3Context) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, 
 func (ac *AggregatorV3Context) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (iter.KV, error) {
 	switch domain {
 	case kv.AccountDomain:
-		return ac.accounts.IteratePrefix2(from, to, tx, limit)
+		return ac.accounts.DomainRangeLatest(tx, from, to, limit)
 	case kv.StorageDomain:
-		return ac.storage.IteratePrefix2(from, to, tx, limit)
+		return ac.storage.DomainRangeLatest(tx, from, to, limit)
 	case kv.CodeDomain:
-		return ac.code.IteratePrefix2(from, to, tx, limit)
+		return ac.code.DomainRangeLatest(tx, from, to, limit)
 	case kv.CommitmentDomain:
-		return ac.commitment.IteratePrefix2(from, to, tx, limit)
+		return ac.commitment.DomainRangeLatest(tx, from, to, limit)
 	default:
 		panic(domain)
 	}

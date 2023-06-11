@@ -178,7 +178,7 @@ func TestIterationBasic(t *testing.T) {
 	}
 	{
 		var keys, vals []string
-		iter2, err := dc.IteratePrefix2([]byte("addr2"), []byte("addr3"), tx, -1)
+		iter2, err := dc.IteratePrefix2(tx, []byte("addr2"), []byte("addr3"), -1)
 		require.NoError(t, err)
 		for iter2.HasNext() {
 			k, v, err := iter2.Next()
@@ -440,7 +440,7 @@ func TestIterationMultistep(t *testing.T) {
 	}
 	{
 		var keys, vals []string
-		iter2, err := dc.IteratePrefix2([]byte("addr2"), []byte("addr3"), tx, -1)
+		iter2, err := dc.IteratePrefix2(tx, []byte("addr2"), []byte("addr3"), -1)
 		require.NoError(t, err)
 		for iter2.HasNext() {
 			k, v, err := iter2.Next()
@@ -972,7 +972,7 @@ func TestDomainContext_IteratePrefix(t *testing.T) {
 	}
 	{
 		counter := 0
-		iter2, err := dctx.IteratePrefix2([]byte("addr2"), []byte("addr3"), tx, -1)
+		iter2, err := dctx.IteratePrefix2(tx, []byte("addr2"), []byte("addr3"), -1)
 		require.NoError(t, err)
 		for iter2.HasNext() {
 			kx, vx, err := iter2.Next()
