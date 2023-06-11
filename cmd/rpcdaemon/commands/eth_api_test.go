@@ -33,6 +33,7 @@ func TestGetBalanceChangesInBlock(t *testing.T) {
 	if err != nil {
 		t.Errorf("calling GetBalanceChangesInBlock resulted in an error: %v", err)
 	}
+	fmt.Printf("a? %d\n", len(balances))
 	expected := map[common.Address]*hexutil.Big{
 		common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"): (*hexutil.Big)(uint256.NewInt(200000000000000000).ToBig()),
 		common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7"): (*hexutil.Big)(uint256.NewInt(300000000000000000).ToBig()),

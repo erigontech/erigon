@@ -192,6 +192,11 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	if err != nil {
 		return nil, nil, err
 	}
+	histV3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		panic(err)
+	}
+
 	var stateWriter state.StateWriter
 	if ethconfig.EnableHistoryV4InTest {
 		panic("implement me")
@@ -219,12 +224,14 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	if err := statedb.CommitBlock(&chain.Rules{}, stateWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
-	if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {
-		if err := csw.WriteChangeSets(); err != nil {
-			return nil, statedb, fmt.Errorf("cannot write change sets: %w", err)
-		}
-		if err := csw.WriteHistory(); err != nil {
-			return nil, statedb, fmt.Errorf("cannot write history: %w", err)
+	if !histV3 {
+		if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {
+			if err := csw.WriteChangeSets(); err != nil {
+				return nil, statedb, fmt.Errorf("cannot write change sets: %w", err)
+			}
+			if err := csw.WriteHistory(); err != nil {
+				return nil, statedb, fmt.Errorf("cannot write history: %w", err)
+			}
 		}
 	}
 	return block, statedb, nil
