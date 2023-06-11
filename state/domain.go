@@ -33,6 +33,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -1744,8 +1745,22 @@ func (sd *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 	return nil
 }
 
-func (sd *DomainContext) IteratePrefix2(from, to []byte, roTx kv.Tx, limit int) (iter.KV, error) {
-	fit := &DomainLatestIterFile{from: from, to: to, limit: limit, dc: sd,
+func (sd *DomainContext) DomainRange(tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
+	if !asc {
+		panic("implement me")
+	}
+	histStateIt, err := sd.hc.WalkAsOf(ts, fromKey, fromKey, tx, limit)
+	if err != nil {
+		return nil, err
+	}
+	lastestStateIt, err := sd.IteratePrefix2(fromKey, toKey, tx, limit)
+	if err != nil {
+		return nil, err
+	}
+	return iter.UnionKV(histStateIt, lastestStateIt, limit), nil
+}
+func (sd *DomainContext) IteratePrefix2(fromKey, toKey []byte, roTx kv.Tx, limit int) (iter.KV, error) {
+	fit := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: sd,
 		roTx:         roTx,
 		idxKeysTable: sd.d.keysTable,
 		h:            &CursorHeap{},

@@ -2047,6 +2047,20 @@ func (ac *AggregatorV3Context) storageFn(plainKey []byte, cell *commitment.Cell)
 	return nil
 }
 
+func (ac *AggregatorV3Context) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
+	switch domain {
+	case kv.AccountDomain:
+		return ac.accounts.DomainRange(tx, fromKey, toKey, ts, asc, limit)
+	case kv.StorageDomain:
+		return ac.storage.DomainRange(tx, fromKey, toKey, ts, asc, limit)
+	case kv.CodeDomain:
+		return ac.code.DomainRange(tx, fromKey, toKey, ts, asc, limit)
+	case kv.CommitmentDomain:
+		return ac.commitment.DomainRange(tx, fromKey, toKey, ts, asc, limit)
+	default:
+		panic(domain)
+	}
+}
 func (ac *AggregatorV3Context) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (iter.KV, error) {
 	switch domain {
 	case kv.AccountDomain:
