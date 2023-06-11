@@ -172,8 +172,8 @@ var Tables = map[stages.SyncStage][]string{
 	stages.IntermediateHashes:  {kv.TrieOfAccounts, kv.TrieOfStorage},
 	stages.CallTraces:          {kv.CallFromIndex, kv.CallToIndex},
 	stages.LogIndex:            {kv.LogAddressIndex, kv.LogTopicIndex},
-	stages.AccountHistoryIndex: {kv.AccountsHistory},
-	stages.StorageHistoryIndex: {kv.StorageHistory},
+	stages.AccountHistoryIndex: {kv.E2AccountsHistory},
+	stages.StorageHistoryIndex: {kv.E2StorageHistory},
 	stages.Finish:              {},
 }
 var stateBuckets = []string{

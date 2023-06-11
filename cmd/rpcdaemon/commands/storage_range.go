@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 )
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
@@ -54,7 +53,7 @@ func storageRangeAtV3(ttx kv.TemporalTx, contractAddress libcommon.Address, star
 	fromKey := append(libcommon.Copy(contractAddress.Bytes()), start...)
 	toKey, _ := kv.NextSubtree(contractAddress.Bytes())
 
-	r, err := ttx.DomainRange(temporal.StorageDomain, fromKey, toKey, txNum, order.Asc, maxResult+1)
+	r, err := ttx.DomainRange(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, maxResult+1)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
