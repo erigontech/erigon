@@ -5,6 +5,7 @@
 package spectest
 
 import (
+	"github.com/ledgerwatch/erigon/cl/transition"
 	"os"
 	"testing"
 
@@ -14,5 +15,5 @@ import (
 )
 
 func Test(t *testing.T) {
-	spectest.RunCases(t, consensus_tests.TestFormats, os.DirFS("./tests"))
+	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS("./tests"))
 }

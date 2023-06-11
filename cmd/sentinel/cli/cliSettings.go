@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -17,27 +18,30 @@ import (
 )
 
 type ConsensusClientCliCfg struct {
-	GenesisCfg       *clparams.GenesisConfig     `json:"genesisCfg"`
-	BeaconCfg        *clparams.BeaconChainConfig `json:"beaconCfg"`
-	NetworkCfg       *clparams.NetworkConfig     `json:"networkCfg"`
-	BeaconDataCfg    *rawdb.BeaconDataConfig     `json:"beaconDataConfig"`
-	Port             uint                        `json:"port"`
-	Addr             string                      `json:"address"`
-	ServerAddr       string                      `json:"serverAddr"`
-	ServerProtocol   string                      `json:"serverProtocol"`
-	ServerTcpPort    uint                        `json:"serverTcpPort"`
-	LogLvl           uint                        `json:"logLevel"`
-	NoDiscovery      bool                        `json:"noDiscovery"`
-	CheckpointUri    string                      `json:"checkpointUri"`
-	Chaindata        string                      `json:"chaindata"`
-	ErigonPrivateApi string                      `json:"erigonPrivateApi"`
-	TransitionChain  bool                        `json:"transitionChain"`
-	NetworkType      clparams.NetworkType        `json:"networkType"`
-	InitialSync      bool                        `json:"initialSync"`
-	BeaconAddr       string                      `json:"beaconAddr"`
-	BeaconProtocol   string                      `json:"beaconProtocol"`
-	RecordMode       bool                        `json:"recordMode"`
-	RecordDir        string                      `json:"recordDir"`
+	GenesisCfg            *clparams.GenesisConfig     `json:"genesisCfg"`
+	BeaconCfg             *clparams.BeaconChainConfig `json:"beaconCfg"`
+	NetworkCfg            *clparams.NetworkConfig     `json:"networkCfg"`
+	BeaconDataCfg         *rawdb.BeaconDataConfig     `json:"beaconDataConfig"`
+	Port                  uint                        `json:"port"`
+	Addr                  string                      `json:"address"`
+	ServerAddr            string                      `json:"serverAddr"`
+	ServerProtocol        string                      `json:"serverProtocol"`
+	ServerTcpPort         uint                        `json:"serverTcpPort"`
+	LogLvl                uint                        `json:"logLevel"`
+	NoDiscovery           bool                        `json:"noDiscovery"`
+	CheckpointUri         string                      `json:"checkpointUri"`
+	Chaindata             string                      `json:"chaindata"`
+	ErigonPrivateApi      string                      `json:"erigonPrivateApi"`
+	TransitionChain       bool                        `json:"transitionChain"`
+	NetworkType           clparams.NetworkType        `json:"networkType"`
+	InitialSync           bool                        `json:"initialSync"`
+	NoBeaconApi           bool                        `json:"noBeaconApi"`
+	BeaconApiReadTimeout  time.Duration               `json:"beaconApiReadTimeout"`
+	BeaconApiWriteTimeout time.Duration               `json:"beaconApiWriteTimeout"`
+	BeaconAddr            string                      `json:"beaconAddr"`
+	BeaconProtocol        string                      `json:"beaconProtocol"`
+	RecordMode            bool                        `json:"recordMode"`
+	RecordDir             string                      `json:"recordDir"`
 
 	InitalState *state.BeaconState
 }
@@ -75,6 +79,9 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.String(flags.SentinelServerAddr.Name), ctx.Int(flags.SentinelServerPort.Name))
 	cfg.ServerProtocol = "tcp"
 
+	cfg.NoBeaconApi = ctx.Bool(flags.NoBeaconApi.Name)
+	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(flags.BeaconApiReadTimeout.Name)) * time.Second
+	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint(flags.BeaconApiWriteTimeout.Name)) * time.Second
 	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(flags.BeaconApiAddr.Name), ctx.Int(flags.BeaconApiPort.Name))
 	cfg.BeaconProtocol = "tcp"
 	cfg.RecordMode = ctx.Bool(flags.RecordModeFlag.Name)
