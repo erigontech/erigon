@@ -131,7 +131,7 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 	if txTask.WriteLists != nil {
 		for table, list := range txTask.WriteLists {
 			switch table {
-			case kv.TblAccountDomain:
+			case kv.DeprecatedAccountDomain:
 				for k, key := range list.Keys {
 					kb, _ := hex.DecodeString(key)
 					prev, err := domains.LatestAccount(kb)
@@ -153,7 +153,7 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 					accounts.DeserialiseV3(&acc, list.Vals[k])
 					fmt.Printf("applied %x b=%d n=%d c=%x\n", kb, &acc.Balance, acc.Nonce, acc.CodeHash.Bytes())
 				}
-			case kv.TblCodeDomain:
+			case kv.DeprecatedCodeDomain:
 				for k, key := range list.Keys {
 					kb, _ := hex.DecodeString(key)
 					fmt.Printf("applied %x c=%x\n", kb, list.Vals[k])
@@ -161,7 +161,7 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 						return err
 					}
 				}
-			case kv.TblStorageDomain:
+			case kv.DeprecatedStorageDomain:
 				for k, key := range list.Keys {
 					hkey, err := hex.DecodeString(key)
 					if err != nil {
@@ -403,7 +403,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	addressBytes := address.Bytes()
 	addr := hex.EncodeToString(addressBytes)
 	value := accounts.SerialiseV3(account)
-	w.writeLists[kv.TblAccountDomain].Push(addr, value)
+	w.writeLists[kv.DeprecatedAccountDomain].Push(addr, value)
 
 	if w.trace {
 		fmt.Printf("[v3_buff] account [%v]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", addr, &account.Balance, account.Nonce, account.Root, account.CodeHash)
@@ -422,7 +422,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 
 func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	addr := hex.EncodeToString(address.Bytes())
-	w.writeLists[kv.TblCodeDomain].Push(addr, code)
+	w.writeLists[kv.DeprecatedCodeDomain].Push(addr, code)
 
 	if len(code) > 0 {
 		if w.trace {
@@ -439,7 +439,7 @@ func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarn
 
 func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *accounts.Account) error {
 	addr := hex.EncodeToString(address.Bytes())
-	w.writeLists[kv.TblAccountDomain].Push(addr, nil)
+	w.writeLists[kv.DeprecatedAccountDomain].Push(addr, nil)
 	if w.trace {
 		fmt.Printf("[v3_buff] account [%x] deleted\n", address)
 	}
@@ -457,7 +457,7 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 		return nil
 	}
 	compositeS := hex.EncodeToString(common.Append(address.Bytes(), key.Bytes()))
-	w.writeLists[kv.TblStorageDomain].Push(compositeS, value.Bytes())
+	w.writeLists[kv.DeprecatedStorageDomain].Push(compositeS, value.Bytes())
 	if w.trace {
 		fmt.Printf("[v3_buff] storage [%x] [%x] => [%x]\n", address, key.Bytes(), value.Bytes())
 	}
@@ -505,7 +505,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 	}
 	if !r.discardReadList {
 		// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
-		r.readLists[kv.TblAccountDomain].Push(string(addr), enc)
+		r.readLists[kv.DeprecatedAccountDomain].Push(string(addr), enc)
 	}
 	if len(enc) == 0 {
 		if r.trace {
@@ -532,7 +532,7 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 
 	composite := common.Append(address.Bytes(), key.Bytes())
 	if !r.discardReadList {
-		r.readLists[kv.TblStorageDomain].Push(string(composite), enc)
+		r.readLists[kv.DeprecatedStorageDomain].Push(string(composite), enc)
 	}
 	if r.trace {
 		if enc == nil {
@@ -552,7 +552,7 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 	}
 
 	if !r.discardReadList {
-		r.readLists[kv.TblCodeDomain].Push(string(addr), enc)
+		r.readLists[kv.DeprecatedCodeDomain].Push(string(addr), enc)
 	}
 	if r.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
@@ -584,10 +584,10 @@ func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, 
 var writeListPool = sync.Pool{
 	New: func() any {
 		return map[string]*libstate.KvList{
-			kv.TblAccountDomain:  {},
-			kv.TblStorageDomain:  {},
-			kv.TblCodeDomain:     {},
-			kv.PlainContractCode: {},
+			kv.DeprecatedAccountDomain: {},
+			kv.DeprecatedStorageDomain: {},
+			kv.DeprecatedCodeDomain:    {},
+			kv.PlainContractCode:       {},
 		}
 	},
 }
@@ -609,10 +609,10 @@ func returnWriteList(v map[string]*libstate.KvList) {
 var readListPool = sync.Pool{
 	New: func() any {
 		return map[string]*libstate.KvList{
-			kv.TblAccountDomain: {},
-			kv.TblCodeDomain:    {},
-			CodeSizeTable:       {},
-			kv.TblStorageDomain: {},
+			kv.DeprecatedAccountDomain: {},
+			kv.DeprecatedCodeDomain:    {},
+			CodeSizeTable:              {},
+			kv.DeprecatedStorageDomain: {},
 		}
 	},
 }

@@ -190,20 +190,18 @@ var stateHistoryBuckets = []string{
 }
 var stateHistoryV3Buckets = []string{
 	kv.TblAccountHistoryKeys, kv.TblAccountIdx, kv.TblAccountHistoryVals,
-	kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx,
-	kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx,
-	kv.TblAccountHistoryKeys, kv.TblAccountIdx, kv.TblAccountHistoryVals,
-	kv.TblStorageHistoryKeys, kv.TblStorageIdx, kv.TblStorageHistoryVals,
-	kv.TblCodeHistoryKeys, kv.TblCodeIdx, kv.TblCodeHistoryVals,
+	kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx,
+	kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx,
 	kv.TblLogAddressKeys, kv.TblLogAddressIdx,
 	kv.TblLogTopicsKeys, kv.TblLogTopicsIdx,
 	kv.TblTracesFromKeys, kv.TblTracesFromIdx,
 	kv.TblTracesToKeys, kv.TblTracesToIdx,
 }
 var stateHistoryV4Buckets = []string{
-	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys,
-	kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
-	kv.TblCommitmentDomain, kv.TblAccountDomain, kv.TblStorageDomain, kv.TblCodeDomain,
+	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys, kv.TblCommitmentKeys,
+	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals,
+
+	kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
 }
 
 func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
