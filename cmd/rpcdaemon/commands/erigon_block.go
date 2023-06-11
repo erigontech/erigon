@@ -11,7 +11,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -206,9 +210,57 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 	}
 	defer tx.Rollback()
 
+	balancesMapping := make(map[common.Address]*hexutil.Big)
+	latestState, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
+	if err != nil {
+		return nil, err
+	}
+
 	blockNumber, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
+	}
+
+	if ethconfig.EnableHistoryV4InTest {
+		minTxNum, _ := rawdbv3.TxNums.Min(tx, blockNumber)
+		it, err := tx.(*temporal.Tx).HistoryRange(temporal.AccountsHistory, int(minTxNum), -1, order.Asc, -1)
+		if err != nil {
+			return nil, err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return nil, err
+			}
+			//TODO: what to do in this case? maybe iterator must skip this values??
+			if len(v) == 0 {
+				continue
+			}
+			addressBytes := k
+
+			var oldAcc accounts.Account
+			if err = accounts.DeserialiseV3(&oldAcc, v); err != nil {
+				return nil, err
+			}
+			oldBalance := oldAcc.Balance
+
+			address := common.BytesToAddress(addressBytes)
+
+			newAcc, err := latestState.ReadAccountData(address)
+			if err != nil {
+				return nil, err
+			}
+
+			newBalance := uint256.NewInt(0)
+			if newAcc != nil {
+				newBalance = &newAcc.Balance
+			}
+
+			if !oldBalance.Eq(newBalance) {
+				newBalanceDesc := (*hexutil.Big)(newBalance.ToBig())
+				balancesMapping[address] = newBalanceDesc
+			}
+		}
 	}
 
 	c, err := tx.Cursor(kv.AccountChangeSet)
@@ -220,13 +272,6 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 	startkey := hexutility.EncodeTs(blockNumber)
 
 	decodeFn := historyv2.Mapper[kv.AccountChangeSet].Decode
-
-	balancesMapping := make(map[common.Address]*hexutil.Big)
-
-	newReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
-	if err != nil {
-		return nil, err
-	}
 
 	for dbKey, dbValue, err := c.Seek(startkey); bytes.Equal(dbKey, startkey) && dbKey != nil; dbKey, dbValue, err = c.Next() {
 		if err != nil {
@@ -245,7 +290,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 
 		address := common.BytesToAddress(addressBytes)
 
-		newAcc, err := newReader.ReadAccountData(address)
+		newAcc, err := latestState.ReadAccountData(address)
 		if err != nil {
 			return nil, err
 		}
