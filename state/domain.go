@@ -1696,11 +1696,10 @@ func (sd *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 			continue
 		}
 
-		g := sd.statelessGetter(i)
 		key := cursor.Key()
 		if key != nil && bytes.HasPrefix(key, prefix) {
 			val := cursor.Value()
-			heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: g, endTxNum: item.endTxNum, reverse: true})
+			heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
 		}
 	}
 
@@ -1710,19 +1709,15 @@ func (sd *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-			ci1 := cp[0]
+			ci1 := heap.Pop(&cp).(*CursorItem)
 			switch ci1.t {
 			case FILE_CURSOR:
-				if ci1.dg.HasNext() {
-					ci1.key, _ = ci1.dg.Next(ci1.key[:0])
+				if ci1.btCursor.Next() {
+					ci1.key = ci1.btCursor.Key()
 					if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
-						ci1.val, _ = ci1.dg.Next(ci1.val[:0])
-						heap.Fix(&cp, 0)
-					} else {
-						heap.Pop(&cp)
+						ci1.val = ci1.btCursor.Value()
+						heap.Push(&cp, ci1)
 					}
-				} else {
-					heap.Pop(&cp)
 				}
 			case DB_CURSOR:
 				k, v, err = ci1.c.NextNoDup()
@@ -1738,9 +1733,7 @@ func (sd *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 						return err
 					}
 					ci1.val = common.Copy(v)
-					heap.Fix(&cp, 0)
-				} else {
-					heap.Pop(&cp)
+					heap.Push(&cp, ci1)
 				}
 			}
 		}
