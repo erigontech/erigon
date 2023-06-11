@@ -2049,11 +2049,11 @@ func (ac *AggregatorV3Context) storageFn(plainKey []byte, cell *commitment.Cell)
 
 func (ac *AggregatorV3Context) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
 	switch domain {
-	case kv.TblAccountDomain:
+	case kv.AccountsDomain:
 		return ac.accounts.DomainRange(tx, fromKey, toKey, ts, asc, limit)
-	case kv.TblStorageDomain:
+	case kv.StorageDomain:
 		return ac.storage.DomainRange(tx, fromKey, toKey, ts, asc, limit)
-	case kv.TblCodeDomain:
+	case kv.CodeDomain:
 		return ac.code.DomainRange(tx, fromKey, toKey, ts, asc, limit)
 	case kv.TblCommitmentDomain:
 		return ac.commitment.DomainRange(tx, fromKey, toKey, ts, asc, limit)
@@ -2063,13 +2063,13 @@ func (ac *AggregatorV3Context) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, 
 }
 func (ac *AggregatorV3Context) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (iter.KV, error) {
 	switch domain {
-	case kv.TblAccountDomain:
+	case kv.AccountsDomain:
 		return ac.accounts.DomainRangeLatest(tx, from, to, limit)
-	case kv.TblStorageDomain:
+	case kv.StorageDomain:
 		return ac.storage.DomainRangeLatest(tx, from, to, limit)
-	case kv.TblCodeDomain:
+	case kv.CodeDomain:
 		return ac.code.DomainRangeLatest(tx, from, to, limit)
-	case kv.TblCommitmentDomain:
+	case kv.CommitmentDomain:
 		return ac.commitment.DomainRangeLatest(tx, from, to, limit)
 	default:
 		panic(domain)
