@@ -1,7 +1,8 @@
-package transition
+package eth2_test
 
 import (
 	_ "embed"
+	"github.com/ledgerwatch/erigon/cl/transition"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -11,16 +12,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//go:embed test_data/block_processing/capella_block.ssz_snappy
+//go:embed statechange/test_data/block_processing/capella_block.ssz_snappy
 var capellaBlock []byte
 
-//go:embed test_data/block_processing/capella_state.ssz_snappy
+//go:embed statechange/test_data/block_processing/capella_state.ssz_snappy
 var capellaState []byte
 
 func TestBlockProcessing(t *testing.T) {
-	state := state.New(&clparams.MainnetBeaconConfig)
-	require.NoError(t, utils.DecodeSSZSnappy(state, capellaState, int(clparams.CapellaVersion)))
+	s := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(s, capellaState, int(clparams.CapellaVersion)))
 	block := &cltypes.SignedBeaconBlock{}
 	require.NoError(t, utils.DecodeSSZSnappy(block, capellaBlock, int(clparams.CapellaVersion)))
-	require.NoError(t, TransitionState(state, block, true)) // All checks already made in transition state
+	require.NoError(t, transition.TransitionState(s, block, true)) // All checks already made in transition state
 }

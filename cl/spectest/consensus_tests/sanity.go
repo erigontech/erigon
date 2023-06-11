@@ -1,11 +1,10 @@
 package consensus_tests
 
 import (
+	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"io/fs"
 	"os"
 	"testing"
-
-	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/spectest"
@@ -25,7 +24,7 @@ var SanitySlots = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest
 	expectedState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
 	require.NoError(t, err)
 
-	err = transition.ProcessSlots(testState, expectedState.Slot())
+	err = c.Machine.ProcessSlots(testState, expectedState.Slot())
 	require.NoError(t, err)
 
 	expectedRoot, err := expectedState.HashSSZ()
@@ -65,7 +64,7 @@ var SanityBlocks = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectes
 
 	var block *cltypes.SignedBeaconBlock
 	for _, block = range blocks {
-		err = transition.TransitionState(testState, block, true)
+		err = machine.TransitionState(c.Machine, testState, block)
 		if err != nil {
 			break
 		}

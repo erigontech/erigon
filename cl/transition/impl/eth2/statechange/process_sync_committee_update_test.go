@@ -1,14 +1,13 @@
-package transition_test
+package statechange_test
 
 import (
 	"encoding/binary"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
-
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +17,7 @@ func TestProcessSyncCommittee(t *testing.T) {
 	var pk [48]byte
 	copy(pk[:], pkBytes)
 	validatorNum := 10_000
-	state := state.New(&clparams.MainnetBeaconConfig)
+	s := state.New(&clparams.MainnetBeaconConfig)
 	currentCommittee := &solid.SyncCommittee{}
 	nextCommittee := &solid.SyncCommittee{}
 	for i := 0; i < validatorNum; i++ {
@@ -28,13 +27,13 @@ func TestProcessSyncCommittee(t *testing.T) {
 		v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
 		v.SetPublicKey(pk)
 		v.SetEffectiveBalance(2000000000)
-		state.AddValidator(v, 2000000000)
+		s.AddValidator(v, 2000000000)
 	}
-	state.SetCurrentSyncCommittee(currentCommittee)
-	state.SetNextSyncCommittee(nextCommittee)
-	prevNextSyncCommittee := state.NextSyncCommittee()
-	state.SetSlot(8160)
-	require.NoError(t, transition.ProcessSyncCommitteeUpdate(state))
-	require.Equal(t, state.CurrentSyncCommittee(), prevNextSyncCommittee)
-	require.NotEqual(t, state.NextSyncCommittee(), prevNextSyncCommittee)
+	s.SetCurrentSyncCommittee(currentCommittee)
+	s.SetNextSyncCommittee(nextCommittee)
+	prevNextSyncCommittee := s.NextSyncCommittee()
+	s.SetSlot(8160)
+	require.NoError(t, statechange.ProcessSyncCommitteeUpdate(s))
+	require.Equal(t, s.CurrentSyncCommittee(), prevNextSyncCommittee)
+	require.NotEqual(t, s.NextSyncCommittee(), prevNextSyncCommittee)
 }

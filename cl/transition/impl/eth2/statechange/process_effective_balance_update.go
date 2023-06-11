@@ -1,4 +1,4 @@
-package transition
+package statechange
 
 import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"

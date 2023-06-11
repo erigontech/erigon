@@ -2,10 +2,10 @@ package stages
 
 import (
 	"context"
+	"github.com/ledgerwatch/erigon/cl/transition"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
