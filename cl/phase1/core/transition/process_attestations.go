@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
@@ -242,19 +243,49 @@ func processAttestation(s *state2.BeaconState, attestation *solid.Attestation, b
 }
 
 func verifyAttestations(s *state2.BeaconState, attestations *solid.ListSSZ[*solid.Attestation], attestingIndicies [][]uint64) (bool, error) {
-	var err error
-	valid := true
+	indexedAttestations := make([]*cltypes.IndexedAttestation, 0, attestations.Len())
 	attestations.Range(func(idx int, a *solid.Attestation, _ int) bool {
 		indexedAttestation := state2.GetIndexedAttestation(a, attestingIndicies[idx])
-		valid, err = state2.IsValidIndexedAttestation(s.BeaconState, indexedAttestation)
-		if err != nil {
-			return false
-		}
-		if !valid {
-			return false
-		}
+		// valid, err = state2.IsValidIndexedAttestation(s.BeaconState, indexedAttestation)
+		// if err != nil {
+		// 	return false
+		// }
+		// if !valid {
+		// 	return false
+		// }
+		indexedAttestations = append(indexedAttestations, indexedAttestation)
 		return true
 	})
 
-	return valid, err
+	return batchVerifyAttestations(s, indexedAttestations)
+}
+
+type indexedAttestationVerificationResult struct {
+	valid bool
+	err   error
+}
+
+// Concurrent verification of BLS.
+func batchVerifyAttestations(s *state2.BeaconState, indexedAttestations []*cltypes.IndexedAttestation) (valid bool, err error) {
+	c := make(chan indexedAttestationVerificationResult, 128)
+
+	for idx := range indexedAttestations {
+		go func(idx int) {
+			valid, err := state2.IsValidIndexedAttestation(s.BeaconState, indexedAttestations[idx])
+			c <- indexedAttestationVerificationResult{
+				valid: valid,
+				err:   err,
+			}
+		}(idx)
+	}
+	for i := 0; i < len(indexedAttestations); i++ {
+		result := <-c
+		if result.err != nil {
+			return false, err
+		}
+		if !result.valid {
+			return false, nil
+		}
+	}
+	return true, nil
 }
