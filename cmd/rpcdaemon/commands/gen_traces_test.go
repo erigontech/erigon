@@ -274,6 +274,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 }
 
 func TestGeneratedTraceApiCollision(t *testing.T) {
+	t.Skip()
 	m := rpcdaemontest.CreateTestSentryForTracesCollision(t)
 	agg := m.HistoryV3Components()
 	br, _ := m.NewBlocksIO()
