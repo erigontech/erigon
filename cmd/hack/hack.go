@@ -311,7 +311,7 @@ func dumpStorage() {
 	db := mdbx.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.StorageHistory, nil, func(k, v []byte) error {
+		return tx.ForEach(kv.E2StorageHistory, nil, func(k, v []byte) error {
 			fmt.Printf("%x %x\n", k, v)
 			return nil
 		})
@@ -329,7 +329,7 @@ func printBucket(chaindata string) {
 	fb := bufio.NewWriter(f)
 	defer fb.Flush()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.StorageHistory)
+		c, err := tx.Cursor(kv.E2StorageHistory)
 		if err != nil {
 			return err
 		}

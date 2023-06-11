@@ -43,7 +43,7 @@ func WalkAsOfStorage(tx kv.Tx, address libcommon.Address, incarnation uint64, st
 	)
 
 	//for historic data
-	shCursor, err := tx.Cursor(kv.StorageHistory)
+	shCursor, err := tx.Cursor(kv.E2StorageHistory)
 	if err != nil {
 		return err
 	}
@@ -150,7 +150,7 @@ func WalkAsOfAccounts(tx kv.Tx, startAddress libcommon.Address, timestamp uint64
 		return err
 	}
 	defer mainCursor.Close()
-	ahCursor, err := tx.Cursor(kv.AccountsHistory)
+	ahCursor, err := tx.Cursor(kv.E2AccountsHistory)
 	if err != nil {
 		return err
 	}

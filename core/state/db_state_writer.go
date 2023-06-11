@@ -163,7 +163,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, accountChanges, kv.AccountsHistory, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
+	err = writeIndex(dsw.blockNr, accountChanges, kv.E2AccountsHistory, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, storageChanges, kv.StorageHistory, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
+	err = writeIndex(dsw.blockNr, storageChanges, kv.E2StorageHistory, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
 	if err != nil {
 		return err
 	}

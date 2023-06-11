@@ -3,7 +3,6 @@ package state
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -18,7 +17,7 @@ func NewReaderV4(tx kv.TemporalTx) *ReaderV4 {
 }
 
 func (r *ReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
-	enc, ok, err := r.tx.DomainGet(temporal.AccountsDomain, address.Bytes(), nil)
+	enc, ok, err := r.tx.DomainGet(kv.AccountsDomain, address.Bytes(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +32,7 @@ func (r *ReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account
 }
 
 func (r *ReaderV4) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) (enc []byte, err error) {
-	enc, ok, err := r.tx.DomainGet(temporal.StorageDomain, address.Bytes(), key.Bytes())
+	enc, ok, err := r.tx.DomainGet(kv.StorageDomain, address.Bytes(), key.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +46,7 @@ func (r *ReaderV4) ReadAccountCode(address libcommon.Address, incarnation uint64
 	if codeHash == emptyCodeHashH {
 		return nil, nil
 	}
-	code, ok, err := r.tx.DomainGet(temporal.CodeDomain, address.Bytes(), nil)
+	code, ok, err := r.tx.DomainGet(kv.CodeDomain, address.Bytes(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +66,7 @@ func (r *ReaderV4) ReadAccountIncarnation(address libcommon.Address) (uint64, er
 }
 
 func (r *ReaderV4) ReadCommitment(prefix []byte) (enc []byte, err error) {
-	enc, ok, err := r.tx.DomainGet(temporal.CommitmentDomain, prefix, nil)
+	enc, ok, err := r.tx.DomainGet(kv.CommitmentDomain, prefix, nil)
 	if err != nil {
 		return nil, err
 	}

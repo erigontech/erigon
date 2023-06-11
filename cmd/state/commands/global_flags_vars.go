@@ -49,7 +49,7 @@ func withCSBucket(cmd *cobra.Command) {
 }
 
 func withIndexBucket(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&indexBucket, "index-bucket", kv.AccountsHistory, kv.AccountsHistory+" for account and "+kv.StorageHistory+" for storage")
+	cmd.Flags().StringVar(&indexBucket, "index-bucket", kv.E2AccountsHistory, kv.E2AccountsHistory+" for account and "+kv.E2StorageHistory+" for storage")
 }
 
 func withSnapshotBlocks(cmd *cobra.Command) {

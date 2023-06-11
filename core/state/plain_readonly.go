@@ -69,8 +69,8 @@ func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.
 		systemContractLookup: systemContractLookup,
 	}
 
-	c1, _ := tx.Cursor(kv.AccountsHistory)
-	c2, _ := tx.Cursor(kv.StorageHistory)
+	c1, _ := tx.Cursor(kv.E2AccountsHistory)
+	c2, _ := tx.Cursor(kv.E2StorageHistory)
 	c3, _ := tx.CursorDupSort(kv.AccountChangeSet)
 	c4, _ := tx.CursorDupSort(kv.StorageChangeSet)
 

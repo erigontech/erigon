@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -551,7 +550,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 
 		var topicsUnion iter.U64
 		for _, topic := range sub {
-			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
+			it, err := tx.IndexRange(kv.LogTopicIdx, topic.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
 			if err != nil {
 				return nil, err
 			}
@@ -569,7 +568,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 
 func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (res iter.U64, err error) {
 	for _, addr := range addrs {
-		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], int(from), int(to), true, kv.Unlim)
+		it, err := tx.IndexRange(kv.LogAddrIdx, addr[:], int(from), int(to), true, kv.Unlim)
 		if err != nil {
 			return nil, err
 		}

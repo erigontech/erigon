@@ -217,31 +217,6 @@ func (tx *Tx) Commit() error {
 	return tx.MdbxTx.Commit()
 }
 
-const (
-	AccountsDomain   kv.Domain = "AccountsDomain"
-	StorageDomain    kv.Domain = "StorageDomain"
-	CodeDomain       kv.Domain = "CodeDomain"
-	CommitmentDomain kv.Domain = "CommitmentDomain"
-)
-
-const (
-	AccountsHistory   kv.History = "AccountsHistory"
-	StorageHistory    kv.History = "StorageHistory"
-	CodeHistory       kv.History = "CodeHistory"
-	CommitmentHistory kv.History = "CommitmentHistory"
-)
-
-const (
-	AccountsHistoryIdx kv.InvertedIdx = "AccountsHistoryIdx"
-	StorageHistoryIdx  kv.InvertedIdx = "StorageHistoryIdx"
-	CodeHistoryIdx     kv.InvertedIdx = "CodeHistoryIdx"
-
-	LogTopicIdx   kv.InvertedIdx = "LogTopicIdx"
-	LogAddrIdx    kv.InvertedIdx = "LogAddrIdx"
-	TracesFromIdx kv.InvertedIdx = "TracesFromIdx"
-	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
-)
-
 func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error) {
 	it, err = tx.aggCtx.DomainRange(tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
@@ -256,26 +231,26 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, err error) {
 	if ethconfig.EnableHistoryV4InTest {
 		switch name {
-		case AccountsDomain:
+		case kv.AccountsDomain:
 			return tx.aggCtx.AccountLatest(key, tx.MdbxTx)
-		case StorageDomain:
+		case kv.StorageDomain:
 			return tx.aggCtx.StorageLatest(key, key2, tx.MdbxTx)
-		case CodeDomain:
+		case kv.CodeDomain:
 			return tx.aggCtx.CodeLatest(key, tx.MdbxTx)
-		case CommitmentDomain:
+		case kv.CommitmentDomain:
 			return tx.aggCtx.CommitmentLatest(key, tx.MdbxTx)
 		default:
 			panic(fmt.Sprintf("unexpected: %s", name))
 		}
 	}
 	switch name {
-	case AccountsDomain:
+	case kv.AccountsDomain:
 		v, err = tx.GetOne(kv.PlainState, key)
 		return v, v != nil, err
-	case StorageDomain:
+	case kv.StorageDomain:
 		v, err = tx.GetOne(kv.PlainState, append(common.Copy(key), key2...))
 		return v, v != nil, err
-	case CodeDomain:
+	case kv.CodeDomain:
 		v, err = tx.GetOne(kv.Code, key2)
 		return v, v != nil, err
 	default:
@@ -285,13 +260,13 @@ func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, er
 func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	if ethconfig.EnableHistoryV4InTest {
 		switch name {
-		case AccountsDomain:
+		case kv.AccountsDomain:
 			v, err := tx.aggCtx.ReadAccountData(key, ts, tx.MdbxTx)
 			return v, v != nil, err
-		case StorageDomain:
+		case kv.StorageDomain:
 			v, err := tx.aggCtx.ReadAccountStorage(append(common.Copy(key), key2...), ts, tx.MdbxTx)
 			return v, v != nil, err
-		case CodeDomain:
+		case kv.CodeDomain:
 			v, err := tx.aggCtx.ReadAccountCode(key, ts, tx.MdbxTx)
 			return v, v != nil, err
 		default:
@@ -299,8 +274,8 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 		}
 	}
 	switch name {
-	case AccountsDomain:
-		v, ok, err = tx.HistoryGet(AccountsHistory, key, ts)
+	case kv.AccountsDomain:
+		v, ok, err = tx.HistoryGet(kv.AccountsHistory, key, ts)
 		if err != nil {
 			return nil, false, err
 		}
@@ -315,8 +290,8 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 			}
 		}
 		return v, v != nil, err
-	case StorageDomain:
-		v, ok, err = tx.HistoryGet(StorageHistory, append(key[:20], key2...), ts)
+	case kv.StorageDomain:
+		v, ok, err = tx.HistoryGet(kv.StorageHistory, append(key[:20], key2...), ts)
 		if err != nil {
 			return nil, false, err
 		}
@@ -325,8 +300,8 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 		}
 		v, err = tx.GetOne(kv.PlainState, append(key, key2...))
 		return v, v != nil, err
-	case CodeDomain:
-		v, ok, err = tx.HistoryGet(CodeHistory, key, ts)
+	case kv.CodeDomain:
+		v, ok, err = tx.HistoryGet(kv.CodeHistory, key, ts)
 		if err != nil {
 			return nil, false, err
 		}
@@ -342,7 +317,7 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 
 func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
-	case AccountsHistory:
+	case kv.AccountsHistory:
 		return tx.aggCtx.ReadAccountDataNoStateWithRecent(key, ts, tx.MdbxTx)
 		if err != nil {
 			return nil, false, err
@@ -351,9 +326,9 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 			return v, ok, nil
 		}
 		return v, true, nil
-	case StorageHistory:
+	case kv.StorageHistory:
 		return tx.aggCtx.ReadAccountStorageNoStateWithRecent2(key, ts, tx.MdbxTx)
-	case CodeHistory:
+	case kv.CodeHistory:
 		return tx.aggCtx.ReadAccountCodeNoStateWithRecent(key, ts, tx.MdbxTx)
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
@@ -362,19 +337,19 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 
 func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
 	switch name {
-	case AccountsHistoryIdx:
+	case kv.AccountsHistoryIdx:
 		timestamps, err = tx.aggCtx.AccountHistoryIdxRange(k, fromTs, toTs, asc, limit, tx)
-	case StorageHistoryIdx:
+	case kv.StorageHistoryIdx:
 		timestamps, err = tx.aggCtx.StorageHistoryIdxRange(k, fromTs, toTs, asc, limit, tx)
-	case CodeHistoryIdx:
+	case kv.CodeHistoryIdx:
 		timestamps, err = tx.aggCtx.CodeHistoryIdxRange(k, fromTs, toTs, asc, limit, tx)
-	case LogTopicIdx:
+	case kv.LogTopicIdx:
 		timestamps, err = tx.aggCtx.LogTopicRange(k, fromTs, toTs, asc, limit, tx)
-	case LogAddrIdx:
+	case kv.LogAddrIdx:
 		timestamps, err = tx.aggCtx.LogAddrRange(k, fromTs, toTs, asc, limit, tx)
-	case TracesFromIdx:
+	case kv.TracesFromIdx:
 		timestamps, err = tx.aggCtx.TraceFromRange(k, fromTs, toTs, asc, limit, tx)
-	case TracesToIdx:
+	case kv.TracesToIdx:
 		timestamps, err = tx.aggCtx.TraceToRange(k, fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
@@ -396,11 +371,11 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 		panic("not implemented yet")
 	}
 	switch name {
-	case AccountsHistory:
+	case kv.AccountsHistory:
 		it, err = tx.aggCtx.AccountHistoryRange(fromTs, toTs, asc, limit, tx)
-	case StorageHistory:
+	case kv.StorageHistory:
 		it, err = tx.aggCtx.StorageHistoryRange(fromTs, toTs, asc, limit, tx)
-	case CodeHistory:
+	case kv.CodeHistory:
 		it, err = tx.aggCtx.CodeHistoryRange(fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
