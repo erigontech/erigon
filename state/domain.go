@@ -1749,7 +1749,15 @@ func (dc *DomainContext) DomainRange(tx kv.Tx, fromKey, toKey []byte, ts uint64,
 	if !asc {
 		panic("implement me")
 	}
-	histStateIt, err := dc.hc.WalkAsOf(ts, fromKey, fromKey, tx, limit)
+	//histStateIt, err := tx.aggCtx.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//lastestStateIt, err := tx.aggCtx.DomainRangeLatest(tx.MdbxTx, kv.AccountDomain, fromKey, toKey, limit)
+	//if err != nil {
+	//	return nil, err
+	//}
+	histStateIt, err := dc.hc.WalkAsOf(ts, fromKey, toKey, tx, limit)
 	if err != nil {
 		return nil, err
 	}
