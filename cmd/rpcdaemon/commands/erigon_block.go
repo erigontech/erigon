@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -221,31 +220,27 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		return nil, err
 	}
 
-	if ethconfig.EnableHistoryV4InTest {
+	if api.historyV3(tx) {
 		minTxNum, _ := rawdbv3.TxNums.Min(tx, blockNumber)
-		it, err := tx.(*temporal.Tx).HistoryRange(temporal.AccountsHistory, int(minTxNum), -1, order.Asc, -1)
+		it, err := tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(minTxNum), -1, order.Asc, -1)
 		if err != nil {
 			return nil, err
 		}
 		for it.HasNext() {
-			k, v, err := it.Next()
+			addressBytes, v, err := it.Next()
 			if err != nil {
 				return nil, err
 			}
-			//TODO: what to do in this case? maybe iterator must skip this values??
-			if len(v) == 0 {
-				continue
-			}
-			addressBytes := k
 
 			var oldAcc accounts.Account
-			if err = accounts.DeserialiseV3(&oldAcc, v); err != nil {
-				return nil, err
+			if len(v) > 0 {
+				if err = accounts.DeserialiseV3(&oldAcc, v); err != nil {
+					return nil, err
+				}
 			}
 			oldBalance := oldAcc.Balance
 
 			address := common.BytesToAddress(addressBytes)
-
 			newAcc, err := latestState.ReadAccountData(address)
 			if err != nil {
 				return nil, err
@@ -281,13 +276,11 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		if err != nil {
 			return nil, err
 		}
-
 		var oldAcc accounts.Account
 		if err = oldAcc.DecodeForStorage(v); err != nil {
 			return nil, err
 		}
 		oldBalance := oldAcc.Balance
-
 		address := common.BytesToAddress(addressBytes)
 
 		newAcc, err := latestState.ReadAccountData(address)
