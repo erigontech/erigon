@@ -19,9 +19,9 @@ var capellaBlock []byte
 var capellaState []byte
 
 func TestBlockProcessing(t *testing.T) {
-	state := state.New(&clparams.MainnetBeaconConfig)
-	require.NoError(t, utils.DecodeSSZSnappy(state, capellaState, int(clparams.CapellaVersion)))
+	s := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(s, capellaState, int(clparams.CapellaVersion)))
 	block := &cltypes.SignedBeaconBlock{}
 	require.NoError(t, utils.DecodeSSZSnappy(block, capellaBlock, int(clparams.CapellaVersion)))
-	require.NoError(t, transition.TransitionState(state, block, true)) // All checks already made in transition state
+	require.NoError(t, transition.TransitionState(s, block, true)) // All checks already made in transition state
 }
