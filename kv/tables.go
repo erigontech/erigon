@@ -792,9 +792,10 @@ func reinit() {
 // Temporal
 
 const (
-	AccountsDomain Domain = "AccountsDomain"
-	StorageDomain  Domain = "StorageDomain"
-	CodeDomain     Domain = "CodeDomain"
+	AccountsDomain   Domain = "AccountsDomain"
+	StorageDomain    Domain = "StorageDomain"
+	CodeDomain       Domain = "CodeDomain"
+	CommitmentDomain Domain = "CommitmentDomain"
 )
 
 const (
