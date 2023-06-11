@@ -72,8 +72,8 @@ import (
 var bucketLabels = map[string]string{
 	kv.Receipts:          "Receipts",
 	kv.Log:               "Event Logs",
-	kv.AccountsHistory:   "History Of Accounts",
-	kv.StorageHistory:    "History Of Storage",
+	kv.E2AccountsHistory: "History Of Accounts",
+	kv.E2StorageHistory:  "History Of Storage",
 	kv.Headers:           "Headers",
 	kv.HeaderCanonical:   "Canonical headers",
 	kv.HeaderTD:          "Headers TD",

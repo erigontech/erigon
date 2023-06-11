@@ -17,8 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -269,11 +267,11 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	if err != nil {
 		return nil, err
 	}
-	itTo, err := tx.IndexRange(temporal.TracesToIdx, addr[:], int(fromTxNum), -1, order.Desc, kv.Unlim)
+	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], int(fromTxNum), -1, order.Desc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(temporal.TracesFromIdx, addr[:], int(fromTxNum), -1, order.Desc, kv.Unlim)
+	itFrom, err := tx.IndexRange(kv.TracesFromIdx, addr[:], int(fromTxNum), -1, order.Desc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
