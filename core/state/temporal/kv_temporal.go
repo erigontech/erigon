@@ -243,7 +243,7 @@ const (
 )
 
 func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error) {
-	it, err = tx.aggCtx.DomainRange(tx.MdbxTx, kv.AccountDomain, fromKey, toKey, asOfTs, order.Asc, limit)
+	it, err = tx.aggCtx.DomainRange(tx.MdbxTx, name, fromKey, toKey, asOfTs, order.Asc, limit)
 	if err != nil {
 		return nil, err
 	}
