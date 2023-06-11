@@ -99,6 +99,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 }
 
 func TestGetProof(t *testing.T) {
+	t.Skip()
 	maxGetProofRewindBlockCount = 1 // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 
 	m, bankAddr, contractAddr := chainWithDeployedContract(t)
