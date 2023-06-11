@@ -49,15 +49,6 @@ func GetAsOf(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool
 		return nil, err
 	}
 	if ok {
-		//restore codehash
-		if !storage {
-			//restore codehash
-			v, err = RestoreCodeHash(tx, key, v, nil)
-			if err != nil {
-				return nil, err
-			}
-		}
-
 		return v, nil
 	}
 	return tx.GetOne(kv.PlainState, key)
