@@ -268,7 +268,7 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 					return nil, nil, err
 				}
 			*/
-			return k[:20], v, nil
+			return k[:20], common.Copy(v), nil
 		})
 		lastestStateIt, err := tx.RangeAscend(kv.PlainState, fromKey, toKey, -1) // don't apply limit, because need filter
 		if err != nil {
