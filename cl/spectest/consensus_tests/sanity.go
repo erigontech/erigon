@@ -25,7 +25,7 @@ var SanitySlots = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest
 	expectedState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
 	require.NoError(t, err)
 
-	err = transition.ProcessSlots(testState, expectedState.Slot())
+	err = transition.DefaultMachine.ProcessSlots(testState, expectedState.Slot())
 	require.NoError(t, err)
 
 	expectedRoot, err := expectedState.HashSSZ()
