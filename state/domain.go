@@ -1658,15 +1658,15 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	return v, b, err
 }
 
-func (sd *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v []byte)) error {
-	sd.d.stats.FilesQueries.Add(1)
+func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v []byte)) error {
+	dc.d.stats.FilesQueries.Add(1)
 
 	var cp CursorHeap
 	heap.Init(&cp)
 	var k, v []byte
 	var err error
 
-	keysCursor, err := roTx.CursorDupSort(sd.d.keysTable)
+	keysCursor, err := roTx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
 		return err
 	}
@@ -1679,15 +1679,15 @@ func (sd *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 		copy(keySuffix, k)
 		copy(keySuffix[len(k):], v)
 		step := ^binary.BigEndian.Uint64(v)
-		txNum := step * sd.d.aggregationStep
-		if v, err = roTx.GetOne(sd.d.valsTable, keySuffix); err != nil {
+		txNum := step * dc.d.aggregationStep
+		if v, err = roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
 			return err
 		}
 		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
 	}
 
-	for i, item := range sd.files {
-		bg := sd.statelessBtree(i)
+	for i, item := range dc.files {
+		bg := dc.statelessBtree(i)
 		if bg.Empty() {
 			continue
 		}
@@ -1730,7 +1730,7 @@ func (sd *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)
-					if v, err = roTx.GetOne(sd.d.valsTable, keySuffix); err != nil {
+					if v, err = roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
 						return err
 					}
 					ci1.val = common.Copy(v)
@@ -1745,27 +1745,27 @@ func (sd *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 	return nil
 }
 
-func (sd *DomainContext) DomainRange(tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
+func (dc *DomainContext) DomainRange(tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
 	if !asc {
 		panic("implement me")
 	}
-	histStateIt, err := sd.hc.WalkAsOf(ts, fromKey, fromKey, tx, limit)
+	histStateIt, err := dc.hc.WalkAsOf(ts, fromKey, fromKey, tx, limit)
 	if err != nil {
 		return nil, err
 	}
-	lastestStateIt, err := sd.IteratePrefix2(fromKey, toKey, tx, limit)
+	lastestStateIt, err := dc.IteratePrefix2(fromKey, toKey, tx, limit)
 	if err != nil {
 		return nil, err
 	}
 	return iter.UnionKV(histStateIt, lastestStateIt, limit), nil
 }
-func (sd *DomainContext) IteratePrefix2(fromKey, toKey []byte, roTx kv.Tx, limit int) (iter.KV, error) {
-	fit := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: sd,
+func (dc *DomainContext) IteratePrefix2(fromKey, toKey []byte, roTx kv.Tx, limit int) (iter.KV, error) {
+	fit := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: dc,
 		roTx:         roTx,
-		idxKeysTable: sd.d.keysTable,
+		idxKeysTable: dc.d.keysTable,
 		h:            &CursorHeap{},
 	}
-	if err := fit.init(sd); err != nil {
+	if err := fit.init(dc); err != nil {
 		return nil, err
 	}
 	return fit, nil
