@@ -366,10 +366,10 @@ const (
 	BittorrentInfo       = "BittorrentInfo"
 
 	// Domains and Inverted Indices
-	AccountDomain    = "AccountsDomain"
-	StorageDomain    = "StorageDomain"
-	CodeDomain       = "CodeDomain"
-	CommitmentDomain = "CommitmentDomain"
+	TblAccountDomain    = "AccountsDomain"
+	TblStorageDomain    = "StorageDomain"
+	TblCodeDomain       = "CodeDomain"
+	TblCommitmentDomain = "CommitmentDomain"
 
 	AccountKeys        = "AccountKeys"
 	AccountVals        = "AccountVals"
@@ -534,28 +534,28 @@ var ChaindataTables = []string{
 	BorSeparate,
 	AccountKeys,
 	AccountVals,
-	AccountDomain,
+	TblAccountDomain,
 	AccountHistoryKeys,
 	AccountHistoryVals,
 	AccountIdx,
 
 	StorageKeys,
 	StorageVals,
-	StorageDomain,
+	TblStorageDomain,
 	StorageHistoryKeys,
 	StorageHistoryVals,
 	StorageIdx,
 
 	CodeKeys,
 	CodeVals,
-	CodeDomain,
+	TblCodeDomain,
 	CodeHistoryKeys,
 	CodeHistoryVals,
 	CodeIdx,
 
 	CommitmentKeys,
 	CommitmentVals,
-	CommitmentDomain,
+	TblCommitmentDomain,
 	CommitmentHistoryKeys,
 	CommitmentHistoryVals,
 	CommitmentIdx,

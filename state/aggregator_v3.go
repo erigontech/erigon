@@ -112,16 +112,16 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 		logger:           logger,
 	}
 	var err error
-	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.AccountKeys, kv.AccountDomain, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountIdx, false, false, logger); err != nil {
+	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.AccountKeys, kv.TblAccountDomain, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountIdx, false, false, logger); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.StorageDomain, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, true, true, logger); err != nil {
+	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.TblStorageDomain, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, true, true, logger); err != nil {
 		return nil, err
 	}
-	if a.code, err = NewDomain(dir, a.tmpdir, aggregationStep, "code", kv.CodeKeys, kv.CodeDomain, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeIdx, true, true, logger); err != nil {
+	if a.code, err = NewDomain(dir, a.tmpdir, aggregationStep, "code", kv.CodeKeys, kv.TblCodeDomain, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeIdx, true, true, logger); err != nil {
 		return nil, err
 	}
-	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.CommitmentKeys, kv.CommitmentDomain, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx, true, true, logger)
+	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.CommitmentKeys, kv.TblCommitmentDomain, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx, true, true, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -2049,13 +2049,13 @@ func (ac *AggregatorV3Context) storageFn(plainKey []byte, cell *commitment.Cell)
 
 func (ac *AggregatorV3Context) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
 	switch domain {
-	case kv.AccountDomain:
+	case kv.TblAccountDomain:
 		return ac.accounts.DomainRange(tx, fromKey, toKey, ts, asc, limit)
-	case kv.StorageDomain:
+	case kv.TblStorageDomain:
 		return ac.storage.DomainRange(tx, fromKey, toKey, ts, asc, limit)
-	case kv.CodeDomain:
+	case kv.TblCodeDomain:
 		return ac.code.DomainRange(tx, fromKey, toKey, ts, asc, limit)
-	case kv.CommitmentDomain:
+	case kv.TblCommitmentDomain:
 		return ac.commitment.DomainRange(tx, fromKey, toKey, ts, asc, limit)
 	default:
 		panic(domain)
@@ -2063,13 +2063,13 @@ func (ac *AggregatorV3Context) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, 
 }
 func (ac *AggregatorV3Context) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (iter.KV, error) {
 	switch domain {
-	case kv.AccountDomain:
+	case kv.TblAccountDomain:
 		return ac.accounts.DomainRangeLatest(tx, from, to, limit)
-	case kv.StorageDomain:
+	case kv.TblStorageDomain:
 		return ac.storage.DomainRangeLatest(tx, from, to, limit)
-	case kv.CodeDomain:
+	case kv.TblCodeDomain:
 		return ac.code.DomainRangeLatest(tx, from, to, limit)
-	case kv.CommitmentDomain:
+	case kv.TblCommitmentDomain:
 		return ac.commitment.DomainRangeLatest(tx, from, to, limit)
 	default:
 		panic(domain)

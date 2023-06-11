@@ -110,25 +110,25 @@ func (sd *SharedDomains) put(table string, key, val []byte) {
 
 func (sd *SharedDomains) puts(table string, key string, val []byte) {
 	switch table {
-	case kv.AccountDomain:
+	case kv.TblAccountDomain:
 		if old, ok := sd.account.Set(key, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
-	case kv.CodeDomain:
+	case kv.TblCodeDomain:
 		if old, ok := sd.code.Set(key, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
-	case kv.StorageDomain:
+	case kv.TblStorageDomain:
 		if old, ok := sd.storage.Set(key, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
-	case kv.CommitmentDomain:
+	case kv.TblCommitmentDomain:
 		if old, ok := sd.commitment.Set(key, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
@@ -150,13 +150,13 @@ func (sd *SharedDomains) get(table string, key []byte) (v []byte, ok bool) {
 	//keyS := *(*string)(unsafe.Pointer(&key))
 	keyS := hex.EncodeToString(key)
 	switch table {
-	case kv.AccountDomain:
+	case kv.TblAccountDomain:
 		v, ok = sd.account.Get(keyS)
-	case kv.CodeDomain:
+	case kv.TblCodeDomain:
 		v, ok = sd.code.Get(keyS)
-	case kv.StorageDomain:
+	case kv.TblStorageDomain:
 		v, ok = sd.storage.Get(keyS)
-	case kv.CommitmentDomain:
+	case kv.TblCommitmentDomain:
 		v, ok = sd.commitment.Get(keyS)
 	default:
 		panic(table)
@@ -169,7 +169,7 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.CommitmentDomain, prefix)
+	v0, ok := sd.Get(kv.TblCommitmentDomain, prefix)
 	if ok {
 		return v0, nil
 	}
@@ -181,7 +181,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, error) {
 }
 
 func (sd *SharedDomains) LatestCode(addr []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.CodeDomain, addr)
+	v0, ok := sd.Get(kv.TblCodeDomain, addr)
 	if ok {
 		return v0, nil
 	}
@@ -193,7 +193,7 @@ func (sd *SharedDomains) LatestCode(addr []byte) ([]byte, error) {
 }
 
 func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.AccountDomain, addr)
+	v0, ok := sd.Get(kv.TblAccountDomain, addr)
 	if ok {
 		return v0, nil
 	}
@@ -210,11 +210,11 @@ func (sd *SharedDomains) ReadsValidBtree(table string, list *KvList) bool {
 
 	var m *btree2.Map[string, []byte]
 	switch table {
-	case kv.AccountDomain:
+	case kv.TblAccountDomain:
 		m = sd.account
-	case kv.CodeDomain:
+	case kv.TblCodeDomain:
 		m = sd.code
-	case kv.StorageDomain:
+	case kv.TblStorageDomain:
 		m = sd.storage
 	default:
 		panic(table)
@@ -231,7 +231,7 @@ func (sd *SharedDomains) ReadsValidBtree(table string, list *KvList) bool {
 }
 
 func (sd *SharedDomains) LatestStorage(addr, loc []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.StorageDomain, common.Append(addr, loc))
+	v0, ok := sd.Get(kv.TblStorageDomain, common.Append(addr, loc))
 	if ok {
 		return v0, nil
 	}
@@ -304,7 +304,7 @@ func (sd *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error
 
 func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []byte) error {
 	sd.Commitment.TouchPlainKey(addr, account, sd.Commitment.TouchAccount)
-	sd.put(kv.AccountDomain, addr, account)
+	sd.put(kv.TblAccountDomain, addr, account)
 	return sd.Account.PutWithPrev(addr, nil, account, prevAccount)
 }
 
@@ -314,7 +314,7 @@ func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, codeHash []byte) e
 	if bytes.Equal(prevCode, code) {
 		return nil
 	}
-	sd.put(kv.CodeDomain, addr, code)
+	sd.put(kv.TblCodeDomain, addr, code)
 	if len(code) == 0 {
 		return sd.Code.DeleteWithPrev(addr, nil, prevCode)
 	}
@@ -322,19 +322,19 @@ func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, codeHash []byte) e
 }
 
 func (sd *SharedDomains) UpdateCommitmentData(prefix []byte, data []byte) error {
-	sd.put(kv.CommitmentDomain, prefix, data)
+	sd.put(kv.TblCommitmentDomain, prefix, data)
 	return sd.Commitment.Put(prefix, nil, data)
 }
 
 func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	sd.Commitment.TouchPlainKey(addr, nil, sd.Commitment.TouchAccount)
 
-	sd.put(kv.AccountDomain, addr, nil)
+	sd.put(kv.TblAccountDomain, addr, nil)
 	if err := sd.Account.DeleteWithPrev(addr, nil, prev); err != nil {
 		return err
 	}
 
-	sd.put(kv.CodeDomain, addr, nil)
+	sd.put(kv.TblCodeDomain, addr, nil)
 	// commitment delete already has been applied via account
 	if err := sd.Code.Delete(addr, nil); err != nil {
 		return err
@@ -347,7 +347,7 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 		if !bytes.HasPrefix(k, addr) {
 			return
 		}
-		sd.put(kv.StorageDomain, k, nil)
+		sd.put(kv.TblStorageDomain, k, nil)
 		sd.Commitment.TouchPlainKey(k, nil, sd.Commitment.TouchStorage)
 		err = sd.Storage.DeleteWithPrev(k, nil, v)
 
@@ -365,7 +365,7 @@ func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value, preVal []b
 	composite := common.Append(addr, loc)
 
 	sd.Commitment.TouchPlainKey(composite, value, sd.Commitment.TouchStorage)
-	sd.put(kv.StorageDomain, composite, value)
+	sd.put(kv.TblStorageDomain, composite, value)
 	if len(value) == 0 {
 		return sd.Storage.DeleteWithPrev(addr, loc, preVal)
 	}
@@ -642,19 +642,19 @@ func (sd *SharedDomains) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix stri
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
 
-	if err := sd.flushBtree(ctx, rwTx, kv.AccountDomain, sd.account, logPrefix, logEvery); err != nil {
+	if err := sd.flushBtree(ctx, rwTx, kv.TblAccountDomain, sd.account, logPrefix, logEvery); err != nil {
 		return err
 	}
 	sd.account.Clear()
-	if err := sd.flushBtree(ctx, rwTx, kv.StorageDomain, sd.storage, logPrefix, logEvery); err != nil {
+	if err := sd.flushBtree(ctx, rwTx, kv.TblStorageDomain, sd.storage, logPrefix, logEvery); err != nil {
 		return err
 	}
 	sd.storage.Clear()
-	if err := sd.flushBtree(ctx, rwTx, kv.CodeDomain, sd.code, logPrefix, logEvery); err != nil {
+	if err := sd.flushBtree(ctx, rwTx, kv.TblCodeDomain, sd.code, logPrefix, logEvery); err != nil {
 		return err
 	}
 	sd.code.Clear()
-	if err := sd.flushBtree(ctx, rwTx, kv.CommitmentDomain, sd.commitment, logPrefix, logEvery); err != nil {
+	if err := sd.flushBtree(ctx, rwTx, kv.TblCommitmentDomain, sd.commitment, logPrefix, logEvery); err != nil {
 		return err
 	}
 	sd.commitment.Clear()
