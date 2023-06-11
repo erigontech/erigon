@@ -30,7 +30,6 @@ type Impl struct {
 }
 
 func (i Impl) VerifyBlockSignature(s *state.BeaconState, block *cltypes.SignedBeaconBlock) error {
-	//TODO implement me
 	return i.FnVerifyBlockSignature(s, block)
 }
 
