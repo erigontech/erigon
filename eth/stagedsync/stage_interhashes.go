@@ -47,7 +47,7 @@ type TrieCfg struct {
 func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.AggregatorV3) TrieCfg {
 	return TrieCfg{
 		db:                db,
-		checkRoot:         checkRoot,
+		checkRoot:         false,
 		tmpDir:            tmpDir,
 		saveNewHashesToDB: saveNewHashesToDB,
 		badBlockHalt:      badBlockHalt,

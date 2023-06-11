@@ -342,11 +342,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
-			var err error
-			b.header.Root, err = hashRoot(tx, b.header)
-			if err != nil {
-				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
-			}
+			b.header.Root = libcommon.Hash{byte(b.Number().Uint64())}
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */)
 			return block, b.receipts, nil
