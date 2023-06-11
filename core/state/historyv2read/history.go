@@ -43,22 +43,14 @@ func RestoreCodeHash(tx kv.Getter, key, v []byte, force *libcommon.Hash) ([]byte
 	return v, nil
 }
 
-func GetAsOf(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool, key []byte, timestamp uint64) ([]byte, error) {
+func GetAsOf(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool, key []byte, timestamp uint64) (v []byte, fromHistory bool, err error) {
 	v, ok, err := historyv2.FindByHistory(indexC, changesC, storage, key, timestamp)
 	if err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	if ok {
-		//restore codehash
-		if !storage {
-			//restore codehash
-			v, err = RestoreCodeHash(tx, key, v, nil)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		return v, nil
+		return v, true, nil
 	}
-	return tx.GetOne(kv.PlainState, key)
+	v, err = tx.GetOne(kv.PlainState, key)
+	return v, false, err
 }
