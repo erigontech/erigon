@@ -8,10 +8,11 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/hashicorp/golang-lru/v2"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
+
+	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"

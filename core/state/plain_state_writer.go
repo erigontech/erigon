@@ -131,6 +131,7 @@ func (w *PlainStateWriter) CreateContract(address libcommon.Address) error {
 
 func (w *PlainStateWriter) WriteChangeSets() error {
 	if w.csw != nil {
+
 		return w.csw.WriteChangeSets()
 	}
 

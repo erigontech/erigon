@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/google/btree"
-	lru "github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -41,9 +41,9 @@ import (
 )
 
 const (
-	checkpointInterval = 1024 // Number of blocks after which to save the vote snapshot to the database
-	inmemorySnapshots  = 128  // Number of recent vote snapshots to keep in memory
-	inmemorySignatures = 4096 // Number of recent block signatures to keep in memory
+	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
+	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
+	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
 )
 
 // Bor protocol constants.
@@ -544,8 +544,8 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			break
 		}
 
-		// If an on-disk checkpoint snapshot can be found, use that
-		if number%checkpointInterval == 0 {
+		// If an on-disk snapshot can be found, use that
+		if number%snapshotPersistInterval == 0 {
 			if s, err := loadSnapshot(c.config, c.signatures, c.DB, hash); err == nil {
 				c.logger.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 
@@ -625,8 +625,8 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 
 	c.recents.Add(snap.Hash, snap)
 
-	// If we've generated a new checkpoint snapshot, save to disk
-	if snap.Number%checkpointInterval == 0 && len(headers) > 0 {
+	// If we've generated a new persistent snapshot, save to disk
+	if snap.Number%snapshotPersistInterval == 0 && len(headers) > 0 {
 		if err = snap.store(c.DB); err != nil {
 			return nil, err
 		}

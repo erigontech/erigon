@@ -34,44 +34,43 @@ func NewRegressionTester(testDirectory string) (*RegressionTester, error) {
 }
 
 func (r *RegressionTester) Run(name string, fn func(*forkchoice.ForkChoiceStore, *cltypes.SignedBeaconBlock) error, step int) error {
-	for true {
-		state, err := r.readStartingState()
-		if err != nil {
-			return err
-		}
-		store, err := forkchoice.NewForkChoiceStore(state, nil, nil, true)
-		if err != nil {
-			return err
-		}
-		log.Info("Loading public keys into memory")
-		bls.SetEnabledCaching(true)
-		state.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-			pk := v.PublicKey()
-			if err := bls.LoadPublicKeyIntoCache(pk[:], false); err != nil {
-				panic(err)
-			}
-			return true
-		})
-		store.OnTick(uint64(time.Now().Unix()))
-		begin := time.Now()
-		beginStep := time.Now()
-		log.Info("Starting test, CTRL+C to stop.", "name", name)
-		for _, block := range r.blockList {
-			if err := fn(store, block); err != nil {
-				return err
-			}
-			if block.Block.Slot%uint64(step) == 0 {
-				elapsed := time.Since(beginStep)
-				log.Info("Processed", "slot", block.Block.Slot, "elapsed", elapsed, "sec/blk", elapsed/time.Duration(step))
-				beginStep = time.Now()
-			}
-		}
-
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		sum := time.Since(begin)
-		log.Info("Finished/Restarting test", "name", name, "averageBlockTime", sum/time.Duration(len(r.blockList)), "sys", common.ByteCount(m.Sys))
+	state, err := r.readStartingState()
+	if err != nil {
+		return err
 	}
+	store, err := forkchoice.NewForkChoiceStore(state, nil, nil, true)
+	if err != nil {
+		return err
+	}
+	log.Info("Loading public keys into memory")
+	bls.SetEnabledCaching(true)
+	state.ForEachValidator(func(v solid.Validator, idx, total int) bool {
+		pk := v.PublicKey()
+		if err := bls.LoadPublicKeyIntoCache(pk[:], false); err != nil {
+			panic(err)
+		}
+		return true
+	})
+	store.OnTick(uint64(time.Now().Unix()))
+	begin := time.Now()
+	beginStep := time.Now()
+	log.Info("Starting test, CTRL+C to stop.", "name", name)
+	for _, block := range r.blockList {
+		if err := fn(store, block); err != nil {
+			return err
+		}
+		if block.Block.Slot%uint64(step) == 0 {
+			elapsed := time.Since(beginStep)
+			log.Info("Processed", "slot", block.Block.Slot, "elapsed", elapsed, "sec/blk", elapsed/time.Duration(step))
+			beginStep = time.Now()
+		}
+	}
+
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	sum := time.Since(begin)
+	log.Info("Finished/Restarting test", "name", name, "averageBlockTime", sum/time.Duration(len(r.blockList)), "sys", common.ByteCount(m.Sys))
+
 	return nil
 }
 

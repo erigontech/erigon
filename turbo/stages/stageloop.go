@@ -99,9 +99,9 @@ func StageLoop(ctx context.Context,
 				return
 			}
 
-			log.Error("Staged Sync", "err", err)
+			logger.Error("Staged Sync", "err", err)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
-				log.Error("Failed to recover header sentriesClient", "err", recoveryErr)
+				logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)
 			}
 			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
 			continue
@@ -112,7 +112,7 @@ func StageLoop(ctx context.Context,
 
 		if loopMinTime != 0 {
 			waitTime := loopMinTime - time.Since(start)
-			log.Info("Wait time until next loop", "for", waitTime)
+			logger.Info("Wait time until next loop", "for", waitTime)
 			c := time.After(waitTime)
 			select {
 			case <-ctx.Done():
