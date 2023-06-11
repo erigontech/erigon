@@ -1936,15 +1936,15 @@ func (ac *AggregatorV3Context) CodeHistoryRange(startTxNum, endTxNum int, asc or
 	return ac.code.hc.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
 }
 
-func (ac *AggregatorV3Context) AccountHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) iter.KV {
+func (ac *AggregatorV3Context) AccountHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) (iter.KV, error) {
 	return ac.accounts.hc.WalkAsOf(startTxNum, from, to, tx, limit)
 }
 
-func (ac *AggregatorV3Context) StorageHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) iter.KV {
+func (ac *AggregatorV3Context) StorageHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) (iter.KV, error) {
 	return ac.storage.hc.WalkAsOf(startTxNum, from, to, tx, limit)
 }
 
-func (ac *AggregatorV3Context) CodeHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) iter.KV {
+func (ac *AggregatorV3Context) CodeHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) (iter.KV, error) {
 	return ac.code.hc.WalkAsOf(startTxNum, from, to, tx, limit)
 }
 
@@ -2047,7 +2047,7 @@ func (ac *AggregatorV3Context) storageFn(plainKey []byte, cell *commitment.Cell)
 	return nil
 }
 
-func (ac *AggregatorV3Context) DomainIterLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (iter.KV, error) {
+func (ac *AggregatorV3Context) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (iter.KV, error) {
 	switch domain {
 	case kv.AccountDomain:
 		return ac.accounts.IteratePrefix2(from, to, tx, limit)

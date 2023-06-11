@@ -1528,7 +1528,7 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 	return val[8:], true, nil
 }
 
-func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, limit int) iter.KV {
+func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, limit int) (iter.KV, error) {
 	hi := &StateAsOfIterF{
 		from: from, to: to, limit: limit,
 
@@ -1550,7 +1550,7 @@ func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.T
 	}
 	binary.BigEndian.PutUint64(hi.startTxKey[:], startTxNum)
 	if err := hi.advanceInFiles(); err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	var dbit iter.KV
@@ -1567,7 +1567,7 @@ func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.T
 		}
 		binary.BigEndian.PutUint64(dbi.startTxKey[:], startTxNum)
 		if err := dbi.advance(); err != nil {
-			panic(err)
+			return nil, err
 		}
 		dbit = dbi
 	} else {
@@ -1583,11 +1583,11 @@ func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.T
 		}
 		binary.BigEndian.PutUint64(dbi.startTxKey[:], startTxNum)
 		if err := dbi.advanceInDb(); err != nil {
-			panic(err)
+			return nil, err
 		}
 		dbit = dbi
 	}
-	return iter.UnionKV(hi, dbit, limit)
+	return iter.UnionKV(hi, dbit, limit), nil
 }
 
 // StateAsOfIter - returns state range at given time in history
