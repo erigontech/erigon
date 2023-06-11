@@ -243,40 +243,16 @@ const (
 )
 
 func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error) {
-	if asc == order.Desc {
-		panic("not supported yet")
+	it, err = tx.aggCtx.DomainRange(tx.MdbxTx, kv.AccountDomain, fromKey, toKey, asOfTs, order.Asc, limit)
+	if err != nil {
+		return nil, err
 	}
-	switch name {
-	case AccountsDomain:
-		it, err = tx.aggCtx.DomainRange(tx.MdbxTx, kv.AccountDomain, fromKey, toKey, asOfTs, order.Asc, limit)
-		if err != nil {
-			return nil, err
-		}
-	case StorageDomain:
-		it, err = tx.aggCtx.DomainRange(tx.MdbxTx, kv.StorageDomain, fromKey, toKey, asOfTs, order.Asc, limit)
-		if err != nil {
-			return nil, err
-		}
-	case CodeDomain:
-		it, err = tx.aggCtx.DomainRange(tx.MdbxTx, kv.Code, fromKey, toKey, asOfTs, order.Asc, limit)
-		if err != nil {
-			return nil, err
-		}
-	case CommitmentDomain:
-		it, err = tx.aggCtx.DomainRange(tx.MdbxTx, kv.CommitmentDomain, fromKey, toKey, asOfTs, order.Asc, limit)
-		if err != nil {
-			return nil, err
-		}
-	default:
-		panic(fmt.Sprintf("unexpected: %s", name))
-	}
-
 	if closer, ok := it.(kv.Closer); ok {
 		tx.resourcesToClose = append(tx.resourcesToClose, closer)
 	}
-
 	return it, nil
 }
+
 func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, err error) {
 	if ethconfig.EnableHistoryV4InTest {
 		switch name {
@@ -367,7 +343,7 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case AccountsHistory:
-		v, ok, err = tx.aggCtx.ReadAccountDataNoStateWithRecent(key, ts, tx.MdbxTx)
+		return tx.aggCtx.ReadAccountDataNoStateWithRecent(key, ts, tx.MdbxTx)
 		if err != nil {
 			return nil, false, err
 		}
