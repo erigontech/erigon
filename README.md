@@ -125,6 +125,7 @@ _Flags:_
 - `log.json`
 - `log.console.json` (alias for `log.json`)
 - `log.dir.path`
+- `log.dir.prefix`
 - `log.dir.verbosity`
 - `log.dir.json`
 
@@ -140,7 +141,7 @@ int value specifying the highest output log level:
   LvlTrace = 5
 ```
 
-To set an output dir for logs to be collected on disk, please set `--log.dir.path`. The flag `--log.dir.verbosity` is
+To set an output dir for logs to be collected on disk, please set `--log.dir.path` If you want to change the filename prodiced from `erigon` you should also set the `--log.dir.prefix` flag to an alternate name. The flag `--log.dir.verbosity` is
 also available to control the verbosity of this logging, with the same int value as above, or the string value e.g. '
 debug' or 'info'. Default verbosity is 'debug' (4), for disk logging.
 
