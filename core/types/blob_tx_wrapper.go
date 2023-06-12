@@ -17,26 +17,36 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-// Compressed BLS12-381 G1 element
-type KZGCommitment [48]byte
+const (
+	LEN_BLOB = params.FieldElementsPerBlob * 32 // 131072
+	LEN_48   = 48                               // KZGCommitment & KZGProof sizes
+)
 
-func (c KZGCommitment) ComputeVersionedHash() libcommon.Hash {
-	return libcommon.Hash(libkzg.KZGToVersionedHash(gokzg4844.KZGCommitment(c)))
+type KZGCommitment [LEN_48]byte // Compressed BLS12-381 G1 element
+type KZGProof [LEN_48]byte
+type Blob [LEN_BLOB]byte
+
+type BlobKzgs []KZGCommitment
+type KZGProofs []KZGProof
+type Blobs []Blob
+
+type BlobTxWrapper struct {
+	Tx          SignedBlobTx
+	Commitments BlobKzgs
+	Blobs       Blobs
+	Proofs      KZGProofs
 }
 
-type KZGProof [48]byte
+/* Blob methods */
 
-// Blob data
-type Blob [params.FieldElementsPerBlob * 32]byte
-
-func (b Blob) encodingSize() int {
-	size := 1
-	size += (bits.Len(131072) + 7) / 8
-	size += 131072
+func (b Blob) payloadSize() int {
+	size := 1                            // 0xb7
+	size += (bits.Len(LEN_BLOB) + 7) / 8 // params.FieldElementsPerBlob * 32 = 131072 (length encoding size)
+	size += LEN_BLOB                     // byte_array it self
 	return size
 }
 
-type BlobKzgs []KZGCommitment
+/* BlobKzgs methods */
 
 func (li BlobKzgs) copy() BlobKzgs {
 	cpy := make(BlobKzgs, len(li))
@@ -44,15 +54,33 @@ func (li BlobKzgs) copy() BlobKzgs {
 	return cpy
 }
 
-func (li BlobKzgs) encodingSize() int {
+func (li BlobKzgs) payloadSize() int {
 	size := 49 * len(li)
 	if size >= 56 {
 		size += (bits.Len(uint(size)) + 7) / 8 // BE encoding of the length of hashes
 	}
-	return size + 1
+	return size
 }
 
-type KZGProofs []KZGProof
+func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+	// prefix
+	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+
+	b[0] = 128 + LEN_48
+	for _, arr := range li {
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(arr[:]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+/* KZGProofs methods */
 
 func (li KZGProofs) copy() KZGProofs {
 	cpy := make(KZGProofs, len(li))
@@ -60,15 +88,33 @@ func (li KZGProofs) copy() KZGProofs {
 	return cpy
 }
 
-func (li KZGProofs) encodingSize() int {
+func (li KZGProofs) payloadSize() int {
 	size := 49 * len(li)
 	if size >= 56 {
 		size += (bits.Len(uint(size)) + 7) / 8 // BE encoding of the length of hashes
 	}
-	return size + 1
+	return size
 }
 
-type Blobs []Blob
+func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+	// prefix
+	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+
+	b[0] = 128 + LEN_48
+	for _, arr := range li {
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(arr[:]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+/* Blobs methods */
 
 func (blobs Blobs) copy() Blobs {
 	cpy := make(Blobs, len(blobs))
@@ -76,13 +122,30 @@ func (blobs Blobs) copy() Blobs {
 	return cpy
 }
 
-func (blobs Blobs) encodingSize() int {
+func (blobs Blobs) payloadSize() int {
 	if len(blobs) > 0 {
-		total := len(blobs) * blobs[0].encodingSize()
+		total := len(blobs) * blobs[0].payloadSize()
 		total += (bits.Len(uint(total)) + 7) / 8
-		total += 1
 	}
-	return 1
+	return 0
+}
+
+func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+	// prefix
+	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+
+	for _, arr := range blobs {
+		if err := rlp.EncodeStringSizePrefix(LEN_BLOB, w, b); err != nil {
+			return err
+		}
+		if _, err := w.Write(arr[:]); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Return KZG commitments, versioned hashes and the proofs that correspond to these blobs
@@ -132,12 +195,11 @@ func toProofs(_proofs KZGProofs) []gokzg4844.KZGProof {
 	return proofs
 }
 
-type BlobTxWrapper struct {
-	Tx          SignedBlobTx
-	Commitments BlobKzgs
-	Blobs       Blobs
-	Proofs      KZGProofs
+func (c KZGCommitment) ComputeVersionedHash() libcommon.Hash {
+	return libcommon.Hash(libkzg.KZGToVersionedHash(gokzg4844.KZGCommitment(c)))
 }
+
+/* BlobTxWrapper methods */
 
 // validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
 func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
@@ -230,33 +292,44 @@ func (txw *BlobTxWrapper) IsContractDeploy() bool { return txw.Tx.IsContractDepl
 func (txw *BlobTxWrapper) Unwrap() Transaction { return &txw.Tx }
 
 func (txw BlobTxWrapper) EncodingSize() int {
-	return 0
+	txSize, commitmentsSize, proofsSize, blobsSize := txw.payloadSize()
+	payloadSize := txSize + commitmentsSize + proofsSize + blobsSize
+	envelopeSize := payloadSize
+	// Add envelope size and type size
+	if payloadSize >= 56 {
+		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+	}
+	envelopeSize += 2
+	return envelopeSize
 }
 
-func (txw BlobTxWrapper) payloadSize() {
-	// txSize, _, _, _, _ := txw.Tx.payloadSize()
-	// txw.Commitments.encodingSize()
-	// txw.Proofs.encodingSize()
-	// txw.Blobs.encodingSize()
+func (txw BlobTxWrapper) payloadSize() (int, int, int, int) {
+	txSize, _, _, _, _ := txw.Tx.payloadSize()
+	commitmentsSize := txw.Commitments.payloadSize()
+	proofsSize := txw.Proofs.payloadSize()
+	blobsSize := txw.Blobs.payloadSize()
+	return txSize, commitmentsSize, proofsSize, blobsSize
 }
 
-func (txw BlobTxWrapper) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) error {
+func (txw BlobTxWrapper) encodePayload(w io.Writer, b []byte, payloadSize, commitmentsSize, proofsSize, blobsSize int) error {
 	// prefix, encode txw payload size
+	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
 
-	// prefix, encode stx payload size
-	// encodeTx()
+	txPayloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := txw.Tx.payloadSize()
+	if err := txw.Tx.encodePayload(w, b, txPayloadSize, nonceLen, gasLen, accessListLen, blobHashesLen); err != nil {
+		return err
+	}
 
 	// TODO: encode in order (see EIP-4844 updates)
-
-	// prefix, encode commitments payload size
-	// encodeCommitments()
-
-	// prefix, encode Blobs payload size
-	// encodeBlobs()
-
-	// prefix, encode Proofs payload size
-	// encodeProofs()
-
+	if err := txw.Commitments.encodePayload(w, b, commitmentsSize); err != nil {
+		return err
+	}
+	if err := txw.Blobs.encodePayload(w, b, blobsSize); err != nil {
+		return err
+	}
+	txw.Proofs.encodePayload(w, b, proofsSize)
 	return nil
 }
 
@@ -265,6 +338,27 @@ func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
 }
 
 func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
+	txSize, commitmentsSize, proofsSize, blobsSize := txw.payloadSize()
+	payloadSize := txSize + commitmentsSize + proofsSize + blobsSize
+	envelopeSize := payloadSize
+	if payloadSize >= 56 {
+		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+	}
+	// size of struct prefix and TxType
+	envelopeSize += 2
+	var b [33]byte
+	// envelope
+	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode TxType
+	b[0] = BlobTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := txw.encodePayload(w, b[:], payloadSize, commitmentsSize, proofsSize, blobsSize); err != nil {
+		return err
+	}
 	return nil
 }
 

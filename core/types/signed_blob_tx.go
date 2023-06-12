@@ -32,8 +32,8 @@ type SignedBlobTx struct {
 	BlobVersionedHashes []libcommon.Hash
 
 	YParity bool
-	R       *uint256.Int
-	S       *uint256.Int
+	R       uint256.Int
+	S       uint256.Int
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -305,34 +305,35 @@ func (stx SignedBlobTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 	// size of BlobVersionedHashes
 	payloadSize++
 	blobHashesLen = blobVersionedHashesSize(stx.BlobVersionedHashes)
+	if blobHashesLen >= 56 {
+		payloadSize += (bits.Len(uint(blobHashesLen)) + 7) / 8
+	}
 	payloadSize += blobHashesLen
 	// size of y_parity
-	payloadSize++
-	// payloadSize += 1 // y_parity takes 1 byte?
+	payloadSize++ // y_parity takes 1 byte?
 	// size of R
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(stx.R)
+	payloadSize += rlp.Uint256LenExcludingHead(&stx.R)
 	// size of S
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(stx.S)
+	payloadSize += rlp.Uint256LenExcludingHead(&stx.S)
 	return payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen
 }
 
 func blobVersionedHashesSize(hashes []libcommon.Hash) int {
-	size := 33 * len(hashes)
-	if size >= 56 {
-		size += (bits.Len(uint(size)) + 7) / 8 // BE encoding of the length of hashes
-	}
-	return size
+	return 33 * len(hashes)
 }
 
 func encodeBloblVersionedHashes(hashes []libcommon.Hash, w io.Writer, b []byte) error {
 	b[0] = 128 + 32
 	for _, h := range hashes {
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-		if _, err := w.Write(h.Bytes()); err != nil {
+		// if _, err := w.Write(b[:1]); err != nil {
+		// 	return err
+		// }
+		// if _, err := w.Write(h.Bytes()); err != nil {
+		// 	return err
+		// }
+		if err := rlp.EncodeString(h[:], w, b); err != nil {
 			return err
 		}
 	}
@@ -550,6 +551,7 @@ func (stx *SignedBlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	stx.R.SetBytes(b)
+
 	// decode S
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
@@ -559,24 +561,25 @@ func (stx *SignedBlobTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 func decodeBlobVersionedHashes(hashes []libcommon.Hash, s *rlp.Stream) error {
-
-	size, err := s.List()
+	_, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open BlobVersionedHashes: %w", err)
 	}
 	var b []byte
 	_hash := libcommon.Hash{}
-	for i := uint64(0); i < size; i++ {
-		if b, err = s.Bytes(); err != nil {
-			return err
-		}
-		if len(b) > 0 && len(b) != 32 {
-			return fmt.Errorf("wrong size for blobVersionedHashes: %d", len(b))
-		}
-		if len(b) > 0 {
+
+	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
+		if len(b) == 32 {
 			copy((_hash)[:], b)
 			hashes = append(hashes, _hash)
+		} else {
+			return fmt.Errorf("wrong size for blobVersionedHashes: %d, %v", len(b), b[0])
 		}
 	}
+
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("close BlobVersionedHashes: %w", err)
+	}
+
 	return nil
 }
