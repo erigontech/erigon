@@ -11,7 +11,7 @@ make erigon
 ```
 
 
-## 2. Build RPC deamon
+## 2. Build RPC daemon
 On the same terminal folder you can build the RPC daemon.
 
 ```bash
@@ -43,7 +43,7 @@ Now save the enode information generated in the logs, we will use this in a minu
 enode://d30d079163d7b69fcb261c0538c0c3faba4fb4429652970e60fa25deb02a789b4811e98b468726ba0be63b9dc925a019f433177eb6b45c23bb78892f786d8f7a@127.0.0.1:53171 
 ```
 
-## 4. Start RPC deamon
+## 4. Start RPC daemon
 
 Open terminal 2 and navigate to erigon/build/bin folder. Here type the following command
     
@@ -68,7 +68,7 @@ Open terminal 3 and navigate to erigon/build/bin folder. Paste in the following 
     --nodiscover
 ```
     
-To check if the nodes are connected, you can go to the log of both the nodes and look for the line
+To check if the nodes are connected, you can go to the log of both nodes and look for the line
     
   ```  [p2p] GoodPeers    eth66=1 ```
     
