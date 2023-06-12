@@ -32,8 +32,8 @@ type Eth1Block struct {
 	BlockHash     libcommon.Hash
 	Transactions  *solid.TransactionsSSZ
 	Withdrawals   *solid.ListSSZ[*types.Withdrawal]
-	DataGasUsed   *uint64
-	ExcessDataGas *uint64
+	DataGasUsed   uint64
+	ExcessDataGas uint64
 	// internals
 	version clparams.StateVersion
 }
@@ -73,8 +73,8 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 	}
 
 	if header.DataGasUsed != nil && header.ExcessDataGas != nil {
-		block.DataGasUsed = header.DataGasUsed
-		block.ExcessDataGas = header.ExcessDataGas
+		block.DataGasUsed = *header.DataGasUsed
+		block.ExcessDataGas = *header.ExcessDataGas
 		block.version = clparams.DenebVersion
 	} else if header.WithdrawalsHash != nil {
 		block.version = clparams.CapellaVersion
@@ -104,8 +104,8 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 
 	var dataGasUsed, excessDataGas uint64
 	if b.version >= clparams.DenebVersion {
-		dataGasUsed = *b.DataGasUsed
-		excessDataGas = *b.ExcessDataGas
+		dataGasUsed = b.DataGasUsed
+		excessDataGas = b.ExcessDataGas
 	}
 
 	return &Eth1Header{
@@ -160,8 +160,6 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
 	b.Extra = solid.NewExtraData()
 	b.Transactions = &solid.TransactionsSSZ{}
 	b.Withdrawals = solid.NewStaticListSSZ[*types.Withdrawal](16, 44)
-	b.DataGasUsed = new(uint64)
-	b.ExcessDataGas = new(uint64)
 	b.version = clparams.StateVersion(version)
 	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
 }
@@ -183,7 +181,7 @@ func (b *Eth1Block) getSchema() []interface{} {
 		s = append(s, b.Withdrawals)
 	}
 	if b.version >= clparams.DenebVersion {
-		s = append(s, b.DataGasUsed, b.ExcessDataGas)
+		s = append(s, &b.DataGasUsed, &b.ExcessDataGas)
 	}
 	return s
 }
@@ -231,9 +229,9 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 
 	if b.version >= clparams.DenebVersion {
 		dataGasUsed := b.DataGasUsed
-		header.DataGasUsed = dataGasUsed
+		header.DataGasUsed = &dataGasUsed
 		excessDataGas := b.ExcessDataGas
-		header.ExcessDataGas = excessDataGas
+		header.ExcessDataGas = &excessDataGas
 	}
 
 	// If the header hash does not match the block hash, return an error.
@@ -242,6 +240,10 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 	}
 
 	return header, nil
+}
+
+func (b *Eth1Block) Version() clparams.StateVersion {
+	return b.version
 }
 
 // Body returns the equivalent raw body (only eth1 body section).
