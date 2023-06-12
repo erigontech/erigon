@@ -21,7 +21,7 @@ type finality[T rawdb.BlockFinality[T]] struct {
 
 type finalityService interface {
 	IsValidPeer(fetchHeadersByNumber func(number uint64, amount int, skip int, reverse bool) ([]*types.Header, []common.Hash, error)) (bool, error)
-	IsValidChain(currentHeader *types.Header, chain []*types.Header) (bool, error)
+	IsValidChain(currentHeader *types.Header, chain []*types.Header) bool
 	Get() (bool, uint64, common.Hash)
 	Process(block uint64, hash common.Hash)
 	Purge()
@@ -45,15 +45,15 @@ func (f *finality[T]) IsValidPeer(fetchHeadersByNumber func(number uint64, amoun
 // IsValidChain checks the validity of chain by comparing it
 // against the local checkpoint entry
 // todo: need changes
-func (f *finality[T]) IsValidChain(currentHeader *types.Header, chain []*types.Header) (bool, error) {
+func (f *finality[T]) IsValidChain(currentHeader *types.Header, chain []*types.Header) bool {
 	// Return if we've received empty chain
 	if len(chain) == 0 {
-		return false, nil
+		return false
 	}
 
-	res, err := isValidChain(currentHeader, chain, f.doExist, f.Number, f.Hash, f.interval)
+	res := isValidChain(currentHeader, chain, f.doExist, f.Number, f.Hash, f.interval)
 
-	return res, err
+	return res
 }
 
 func (f *finality[T]) Process(block uint64, hash common.Hash) {

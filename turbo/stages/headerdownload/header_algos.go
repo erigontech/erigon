@@ -536,13 +536,12 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, borPenalties *[]Penalt
 		if !link.verified {
 			// Whitelist service is called to check if the bor chain is
 			// on the cannonical chain according to milestones
-			borValidChain, err := validateReorg(link.header)
-			borInvalidChain := !borValidChain || err != nil
-			if borInvalidChain {
+			borValidChain := validateReorg(link.header)
+			if !borValidChain {
 				*borPenalties = append(*borPenalties, PenaltyItem{Penalty: BadBlockPenalty, PeerID: link.peerID})
 			}
 
-			if err := hd.VerifyHeader(link.header); err != nil || borInvalidChain {
+			if err := hd.VerifyHeader(link.header); err != nil || !borValidChain {
 				hd.badPoSHeaders[link.hash] = link.header.ParentHash
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
@@ -1396,12 +1395,12 @@ func DecodeTips(encodings []string) (map[libcommon.Hash]HeaderRecord, error) {
 
 // ValidateReorg calls the chain validator service to check if the reorg is valid or not
 // This function is focussed at bor, in all other cases returns true without validation
-func validateReorg(current *types.Header) (bool, error) {
+func validateReorg(current *types.Header) bool {
 	service := whitelist.GetWhitelistingService()
 
 	if service != nil {
 		return service.IsValidChain(current, []*types.Header{current})
 	}
 
-	return true, nil
+	return true
 }
