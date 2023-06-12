@@ -151,7 +151,14 @@ func (nw *Network) startNode(nodeAddr string, cfg interface{}, nodeNumber int) (
 		app := erigonapp.MakeApp(fmt.Sprintf("node-%d", nodeNumber), node.run, erigoncli.DefaultFlags)
 
 		if err := app.Run(args); err != nil {
+<<<<<<< HEAD
 			nw.Logger.Warn("App run returned error", "node", fmt.Sprintf("node-%d", nodeNumber), "err", err)
+=======
+			_, printErr := fmt.Fprintln(os.Stderr, err)
+			if printErr != nil {
+				nw.Logger.Warn("Error writing app run error to stderr", "err", printErr)
+			}
+>>>>>>> 89e335022 (fixes for testing dev networks (runs slowly in multi node mode))
 		}
 	}()
 

@@ -165,6 +165,7 @@ func action(ctx *cli.Context) error {
 		return fmt.Errorf("Network start failed: %w", err)
 	}
 
+<<<<<<< HEAD
 	go func() {
 		signalCh := make(chan os.Signal, 1)
 		signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
@@ -188,6 +189,8 @@ func action(ctx *cli.Context) error {
 		}()
 	}
 
+=======
+>>>>>>> 89e335022 (fixes for testing dev networks (runs slowly in multi node mode))
 	runCtx := devnet.WithCliContext(context.Background(), ctx)
 
 	if ctx.String(ChainFlag.Name) == networkname.DevChainName {

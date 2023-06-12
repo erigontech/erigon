@@ -52,7 +52,15 @@ func (n *node) Stop() {
 		toClose.Close()
 	}
 
+<<<<<<< HEAD
 	n.done()
+=======
+	if n.wg != nil {
+		wg := n.wg
+		n.wg = nil
+		wg.Done()
+	}
+>>>>>>> 89e335022 (fixes for testing dev networks (runs slowly in multi node mode))
 }
 
 func (n *node) running() bool {
