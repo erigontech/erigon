@@ -2055,7 +2055,7 @@ func (ac *AggregatorV3Context) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, 
 		return ac.storage.DomainRange(tx, fromKey, toKey, ts, asc, limit)
 	case kv.CodeDomain:
 		return ac.code.DomainRange(tx, fromKey, toKey, ts, asc, limit)
-	case kv.DeprecatedCommitmentDomain:
+	case kv.CommitmentDomain:
 		return ac.commitment.DomainRange(tx, fromKey, toKey, ts, asc, limit)
 	default:
 		panic(domain)

@@ -791,9 +791,10 @@ const (
 )
 
 const (
-	AccountsHistory History = "AccountsHistory"
-	StorageHistory  History = "StorageHistory"
-	CodeHistory     History = "CodeHistory"
+	AccountsHistory   History = "AccountsHistory"
+	StorageHistory    History = "StorageHistory"
+	CodeHistory       History = "CodeHistory"
+	CommitmentHistory History = "CommitmentHistory"
 )
 
 const (
@@ -807,9 +808,31 @@ const (
 	TracesToIdx   InvertedIdx = "TracesToIdx"
 )
 
-const (
-	DeprecatedAccountDomain    = "AccountsDomain"
-	DeprecatedStorageDomain    = "StorageDomain"
-	DeprecatedCodeDomain       = "CodeDomain"
-	DeprecatedCommitmentDomain = "CommitmentDomain"
-)
+func (d Domain) String() string {
+	switch d {
+	case AccountsDomain:
+		return "AccountsHistory"
+	case StorageDomain:
+		return "StorageHistory"
+	case CodeDomain:
+		return "CodeHistory"
+	case CommitmentDomain:
+		return "CommitmentDomain"
+	default:
+		panic(d)
+	}
+}
+func (h History) String() string {
+	switch h {
+	case AccountsHistory:
+		return "AccountsHistory"
+	case StorageHistory:
+		return "StorageHistory"
+	case CodeHistory:
+		return "CodeHistory"
+	case CommitmentHistory:
+		return "CommitmentHistory"
+	default:
+		panic(h)
+	}
+}

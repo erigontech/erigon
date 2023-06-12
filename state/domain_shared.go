@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"container/heap"
-	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -11,13 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -102,33 +99,33 @@ func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 	return sd
 }
 
-func (sd *SharedDomains) put(table string, key, val []byte) {
+func (sd *SharedDomains) put(table kv.Domain, key, val []byte) {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
 	sd.puts(table, hex.EncodeToString(key), val)
 }
 
-func (sd *SharedDomains) puts(table string, key string, val []byte) {
+func (sd *SharedDomains) puts(table kv.Domain, key string, val []byte) {
 	switch table {
-	case kv.DeprecatedAccountDomain:
+	case kv.AccountsDomain:
 		if old, ok := sd.account.Set(key, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
-	case kv.DeprecatedCodeDomain:
+	case kv.CodeDomain:
 		if old, ok := sd.code.Set(key, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
-	case kv.DeprecatedStorageDomain:
+	case kv.StorageDomain:
 		if old, ok := sd.storage.Set(key, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
-	case kv.DeprecatedCommitmentDomain:
+	case kv.CommitmentDomain:
 		if old, ok := sd.commitment.Set(key, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
@@ -139,24 +136,24 @@ func (sd *SharedDomains) puts(table string, key string, val []byte) {
 	}
 }
 
-func (sd *SharedDomains) Get(table string, key []byte) (v []byte, ok bool) {
+func (sd *SharedDomains) Get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	sd.muMaps.RLock()
 	v, ok = sd.get(table, key)
 	sd.muMaps.RUnlock()
 	return v, ok
 }
 
-func (sd *SharedDomains) get(table string, key []byte) (v []byte, ok bool) {
+func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	//keyS := *(*string)(unsafe.Pointer(&key))
 	keyS := hex.EncodeToString(key)
 	switch table {
-	case kv.DeprecatedAccountDomain:
+	case kv.AccountsDomain:
 		v, ok = sd.account.Get(keyS)
-	case kv.DeprecatedCodeDomain:
+	case kv.CodeDomain:
 		v, ok = sd.code.Get(keyS)
-	case kv.DeprecatedStorageDomain:
+	case kv.StorageDomain:
 		v, ok = sd.storage.Get(keyS)
-	case kv.DeprecatedCommitmentDomain:
+	case kv.CommitmentDomain:
 		v, ok = sd.commitment.Get(keyS)
 	default:
 		panic(table)
@@ -169,7 +166,7 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.DeprecatedCommitmentDomain, prefix)
+	v0, ok := sd.Get(kv.CommitmentDomain, prefix)
 	if ok {
 		return v0, nil
 	}
@@ -181,7 +178,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, error) {
 }
 
 func (sd *SharedDomains) LatestCode(addr []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.DeprecatedCodeDomain, addr)
+	v0, ok := sd.Get(kv.CodeDomain, addr)
 	if ok {
 		return v0, nil
 	}
@@ -193,7 +190,7 @@ func (sd *SharedDomains) LatestCode(addr []byte) ([]byte, error) {
 }
 
 func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.DeprecatedAccountDomain, addr)
+	v0, ok := sd.Get(kv.AccountsDomain, addr)
 	if ok {
 		return v0, nil
 	}
@@ -204,17 +201,17 @@ func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
 	return v, nil
 }
 
-func (sd *SharedDomains) ReadsValidBtree(table string, list *KvList) bool {
+func (sd *SharedDomains) ReadsValidBtree(table kv.Domain, list *KvList) bool {
 	sd.muMaps.RLock()
 	defer sd.muMaps.RUnlock()
 
 	var m *btree2.Map[string, []byte]
 	switch table {
-	case kv.DeprecatedAccountDomain:
+	case kv.AccountsDomain:
 		m = sd.account
-	case kv.DeprecatedCodeDomain:
+	case kv.CodeDomain:
 		m = sd.code
-	case kv.DeprecatedStorageDomain:
+	case kv.StorageDomain:
 		m = sd.storage
 	default:
 		panic(table)
@@ -231,7 +228,7 @@ func (sd *SharedDomains) ReadsValidBtree(table string, list *KvList) bool {
 }
 
 func (sd *SharedDomains) LatestStorage(addr, loc []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.DeprecatedStorageDomain, common.Append(addr, loc))
+	v0, ok := sd.Get(kv.StorageDomain, common.Append(addr, loc))
 	if ok {
 		return v0, nil
 	}
@@ -304,7 +301,7 @@ func (sd *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error
 
 func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []byte) error {
 	sd.Commitment.TouchPlainKey(addr, account, sd.Commitment.TouchAccount)
-	sd.put(kv.DeprecatedAccountDomain, addr, account)
+	sd.put(kv.AccountsDomain, addr, account)
 	return sd.Account.PutWithPrev(addr, nil, account, prevAccount)
 }
 
@@ -314,7 +311,7 @@ func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, codeHash []byte) e
 	if bytes.Equal(prevCode, code) {
 		return nil
 	}
-	sd.put(kv.DeprecatedCodeDomain, addr, code)
+	sd.put(kv.CodeDomain, addr, code)
 	if len(code) == 0 {
 		return sd.Code.DeleteWithPrev(addr, nil, prevCode)
 	}
@@ -322,19 +319,19 @@ func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, codeHash []byte) e
 }
 
 func (sd *SharedDomains) UpdateCommitmentData(prefix []byte, data []byte) error {
-	sd.put(kv.DeprecatedCommitmentDomain, prefix, data)
+	sd.put(kv.CommitmentDomain, prefix, data)
 	return sd.Commitment.Put(prefix, nil, data)
 }
 
 func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	sd.Commitment.TouchPlainKey(addr, nil, sd.Commitment.TouchAccount)
 
-	sd.put(kv.DeprecatedAccountDomain, addr, nil)
+	sd.put(kv.AccountsDomain, addr, nil)
 	if err := sd.Account.DeleteWithPrev(addr, nil, prev); err != nil {
 		return err
 	}
 
-	sd.put(kv.DeprecatedCodeDomain, addr, nil)
+	sd.put(kv.CodeDomain, addr, nil)
 	// commitment delete already has been applied via account
 	if err := sd.Code.Delete(addr, nil); err != nil {
 		return err
@@ -347,7 +344,7 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 		if !bytes.HasPrefix(k, addr) {
 			return
 		}
-		sd.put(kv.DeprecatedStorageDomain, k, nil)
+		sd.put(kv.StorageDomain, k, nil)
 		sd.Commitment.TouchPlainKey(k, nil, sd.Commitment.TouchStorage)
 		err = sd.Storage.DeleteWithPrev(k, nil, v)
 
@@ -365,7 +362,7 @@ func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value, preVal []b
 	composite := common.Append(addr, loc)
 
 	sd.Commitment.TouchPlainKey(composite, value, sd.Commitment.TouchStorage)
-	sd.put(kv.DeprecatedStorageDomain, composite, value)
+	sd.put(kv.StorageDomain, composite, value)
 	if len(value) == 0 {
 		return sd.Storage.DeleteWithPrev(addr, loc, preVal)
 	}
@@ -582,82 +579,4 @@ func (sd *SharedDomains) Close() {
 	sd.Storage.Close()
 	sd.Code.Close()
 	sd.Commitment.Close()
-}
-
-func (sd *SharedDomains) flushMap(ctx context.Context, rwTx kv.RwTx, table string, m map[string][]byte, logPrefix string, logEvery *time.Ticker) error {
-	collector := etl.NewCollector(logPrefix, "", etl.NewSortableBuffer(etl.BufferOptimalSize), log.New())
-	defer collector.Close()
-
-	var count int
-	total := len(m)
-	for k, v := range m {
-		if err := collector.Collect([]byte(k), v); err != nil {
-			return err
-		}
-		count++
-		select {
-		default:
-		case <-logEvery.C:
-			progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, float64(total)/1_000_000)
-			log.Info("Write to db", "progress", progress, "current table", table)
-			rwTx.CollectMetrics()
-		}
-	}
-	if err := collector.Load(rwTx, table, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-	return nil
-}
-func (sd *SharedDomains) flushBtree(ctx context.Context, rwTx kv.RwTx, table string, m *btree2.Map[string, []byte], logPrefix string, logEvery *time.Ticker) error {
-	c, err := rwTx.RwCursor(table)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	iter := m.Iter()
-	for ok := iter.First(); ok; ok = iter.Next() {
-		if len(iter.Value()) == 0 {
-			if err = c.Delete([]byte(iter.Key())); err != nil {
-				return err
-			}
-		} else {
-			if err = c.Put([]byte(iter.Key()), iter.Value()); err != nil {
-				return err
-			}
-		}
-
-		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_prefix", hex.EncodeToString([]byte(iter.Key())[:4]))
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-	return nil
-}
-
-// todo do we really need that? we already got this values in domainWAL
-func (sd *SharedDomains) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, logEvery *time.Ticker) error {
-	sd.muMaps.Lock()
-	defer sd.muMaps.Unlock()
-
-	if err := sd.flushBtree(ctx, rwTx, kv.DeprecatedAccountDomain, sd.account, logPrefix, logEvery); err != nil {
-		return err
-	}
-	sd.account.Clear()
-	if err := sd.flushBtree(ctx, rwTx, kv.DeprecatedStorageDomain, sd.storage, logPrefix, logEvery); err != nil {
-		return err
-	}
-	sd.storage.Clear()
-	if err := sd.flushBtree(ctx, rwTx, kv.DeprecatedCodeDomain, sd.code, logPrefix, logEvery); err != nil {
-		return err
-	}
-	sd.code.Clear()
-	if err := sd.flushBtree(ctx, rwTx, kv.DeprecatedCommitmentDomain, sd.commitment, logPrefix, logEvery); err != nil {
-		return err
-	}
-	sd.commitment.Clear()
-	sd.estSize.Store(0)
-	return nil
 }
