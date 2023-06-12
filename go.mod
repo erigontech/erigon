@@ -14,7 +14,7 @@ require (
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230502013805-237fcc25d586
 	github.com/99designs/gqlgen v0.17.32
-	github.com/Giulio2002/bls v0.0.0-20230507111335-fa36c339a11f
+	github.com/Giulio2002/bls v0.0.0-20230611172327-c0b9800e7b57
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/fastcache v1.12.1
 	github.com/VictoriaMetrics/metrics v1.23.1

@@ -81,7 +81,7 @@ Erigon does:
 - wait for download of all snapshots
 - when .seg available - automatically create .idx files - secondary indices, for example to find block by hash
 - then switch to normal staged sync (which doesn't require connection to Downloader)
-- ensure that snapshot dwnloading happening only once: even if new Erigon version does include new pre-verified snapshot
+- ensure that snapshot downloading happens only once: even if new Erigon version does include new pre-verified snapshot
   hashes, Erigon will not download them (to avoid unpredictable downtime) - but Erigon may produce them by self.
 
 Downloader does:
@@ -95,7 +95,7 @@ Technical details:
 - To prevent attack - .idx creation using random Seed - all nodes will have different .idx file (and same .seg files)
 - If you add/remove any .seg file manually, also need remove `<your_datadir>/snapshots/db` folder
 
-## How to verify that .seg files have same checksum withch current .torrent files
+## How to verify that .seg files have the same checksum as current .torrent files
 
 ```
 # Use it if you see weird behavior, bugs, bans, hardware issues, etc...

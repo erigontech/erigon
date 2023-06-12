@@ -2,7 +2,7 @@
 
 Staged Sync is a version of [Go-Ethereum](https://github.com/ethereum/go-ethereum)'s Full Sync that was rearchitected for better performance.
 
-It is I/O intensive and even though we have a goal on being able to sync the node on an HDD, we still recommend using fast SSDs.
+It is I/O intensive and even though we have a goal of being able to sync the node on an HDD, we still recommend using fast SSDs.
 
 Staged Sync, as its name suggests, consists of 10 stages that are executed in order, one after another.
 
@@ -14,7 +14,7 @@ The first stage (downloading headers) sets the local HEAD block.
 
 Each stage is executed in order and a stage N does not stop until the local head is reached for it.
 
-That mean, that in the ideal scenario (no network interruptions, the app isn't restarted, etc), for the full initial sync, each stage will be executed exactly once.
+That means, that in the ideal scenario (no network interruptions, the app isn't restarted, etc), for the full initial sync, each stage will be executed exactly once.
 
 After the last stage is finished, the process starts from the beginning, by looking for the new headers to download.
 
@@ -65,7 +65,7 @@ In the Proof-of-Stake world staged sync becomes somewhat more complicated, as th
 
 ## Stages (for the up to date list see [`stages.go`](/eth/stagedsync/stages/stages.go) and [`stagebuilder.go`](/eth/stagedsync/stagebuilder.go)):
 
-Each stage consists of 2 functions `ExecFunc` that progesses the stage forward and `UnwindFunc` that unwinds the stage backwards.
+Each stage consists of 2 functions `ExecFunc` that progresses the stage forward and `UnwindFunc` that unwinds the stage backwards.
 
 Most of the stages can work offline though it isn't implemented in the current version.
 
@@ -136,7 +136,7 @@ This stage build the Merkle trie and checks the root hash for the current state.
 
 It also builds Intermediate Hashes along the way and stores them into the database.
 
-If there were no intermediate hashes stored before (that could happend during the first initial sync), it builds the full Merkle Trie and its root hash.
+If there were no intermediate hashes stored before (that could happen during the first initial sync), it builds the full Merkle Trie and its root hash.
 
 If there are intermediate hashes in the database, it uses the block history to figure out which ones are outdated and which ones are still up to date. Then it builds a partial Merkle trie using the up-to-date hashes and only rebuilding the outdated ones.
 

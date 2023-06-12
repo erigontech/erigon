@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/transition/machine"
+
 	"gfx.cafe/util/go/generic"
 	"github.com/stretchr/testify/require"
 )
 
-func RunCases(t *testing.T, app Appendix, root fs.FS) {
+func RunCases(t *testing.T, app Appendix, machineImpl machine.Interface, root fs.FS) {
 	cases, err := ReadTestCases(root)
 	require.Nil(t, err, "reading cases")
 	// prepare for gore.....
@@ -59,6 +61,7 @@ func RunCases(t *testing.T, app Appendix, root fs.FS) {
 															value.SuiteName,
 															value.CaseName,
 														))
+														value.Machine = machineImpl
 														require.NoError(t, err)
 														err = handler.Run(t, subfs, value)
 														require.NoError(t, err)

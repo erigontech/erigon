@@ -2,8 +2,9 @@ package main
 
 import (
 	"flag"
-	"net/http"
 	_ "net/http/pprof" //nolint:gosec
+
+	"github.com/ledgerwatch/erigon/turbo/debug"
 
 	"golang.org/x/exp/slices"
 
@@ -42,13 +43,7 @@ func main() {
 	)
 	if *pprof {
 		// Server for pprof
-		go func() {
-			log.Info("Serving pprof on localhost:6060")
-			if err := http.ListenAndServe("localhost:6060", nil); err != nil { //nolint:gosec
-				log.Error("Could not serve pprof", "err", err)
-			}
-
-		}()
+		debug.StartPProf("localhost:6060", true)
 	}
 
 	if err != nil {
