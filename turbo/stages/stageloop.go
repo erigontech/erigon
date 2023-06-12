@@ -150,7 +150,7 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initi
 	}
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > blocksInSnapshots && finishProgressBefore == headersProgressBefore
-	canRunCycleInOneTransaction := !isSynced
+	canRunCycleInOneTransaction := isSynced
 
 	// Main steps:
 	// - process new blocks
