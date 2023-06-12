@@ -201,7 +201,6 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 }
 
 func TestStorageRangeAt(t *testing.T) {
-	t.Skip()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	br, _ := m.NewBlocksIO()
 	agg := m.HistoryV3Components()

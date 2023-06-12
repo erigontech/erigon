@@ -18,7 +18,6 @@ import (
 var latestBlock = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
 func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
-	t.Skip()
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewParityAPIImpl(m.DB)
@@ -68,6 +67,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
 
 func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T) {
 	t.Skip()
+
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewParityAPIImpl(m.DB)

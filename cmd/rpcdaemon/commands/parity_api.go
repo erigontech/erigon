@@ -9,6 +9,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 
 	"github.com/ledgerwatch/erigon/rpc"
@@ -41,6 +45,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		return nil, err
 	}
 
+	keys := make([]hexutility.Bytes, 0)
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
@@ -53,6 +58,28 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		return nil, fmt.Errorf("acc not found")
 	}
 
+	if ethconfig.EnableHistoryV4InTest {
+		bn := rawdb.ReadCurrentBlockNumber(tx)
+		minTxNum, err := rawdbv3.TxNums.Min(tx, *bn)
+		if err != nil {
+			return nil, err
+		}
+		to, _ := kv.NextSubtree(account[:])
+		r, err := tx.(kv.TemporalTx).DomainRange(kv.StorageDomain, account[:], to, minTxNum, order.Asc, quantity+1)
+		if err != nil {
+			return nil, err
+		}
+		for r.HasNext() {
+			k, v, err := r.Next()
+			if err != nil {
+				return nil, err
+			}
+			keys = append(keys, k[20:])
+			_ = v
+		}
+		return keys, nil
+	}
+
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, a.GetIncarnation())
 	seekBytes := append(account.Bytes(), b...)
@@ -62,7 +89,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		return nil, err
 	}
 	defer c.Close()
-	keys := make([]hexutility.Bytes, 0)
+
 	var v []byte
 	var seekVal []byte
 	if offset != nil {
