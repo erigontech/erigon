@@ -115,13 +115,17 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		engine = execution_client.NewExecutionEnginePhase1FromClient(ctx, remote.NewETHBACKENDClient(cc))
 	}
 
-	apiHandler := handler.NewApiHandler(cfg.GenesisCfg, cfg.BeaconCfg)
-	go beacon.ListenAndServe(apiHandler, &beacon.RouterConfiguration{
-		Protocol: cfg.BeaconProtocol,
-		Address:  cfg.BeaconAddr,
-		// TODO(enriavil1): Make timeouts configurable via flags
-	})
-	log.Info("Beacon API started", "addr", cfg.BeaconAddr)
+	if !cfg.NoBeaconApi {
+		apiHandler := handler.NewApiHandler(cfg.GenesisCfg, cfg.BeaconCfg)
+		go beacon.ListenAndServe(apiHandler, &beacon.RouterConfiguration{
+			Protocol:        cfg.BeaconProtocol,
+			Address:         cfg.BeaconAddr,
+			ReadTimeTimeout: cfg.BeaconApiReadTimeout,
+			WriteTimeout:    cfg.BeaconApiWriteTimeout,
+			IdleTimeout:     cfg.BeaconApiWriteTimeout,
+		})
+		log.Info("Beacon API started", "addr", cfg.BeaconAddr)
+	}
 
 	var caplinFreezer freezer.Freezer
 	if cfg.RecordMode {

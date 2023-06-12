@@ -172,8 +172,8 @@ var Tables = map[stages.SyncStage][]string{
 	stages.IntermediateHashes:  {kv.TrieOfAccounts, kv.TrieOfStorage},
 	stages.CallTraces:          {kv.CallFromIndex, kv.CallToIndex},
 	stages.LogIndex:            {kv.LogAddressIndex, kv.LogTopicIndex},
-	stages.AccountHistoryIndex: {kv.AccountsHistory},
-	stages.StorageHistoryIndex: {kv.StorageHistory},
+	stages.AccountHistoryIndex: {kv.E2AccountsHistory},
+	stages.StorageHistoryIndex: {kv.E2StorageHistory},
 	stages.Finish:              {},
 }
 var stateBuckets = []string{
@@ -189,20 +189,20 @@ var stateHistoryBuckets = []string{
 	kv.CallTraceSet,
 }
 var stateHistoryV3Buckets = []string{
-	kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals,
-	kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx,
-	kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeIdx,
-	kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals,
-	kv.StorageHistoryKeys, kv.StorageIdx, kv.StorageHistoryVals,
-	kv.CodeHistoryKeys, kv.CodeIdx, kv.CodeHistoryVals,
-	kv.LogAddressKeys, kv.LogAddressIdx,
-	kv.LogTopicsKeys, kv.LogTopicsIdx,
-	kv.TracesFromKeys, kv.TracesFromIdx,
-	kv.TracesToKeys, kv.TracesToIdx,
+	kv.TblAccountHistoryKeys, kv.TblAccountIdx, kv.TblAccountHistoryVals,
+	kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx,
+	kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx,
+	kv.TblAccountHistoryKeys, kv.TblAccountIdx, kv.TblAccountHistoryVals,
+	kv.TblStorageHistoryKeys, kv.TblStorageIdx, kv.TblStorageHistoryVals,
+	kv.TblCodeHistoryKeys, kv.TblCodeIdx, kv.TblCodeHistoryVals,
+	kv.TblLogAddressKeys, kv.TblLogAddressIdx,
+	kv.TblLogTopicsKeys, kv.TblLogTopicsIdx,
+	kv.TblTracesFromKeys, kv.TblTracesFromIdx,
+	kv.TblTracesToKeys, kv.TblTracesToIdx,
 }
 var stateHistoryV4Buckets = []string{
-	kv.AccountKeys, kv.StorageKeys, kv.CodeKeys,
-	kv.CommitmentKeys, kv.CommitmentVals, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx,
+	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys,
+	kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
 }
 
 func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {

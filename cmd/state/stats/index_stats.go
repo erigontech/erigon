@@ -24,7 +24,7 @@ func IndexStats(chaindata string, indexBucket string, statsFile string) error {
 	db := mdbx.MustOpen(chaindata)
 	startTime := time.Now()
 	lenOfKey := length.Addr
-	if strings.HasPrefix(indexBucket, kv.StorageHistory) {
+	if strings.HasPrefix(indexBucket, kv.E2StorageHistory) {
 		lenOfKey = length.Addr + length.Hash + length.Incarnation
 	}
 

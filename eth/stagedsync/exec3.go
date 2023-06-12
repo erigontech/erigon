@@ -49,8 +49,8 @@ var ExecStepsInDB = metrics.NewCounter(`exec_steps_in_db`) //nolint
 var ExecRepeats = metrics.NewCounter(`exec_repeats`)       //nolint
 var ExecTriggers = metrics.NewCounter(`exec_triggers`)     //nolint
 
-func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string) *Progress {
-	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix}
+func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string, logger log.Logger) *Progress {
+	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
 }
 
 type Progress struct {
@@ -62,6 +62,7 @@ type Progress struct {
 
 	workersCount int
 	logPrefix    string
+	logger       log.Logger
 }
 
 func (p *Progress) Log(rs *state.StateV3, in *exec22.QueueWithRetry, rws *exec22.ResultsQueue, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64) {
@@ -77,7 +78,7 @@ func (p *Progress) Log(rs *state.StateV3, in *exec22.QueueWithRetry, rws *exec22
 	if doneCount > p.prevCount {
 		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
 	}
-	log.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
+	p.logger.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
 		//"workers", workerCount,
 		"blk", outputBlockNum,
 		//"blk/s", fmt.Sprintf("%.1f", speedBlock),
@@ -251,7 +252,7 @@ func ExecV3(ctx context.Context,
 	applyWorker.DiscardReadList()
 
 	commitThreshold := batchSize.Bytes()
-	progress := NewProgress(block, commitThreshold, workerCount, execStage.LogPrefix())
+	progress := NewProgress(block, commitThreshold, workerCount, execStage.LogPrefix(), logger)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
