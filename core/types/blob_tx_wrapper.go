@@ -183,7 +183,7 @@ func (li *BlobKzgs) Deserialize(dr *codec.DecodingReader) error {
 		i := len(*li)
 		*li = append(*li, KZGCommitment{})
 		return &(*li)[i]
-	}, 48, params.MaxBlobsPerBlock)
+	}, 48, chain.MaxBlobsPerBlock)
 }
 
 func (li BlobKzgs) Serialize(w *codec.EncodingWriter) error {
@@ -213,7 +213,7 @@ func (li *KZGProofs) Deserialize(dr *codec.DecodingReader) error {
 		i := len(*li)
 		*li = append(*li, KZGProof{})
 		return &(*li)[i]
-	}, 48, params.MaxBlobsPerBlock)
+	}, 48, chain.MaxBlobsPerBlock)
 }
 
 func (li KZGProofs) Serialize(w *codec.EncodingWriter) error {
@@ -354,7 +354,7 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	// the following check isn't strictly necessary as it would be caught by data gas processing
 	// (and hence it is not explicitly in the spec for this function), but it doesn't hurt to fail
 	// early in case we are getting spammed with too many blobs or there is a bug somewhere:
-	if uint64(l1) > params.MaxBlobsPerBlock {
+	if uint64(l1) > chain.MaxBlobsPerBlock {
 		return fmt.Errorf("number of blobs exceeds max: %v", l1)
 	}
 	kzgCtx := libkzg.Ctx()
