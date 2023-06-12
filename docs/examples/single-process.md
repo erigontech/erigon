@@ -18,6 +18,7 @@ How to run Erigon in a single process (all parts of the system run as one).
      --ws \
      --http.api=eth,debug,net,trace,web3,erigon \
      --log.dir.path=/desired/path/to/logs
+     --log.dir.prefix=filename
      ```
 
 ## Notes
