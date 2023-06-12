@@ -1123,60 +1123,26 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
 		return false
 	})
 
-	if borSpan == nil {
-		// Span with high enough block number is not loaded
-		var spanID uint64
-		if c.spanCache.Len() > 0 {
-			spanID = c.spanCache.Max().(*span.HeimdallSpan).ID + 1
-		}
-
-		c.logger.Info("Span with high enough block number is not loaded", "fetching span", spanID)
-
-		// Fetch span once
-		if borSpan == nil {
-			response, err := c.HeimdallClient.Span(c.execCtx, spanID)
-			if err != nil {
-				return nil, err
-			}
-			borSpan = response
-		}
-
-		endBlock := borSpan.EndBlock
-		for endBlock < blockNum {
-			// Fast forward till we reach the last spanId
-			spanID++
-			endBlock += spanLength
-		}
-
-		if endBlock != borSpan.EndBlock {
-			// We're at the last span ID. Fetch it.
-			c.logger.Info("Span with high enough block number is not loaded", "fetching span", spanID)
-			response, err := c.HeimdallClient.Span(c.execCtx, spanID)
-			if err != nil {
-				return nil, err
-			}
-			borSpan = response
-		}
-
-		c.spanCache.ReplaceOrInsert(borSpan)
-	} else {
-		startBlock := borSpan.StartBlock
-		spanID := borSpan.ID
-		for startBlock > blockNum {
-			spanID--
-			startBlock -= spanLength
-		}
-
-		if startBlock != borSpan.StartBlock {
-			c.logger.Info("Span with low enough block number is not loaded", "fetching span", spanID)
-			response, err := c.HeimdallClient.Span(c.execCtx, spanID)
-			if err != nil {
-				return nil, err
-			}
-			borSpan = response
-		}
-		c.spanCache.ReplaceOrInsert(borSpan)
+	if borSpan != nil && borSpan.StartBlock <= blockNum && borSpan.EndBlock >= blockNum {
+		return borSpan, nil
 	}
+
+	// Span with given block block number is not loaded
+	// As span has fixed set of blocks (except 0th span), we can
+	// formulate it and get the exact ID we'd need to fetch.
+	var spanID uint64
+	if blockNum > zerothSpanEnd {
+		spanID = 1 + (blockNum-zerothSpanEnd-1)/spanLength
+	}
+
+	c.logger.Info("Span with given block number is not loaded", "fetching span", spanID)
+
+	response, err := c.HeimdallClient.Span(c.execCtx, spanID)
+	if err != nil {
+		return nil, err
+	}
+	borSpan = response
+	c.spanCache.ReplaceOrInsert(borSpan)
 
 	for c.spanCache.Len() > 128 {
 		c.spanCache.DeleteMin()
