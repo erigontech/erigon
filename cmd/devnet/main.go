@@ -115,8 +115,17 @@ func action(ctx *cli.Context) error {
 		return fmt.Errorf("Network start failed: %w", err)
 	}
 
+	runCtx := devnet.WithCliContext(context.Background(), ctx)
+
+	if ctx.String(ChainFlag.Name) == networkname.DevChainName {
+		// the dev network currently inserts blocks very slowly when run in multi node mode - needs investigaton
+		// this effectively makes it a ingle node network by routing all traffic to node 0
+		// devnet.WithCurrentNode(devnet.WithCliContext(context.Background(), ctx), 0)
+		services.MaxNumberOfEmptyBlockChecks = 30
+	}
+
 	network.Run(
-		devnet.WithCliContext(context.Background(), ctx),
+		runCtx,
 		scenarios.Scenario{
 			Name: "all",
 			Steps: []*scenarios.Step{

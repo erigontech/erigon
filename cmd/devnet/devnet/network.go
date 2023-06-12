@@ -115,12 +115,12 @@ func (nw *Network) startNode(nodeAddr string, cfg interface{}, nodeNumber int) (
 		defer func() {
 			panicResult := recover()
 			if panicResult == nil {
-				nw.wg.Done()
 				return
 			}
 
 			nw.Logger.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
-			nw.wg.Done()
+			nw.Stop()
+			os.Exit(1)
 		}()
 
 		app := erigonapp.MakeApp(fmt.Sprintf("node-%d", nodeNumber), node.run, erigoncli.DefaultFlags)
@@ -130,7 +130,6 @@ func (nw *Network) startNode(nodeAddr string, cfg interface{}, nodeNumber int) (
 			if printErr != nil {
 				nw.Logger.Warn("Error writing app run error to stderr", "err", printErr)
 			}
-			nw.wg.Done()
 		}
 	}()
 

@@ -13,12 +13,11 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-// MaxNumberOfBlockChecks is the max number of blocks to look for a transaction in
-const (
+var (
+	// MaxNumberOfBlockChecks is the max number of blocks to look for a transaction in
 	MaxNumberOfEmptyBlockChecks = 25
+	Subscriptions               *map[requests.SubMethod]*Subscription
 )
-
-var Subscriptions *map[requests.SubMethod]*Subscription
 
 // Subscription houses the client subscription, name and channel for its delivery
 type Subscription struct {

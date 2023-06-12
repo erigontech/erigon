@@ -50,8 +50,13 @@ func Logger(ctx go_context.Context) log.Logger {
 	return log.Root()
 }
 
-func WithCurrentNode(ctx go_context.Context, selector ...interface{}) Context {
-	return &context{go_context.WithValue(ctx, ckNode, SelectNode(ctx, selector...))}
+type cnode struct {
+	selector interface{}
+	node     Node
+}
+
+func WithCurrentNode(ctx go_context.Context, selector interface{}) Context {
+	return &context{go_context.WithValue(ctx, ckNode, &cnode{selector: selector})}
 }
 
 func WithCliContext(ctx go_context.Context, cliCtx *cli.Context) Context {
@@ -59,8 +64,14 @@ func WithCliContext(ctx go_context.Context, cliCtx *cli.Context) Context {
 }
 
 func CurrentNode(ctx go_context.Context) Node {
-	if node, ok := ctx.Value(ckNode).(Node); ok {
-		return node
+	if cn, ok := ctx.Value(ckNode).(*cnode); ok {
+		if cn.node == nil {
+			if network, ok := ctx.Value(ckNetwork).(*Network); ok {
+				cn.node = network.SelectNode(ctx, cn.selector)
+			}
+		}
+
+		return cn.node
 	}
 
 	return nil
@@ -69,14 +80,7 @@ func CurrentNode(ctx go_context.Context) Node {
 func SelectNode(ctx go_context.Context, selector ...interface{}) Node {
 	if network, ok := ctx.Value(ckNetwork).(*Network); ok {
 		if len(selector) > 0 {
-			switch selector := selector[0].(type) {
-			case int:
-				return network.SelectNode(ctx, selector)
-			case NodeSelector:
-				return network.SelectNode(ctx, selector)
-			default:
-				return nil
-			}
+			return network.SelectNode(ctx, selector[0])
 		}
 
 		if current := CurrentNode(ctx); current != nil {

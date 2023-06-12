@@ -85,7 +85,9 @@ func (m Miner) Configure(baseNode Node, nodeNumber int) (int, interface{}, error
 
 	switch m.Chain {
 	case networkname.DevChainName:
-		m.DevPeriod = 30
+		if m.DevPeriod == 0 {
+			m.DevPeriod = 30
+		}
 	}
 
 	return m.HttpPort, m, nil

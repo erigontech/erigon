@@ -42,7 +42,11 @@ func (n node) Stop() {
 		toClose.Close()
 	}
 
-	n.wg.Done()
+	if n.wg != nil {
+		wg := n.wg
+		n.wg = nil
+		wg.Done()
+	}
 }
 
 func (n node) IsMiner() bool {
