@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -51,7 +51,7 @@ func BuildLog(hash libcommon.Hash, blockNum string, address libcommon.Address, t
 		Address:     address,
 		Topics:      topics,
 		Data:        data,
-		BlockNumber: hexutil.Uint64(HexToInt(blockNum)),
+		BlockNumber: hexutil.Uint64(devnetutils.HexToInt(blockNum)),
 		TxHash:      hash,
 		TxIndex:     txIndex,
 		BlockHash:   blockHash,
@@ -60,14 +60,7 @@ func BuildLog(hash libcommon.Hash, blockNum string, address libcommon.Address, t
 	}
 }
 
-// HexToInt converts a hexadecimal string to uint64
-func HexToInt(hexStr string) uint64 {
-	cleaned := strings.ReplaceAll(hexStr, "0x", "") // remove the 0x prefix
-	result, _ := strconv.ParseUint(cleaned, 16, 64)
-	return result
-}
-
-func (reqGen *RequestGenerator) GetAndCompareLogs(fromBlock uint64, toBlock uint64, expected Log) error {
+func (reqGen *requestGenerator) GetAndCompareLogs(fromBlock uint64, toBlock uint64, expected Log) error {
 	reqGen.logger.Info("GETTING AND COMPARING LOGS")
 	var b EthGetLogs
 
@@ -148,7 +141,7 @@ func hashSlicesAreEqual(s1, s2 []libcommon.Hash) bool {
 	return true
 }
 
-func (req *RequestGenerator) getLogs(fromBlock, toBlock uint64, address libcommon.Address) (RPCMethod, string) {
+func (req *requestGenerator) getLogs(fromBlock, toBlock uint64, address libcommon.Address) (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[{"fromBlock":"0x%x","toBlock":"0x%x","address":"0x%x"}],"id":%d}`
 	return Methods.ETHGetLogs, fmt.Sprintf(template, Methods.ETHGetLogs, fromBlock, toBlock, address, req.reqID)
 }

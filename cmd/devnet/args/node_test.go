@@ -1,4 +1,4 @@
-package node_test
+package args_test
 
 import (
 	"errors"
@@ -6,21 +6,21 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
-	"github.com/ledgerwatch/erigon/cmd/devnet/node"
+	"github.com/ledgerwatch/erigon/cmd/devnet/args"
 )
 
 func TestNodeArgs(t *testing.T) {
 	asMap := map[string]struct{}{}
 
-	args, _ := devnetutils.AsArgs(node.Miner{
-		Node: node.Node{
+	nodeArgs, _ := args.AsArgs(args.Miner{
+		Node: args.Node{
 			DataDir:        filepath.Join("data", fmt.Sprintf("%d", 1)),
 			PrivateApiAddr: "localhost:9092",
 		},
+		DevPeriod: 30,
 	})
 
-	for _, arg := range args {
+	for _, arg := range nodeArgs {
 		asMap[arg] = struct{}{}
 	}
 
@@ -36,15 +36,15 @@ func TestNodeArgs(t *testing.T) {
 		t.Fatal(asMap, "not found")
 	}
 
-	args, _ = devnetutils.AsArgs(node.NonMiner{
-		Node: node.Node{
+	nodeArgs, _ = args.AsArgs(args.NonMiner{
+		Node: args.Node{
 			DataDir:        filepath.Join("data", fmt.Sprintf("%d", 2)),
 			StaticPeers:    "enode",
 			PrivateApiAddr: "localhost:9091",
 		},
 	})
 
-	for _, arg := range args {
+	for _, arg := range nodeArgs {
 		asMap[arg] = struct{}{}
 	}
 
