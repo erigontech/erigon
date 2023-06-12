@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/google/btree"
-	lru "github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -41,11 +41,11 @@ import (
 )
 
 const (
-	spanLength         = 6400 // Number of blocks in a span
-	zerothSpanEnd      = 255  // End block of 0th span
-	checkpointInterval = 1024 // Number of blocks after which to save the vote snapshot to the database
-	inmemorySnapshots  = 128  // Number of recent vote snapshots to keep in memory
-	inmemorySignatures = 4096 // Number of recent block signatures to keep in memory
+	spanLength              = 6400 // Number of blocks in a span
+	zerothSpanEnd           = 255  // End block of 0th span
+	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
+	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
+	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
 )
 
 // Bor protocol constants.
@@ -553,8 +553,8 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			break
 		}
 
-		// If an on-disk checkpoint snapshot can be found, use that
-		if number%checkpointInterval == 0 {
+		// If an on-disk snapshot can be found, use that
+		if number%snapshotPersistInterval == 0 {
 			if s, err := loadSnapshot(c.config, c.signatures, c.DB, hash); err == nil {
 				c.logger.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 
@@ -634,8 +634,8 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 
 	c.recents.Add(snap.Hash, snap)
 
-	// If we've generated a new checkpoint snapshot, save to disk
-	if snap.Number%checkpointInterval == 0 && len(headers) > 0 {
+	// If we've generated a new persistent snapshot, save to disk
+	if snap.Number%snapshotPersistInterval == 0 && len(headers) > 0 {
 		if err = snap.store(c.DB); err != nil {
 			return nil, err
 		}
@@ -1224,7 +1224,7 @@ func (c *Bor) CommitStates(
 	lastStateID := lastStateIDBig.Uint64()
 	from = lastStateID + 1
 
-	c.logger.Info(
+	c.logger.Debug(
 		"Fetching state updates from Heimdall",
 		"fromID", from,
 		"to", to.Format(time.RFC3339),
@@ -1273,7 +1273,7 @@ func (c *Bor) CommitStates(
 
 	processTime := time.Since(processStart)
 
-	c.logger.Info("StateSyncData", "number", number, "lastStateID", lastStateID, "total records", len(eventRecords), "fetch time", int(fetchTime.Milliseconds()), "process time", int(processTime.Milliseconds()))
+	c.logger.Debug("StateSyncData", "number", number, "lastStateID", lastStateID, "total records", len(eventRecords), "fetch time", int(fetchTime.Milliseconds()), "process time", int(processTime.Milliseconds()))
 
 	return stateSyncs, nil
 }

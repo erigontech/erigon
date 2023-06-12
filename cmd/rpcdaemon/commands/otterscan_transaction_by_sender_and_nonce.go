@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -29,7 +28,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	var acc accounts.Account
 	if api.historyV3(tx) {
 		ttx := tx.(kv.TemporalTx)
-		it, err := ttx.IndexRange(temporal.AccountsHistoryIdx, addr[:], -1, -1, order.Asc, kv.Unlim)
+		it, err := ttx.IndexRange(kv.AccountsHistoryIdx, addr[:], -1, -1, order.Asc, kv.Unlim)
 		if err != nil {
 			return nil, err
 		}
@@ -46,7 +45,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 				continue
 			}
 
-			v, ok, err := ttx.HistoryGet(temporal.AccountsHistory, addr[:], txnID)
+			v, ok, err := ttx.HistoryGet(kv.AccountsHistory, addr[:], txnID)
 			if err != nil {
 				log.Error("Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
 				return nil, err
@@ -62,7 +61,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 				continue
 			}
 
-			if err := acc.DecodeForStorage(v); err != nil {
+			if err := accounts.DeserialiseV3(&acc, v); err != nil {
 				return nil, err
 			}
 			// Desired nonce was found in this chunk
@@ -86,7 +85,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
 		idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
 			txnID := uint64(i) + prevTxnID
-			v, ok, err := ttx.HistoryGet(temporal.AccountsHistory, addr[:], txnID)
+			v, ok, err := ttx.HistoryGet(kv.AccountsHistory, addr[:], txnID)
 			if err != nil {
 				log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
 				panic(err)
@@ -99,10 +98,11 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 				return false
 			}
 
-			if err := acc.DecodeForStorage(v); err != nil {
+			if err := accounts.DeserialiseV3(&acc, v); err != nil {
 				searchErr = err
 				return false
 			}
+
 			// Since the state contains the nonce BEFORE the block changes, we look for
 			// the block when the nonce changed to be > the desired once, which means the
 			// previous history block contains the actual change; it may contain multiple
@@ -150,7 +150,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		return &txHash, nil
 	}
 
-	accHistoryC, err := tx.Cursor(kv.AccountsHistory)
+	accHistoryC, err := tx.Cursor(kv.E2AccountsHistory)
 	if err != nil {
 		return nil, err
 	}
