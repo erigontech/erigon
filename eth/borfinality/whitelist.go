@@ -200,7 +200,6 @@ func handleNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, config *config)
 	milestoneIDs := service.GetMilestoneIDsList()
 
 	for _, milestoneID := range milestoneIDs {
-		// todo: check if we can ignore the error
 		err := fetchNoAckMilestoneByID(ctx, bor, milestoneID)
 		if err == nil {
 			service.RemoveMilestoneID(milestoneID)

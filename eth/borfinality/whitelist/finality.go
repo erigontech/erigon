@@ -44,7 +44,6 @@ func (f *finality[T]) IsValidPeer(fetchHeadersByNumber func(number uint64, amoun
 
 // IsValidChain checks the validity of chain by comparing it
 // against the local checkpoint entry
-// todo: need changes
 func (f *finality[T]) IsValidChain(currentHeader *types.Header, chain []*types.Header) bool {
 	// Return if we've received empty chain
 	if len(chain) == 0 {
