@@ -229,86 +229,29 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 }
 
 func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, err error) {
-	if ethconfig.EnableHistoryV4InTest {
-		switch name {
-		case kv.AccountsDomain:
-			return tx.aggCtx.AccountLatest(key, tx.MdbxTx)
-		case kv.StorageDomain:
-			return tx.aggCtx.StorageLatest(key, key2, tx.MdbxTx)
-		case kv.CodeDomain:
-			return tx.aggCtx.CodeLatest(key, tx.MdbxTx)
-		case kv.CommitmentDomain:
-			return tx.aggCtx.CommitmentLatest(key, tx.MdbxTx)
-		default:
-			panic(fmt.Sprintf("unexpected: %s", name))
-		}
-	}
 	switch name {
 	case kv.AccountsDomain:
-		v, err = tx.GetOne(kv.PlainState, key)
-		return v, v != nil, err
+		return tx.aggCtx.AccountLatest(key, tx.MdbxTx)
 	case kv.StorageDomain:
-		v, err = tx.GetOne(kv.PlainState, append(common.Copy(key), key2...))
-		return v, v != nil, err
+		return tx.aggCtx.StorageLatest(key, key2, tx.MdbxTx)
 	case kv.CodeDomain:
-		v, err = tx.GetOne(kv.Code, key2)
-		return v, v != nil, err
+		return tx.aggCtx.CodeLatest(key, tx.MdbxTx)
+	case kv.CommitmentDomain:
+		return tx.aggCtx.CommitmentLatest(key, tx.MdbxTx)
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
 }
 func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	if ethconfig.EnableHistoryV4InTest {
-		switch name {
-		case kv.AccountsDomain:
-			v, err := tx.aggCtx.ReadAccountData(key, ts, tx.MdbxTx)
-			return v, v != nil, err
-		case kv.StorageDomain:
-			v, err := tx.aggCtx.ReadAccountStorage(append(common.Copy(key), key2...), ts, tx.MdbxTx)
-			return v, v != nil, err
-		case kv.CodeDomain:
-			v, err := tx.aggCtx.ReadAccountCode(key, ts, tx.MdbxTx)
-			return v, v != nil, err
-		default:
-			panic(fmt.Sprintf("unexpected: %s", name))
-		}
-	}
 	switch name {
 	case kv.AccountsDomain:
-		v, ok, err = tx.HistoryGet(kv.AccountsHistory, key, ts)
-		if err != nil {
-			return nil, false, err
-		}
-		if ok {
-			return v, true, nil
-		}
-		v, err = tx.GetOne(kv.PlainState, key)
-		if len(v) > 0 {
-			v, err = accounts.ConvertV2toV3(v)
-			if err != nil {
-				return nil, false, err
-			}
-		}
+		v, err := tx.aggCtx.ReadAccountData(key, ts, tx.MdbxTx)
 		return v, v != nil, err
 	case kv.StorageDomain:
-		v, ok, err = tx.HistoryGet(kv.StorageHistory, append(key[:20], key2...), ts)
-		if err != nil {
-			return nil, false, err
-		}
-		if ok {
-			return v, true, nil
-		}
-		v, err = tx.GetOne(kv.PlainState, append(key, key2...))
+		v, err := tx.aggCtx.ReadAccountStorage(append(common.Copy(key), key2...), ts, tx.MdbxTx)
 		return v, v != nil, err
 	case kv.CodeDomain:
-		v, ok, err = tx.HistoryGet(kv.CodeHistory, key, ts)
-		if err != nil {
-			return nil, false, err
-		}
-		if ok {
-			return v, true, nil
-		}
-		v, err = tx.GetOne(kv.Code, key2)
+		v, err := tx.aggCtx.ReadAccountCode(key, ts, tx.MdbxTx)
 		return v, v != nil, err
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
@@ -318,7 +261,7 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case kv.AccountsHistory:
-		return tx.aggCtx.ReadAccountDataNoStateWithRecent(key, ts, tx.MdbxTx)
+		v, ok, err = tx.aggCtx.ReadAccountDataNoStateWithRecent(key, ts, tx.MdbxTx)
 		if err != nil {
 			return nil, false, err
 		}
