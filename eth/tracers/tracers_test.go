@@ -100,7 +100,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	rules := params.AllProtocolChanges.Rules(context.BlockNumber, context.Time)
-	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
+	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber, m.HistoryV3)
 
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("prestateTracer", new(tracers.Context), json.RawMessage("{}"))

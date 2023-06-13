@@ -317,9 +317,9 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	return statedb, root, nil
 }
 
-func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64, histV3 bool) (*state.IntraBlockState, error) {
 	var r state.StateReader
-	if ethconfig.EnableHistoryV4InTest {
+	if histV3 {
 		r = state.NewReaderV4(tx.(kv.TemporalTx))
 	} else {
 		r = state.NewPlainStateReader(tx)
@@ -350,7 +350,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		}
 	}
 
-	w := rpchelper.NewLatestStateWriter(tx, blockNr-1)
+	w := rpchelper.NewLatestStateWriter(tx, blockNr-1, histV3)
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, w); err != nil {
 		return nil, err
