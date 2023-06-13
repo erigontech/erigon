@@ -489,9 +489,6 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 
 	defer func() {
-		if err == nil {
-			db.wg.Add(1)
-		}
 		if txn == nil {
 			// on error, or if there is whatever reason that we don't return a tx,
 			// we need to free up the limiter slot, otherwise it could lead to deadlocks
@@ -503,6 +500,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label.String(), stack2.Trace().String())
 	}
+	db.wg.Add(1)
 	return &MdbxTx{
 		ctx:      ctx,
 		db:       db,
@@ -530,17 +528,12 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 		return nil, fmt.Errorf("db closed")
 	}
 	runtime.LockOSThread()
-	defer func() {
-		if err == nil {
-			db.wg.Add(1)
-		}
-	}()
-
 	tx, err := db.env.BeginTxn(nil, flags)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label.String(), stack2.Trace().String())
 	}
+	db.wg.Add(1)
 	return &MdbxTx{
 		db:  db,
 		tx:  tx,
