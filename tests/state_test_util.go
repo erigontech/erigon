@@ -191,20 +191,14 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr, ethconfig.EnableHistoryV4InTest)
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	r := rpchelper.NewLatestStateReader(tx)
+	r := rpchelper.NewLatestStateReader(tx, ethconfig.EnableHistoryV4InTest)
+	w := rpchelper.NewLatestStateWriter(tx, writeBlockNr, ethconfig.EnableHistoryV4InTest)
 	statedb := state.New(r)
-
-	var w state.StateWriter
-	if ethconfig.EnableHistoryV4InTest {
-		w = state.NewWriterV4(tx.(kv.TemporalTx))
-	} else {
-		w = state.NewPlainStateWriter(tx, nil, writeBlockNr)
-	}
 
 	var baseFee *big.Int
 	if config.IsLondon(0) {
