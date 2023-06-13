@@ -312,12 +312,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 }
 
 func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64, histV3 bool) (*state.IntraBlockState, error) {
-	var r state.StateReader
-	if histV3 {
-		r = state.NewReaderV4(tx.(kv.TemporalTx))
-	} else {
-		r = state.NewPlainStateReader(tx)
-	}
+	r := rpchelper.NewLatestStateReader(tx, histV3)
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
