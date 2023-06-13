@@ -732,7 +732,17 @@ var (
 	// WithoutHeimdallFlag no heimdall (for testing purpose)
 	WithoutHeimdallFlag = cli.BoolFlag{
 		Name:  "bor.withoutheimdall",
-		Usage: "Run without Heimdall service (for testing purpose)",
+		Usage: "Run without Heimdall service (for testing purposes)",
+	}
+
+	BorBlockPeriodFlag = cli.BoolFlag{
+		Name:  "bor.period",
+		Usage: "Override the bor block period (for testing purposes)",
+	}
+
+	BorBlockSizeFlag = cli.BoolFlag{
+		Name:  "bor.minblocksize",
+		Usage: "Ignore the bor block period and wait for 'blocksize' transactions (for testing purposes)",
 	}
 
 	// HeimdallgRPCAddressFlag flag for heimdall gRPC address
