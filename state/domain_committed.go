@@ -131,7 +131,6 @@ func (t *UpdateTree) GetWithDomain(key []byte, domain *SharedDomains) (*Commitme
 				c.update.ValLength = length.Hash
 				c.update.CodeValue = nil
 			} else {
-				fmt.Printf("replaced code %x -> %x without CodeFlag\n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
 				copy(c.update.CodeHashOrStorage[:], chash)
 				c.update.ValLength = length.Hash
 				//if !bytes.Equal(chash, commitment.Empty {
@@ -204,7 +203,6 @@ func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
 			c.update.ValLength = length.Hash
 			copy(c.update.CodeHashOrStorage[:], commitment.EmptyCodeHash)
 		} else {
-			fmt.Printf("replaced code %x -> %x\n", c.update.CodeHashOrStorage[:c.update.ValLength], chash)
 			copy(c.update.CodeHashOrStorage[:], chash)
 			c.update.ValLength = length.Hash
 			c.update.Flags |= commitment.CodeUpdate
