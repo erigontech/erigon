@@ -307,7 +307,9 @@ func (ff *Filters) UnsubscribeHeads(id HeadsSubID) bool {
 	if !ok {
 		return false
 	}
+	log.Warn("[dbg] before close", "id", id)
 	ch.Close()
+	log.Warn("[dbg] after close", "id", id)
 	if _, ok = ff.headsSubs.Delete(id); !ok {
 		return false
 	}

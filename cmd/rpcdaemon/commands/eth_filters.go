@@ -145,15 +145,17 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 				if h != nil {
 					err := notifier.Notify(rpcSub.ID, h)
 					if err != nil {
-						log.Warn("error while notifying subscription", "err", err)
-						return
+						log.Warn("[rpc] error while notifying subscription", "err", err)
 					}
 				}
 				if !ok {
-					log.Warn("new heads channel was closed")
+					log.Warn("[rpc] new heads channel was closed")
 					return
 				}
 			case <-rpcSub.Err():
+				return
+			case <-notifier.Closed():
+				api.filters.UnsubscribeHeads(id)
 				return
 			}
 		}
@@ -186,13 +188,12 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 					if t != nil {
 						err := notifier.Notify(rpcSub.ID, t.Hash())
 						if err != nil {
-							log.Warn("error while notifying subscription", "err", err)
-							return
+							log.Warn("[rpc] error while notifying subscription", "err", err)
 						}
 					}
 				}
 				if !ok {
-					log.Warn("new pending transactions channel was closed")
+					log.Warn("[rpc] new pending transactions channel was closed")
 					return
 				}
 			case <-rpcSub.Err():
@@ -228,13 +229,12 @@ func (api *APIImpl) NewPendingTransactionsWithBody(ctx context.Context) (*rpc.Su
 					if t != nil {
 						err := notifier.Notify(rpcSub.ID, t)
 						if err != nil {
-							log.Warn("error while notifying subscription", "err", err)
-							return
+							log.Warn("[rpc] error while notifying subscription", "err", err)
 						}
 					}
 				}
 				if !ok {
-					log.Warn("new pending transactions channel was closed")
+					log.Warn("[rpc] new pending transactions channel was closed")
 					return
 				}
 			case <-rpcSub.Err():
@@ -269,12 +269,11 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 				if h != nil {
 					err := notifier.Notify(rpcSub.ID, h)
 					if err != nil {
-						log.Warn("error while notifying subscription", "err", err)
-						return
+						log.Warn("[rpc] error while notifying subscription", "err", err)
 					}
 				}
 				if !ok {
-					log.Warn("log channel was closed")
+					log.Warn("[rpc] log channel was closed")
 					return
 				}
 			case <-rpcSub.Err():
