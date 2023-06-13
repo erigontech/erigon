@@ -50,7 +50,7 @@ func TestEthSubscribe(t *testing.T) {
 	newHeads, id := ff.SubscribeNewHeads(16)
 	defer ff.UnsubscribeHeads(id)
 
-	initialCycle := true
+	initialCycle := stages.MockInsertAsInitialCycle
 	highestSeenHeader := chain.TopBlock.NumberU64()
 
 	hook := stages.NewHook(m.Ctx, m.Notifications, m.Sync, br, m.ChainConfig, m.Log, m.UpdateHead)
