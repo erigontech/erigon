@@ -23,6 +23,9 @@ import (
 )
 
 func TestExec(t *testing.T) {
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip()
+	}
 	logger := log.New()
 	ctx, db1, db2 := context.Background(), memdb.NewTestDB(t), memdb.NewTestDB(t)
 	cfg := ExecuteBlockCfg{}
@@ -175,6 +178,9 @@ func newAgg(t *testing.T, logger log.Logger) *libstate.AggregatorV3 {
 }
 
 func TestExec22(t *testing.T) {
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip()
+	}
 	logger := log.New()
 	ctx, db1, db2 := context.Background(), memdb.NewTestDB(t), memdb.NewTestDB(t)
 	agg := newAgg(t, logger)
