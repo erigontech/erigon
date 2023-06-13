@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 
@@ -66,18 +67,16 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 			return nil, err
 		}
 		to, _ := kv.NextSubtree(account[:])
-		r, err := tx.(kv.TemporalTx).DomainRange(kv.StorageDomain, account[:], to, minTxNum, order.Asc, quantity+1)
+		r, err := tx.(kv.TemporalTx).DomainRange(kv.StorageDomain, account[:], to, minTxNum, order.Asc, quantity)
 		if err != nil {
 			return nil, err
 		}
 		for r.HasNext() {
-			k, v, err := r.Next()
+			k, _, err := r.Next()
 			if err != nil {
 				return nil, err
 			}
-			keys = append(keys, k[20:])
-			fmt.Printf("k: %x, v: %x\n", k, v)
-			_ = v
+			keys = append(keys, common.CopyBytes(k[20:]))
 		}
 		return keys, nil
 	}

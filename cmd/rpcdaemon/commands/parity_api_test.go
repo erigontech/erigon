@@ -39,6 +39,7 @@ func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 	}
 	assert.Equal(len(answers), len(result))
 	for k, v := range result {
+		fmt.Printf("result: %x\n", common.Bytes2Hex(v))
 		assert.Equal(answers[k], common.Bytes2Hex(v))
 	}
 }
