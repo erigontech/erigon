@@ -1,12 +1,10 @@
-//go:build spectest
-
-// once all tests are implemented, we can allow this test in the ci build path
-
 package spectest
 
 import (
 	"os"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/cl/transition"
 
 	"github.com/ledgerwatch/erigon/cl/spectest/consensus_tests"
 
@@ -14,5 +12,5 @@ import (
 )
 
 func Test(t *testing.T) {
-	spectest.RunCases(t, consensus_tests.TestFormats, os.DirFS("./tests"))
+	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS("./tests"))
 }

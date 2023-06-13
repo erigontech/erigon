@@ -1,6 +1,8 @@
 package flags
 
-import "github.com/urfave/cli/v2"
+import (
+	"github.com/urfave/cli/v2"
+)
 
 var (
 	SentinelDiscoveryPort = cli.IntFlag{
@@ -27,6 +29,31 @@ var (
 		Name:  "sentinel.addr",
 		Usage: "sets the lightclient server host addr",
 		Value: "localhost",
+	}
+	NoBeaconApi = cli.BoolFlag{
+		Name:  "no-beacon-api",
+		Usage: "turn off the beacon api",
+		Value: false,
+	}
+	BeaconApiReadTimeout = cli.Uint64Flag{
+		Name:  "beacon.api.read.timeout",
+		Usage: "Sets the seconds for a read time out in the beacon api",
+		Value: 5,
+	}
+	BeaconApiWriteTimeout = cli.Uint64Flag{
+		Name:  "beacon.api.write.timeout",
+		Usage: "Sets the seconds for a write time out in the beacon api",
+		Value: 5,
+	}
+	BeaconApiAddr = cli.StringFlag{
+		Name:  "beacon.api.addr",
+		Usage: "sets the host to listen for beacon api requests",
+		Value: "localhost",
+	}
+	BeaconApiPort = cli.UintFlag{
+		Name:  "beacon.api.port",
+		Usage: "sets the port to listen for beacon api requests",
+		Value: 5555,
 	}
 	BootnodesFlag = cli.StringFlag{
 		Name:  "sentinel.bootnodes",

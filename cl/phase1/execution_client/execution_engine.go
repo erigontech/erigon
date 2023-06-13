@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	types2 "github.com/ledgerwatch/erigon/core/types"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 )
@@ -146,9 +147,15 @@ func convertPayloadToGrpc(e *cltypes.Eth1Block) (*types.ExecutionPayload, error)
 		Transactions:  e.Transactions.UnderlyngReference(),
 		Withdrawals:   privateapi.ConvertWithdrawalsToRpc(withdrawals),
 	}
-	if e.Withdrawals != nil {
+	if e.Version() >= clparams.CapellaVersion {
 		res.Version = 2
 		res.Withdrawals = privateapi.ConvertWithdrawalsToRpc(withdrawals)
+	}
+
+	if e.Version() >= clparams.DenebVersion {
+		res.DataGasUsed = &e.DataGasUsed
+		res.ExcessDataGas = &e.ExcessDataGas
+		res.Version = 3
 	}
 
 	return res, nil

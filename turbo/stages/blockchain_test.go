@@ -835,7 +835,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 	} else {
 		if pm.History.Enabled() {
 			afterPrune := uint64(0)
-			err := tx.ForEach(kv.AccountsHistory, nil, func(k, _ []byte) error {
+			err := tx.ForEach(kv.E2AccountsHistory, nil, func(k, _ []byte) error {
 				n := binary.BigEndian.Uint64(k[length.Addr:])
 				require.Greater(n, pm.History.PruneTo(head))
 				afterPrune++
@@ -844,7 +844,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			require.Greater(afterPrune, uint64(0))
 			assert.NoError(t, err)
 		} else {
-			found, err := bitmapdb.Get64(tx, kv.AccountsHistory, address[:], 0, 1024)
+			found, err := bitmapdb.Get64(tx, kv.E2AccountsHistory, address[:], 0, 1024)
 			require.NoError(err)
 			require.Equal(uint64(0), found.Minimum())
 		}

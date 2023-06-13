@@ -123,6 +123,8 @@ COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += erigon-el
 COMMANDS += caplin-phase1
+COMMANDS += caplin-regression
+
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -146,14 +148,14 @@ test:
 	$(GOTEST) --timeout 100s
 
 test3:
-	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),erigon3
+	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),e3
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
 test3-integration:
-	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,erigon3
+	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,e3
 
 ## lint:                              run golangci-lint with .golangci.yml config file
 lint:
@@ -188,6 +190,7 @@ devtools:
 #	PATH=$(GOBIN):$(PATH) go generate ./core/types
 	PATH=$(GOBIN):$(PATH) go generate ./consensus/aura/...
 	#PATH=$(GOBIN):$(PATH) go generate ./eth/ethconfig/...
+	cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
@@ -215,7 +218,7 @@ git-submodules:
 	@git submodule update --quiet --init --recursive --force || true
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.20.4
+GOLANG_CROSS_VERSION  ?= v1.20.5
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules

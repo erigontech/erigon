@@ -13,12 +13,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 type ContractCreatorData struct {
@@ -33,8 +31,8 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	}
 	defer tx.Rollback()
 
-	reader := state.NewPlainStateReader(tx)
-	plainStateAcc, err := reader.ReadAccountData(addr)
+	latestState := rpchelper.NewLatestStateReader(tx)
+	plainStateAcc, err := latestState.ReadAccountData(addr)
 	if err != nil {
 		return nil, err
 	}
@@ -57,14 +55,6 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	var acc accounts.Account
 	if api.historyV3(tx) {
 		ttx := tx.(kv.TemporalTx)
-		headNumber, err := stages.GetStageProgress(tx, stages.Execution)
-		if err != nil {
-			return nil, err
-		}
-		lastTxNum, err := rawdbv3.TxNums.Max(tx, headNumber)
-		if err != nil {
-			return nil, err
-		}
 
 		// Contract; search for creation tx; navigate forward on AccountsHistory/ChangeSets
 		//
@@ -75,7 +65,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		// so it is optimal to search from the beginning even if the contract has multiple
 		// incarnations.
 		var prevTxnID, nextTxnID uint64
-		it, err := ttx.IndexRange(temporal.AccountsHistoryIdx, addr[:], 0, int(lastTxNum+1), order.Asc, kv.Unlim)
+		it, err := ttx.IndexRange(kv.AccountsHistoryIdx, addr[:], 0, -1, order.Asc, kv.Unlim)
 		if err != nil {
 			return nil, err
 		}
@@ -90,12 +80,11 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 				continue
 			}
 
-			v, ok, err := ttx.HistoryGet(temporal.AccountsHistory, addr[:], txnID)
+			v, ok, err := ttx.HistoryGet(kv.AccountsHistory, addr[:], txnID)
 			if err != nil {
-				log.Error("Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
+				log.Error("Unexpected error, couldn't find changeset", "txNum", txnID, "addr", addr)
 				return nil, err
 			}
-			fmt.Printf("i: %d, %t, %x\n", i, ok, v)
 
 			if !ok {
 				err = fmt.Errorf("couldn't find history txnID=%v addr=%v", txnID, addr)
@@ -107,7 +96,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 				continue
 			}
 
-			if err := acc.DecodeForStorage(v); err != nil {
+			if err := accounts.DeserialiseV3(&acc, v); err != nil {
 				return nil, err
 			}
 			// Found the shard where the incarnation change happens; ignore all next index values
@@ -132,7 +121,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
 		idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
 			txnID := uint64(i) + prevTxnID
-			v, ok, err := ttx.HistoryGet(temporal.AccountsHistory, addr[:], txnID)
+			v, ok, err := ttx.HistoryGet(kv.AccountsHistory, addr[:], txnID)
 			if err != nil {
 				log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
 				panic(err)
@@ -145,7 +134,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 				return false
 			}
 
-			if err := acc.DecodeForStorage(v); err != nil {
+			if err := accounts.DeserialiseV3(&acc, v); err != nil {
 				searchErr = err
 				return false
 			}
@@ -195,7 +184,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	// dozens of states changes due to ETH deposits/withdraw after contract creation,
 	// so it is optimal to search from the beginning even if the contract has multiple
 	// incarnations.
-	accHistory, err := tx.Cursor(kv.AccountsHistory)
+	accHistory, err := tx.Cursor(kv.E2AccountsHistory)
 	if err != nil {
 		return nil, err
 	}

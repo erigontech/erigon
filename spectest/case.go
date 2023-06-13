@@ -1,6 +1,7 @@
 package spectest
 
 import (
+	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"io/fs"
 	"os"
 	"strings"
@@ -16,6 +17,8 @@ type TestCase struct {
 	HandlerName   string
 	SuiteName     string
 	CaseName      string
+
+	Machine machine.Interface
 }
 
 func (t *TestCase) Version() clparams.StateVersion {

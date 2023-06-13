@@ -2,10 +2,9 @@ package consensus_tests
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"io/fs"
 	"testing"
-
-	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
 
 	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/assert"
@@ -26,7 +25,7 @@ var FinalityFinality = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spe
 	}
 	startSlot := testState.Slot()
 	for _, block := range blocks {
-		if err := transition.TransitionState(testState, block, true); err != nil {
+		if err := machine.TransitionState(c.Machine, testState, block); err != nil {
 			require.NoError(t, fmt.Errorf("cannot transition state: %w. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot))
 		}
 	}
