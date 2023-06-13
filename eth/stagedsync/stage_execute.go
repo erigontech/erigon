@@ -389,7 +389,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	defer func() {
 		logger.Info("SpawnExecuteBlocksStage exit ", "err", err, "stack", dbg.Stack())
 	}()
-
 	if cfg.historyV3 {
 		if err = ExecBlockV3(s, u, tx, toBlock, ctx, cfg, initialCycle, logger); err != nil {
 			return err

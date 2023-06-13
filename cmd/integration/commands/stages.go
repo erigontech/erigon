@@ -968,7 +968,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	}
 	defer tx.Rollback()
 
-	err = stagedsync.SpawnExecuteBlocksStage(s, sync, tx, block, ctx, cfg, true /* initialCycle */, logger)
+	err = stagedsync.SpawnExecuteBlocksStage(s, sync, tx, block, ctx, cfg, false /* initialCycle */, logger)
 	if err != nil {
 		return err
 	}
