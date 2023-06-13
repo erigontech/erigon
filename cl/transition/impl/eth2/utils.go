@@ -1,12 +1,10 @@
-package transition
+package eth2
 
 import (
 	"encoding/binary"
-	"reflect"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -58,32 +56,39 @@ func txPeekBlobVersionedHashes(txBytes []byte) []libcommon.Hash {
 	return versionedHashes
 }
 
-func VerifyKzgCommitmentsAgainstTransactions(transactions *solid.TransactionsSSZ, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) (bool, error) {
-	allVersionedHashes := []libcommon.Hash{}
-	transactions.ForEach(func(tx []byte, idx, total int) bool {
-		if tx[0] != types.BlobTxType {
-			return true
-		}
+func computeSigningRootEpoch(epoch uint64, domain []byte) (libcommon.Hash, error) {
+	b := make([]byte, 32)
+	binary.LittleEndian.PutUint64(b, epoch)
+	return utils.Keccak256(b, domain), nil
+}
 
-		allVersionedHashes = append(allVersionedHashes, txPeekBlobVersionedHashes(tx)...)
-		return true
-	})
-
-	commitmentVersionedHash := []libcommon.Hash{}
+// transitionSlot is called each time there is a new slot to process
+func transitionSlot(s *state.BeaconState) error {
+	slot := s.Slot()
+	previousStateRoot := s.PreviousStateRoot()
 	var err error
-	var versionedHash libcommon.Hash
-	kzgCommitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
-		versionedHash, err = kzgCommitmentToVersionedHash(value)
+	if previousStateRoot == (libcommon.Hash{}) {
+		previousStateRoot, err = s.HashSSZ()
 		if err != nil {
-			return false
+			return err
 		}
-
-		commitmentVersionedHash = append(commitmentVersionedHash, versionedHash)
-		return true
-	})
-	if err != nil {
-		return false, err
 	}
 
-	return reflect.DeepEqual(allVersionedHashes, commitmentVersionedHash), nil
+	beaconConfig := s.BeaconConfig()
+
+	s.SetStateRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousStateRoot)
+
+	latestBlockHeader := s.LatestBlockHeader()
+	if latestBlockHeader.Root == [32]byte{} {
+		latestBlockHeader.Root = previousStateRoot
+		s.SetLatestBlockHeader(&latestBlockHeader)
+	}
+	blockHeader := s.LatestBlockHeader()
+
+	previousBlockRoot, err := (&blockHeader).HashSSZ()
+	if err != nil {
+		return err
+	}
+	s.SetBlockRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousBlockRoot)
+	return nil
 }

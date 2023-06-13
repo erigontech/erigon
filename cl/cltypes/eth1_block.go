@@ -72,10 +72,8 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 		Withdrawals:   solid.NewStaticListSSZFromList(body.Withdrawals, 16, 44),
 	}
 
-	if header.DataGasUsed != nil {
+	if header.DataGasUsed != nil && header.ExcessDataGas != nil {
 		block.DataGasUsed = *header.DataGasUsed
-	}
-	if header.ExcessDataGas != nil {
 		block.ExcessDataGas = *header.ExcessDataGas
 		block.version = clparams.DenebVersion
 	} else if header.WithdrawalsHash != nil {
@@ -104,6 +102,12 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 		}
 	}
 
+	var dataGasUsed, excessDataGas uint64
+	if b.version >= clparams.DenebVersion {
+		dataGasUsed = b.DataGasUsed
+		excessDataGas = b.ExcessDataGas
+	}
+
 	return &Eth1Header{
 		ParentHash:       b.ParentHash,
 		FeeRecipient:     b.FeeRecipient,
@@ -120,8 +124,8 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 		BlockHash:        b.BlockHash,
 		TransactionsRoot: transactionsRoot,
 		WithdrawalsRoot:  withdrawalsRoot,
-		DataGasUsed:      b.DataGasUsed,
-		ExcessDataGas:    b.ExcessDataGas,
+		DataGasUsed:      dataGasUsed,
+		ExcessDataGas:    excessDataGas,
 		version:          b.version,
 	}, nil
 }
@@ -236,6 +240,10 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 	}
 
 	return header, nil
+}
+
+func (b *Eth1Block) Version() clparams.StateVersion {
+	return b.version
 }
 
 // Body returns the equivalent raw body (only eth1 body section).

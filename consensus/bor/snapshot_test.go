@@ -8,7 +8,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/log/v3"
-	crand "github.com/maticnetwork/crand"
+	"github.com/maticnetwork/crand"
 	"github.com/stretchr/testify/require"
 )
 

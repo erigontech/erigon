@@ -1,4 +1,4 @@
-package transition
+package statechange
 
 import (
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"

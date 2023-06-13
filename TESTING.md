@@ -53,7 +53,7 @@ INFO [03-24|13:41:20.391] Commit cycle                             in=2.16378229
 
 Here we see that the sync cycle went through all the stages for a single block `12101885`.
 
-After that, it is useful to wait more until an Unwind is encoutered and check that Erigon handled it without errors.
+After that, it is useful to wait more until an Unwind is encountered and check that Erigon handled it without errors.
 Usually, errors occur at the stage
 `[7/14 IntermediateHashes]` and manifest in the wrong trie root. Here is an example of processing an unwind without
 errors (look for the word "Unwind" in the log):
@@ -148,7 +148,7 @@ ERROR[08-01|14:30:38.299] Demoting invalidated transaction         hash="859191â
 ERROR[08-01|14:30:38.299] Demoting invalidated transaction         hash="25ee67â€¦e73153"
 ```
 
-this is also likely to disappered after the introduction of new downloader/sentry design
+this is also likely to disappear after the introduction of new downloader/sentry design
 
 ### Assessing relative performance of sync
 
@@ -172,7 +172,7 @@ INFO [03-24|13:41:20.391] Commit cycle                             in=2.16378229
 
 The line above shows how long was commit cycle. We saw in the past that after some changes the commit time dramatically
 increases, and these
-regressions need to be investigaged. We expect "commit cycle" on Linux with NVMe drive to usually take less than a
+regressions need to be investigated. We expect "commit cycle" on Linux with NVMe drive to usually take less than a
 second. For other operating
 systems and devices the typical time may vary, but it should significantly increase from one release to another.
 Perhaps we need to log some extra information in the log to make it easier for the tester to filter out the log
@@ -274,11 +274,11 @@ requests for certain RPC methods, using hits provided by options `--blockFrom` a
 useful ones are:
 
 1. `bench8` tests `eth_getLogs` RPC method (compatibility with go-ethereum and OpenEthereum)
-2. `bench11` tests `trace_call` RPC method (compatiblity with OpenEthereum tracing)
+2. `bench11` tests `trace_call` RPC method (compatibility with OpenEthereum tracing)
 3. `bench12` tests `debug_traceCall` RPC method (compatibility with go-ethereum tracing)
-4. `bench13` tests `trace_callMany` RPC method (compability with OpenEthereum tracing)
+4. `bench13` tests `trace_callMany` RPC method (compatibility with OpenEthereum tracing)
 
-Options `--erigonUrl` and `--gethUrl` specify HTTP endpoints that needs to be tested against each other. Despite its
+Options `--erigonUrl` and `--gethUrl` specify HTTP endpoints that need to be tested against each other. Despite its
 name, `--gethUrl` option does not have to
 point to go-ethereum node, it can point to anything that it supposed to be "correct" for the purpose of the test (
 go-ethereum node, OpenEthereum node,
@@ -286,7 +286,7 @@ or Erigon RPC daemon & Erigon node built from the previous release code).
 
 Option `--needCompare` triggers the comparison of JSON RPC responses. If omitted, requests to `--gethUrl` are not done.
 When comparison is turned on,
-the utility stops at the first occurrence of mistmatch.
+the utility stops at the first occurrence of mismatch.
 
 ## RPC test recording and replay
 
