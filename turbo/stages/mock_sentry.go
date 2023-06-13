@@ -608,7 +608,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		ms.SendPayloadRequest(chain.Blocks[i])
 	}
 
-	initialCycle := false
+	initialCycle := MockInsertAsInitialCycle
 	blockReader, _ := ms.NewBlocksIO()
 	hook := NewHook(ms.Ctx, ms.Notifications, ms.Sync, blockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
 	headBlockHash, err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, initialCycle, ms.Log, blockReader.Snapshots().(*snapshotsync.RoSnapshots), hook)
