@@ -290,8 +290,6 @@ func (s *Merge) Close() error {
 	return s.eth1Engine.Close()
 }
 
-
-
 // IsTTDReached checks if the TotalTerminalDifficulty has been surpassed on the `parentHash` block.
 // It depends on the parentHash already being stored in the database.
 // If the total difficulty is not stored in the database a ErrUnknownAncestorTD error is returned.

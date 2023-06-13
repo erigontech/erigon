@@ -64,9 +64,10 @@ type ChainReader interface {
 	HasBlock(hash libcommon.Hash, number uint64) bool
 }
 
-type SystemCall func(contract libcommon.Address, data []byte, ) ([]byte, error)
-//Use more options to call contract
-type SysCallCustom func (contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
+type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)
+
+// Use more options to call contract
+type SysCallCustom func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
 type Call func(contract libcommon.Address, data []byte) ([]byte, error)
 
 // RewardKind - The kind of block reward.

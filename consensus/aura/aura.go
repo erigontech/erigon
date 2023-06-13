@@ -38,10 +38,10 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -765,16 +765,16 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 	blockNum := header.Number.Uint64()
 
 	//Check block gas limit from smart contract, if applicable
-	gasLimitOverride := c.HasGasLimitContract() && !misc.IsPoSHeader(header) 
+	gasLimitOverride := c.HasGasLimitContract() && !misc.IsPoSHeader(header)
 	if gasLimitOverride {
 		log.Info("[AuRa] Found Gas limit for pre-merge block, validating gas limit with contract")
-		syscallPrevHeader := func(addr libcommon.Address, data []byte) ([]byte, error){
+		syscallPrevHeader := func(addr libcommon.Address, data []byte) ([]byte, error) {
 			return syscallCustom(addr, data, state, chain.GetHeaderByHash(header.ParentHash), true)
 		}
 		blockGasLimit := c.GetBlockGasLimitFromContract(config, syscallPrevHeader)
 
 		if blockGasLimit > 0 {
-			if header.GasLimit != blockGasLimit{
+			if header.GasLimit != blockGasLimit {
 				panic("Block gas limit doesn't match BlockGasLimitContract with AuRa")
 			}
 		}
@@ -784,7 +784,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 		state.SetCode(address, rewrittenCode)
 	}
 
-	syscall := func(addr libcommon.Address, data []byte) ([]byte, error){
+	syscall := func(addr libcommon.Address, data []byte) ([]byte, error) {
 		return syscallCustom(addr, data, state, header, true)
 	}
 	c.certifierLock.Lock()
@@ -1303,7 +1303,7 @@ func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash libcommon.Hash) []
 	return res
 }
 
-func (c *AuRa) GetBlockGasLimitFromContract(_ *chain.Config, syscall consensus.SystemCall) uint64{
+func (c *AuRa) GetBlockGasLimitFromContract(_ *chain.Config, syscall consensus.SystemCall) uint64 {
 	// var blockLimitContract
 	addr, ok := c.cfg.BlockGasLimitContractTransitions[0]
 	if !ok {

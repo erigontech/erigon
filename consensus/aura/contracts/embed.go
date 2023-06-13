@@ -17,4 +17,4 @@ var Registrar []byte
 var Withdrawal []byte
 
 //go:embed block_gas_limit.json
-var BlockGasLimit [] byte
+var BlockGasLimit []byte
