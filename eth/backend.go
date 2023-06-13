@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -833,8 +834,20 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
 func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string) error {
-	if !cfg.Enabled {
-		return nil
+
+	var borcfg *bor.Bor
+	if b, ok := s.engine.(*bor.Bor); ok {
+		borcfg = b
+	} else if br, ok := s.engine.(*merge.Merge); ok {
+		if b, ok := br.InnerEngine().(*bor.Bor); ok {
+			borcfg = b
+		}
+	}
+
+	if borcfg == nil {
+		if !cfg.Enabled {
+			return nil
+		}
 	}
 
 	// Configure the local mining address
@@ -842,6 +855,31 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 	if err != nil {
 		s.logger.Error("Cannot start mining without etherbase", "err", err)
 		return fmt.Errorf("etherbase missing: %w", err)
+	}
+
+	if borcfg != nil {
+		if cfg.Enabled {
+			if cfg.SigKey == nil {
+				s.logger.Error("Etherbase account unavailable locally", "err", err)
+				return fmt.Errorf("signer missing: %w", err)
+			}
+
+			borcfg.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
+				return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
+			})
+		} else {
+			// for the bor dev network without heimdall we need the authorizer to be set otherwise there is no
+			// validator defined in the bor validator set and non mining nodes will reject all blocks
+			// this assumes in this mode we're only running a single validator
+
+			if s.chainConfig.ChainName == networkname.BorDevnetChainName && s.config.WithoutHeimdall {
+				borcfg.Authorize(eb, func(addr libcommon.Address, _ string, _ []byte) ([]byte, error) {
+					return nil, &bor.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
+				})
+			}
+
+			return nil
+		}
 	}
 
 	var clq *clique.Clique
@@ -859,25 +897,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		}
 
 		clq.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
-			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
-		})
-	}
-
-	var borcfg *bor.Bor
-	if b, ok := s.engine.(*bor.Bor); ok {
-		borcfg = b
-	} else if br, ok := s.engine.(*merge.Merge); ok {
-		if b, ok := br.InnerEngine().(*bor.Bor); ok {
-			borcfg = b
-		}
-	}
-	if borcfg != nil {
-		if cfg.SigKey == nil {
-			s.logger.Error("Etherbase account unavailable locally", "err", err)
-			return fmt.Errorf("signer missing: %w", err)
-		}
-
-		borcfg.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
 			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
 		})
 	}
@@ -976,6 +995,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 		nodeInfo, err := sc.NodeInfo(context.Background(), nil)
 		if err != nil {
 			s.logger.Error("sentry nodeInfo", "err", err)
+			continue
 		}
 
 		nodes = append(nodes, nodeInfo)

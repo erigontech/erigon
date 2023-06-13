@@ -100,6 +100,7 @@ func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config
 		// Then, bor != nil will also be enabled for ethash and clique. Only enable Bor for real if there is a validator contract present.
 		if chainConfig.Bor != nil && chainConfig.Bor.ValidatorContract != "" {
 			genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, chainConfig.Bor.ValidatorContract, chainConfig.Bor.StateReceiverContract, logger)
+
 			spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig, logger)
 
 			var err error
