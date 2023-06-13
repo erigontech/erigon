@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -138,8 +139,8 @@ func TestCreateGas(t *testing.T) {
 		address := libcommon.BytesToAddress([]byte("contract"))
 		_, tx := memdb.NewTestTx(t)
 
-		stateReader := rpchelper.NewLatestStateReader(tx)
-		stateWriter := rpchelper.NewLatestStateWriter(tx, 0)
+		stateReader := rpchelper.NewLatestStateReader(tx, ethconfig.EnableHistoryV4InTest)
+		stateWriter := rpchelper.NewLatestStateWriter(tx, 0, ethconfig.EnableHistoryV4InTest)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)

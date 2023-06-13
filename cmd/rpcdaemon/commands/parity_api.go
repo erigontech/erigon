@@ -25,13 +25,15 @@ type ParityAPI interface {
 
 // ParityAPIImpl data structure to store things needed for parity_ commands
 type ParityAPIImpl struct {
+	*BaseAPI
 	db kv.RoDB
 }
 
 // NewParityAPIImpl returns ParityAPIImpl instance
-func NewParityAPIImpl(db kv.RoDB) *ParityAPIImpl {
+func NewParityAPIImpl(base *BaseAPI, db kv.RoDB) *ParityAPIImpl {
 	return &ParityAPIImpl{
-		db: db,
+		BaseAPI: base,
+		db:      db,
 	}
 }
 
@@ -46,11 +48,15 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
 	}
 	defer tx.Rollback()
-	a, err := rpchelper.NewLatestStateReader(tx).ReadAccountData(account)
+	a, err := rpchelper.NewLatestStateReader(tx, api.historyV3(tx)).ReadAccountData(account)
 	if err != nil {
 		return nil, err
 	} else if a == nil {
 		return nil, fmt.Errorf("acc not found")
+	}
+
+	if api.historyV3(tx) {
+		panic("implement me")
 	}
 
 	b := make([]byte, 8)

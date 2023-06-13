@@ -131,13 +131,13 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, histor
 	return r, nil
 }
 
-func NewLatestStateReader(tx kv.Getter) state.StateReader {
-	if ethconfig.EnableHistoryV4InTest {
+func NewLatestStateReader(tx kv.Getter, histV3 bool) state.StateReader {
+	if histV3 {
 		return state.NewReaderV4(tx.(kv.TemporalTx))
 	}
 	return state.NewPlainStateReader(tx)
 }
-func NewLatestStateWriter(tx kv.RwTx, blockNum uint64) state.StateWriter {
+func NewLatestStateWriter(tx kv.RwTx, blockNum uint64, histV3 bool) state.StateWriter {
 	if ethconfig.EnableHistoryV4InTest {
 		return state.NewWriterV4(tx.(kv.TemporalTx))
 	}
