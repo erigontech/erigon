@@ -59,7 +59,7 @@ type Server struct {
 
 // NewServer creates a new server instance with no registered handlers.
 func NewServer(batchConcurrency uint, traceRequests, disableStreaming bool, logger log.Logger) *Server {
-	server := &Server{idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency,
+	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, logger: logger}
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.

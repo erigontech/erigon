@@ -402,7 +402,11 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.next.ServeHTTP(w, r)
 		return
 	}
-	if _, exist := h.vhosts[host]; exist {
+	if _, exist := h.vhosts["any"]; exist {
+		h.next.ServeHTTP(w, r)
+		return
+	}
+	if _, exist := h.vhosts[strings.ToLower(host)]; exist {
 		h.next.ServeHTTP(w, r)
 		return
 	}

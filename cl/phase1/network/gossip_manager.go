@@ -70,7 +70,7 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 		if block.Block.Slot+maxGossipSlotThreshold < currentSlotByTime {
 			return nil
 		}
-		if block.Block.Slot+maxGossipSlotThreshold == currentSlotByTime {
+		if block.Block.Slot == currentSlotByTime {
 			if _, err := g.sentinel.PublishGossip(g.ctx, data); err != nil {
 				log.Debug("failed publish gossip", "err", err)
 			}
