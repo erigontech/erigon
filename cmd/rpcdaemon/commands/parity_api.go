@@ -76,6 +76,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 				return nil, err
 			}
 			keys = append(keys, k[20:])
+			fmt.Printf("k: %x, v: %x\n", k, v)
 			_ = v
 		}
 		return keys, nil
