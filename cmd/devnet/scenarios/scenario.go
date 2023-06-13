@@ -40,7 +40,7 @@ func RegisterStepHandlers(handlers ...stepHandler) error {
 			}
 
 			h.matchExpressions = []string{
-				string(name),
+				name,
 			}
 		}
 
@@ -100,7 +100,7 @@ var typeOfBytes = reflect.TypeOf([]byte(nil))
 var typeOfContext = reflect.TypeOf((*context.Context)(nil)).Elem()
 
 func (c *stepRunner) Run(ctx context.Context, args []interface{}) (context.Context, interface{}) {
-	var values []reflect.Value
+	var values = make([]reflect.Value, 0, len(args))
 
 	typ := c.Handler.Type()
 	numIn := typ.NumIn()
@@ -140,7 +140,7 @@ func (c *stepRunner) Run(ctx context.Context, args []interface{}) (context.Conte
 		return ctx, res[0].Interface()
 	}
 
-	var results []interface{}
+	var results = make([]interface{}, 0, len(res))
 
 	for _, value := range res {
 		results = append(results, value.Interface())

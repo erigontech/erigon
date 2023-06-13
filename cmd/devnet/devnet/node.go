@@ -35,7 +35,7 @@ type node struct {
 	ethNode *enode.ErigonNode
 }
 
-func (n node) Stop() {
+func (n *node) Stop() {
 	if n.ethNode != nil {
 		toClose := n.ethNode
 		n.ethNode = nil

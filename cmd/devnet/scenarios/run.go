@@ -42,7 +42,7 @@ func (r *runner) concurrent(ctx context.Context, rate int) (err error) {
 		suite: &suite{
 			randomize:      r.randomize,
 			defaultContext: ctx,
-			stepRunners: stepRunners(ctx),
+			stepRunners:    stepRunners(ctx),
 		},
 	}
 
@@ -51,12 +51,12 @@ func (r *runner) concurrent(ctx context.Context, rate int) (err error) {
 
 		queue <- i // reserve space in queue
 
-		runScenario := func(err error, Scenario *Scenario) {
+		runScenario := func(err *error, Scenario *Scenario) {
 			defer func() {
 				<-queue // free a space in queue
 			}()
 
-			if r.stopOnFailure && err != nil {
+			if r.stopOnFailure && *err != nil {
 				return
 			}
 
@@ -71,7 +71,7 @@ func (r *runner) concurrent(ctx context.Context, rate int) (err error) {
 			_, serr := suite.runScenario(&scenario)
 			if suite.shouldFail(serr) {
 				copyLock.Lock()
-				err = serr
+				*err = serr
 				copyLock.Unlock()
 			}
 		}
@@ -79,9 +79,9 @@ func (r *runner) concurrent(ctx context.Context, rate int) (err error) {
 		if rate == 1 {
 			// Running within the same goroutine for concurrency 1
 			// to preserve original stacks and simplify debugging.
-			runScenario(err, &scenario)
+			runScenario(&err, &scenario)
 		} else {
-			go runScenario(err, &scenario)
+			go runScenario(&err, &scenario)
 		}
 	}
 

@@ -38,7 +38,7 @@ type suite struct {
 }
 
 func (s *suite) runSteps(ctx context.Context, scenario *Scenario, steps []*Step) (context.Context, []StepResult, error) {
-	var results []StepResult
+	var results = make([]StepResult, 0, len(steps))
 	var err error
 
 	for i, step := range steps {
