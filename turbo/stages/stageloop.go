@@ -239,6 +239,7 @@ func NewHook(ctx context.Context, notifications *shards.Notifications, sync *sta
 	return &Hook{ctx: ctx, notifications: notifications, sync: sync, blockReader: blockReader, chainConfig: chainConfig, logger: logger, updateHead: updateHead}
 }
 func (h *Hook) BeforeRun(tx kv.Tx, canRunCycleInOneTransaction bool) error {
+	defer func(t time.Time) { fmt.Printf("stageloop.go:242: BeforeRun %s\n", time.Since(t)) }(time.Now())
 	notifications := h.notifications
 	if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction {
 		stateVersion, err := rawdb.GetStateVersion(tx)
@@ -250,6 +251,7 @@ func (h *Hook) BeforeRun(tx kv.Tx, canRunCycleInOneTransaction bool) error {
 	return nil
 }
 func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
+	defer func(t time.Time) { fmt.Printf("stageloop.go:254: AfterRun %s\n", time.Since(t)) }(time.Now())
 	notifications := h.notifications
 	blockReader := h.blockReader
 	// -- send notifications START
