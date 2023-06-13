@@ -789,6 +789,7 @@ Loop:
 		//if !bytes.Equal(rh, header.Root.Bytes()) {
 		//	return fmt.Errorf("root hash mismatch: %x != %x, bn=%d", rh, header.Root.Bytes(), blockNum)
 		//}
+		fmt.Printf("[dbg] update exec progress: %d\n", execStage)
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
 			return err
 		}
@@ -800,6 +801,7 @@ Loop:
 	}
 
 	if !useExternalTx && applyTx != nil {
+		fmt.Printf("[dbg] commit\n")
 		if err = applyTx.Commit(); err != nil {
 			return err
 		}
