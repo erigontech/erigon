@@ -972,6 +972,11 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
