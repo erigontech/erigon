@@ -497,9 +497,23 @@ func (h *History) FinishWrites() {
 }
 
 func (h *History) Rotate() historyFlusher {
-	w := h.wal
-	h.wal = h.newWriter(h.wal.tmpdir, h.wal.buffered, h.wal.discard)
-	return historyFlusher{h: w, i: h.InvertedIndex.Rotate()}
+	hf := historyFlusher{}
+	if h.InvertedIndex.wal != nil {
+		hf.i = h.InvertedIndex.Rotate()
+	}
+
+	if h.wal != nil {
+		w := h.wal
+		hf.h = w
+		h.wal = h.newWriter(h.wal.tmpdir, h.wal.buffered, h.wal.discard)
+	}
+	return hf
+}
+
+type noopFlusher struct{}
+
+func (f noopFlusher) Flush(_ context.Context, _ kv.RwTx) error {
+	return nil
 }
 
 type historyFlusher struct {
@@ -514,11 +528,15 @@ func (f historyFlusher) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	if err := f.i.Flush(ctx, tx); err != nil {
-		return err
+	if f.i != nil {
+		if err := f.i.Flush(ctx, tx); err != nil {
+			return err
+		}
 	}
-	if err := f.h.flush(ctx, tx); err != nil {
-		return err
+	if f.h != nil {
+		if err := f.h.flush(ctx, tx); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1074,10 +1092,14 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 		if txNum >= txTo {
 			break
 		}
+		if txNum < txFrom {
+			continue
+		}
 		for ; err == nil && k != nil; k, v, err = historyKeysCursor.NextDup() {
 			if err := collector.Collect(v, nil); err != nil {
 				return err
 			}
+			fmt.Printf("prune %s history: tx=%d %x %x\n", h.filenameBase, txNum, k, v)
 		}
 
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
@@ -1105,6 +1127,10 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 				if txNum >= txTo {
 					break
 				}
+				if txNum < txFrom {
+					continue
+				}
+				fmt.Printf("prune7 %s history: tx=%d %x %x\n", h.filenameBase, txNum, k, v)
 				if err = valsC.DeleteCurrent(); err != nil {
 					return err
 				}
@@ -1135,9 +1161,13 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 					return err
 				}
 				txNum := binary.BigEndian.Uint64(v)
+				if txNum < txFrom {
+					continue
+				}
 				if txNum >= txTo {
 					break
 				}
+				fmt.Printf("prune1 %s history: tx=%d %x %x\n", h.filenameBase, txNum, k, v)
 				if err = valsC.DeleteCurrent(); err != nil {
 					return err
 				}
@@ -1199,6 +1229,7 @@ func (h *History) pruneF(txFrom, txTo uint64, f func(txNum uint64, k, v []byte) 
 				return err
 			}
 			if kk != nil {
+				//fmt.Printf("del buffered key %x v %x\n", kk, vv)
 				if err = valsC.DeleteCurrent(); err != nil {
 					return err
 				}
@@ -1214,6 +1245,7 @@ func (h *History) pruneF(txFrom, txTo uint64, f func(txNum uint64, k, v []byte) 
 			if err := f(txNum, v, vv[8:]); err != nil {
 				return err
 			}
+			//fmt.Printf("del buffered key %x v %x\n", k, vv)
 			if err = valsCDup.DeleteCurrent(); err != nil {
 				return err
 			}

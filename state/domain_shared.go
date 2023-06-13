@@ -73,9 +73,25 @@ type SharedDomains struct {
 	Commitment *DomainCommitted
 }
 
-func (sd *SharedDomains) Unwind() {
+func (sd *SharedDomains) Unwind(rwtx kv.RwTx) {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
+	//ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
+	//defer cancel()
+	//
+	//logEvery := time.NewTicker(time.Second * 30)
+	//if err := sd.flushBtree(ctx, rwtx, sd.Account.valsTable, sd.account, "sd_unwind", logEvery); err != nil {
+	//	panic(err)
+	//}
+	//if err := sd.flushBtree(ctx, rwtx, sd.Storage.valsTable, sd.storage, "sd_unwind", logEvery); err != nil {
+	//	panic(err)
+	//}
+	//if err := sd.flushBtree(ctx, rwtx, sd.Code.valsTable, sd.code, "sd_unwind", logEvery); err != nil {
+	//	panic(err)
+	//}
+	//if err := sd.flushBtree(ctx, rwtx, sd.Commitment.valsTable, sd.commitment, "sd_unwind", logEvery); err != nil {
+	//	panic(err)
+	//}
 	sd.account.Clear()
 	sd.code.Clear()
 	sd.commitment.Clear()
@@ -318,9 +334,9 @@ func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, codeHash []byte) e
 	return sd.Code.PutWithPrev(addr, nil, code, prevCode)
 }
 
-func (sd *SharedDomains) UpdateCommitmentData(prefix []byte, data []byte) error {
+func (sd *SharedDomains) UpdateCommitmentData(prefix []byte, data, prev []byte) error {
 	sd.put(kv.CommitmentDomain, prefix, data)
-	return sd.Commitment.Put(prefix, nil, data)
+	return sd.Commitment.PutWithPrev(prefix, nil, data, prev)
 }
 
 func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
@@ -420,7 +436,8 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 		if trace {
 			fmt.Printf("sd computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
 		}
-		if err = sd.UpdateCommitmentData(prefix, merged); err != nil {
+
+		if err = sd.UpdateCommitmentData(prefix, merged, stated); err != nil {
 			return nil, err
 		}
 		mxCommitmentUpdatesApplied.Inc()

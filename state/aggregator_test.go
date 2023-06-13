@@ -636,3 +636,75 @@ func Test_InitBtreeIndex(t *testing.T) {
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	bt.Close()
 }
+
+func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (string, kv.RwDB, *AggregatorV3) {
+	t.Helper()
+	path := t.TempDir()
+	logger := log.New()
+	db := mdbx.NewMDBX(logger).InMem(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.ChaindataTablesCfg
+	}).MustOpen()
+	t.Cleanup(db.Close)
+	agg, err := NewAggregatorV3(context.Background(), filepath.Join(path, "e4"), filepath.Join(path, "e4tmp"), aggStep, db, logger)
+	require.NoError(t, err)
+	return path, db, agg
+}
+
+func TestAggregatorV3_SharedDomains(t *testing.T) {
+	_, db, agg := testDbAndAggregatorv3(t, 20)
+	defer agg.Close()
+	defer db.Close()
+
+	domains := agg.SharedDomains()
+
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains.SetTx(rwTx)
+	agg.SetTx(rwTx)
+	agg.StartUnbufferedWrites()
+	defer agg.FinishWrites()
+	defer domains.Close()
+
+	var i uint64
+	roots := make([][]byte, 0, 10)
+	for i = 0; i < 6; i++ {
+		domains.SetTxNum(uint64(i))
+		key := make([]byte, 8)
+		binary.BigEndian.PutUint64(key, uint64(i))
+
+		err = domains.UpdateAccountCode(key, []byte{byte(i)}, nil)
+		require.NoError(t, err)
+
+		rh, err := domains.Commit(true, false)
+		require.NoError(t, err)
+		require.NotEmpty(t, rh)
+		roots = append(roots, rh)
+	}
+	//err = agg.Flush(context.Background(), rwTx)
+	//require.NoError(t, err)
+
+	err = agg.Unwind(context.Background(), 4, nil)
+
+	mc := agg.MakeContext()
+	mc.commitment.IteratePrefix(rwTx, nil, func(key, value []byte) {
+		fmt.Printf("commitment %x %x\n", key, value)
+	})
+	require.NoError(t, err)
+
+	for i = 4; i < 12; i++ {
+		domains.SetTxNum(uint64(i))
+		key := make([]byte, 8)
+		binary.BigEndian.PutUint64(key, uint64(i))
+
+		err = domains.UpdateAccountCode(key, []byte{byte(i)}, nil)
+		require.NoError(t, err)
+
+		rh, err := domains.Commit(true, false)
+		require.NoError(t, err)
+		require.NotEmpty(t, rh)
+		roots = append(roots, rh)
+	}
+
+}

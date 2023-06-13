@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -32,10 +33,11 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
 
@@ -1246,6 +1248,111 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 	d.reCalcRoFiles()
 }
 
+func (d *Domain) pruneF(ctx context.Context, step, txFrom, txTo, limit uint64, f func(txnum uint64, k, v []byte) error) error {
+	keysCursor, err := d.tx.RwCursorDupSort(d.keysTable)
+	if err != nil {
+		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
+	}
+	defer keysCursor.Close()
+	var txKey [8]byte
+	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	var k, v []byte
+	var valsC kv.RwCursor
+	var valsCDup kv.RwCursorDupSort
+	if d.largeValues {
+		valsC, err = d.tx.RwCursor(d.valsTable)
+		if err != nil {
+			return err
+		}
+		defer valsC.Close()
+	} else {
+		valsCDup, err = d.tx.RwCursorDupSort(d.valsTable)
+		if err != nil {
+			return err
+		}
+		defer valsCDup.Close()
+	}
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^step)
+
+	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
+		txStep := binary.BigEndian.Uint64(v)
+		if !bytes.Equal(v, stepBytes) {
+
+			if txStep&(1>>63)-1 == 0 {
+				// this is txnumber not invstep
+				if txStep > txFrom {
+					// not needed that
+					continue
+				}
+
+			}
+			continue
+		}
+
+		if d.largeValues {
+			seek := common.Append(k, v)
+			kk, vv, err := valsC.SeekExact(seek)
+			if err != nil {
+				return err
+			}
+			if err := f(txStep, kk[:len(kk)-8], vv); err != nil {
+				return err
+			}
+			if kk != nil {
+				//fmt.Printf("del buffered key %x v %x\n", kk, vv)
+				if err = valsC.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
+		} else {
+			vv, err := valsCDup.SeekBothRange(k, nil)
+			if err != nil {
+				return err
+			}
+			if binary.BigEndian.Uint64(vv) != txStep {
+				continue
+			}
+			if err := f(txStep, v, vv[8:]); err != nil {
+				return err
+			}
+			//fmt.Printf("del buffered key %x v %x\n", k, vv)
+			if err = valsCDup.DeleteCurrent(); err != nil {
+				return err
+			}
+		}
+
+		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
+		if err = keysCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
+	}
+	exists := map[string]struct{}{}
+	if err := d.History.pruneF(txFrom, txTo, func(txNum uint64, k, v []byte) error {
+		if _, ok := exists[string(k)]; ok {
+			return nil
+		}
+		exists[string(k)] = struct{}{}
+
+		//d.SetTxNum(txNum)
+		fmt.Printf("puts bakc %x %x from tx %d\n", k, v, txNum)
+		//return d.History.AddPrevValue(k, nil, v)
+		return nil
+		//return d.
+	}); err != nil {
+		return err
+	}
+	//if err := d.History.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
+	//	return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
+	//}
+	return nil
+
+}
+
 // [txFrom; txTo)
 func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
 	defer func(t time.Time) { d.stats.LastPruneTook = time.Since(t) }(time.Now())
@@ -1271,38 +1378,70 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 
 	var (
 		k, v, stepBytes []byte
-		keyMaxSteps     = make(map[string]uint64)
-		c               = 0
+		keyMaxSteps     = make(map[string]struct{})
 	)
+
+	hctx := d.History.MakeContext()
+	defer hctx.Close()
+
 	stepBytes = make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
+	//prevAgg := 0
+	//if d.txNum > d.aggregationStep {
+	//	mn := d.txNum / d.aggregationStep
+	//	prevAgg = int(mn * d.aggregationStep)
+	//}
 
-	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
+	//iter, err := hctx.WalkAsOf(txFrom, []byte{}, []byte{}, d.tx, math.MaxUint64)
+	//if err != nil {
+	//	return fmt.Errorf("walk history: %w", err)
+	//}
+	//
+	//for k, v, err := iter.Next(); iter.HasNext() && err == nil && k != nil; k, v, err = iter.Next() {
+	//
+	//}
+
+	kwal := d.newWriter(path.Join(d.tmpdir, "prune_keys"), true, false)
+	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.NextNoDup() {
 		if bytes.Equal(v, stepBytes) {
-			c++
-			kl, vl, err := keysCursor.PrevDup()
+			// remove those keys with values equal to stepBytes and has history
+			val, existed, err := hctx.GetNoStateWithRecent(k, txFrom, d.tx)
 			if err != nil {
-				break
+				return err
 			}
-			if kl == nil && vl == nil {
+			if !existed {
 				continue
 			}
-			s := ^binary.BigEndian.Uint64(vl)
-			if s > step {
-				kn, vn, err := keysCursor.NextDup()
-				if err != nil {
-					break
-				}
-				if bytes.Equal(kn, k) && bytes.Equal(vn, stepBytes) {
-					if err := keysCursor.DeleteCurrent(); err != nil {
-						return fmt.Errorf("prune key %x: %w", k, err)
-					}
-					mxPruneSize.Inc()
-					keyMaxSteps[string(k)] = s
-				}
+			if err := kwal.addValue(k, nil, val); err != nil {
+				return err
 			}
+			dupes, err := keysCursor.CountDuplicates()
+			if err != nil {
+				return err
+			}
+			if err := keysCursor.DeleteCurrentDuplicates(); err != nil {
+				return fmt.Errorf("prune key %x: %w", k, err)
+			}
+			mxPruneSize.Add(int(dupes))
+			fmt.Printf("[%s] prune key dups %d %x %x\n", d.valsTable, dupes, k, v)
+			keyMaxSteps[string(k)] = struct{}{}
+			pos.Add(dupes)
+
+			//pk, pv, err := keysCursor.PrevDup()
+			//if err != nil {
+			//	return err
+			//}
+			//if pk == nil && pv == nil {
+			//	// this is first key
+			//	continue
+			//}
+			//for kn, vn, err := keysCursor.NextDup(); err != nil && kn != nil; kn, vn, err = keysCursor.NextDup() {
+			//	fmt.Printf("[%s] prune key %x %x\n", d.valsTable, kn, vn)
+			//	if err := keysCursor.DeleteCurrent(); err != nil {
+			//		return fmt.Errorf("prune key %x: %w", k, err)
+			//	}
+			//}
 		}
-		pos.Add(1)
 
 		select {
 		case <-ctx.Done():
@@ -1322,50 +1461,105 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 
 	_state = "delete vals"
 	pos.Store(0)
-	// It is important to clean up tables in a specific order
-	// First keysTable, because it is the first one access in the `get` function, i.e. if the record is deleted from there, other tables will not be accessed
-	var valsCursor kv.RwCursor
-	if valsCursor, err = d.tx.RwCursor(d.valsTable); err != nil {
-		return fmt.Errorf("%s vals cursor: %w", d.filenameBase, err)
-	}
-	defer valsCursor.Close()
 
-	totalKeys, err = valsCursor.Count()
-	if err != nil {
-		return fmt.Errorf("count of %s keys: %w", d.filenameBase, err)
-	}
-
-	for k, _, err := valsCursor.First(); err == nil && k != nil; k, _, err = valsCursor.Next() {
-		if bytes.HasSuffix(k, stepBytes) {
+	if !d.largeValues {
+		// It is important to clean up tables in a specific order
+		// First keysTable, because it is the first one access in the `get` function, i.e. if the record is deleted from there, other tables will not be accessed
+		var valsCursor kv.RwCursorDupSort
+		if valsCursor, err = d.tx.RwCursorDupSort(d.valsTable); err != nil {
+			return fmt.Errorf("%s vals cursor: %w", d.filenameBase, err)
+		}
+		defer valsCursor.Close()
+		for k, _, err := valsCursor.First(); err == nil && k != nil; k, _, err = valsCursor.Next() {
+			//if bytes.HasSuffix(k, stepBytes) {
 			if _, ok := keyMaxSteps[string(k)]; !ok {
 				continue
 			}
+			dupes, err := valsCursor.CountDuplicates()
+			if err != nil {
+				return err
+			}
+			fmt.Printf("[%s] prune val %x %x\n", d.valsTable, k, v)
+			if err := valsCursor.DeleteCurrentDuplicates(); err != nil {
+				return fmt.Errorf("prune val %x: %w", k, err)
+			}
+			mxPruneSize.Add(int(dupes))
+			pos.Add(dupes)
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				d.logger.Info("[snapshots] prune domain", "name", d.filenameBase,
+					"stage", _state,
+					"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
+					"progress", fmt.Sprintf("%.2f%%", (float64(pos.Load())/float64(totalKeys))*100))
+			default:
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("iterate over %s vals: %w", d.filenameBase, err)
+		}
+
+	} else {
+		// It is important to clean up tables in a specific order
+		// First keysTable, because it is the first one access in the `get` function, i.e. if the record is deleted from there, other tables will not be accessed
+		var valsCursor kv.RwCursor
+		if valsCursor, err = d.tx.RwCursor(d.valsTable); err != nil {
+			return fmt.Errorf("%s vals cursor: %w", d.filenameBase, err)
+		}
+		defer valsCursor.Close()
+		for k, _, err := valsCursor.First(); err == nil && k != nil; k, _, err = valsCursor.Next() {
+			if _, ok := keyMaxSteps[string(k)]; !ok {
+				continue
+			}
+			fmt.Printf("[%s] prune v %x %x\n", d.valsTable, k, v)
 			if err := valsCursor.DeleteCurrent(); err != nil {
 				return fmt.Errorf("prune val %x: %w", k, err)
 			}
 			mxPruneSize.Inc()
-		}
-		pos.Add(1)
-		//_prog = 100 * (float64(pos) / float64(totalKeys))
+			pos.Add(1)
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			d.logger.Info("[snapshots] prune domain", "name", d.filenameBase,
-				"stage", _state,
-				"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
-				"progress", fmt.Sprintf("%.2f%%", (float64(pos.Load())/float64(totalKeys))*100))
-		default:
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				d.logger.Info("[snapshots] prune domain", "name", d.filenameBase,
+					"stage", _state,
+					"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
+					"progress", fmt.Sprintf("%.2f%%", (float64(pos.Load())/float64(totalKeys))*100))
+			default:
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("iterate over %s vals: %w", d.filenameBase, err)
 		}
 	}
-	if err != nil {
-		return fmt.Errorf("iterate over %s vals: %w", d.filenameBase, err)
+
+	if err := kwal.flush(context.Background(), d.tx); err != nil {
+		return fmt.Errorf("flush restoration after prune: %w", err)
 	}
 
 	defer func(t time.Time) { d.stats.LastPruneHistTook = time.Since(t) }(time.Now())
+	//exists := map[string]struct{}{}
+	//if err := d.History.pruneF(txFrom, txTo, func(txNum uint64, k, v []byte) error {
+	//	if txNum > txFrom {
+	//		return nil
+	//	}
+	//	if _, ok := exists[string(k)]; ok {
+	//		return nil
+	//	}
+	//	exists[string(k)] = struct{}{}
+	//
+	//	//d.SetTxNum(txNum)
+	//	//return d.History.AddPrevValue(k, nil, v)
+	//	fmt.Printf("puts bakc %x %x from tx %d\n", k, v, txNum)
+	//	return d.put(k, v)
+	//}); err != nil {
+	//	return err
+	//}
 
-	if err = d.History.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := d.History.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	return nil
@@ -1441,10 +1635,11 @@ func (d *Domain) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) err
 
 func (d *Domain) Rotate() flusher {
 	hf := d.History.Rotate()
-
-	hf.d = d.wal
-	d.wal = d.newWriter(d.wal.tmpdir, d.wal.buffered, d.wal.discard)
-	log.Warn("WAL has been rotated", "domain", d.filenameBase)
+	if d.wal != nil {
+		hf.d = d.wal
+		d.wal = d.newWriter(d.wal.tmpdir, d.wal.buffered, d.wal.discard)
+		log.Warn("WAL has been rotated", "domain", d.filenameBase)
+	}
 	return hf
 }
 

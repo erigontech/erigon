@@ -914,69 +914,66 @@ func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 	//TODO: use ETL to avoid OOM (or specialized history-iterator instead of pruneF)
 	//stateChanges := etl.NewCollector(a.logPrefix, a.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), a.logger)
 	//defer stateChanges.Close()
-	{
-		exists := map[string]struct{}{}
-		if err := a.accounts.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
-			if _, ok := exists[string(k)]; ok {
-				return nil
-			}
-			exists[string(k)] = struct{}{}
+	//txUnwindTo--
+	//{
+	//	exists := map[string]struct{}{}
+	//	if err := a.accounts.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
+	//		if _, ok := exists[string(k)]; ok {
+	//			return nil
+	//		}
+	//		exists[string(k)] = struct{}{}
+	//
+	//		a.accounts.SetTxNum(txNum)
+	//		return a.accounts.put(k, v)
+	//	}); err != nil {
+	//		return err
+	//	}
+	//}
+	//{
+	//	exists := map[string]struct{}{}
+	//	if err := a.storage.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
+	//		if _, ok := exists[string(k)]; ok {
+	//			return nil
+	//		}
+	//		exists[string(k)] = struct{}{}
+	//
+	//		a.storage.SetTxNum(txNum)
+	//		return a.storage.put(k, v)
+	//	}); err != nil {
+	//		return err
+	//	}
+	//}
+	//{
+	//	exists := map[string]struct{}{}
+	//	if err := a.code.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
+	//		if _, ok := exists[string(k)]; ok {
+	//			return nil
+	//		}
+	//		exists[string(k)] = struct{}{}
+	//
+	//		a.code.SetTxNum(txNum)
+	//		return a.code.put(k, v)
+	//	}); err != nil {
+	//		return err
+	//	}
+	//}
+	//{
+	//	exists := map[string]struct{}{}
+	//	if err := a.commitment.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
+	//		if _, ok := exists[string(k)]; ok {
+	//			return nil
+	//		}
+	//		exists[string(k)] = struct{}{}
+	//
+	//		a.commitment.SetTxNum(txNum)
+	//		return a.commitment.put(k, v)
+	//	}); err != nil {
+	//		return err
+	//	}
+	//}
+	a.domains.Unwind(a.rwTx)
 
-			a.accounts.SetTxNum(txNum)
-			return a.accounts.put(k, v)
-		}); err != nil {
-			return err
-		}
-	}
-	{
-		exists := map[string]struct{}{}
-		if err := a.storage.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
-			if _, ok := exists[string(k)]; ok {
-				return nil
-			}
-			exists[string(k)] = struct{}{}
-
-			a.storage.SetTxNum(txNum)
-			return a.storage.put(k, v)
-		}); err != nil {
-			return err
-		}
-	}
-	{
-		exists := map[string]struct{}{}
-		if err := a.code.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
-			if _, ok := exists[string(k)]; ok {
-				return nil
-			}
-			exists[string(k)] = struct{}{}
-
-			a.code.SetTxNum(txNum)
-			return a.code.put(k, v)
-		}); err != nil {
-			return err
-		}
-	}
-	{
-		exists := map[string]struct{}{}
-		if err := a.commitment.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
-			if _, ok := exists[string(k)]; ok {
-				return nil
-			}
-			exists[string(k)] = struct{}{}
-
-			a.commitment.SetTxNum(txNum)
-			return a.commitment.put(k, v)
-		}); err != nil {
-			return err
-		}
-	}
-
-	a.domains.Unwind()
-	bn, txn, err := a.domains.Commitment.SeekCommitment(txUnwindTo - 1)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Unwind domains to block %d, txn %d wanted to %d\n", bn, txn, txUnwindTo)
+	//a.Flush(ctx, a.rwTx)
 
 	//if err := stateChanges.Load(a.rwTx, kv.PlainState, stateLoad, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 	//	return err
@@ -1008,6 +1005,17 @@ func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 	if err := a.tracesTo.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
 		return err
 	}
+
+	a.accounts.MakeContext().IteratePrefix(a.rwTx, []byte{}, func(k, v []byte) {
+		n, b, _ := DecodeAccountBytes(v)
+		fmt.Printf("acc - %x - n=%d b=%d\n", k, n, b.Uint64())
+	})
+
+	bn, txn, err := a.domains.Commitment.SeekCommitment(txUnwindTo - 1)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Unwind domains to block %d, txn %d wanted to %d\n", bn, txn, txUnwindTo)
 	return nil
 }
 

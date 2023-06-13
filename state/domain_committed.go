@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"container/heap"
 	"context"
+	"crypto/md5"
 	"encoding/binary"
 	"fmt"
 	"hash"
@@ -278,10 +279,14 @@ func (t *UpdateTree) hashAndNibblizeKey(key []byte) []byte {
 	hashedKey := make([]byte, length.Hash)
 
 	t.keccak.Reset()
-	t.keccak.Write(key[:length.Addr])
+	if len(key) < length.Addr {
+		t.keccak.Write(key[:])
+	} else {
+		t.keccak.Write(key[:length.Addr])
+	}
 	copy(hashedKey[:length.Hash], t.keccak.Sum(nil))
 
-	if len(key[length.Addr:]) > 0 {
+	if len(key) > length.Addr {
 		hashedKey = append(hashedKey, make([]byte, length.Hash)...)
 		t.keccak.Reset()
 		t.keccak.Write(key[length.Addr:])
@@ -341,6 +346,7 @@ func NewCommittedDomain(d *Domain, mode CommitmentMode, trieVariant commitment.T
 	return &DomainCommitted{
 		Domain:       d,
 		mode:         mode,
+		trace:        true,
 		updates:      NewUpdateTree(),
 		patriciaTrie: commitment.InitializeTrie(trieVariant),
 		branchMerger: commitment.NewHexBranchMerger(8192),
@@ -395,7 +401,6 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 		return err
 	}
 	cs := &commitmentState{txNum: d.txNum, trieState: state, blockNum: blockNum}
-	//copy(cs.rootHash[:], rh)
 	encoded, err := cs.Encode()
 	if err != nil {
 		return err
@@ -404,7 +409,10 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 	var dbuf [8]byte
 	binary.BigEndian.PutUint64(dbuf[:], d.txNum)
 
-	fmt.Printf("commitment put %d rh %x\n", d.txNum, rh)
+	mw := md5.New()
+	mw.Write(encoded)
+
+	fmt.Printf("commitment put %d rh %x vh %x\n", d.txNum, rh, mw.Sum(nil))
 	if err := d.Domain.PutWithPrev(keyCommitmentState, dbuf[:], encoded, d.prevState); err != nil {
 		return err
 	}
@@ -802,7 +810,10 @@ func (d *DomainCommitted) SeekCommitment(sinceTx uint64) (blockNum, txNum uint64
 			latestState = value
 		}
 		latestTxNum = txn
-		fmt.Printf("found state txn: %d, value: %x\n", txn, value[:])
+		mw := md5.New()
+		mw.Write(value)
+
+		fmt.Printf("commitment get txn: %d hash %x hs %x value: %x\n", txn, key, mw.Sum(nil), value[:])
 		//latestTxNum, latestState = txn, value
 	})
 	txn := binary.BigEndian.Uint64(latestState)
@@ -815,7 +826,6 @@ type commitmentState struct {
 	txNum     uint64
 	blockNum  uint64
 	trieState []byte
-	rootHash  [length.Hash]byte
 }
 
 func (cs *commitmentState) Decode(buf []byte) error {
@@ -833,7 +843,6 @@ func (cs *commitmentState) Decode(buf []byte) error {
 		return nil
 	}
 	copy(cs.trieState, buf[pos:pos+len(cs.trieState)])
-	copy(cs.rootHash[:], buf[pos:pos+length.Hash])
 	return nil
 }
 
@@ -847,9 +856,6 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 		return nil, err
 	}
 	if _, err := buf.Write(cs.trieState); err != nil {
-		return nil, err
-	}
-	if _, err := buf.Write(cs.rootHash[:]); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
