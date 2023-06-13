@@ -462,7 +462,7 @@ type StateReaderV3 struct {
 func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
 	return &StateReaderV3{
 		rs:        rs,
-		trace:     true,
+		trace:     false,
 		readLists: newReadList(),
 	}
 }
@@ -486,6 +486,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 	}
 	if len(enc) == 0 {
 		if r.trace {
+			panic(1)
 			fmt.Printf("ReadAccountData [%x] => [empty], txNum: %d\n", address, r.txNum)
 		}
 		return nil, nil
