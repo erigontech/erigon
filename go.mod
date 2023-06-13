@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230611135853-ba7975b03348
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230613032328-68e583c1497a
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230605042354-196538d42475
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
