@@ -286,6 +286,7 @@ func (rs *StateV3) ApplyLogsAndTraces(txTask *exec22.TxTask, agg *libstate.Aggre
 func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, agg *libstate.AggregatorV3, accumulator *shards.Accumulator) error {
 	agg.SetTx(tx)
 	var currentInc uint64
+
 	if err := agg.Unwind(ctx, txUnwindTo, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == length.Addr {
 			if len(v) > 0 {

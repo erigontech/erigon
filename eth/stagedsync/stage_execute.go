@@ -346,10 +346,6 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	if err := rs.Unwind(ctx, tx, txNum, cfg.agg, accumulator); err != nil {
 		return fmt.Errorf("StateV3.Unwind: %w", err)
 	}
-	rs.Domains().Account.MakeContext().IteratePrefix(tx, []byte{}, func(k, v []byte) {
-		n, b, ch := libstate.DecodeAccountBytes(v)
-		fmt.Printf("k %x n %d b %d ch %x\n", k, n, &b, ch)
-	})
 	if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("truncate receipts: %w", err)
 	}

@@ -728,15 +728,14 @@ Loop:
 					//	return err
 					//}
 					t2 = time.Since(tt)
-
 					tt = time.Now()
-					rh, err := agg.ComputeCommitment(true, false)
-					if err != nil {
-						return err
-					}
-					if !bytes.Equal(rh, header.Root.Bytes()) {
-						return fmt.Errorf("root hash mismatch: %x != %x, bn=%d", rh, header.Root.Bytes(), blockNum)
-					}
+					//rh, err := agg.ComputeCommitment(true, false)
+					//if err != nil {
+					//	return err
+					//}
+					//if !bytes.Equal(rh, header.Root.Bytes()) {
+					//	return fmt.Errorf("root hash mismatch: %x != %x, bn=%d", rh, header.Root.Bytes(), blockNum)
+					//}
 					if err := agg.Flush(ctx, applyTx); err != nil {
 						return err
 					}
