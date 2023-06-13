@@ -154,9 +154,6 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 				}
 			case <-rpcSub.Err():
 				return
-			case <-notifier.Closed():
-				api.filters.UnsubscribeHeads(id)
-				return
 			}
 		}
 	}()

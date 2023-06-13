@@ -1,7 +1,6 @@
 package rpchelper
 
 import (
-	"context"
 	"sync"
 	"sync/atomic"
 )
@@ -13,12 +12,8 @@ type Sub[T any] interface {
 }
 
 type chan_sub[T any] struct {
-	ch chan T
-
+	ch     chan T
 	closed atomic.Bool
-
-	ctx context.Context
-	cn  context.CancelFunc
 }
 
 // buffered channel
@@ -29,24 +24,22 @@ func newChanSub[T any](size int) *chan_sub[T] {
 	}
 	o := &chan_sub[T]{}
 	o.ch = make(chan T, size)
-	o.ctx, o.cn = context.WithCancel(context.Background())
 	return o
 }
 func (s *chan_sub[T]) Send(x T) {
+	if s.closed.Load() {
+		return
+	}
+
 	select {
-	// if the output buffer is empty, send
 	case s.ch <- x:
-		// if sub is canceled, dispose message
-	case <-s.ctx.Done():
-		// the sub is overloaded, dispose message
-	default:
+	default: // the sub is overloaded, dispose message
 	}
 }
 func (s *chan_sub[T]) Close() {
-	if !s.closed.CompareAndSwap(false, true) {
+	if swapped := s.closed.CompareAndSwap(false, true); !swapped {
 		return
 	}
-	s.cn()
 	close(s.ch)
 }
 
@@ -105,8 +98,7 @@ func (m *SyncMap[K, T]) Range(fn func(k K, v T) error) error {
 	return nil
 }
 
-func (m *SyncMap[K, T]) Delete(k K) (T, bool) {
-	var t T
+func (m *SyncMap[K, T]) Delete(k K) (t T, deleted bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	val, ok := m.m[k]
