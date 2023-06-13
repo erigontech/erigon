@@ -608,7 +608,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		ms.SendPayloadRequest(chain.Blocks[i])
 	}
 
-	initialCycle := false
+	initialCycle := MockInsertAsInitialCycle
 	blockReader, _ := ms.NewBlocksIO()
 	hook := NewHook(ms.Ctx, ms.Notifications, ms.Sync, blockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
 	headBlockHash, err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, initialCycle, ms.Log, blockReader.Snapshots().(*snapshotsync.RoSnapshots), hook)
@@ -706,13 +706,6 @@ func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
 		return state.NewReaderV4(tx.(kv.TemporalTx))
 	}
 	return state.NewPlainStateReader(tx)
-}
-
-func (ms *MockSentry) NewStateWriter(tx kv.RwTx, blockNum uint64) state.StateWriter {
-	if ethconfig.EnableHistoryV4InTest {
-		return state.NewWriterV4(tx.(kv.TemporalTx))
-	}
-	return state.NewPlainStateWriter(tx, tx, blockNum)
 }
 
 func (ms *MockSentry) CalcStateRoot(tx kv.Tx) libcommon.Hash {

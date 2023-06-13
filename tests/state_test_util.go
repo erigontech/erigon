@@ -191,20 +191,14 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr, ethconfig.EnableHistoryV4InTest)
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	r := rpchelper.NewLatestStateReader(tx)
+	r := rpchelper.NewLatestStateReader(tx, ethconfig.EnableHistoryV4InTest)
+	w := rpchelper.NewLatestStateWriter(tx, writeBlockNr, ethconfig.EnableHistoryV4InTest)
 	statedb := state.New(r)
-
-	var w state.StateWriter
-	if ethconfig.EnableHistoryV4InTest {
-		w = state.NewWriterV4(tx.(kv.TemporalTx))
-	} else {
-		w = state.NewPlainStateWriter(tx, nil, writeBlockNr)
-	}
 
 	var baseFee *big.Int
 	if config.IsLondon(0) {
@@ -317,13 +311,8 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	return statedb, root, nil
 }
 
-func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	var r state.StateReader
-	if ethconfig.EnableHistoryV4InTest {
-		r = state.NewReaderV4(tx.(kv.TemporalTx))
-	} else {
-		r = state.NewPlainStateReader(tx)
-	}
+func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64, histV3 bool) (*state.IntraBlockState, error) {
+	r := rpchelper.NewLatestStateReader(tx, histV3)
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
@@ -350,7 +339,7 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		}
 	}
 
-	w := rpchelper.NewLatestStateWriter(tx, blockNr-1)
+	w := rpchelper.NewLatestStateWriter(tx, blockNr-1, histV3)
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, w); err != nil {
 		return nil, err
