@@ -807,32 +807,3 @@ const (
 	TracesFromIdx InvertedIdx = "TracesFromIdx"
 	TracesToIdx   InvertedIdx = "TracesToIdx"
 )
-
-func (d Domain) String() string {
-	switch d {
-	case AccountsDomain:
-		return "AccountsHistory"
-	case StorageDomain:
-		return "StorageHistory"
-	case CodeDomain:
-		return "CodeHistory"
-	case CommitmentDomain:
-		return "CommitmentDomain"
-	default:
-		panic(d)
-	}
-}
-func (h History) String() string {
-	switch h {
-	case AccountsHistory:
-		return "AccountsHistory"
-	case StorageHistory:
-		return "StorageHistory"
-	case CodeHistory:
-		return "CodeHistory"
-	case CommitmentHistory:
-		return "CommitmentHistory"
-	default:
-		panic(h)
-	}
-}

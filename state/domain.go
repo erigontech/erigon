@@ -1638,7 +1638,6 @@ func (d *Domain) Rotate() flusher {
 	if d.wal != nil {
 		hf.d = d.wal
 		d.wal = d.newWriter(d.wal.tmpdir, d.wal.buffered, d.wal.discard)
-		log.Warn("WAL has been rotated", "domain", d.filenameBase)
 	}
 	return hf
 }
