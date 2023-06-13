@@ -58,6 +58,8 @@ func BodiesForward(
 	firstCycle bool,
 	logger log.Logger,
 ) error {
+	fmt.Println("SHIVAM 10.5711", s.LogPrefix())
+
 	var doUpdate bool
 	if cfg.blockReader != nil && cfg.blockReader.Snapshots() != nil && s.BlockNumber < cfg.blockReader.Snapshots().BlocksAvailable() {
 		s.BlockNumber = cfg.blockReader.Snapshots().BlocksAvailable()
@@ -75,6 +77,7 @@ func BodiesForward(
 		defer tx.Rollback()
 	}
 	timeout := cfg.timeout
+	fmt.Println("SHIVAM 10.5712", s.LogPrefix())
 
 	// this update is required, because cfg.bd.UpdateFromDb(tx) below reads it and initialises requestedLow accordingly
 	// if not done, it will cause downloading from block 1
@@ -127,8 +130,11 @@ func BodiesForward(
 	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
 	cr := ChainReader{Cfg: cfg.chanConfig, Db: tx, BlockReader: cfg.blockReader}
+	fmt.Println("SHIVAM 10.5713", s.LogPrefix())
 
 	loopBody := func() (bool, error) {
+		fmt.Println("SHIVAM loop 1", s.LogPrefix())
+
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
 		// having some time out so requesting again and cycling like that forever.  We'll cap it
 		// and break the loop so we can see if there are any records to actually process further down
@@ -154,6 +160,7 @@ func BodiesForward(
 				d3 += time.Since(start)
 			}
 		}
+		fmt.Println("SHIVAM loop 2", s.LogPrefix())
 
 		start := time.Now()
 		requestedLow, delivered, err := cfg.bd.GetDeliveries(tx)
@@ -167,7 +174,11 @@ func BodiesForward(
 		toProcess := cfg.bd.NextProcessingCount()
 
 		write := true
+		fmt.Println("SHIVAM loop 3", s.LogPrefix())
+
 		for i := uint64(0); i < toProcess; i++ {
+			fmt.Println("SHIVAM loop 4", s.LogPrefix())
+
 			select {
 			case <-logEvery.C:
 				logWritingBodies(logPrefix, bodyProgress, headerProgress, logger)
@@ -222,9 +233,11 @@ func BodiesForward(
 			}
 			cfg.bd.AdvanceLow()
 		}
+		fmt.Println("SHIVAM loop 5", s.LogPrefix())
 
 		d5 += time.Since(start)
 		start = time.Now()
+		fmt.Println("SHIVAM loop 5.1", bodyProgress, headerProgress)
 		if bodyProgress == headerProgress {
 			return true, nil
 		}
@@ -237,6 +250,8 @@ func BodiesForward(
 		}
 		timer.Stop()
 		timer = time.NewTimer(1 * time.Second)
+		fmt.Println("SHIVAM loop 6", s.LogPrefix())
+
 		select {
 		case <-ctx.Done():
 			stopped = true
@@ -259,9 +274,11 @@ func BodiesForward(
 			logger.Trace("bodyLoop woken up by the incoming request")
 		}
 		d6 += time.Since(start)
+		fmt.Println("SHIVAM loop 10", s.LogPrefix())
 
 		return false, nil
 	}
+	fmt.Println("SHIVAM 10.5714", s.LogPrefix())
 
 	// kick off the loop and check for any reason to stop and break early
 	var shouldBreak bool
@@ -270,6 +287,7 @@ func BodiesForward(
 			return err
 		}
 	}
+	fmt.Println("SHIVAM 10.5715", s.LogPrefix())
 
 	// remove the temporary bucket for bodies stage
 	if !useExternalTx {
@@ -277,6 +295,7 @@ func BodiesForward(
 			return err
 		}
 	}
+	fmt.Println("SHIVAM 10.5716", s.LogPrefix())
 
 	if stopped {
 		return libcommon.ErrStopped
@@ -284,6 +303,7 @@ func BodiesForward(
 	if bodyProgress > s.BlockNumber+16 {
 		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
 	}
+	fmt.Println("SHIVAM 10.5719", s.LogPrefix())
 	return nil
 }
 

@@ -33,7 +33,7 @@ import (
 //go:embed chainspecs
 var chainspecs embed.FS
 
-func readChainSpec(filename string) *chain.Config {
+func ReadChainSpec(filename string) *chain.Config {
 	f, err := chainspecs.Open(filename)
 	if err != nil {
 		panic(fmt.Sprintf("Could not open chainspec for %s: %v", filename, err))
@@ -68,16 +68,16 @@ var (
 
 var (
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
-	MainnetChainConfig = readChainSpec("chainspecs/mainnet.json")
+	MainnetChainConfig = ReadChainSpec("chainspecs/mainnet.json")
 
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
-	SepoliaChainConfig = readChainSpec("chainspecs/sepolia.json")
+	SepoliaChainConfig = ReadChainSpec("chainspecs/sepolia.json")
 
 	// RinkebyChainConfig contains the chain parameters to run a node on the Rinkeby test network.
-	RinkebyChainConfig = readChainSpec("chainspecs/rinkeby.json")
+	RinkebyChainConfig = ReadChainSpec("chainspecs/rinkeby.json")
 
 	// GoerliChainConfig contains the chain parameters to run a node on the Görli test network.
-	GoerliChainConfig = readChainSpec("chainspecs/goerli.json")
+	GoerliChainConfig = ReadChainSpec("chainspecs/goerli.json")
 
 	// AllProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the main net protocol.
@@ -120,15 +120,15 @@ var (
 		Clique:                &chain.CliqueConfig{Period: 0, Epoch: 30000},
 	}
 
-	MumbaiChainConfig = readChainSpec("chainspecs/mumbai.json")
+	MumbaiChainConfig = ReadChainSpec("chainspecs/mumbai.json")
 
-	BorMainnetChainConfig = readChainSpec("chainspecs/bor-mainnet.json")
+	BorMainnetChainConfig = ReadChainSpec("chainspecs/bor-mainnet.json")
 
-	BorDevnetChainConfig = readChainSpec("chainspecs/bor-devnet.json")
+	BorDevnetChainConfig = ReadChainSpec("chainspecs/bor-devnet.json")
 
-	GnosisChainConfig = readChainSpec("chainspecs/gnosis.json")
+	GnosisChainConfig = ReadChainSpec("chainspecs/gnosis.json")
 
-	ChiadoChainConfig = readChainSpec("chainspecs/chiado.json")
+	ChiadoChainConfig = ReadChainSpec("chainspecs/chiado.json")
 
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 

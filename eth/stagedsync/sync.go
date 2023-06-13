@@ -212,10 +212,14 @@ func (s *Sync) RunUnwind(db kv.RwDB, tx kv.RwTx) error {
 	return nil
 }
 func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
+	fmt.Println("SHIVAM 10.561")
+
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
 	for !s.IsDone() {
+		fmt.Println("SHIVAM 10.562")
+
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
 			for j := 0; j < len(s.unwindOrder); j++ {
@@ -239,6 +243,8 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			// we relax the rules for Stage1
 			firstCycle = false
 		}
+		fmt.Println("SHIVAM 10.563")
+
 		if badBlockUnwind {
 			// If there was a bad block, the current step needs to complete, to send the corresponding reply to the Consensus Layer
 			// Otherwise, the staged sync will get stuck in the Headers stage with "Waiting for Consensus Layer..."
@@ -246,11 +252,13 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 		}
 
 		stage := s.stages[s.currentStage]
+		fmt.Println("SHIVAM 10.564")
 
 		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
 			return libcommon.ErrStopped
 		}
+		fmt.Println("SHIVAM 10.565")
 
 		if stage.Disabled || stage.Forward == nil {
 			s.logger.Trace(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
@@ -258,17 +266,21 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			s.NextStage()
 			continue
 		}
+		fmt.Println("SHIVAM 10.566")
 
 		if err := s.runStage(stage, db, tx, firstCycle, badBlockUnwind); err != nil {
 			return err
 		}
+		fmt.Println("SHIVAM 10.567")
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
 			return libcommon.ErrStopped
 		}
+		fmt.Println("SHIVAM 10.568")
 
 		s.NextStage()
+		fmt.Println("SHIVAM 10.569")
 	}
 
 	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
@@ -351,17 +363,20 @@ func PrintTables(db kv.RoDB, tx kv.RwTx) []interface{} {
 }
 
 func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwind bool) (err error) {
+	fmt.Println("SHIVAM 10.570", s.LogPrefix())
 	start := time.Now()
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
 		return err
 	}
+	fmt.Println("SHIVAM 10.571", s.LogPrefix())
 
 	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, tx, s.logger); err != nil {
 		wrappedError := fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 		s.logger.Debug("Error while executing stage", "err", wrappedError)
 		return wrappedError
 	}
+	fmt.Println("SHIVAM 10.572", s.LogPrefix())
 
 	took := time.Since(start)
 	logPrefix := s.LogPrefix()

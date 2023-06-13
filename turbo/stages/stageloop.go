@@ -88,9 +88,11 @@ func StageLoop(ctx context.Context,
 		default:
 			// continue
 		}
+		fmt.Println("SHIVAM 10.5")
 
 		// Estimate the current top height seen from the peer
 		headBlockHash, err := StageLoopStep(ctx, db, sync, initialCycle, logger, blockSnapshots, hook)
+		fmt.Println("SHIVAM 10.6", err)
 
 		SendPayloadStatus(hd, headBlockHash, err)
 
@@ -124,6 +126,8 @@ func StageLoop(ctx context.Context,
 }
 
 func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockSnapshots *snapshotsync.RoSnapshots, hook *Hook) (headBlockHash libcommon.Hash, err error) {
+	fmt.Println("SHIVAM 10.51")
+
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -142,6 +146,9 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initi
 	}); err != nil {
 		return headBlockHash, err
 	}
+
+	fmt.Println("SHIVAM 10.52")
+
 	// Sync from scratch must be able Commit partial progress
 	// In all other cases - process blocks batch in 1 RwTx
 	blocksInSnapshots := uint64(0)
@@ -151,6 +158,7 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initi
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > blocksInSnapshots && finishProgressBefore == headersProgressBefore
 	canRunCycleInOneTransaction := !isSynced
+	fmt.Println("SHIVAM 10.53")
 
 	// Main steps:
 	// - process new blocks
@@ -158,6 +166,8 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initi
 	//       send notifications Now and do write to disks Later.
 	// - Send Notifications: about new blocks, new receipts, state changes, etc...
 	// - Prune(limited time)+Commit(sync). Write to disk happening here.
+
+	fmt.Println("SHIVAM 10.54")
 
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
@@ -168,18 +178,27 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initi
 		defer tx.Rollback()
 	}
 
+	fmt.Println("SHIVAM 10.55")
+
 	if hook != nil {
 		if err = hook.BeforeRun(tx, canRunCycleInOneTransaction); err != nil {
 			return headBlockHash, err
 		}
 	}
+	fmt.Println("SHIVAM 10.56")
+
 	err = sync.Run(db, tx, initialCycle)
 	if err != nil {
 		return headBlockHash, err
 	}
+
+	fmt.Println("SHIVAM 10.57")
+
 	logCtx := sync.PrintTimings()
 	var tableSizes []interface{}
 	var commitTime time.Duration
+	fmt.Println("SHIVAM 10.58")
+
 	if canRunCycleInOneTransaction {
 		tableSizes = stagedsync.PrintTables(db, tx) // Need to do this before commit to access tx
 		commitStart := time.Now()
@@ -191,6 +210,8 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initi
 	}
 
 	// -- send notifications START
+	fmt.Println("SHIVAM 10.3")
+
 	var head uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		headBlockHash = rawdb.ReadHeadBlockHash(tx)
@@ -250,6 +271,8 @@ func (h *Hook) BeforeRun(tx kv.Tx, canRunCycleInOneTransaction bool) error {
 	return nil
 }
 func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
+	fmt.Println("SHIVAM 10.2")
+
 	notifications := h.notifications
 	blockReader := h.blockReader
 	// -- send notifications START

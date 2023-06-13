@@ -68,13 +68,32 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 
 func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
 	// Use signer as validator in case of bor devent
-	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
+
+	switch c.chainConfig.ChainName {
+	case networkname.BorDevnetChainName:
 		validators := []*valset.Validator{
 			{
 				ID:               1,
 				Address:          signer,
 				VotingPower:      1000,
 				ProposerPriority: 1,
+			},
+		}
+
+		return validators, nil
+
+	case networkname.BorE2ETestChainName:
+		validators := []*valset.Validator{
+			{
+				ID:               1,
+				Address:          libcommon.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"),
+				VotingPower:      1000,
+				ProposerPriority: 1,
+			}, {
+				ID:               2,
+				Address:          libcommon.HexToAddress("0x9fB29AAc15b9A4B7F17c3385939b007540f4d791"),
+				VotingPower:      1000,
+				ProposerPriority: 2,
 			},
 		}
 
@@ -91,13 +110,32 @@ func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon
 
 func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
 	// Use signer as validator in case of bor devent
-	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
+
+	switch c.chainConfig.ChainName {
+	case networkname.BorDevnetChainName:
 		validators := []*valset.Validator{
 			{
 				ID:               1,
 				Address:          signer,
 				VotingPower:      1000,
 				ProposerPriority: 1,
+			},
+		}
+
+		return validators, nil
+
+	case networkname.BorE2ETestChainName:
+		validators := []*valset.Validator{
+			{
+				ID:               1,
+				Address:          libcommon.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"),
+				VotingPower:      1000,
+				ProposerPriority: 1,
+			}, {
+				ID:               2,
+				Address:          libcommon.HexToAddress("0x9fB29AAc15b9A4B7F17c3385939b007540f4d791"),
+				VotingPower:      1000,
+				ProposerPriority: 2,
 			},
 		}
 

@@ -9,6 +9,7 @@ const (
 	MumbaiChainName     = "mumbai"
 	BorMainnetChainName = "bor-mainnet"
 	BorDevnetChainName  = "bor-devnet"
+	BorE2ETestChainName = "bor-e2e-test"
 	GnosisChainName     = "gnosis"
 	ChiadoChainName     = "chiado"
 )
