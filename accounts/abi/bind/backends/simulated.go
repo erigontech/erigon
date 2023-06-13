@@ -754,7 +754,8 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
-		&b.pendingHeader.GasUsed, vm.Config{}); err != nil {
+		&b.pendingHeader.GasUsed, b.pendingHeader.DataGasUsed,
+		vm.Config{}); err != nil {
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))

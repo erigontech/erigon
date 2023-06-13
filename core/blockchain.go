@@ -86,6 +86,7 @@ func ExecuteBlockEphemerally(
 	header := block.Header()
 
 	usedGas := new(uint64)
+	usedDataGas := new(uint64)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
@@ -117,7 +118,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, usedDataGas, *vmConfig)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -145,6 +146,10 @@ func ExecuteBlockEphemerally(
 
 	if !vmConfig.StatelessExec && *usedGas != header.GasUsed {
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+	}
+
+	if header.DataGasUsed != nil && *usedDataGas != *header.DataGasUsed {
+		return nil, fmt.Errorf("data gas used by execution: %d, in header: %d", *usedDataGas, *header.DataGasUsed)
 	}
 
 	var bloom types.Bloom
@@ -283,6 +288,7 @@ func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Con
 	gp := new(GasPool)
 	gp.AddGas(50_000_000)
 	var gasUsed uint64
+	var gasDataUsed uint64
 	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
@@ -292,7 +298,7 @@ func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Con
 		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
 	vmConfig := vm.Config{NoReceipts: true}
-	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig)
+	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, &gasDataUsed, vmConfig)
 	if err != nil {
 		return result, fmt.Errorf("SysCallContract: %w ", err)
 	}
