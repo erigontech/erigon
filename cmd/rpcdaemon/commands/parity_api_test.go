@@ -45,8 +45,6 @@ func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 }
 
 func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
-	t.Skip()
-
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	br, _ := m.NewBlocksIO()
@@ -74,8 +72,6 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
 }
 
 func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T) {
-	t.Skip()
-
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	br, _ := m.NewBlocksIO()
@@ -100,8 +96,6 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T
 }
 
 func TestParityAPIImpl_ListStorageKeys_WithOffset_EmptyResponse(t *testing.T) {
-	t.Skip()
-
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	br, _ := m.NewBlocksIO()
@@ -119,8 +113,6 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_EmptyResponse(t *testing.T) {
 }
 
 func TestParityAPIImpl_ListStorageKeys_AccNotFound(t *testing.T) {
-	t.Skip()
-
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	br, _ := m.NewBlocksIO()
