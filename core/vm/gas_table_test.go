@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"context"
 	"errors"
 	"math"
 	"strconv"
@@ -24,14 +25,15 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -135,9 +137,12 @@ var createGasTests = []struct {
 }
 
 func TestCreateGas(t *testing.T) {
+	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	for i, tt := range createGasTests {
 		address := libcommon.BytesToAddress([]byte("contract"))
-		_, tx := memdb.NewTestTx(t)
+
+		tx, _ := db.BeginRw(context.Background())
+		defer tx.Rollback()
 
 		stateReader := rpchelper.NewLatestStateReader(tx, ethconfig.EnableHistoryV4InTest)
 		stateWriter := rpchelper.NewLatestStateWriter(tx, 0, ethconfig.EnableHistoryV4InTest)
@@ -166,5 +171,6 @@ func TestCreateGas(t *testing.T) {
 		if gasUsed := startGas - gas; gasUsed != tt.gasUsed {
 			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
 		}
+		tx.Rollback()
 	}
 }

@@ -9,7 +9,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -70,8 +69,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			SpuriousDragonBlock:   big.NewInt(2),
 			ByzantiumBlock:        big.NewInt(3),
 		}
-		_, dbNoFork, _  = temporal.NewTestDB(t, datadir.New(t.TempDir()), nil, log.New())
-		_, dbProFork, _ = temporal.NewTestDB(t, datadir.New(t.TempDir()), nil, log.New())
+		_, dbNoFork, _  = temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+		_, dbProFork, _ = temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 
 		gspecNoFork  = &types.Genesis{Config: configNoFork}
 		gspecProFork = &types.Genesis{Config: configProFork}
@@ -163,7 +162,7 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	}()
 
 	configNoFork := &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
-	_, dbNoFork, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil, log.New())
+	_, dbNoFork, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	gspecNoFork := &types.Genesis{Config: configNoFork}
 	genesisNoFork := core.MustCommitGenesis(gspecNoFork, dbNoFork, "")
 	ss := &GrpcServer{p2p: &p2p.Config{}}

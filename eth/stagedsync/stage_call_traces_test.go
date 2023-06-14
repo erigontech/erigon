@@ -35,7 +35,7 @@ func genTestCallTraceSet(t *testing.T, tx kv.RwTx, to uint64) {
 func TestCallTrace(t *testing.T) {
 	logger := log.New()
 	ctx, require := context.Background(), require.New(t)
-	histV3, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil, log.New())
+	histV3, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	if histV3 {
 		t.Skip()
 	}
