@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/stretchr/testify/assert"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -20,7 +21,10 @@ var latestBlock = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewParityAPIImpl(m.DB)
+	br, _ := m.NewBlocksIO()
+	agg := m.HistoryV3Components()
+	baseApi := NewBaseApi(nil, nil, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	api := NewParityAPIImpl(baseApi, m.DB)
 	answers := []string{
 		"0000000000000000000000000000000000000000000000000000000000000000",
 		"0000000000000000000000000000000000000000000000000000000000000002",
@@ -42,7 +46,10 @@ func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewParityAPIImpl(m.DB)
+	br, _ := m.NewBlocksIO()
+	agg := m.HistoryV3Components()
+	baseApi := NewBaseApi(nil, nil, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	api := NewParityAPIImpl(baseApi, m.DB)
 	answers := []string{
 		"29d05770ca9ee7088a64e18c8e5160fc62c3c2179dc8ef9b4dbc970c9e51b4d8",
 		"29edc84535d98b29835079d685b97b41ee8e831e343cc80793057e462353a26d",
@@ -66,7 +73,10 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
 func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewParityAPIImpl(m.DB)
+	br, _ := m.NewBlocksIO()
+	agg := m.HistoryV3Components()
+	baseApi := NewBaseApi(nil, nil, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	api := NewParityAPIImpl(baseApi, m.DB)
 	answers := []string{
 		"4644be453c81744b6842ddf615d7fca0e14a23b09734be63d44c23452de95631",
 		"4974416255391052161ba8184fe652f3bf8c915592c65f7de127af8e637dce5d",
@@ -87,7 +97,10 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T
 func TestParityAPIImpl_ListStorageKeys_WithOffset_EmptyResponse(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewParityAPIImpl(m.DB)
+	br, _ := m.NewBlocksIO()
+	agg := m.HistoryV3Components()
+	baseApi := NewBaseApi(nil, nil, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	api := NewParityAPIImpl(baseApi, m.DB)
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 	offset := common.Hex2Bytes("ff")
 	b := hexutility.Bytes(offset)
@@ -101,7 +114,10 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_EmptyResponse(t *testing.T) {
 func TestParityAPIImpl_ListStorageKeys_AccNotFound(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewParityAPIImpl(m.DB)
+	br, _ := m.NewBlocksIO()
+	agg := m.HistoryV3Components()
+	baseApi := NewBaseApi(nil, nil, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	api := NewParityAPIImpl(baseApi, m.DB)
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcaef")
 	_, err := api.ListStorageKeys(context.Background(), addr, 2, nil, latestBlock)
 	assert.Error(err, fmt.Errorf("acc not found"))
