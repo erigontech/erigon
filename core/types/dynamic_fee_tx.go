@@ -24,6 +24,7 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -35,6 +36,7 @@ import (
 
 type DynamicFeeTransaction struct {
 	CommonTx
+	ChainID    *uint256.Int
 	Tip        *uint256.Int
 	FeeCap     *uint256.Int
 	AccessList types2.AccessList
@@ -78,14 +80,14 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			TransactionMisc: TransactionMisc{
 				time: tx.time,
 			},
-			ChainID: new(uint256.Int),
-			Nonce:   tx.Nonce,
-			To:      tx.To, // TODO: copy pointed-to address
-			Data:    common.CopyBytes(tx.Data),
-			Gas:     tx.Gas,
+			Nonce: tx.Nonce,
+			To:    tx.To, // TODO: copy pointed-to address
+			Data:  common.CopyBytes(tx.Data),
+			Gas:   tx.Gas,
 			// These are copied below.
 			Value: new(uint256.Int),
 		},
+		ChainID:    new(uint256.Int),
 		AccessList: make(types2.AccessList, len(tx.AccessList)),
 		Tip:        new(uint256.Int),
 		FeeCap:     new(uint256.Int),
@@ -471,14 +473,14 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error
 func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
 	return &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			ChainID: &chainID,
-			Nonce:   nonce,
-			To:      &to,
-			Value:   amount,
-			Gas:     gasLimit,
-			Data:    data,
+			Nonce: nonce,
+			To:    &to,
+			Value: amount,
+			Gas:   gasLimit,
+			Data:  data,
 		},
-		Tip:    gasTip,
-		FeeCap: gasFeeCap,
+		ChainID: &chainID,
+		Tip:     gasTip,
+		FeeCap:  gasFeeCap,
 	}
 }
