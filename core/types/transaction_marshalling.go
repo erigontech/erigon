@@ -62,6 +62,9 @@ func (tx LegacyTx) MarshalJSON() ([]byte, error) {
 	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
 	enc.S = (*hexutil.Big)(tx.S.ToBig())
+	if tx.Protected() {
+		enc.ChainID = (*hexutil.Big)(tx.GetChainID().ToBig())
+	}
 	return json.Marshal(&enc)
 }
 

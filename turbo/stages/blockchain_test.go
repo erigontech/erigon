@@ -26,6 +26,10 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -33,10 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -49,6 +49,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -2128,12 +2129,12 @@ func TestEIP1559Transition(t *testing.T) {
 			chainID.SetFromBig(gspec.Config.ChainID)
 			var tx types.Transaction = &types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{
-					ChainID: &chainID,
-					Nonce:   0,
-					To:      &aa,
-					Gas:     30000,
-					Data:    []byte{},
+					Nonce: 0,
+					To:    &aa,
+					Gas:   30000,
+					Data:  []byte{},
 				},
+				ChainID:    &chainID,
 				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)),
 				Tip:        u256.Num2,
 				AccessList: accesses,
