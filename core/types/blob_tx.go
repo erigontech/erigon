@@ -26,6 +26,7 @@ type BlobTx struct {
 func (stx BlobTx) copy() *BlobTx {
 	cpy := &BlobTx{
 		DynamicFeeTransaction: *stx.DynamicFeeTransaction.copy(),
+		MaxFeePerDataGas:      new(uint256.Int),
 		BlobVersionedHashes:   make([]libcommon.Hash, len(stx.BlobVersionedHashes)),
 	}
 	copy(cpy.BlobVersionedHashes, stx.BlobVersionedHashes)
