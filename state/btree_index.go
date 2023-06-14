@@ -720,7 +720,7 @@ func (btw *BtIndexWriter) Build() error {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
 	// Write number of bytes per index record
-	btw.bytesPerRec = (bits.Len64(btw.maxOffset) + 7) / 8
+	btw.bytesPerRec = common.BitLenToByteLen(bits.Len64(btw.maxOffset))
 	if err = btw.indexW.WriteByte(byte(btw.bytesPerRec)); err != nil {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}

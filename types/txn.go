@@ -336,8 +336,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 			if chainIDBits <= 7 {
 				chainIDLen = 1
 			} else {
-				chainIDLen = (chainIDBits + 7) / 8 // It is always < 56 bytes
-				sigHashLen++                       // For chainId len Prefix
+				chainIDLen = common.BitLenToByteLen(chainIDBits) // It is always < 56 bytes
+				sigHashLen++                                     // For chainId len Prefix
 			}
 			sigHashLen += uint(chainIDLen) // For chainId
 			sigHashLen += 2                // For two extra zeros
@@ -399,7 +399,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 			return 0, fmt.Errorf("%w: computing signHash (hashing len Prefix): %s", ErrParseTxn, err) //nolint
 		}
 	} else {
-		beLen := (bits.Len(sigHashLen) + 7) / 8
+		beLen := common.BitLenToByteLen(bits.Len(sigHashLen))
 		binary.BigEndian.PutUint64(ctx.buf[1:], uint64(sigHashLen))
 		ctx.buf[8-beLen] = byte(beLen) + 247
 		if _, err := ctx.Keccak2.Write(ctx.buf[8-beLen : 9]); err != nil {
@@ -725,7 +725,7 @@ func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {
 		structLength += uint(balance.ByteLen()) + 1
 	}
 	if nonce > 0 {
-		structLength += uint((bits.Len64(nonce)+7)/8) + 1
+		structLength += uint(common.BitLenToByteLen(bits.Len64(nonce))) + 1
 	}
 	return structLength
 }
@@ -735,7 +735,7 @@ func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
 	var pos = 1
 	if nonce > 0 {
 		fieldSet = 1
-		nonceBytes := (bits.Len64(nonce) + 7) / 8
+		nonceBytes := common.BitLenToByteLen(bits.Len64(nonce))
 		buffer[pos] = byte(nonceBytes)
 		var nonce = nonce
 		for i := nonceBytes; i > 0; i-- {

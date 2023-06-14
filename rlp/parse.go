@@ -1,5 +1,5 @@
 /*
-   Copyright 2021 Erigon contributors
+   Copyright 2021 The Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 var (
@@ -223,7 +225,7 @@ func U256Len(z *uint256.Int) int {
 	if nBits <= 7 {
 		return 1
 	}
-	return 1 + (nBits+7)/8
+	return 1 + common.BitLenToByteLen(nBits)
 }
 
 func ParseHash(payload []byte, pos int, hashbuf []byte) (int, error) {

@@ -1,5 +1,5 @@
 /*
-   Copyright 2022 Erigon contributors
+   Copyright 2022 The Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -27,10 +27,10 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/log/v3"
-
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 )
@@ -409,7 +409,7 @@ func (cell *Cell) accountForHashing(buffer []byte, storageRootHash [length.Hash]
 	if cell.Nonce < 128 && cell.Nonce != 0 {
 		nonceBytes = 0
 	} else {
-		nonceBytes = (bits.Len64(cell.Nonce) + 7) / 8
+		nonceBytes = common.BitLenToByteLen(bits.Len64(cell.Nonce))
 	}
 
 	var structLength = uint(balanceBytes + nonceBytes + 2)
@@ -420,7 +420,7 @@ func (cell *Cell) accountForHashing(buffer []byte, storageRootHash [length.Hash]
 		buffer[0] = byte(192 + structLength)
 		pos = 1
 	} else {
-		lengthBytes := (bits.Len(structLength) + 7) / 8
+		lengthBytes := common.BitLenToByteLen(bits.Len(structLength))
 		buffer[0] = byte(247 + lengthBytes)
 
 		for i := lengthBytes; i > 0; i-- {

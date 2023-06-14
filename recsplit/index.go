@@ -1,5 +1,5 @@
 /*
-   Copyright 2022 Erigon contributors
+   Copyright 2022 The Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -28,10 +28,12 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/mmap"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Index implements index lookup from the file created by the RecSplit
@@ -299,7 +301,7 @@ func (idx *Index) RewriteWithOffsets(w *bufio.Writer, m map[uint64]uint64) error
 			maxOffset = offset
 		}
 	}
-	bytesPerRec := (bits.Len64(maxOffset) + 7) / 8
+	bytesPerRec := common.BitLenToByteLen(bits.Len64(maxOffset))
 	var numBuf [8]byte
 	// Write baseDataID
 	binary.BigEndian.PutUint64(numBuf[:], idx.baseDataID)
