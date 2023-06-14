@@ -129,11 +129,11 @@ func action(ctx *cli.Context) error {
 		scenarios.Scenario{
 			Name: "all",
 			Steps: []*scenarios.Step{
-				&scenarios.Step{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
-				&scenarios.Step{Text: "PingErigonRpc"},
-				&scenarios.Step{Text: "CheckTxPoolContent", Args: []any{0, 0, 0}},
-				&scenarios.Step{Text: "SendTxWithDynamicFee", Args: []any{recipientAddress, services.DevAddress, sendValue}},
-				&scenarios.Step{Text: "AwaitBlocks", Args: []any{2 * time.Second}},
+				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
+				{Text: "PingErigonRpc"},
+				{Text: "CheckTxPoolContent", Args: []any{0, 0, 0}},
+				{Text: "SendTxWithDynamicFee", Args: []any{recipientAddress, services.DevAddress, sendValue}},
+				{Text: "AwaitBlocks", Args: []any{2 * time.Second}},
 			},
 		})
 
