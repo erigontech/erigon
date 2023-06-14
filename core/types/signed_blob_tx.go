@@ -113,15 +113,8 @@ func blobVersionedHashesSize(hashes []libcommon.Hash) int {
 	return 33 * len(hashes)
 }
 
-func encodeBloblVersionedHashes(hashes []libcommon.Hash, w io.Writer, b []byte) error {
-	b[0] = 128 + 32
+func encodeBlobVersionedHashes(hashes []libcommon.Hash, w io.Writer, b []byte) error {
 	for _, h := range hashes {
-		// if _, err := w.Write(b[:1]); err != nil {
-		// 	return err
-		// }
-		// if _, err := w.Write(h.Bytes()); err != nil {
-		// 	return err
-		// }
 		if err := rlp.EncodeString(h[:], w, b); err != nil {
 			return err
 		}
@@ -143,11 +136,11 @@ func (stx SignedBlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 		return err
 	}
 	// encode MaxPriorityFeePerGas
-	if err := stx.MaxPriorityFeePerGas.EncodeRLP(w); err != nil {
+	if err := stx.Tip.EncodeRLP(w); err != nil {
 		return err
 	}
 	// encode MaxFeePerGas
-	if err := stx.MaxFeePerGas.EncodeRLP(w); err != nil {
+	if err := stx.FeeCap.EncodeRLP(w); err != nil {
 		return err
 	}
 	// encode Gas
@@ -193,16 +186,11 @@ func (stx SignedBlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 		return err
 	}
 	// encode BlobVersionedHashes
-	if err := encodeBloblVersionedHashes(stx.BlobVersionedHashes, w, b); err != nil {
+	if err := encodeBlobVersionedHashes(stx.BlobVersionedHashes, w, b); err != nil {
 		return err
 	}
 	// encode y_parity
-	if stx.YParity {
-		b[0] = 1
-	} else {
-		b[0] = 0
-	}
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := stx.V.EncodeRLP(w); err != nil {
 		return err
 	}
 	// encode R
@@ -272,12 +260,12 @@ func (stx *SignedBlobTx) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
-	stx.MaxPriorityFeePerGas = new(uint256.Int).SetBytes(b)
+	stx.Tip = new(uint256.Int).SetBytes(b)
 
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
-	stx.MaxFeePerGas = new(uint256.Int).SetBytes(b)
+	stx.FeeCap = new(uint256.Int).SetBytes(b)
 
 	if stx.Gas, err = s.Uint(); err != nil {
 		return err
@@ -321,19 +309,10 @@ func (stx *SignedBlobTx) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	// decode y_parity
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
-	if len(b) > 1 {
-		return fmt.Errorf("wrong size for y_parity: %d", len(b))
-	}
-	if b[0] == 1 {
-		stx.YParity = true
-	} else if b[0] == 0 {
-		stx.YParity = false
-	} else {
-		return fmt.Errorf("wrong value for y_parity: %d", b)
-	}
+	stx.V.SetBytes(b)
 
 	// decode R
 	if b, err = s.Uint256Bytes(); err != nil {

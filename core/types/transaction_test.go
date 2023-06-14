@@ -635,23 +635,24 @@ func randData() []byte {
 }
 
 func newRandSignedBlobTx() *SignedBlobTx {
-	stx := &SignedBlobTx{
-		ChainID:              uint256.NewInt(rand.Uint64()),
-		Nonce:                rand.Uint64(),
-		MaxPriorityFeePerGas: uint256.NewInt(rand.Uint64()),
-		MaxFeePerGas:         uint256.NewInt(rand.Uint64()),
-		Gas:                  rand.Uint64(),
-		To:                   randAddr(),
-		Value:                uint256.NewInt(rand.Uint64()),
-		Data:                 randData(),
-		AccessList:           randAccessList(),
-
+	stx := &SignedBlobTx{DynamicFeeTransaction: DynamicFeeTransaction{
+		CommonTx: CommonTx{
+			Nonce: rand.Uint64(),
+			Gas:   rand.Uint64(),
+			To:    randAddr(),
+			Value: uint256.NewInt(rand.Uint64()),
+			Data:  randData(),
+			V:     *uint256.NewInt(uint64(rand.Intn(2))),
+			R:     *uint256.NewInt(rand.Uint64()),
+			S:     *uint256.NewInt(rand.Uint64()),
+		},
+		ChainID:    uint256.NewInt(rand.Uint64()),
+		Tip:        uint256.NewInt(rand.Uint64()),
+		FeeCap:     uint256.NewInt(rand.Uint64()),
+		AccessList: randAccessList(),
+	},
 		MaxFeePerDataGas:    uint256.NewInt(rand.Uint64()),
 		BlobVersionedHashes: randHashes(randIntInRange(5, 10)),
-
-		YParity: rand.Intn(2) == 1,
-		R:       *uint256.NewInt(rand.Uint64()),
-		S:       *uint256.NewInt(rand.Uint64()),
 	}
 	return stx
 }
@@ -660,8 +661,8 @@ func printSTX(stx *SignedBlobTx) {
 	fmt.Println("--SignedBlobTx")
 	fmt.Printf("ChainID: %v\n", stx.ChainID)
 	fmt.Printf("Nonce: %v\n", stx.Nonce)
-	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.MaxPriorityFeePerGas)
-	fmt.Printf("MaxFeePerGas: %v\n", stx.MaxFeePerGas)
+	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.Tip)
+	fmt.Printf("MaxFeePerGas: %v\n", stx.FeeCap)
 	fmt.Printf("Gas: %v\n", stx.Gas)
 	fmt.Printf("To: %v\n", stx.To)
 	fmt.Printf("Value: %v\n", stx.Value)
@@ -669,7 +670,7 @@ func printSTX(stx *SignedBlobTx) {
 	fmt.Printf("AccessList: %v\n", stx.AccessList)
 	fmt.Printf("MaxFeePerDataGas: %v\n", stx.MaxFeePerDataGas)
 	fmt.Printf("BlobVersionedHashes: %v\n", stx.BlobVersionedHashes)
-	fmt.Printf("YParity: %v\n", stx.YParity)
+	fmt.Printf("YParity: %v\n", stx.V)
 	fmt.Printf("R: %v\n", stx.R)
 	fmt.Printf("S: %v\n", stx.S)
 	fmt.Println("-----")
