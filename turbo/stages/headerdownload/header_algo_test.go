@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -17,7 +17,6 @@ import (
 )
 
 func TestInserter1(t *testing.T) {
-	m := stages.Mock(t)
 	funds := big.NewInt(1000000000)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
@@ -28,8 +27,8 @@ func TestInserter1(t *testing.T) {
 			address: {Balance: funds},
 		},
 	}
-	db := memdb.NewTestDB(t)
-	defer db.Close()
+	m := stages.MockWithGenesis(t, gspec, key, false)
+	db := m.DB
 	_, genesis, err := core.CommitGenesisBlock(db, gspec, "", m.Log)
 	if err != nil {
 		t.Fatal(err)

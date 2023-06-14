@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230613071011-43c9c999138a
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230614032101-ee8930fe2e70
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230605042354-196538d42475
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -13,7 +13,7 @@ require (
 
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230502013805-237fcc25d586
-	github.com/99designs/gqlgen v0.17.32
+	github.com/99designs/gqlgen v0.17.33
 	github.com/Giulio2002/bls v0.0.0-20230611172327-c0b9800e7b57
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/fastcache v1.12.1
@@ -84,12 +84,12 @@ require (
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli/v2 v2.25.6
 	github.com/valyala/fastjson v1.6.4
-	github.com/vektah/gqlparser/v2 v2.5.2-0.20230422221642-25e09f9d292d
+	github.com/vektah/gqlparser/v2 v2.5.3
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/zap v1.24.0
-	golang.org/x/crypto v0.9.0
+	golang.org/x/crypto v0.10.0
 	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
-	golang.org/x/net v0.10.0
+	golang.org/x/net v0.11.0
 	golang.org/x/sync v0.2.0
 	golang.org/x/sys v0.9.0
 	golang.org/x/time v0.3.0
@@ -253,8 +253,8 @@ require (
 	go.uber.org/fx v1.19.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.10.0 // indirect
-	golang.org/x/text v0.9.0 // indirect
-	golang.org/x/tools v0.9.1 // indirect
+	golang.org/x/text v0.10.0 // indirect
+	golang.org/x/tools v0.9.3 // indirect
 	google.golang.org/genproto v0.0.0-20230306155012-7f2fa6fef1f4 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
