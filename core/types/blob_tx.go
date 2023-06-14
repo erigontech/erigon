@@ -16,15 +16,15 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-type SignedBlobTx struct {
+type BlobTx struct {
 	DynamicFeeTransaction
 	MaxFeePerDataGas    *uint256.Int
 	BlobVersionedHashes []libcommon.Hash
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
-func (stx SignedBlobTx) copy() *SignedBlobTx {
-	cpy := &SignedBlobTx{
+func (stx BlobTx) copy() *BlobTx {
+	cpy := &BlobTx{
 		DynamicFeeTransaction: *stx.DynamicFeeTransaction.copy(),
 		BlobVersionedHashes:   make([]libcommon.Hash, len(stx.BlobVersionedHashes)),
 	}
@@ -35,17 +35,17 @@ func (stx SignedBlobTx) copy() *SignedBlobTx {
 	return cpy
 }
 
-func (stx SignedBlobTx) Type() byte { return BlobTxType }
+func (stx BlobTx) Type() byte { return BlobTxType }
 
-func (stx SignedBlobTx) GetDataHashes() []libcommon.Hash {
+func (stx BlobTx) GetDataHashes() []libcommon.Hash {
 	return stx.BlobVersionedHashes
 }
 
-func (stx SignedBlobTx) GetDataGas() uint64 {
+func (stx BlobTx) GetDataGas() uint64 {
 	return params.DataGasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
 
-func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+func (stx BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
 	msg, err := stx.DynamicFeeTransaction.AsMessage(s, baseFee, rules)
 	if err != nil {
 		return Message{}, err
@@ -54,7 +54,7 @@ func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules
 	return msg, err
 }
 
-func (stx SignedBlobTx) Hash() libcommon.Hash {
+func (stx BlobTx) Hash() libcommon.Hash {
 	if hash := stx.hash.Load(); hash != nil {
 		return *hash.(*libcommon.Hash)
 	}
@@ -76,7 +76,7 @@ func (stx SignedBlobTx) Hash() libcommon.Hash {
 	return hash
 }
 
-func (stx SignedBlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
+func (stx BlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 	return prefixedRlpHash(
 		BlobTxType,
 		[]interface{}{
@@ -94,7 +94,7 @@ func (stx SignedBlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 		})
 }
 
-func (stx SignedBlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) {
+func (stx BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) {
 	payloadSize, nonceLen, gasLen, accessListLen = stx.DynamicFeeTransaction.payloadSize()
 	// size of MaxFeePerDataGas
 	payloadSize++
@@ -122,7 +122,7 @@ func encodeBlobVersionedHashes(hashes []libcommon.Hash, w io.Writer, b []byte) e
 	return nil
 }
 
-func (stx SignedBlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) error {
+func (stx BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -204,7 +204,7 @@ func (stx SignedBlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 	return nil
 }
 
-func (stx SignedBlobTx) EncodeRLP(w io.Writer) error {
+func (stx BlobTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
 	envelopeSize := payloadSize
 	if payloadSize >= 56 {
@@ -228,7 +228,7 @@ func (stx SignedBlobTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func (stx SignedBlobTx) MarshalBinary(w io.Writer) error {
+func (stx BlobTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
 	var b [33]byte
 	// encode TxType
@@ -242,7 +242,7 @@ func (stx SignedBlobTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (stx *SignedBlobTx) DecodeRLP(s *rlp.Stream) error {
+func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err

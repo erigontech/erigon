@@ -582,7 +582,7 @@ func assertEqual(orig Transaction, cpy Transaction) error {
 
 const N = 50
 
-var dummySignedBlobTxs = [N]*SignedBlobTx{}
+var dummyBlobTxs = [N]*BlobTx{}
 var addr [20]byte
 
 func randIntInRange(min, max int) int {
@@ -634,8 +634,8 @@ func randData() []byte {
 	return data
 }
 
-func newRandSignedBlobTx() *SignedBlobTx {
-	stx := &SignedBlobTx{DynamicFeeTransaction: DynamicFeeTransaction{
+func newRandBlobTx() *BlobTx {
+	stx := &BlobTx{DynamicFeeTransaction: DynamicFeeTransaction{
 		CommonTx: CommonTx{
 			Nonce: rand.Uint64(),
 			Gas:   rand.Uint64(),
@@ -657,8 +657,8 @@ func newRandSignedBlobTx() *SignedBlobTx {
 	return stx
 }
 
-func printSTX(stx *SignedBlobTx) {
-	fmt.Println("--SignedBlobTx")
+func printSTX(stx *BlobTx) {
+	fmt.Println("--BlobTx")
 	fmt.Printf("ChainID: %v\n", stx.ChainID)
 	fmt.Printf("Nonce: %v\n", stx.Nonce)
 	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.Tip)
@@ -677,22 +677,22 @@ func printSTX(stx *SignedBlobTx) {
 	fmt.Println()
 }
 
-func populateSignedBlobTxs() {
+func populateBlobTxs() {
 	for i := 0; i < N; i++ {
-		dummySignedBlobTxs[i] = newRandSignedBlobTx()
+		dummyBlobTxs[i] = newRandBlobTx()
 	}
 }
 
-func TestSignedBlobTxEncodeDecode(t *testing.T) {
+func TestBlobTxEncodeDecode(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
-	populateSignedBlobTxs()
+	populateBlobTxs()
 	for i := 0; i < N; i++ {
-		// printSTX(dummySignedBlobTxs[i])
+		// printSTX(dummyBlobTxs[i])
 
-		tx, err := encodeDecodeBinary(dummySignedBlobTxs[i])
+		tx, err := encodeDecodeBinary(dummyBlobTxs[i])
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertEqual(dummySignedBlobTxs[i], tx)
+		assertEqual(dummyBlobTxs[i], tx)
 	}
 }

@@ -31,7 +31,7 @@ type KZGProofs []KZGProof
 type Blobs []Blob
 
 type BlobTxWrapper struct {
-	Tx          SignedBlobTx
+	Tx          BlobTx
 	Commitments BlobKzgs
 	Blobs       Blobs
 	Proofs      KZGProofs

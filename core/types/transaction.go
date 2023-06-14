@@ -187,7 +187,7 @@ func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 	switch data[0] {
 	case BlobTxType:
 		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
-		t := &SignedBlobTx{}
+		t := &BlobTx{}
 		if err := t.DecodeRLP(s); err != nil {
 			return nil, err
 		}

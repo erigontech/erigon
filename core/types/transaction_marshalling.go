@@ -107,7 +107,7 @@ func (tx DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&enc)
 }
 
-func toSignedBlobTxJSON(tx *SignedBlobTx) *txJSON {
+func toBlobTxJSON(tx *BlobTx) *txJSON {
 	var enc txJSON
 	// These are set for all tx types.
 	enc.Hash = tx.Hash()
@@ -132,12 +132,12 @@ func toSignedBlobTxJSON(tx *SignedBlobTx) *txJSON {
 	return &enc
 }
 
-func (tx SignedBlobTx) MarshalJSON() ([]byte, error) {
-	return json.Marshal(toSignedBlobTxJSON(&tx))
+func (tx BlobTx) MarshalJSON() ([]byte, error) {
+	return json.Marshal(toBlobTxJSON(&tx))
 }
 
 func (tx BlobTxWrapper) MarshalJSON() ([]byte, error) {
-	enc := toSignedBlobTxJSON(&tx.Tx)
+	enc := toBlobTxJSON(&tx.Tx)
 
 	enc.Blobs = tx.Blobs
 	enc.Commitments = tx.Commitments

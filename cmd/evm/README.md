@@ -114,7 +114,7 @@ type Withdrawal struct {
 ##### `txs`
 
 The `txs` object is an array of any of the transaction types: `LegacyTx`,
-`AccessListTx`, or `DynamicFeeTx`.
+`AccessListTx`, `DynamicFeeTx`, or `BlobTx`.
 
 ```go
 type LegacyTx struct {
