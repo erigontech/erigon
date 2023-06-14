@@ -247,7 +247,7 @@ func (stx SignedBlobTx) EncodingSize() int {
 	envelopeSize := payloadSize
 	// Add envelope size and type size
 	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
 	}
 	envelopeSize += 2
 	return envelopeSize
@@ -288,7 +288,7 @@ func (stx SignedBlobTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 		}
 	default:
 		if len(stx.Data) >= 56 {
-			payloadSize += (bits.Len(uint(len(stx.Data))) + 7) / 8
+			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(len(stx.Data))))
 		}
 		payloadSize += len(stx.Data)
 	}
@@ -296,7 +296,7 @@ func (stx SignedBlobTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 	payloadSize++
 	accessListLen = accessListSize(stx.AccessList)
 	if accessListLen >= 56 {
-		payloadSize += (bits.Len(uint(accessListLen)) + 7) / 8
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(accessListLen)))
 	}
 	payloadSize += accessListLen
 	// size of MaxFeePerDataGas
@@ -306,7 +306,7 @@ func (stx SignedBlobTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 	payloadSize++
 	blobHashesLen = blobVersionedHashesSize(stx.BlobVersionedHashes)
 	if blobHashesLen >= 56 {
-		payloadSize += (bits.Len(uint(blobHashesLen)) + 7) / 8
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(blobHashesLen)))
 	}
 	payloadSize += blobHashesLen
 	// size of y_parity
@@ -431,7 +431,7 @@ func (stx SignedBlobTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
 	envelopeSize := payloadSize
 	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
 	}
 	// size of struct prefix and TxType
 	envelopeSize += 2
