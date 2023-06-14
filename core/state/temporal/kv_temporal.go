@@ -333,7 +333,7 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 }
 
 // TODO: need remove `gspec` param (move SystemContractCodeLookup feature somewhere)
-func NewTestDB(tb testing.TB, ctx context.Context, dirs datadir.Dirs, gspec *types.Genesis, logger log.Logger) (histV3 bool, db kv.RwDB, agg *state.AggregatorV3) {
+func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis, logger log.Logger) (histV3 bool, db kv.RwDB, agg *state.AggregatorV3) {
 	historyV3 := ethconfig.EnableHistoryV3InTest
 
 	if tb != nil {
@@ -349,7 +349,7 @@ func NewTestDB(tb testing.TB, ctx context.Context, dirs datadir.Dirs, gspec *typ
 	if historyV3 {
 		var err error
 		dir.MustExist(dirs.SnapHistory)
-		agg, err = state.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
+		agg, err = state.NewAggregatorV3(context.Background(), dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
 		if err != nil {
 			panic(err)
 		}

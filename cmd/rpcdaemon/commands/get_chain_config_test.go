@@ -11,7 +11,7 @@ import (
 )
 
 func TestGetChainConfig(t *testing.T) {
-	_, db, _ := temporal.NewTestDB(t, context.Background(), datadir.New(t.TempDir()), nil, log.New())
+	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil, log.New())
 	config, _, err := core.CommitGenesisBlock(db, core.MainnetGenesisBlock(), "", log.New())
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)
