@@ -28,6 +28,8 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -37,8 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -293,7 +293,8 @@ func Main(ctx *cli.Context) error {
 		}
 		return h
 	}
-	db := memdb.New("" /* tmpDir */)
+
+	_, db, _ := temporal.NewTestDB(nil, context.Background(), datadir.New(""), nil, log.New())
 	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())
