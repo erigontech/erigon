@@ -25,8 +25,6 @@ CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'd
 CGO_CFLAGS += -O
 CGO_CFLAGS += -D__BLST_PORTABLE__
 CGO_CFLAGS += -Wno-error=strict-prototypes # for Clang15, remove it when can https://github.com/ledgerwatch/erigon/issues/6113#issuecomment-1359526277
-CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
-DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
 # about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
 BUILD_TAGS = nosqlite,noboltdb
@@ -35,9 +33,9 @@ PACKAGE = github.com/ledgerwatch/erigon
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
 GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
 
-GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
-GO_DBG_BUILD = $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = $(CGO_CFLAGS) GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
+GOBUILD = CGO_CFLAGS="$(CGO_CFLAGS)" $(GO) build $(GO_FLAGS)
+GO_DBG_BUILD = CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
+GOTEST = CGO_CFLAGS="$(CGO_CFLAGS)" GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
 
 default: all
 
@@ -188,9 +186,9 @@ devtools:
 	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
 	PATH=$(GOBIN):$(PATH) go generate ./common
 #	PATH=$(GOBIN):$(PATH) go generate ./core/types
+	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 	PATH=$(GOBIN):$(PATH) go generate ./consensus/aura/...
 	#PATH=$(GOBIN):$(PATH) go generate ./eth/ethconfig/...
-	cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
