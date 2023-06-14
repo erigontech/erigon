@@ -336,9 +336,6 @@ func DeriveChainId(v *uint256.Int) *uint256.Int {
 		if v == 27 || v == 28 {
 			return new(uint256.Int)
 		}
-		if v < 35 {
-			return nil
-		}
 		return new(uint256.Int).SetUint64((v - 35) / 2)
 	}
 	r := new(uint256.Int).Sub(v, u256.Num35)
