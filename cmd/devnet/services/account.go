@@ -5,11 +5,11 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/node"
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 )
 
-func GetNonce(node *node.Node, address libcommon.Address) (uint64, error) {
+func GetNonce(node devnet.Node, address libcommon.Address) (uint64, error) {
 	res, err := node.GetTransactionCount(address, requests.BlockNumbers.Latest)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get transaction count for address 0x%x: %v", address, err)
