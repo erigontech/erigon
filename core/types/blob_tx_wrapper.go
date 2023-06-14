@@ -39,7 +39,7 @@ type BlobTxWrapper struct {
 
 /* Blob methods */
 
-func (b Blob) payloadSize() int {
+func (b *Blob) payloadSize() int {
 	size := 1                            // 0xb7
 	size += (bits.Len(LEN_BLOB) + 7) / 8 // params.FieldElementsPerBlob * 32 = 131072 (length encoding size)
 	size += LEN_BLOB                     // byte_array it self
@@ -123,11 +123,12 @@ func (blobs Blobs) copy() Blobs {
 }
 
 func (blobs Blobs) payloadSize() int {
+	total := 0
 	if len(blobs) > 0 {
-		total := len(blobs) * blobs[0].payloadSize()
+		total = len(blobs) * blobs[0].payloadSize()
 		total += (bits.Len(uint(total)) + 7) / 8
 	}
-	return 0
+	return total
 }
 
 func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {

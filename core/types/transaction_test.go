@@ -621,7 +621,7 @@ func randAccessList() types2.AccessList {
 
 		tup.Address = *randAddr()
 		tup.StorageKeys = append(tup.StorageKeys, randHash())
-		result = append(result)
+		result = append(result, tup)
 	}
 	return result
 }
