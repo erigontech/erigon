@@ -7,157 +7,51 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type SignedBlobTx struct {
-	TransactionMisc
-
-	ChainID              *uint256.Int
-	Nonce                uint64 // nonce of sender account
-	MaxPriorityFeePerGas *uint256.Int
-	MaxFeePerGas         *uint256.Int
-	Gas                  uint64
-	To                   *libcommon.Address `rlp:"nil"` // nil means contract creation
-	Value                *uint256.Int       // wei amount
-	Data                 []byte             // contract invocation input data
-	AccessList           types2.AccessList
-
+	DynamicFeeTransaction
 	MaxFeePerDataGas    *uint256.Int
 	BlobVersionedHashes []libcommon.Hash
-
-	YParity bool
-	R       uint256.Int
-	S       uint256.Int
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
 func (stx SignedBlobTx) copy() *SignedBlobTx {
 	cpy := &SignedBlobTx{
-		TransactionMisc: TransactionMisc{
-			time: stx.time,
-		},
-		ChainID:              new(uint256.Int),
-		Nonce:                stx.Nonce,
-		MaxPriorityFeePerGas: new(uint256.Int),
-		MaxFeePerGas:         new(uint256.Int),
-		Gas:                  stx.Gas,
-		To:                   new(libcommon.Address),
-		Value:                stx.Value,
-		Data:                 common.CopyBytes(stx.Data),
-		AccessList:           make([]types2.AccessTuple, len(stx.AccessList)),
-		MaxFeePerDataGas:     stx.MaxFeePerDataGas,
-		BlobVersionedHashes:  make([]libcommon.Hash, len(stx.BlobVersionedHashes)),
+		DynamicFeeTransaction: *stx.DynamicFeeTransaction.copy(),
+		BlobVersionedHashes:   make([]libcommon.Hash, len(stx.BlobVersionedHashes)),
 	}
-	if stx.ChainID != nil {
-		cpy.ChainID.Set(stx.ChainID)
-	}
-	if stx.MaxPriorityFeePerGas != nil {
-		cpy.MaxPriorityFeePerGas.Set(stx.MaxPriorityFeePerGas)
-	}
-	if stx.MaxFeePerGas != nil {
-		cpy.MaxFeePerGas.Set(stx.MaxFeePerGas)
-	}
-	copy(cpy.To[:], stx.To[:]) // TODO: make sure this is the right way
-	copy(cpy.AccessList, stx.AccessList)
 	copy(cpy.BlobVersionedHashes, stx.BlobVersionedHashes)
+	if stx.MaxFeePerDataGas != nil {
+		cpy.MaxFeePerDataGas.Set(stx.MaxFeePerDataGas)
+	}
 	return cpy
 }
 
-func (stx SignedBlobTx) Type() byte               { return BlobTxType }
-func (stx SignedBlobTx) GetChainID() *uint256.Int { return stx.ChainID }
-func (stx SignedBlobTx) GetNonce() uint64         { return stx.Nonce }
-func (stx SignedBlobTx) GetPrice() *uint256.Int   { return stx.MaxPriorityFeePerGas }
-func (stx SignedBlobTx) GetTip() *uint256.Int     { return stx.MaxPriorityFeePerGas }
-func (stx SignedBlobTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return stx.GetTip()
-	}
-	gasFeeCap := stx.GetFeeCap()
-	// return 0 because effectiveFee cant be < 0
-	if gasFeeCap.Lt(baseFee) {
-		return uint256.NewInt(0)
-	}
-	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if stx.GetTip().Lt(effectiveFee) {
-		return stx.GetTip()
-	} else {
-		return effectiveFee
-	}
-}
-func (stx SignedBlobTx) GetFeeCap() *uint256.Int { return stx.MaxFeePerGas }
-func (stx SignedBlobTx) Cost() *uint256.Int {
-	// total := new(uint256.Int).SetUint64(uint64(stx.Message.Gas))
-	// tip := uint256.Int(stx.Message.GasTipCap)
-	// total.Mul(total, &tip)
-
-	// value := uint256.Int(stx.Message.Value)
-	// total.Add(total, &value)
-	// return total
-
-	total := new(uint256.Int).SetUint64(stx.Gas)
-	total.Mul(total, stx.MaxPriorityFeePerGas)
-	total.Add(total, stx.Value)
-	return total
-}
+func (stx SignedBlobTx) Type() byte { return BlobTxType }
 
 func (stx SignedBlobTx) GetDataHashes() []libcommon.Hash {
 	return stx.BlobVersionedHashes
 }
-func (stx SignedBlobTx) GetGas() uint64 { return stx.Gas }
+
 func (stx SignedBlobTx) GetDataGas() uint64 {
 	return params.DataGasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
-func (stx SignedBlobTx) GetValue() *uint256.Int { return stx.Value }
-
-func (stx SignedBlobTx) GetTo() *libcommon.Address { return stx.To }
 
 func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg := Message{
-		nonce:            stx.Nonce,
-		gasLimit:         stx.Gas,
-		gasPrice:         *stx.MaxPriorityFeePerGas,
-		tip:              *stx.MaxFeePerGas,
-		feeCap:           *stx.MaxPriorityFeePerGas,
-		to:               stx.To,
-		amount:           *stx.Value,
-		data:             stx.Data,
-		accessList:       stx.AccessList,
-		checkNonce:       true,
-		maxFeePerDataGas: *stx.MaxFeePerDataGas,
-		dataHashes:       stx.BlobVersionedHashes,
+	msg, err := stx.DynamicFeeTransaction.AsMessage(s, baseFee, rules)
+	if err != nil {
+		return Message{}, err
 	}
-	if baseFee != nil {
-		overflow := msg.gasPrice.SetFromBig(baseFee)
-		if overflow {
-			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
-		}
-	}
-	msg.gasPrice.Add(&msg.gasPrice, stx.GetTip())
-	if msg.gasPrice.Gt(stx.GetFeeCap()) {
-		msg.gasPrice.Set(stx.GetFeeCap())
-	}
-
-	var err error
-	// msg.from, err = stx.Sender(s)
+	msg.dataHashes = stx.BlobVersionedHashes
 	return msg, err
-}
-
-func (stx SignedBlobTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
-	// TODO
-	cpy := stx.copy()
-	return cpy, nil
-}
-
-func (stx SignedBlobTx) FakeSign(address libcommon.Address) (Transaction, error) {
-	// TODO
-	cpy := stx.copy()
-	return cpy, nil
 }
 
 func (stx SignedBlobTx) Hash() libcommon.Hash {
@@ -167,8 +61,8 @@ func (stx SignedBlobTx) Hash() libcommon.Hash {
 	hash := prefixedRlpHash(BlobTxType, []interface{}{
 		stx.ChainID,
 		stx.Nonce,
-		stx.MaxPriorityFeePerGas,
-		stx.MaxFeePerGas,
+		stx.Tip,
+		stx.FeeCap,
 		stx.Gas,
 		stx.To,
 		stx.Value,
@@ -176,9 +70,7 @@ func (stx SignedBlobTx) Hash() libcommon.Hash {
 		stx.AccessList,
 		stx.MaxFeePerDataGas,
 		stx.BlobVersionedHashes,
-		stx.YParity,
-		stx.R,
-		stx.S,
+		stx.V, stx.R, stx.S,
 	})
 	stx.hash.Store(&hash)
 	return hash
@@ -190,8 +82,8 @@ func (stx SignedBlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 		[]interface{}{
 			chainID,
 			stx.Nonce,
-			stx.MaxPriorityFeePerGas,
-			stx.MaxFeePerGas,
+			stx.Tip,
+			stx.FeeCap,
 			stx.Gas,
 			stx.To,
 			stx.Value,
@@ -202,103 +94,8 @@ func (stx SignedBlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 		})
 }
 
-func (stx SignedBlobTx) GetData() []byte                  { return stx.Data }
-func (stx SignedBlobTx) GetAccessList() types2.AccessList { return stx.AccessList }
-func (stx SignedBlobTx) Protected() bool                  { return true }
-
-func (stx SignedBlobTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
-	// TODO
-	return nil, nil, nil
-}
-
-func (stx *SignedBlobTx) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := stx.from.Load(); sc != nil {
-		return sc.(libcommon.Address), nil
-	}
-
-	addr, err := signer.Sender(stx)
-	if err != nil {
-		return libcommon.Address{}, err
-	}
-
-	stx.from.Store(addr)
-	return addr, nil
-}
-
-func (stx SignedBlobTx) GetSender() (libcommon.Address, bool) {
-	if sc := stx.from.Load(); sc != nil {
-		return sc.(libcommon.Address), true
-	}
-	return libcommon.Address{}, false
-}
-func (stx *SignedBlobTx) SetSender(addr libcommon.Address) {
-	stx.from.Store(addr)
-}
-
-func (stx *SignedBlobTx) IsContractDeploy() bool {
-	return stx.GetTo() == nil
-}
-func (stx *SignedBlobTx) Unwrap() Transaction {
-	return stx
-}
-
-func (stx SignedBlobTx) EncodingSize() int {
-	payloadSize, _, _, _, _ := stx.payloadSize()
-	envelopeSize := payloadSize
-	// Add envelope size and type size
-	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
-	}
-	envelopeSize += 2
-	return envelopeSize
-}
-func (stx SignedBlobTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen, blobHashesLen int) {
-	// size of ChainID
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(stx.ChainID)
-	// size of Nonce
-	payloadSize++
-	nonceLen = rlp.IntLenExcludingHead(stx.Nonce)
-	payloadSize += nonceLen
-	// size of MaxPriorityFeePerGas
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxPriorityFeePerGas)
-	// size of MaxFeePerGas
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxFeePerGas)
-	// size of Gas
-	payloadSize++
-	gasLen = rlp.IntLenExcludingHead(stx.Gas)
-	payloadSize += gasLen
-	// size of To
-	payloadSize++
-	if stx.To != nil {
-		payloadSize += 20
-	}
-	// size of Value
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(stx.Value)
-	// size of Data
-	payloadSize++
-	switch len(stx.Data) {
-	case 0:
-	case 1:
-		if stx.Data[0] >= 128 {
-			payloadSize++
-		}
-	default:
-		if len(stx.Data) >= 56 {
-			payloadSize += (bits.Len(uint(len(stx.Data))) + 7) / 8
-		}
-		payloadSize += len(stx.Data)
-	}
-	// size of AccessList
-	payloadSize++
-	accessListLen = accessListSize(stx.AccessList)
-	if accessListLen >= 56 {
-		payloadSize += (bits.Len(uint(accessListLen)) + 7) / 8
-	}
-	payloadSize += accessListLen
+func (stx SignedBlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) {
+	payloadSize, nonceLen, gasLen, accessListLen = stx.DynamicFeeTransaction.payloadSize()
 	// size of MaxFeePerDataGas
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxFeePerDataGas)
@@ -309,15 +106,7 @@ func (stx SignedBlobTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 		payloadSize += (bits.Len(uint(blobHashesLen)) + 7) / 8
 	}
 	payloadSize += blobHashesLen
-	// size of y_parity
-	payloadSize++ // y_parity takes 1 byte?
-	// size of R
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&stx.R)
-	// size of S
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&stx.S)
-	return payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen
+	return
 }
 
 func blobVersionedHashesSize(hashes []libcommon.Hash) int {
