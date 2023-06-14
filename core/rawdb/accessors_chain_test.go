@@ -99,7 +99,7 @@ func TestBodyStorage(t *testing.T) {
 	}
 
 	// prepare db so it works with our test
-	signer1 := types.MakeSigner(params.MainnetChainConfig, 1)
+	signer1 := types.MakeSigner(params.MainnetChainConfig, 1, 0)
 	body := &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(types.NewTransaction(1, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),

@@ -114,7 +114,7 @@ type Withdrawal struct {
 ##### `txs`
 
 The `txs` object is an array of any of the transaction types: `LegacyTx`,
-`AccessListTx`, `DynamicFeeTx`, or `BlobTx`.
+`AccessListTx`, or `DynamicFeeTx`.
 
 ```go
 type LegacyTx struct {
@@ -127,7 +127,7 @@ type LegacyTx struct {
 	V         *big.Int        `json:"v"`
 	R         *big.Int        `json:"r"`
 	S         *big.Int        `json:"s"`
-    SecretKey *common.Hash    `json:"secretKey"`
+  SecretKey *common.Hash    `json:"secretKey"`
 }
 type AccessList []AccessTuple
 type AccessTuple struct {
@@ -146,7 +146,7 @@ type AccessListTx struct {
 	V          *big.Int        `json:"v"`
 	R          *big.Int        `json:"r"`
 	S          *big.Int        `json:"s"`
-    SecretKey  *common.Hash     `json:"secretKey"`
+  SecretKey  *common.Hash    `json:"secretKey"`
 }
 type DynamicFeeTx struct {
 	ChainID    *big.Int        `json:"chainId"`
@@ -161,7 +161,24 @@ type DynamicFeeTx struct {
 	V          *big.Int        `json:"v"`
 	R          *big.Int        `json:"r"`
 	S          *big.Int        `json:"s"`
-    SecretKey  *common.Hash     `json:"secretKey"`
+  SecretKey  *common.Hash    `json:"secretKey"`
+}
+type BlobTx struct {
+	ChainID    *big.Int        `json:"chainId"`
+	Nonce      uint64          `json:"nonce"`
+	GasTipCap  *big.Int        `json:"maxPriorityFeePerGas"`
+	GasFeeCap  *big.Int        `json:"maxFeePerGas"`
+	Gas        uint64          `json:"gas"`
+	To         *common.Address `json:"to"`
+	Value      *big.Int        `json:"value"`
+	Data       []byte          `json:"data"`
+	AccessList AccessList      `json:"accessList"`
+  MaxFeePerDataGas    *uint256.Int
+	BlobVersionedHashes []libcommon.Hash
+	V          *big.Int        `json:"v"`
+	R          *big.Int        `json:"r"`
+	S          *big.Int        `json:"s"`
+  SecretKey  *common.Hash    `json:"secretKey"`
 }
 ```
 

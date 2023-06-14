@@ -42,7 +42,7 @@ func TestSenders(t *testing.T) {
 	}
 
 	// prepare tx so it works with our test
-	signer1 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64())
+	signer1 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64(), 0)
 	header := &types.Header{Number: libcommon.Big1}
 	hash := header.Hash()
 	require.NoError(bw.WriteHeader(tx, header))
@@ -74,7 +74,7 @@ func TestSenders(t *testing.T) {
 	}))
 	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 1))
 
-	signer2 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64())
+	signer2 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64(), 0)
 	header.Number = libcommon.Big2
 	hash = header.Hash()
 	require.NoError(bw.WriteHeader(tx, header))

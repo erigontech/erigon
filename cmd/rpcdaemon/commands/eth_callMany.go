@@ -173,7 +173,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
-	signer := types.MakeSigner(chainConfig, blockNum)
+	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := chainConfig.Rules(blockNum, blockCtx.Time)
 
 	timeoutMilliSeconds := int64(5000)
