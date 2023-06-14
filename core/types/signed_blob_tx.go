@@ -103,7 +103,7 @@ func (stx SignedBlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessList
 	payloadSize++
 	blobHashesLen = blobVersionedHashesSize(stx.BlobVersionedHashes)
 	if blobHashesLen >= 56 {
-		payloadSize += (bits.Len(uint(blobHashesLen)) + 7) / 8
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(blobHashesLen)))
 	}
 	payloadSize += blobHashesLen
 	return
@@ -220,7 +220,7 @@ func (stx SignedBlobTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
 	envelopeSize := payloadSize
 	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
 	}
 	// size of struct prefix and TxType
 	envelopeSize += 2

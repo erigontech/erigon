@@ -40,9 +40,9 @@ type BlobTxWrapper struct {
 /* Blob methods */
 
 func (b *Blob) payloadSize() int {
-	size := 1                            // 0xb7
-	size += (bits.Len(LEN_BLOB) + 7) / 8 // params.FieldElementsPerBlob * 32 = 131072 (length encoding size)
-	size += LEN_BLOB                     // byte_array it self
+	size := 1                                             // 0xb7
+	size += libcommon.BitLenToByteLen(bits.Len(LEN_BLOB)) // params.FieldElementsPerBlob * 32 = 131072 (length encoding size)
+	size += LEN_BLOB                                      // byte_array it self
 	return size
 }
 
@@ -57,7 +57,7 @@ func (li BlobKzgs) copy() BlobKzgs {
 func (li BlobKzgs) payloadSize() int {
 	size := 49 * len(li)
 	if size >= 56 {
-		size += (bits.Len(uint(size)) + 7) / 8 // BE encoding of the length of hashes
+		size += libcommon.BitLenToByteLen(bits.Len(uint(size))) // BE encoding of the length of hashes
 	}
 	return size
 }
@@ -91,7 +91,7 @@ func (li KZGProofs) copy() KZGProofs {
 func (li KZGProofs) payloadSize() int {
 	size := 49 * len(li)
 	if size >= 56 {
-		size += (bits.Len(uint(size)) + 7) / 8 // BE encoding of the length of hashes
+		size += libcommon.BitLenToByteLen(bits.Len(uint(size))) // BE encoding of the length of hashes
 	}
 	return size
 }
@@ -126,7 +126,7 @@ func (blobs Blobs) payloadSize() int {
 	total := 0
 	if len(blobs) > 0 {
 		total = len(blobs) * blobs[0].payloadSize()
-		total += (bits.Len(uint(total)) + 7) / 8
+		total += libcommon.BitLenToByteLen(bits.Len(uint(total)))
 	}
 	return total
 }
@@ -298,7 +298,7 @@ func (txw BlobTxWrapper) EncodingSize() int {
 	envelopeSize := payloadSize
 	// Add envelope size and type size
 	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
 	}
 	envelopeSize += 2
 	return envelopeSize
@@ -343,7 +343,7 @@ func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
 	payloadSize := txSize + commitmentsSize + proofsSize + blobsSize
 	envelopeSize := payloadSize
 	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
 	}
 	// size of struct prefix and TxType
 	envelopeSize += 2

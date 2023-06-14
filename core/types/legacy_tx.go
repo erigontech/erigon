@@ -224,7 +224,7 @@ func (tx LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 		}
 	default:
 		if len(tx.Data) >= 56 {
-			payloadSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(len(tx.Data))))
 		}
 		payloadSize += len(tx.Data)
 	}

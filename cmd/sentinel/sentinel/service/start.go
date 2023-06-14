@@ -111,7 +111,6 @@ func StartServe(server *SentinelServer, srvCfg *ServerConfig, creds credentials.
 	// Create a gRPC server
 	gRPCserver := grpc.NewServer(grpc.Creds(creds))
 	go server.ListenToGossip()
-	go server.startServerBackgroundLoop()
 	// Regiser our server as a gRPC server
 	sentinelrpc.RegisterSentinelServer(gRPCserver, server)
 	if err := gRPCserver.Serve(lis); err != nil {

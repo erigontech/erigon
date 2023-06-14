@@ -25,6 +25,7 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -95,7 +96,7 @@ func (tx AccessListTx) EncodingSize() int {
 	envelopeSize := payloadSize
 	// Add envelope size and type size
 	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
 	}
 	envelopeSize += 2
 	return envelopeSize
@@ -135,7 +136,7 @@ func (tx AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessL
 		}
 	default:
 		if len(tx.Data) >= 56 {
-			payloadSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(len(tx.Data))))
 		}
 		payloadSize += len(tx.Data)
 	}
@@ -143,7 +144,7 @@ func (tx AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessL
 	payloadSize++
 	accessListLen = accessListSize(tx.AccessList)
 	if accessListLen >= 56 {
-		payloadSize += (bits.Len(uint(accessListLen)) + 7) / 8
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(accessListLen)))
 	}
 	payloadSize += accessListLen
 	// size of V
@@ -167,12 +168,12 @@ func accessListSize(al types2.AccessList) int {
 		// Each storage key takes 33 bytes
 		storageLen := 33 * len(tuple.StorageKeys)
 		if storageLen >= 56 {
-			tupleLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
+			tupleLen += libcommon.BitLenToByteLen(bits.Len(uint(storageLen))) // BE encoding of the length of the storage keys
 		}
 		tupleLen += storageLen
 		accessListLen++
 		if tupleLen >= 56 {
-			accessListLen += (bits.Len(uint(tupleLen)) + 7) / 8 // BE encoding of the length of the storage keys
+			accessListLen += libcommon.BitLenToByteLen(bits.Len(uint(tupleLen))) // BE encoding of the length of the storage keys
 		}
 		accessListLen += tupleLen
 	}
@@ -186,7 +187,7 @@ func encodeAccessList(al types2.AccessList, w io.Writer, b []byte) error {
 		// Each storage key takes 33 bytes
 		storageLen := 33 * len(tuple.StorageKeys)
 		if storageLen >= 56 {
-			tupleLen += (bits.Len(uint(storageLen)) + 7) / 8 // BE encoding of the length of the storage keys
+			tupleLen += libcommon.BitLenToByteLen(bits.Len(uint(storageLen))) // BE encoding of the length of the storage keys
 		}
 		tupleLen += storageLen
 		if err := EncodeStructSizePrefix(tupleLen, w, b); err != nil {
@@ -217,7 +218,7 @@ func encodeAccessList(al types2.AccessList, w io.Writer, b []byte) error {
 
 func EncodeStructSizePrefix(size int, w io.Writer, b []byte) error {
 	if size >= 56 {
-		beSize := (bits.Len(uint(size)) + 7) / 8
+		beSize := libcommon.BitLenToByteLen(bits.Len(uint(size)))
 		binary.BigEndian.PutUint64(b[1:], uint64(size))
 		b[8-beSize] = byte(beSize) + 247
 		if _, err := w.Write(b[8-beSize : 9]); err != nil {
@@ -321,7 +322,7 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	envelopeSize := payloadSize
 	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
 	}
 	// size of struct prefix and TxType
 	envelopeSize += 2
