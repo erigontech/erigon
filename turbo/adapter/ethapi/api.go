@@ -449,17 +449,15 @@ func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumb
 		result.Accesses = &t.AccessList
 		// if the transaction has been mined, compute the effective gas price
 		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
-	case *types.SignedBlobTx:
-		chainId.Set(t.GetChainID())
+	case *types.BlobTx:
+		chainId.Set(t.ChainID)
 		result.ChainID = (*hexutil.Big)(chainId.ToBig())
-		result.Tip = (*hexutil.Big)(t.GetTip().ToBig())
-		result.FeeCap = (*hexutil.Big)(t.GetFeeCap().ToBig())
-		v, r, s := t.RawSignatureValues()
-		result.V = (*hexutil.Big)(v.ToBig())
-		result.R = (*hexutil.Big)(r.ToBig())
-		result.S = (*hexutil.Big)(s.ToBig())
-		al := t.GetAccessList()
-		result.Accesses = &al
+		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
+		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
+		result.V = (*hexutil.Big)(t.V.ToBig())
+		result.R = (*hexutil.Big)(t.R.ToBig())
+		result.S = (*hexutil.Big)(t.S.ToBig())
+		result.Accesses = &t.AccessList
 		// if the transaction has been mined, compute the effective gas price
 		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
 		result.MaxFeePerDataGas = (*hexutil.Big)(t.MaxFeePerDataGas.ToBig())

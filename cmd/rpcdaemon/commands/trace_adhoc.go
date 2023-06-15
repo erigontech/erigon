@@ -754,8 +754,9 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		}
 	}
 
+	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, _, err := api.callManyTransactions(ctx, tx, block, traceTypes, int(txnIndex), *gasBailOut, types.MakeSigner(chainConfig, blockNum), chainConfig)
+	traces, _, err := api.callManyTransactions(ctx, tx, block, traceTypes, int(txnIndex), *gasBailOut, signer, chainConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -836,8 +837,9 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		}
 	}
 
+	signer := types.MakeSigner(chainConfig, blockNumber, block.Time())
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, _, err := api.callManyTransactions(ctx, tx, block, traceTypes, -1 /* all tx indices */, *gasBailOut, types.MakeSigner(chainConfig, blockNumber), chainConfig)
+	traces, _, err := api.callManyTransactions(ctx, tx, block, traceTypes, -1 /* all tx indices */, *gasBailOut, signer, chainConfig)
 	if err != nil {
 		return nil, err
 	}

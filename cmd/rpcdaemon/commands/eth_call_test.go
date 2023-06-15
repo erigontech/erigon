@@ -524,7 +524,7 @@ func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, libcommon.Addr
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.InsertChain(chain)
+	err = m.InsertChain(chain, nil)
 	assert.NoError(t, err)
 
 	tx, err := db.BeginRo(context.Background())

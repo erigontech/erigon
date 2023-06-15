@@ -59,7 +59,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
 
 	// Recompute transactions up to the target index.
-	signer := types.MakeSigner(cfg, block.NumberU64())
+	signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
 	if historyV3 {
 		rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
 		txn := block.Transactions()[txIndex]

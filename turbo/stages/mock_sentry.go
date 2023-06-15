@@ -524,7 +524,7 @@ func (ms *MockSentry) numberOfPoWBlocks(chain *core.ChainPack) int {
 	return chain.NumberOfPoWBlocks()
 }
 
-func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
+func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 	n := ms.numberOfPoWBlocks(chain)
 	if n == 0 {
 		// No Proof-of-Work blocks
@@ -586,7 +586,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	}
 	initialCycle := MockInsertAsInitialCycle
 	hook := NewHook(ms.Ctx, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
-	if _, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook); err != nil {
+	if err = StageLoopStep(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {
@@ -595,7 +595,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	return nil
 }
 
-func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
+func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 	n := ms.numberOfPoWBlocks(chain)
 	if n >= chain.Length() {
 		return nil
@@ -610,11 +610,11 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 
 	initialCycle := MockInsertAsInitialCycle
 	hook := NewHook(ms.Ctx, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
-	headBlockHash, err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook)
+	err := StageLoopStep(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook)
 	if err != nil {
 		return err
 	}
-	SendPayloadStatus(ms.HeaderDownload(), headBlockHash, err)
+	SendPayloadStatus(ms.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	ms.ReceivePayloadStatus()
 
 	fc := engineapi.ForkChoiceMessage{
@@ -623,39 +623,46 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
 	ms.SendForkChoiceRequest(&fc)
-	headBlockHash, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook)
+	err = StageLoopStep(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook)
 	if err != nil {
 		return err
 	}
-	SendPayloadStatus(ms.HeaderDownload(), headBlockHash, err)
+	SendPayloadStatus(ms.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	ms.ReceivePayloadStatus()
 
 	return nil
 }
 
-func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
-	if err := ms.insertPoWBlocks(chain); err != nil {
-		return err
-	}
-	if err := ms.insertPoSBlocks(chain); err != nil {
-		return err
-	}
-	// Check if the latest header was imported or rolled back
-	if err := ms.DB.View(ms.Ctx, func(tx kv.Tx) error {
-		if rawdb.ReadHeader(tx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
-			return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
-		}
-		execAt, err := stages.GetStageProgress(tx, stages.Execution)
+func (ms *MockSentry) InsertChain(chain *core.ChainPack, tx kv.RwTx) error {
+	externalTx := tx != nil
+	if !externalTx {
+		var err error
+		tx, err = ms.DB.BeginRw(ms.Ctx)
 		if err != nil {
 			return err
 		}
-		if execAt == 0 {
-			return fmt.Errorf("sentryMock.InsertChain end up with Execution stage progress = 0")
-		}
-		return nil
-	}); err != nil {
+		defer tx.Rollback()
+	}
+
+	if err := ms.insertPoWBlocks(chain, tx); err != nil {
 		return err
 	}
+	if err := ms.insertPoSBlocks(chain, tx); err != nil {
+		return err
+	}
+
+	// Check if the latest header was imported or rolled back
+	if rawdb.ReadHeader(tx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
+		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
+	}
+	execAt, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	if execAt == 0 {
+		return fmt.Errorf("sentryMock.InsertChain end up with Execution stage progress = 0")
+	}
+
 	if ms.sentriesClient.Hd.IsBadHeader(chain.TopBlock.Hash()) {
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
@@ -673,6 +680,12 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	//	return err
 	//}
 	//}
+
+	if !externalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
