@@ -991,7 +991,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 
 	// Wait until sealing is terminated or delay timeout.
-	c.logger.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay-in-sec", uint(delay), "delay", common.PrettyDuration(delay))
+	c.logger.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay", common.PrettyDuration(delay))
 
 	go func() {
 		select {
@@ -1001,19 +1001,22 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 		case <-time.After(delay):
 			if wiggle > 0 {
 				c.logger.Info(
-					"Sealing out-of-turn",
+					"Sealed out-of-turn",
 					"number", number,
 					"wiggle", common.PrettyDuration(wiggle),
-					"in-turn-signer", snap.ValidatorSet.GetProposer().Address.Hex(),
+					"delay", delay,
+					"headerDifficulty", header.Difficulty,
+					"signer", signer.Hex(),
+				)
+			} else {
+				c.logger.Info(
+					"Sealed in-turn",
+					"number", number,
+					"delay", delay,
+					"headerDifficulty", header.Difficulty,
+					"signer", signer.Hex(),
 				)
 			}
-
-			c.logger.Info(
-				"Sealing successful",
-				"number", number,
-				"delay", delay,
-				"headerDifficulty", header.Difficulty,
-			)
 		}
 		select {
 		case results <- block.WithSeal(header):
@@ -1022,6 +1025,32 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 		}
 	}()
 	return nil
+}
+
+// Seal implements consensus.Engine, attempting to create a sealed block using
+// the local signing credentials.
+func (c *Bor) IsProposer(chain consensus.ChainHeaderReader, block *types.Block) (bool, error) {
+	header := block.Header()
+	number := header.Number.Uint64()
+
+	if number == 0 {
+		return false, nil
+	}
+
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
+	if err != nil {
+		return false, err
+	}
+
+	currentSigner := c.authorizedSigner.Load()
+
+	if !snap.ValidatorSet.HasAddress(currentSigner.signer) {
+		return false, nil
+	}
+
+	successionNumber, err := snap.GetSignerSuccessionNumber(currentSigner.signer)
+
+	return successionNumber == 0, err
 }
 
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
