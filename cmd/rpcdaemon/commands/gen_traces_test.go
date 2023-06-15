@@ -28,9 +28,8 @@ Testing tracing RPC API by generating patters of contracts invoking one another 
 func TestGeneratedDebugApi(t *testing.T) {
 	m := rpcdaemontest.CreateTestSentryForTraces(t)
 	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	var buf bytes.Buffer
 	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -116,9 +115,8 @@ func TestGeneratedDebugApi(t *testing.T) {
 func TestGeneratedTraceApi(t *testing.T) {
 	m := rpcdaemontest.CreateTestSentryForTraces(t)
 	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 	api := NewTraceAPI(baseApi, m.DB, &httpcfg.HttpCfg{})
 	traces, err := api.Block(context.Background(), rpc.BlockNumber(1), new(bool))
 	if err != nil {

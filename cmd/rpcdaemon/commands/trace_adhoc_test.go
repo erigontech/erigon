@@ -19,11 +19,7 @@ import (
 
 func TestEmptyQuery(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	br, _ := m.NewBlocksIO()
-
-	api := NewTraceAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage("[]"), &rpc.BlockNumberOrHash{BlockNumber: &latest})
@@ -39,11 +35,7 @@ func TestEmptyQuery(t *testing.T) {
 }
 func TestCoinbaseBalance(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	br, _ := m.NewBlocksIO()
-
-	api := NewTraceAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`

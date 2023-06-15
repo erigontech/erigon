@@ -53,9 +53,8 @@ func TestCallTraceOneByOne(t *testing.T) {
 	}
 
 	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
 	api := NewTraceAPI(
-		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs),
+		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs),
 		m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {

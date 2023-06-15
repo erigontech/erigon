@@ -25,10 +25,7 @@ import (
 // Gets the latest block number with the latest tag
 func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 	b, err := api.GetBlockByNumber(context.Background(), rpc.LatestBlockNumber, false)
 	expected := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
 	if err != nil {
@@ -39,16 +36,13 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 
 func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
 	ctx := context.Background()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tx, err := m.DB.BeginRw(ctx)
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := br.BlockByHash(ctx, tx, latestBlockHash)
+	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
@@ -61,7 +55,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	}
 	tx.Commit()
 
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 	block, err := api.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
