@@ -75,14 +75,8 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	ethCallBlockNumber := rpc.BlockNumber(2)
 
 	m, bankAddress, contractAddress := chainWithDeployedContract(t)
-	br, _ := m.NewBlocksIO()
-
 	doPrune(t, m.DB, pruneTo)
-
-	agg := m.HistoryV3Components()
-
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 
 	callData := hexutil.MustDecode("0x2e64cec1")
 	callDataBytes := hexutility.Bytes(callData)
@@ -100,15 +94,10 @@ func TestGetProof(t *testing.T) {
 	maxGetProofRewindBlockCount = 1 // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 
 	m, bankAddr, contractAddr := chainWithDeployedContract(t)
-	br, _ := m.NewBlocksIO()
-
 	if m.HistoryV3 {
 		t.Skip("not supported by Erigon3")
 	}
-	agg := m.HistoryV3Components()
-
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 
 	key := func(b byte) libcommon.Hash {
 		result := libcommon.Hash{}
@@ -229,18 +218,14 @@ func TestGetProof(t *testing.T) {
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
 	}
 	defer tx.Rollback()
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
 
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
-
-	latestBlock, err := br.CurrentBlock(tx)
+	latestBlock, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
 	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
 
@@ -268,18 +253,14 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("failed at beginning tx")
 	}
 	defer tx.Rollback()
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
 
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
-
-	oldestBlock, err := br.BlockByNumber(m.Ctx, tx, 0)
+	oldestBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 0)
 	if err != nil {
 		t.Error("couldn't retrieve oldest block")
 	}
@@ -310,18 +291,14 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
 	}
 	defer tx.Rollback()
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
 
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
-
-	latestBlock, err := br.CurrentBlock(tx)
+	latestBlock, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
 
 	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
@@ -350,16 +327,12 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 func TestGetBlockByTimeMiddle(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
 	}
 	defer tx.Rollback()
-
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	oldestHeader, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
@@ -371,7 +344,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	}
 
 	middleNumber := (currentHeader.Number.Uint64() + oldestHeader.Number.Uint64()) / 2
-	middleBlock, err := br.BlockByNumber(m.Ctx, tx, middleNumber)
+	middleBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, middleNumber)
 	if err != nil {
 		t.Error("couldn't retrieve middle block")
 	}
@@ -401,19 +374,15 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 func TestGetBlockByTimestamp(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
 	tx, err := m.DB.BeginRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
 	}
 	defer tx.Rollback()
-
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
 
 	highestBlockNumber := rawdb.ReadCurrentHeader(tx).Number
-	pickedBlock, err := br.BlockByNumber(m.Ctx, tx, highestBlockNumber.Uint64()/3)
+	pickedBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, highestBlockNumber.Uint64()/3)
 	if err != nil {
 		t.Errorf("couldn't get block %v", pickedBlock.Number())
 	}

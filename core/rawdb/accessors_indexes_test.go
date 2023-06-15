@@ -50,7 +50,7 @@ func TestLookupStorage(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			m := stages.Mock(t)
-			br, bw := m.NewBlocksIO()
+			br, bw := m.BlocksIO()
 			tx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
 			defer tx.Rollback()

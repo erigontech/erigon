@@ -90,10 +90,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T
 func TestParityAPIImpl_ListStorageKeys_WithOffset_EmptyResponse(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br, _ := m.NewBlocksIO()
-	agg := m.HistoryV3Components()
-	baseApi := NewBaseApi(nil, nil, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
-	api := NewParityAPIImpl(baseApi, m.DB)
+	api := NewParityAPIImpl(newBaseApiForTest(m), m.DB)
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 	offset := common.Hex2Bytes("ff")
 	b := hexutility.Bytes(offset)
@@ -107,10 +104,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_EmptyResponse(t *testing.T) {
 func TestParityAPIImpl_ListStorageKeys_AccNotFound(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br, _ := m.NewBlocksIO()
-	agg := m.HistoryV3Components()
-	baseApi := NewBaseApi(nil, nil, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
-	api := NewParityAPIImpl(baseApi, m.DB)
+	api := NewParityAPIImpl(newBaseApiForTest(m), m.DB)
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcaef")
 	_, err := api.ListStorageKeys(context.Background(), addr, 2, nil, latestBlock)
 	assert.Error(err, fmt.Errorf("acc not found"))

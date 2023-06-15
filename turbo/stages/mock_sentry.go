@@ -729,6 +729,6 @@ func (ms *MockSentry) HistoryV3Components() *libstate.AggregatorV3 {
 	return ms.agg
 }
 
-func (ms *MockSentry) NewBlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
-	return freezeblocks.NewBlockReader(ms.BlockSnapshots), blockio.NewBlockWriter(ms.HistoryV3)
+func (ms *MockSentry) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
+	return ms.BlockReader, blockio.NewBlockWriter(ms.HistoryV3)
 }

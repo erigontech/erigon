@@ -46,7 +46,7 @@ func TestHeaderStorage(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	ctx := m.Ctx
-	br, bw := m.NewBlocksIO()
+	br, bw := m.BlocksIO()
 
 	// Create a test header to move around the database and make sure it's really new
 	header := &types.Header{Number: big.NewInt(42), Extra: []byte("test header")}
@@ -86,7 +86,7 @@ func TestBodyStorage(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	ctx := m.Ctx
-	br, bw := m.NewBlocksIO()
+	br, bw := m.BlocksIO()
 	require := require.New(t)
 
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -155,7 +155,7 @@ func TestBlockStorage(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 	ctx := m.Ctx
-	br, bw := m.NewBlocksIO()
+	br, bw := m.BlocksIO()
 
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
@@ -264,7 +264,7 @@ func TestPartialBlockStorage(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	ctx := m.Ctx
-	br, bw := m.NewBlocksIO()
+	br, bw := m.BlocksIO()
 
 	block := types.NewBlockWithHeader(&types.Header{
 		Extra:       []byte("test block"),
@@ -309,7 +309,7 @@ func TestTdStorage(t *testing.T) {
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	_, bw := m.NewBlocksIO()
+	_, bw := m.BlocksIO()
 
 	// Create a test TD to move around the database and make sure it's really new
 	hash, td := libcommon.Hash{}, big.NewInt(314)
@@ -354,7 +354,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	br, bw := m.NewBlocksIO()
+	br, bw := m.BlocksIO()
 
 	// Create a test canonical number and assinged hash to move around
 	hash, number := libcommon.Hash{0: 0xff}, uint64(314)
@@ -449,7 +449,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	br, bw := m.NewBlocksIO()
+	br, bw := m.BlocksIO()
 	require := require.New(t)
 	ctx := m.Ctx
 
@@ -542,7 +542,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	br, bw := m.NewBlocksIO()
+	br, bw := m.BlocksIO()
 	ctx := context.Background()
 
 	// create fake withdrawals
