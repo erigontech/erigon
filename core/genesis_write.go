@@ -27,7 +27,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
@@ -132,11 +131,10 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 			return genesis.Config, block, &types.GenesisMismatchError{Stored: storedHash, New: hash}
 		}
 	}
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
 	number := rawdb.ReadHeaderNumber(tx, storedHash)
 	if number != nil {
 		var err error
-		storedBlock, _, err = blockReader.BlockWithSenders(context.Background(), tx, storedHash, *number)
+		storedBlock, _, err = rawdb.ReadBlockWithSenders(tx, storedHash, *number)
 		if err != nil {
 			return genesis.Config, nil, err
 		}
