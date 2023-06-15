@@ -249,7 +249,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 		return fmt.Errorf("receipt hash: want: %x have: %x", h.ReceiptTrie, h2.ReceiptHash)
 	}
 	if h.TransactionsTrie != h2.TxHash {
-		return fmt.Errorf("tx hash: want: %x have: %x", h.TransactionsTrie, h2.TxHash)
+		return fmt.Errorf("txn hash: want: %x have: %x", h.TransactionsTrie, h2.TxHash)
 	}
 	if h.StateRoot != h2.Root {
 		return fmt.Errorf("state hash: want: %x have: %x", h.StateRoot, h2.Root)
