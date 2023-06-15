@@ -324,15 +324,20 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	if err = m.InsertChain(easyChain, nil); err != nil {
+
+	tx, err := m.DB.BeginRw(m.Ctx)
+	if err != nil {
+		fmt.Printf("beginro error: %v\n", err)
+		return
+	}
+	defer tx.Rollback()
+
+	if err = m.InsertChain(easyChain, tx); err != nil {
 		t.Fatalf("failed to insert easy chain: %v", err)
 	}
-	if err = m.InsertChain(diffChain, nil); err != nil {
+	if err = m.InsertChain(diffChain, tx); err != nil {
 		t.Fatalf("failed to insert difficult chain: %v", err)
 	}
-	tx, err := m.DB.BeginRo(context.Background())
-	require.NoError(err)
-	defer tx.Rollback()
 
 	// Check that the chain is valid number and link wise
 	prev, err := m.BlockReader.CurrentBlock(tx)
