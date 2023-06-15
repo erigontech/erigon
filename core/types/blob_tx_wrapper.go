@@ -1,204 +1,52 @@
 package types
 
 import (
-	"bytes"
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"math/bits"
 	"time"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
-	"github.com/protolambda/ztyp/codec"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-// Compressed BLS12-381 G1 element
-type KZGCommitment [48]byte
+const (
+	LEN_BLOB = params.FieldElementsPerBlob * 32 // 131072
+	LEN_48   = 48                               // KZGCommitment & KZGProof sizes
+)
 
-func (p *KZGCommitment) Deserialize(dr *codec.DecodingReader) error {
-	if p == nil {
-		return errors.New("nil pubkey")
-	}
-	_, err := dr.Read(p[:])
-	return err
-}
-
-func (p *KZGCommitment) Serialize(w *codec.EncodingWriter) error {
-	return w.Write(p[:])
-}
-
-func (KZGCommitment) ByteLength() uint64 {
-	return 48
-}
-
-func (KZGCommitment) FixedLength() uint64 {
-	return 48
-}
-
-func (p KZGCommitment) MarshalText() ([]byte, error) {
-	return []byte("0x" + hex.EncodeToString(p[:])), nil
-}
-
-func (p KZGCommitment) String() string {
-	return "0x" + hex.EncodeToString(p[:])
-}
-
-func (p *KZGCommitment) UnmarshalText(text []byte) error {
-	return hexutility.UnmarshalFixedText("KZGCommitment", text, p[:])
-}
-
-func (c KZGCommitment) ComputeVersionedHash() libcommon.Hash {
-	return libcommon.Hash(libkzg.KZGToVersionedHash(gokzg4844.KZGCommitment(c)))
-}
-
-// Compressed BLS12-381 G1 element
-type KZGProof [48]byte
-
-func (p *KZGProof) Deserialize(dr *codec.DecodingReader) error {
-	if p == nil {
-		return errors.New("nil pubkey")
-	}
-	_, err := dr.Read(p[:])
-	return err
-}
-
-func (p *KZGProof) Serialize(w *codec.EncodingWriter) error {
-	return w.Write(p[:])
-}
-
-func (KZGProof) ByteLength() uint64 {
-	return 48
-}
-
-func (KZGProof) FixedLength() uint64 {
-	return 48
-}
-
-func (p KZGProof) MarshalText() ([]byte, error) {
-	return []byte("0x" + hex.EncodeToString(p[:])), nil
-}
-
-func (p KZGProof) String() string {
-	return "0x" + hex.EncodeToString(p[:])
-}
-
-func (p *KZGProof) UnmarshalText(text []byte) error {
-	return hexutility.UnmarshalFixedText("KZGProof", text, p[:])
-}
-
-// BLSFieldElement is the raw bytes representation of a field element
-type BLSFieldElement [32]byte
-
-func (p BLSFieldElement) MarshalText() ([]byte, error) {
-	return []byte("0x" + hex.EncodeToString(p[:])), nil
-}
-
-func (p BLSFieldElement) String() string {
-	return "0x" + hex.EncodeToString(p[:])
-}
-
-func (p *BLSFieldElement) UnmarshalText(text []byte) error {
-	return hexutility.UnmarshalFixedText("BLSFieldElement", text, p[:])
-}
-
-// Blob data
-type Blob [params.FieldElementsPerBlob * 32]byte
-
-func (blob *Blob) Deserialize(dr *codec.DecodingReader) error {
-	if blob == nil {
-		return errors.New("cannot decode ssz into nil Blob")
-	}
-
-	// We treat the blob as an opaque sequence of bytes
-	// and therefore we do not do any validation related to field
-	// elements
-	if _, err := dr.Read(blob[:]); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (blob *Blob) Serialize(w *codec.EncodingWriter) error {
-	return w.Write(blob[:])
-}
-
-func (blob *Blob) ByteLength() (out uint64) {
-	return params.FieldElementsPerBlob * 32
-}
-
-func (blob *Blob) FixedLength() uint64 {
-	return params.FieldElementsPerBlob * 32
-}
-
-func (blob *Blob) MarshalText() ([]byte, error) {
-	out := make([]byte, 2+params.FieldElementsPerBlob*32*2)
-	copy(out[:2], "0x")
-	hex.Encode(out[2:], blob[:])
-
-	return out, nil
-}
-
-func (blob *Blob) String() string {
-	v, err := blob.MarshalText()
-	if err != nil {
-		return "<invalid-blob>"
-	}
-	return string(v)
-}
-
-func (blob *Blob) UnmarshalText(text []byte) error {
-	if blob == nil {
-		return errors.New("cannot decode text into nil Blob")
-	}
-	l := 2 + params.FieldElementsPerBlob*32*2
-	if len(text) != l {
-		return fmt.Errorf("expected %d characters but got %d", l, len(text))
-	}
-	if !(text[0] == '0' && text[1] == 'x') {
-		return fmt.Errorf("expected '0x' prefix in Blob string")
-	}
-	if _, err := hex.Decode(blob[:], text[2:]); err != nil {
-		return fmt.Errorf("blob is not formatted correctly: %v", err)
-	}
-
-	return nil
-}
+type KZGCommitment [LEN_48]byte // Compressed BLS12-381 G1 element
+type KZGProof [LEN_48]byte
+type Blob [LEN_BLOB]byte
 
 type BlobKzgs []KZGCommitment
+type KZGProofs []KZGProof
+type Blobs []Blob
 
-func (li *BlobKzgs) Deserialize(dr *codec.DecodingReader) error {
-	return dr.List(func() codec.Deserializable {
-		i := len(*li)
-		*li = append(*li, KZGCommitment{})
-		return &(*li)[i]
-	}, 48, params.MaxBlobsPerBlock)
+type BlobTxWrapper struct {
+	Tx          SignedBlobTx
+	Commitments BlobKzgs
+	Blobs       Blobs
+	Proofs      KZGProofs
 }
 
-func (li BlobKzgs) Serialize(w *codec.EncodingWriter) error {
-	return w.List(func(i uint64) codec.Serializable {
-		return &li[i]
-	}, 48, uint64(len(li)))
+/* Blob methods */
+
+func (b *Blob) payloadSize() int {
+	size := 1                                             // 0xb7
+	size += libcommon.BitLenToByteLen(bits.Len(LEN_BLOB)) // params.FieldElementsPerBlob * 32 = 131072 (length encoding size)
+	size += LEN_BLOB                                      // byte_array it self
+	return size
 }
 
-func (li BlobKzgs) ByteLength() uint64 {
-	return uint64(len(li)) * 48
-}
-
-func (li BlobKzgs) FixedLength() uint64 {
-	return 0
-}
+/* BlobKzgs methods */
 
 func (li BlobKzgs) copy() BlobKzgs {
 	cpy := make(BlobKzgs, len(li))
@@ -206,29 +54,33 @@ func (li BlobKzgs) copy() BlobKzgs {
 	return cpy
 }
 
-type KZGProofs []KZGProof
-
-func (li *KZGProofs) Deserialize(dr *codec.DecodingReader) error {
-	return dr.List(func() codec.Deserializable {
-		i := len(*li)
-		*li = append(*li, KZGProof{})
-		return &(*li)[i]
-	}, 48, params.MaxBlobsPerBlock)
+func (li BlobKzgs) payloadSize() int {
+	size := 49 * len(li)
+	if size >= 56 {
+		size += libcommon.BitLenToByteLen(bits.Len(uint(size))) // BE encoding of the length of hashes
+	}
+	return size
 }
 
-func (li KZGProofs) Serialize(w *codec.EncodingWriter) error {
-	return w.List(func(i uint64) codec.Serializable {
-		return &li[i]
-	}, 48, uint64(len(li)))
+func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+	// prefix
+	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+
+	b[0] = 128 + LEN_48
+	for _, arr := range li {
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(arr[:]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (li KZGProofs) ByteLength() uint64 {
-	return uint64(len(li)) * 48
-}
-
-func (li KZGProofs) FixedLength() uint64 {
-	return 0
-}
+/* KZGProofs methods */
 
 func (li KZGProofs) copy() KZGProofs {
 	cpy := make(KZGProofs, len(li))
@@ -236,34 +88,65 @@ func (li KZGProofs) copy() KZGProofs {
 	return cpy
 }
 
-type Blobs []Blob
-
-func (a *Blobs) Deserialize(dr *codec.DecodingReader) error {
-	return dr.List(func() codec.Deserializable {
-		i := len(*a)
-		*a = append(*a, Blob{})
-		return &(*a)[i]
-	}, params.FieldElementsPerBlob*32, params.FieldElementsPerBlob)
+func (li KZGProofs) payloadSize() int {
+	size := 49 * len(li)
+	if size >= 56 {
+		size += libcommon.BitLenToByteLen(bits.Len(uint(size))) // BE encoding of the length of hashes
+	}
+	return size
 }
 
-func (a Blobs) Serialize(w *codec.EncodingWriter) error {
-	return w.List(func(i uint64) codec.Serializable {
-		return &a[i]
-	}, params.FieldElementsPerBlob*32, uint64(len(a)))
+func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+	// prefix
+	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+
+	b[0] = 128 + LEN_48
+	for _, arr := range li {
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(arr[:]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (a Blobs) ByteLength() (out uint64) {
-	return uint64(len(a)) * params.FieldElementsPerBlob * 32
-}
-
-func (a *Blobs) FixedLength() uint64 {
-	return 0 // it's a list, no fixed length
-}
+/* Blobs methods */
 
 func (blobs Blobs) copy() Blobs {
 	cpy := make(Blobs, len(blobs))
 	copy(cpy, blobs) // each blob element is an array and gets deep-copied
 	return cpy
+}
+
+func (blobs Blobs) payloadSize() int {
+	total := 0
+	if len(blobs) > 0 {
+		total = len(blobs) * blobs[0].payloadSize()
+		total += libcommon.BitLenToByteLen(bits.Len(uint(total)))
+	}
+	return total
+}
+
+func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+	// prefix
+	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+
+	for _, arr := range blobs {
+		if err := rlp.EncodeStringSizePrefix(LEN_BLOB, w, b); err != nil {
+			return err
+		}
+		if _, err := w.Write(arr[:]); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Return KZG commitments, versioned hashes and the proofs that correspond to these blobs
@@ -313,34 +196,15 @@ func toProofs(_proofs KZGProofs) []gokzg4844.KZGProof {
 	return proofs
 }
 
-// BlobTxWrapper is the "network representation" of a Blob transaction, that is it includes not
-// only the SignedBlobTx but also all the associated blob data.
-type BlobTxWrapper struct {
-	Tx          SignedBlobTx
-	Commitments BlobKzgs
-	Blobs       Blobs
-	Proofs      KZGProofs
+func (c KZGCommitment) ComputeVersionedHash() libcommon.Hash {
+	return libcommon.Hash(libkzg.KZGToVersionedHash(gokzg4844.KZGCommitment(c)))
 }
 
-func (txw *BlobTxWrapper) Deserialize(dr *codec.DecodingReader) error {
-	return dr.Container(&txw.Tx, &txw.Commitments, &txw.Blobs, &txw.Proofs)
-}
-
-func (txw *BlobTxWrapper) Serialize(w *codec.EncodingWriter) error {
-	return w.Container(&txw.Tx, &txw.Commitments, &txw.Blobs, &txw.Proofs)
-}
-
-func (txw *BlobTxWrapper) ByteLength() uint64 {
-	return codec.ContainerLength(&txw.Tx, &txw.Commitments, &txw.Blobs, &txw.Proofs)
-}
-
-func (txw *BlobTxWrapper) FixedLength() uint64 {
-	return 0
-}
+/* BlobTxWrapper methods */
 
 // validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
 func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
-	blobTx := txw.Tx.Message
+	blobTx := txw.Tx
 	l1 := len(blobTx.BlobVersionedHashes)
 	if l1 == 0 {
 		return fmt.Errorf("a blob tx must contain at least one blob")
@@ -379,61 +243,127 @@ func (txw *BlobTxWrapper) GetTip() *uint256.Int     { return txw.Tx.GetTip() }
 func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	return txw.Tx.GetEffectiveGasTip(baseFee)
 }
-func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int         { return txw.Tx.GetFeeCap() }
-func (txw *BlobTxWrapper) Cost() *uint256.Int              { return txw.Tx.GetFeeCap() }
+func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int { return txw.Tx.GetFeeCap() }
+
+func (txw *BlobTxWrapper) Cost() *uint256.Int { return txw.Tx.GetFeeCap() }
+
 func (txw *BlobTxWrapper) GetDataHashes() []libcommon.Hash { return txw.Tx.GetDataHashes() }
-func (txw *BlobTxWrapper) GetGas() uint64                  { return txw.Tx.GetGas() }
-func (txw *BlobTxWrapper) GetDataGas() uint64              { return txw.Tx.GetDataGas() }
-func (txw *BlobTxWrapper) GetValue() *uint256.Int          { return txw.Tx.GetValue() }
-func (txw *BlobTxWrapper) Time() time.Time                 { return txw.Tx.Time() }
-func (txw *BlobTxWrapper) GetTo() *libcommon.Address       { return txw.Tx.GetTo() }
+
+func (txw *BlobTxWrapper) GetGas() uint64            { return txw.Tx.GetGas() }
+func (txw *BlobTxWrapper) GetDataGas() uint64        { return txw.Tx.GetDataGas() }
+func (txw *BlobTxWrapper) GetValue() *uint256.Int    { return txw.Tx.GetValue() }
+func (txw *BlobTxWrapper) Time() time.Time           { return txw.Tx.Time() }
+func (txw *BlobTxWrapper) GetTo() *libcommon.Address { return txw.Tx.GetTo() }
+
 func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
 	return txw.Tx.AsMessage(s, baseFee, rules)
 }
 func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	return txw.Tx.WithSignature(signer, sig)
 }
+
 func (txw *BlobTxWrapper) FakeSign(address libcommon.Address) (Transaction, error) {
 	return txw.Tx.FakeSign(address)
 }
+
 func (txw *BlobTxWrapper) Hash() libcommon.Hash { return txw.Tx.Hash() }
+
 func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) libcommon.Hash {
 	return txw.Tx.SigningHash(chainID)
 }
-func (txw *BlobTxWrapper) GetData() []byte                  { return txw.Tx.GetData() }
+
+func (txw *BlobTxWrapper) GetData() []byte { return txw.Tx.GetData() }
+
 func (txw *BlobTxWrapper) GetAccessList() types2.AccessList { return txw.Tx.GetAccessList() }
-func (txw *BlobTxWrapper) Protected() bool                  { return txw.Tx.Protected() }
+
+func (txw *BlobTxWrapper) Protected() bool { return txw.Tx.Protected() }
+
 func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return txw.Tx.RawSignatureValues()
 }
+
 func (txw *BlobTxWrapper) Sender(s Signer) (libcommon.Address, error) { return txw.Tx.Sender(s) }
-func (txw *BlobTxWrapper) GetSender() (libcommon.Address, bool)       { return txw.Tx.GetSender() }
-func (txw *BlobTxWrapper) SetSender(address libcommon.Address)        { txw.Tx.SetSender(address) }
-func (txw *BlobTxWrapper) IsContractDeploy() bool                     { return txw.Tx.IsContractDeploy() }
-func (txw *BlobTxWrapper) Unwrap() Transaction                        { return &txw.Tx }
+
+func (txw *BlobTxWrapper) GetSender() (libcommon.Address, bool) { return txw.Tx.GetSender() }
+
+func (txw *BlobTxWrapper) SetSender(address libcommon.Address) { txw.Tx.SetSender(address) }
+
+func (txw *BlobTxWrapper) IsContractDeploy() bool { return txw.Tx.IsContractDeploy() }
+
+func (txw *BlobTxWrapper) Unwrap() Transaction { return &txw.Tx }
 
 func (txw BlobTxWrapper) EncodingSize() int {
-	envelopeSize := int(codec.ContainerLength(&txw.Tx, &txw.Commitments, &txw.Blobs, &txw.Proofs))
-	// Add type byte
-	envelopeSize++
+	txSize, commitmentsSize, proofsSize, blobsSize := txw.payloadSize()
+	payloadSize := txSize + commitmentsSize + proofsSize + blobsSize
+	envelopeSize := payloadSize
+	// Add envelope size and type size
+	if payloadSize >= 56 {
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
+	}
+	envelopeSize += 2
 	return envelopeSize
 }
 
+func (txw BlobTxWrapper) payloadSize() (int, int, int, int) {
+	txSize, _, _, _, _ := txw.Tx.payloadSize()
+	commitmentsSize := txw.Commitments.payloadSize()
+	proofsSize := txw.Proofs.payloadSize()
+	blobsSize := txw.Blobs.payloadSize()
+	return txSize, commitmentsSize, proofsSize, blobsSize
+}
+
+func (txw BlobTxWrapper) encodePayload(w io.Writer, b []byte, payloadSize, commitmentsSize, proofsSize, blobsSize int) error {
+	// prefix, encode txw payload size
+	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+
+	txPayloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := txw.Tx.payloadSize()
+	if err := txw.Tx.encodePayload(w, b, txPayloadSize, nonceLen, gasLen, accessListLen, blobHashesLen); err != nil {
+		return err
+	}
+
+	// TODO: encode in order (see EIP-4844 updates)
+	if err := txw.Commitments.encodePayload(w, b, commitmentsSize); err != nil {
+		return err
+	}
+	if err := txw.Blobs.encodePayload(w, b, blobsSize); err != nil {
+		return err
+	}
+	txw.Proofs.encodePayload(w, b, proofsSize)
+	return nil
+}
+
 func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
+	return nil
+}
+
+func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
+	txSize, commitmentsSize, proofsSize, blobsSize := txw.payloadSize()
+	payloadSize := txSize + commitmentsSize + proofsSize + blobsSize
+	envelopeSize := payloadSize
+	if payloadSize >= 56 {
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
+	}
+	// size of struct prefix and TxType
+	envelopeSize += 2
 	var b [33]byte
+	// envelope
+	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
 	// encode TxType
 	b[0] = BlobTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	wcodec := codec.NewEncodingWriter(w)
-	return txw.Serialize(wcodec)
-}
-
-func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
-	var buf bytes.Buffer
-	if err := txw.MarshalBinary(&buf); err != nil {
+	if err := txw.encodePayload(w, b[:], payloadSize, commitmentsSize, proofsSize, blobsSize); err != nil {
 		return err
 	}
-	return rlp.Encode(w, buf.Bytes())
+	return nil
+}
+
+func (txw BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
+	// TODO
+	return nil
 }

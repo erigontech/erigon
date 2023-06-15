@@ -1,4 +1,4 @@
-package node_test
+package args_test
 
 import (
 	"errors"
@@ -6,21 +6,21 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
-	"github.com/ledgerwatch/erigon/cmd/devnet/node"
+	"github.com/ledgerwatch/erigon/cmd/devnet/args"
 )
 
 func TestNodeArgs(t *testing.T) {
 	asMap := map[string]struct{}{}
 
-	args, _ := devnetutils.AsArgs(node.Miner{
-		Node: node.Node{
+	nodeArgs, _ := args.AsArgs(args.Miner{
+		Node: args.Node{
 			DataDir:        filepath.Join("data", fmt.Sprintf("%d", 1)),
 			PrivateApiAddr: "localhost:9092",
 		},
+		DevPeriod: 30,
 	})
 
-	for _, arg := range args {
+	for _, arg := range nodeArgs {
 		asMap[arg] = struct{}{}
 	}
 
@@ -36,15 +36,15 @@ func TestNodeArgs(t *testing.T) {
 		t.Fatal(asMap, "not found")
 	}
 
-	args, _ = devnetutils.AsArgs(node.NonMiner{
-		Node: node.Node{
+	nodeArgs, _ = args.AsArgs(args.NonMiner{
+		Node: args.Node{
 			DataDir:        filepath.Join("data", fmt.Sprintf("%d", 2)),
 			StaticPeers:    "enode",
 			PrivateApiAddr: "localhost:9091",
 		},
 	})
 
-	for _, arg := range args {
+	for _, arg := range nodeArgs {
 		asMap[arg] = struct{}{}
 	}
 
@@ -160,8 +160,10 @@ func miningNodeArgs(dataDir string, nodeNumber int) []string {
 	downloaderArg, _ := parameterFromArgument("--no-downloader", "true")
 	httpPortArg, _ := parameterFromArgument("--http.port", "8545")
 	authrpcPortArg, _ := parameterFromArgument("--authrpc.port", "8551")
+	natArg, _ := parameterFromArgument("--nat", "none")
+	accountSlotsArg, _ := parameterFromArgument("--txpool.accountslots", "16")
 
-	return []string{buildDirArg, dataDirArg, chainType, privateApiAddr, httpPortArg, authrpcPortArg, mine, httpApi, ws, devPeriod, consoleVerbosity, p2pProtocol, downloaderArg}
+	return []string{buildDirArg, dataDirArg, chainType, privateApiAddr, httpPortArg, authrpcPortArg, mine, httpApi, ws, natArg, devPeriod, consoleVerbosity, p2pProtocol, downloaderArg, accountSlotsArg}
 }
 
 // nonMiningNodeArgs returns custom args for starting a non-mining node
@@ -176,8 +178,10 @@ func nonMiningNodeArgs(dataDir string, nodeNumber int, enode string) []string {
 	p2pProtocol, _ := parameterFromArgument("--p2p.protocol", "68")
 	downloaderArg, _ := parameterFromArgument("--no-downloader", "true")
 	httpPortArg, _ := parameterFromArgument("--http.port", "8545")
-	httpApi, _ := parameterFromArgument(httpApiArg, "eth,debug,net,trace,web3,erigon")
+	httpApi, _ := parameterFromArgument(httpApiArg, "admin,eth,debug,net,trace,web3,erigon,txpool")
 	authrpcPortArg, _ := parameterFromArgument("--authrpc.port", "8551")
+	natArg, _ := parameterFromArgument("--nat", "none")
+	ws := wsArg
 
-	return []string{buildDirArg, dataDirArg, chainType, privateApiAddr, httpPortArg, authrpcPortArg, httpApi, staticPeers, noDiscover, consoleVerbosity, torrentPort, p2pProtocol, downloaderArg}
+	return []string{buildDirArg, dataDirArg, chainType, privateApiAddr, httpPortArg, authrpcPortArg, httpApi, ws, natArg, staticPeers, noDiscover, consoleVerbosity, torrentPort, p2pProtocol, downloaderArg}
 }

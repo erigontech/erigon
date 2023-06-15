@@ -1,8 +1,8 @@
 package rpchelper
 
 import (
-	"context"
 	"sync"
+	"sync/atomic"
 )
 
 // a simple interface for subscriptions for rpc helper
@@ -12,12 +12,8 @@ type Sub[T any] interface {
 }
 
 type chan_sub[T any] struct {
-	ch chan T
-
-	closed chan struct{}
-
-	ctx context.Context
-	cn  context.CancelFunc
+	ch     chan T
+	closed atomic.Bool
 }
 
 // buffered channel
@@ -28,38 +24,23 @@ func newChanSub[T any](size int) *chan_sub[T] {
 	}
 	o := &chan_sub[T]{}
 	o.ch = make(chan T, size)
-	o.closed = make(chan struct{})
-	o.ctx, o.cn = context.WithCancel(context.Background())
 	return o
 }
 func (s *chan_sub[T]) Send(x T) {
+	if s.closed.Load() {
+		return
+	}
+
 	select {
-	// if the output buffer is empty, send
 	case s.ch <- x:
-		// if sub is canceled, dispose message
-	case <-s.ctx.Done():
-		// the sub is overloaded, dispose message
-	default:
+	default: // the sub is overloaded, dispose message
 	}
 }
 func (s *chan_sub[T]) Close() {
-	select {
-	case <-s.ctx.Done():
+	if swapped := s.closed.CompareAndSwap(false, true); !swapped {
 		return
-	default:
 	}
-	// its possible for multiple goroutines to get to this point, if Close is called twice at the same time
-	// close the context - allows any sends to exit
-	s.cn()
-	select {
-	case s.closed <- struct{}{}:
-		// but it is not possible for multiple goroutines to get to this point
-		// drain the channel
-		for range s.ch {
-		}
-		close(s.ch)
-	default:
-	}
+	close(s.ch)
 }
 
 func NewSyncMap[K comparable, T any]() *SyncMap[K, T] {
@@ -117,8 +98,7 @@ func (m *SyncMap[K, T]) Range(fn func(k K, v T) error) error {
 	return nil
 }
 
-func (m *SyncMap[K, T]) Delete(k K) (T, bool) {
-	var t T
+func (m *SyncMap[K, T]) Delete(k K) (t T, deleted bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	val, ok := m.m[k]

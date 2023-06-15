@@ -36,7 +36,6 @@ import (
 type CommonTx struct {
 	TransactionMisc
 
-	ChainID *uint256.Int
 	Nonce   uint64             // nonce of sender account
 	Gas     uint64             // gas limit
 	To      *libcommon.Address `rlp:"nil"` // nil means contract creation
@@ -46,7 +45,7 @@ type CommonTx struct {
 }
 
 func (ct CommonTx) GetChainID() *uint256.Int {
-	return ct.ChainID
+	return nil
 }
 
 func (ct CommonTx) GetNonce() uint64 {
@@ -229,7 +228,7 @@ func (tx LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 		}
 	default:
 		if len(tx.Data) >= 56 {
-			payloadSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(len(tx.Data))))
 		}
 		payloadSize += len(tx.Data)
 	}
