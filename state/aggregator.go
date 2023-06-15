@@ -1,5 +1,5 @@
 /*
-   Copyright 2022 Erigon contributors
+   Copyright 2022 The Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -1317,7 +1318,7 @@ func DecodeAccountBytes(enc []byte) (nonce uint64, balance *uint256.Int, hash []
 func EncodeAccountBytes(nonce uint64, balance *uint256.Int, hash []byte, incarnation uint64) []byte {
 	l := int(1)
 	if nonce > 0 {
-		l += (bits.Len64(nonce) + 7) / 8
+		l += common.BitLenToByteLen(bits.Len64(nonce))
 	}
 	l++
 	if !balance.IsZero() {
@@ -1329,7 +1330,7 @@ func EncodeAccountBytes(nonce uint64, balance *uint256.Int, hash []byte, incarna
 	}
 	l++
 	if incarnation > 0 {
-		l += (bits.Len64(incarnation) + 7) / 8
+		l += common.BitLenToByteLen(bits.Len64(incarnation))
 	}
 	value := make([]byte, l)
 	pos := 0
@@ -1338,7 +1339,7 @@ func EncodeAccountBytes(nonce uint64, balance *uint256.Int, hash []byte, incarna
 		value[pos] = 0
 		pos++
 	} else {
-		nonceBytes := (bits.Len64(nonce) + 7) / 8
+		nonceBytes := common.BitLenToByteLen(bits.Len64(nonce))
 		value[pos] = byte(nonceBytes)
 		var nonce = nonce
 		for i := nonceBytes; i > 0; i-- {
@@ -1369,7 +1370,7 @@ func EncodeAccountBytes(nonce uint64, balance *uint256.Int, hash []byte, incarna
 	if incarnation == 0 {
 		value[pos] = 0
 	} else {
-		incBytes := (bits.Len64(incarnation) + 7) / 8
+		incBytes := common.BitLenToByteLen(bits.Len64(incarnation))
 		value[pos] = byte(incBytes)
 		var inc = incarnation
 		for i := incBytes; i > 0; i-- {

@@ -28,6 +28,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -53,7 +54,7 @@ type txPool interface {
 
 	PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64) (bool, error)
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	AddLocalTxs(ctx context.Context, newTxs types.TxSlots, tx kv.Tx) ([]DiscardReason, error)
+	AddLocalTxs(ctx context.Context, newTxs types.TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error)
 	deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
@@ -198,10 +199,10 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 			return nil
 		}); err != nil {
 			if errors.Is(err, types.ErrAlreadyKnown) { // Noop, but need to handle to not count these
-				reply.Errors[i] = AlreadyKnown.String()
+				reply.Errors[i] = txpoolcfg.AlreadyKnown.String()
 				reply.Imported[i] = txpool_proto.ImportResult_ALREADY_EXISTS
 			} else if errors.Is(err, types.ErrRlpTooBig) { // Noop, but need to handle to not count these
-				reply.Errors[i] = RLPTooLong.String()
+				reply.Errors[i] = txpoolcfg.RLPTooLong.String()
 				reply.Imported[i] = txpool_proto.ImportResult_INVALID
 			} else {
 				reply.Errors[i] = err.Error()
@@ -231,15 +232,15 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	return reply, nil
 }
 
-func mapDiscardReasonToProto(reason DiscardReason) txpool_proto.ImportResult {
+func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpool_proto.ImportResult {
 	switch reason {
-	case Success:
+	case txpoolcfg.Success:
 		return txpool_proto.ImportResult_SUCCESS
-	case AlreadyKnown:
+	case txpoolcfg.AlreadyKnown:
 		return txpool_proto.ImportResult_ALREADY_EXISTS
-	case UnderPriced, ReplaceUnderpriced, FeeTooLow:
+	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.FeeTooLow:
 		return txpool_proto.ImportResult_FEE_TOO_LOW
-	case InvalidSender, NegativeValue, OversizedData, InitCodeTooLarge, RLPTooLong:
+	case txpoolcfg.InvalidSender, txpoolcfg.NegativeValue, txpoolcfg.OversizedData, txpoolcfg.InitCodeTooLarge, txpoolcfg.RLPTooLong:
 		return txpool_proto.ImportResult_INVALID
 	default:
 		return txpool_proto.ImportResult_INTERNAL_ERROR

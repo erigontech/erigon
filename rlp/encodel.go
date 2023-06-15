@@ -1,5 +1,5 @@
 /*
-   Copyright 2021 Erigon contributors
+   Copyright 2021 The Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ package rlp
 import (
 	"encoding/binary"
 	"math/bits"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 // General design:
@@ -38,14 +40,14 @@ import (
 
 func ListPrefixLen(dataLen int) int {
 	if dataLen >= 56 {
-		return 1 + (bits.Len64(uint64(dataLen))+7)/8
+		return 1 + common.BitLenToByteLen(bits.Len64(uint64(dataLen)))
 	}
 	return 1
 }
 func EncodeListPrefix(dataLen int, to []byte) int {
 	if dataLen >= 56 {
 		_ = to[9]
-		beLen := (bits.Len64(uint64(dataLen)) + 7) / 8
+		beLen := common.BitLenToByteLen(bits.Len64(uint64(dataLen)))
 		binary.BigEndian.PutUint64(to[1:], uint64(dataLen))
 		to[8-beLen] = 247 + byte(beLen)
 		copy(to, to[8-beLen:9])
@@ -59,14 +61,14 @@ func U32Len(i uint32) int {
 	if i < 128 {
 		return 1
 	}
-	return 1 + (bits.Len32(i)+7)/8
+	return 1 + common.BitLenToByteLen(bits.Len32(i))
 }
 
 func U64Len(i uint64) int {
 	if i < 128 {
 		return 1
 	}
-	return 1 + (bits.Len64(i)+7)/8
+	return 1 + common.BitLenToByteLen(bits.Len64(i))
 }
 
 func EncodeU32(i uint32, to []byte) int {
@@ -185,7 +187,7 @@ func StringLen(s []byte) int {
 	sLen := len(s)
 	switch {
 	case sLen > 56:
-		beLen := (bits.Len(uint(sLen)) + 7) / 8
+		beLen := common.BitLenToByteLen(bits.Len(uint(sLen)))
 		return 1 + beLen + sLen
 	case sLen == 0:
 		return 1
@@ -201,7 +203,7 @@ func StringLen(s []byte) int {
 func EncodeString(s []byte, to []byte) int {
 	switch {
 	case len(s) > 56:
-		beLen := (bits.Len(uint(len(s))) + 7) / 8
+		beLen := common.BitLenToByteLen(bits.Len(uint(len(s))))
 		binary.BigEndian.PutUint64(to[1:], uint64(len(s)))
 		_ = to[beLen+len(s)]
 

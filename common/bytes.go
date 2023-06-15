@@ -1,5 +1,5 @@
 /*
-   Copyright 2021 Erigon contributors
+   Copyright 2021 The Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -76,4 +76,8 @@ func EnsureEnoughSize(in []byte, size int) []byte {
 		return newBuf
 	}
 	return in[:size] // Reuse the space if it has enough capacity
+}
+
+func BitLenToByteLen(bitLen int) (byteLen int) {
+	return (bitLen + 7) / 8
 }

@@ -1,5 +1,5 @@
 /*
-   Copyright 2021 Erigon contributors
+   Copyright 2021 The Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -28,12 +28,14 @@ import (
 	"path/filepath"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spaolacci/murmur3"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spaolacci/murmur3"
 )
 
 var ErrCollision = fmt.Errorf("duplicate key")
@@ -556,7 +558,7 @@ func (rs *RecSplit) Build() error {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
 	// Write number of bytes per index record
-	rs.bytesPerRec = (bits.Len64(rs.maxOffset) + 7) / 8
+	rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
 	if err = rs.indexW.WriteByte(byte(rs.bytesPerRec)); err != nil {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}

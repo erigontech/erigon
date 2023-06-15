@@ -1,5 +1,5 @@
 /*
-   Copyright 2022 Erigon contributors
+   Copyright 2022 The Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -26,7 +26,8 @@ import (
 	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -171,7 +172,7 @@ func TruncateRange(db kv.RwTx, bucket string, key []byte, to uint32) error {
 		if _, err := chunk.WriteTo(buf); err != nil {
 			return err
 		}
-		return db.Put(bucket, chunkKey, libcommon.Copy(buf.Bytes()))
+		return db.Put(bucket, chunkKey, common.Copy(buf.Bytes()))
 	})
 }
 
@@ -326,7 +327,7 @@ func TruncateRange64(db kv.RwTx, bucket string, key []byte, to uint64) error {
 		if _, err := chunk.WriteTo(buf); err != nil {
 			return err
 		}
-		return db.Put(bucket, chunkKey, libcommon.Copy(buf.Bytes()))
+		return db.Put(bucket, chunkKey, common.Copy(buf.Bytes()))
 	})
 }
 
@@ -408,7 +409,7 @@ func Walk(c kv.Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) 
 }
 
 func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {
-	fixedbytes = (fixedbits + 7) / 8
+	fixedbytes = common.BitLenToByteLen(fixedbits)
 	shiftbits := fixedbits & 7
 	mask = byte(0xff)
 	if shiftbits != 0 {

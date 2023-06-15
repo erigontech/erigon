@@ -1,5 +1,5 @@
 /*
-   Copyright 2021 Erigon contributors
+   Copyright 2021 The Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ package ssz
 import (
 	"encoding/binary"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 )
@@ -144,7 +144,7 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 	return objs, nil
 }
 
-func DecodeHashList(bytes []byte, start, end, max uint32) ([]libcommon.Hash, error) {
+func DecodeHashList(bytes []byte, start, end, max uint32) ([]common.Hash, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -157,7 +157,7 @@ func DecodeHashList(bytes []byte, start, end, max uint32) ([]libcommon.Hash, err
 	if elementsNum > max {
 		return nil, ErrTooBigList
 	}
-	objs := make([]libcommon.Hash, elementsNum)
+	objs := make([]common.Hash, elementsNum)
 	for i := range objs {
 		copy(objs[i][:], buf[i*length.Hash:])
 	}
