@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
@@ -42,13 +41,12 @@ type SendersCfg struct {
 	tmpdir          string
 	prune           prune.Mode
 	chainConfig     *chain.Config
-	blockRetire     *snapshotsync.BlockRetire
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
 	blockWriter     *blockio.BlockWriter
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire, blockWriter *blockio.BlockWriter, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, blockWriter *blockio.BlockWriter, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -63,7 +61,6 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpd
 		tmpdir:          tmpdir,
 		chainConfig:     chainCfg,
 		prune:           prune,
-		blockRetire:     br,
 		hd:              hd,
 
 		blockReader: blockReader,
@@ -72,8 +69,8 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpd
 }
 
 func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, logger log.Logger) error {
-	if cfg.blockRetire != nil && cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled && s.BlockNumber < cfg.blockRetire.Snapshots().BlocksAvailable() {
-		s.BlockNumber = cfg.blockRetire.Snapshots().BlocksAvailable()
+	if cfg.blockReader.FreezingCfg().Enabled && s.BlockNumber < cfg.blockReader.FrozenBlocks() {
+		s.BlockNumber = cfg.blockReader.FrozenBlocks()
 	}
 
 	quitCh := ctx.Done()
@@ -367,8 +364,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		}
 		defer tx.Rollback()
 	}
-	sn := cfg.blockRetire.Snapshots()
-	if sn.Cfg().Enabled {
+	if cfg.blockReader.FreezingCfg().Enabled {
 		// noop. in this case senders will be deleted by BlockRetire.PruneAncientBlocks after data-freezing.
 	} else if cfg.prune.TxIndex.Enabled() {
 		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)

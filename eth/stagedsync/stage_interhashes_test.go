@@ -11,12 +11,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 
 	"github.com/ledgerwatch/log/v3"
@@ -79,7 +79,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	// ----------------------------------------------------------------
 
 	historyV3 := false
-	blockReader := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()))
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
 	cfg := StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
 	_, err := RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx, log.New())
 	assert.Nil(t, err)
@@ -201,7 +201,7 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	hash6 := libcommon.HexToHash("0x3100000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash6[:], encoded))
 
-	blockReader := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()))
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
 	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil), libcommon.Hash{} /* expectedRootHash */, ctx, log.New())
 	assert.Nil(t, err)
 
@@ -264,7 +264,7 @@ func TestStorageDeletion(t *testing.T) {
 	// Populate account & storage trie DB tables
 	// ----------------------------------------------------------------
 	historyV3 := false
-	blockReader := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()))
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
 	cfg := StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
 	_, err = RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx, log.New())
 	assert.Nil(t, err)
@@ -383,7 +383,7 @@ func TestHiveTrieRoot(t *testing.T) {
 		common.FromHex("02081bc16d674ec80000")))
 
 	historyV3 := false
-	blockReader := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()))
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
 	cfg := StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
 	logger := log.New()
 	_, err := RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx, logger)

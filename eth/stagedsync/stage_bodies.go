@@ -59,8 +59,8 @@ func BodiesForward(
 	logger log.Logger,
 ) error {
 	var doUpdate bool
-	if cfg.blockReader != nil && cfg.blockReader.Snapshots() != nil && s.BlockNumber < cfg.blockReader.Snapshots().BlocksAvailable() {
-		s.BlockNumber = cfg.blockReader.Snapshots().BlocksAvailable()
+	if s.BlockNumber < cfg.blockReader.FrozenBlocks() {
+		s.BlockNumber = cfg.blockReader.FrozenBlocks()
 		doUpdate = true
 	}
 

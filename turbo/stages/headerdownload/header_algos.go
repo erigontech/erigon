@@ -1223,7 +1223,9 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 	return nil
 }
 
-func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, n uint64, r services.FullBlockReader) error {
+func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, r services.FullBlockReader) error {
+	n := r.FrozenBlocks()
+
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	for i := n; i > 0 && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; i-- {

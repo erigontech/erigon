@@ -1,4 +1,4 @@
-package snapshotsync
+package freezeblocks
 
 import (
 	"context"
@@ -71,7 +71,7 @@ func TestMergeSnapshots(t *testing.T) {
 	for i := uint64(500_000); i < 500_000+N*100_000; i += 100_000 {
 		createFile(i, i+100_000)
 	}
-	s := NewRoSnapshots(ethconfig.Snapshot{Enabled: true}, dir, logger)
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
 	{
@@ -129,7 +129,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	chainSnapshotCfg := snapcfg.KnownCfg(networkname.MainnetChainName, nil, nil)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
-	cfg := ethconfig.Snapshot{Enabled: true}
+	cfg := ethconfig.BlocksFreezing{Enabled: true}
 	createFile := func(from, to uint64, name snaptype.Type) { createTestSegmentFile(t, from, to, name, dir, logger) }
 	s := NewRoSnapshots(cfg, dir, logger)
 	defer s.Close()

@@ -13,6 +13,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -54,7 +55,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -100,7 +100,8 @@ type MockSentry struct {
 
 	HistoryV3      bool
 	agg            *libstate.AggregatorV3
-	BlockSnapshots *snapshotsync.RoSnapshots
+	BlockSnapshots *freezeblocks.RoSnapshots
+	BlockReader    services.BlockReader
 }
 
 func (ms *MockSentry) Close() {
@@ -237,7 +238,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.HistoryV3 = histV3
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, logger)
-	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger)
+	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger)
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
 		tb:          tb,
@@ -256,6 +257,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		},
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
+		BlockReader:    freezeblocks.NewBlockReader(allSnapshots),
 		HistoryV3:      cfg.HistoryV3,
 	}
 	if tb != nil {
@@ -367,7 +369,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	var snapshotsDownloader proto_downloader.DownloaderClient
 
-	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, blockReader, blockWriter, mock.DB, snapshotsDownloader, mock.Notifications.Events, logger)
+	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, mock.DB, mock.Notifications.Events, logger)
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx,
 			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs, blockRetire, snapshotsDownloader, blockReader, mock.Notifications.Events, mock.HistoryV3, mock.agg),
@@ -375,7 +377,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			stagedsync.StageCumulativeIndexCfg(mock.DB, blockReader),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig, blockWriter),
 			stagedsync.StageBodiesCfg(mock.DB, mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, *mock.ChainConfig, blockReader, cfg.HistoryV3, blockWriter),
-			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockRetire, blockWriter, blockReader, mock.sentriesClient.Hd),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockWriter, blockReader, mock.sentriesClient.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				prune,
@@ -586,7 +588,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	initialCycle := MockInsertAsInitialCycle
 	blockReader, _ := ms.NewBlocksIO()
 	hook := NewHook(ms.Ctx, ms.Notifications, ms.Sync, blockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
-	if _, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, initialCycle, ms.Log, blockReader.Snapshots().(*snapshotsync.RoSnapshots), hook); err != nil {
+	if _, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, initialCycle, ms.Log, blockReader, hook); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {
@@ -611,7 +613,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	initialCycle := MockInsertAsInitialCycle
 	blockReader, _ := ms.NewBlocksIO()
 	hook := NewHook(ms.Ctx, ms.Notifications, ms.Sync, blockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
-	headBlockHash, err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, initialCycle, ms.Log, blockReader.Snapshots().(*snapshotsync.RoSnapshots), hook)
+	headBlockHash, err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, initialCycle, ms.Log, blockReader, hook)
 	if err != nil {
 		return err
 	}
@@ -624,7 +626,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
 	ms.SendForkChoiceRequest(&fc)
-	headBlockHash, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, initialCycle, ms.Log, blockReader.Snapshots().(*snapshotsync.RoSnapshots), hook)
+	headBlockHash, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, initialCycle, ms.Log, blockReader, hook)
 	if err != nil {
 		return err
 	}
@@ -731,5 +733,5 @@ func (ms *MockSentry) HistoryV3Components() *libstate.AggregatorV3 {
 }
 
 func (ms *MockSentry) NewBlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
-	return snapshotsync.NewBlockReader(ms.BlockSnapshots), blockio.NewBlockWriter(ms.HistoryV3)
+	return freezeblocks.NewBlockReader(ms.BlockSnapshots), blockio.NewBlockWriter(ms.HistoryV3)
 }

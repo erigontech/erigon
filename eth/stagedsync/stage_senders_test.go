@@ -17,12 +17,10 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func TestSenders(t *testing.T) {
-	logger := log.New()
 	require := require.New(t)
 
 	m := stages2.Mock(t)
@@ -130,8 +128,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	blockRetire := snapshotsync.NewBlockRetire(1, "", br, bw, db, nil, nil, logger)
-	cfg := stagedsync.StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, blockRetire, bw, br, nil)
+	cfg := stagedsync.StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, bw, br, nil)
 	err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 3, m.Ctx, log.New())
 	require.NoError(err)
 

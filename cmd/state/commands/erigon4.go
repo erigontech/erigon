@@ -15,6 +15,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -42,7 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 var (
@@ -236,12 +236,12 @@ func Erigon4(genesis *types.Genesis, chainConfig *chain2.Config, logger log.Logg
 	}()
 
 	var blockReader services.FullBlockReader
-	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), logger)
+	var allSnapshots = freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), logger)
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader = snapshotsync.NewBlockReader(allSnapshots)
+	blockReader = freezeblocks.NewBlockReader(allSnapshots)
 	engine := initConsensusEngine(chainConfig, allSnapshots, logger)
 
 	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
@@ -603,7 +603,7 @@ func (ww *StateWriterV4) CreateContract(address libcommon.Address) error {
 	return nil
 }
 
-func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots, logger log.Logger) (engine consensus.Engine) {
+func initConsensusEngine(cc *chain2.Config, snapshots *freezeblocks.RoSnapshots, logger log.Logger) (engine consensus.Engine) {
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}

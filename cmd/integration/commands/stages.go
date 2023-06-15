@@ -12,6 +12,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
@@ -36,7 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -48,7 +48,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 )
@@ -865,17 +864,12 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	s := stage(sync, tx, nil, stages.Senders)
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	var blockRetire *snapshotsync.BlockRetire
-	if sn.Cfg().Enabled {
-		blockRetire = snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), tmpdir, br, bw, db, nil, nil, logger)
-	}
-
 	pm, err := prune.Get(tx)
 	if err != nil {
 		return err
 	}
 
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, blockRetire, bw, br, nil)
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, bw, br, nil)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
@@ -1361,10 +1355,10 @@ func removeMigration(db kv.RwDB, ctx context.Context) error {
 }
 
 var openSnapshotOnce sync.Once
-var _allSnapshotsSingleton *snapshotsync.RoSnapshots
+var _allSnapshotsSingleton *freezeblocks.RoSnapshots
 var _aggSingleton *libstate.AggregatorV3
 
-func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*snapshotsync.RoSnapshots, *libstate.AggregatorV3) {
+func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezeblocks.RoSnapshots, *libstate.AggregatorV3) {
 	openSnapshotOnce.Do(func() {
 		var useSnapshots bool
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
@@ -1375,7 +1369,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*snapshot
 		dir.MustExist(dirs.SnapHistory)
 
 		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
-		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, dirs.Snap, logger)
+		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, logger)
 
 		var err error
 		_aggSingleton, err = libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
@@ -1412,7 +1406,7 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 	openBlockReaderOnce.Do(func() {
 		sn, _ := allSnapshots(context.Background(), db, logger)
 		histV3 := kvcfg.HistoryV3.FromDB(db)
-		_blockReaderSingleton = snapshotsync.NewBlockReader(sn)
+		_blockReaderSingleton = freezeblocks.NewBlockReader(sn)
 		_blockWriterSingleton = blockio.NewBlockWriter(histV3)
 	})
 	return _blockReaderSingleton, _blockWriterSingleton
@@ -1421,7 +1415,7 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 var openDomainsOnce sync.Once
 var _aggDomainSingleton *libstate.Aggregator
 
-func allDomains(ctx context.Context, db kv.RoDB, stepSize uint64, mode libstate.CommitmentMode, trie commitment.TrieVariant, logger log.Logger) (*snapshotsync.RoSnapshots, *libstate.Aggregator) {
+func allDomains(ctx context.Context, db kv.RoDB, stepSize uint64, mode libstate.CommitmentMode, trie commitment.TrieVariant, logger log.Logger) (*freezeblocks.RoSnapshots, *libstate.Aggregator) {
 	openDomainsOnce.Do(func() {
 		var useSnapshots bool
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
@@ -1432,7 +1426,7 @@ func allDomains(ctx context.Context, db kv.RoDB, stepSize uint64, mode libstate.
 		dir.MustExist(dirs.SnapHistory)
 
 		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
-		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, dirs.Snap, logger)
+		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, logger)
 
 		var err error
 		_aggDomainSingleton, err = libstate.NewAggregator(filepath.Join(dirs.DataDir, "state"), dirs.Tmp, stepSize, mode, trie, logger)
@@ -1460,7 +1454,7 @@ func allDomains(ctx context.Context, db kv.RoDB, stepSize uint64, mode libstate.
 	return _allSnapshotsSingleton, _aggDomainSingleton
 }
 
-func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.CommitmentMode, trie commitment.TrieVariant, logger log.Logger) (consensus.Engine, ethconfig.Config, *snapshotsync.RoSnapshots, *libstate.Aggregator) {
+func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.CommitmentMode, trie commitment.TrieVariant, logger log.Logger) (consensus.Engine, ethconfig.Config, *freezeblocks.RoSnapshots, *libstate.Aggregator) {
 	historyV3, pm := kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 	//events := shards.NewEvents()
 	genesis := core.GenesisBlockByChainName(chain)
@@ -1526,7 +1520,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 
 	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, logger)
 
-	blockReader, _ := blocksIO(db, logger)
+	blockReader, blockWriter := blocksIO(db, logger)
 	sentryControlServer, err := sentry.NewMultiClient(
 		db,
 		"",
@@ -1546,7 +1540,10 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		panic(err)
 	}
 
-	stages := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &shards.Notifications{}, nil, blockReader, agg, nil, logger)
+	notifications := &shards.Notifications{}
+	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, db, notifications.Events, logger)
+
+	stages := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, logger)
 	sync := stagedsync.New(stages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger)
 
 	miner := stagedsync.NewMiningState(&cfg.Miner)

@@ -16,6 +16,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
@@ -83,7 +84,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
@@ -153,7 +153,7 @@ type Ethereum struct {
 	blockWriter             *blockio.BlockWriter
 
 	agg            *libstate.AggregatorV3
-	blockSnapshots *snapshotsync.RoSnapshots
+	blockSnapshots *freezeblocks.RoSnapshots
 	logger         log.Logger
 }
 
@@ -227,7 +227,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		logger: logger,
 	}
 	var (
-		allSnapshots *snapshotsync.RoSnapshots
+		allSnapshots *freezeblocks.RoSnapshots
 	)
 	blockReader, blockWriter, allSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config.Snapshot, config.HistoryV3, logger)
 	if err != nil {
@@ -615,8 +615,9 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		return nil, err
 	}
 
+	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, backend.notifications.Events, logger)
 	backend.stagedSync, err = stages3.NewStagedSync(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config,
-		backend.sentriesClient, backend.notifications, backend.downloaderClient, backend.agg, backend.forkValidator, logger, backend.blockReader, backend.blockWriter)
+		backend.sentriesClient, backend.notifications, backend.downloaderClient, backend.agg, backend.forkValidator, logger, backend.blockReader, backend.blockWriter, blockRetire)
 	if err != nil {
 		return nil, err
 	}
@@ -893,13 +894,13 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 	return err
 }
 
-func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig ethconfig.Snapshot, histV3 bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
-	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap, logger)
+func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig ethconfig.BlocksFreezing, histV3 bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *libstate.AggregatorV3, error) {
+	allSnapshots := freezeblocks.NewRoSnapshots(snConfig, dirs.Snap, logger)
 	var err error
 	if !snConfig.NoDownloader {
 		allSnapshots.OptimisticalyReopenWithDB(db)
 	}
-	blockReader := snapshotsync.NewBlockReader(allSnapshots)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots)
 	blockWriter := blockio.NewBlockWriter(histV3)
 
 	dir.MustExist(dirs.SnapHistory)

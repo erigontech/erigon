@@ -106,8 +106,8 @@ func SpawnStageHeaders(
 		}
 		defer tx.Rollback()
 	}
-	if initialCycle && cfg.blockReader != nil && cfg.blockReader.Snapshots() != nil && cfg.blockReader.Snapshots().Cfg().Enabled {
-		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader.Snapshots().BlocksAvailable(), cfg.blockReader); err != nil {
+	if initialCycle && cfg.blockReader.FreezingCfg().Enabled {
+		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader); err != nil {
 			return err
 		}
 	}
