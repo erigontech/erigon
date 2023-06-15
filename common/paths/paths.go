@@ -96,6 +96,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return networkDataDirCheckingLegacy(datadir, "gnosis")
 	case networkname.ChiadoChainName:
 		return networkDataDirCheckingLegacy(datadir, "chiado")
+	case networkname.GnosisWithdrawalsDevnet6Name:
+		return networkDataDirCheckingLegacy(datadir, "gnosis_withdrawals_devnet_6")
 
 	default:
 		return datadir
