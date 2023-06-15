@@ -45,7 +45,9 @@ func NewRemoteBackend(client remote.ETHBACKENDClient, db kv.RoDB, blockReader se
 		blockReader:      blockReader,
 	}
 }
-
+func (back *RemoteBackend) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
+	panic("not implemented")
+}
 func (back *RemoteBackend) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	panic("not implemented")
 }
