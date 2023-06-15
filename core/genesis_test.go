@@ -40,7 +40,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 			panic(err)
 		}
 		blockWriter := blockio.NewBlockWriter(histV3)
-		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, "", logger, blockWriter)
+		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, "", logger)
 		require.NoError(t, err)
 		expect := params.GenesisHashByChainName(network)
 		require.NotNil(t, expect, network)
@@ -92,13 +92,13 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	}
 	blockWriter := blockio.NewBlockWriter(histV3)
 	genesis := core.GenesisBlockByChainName(networkname.MainnetChainName)
-	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger, blockWriter)
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger, blockWriter)
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger)
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
