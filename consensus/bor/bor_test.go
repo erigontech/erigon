@@ -26,25 +26,44 @@ import (
 )
 
 type test_heimdall struct {
-	lastEndBlock uint64
+	currentSpan  *span.HeimdallSpan
 	chainConfig  *chain.Config
 	validatorSet *valset.ValidatorSet
+	spans        map[uint64]*span.HeimdallSpan
+}
+
+func newTestHeimdall(chainConfig *chain.Config) *test_heimdall {
+	return &test_heimdall{nil, chainConfig, nil, map[uint64]*span.HeimdallSpan{}}
 }
 
 func (h test_heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*clerk.EventRecordWithTime, error) {
-	return nil, fmt.Errorf("TODO")
+	return nil, nil
 }
 
 func (h *test_heimdall) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan, error) {
-	var startBlock uint64
 
-	if h.lastEndBlock == 0 {
-		startBlock = 256
-	} else {
-		startBlock = h.lastEndBlock + 1
+	if span, ok := h.spans[spanID]; ok {
+		h.currentSpan = span
+		return span, nil
 	}
 
-	h.lastEndBlock = startBlock + (100 * h.chainConfig.Bor.CalculateSprint(startBlock)) - 1
+	var nextSpan = span.Span{
+		ID: spanID,
+	}
+
+	if h.currentSpan == nil || spanID == 0 {
+		nextSpan.StartBlock = 1 //256
+	} else {
+		if spanID != h.currentSpan.ID+1 {
+			return nil, fmt.Errorf("Can't initialize span: non consecutive span")
+		}
+
+		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
+	}
+
+	nextSpan.EndBlock = nextSpan.StartBlock + (100 * h.chainConfig.Bor.CalculateSprint(nextSpan.StartBlock)) - 1
+
+	// TODO we should use a subset here - see: https://wiki.polygon.technology/docs/pos/bor/
 
 	selectedProducers := make([]valset.Validator, len(h.validatorSet.Validators))
 
@@ -52,15 +71,24 @@ func (h *test_heimdall) Span(ctx context.Context, spanID uint64) (*span.Heimdall
 		selectedProducers[i] = *v
 	}
 
-	return &span.HeimdallSpan{
-		Span: span.Span{
-			StartBlock: startBlock,
-			EndBlock:   h.lastEndBlock,
-		},
+	h.currentSpan = &span.HeimdallSpan{
+		Span:              nextSpan,
 		ValidatorSet:      *h.validatorSet,
 		SelectedProducers: selectedProducers,
 		ChainID:           h.chainConfig.ChainID.String(),
-	}, nil
+	}
+
+	h.spans[h.currentSpan.ID] = h.currentSpan
+
+	return h.currentSpan, nil
+}
+
+func (h test_heimdall) currentSprintLength() int {
+	if h.currentSpan != nil {
+		return int(h.chainConfig.Bor.CalculateSprint(h.currentSpan.StartBlock))
+	}
+
+	return int(h.chainConfig.Bor.CalculateSprint(256))
 }
 
 func (h test_heimdall) FetchCheckpoint(ctx context.Context, number int64) (*checkpoint.Checkpoint, error) {
@@ -81,16 +109,15 @@ func (g test_genesisContract) CommitState(event *clerk.EventRecordWithTime, sysc
 }
 
 func (g test_genesisContract) LastStateId(syscall consensus.SystemCall) (*big.Int, error) {
-	return nil, fmt.Errorf("TODO")
+	return big.NewInt(0), nil
 }
 
 type headerReader struct {
-	sentry *stages.MockSentry
-	parent *types.Block
+	validator validator
 }
 
 func (r headerReader) Config() *chain.Config {
-	return r.sentry.ChainConfig
+	return r.validator.ChainConfig
 }
 
 func (r headerReader) CurrentHeader() *types.Header {
@@ -98,18 +125,13 @@ func (r headerReader) CurrentHeader() *types.Header {
 }
 
 func (r headerReader) GetHeader(_ libcommon.Hash, blockNo uint64) *types.Header {
-	if r.parent != nil {
-		if r.parent.NumberU64() == blockNo {
-			return r.parent.Header()
-		}
-	}
-	return nil
+	return r.GetHeaderByNumber(blockNo)
 }
 
 func (r headerReader) GetHeaderByNumber(blockNo uint64) *types.Header {
-	if r.parent != nil {
-		if r.parent.NumberU64() == blockNo {
-			return r.parent.Header()
+	if r.validator.blocks != nil {
+		if block, ok := r.validator.blocks[blockNo]; ok {
+			return block.Header()
 		}
 	}
 	return nil
@@ -123,13 +145,85 @@ func (r headerReader) GetTd(libcommon.Hash, uint64) *big.Int {
 	return nil
 }
 
-func newValidator(t *testing.T, heimdall *test_heimdall) *stages.MockSentry {
+type spanner struct {
+	*span.ChainSpanner
+	currentSpan span.Span
+}
+
+func (c spanner) GetCurrentSpan(_ consensus.SystemCall) (*span.Span, error) {
+	return &c.currentSpan, nil
+}
+
+func (c spanner) CommitSpan(heimdallSpan span.HeimdallSpan, syscall consensus.SystemCall) error {
+	c.currentSpan = heimdallSpan.Span
+	return nil
+}
+
+type validator struct {
+	*stages.MockSentry
+	heimdall *test_heimdall
+	blocks   map[uint64]*types.Block
+}
+
+func (v validator) generateChain(length int) (*core.ChainPack, error) {
+	return core.GenerateChain(v.ChainConfig, v.Genesis, v.Engine, v.DB, length, func(i int, block *core.BlockGen) {
+		v.blocks[block.GetParent().NumberU64()] = block.GetParent()
+	}, false)
+}
+
+func (v validator) IsProposer(block *types.Block) (bool, error) {
+	return v.Engine.(*bor.Bor).IsProposer(headerReader{v}, block)
+}
+
+func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
+	sealedBlocks := make([]*types.Block, 0, len(blocks))
+
+	sealResults := make(chan *types.Block)
+
+	hr := headerReader{v}
+
+	for _, block := range blocks {
+		header := block.HeaderNoCopy()
+
+		if err := v.Engine.Prepare(hr, header, nil); err != nil {
+			return nil, err
+		}
+
+		if parent := hr.GetHeaderByNumber(header.Number.Uint64() - 1); parent != nil {
+			header.ParentHash = parent.Hash()
+		}
+
+		if err := v.Engine.Seal(hr, block, sealResults, nil); err != nil {
+			return nil, err
+		}
+
+		sealedBlock := <-sealResults
+		v.blocks[sealedBlock.NumberU64()] = sealedBlock
+		sealedBlocks = append(sealedBlocks, sealedBlock)
+	}
+
+	return sealedBlocks, nil
+}
+
+func (v validator) verifyBlocks(blocks []*types.Block) error {
+	hr := headerReader{v}
+
+	for i, block := range blocks {
+		if err := v.Engine.VerifyHeader(hr, block.Header(), false); err != nil {
+			return fmt.Errorf("block %d: failed to verify: %w", i, err)
+		}
+	}
+
+	return nil
+}
+
+func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*types.Block) validator {
 	logger := log.Root()
 
 	bor := bor.New(
 		heimdall.chainConfig,
 		memdb.New(""),
-		span.NewChainSpanner(contract.ValidatorSet(), heimdall.chainConfig, false, logger),
+		spanner{span.NewChainSpanner(contract.ValidatorSet(), heimdall.chainConfig, false, logger), span.Span{}},
 		heimdall,
 		test_genesisContract{},
 		logger,
@@ -162,40 +256,108 @@ func newValidator(t *testing.T, heimdall *test_heimdall) *stages.MockSentry {
 		return crypto.Sign(crypto.Keccak256(message), validatorKey)
 	})
 
-	return stages.MockWithEverything(t, &types.Genesis{Config: heimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, false, false)
+	return validator{
+		stages.MockWithEverything(t, &types.Genesis{Config: heimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, false, false),
+		heimdall,
+		blocks,
+	}
 }
 
 func TestValidatorCreate(t *testing.T) {
-	newValidator(t, &test_heimdall{0, params.BorDevnetChainConfig, nil})
+	newValidator(t, newTestHeimdall(params.BorDevnetChainConfig), map[uint64]*types.Block{})
 }
 
 func TestVerifyHeader(t *testing.T) {
-	v := newValidator(t, &test_heimdall{0, params.BorDevnetChainConfig, nil})
+	v := newValidator(t, newTestHeimdall(params.BorDevnetChainConfig), map[uint64]*types.Block{})
 
-	hr := headerReader{v, nil}
-
-	chain, err := core.GenerateChain(v.ChainConfig, v.Genesis, v.Engine, v.DB, 1, func(i int, block *core.BlockGen) {
-		hr.parent = block.GetParent()
-		v.Engine.Prepare(hr, block.GetHeader(), nil)
-	}, false)
+	chain, err := v.generateChain(1)
 
 	if err != nil {
 		t.Fatalf("generate blocks failed: %v", err)
 	}
 
-	sealedBlocks := make(chan *types.Block)
-
-	err = v.Engine.Seal(hr, chain.Blocks[0], sealedBlocks, nil)
+	sealedBlocks, err := v.sealBlocks(chain.Blocks)
 
 	if err != nil {
 		t.Fatalf("seal block failed: %v", err)
 	}
 
-	sealedBlock := <-sealedBlocks
-
-	err = v.Engine.VerifyHeader(hr, sealedBlock.Header(), false)
+	err = v.verifyBlocks(sealedBlocks)
 
 	if err != nil {
-		t.Fatalf("verify header failed: %v", err)
+		t.Fatalf("verify blocks failed: %v", err)
+	}
+}
+
+func TestVerifyRun(t *testing.T) {
+	testVerify(t, 5, 8)
+}
+
+func TestVerifySprint(t *testing.T) {
+	testVerify(t, 10, int(params.BorDevnetChainConfig.Bor.CalculateSprint(256)))
+}
+func TestVerifySpan(t *testing.T) {
+	testVerify(t, 10, 4 /*100**/ *int(params.BorDevnetChainConfig.Bor.CalculateSprint(256)))
+}
+
+func testVerify(t *testing.T, noValidators int, chainLength int) {
+	log.Root().SetHandler(log.StderrHandler)
+
+	heimdall := newTestHeimdall(params.BorDevnetChainConfig)
+	blocks := map[uint64]*types.Block{}
+
+	validators := make([]validator, noValidators)
+
+	for i := 0; i < noValidators; i++ {
+		validators[i] = newValidator(t, heimdall, blocks)
+	}
+
+	chains := make([]*core.ChainPack, noValidators)
+
+	for i, v := range validators {
+		chain, err := v.generateChain(chainLength)
+
+		if err != nil {
+			t.Fatalf("generate blocks failed: %v", err)
+		}
+
+		chains[i] = chain
+	}
+
+	lastProposerIndex := -1
+
+	for bi := 0; bi < chainLength; bi++ {
+		for vi, v := range validators {
+			block := chains[vi].Blocks[bi]
+
+			isProposer, err := v.IsProposer(block)
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if isProposer {
+
+				if vi != lastProposerIndex {
+					sprintLen := params.BorDevnetChainConfig.Bor.CalculateSprint(block.NumberU64())
+					if block.NumberU64() > 1 && block.NumberU64()%sprintLen != 0 {
+						t.Fatalf("Unexpected sprint boundary at %d for: %d", bi, block.NumberU64())
+					}
+					lastProposerIndex = vi
+				}
+
+				sealedBlocks, err := v.sealBlocks([]*types.Block{block})
+
+				if err != nil {
+					t.Fatalf("seal block failed: %v", err)
+				}
+
+				err = v.verifyBlocks(sealedBlocks)
+
+				if err != nil {
+					t.Fatalf("verify blocks failed: %v", err)
+				}
+			}
+		}
 	}
 }
