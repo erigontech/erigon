@@ -113,12 +113,12 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1), nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCK 2
-	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2), nil); err != nil {
 		t.Fatal(err)
 	}
 	// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database

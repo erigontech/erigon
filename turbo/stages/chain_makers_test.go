@@ -93,7 +93,7 @@ func TestGenerateChain(t *testing.T) {
 	}
 
 	// Import the chain. This runs all block validation rules.
-	if err := m.InsertChain(chain); err != nil {
+	if err := m.InsertChain(chain, nil); err != nil {
 		fmt.Printf("insert error%v\n", err)
 		return
 	}

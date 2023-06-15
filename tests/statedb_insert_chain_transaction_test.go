@@ -54,7 +54,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 
 	incorrectBlock := types.NewBlock(&incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{&incorrectHeader}, TopBlock: incorrectBlock}
-	if err = m.InsertChain(incorrectChain); err == nil {
+	if err = m.InsertChain(incorrectChain, nil); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -69,7 +69,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err = m.InsertChain(chain); err != nil {
+	if err = m.InsertChain(chain, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -122,7 +122,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 
 	incorrectBlock := types.NewBlock(&incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{&incorrectHeader}, TopBlock: incorrectBlock}
-	if err = m.InsertChain(incorrectChain); err == nil {
+	if err = m.InsertChain(incorrectChain, nil); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -137,7 +137,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err = m.InsertChain(chain); err != nil {
+	if err = m.InsertChain(chain, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -184,7 +184,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 
 	incorrectBlock := types.NewBlock(&incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{&incorrectHeader}, TopBlock: incorrectBlock}
-	if err = m.InsertChain(incorrectChain); err == nil {
+	if err = m.InsertChain(incorrectChain, nil); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -199,7 +199,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err = m.InsertChain(chain); err != nil {
+	if err = m.InsertChain(chain, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -246,7 +246,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 
 	incorrectBlock := types.NewBlock(&incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{&incorrectHeader}, TopBlock: incorrectBlock}
-	if err = m.InsertChain(incorrectChain); err == nil {
+	if err = m.InsertChain(incorrectChain, nil); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -261,7 +261,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err = m.InsertChain(chain); err != nil {
+	if err = m.InsertChain(chain, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -308,7 +308,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	incorrectBlock := types.NewBlock(&incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{&incorrectHeader}, TopBlock: incorrectBlock}
 
-	if err = m.InsertChain(incorrectChain); err == nil {
+	if err = m.InsertChain(incorrectChain, nil); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -323,7 +323,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err = m.InsertChain(chain); err != nil {
+	if err = m.InsertChain(chain, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -368,7 +368,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1), nil); err != nil {
 		t.Fatal(err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
@@ -390,7 +390,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{&incorrectHeader}, TopBlock: incorrectBlock}
 
 	// BLOCK 2 - INCORRECT
-	if err = m.InsertChain(incorrectChain); err == nil {
+	if err = m.InsertChain(incorrectChain, nil); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -408,7 +408,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	require.NoError(t, err)
 
 	// BLOCK 2 - CORRECT
-	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -454,7 +454,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -473,7 +473,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	require.NoError(t, err)
 
 	// BLOCK 2
-	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2), nil); err != nil {
 		t.Fatal(err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
@@ -496,12 +496,12 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	incorrectBlock := types.NewBlock(&incorrectHeader, chain.Blocks[2].Transactions(), chain.Blocks[2].Uncles(), chain.Receipts[2], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{&incorrectHeader}, TopBlock: incorrectBlock}
 
-	if err = m.InsertChain(incorrectChain); err == nil {
+	if err = m.InsertChain(incorrectChain, nil); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 3
-	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
+	if err = m.InsertChain(chain.Slice(2, 3), nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -538,7 +538,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -557,7 +557,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	require.NoError(t, err)
 
 	// BLOCK 2
-	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -575,7 +575,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	require.NoError(t, err)
 
 	// BLOCK 3
-	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
+	if err = m.InsertChain(chain.Slice(2, 3), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -585,12 +585,12 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	incorrectBlock := types.NewBlock(&incorrectHeader, chain.Blocks[3].Transactions(), chain.Blocks[3].Uncles(), chain.Receipts[3], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{&incorrectHeader}, TopBlock: incorrectBlock}
 
-	if err = m.InsertChain(incorrectChain); err == nil {
+	if err = m.InsertChain(incorrectChain, nil); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 4
-	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
+	if err = m.InsertChain(chain.Slice(3, 4), nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -627,7 +627,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -645,7 +645,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	require.NoError(t, err)
 
 	// BLOCK 2
-	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -663,7 +663,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	require.NoError(t, err)
 
 	// BLOCK 3
-	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
+	if err = m.InsertChain(chain.Slice(2, 3), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -672,12 +672,12 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	incorrectHeader.Root = chain.Headers[1].Root
 	incorrectBlock := types.NewBlock(&incorrectHeader, chain.Blocks[3].Transactions(), chain.Blocks[3].Uncles(), chain.Receipts[3], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{&incorrectHeader}, TopBlock: incorrectBlock}
-	if err = m.InsertChain(incorrectChain); err == nil {
+	if err = m.InsertChain(incorrectChain, nil); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 4
-	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
+	if err = m.InsertChain(chain.Slice(3, 4), nil); err != nil {
 		t.Fatal(err)
 	}
 }

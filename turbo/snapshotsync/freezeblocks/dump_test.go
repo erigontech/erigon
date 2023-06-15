@@ -178,7 +178,7 @@ func createDumpTestKV(t *testing.T, chainSize int) *stages.MockSentry {
 		t.Error(err)
 	}
 	// Construct testing chain
-	if err = m.InsertChain(chain); err != nil {
+	if err = m.InsertChain(chain, nil); err != nil {
 		t.Error(err)
 	}
 
