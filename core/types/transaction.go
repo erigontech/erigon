@@ -185,13 +185,6 @@ func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 		return nil, fmt.Errorf("short input: %v", len(data))
 	}
 	switch data[0] {
-	case BlobTxType:
-		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
-		t := &SignedBlobTx{}
-		if err := t.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		return t, nil
 	case AccessListTxType:
 		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
 		t := &AccessListTx{}
@@ -202,6 +195,13 @@ func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 	case DynamicFeeTxType:
 		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
 		t := &DynamicFeeTransaction{}
+		if err := t.DecodeRLP(s); err != nil {
+			return nil, err
+		}
+		return t, nil
+	case BlobTxType:
+		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
+		t := &BlobTx{}
 		if err := t.DecodeRLP(s); err != nil {
 			return nil, err
 		}

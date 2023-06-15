@@ -306,7 +306,8 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 		}
 
 		body := job.body
-		signer := types.MakeSigner(config, job.blockNumber)
+		blockTime := uint64(0) // TODO(yperbasis) proper timestamp
+		signer := types.MakeSigner(config, job.blockNumber, blockTime)
 		job.senders = make([]byte, len(body.Transactions)*length.Addr)
 		for i, tx := range body.Transactions {
 			from, err := signer.SenderWithContext(cryptoContext, tx)

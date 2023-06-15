@@ -283,7 +283,7 @@ func initialState1() error {
 			GasLimit: 10000000,
 		}
 		// this code generates a log
-		signer = types.MakeSigner(params.AllProtocolChanges, 1)
+		signer = types.MakeSigner(params.AllProtocolChanges, 1, 0)
 	)
 	m := stages.MockWithGenesis(nil, gspec, key, false)
 	defer m.DB.Close()

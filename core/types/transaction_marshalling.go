@@ -107,24 +107,21 @@ func (tx DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&enc)
 }
 
-func toSignedBlobTxJSON(tx *SignedBlobTx) *txJSON {
+func toBlobTxJSON(tx *BlobTx) *txJSON {
 	var enc txJSON
 	// These are set for all tx types.
 	enc.Hash = tx.Hash()
 	enc.Type = hexutil.Uint64(tx.Type())
-	enc.ChainID = (*hexutil.Big)(tx.GetChainID().ToBig())
-	accessList := tx.GetAccessList()
-	enc.AccessList = &accessList
-	nonce := tx.GetNonce()
-	enc.Nonce = (*hexutil.Uint64)(&nonce)
-	gas := tx.GetGas()
-	enc.Gas = (*hexutil.Uint64)(&gas)
-	enc.FeeCap = (*hexutil.Big)(tx.GetFeeCap().ToBig())
-	enc.Tip = (*hexutil.Big)(tx.GetTip().ToBig())
-	enc.Value = (*hexutil.Big)(tx.GetValue().ToBig())
+	enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
+	enc.AccessList = &tx.AccessList
+	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
+	enc.Gas = (*hexutil.Uint64)(&tx.Gas)
+	enc.FeeCap = (*hexutil.Big)(tx.FeeCap.ToBig())
+	enc.Tip = (*hexutil.Big)(tx.Tip.ToBig())
+	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
 	enc.Data = (*hexutility.Bytes)(&tx.Data)
-	enc.To = tx.GetTo()
-	// enc.V = (*hexutil.Big)(tx.GetV().ToBig())
+	enc.To = tx.To
+	enc.V = (*hexutil.Big)(tx.V.ToBig())
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
 	enc.S = (*hexutil.Big)(tx.S.ToBig())
 	enc.MaxFeePerDataGas = (*hexutil.Big)(tx.MaxFeePerDataGas.ToBig())
@@ -132,12 +129,12 @@ func toSignedBlobTxJSON(tx *SignedBlobTx) *txJSON {
 	return &enc
 }
 
-func (tx SignedBlobTx) MarshalJSON() ([]byte, error) {
-	return json.Marshal(toSignedBlobTxJSON(&tx))
+func (tx BlobTx) MarshalJSON() ([]byte, error) {
+	return json.Marshal(toBlobTxJSON(&tx))
 }
 
 func (tx BlobTxWrapper) MarshalJSON() ([]byte, error) {
-	enc := toSignedBlobTxJSON(&tx.Tx)
+	enc := toBlobTxJSON(&tx.Tx)
 
 	enc.Blobs = tx.Blobs
 	enc.Commitments = tx.Commitments
