@@ -537,7 +537,6 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, borPenalties *[]Penalt
 			// on the cannonical chain according to milestones
 			borValidChain := validateReorg(hd.highestInDb, link.header)
 
-			fmt.Println("***** Validate Reorg *****", borValidChain)
 			if !borValidChain {
 				*borPenalties = append(*borPenalties, PenaltyItem{Penalty: BadBlockPenalty, PeerID: link.peerID})
 			}
