@@ -130,7 +130,7 @@ func (s *Service) ProcessCheckpoint(endBlockNum uint64, endBlockHash common.Hash
 	s.checkpointService.Process(endBlockNum, endBlockHash)
 }
 
-func (s *Service) IsValidChain(currentHeader *types.Header, chain []*types.Header) bool {
+func (s *Service) IsValidChain(currentHeader uint64, chain []*types.Header) bool {
 	checkpointBool := s.checkpointService.IsValidChain(currentHeader, chain)
 	if !checkpointBool {
 		return checkpointBool
@@ -175,18 +175,16 @@ func splitChain(current uint64, chain []*types.Header) ([]*types.Header, []*type
 	return pastChain, futureChain
 }
 
-func isValidChain(currentHeader *types.Header, chain []*types.Header, doExist bool, number uint64, hash common.Hash, interval uint64) bool {
+func isValidChain(currentHeader uint64, chain []*types.Header, doExist bool, number uint64, hash common.Hash, interval uint64) bool {
 	// Check if we have milestone to validate incoming chain in memory
 	if !doExist {
 		// We don't have any entry, no additional validation will be possible
 		return true
 	}
 
-	current := currentHeader.Number.Uint64()
-
 	// Check if imported chain is less than whitelisted number
 	if chain[len(chain)-1].Number.Uint64() < number {
-		if current >= number { //If current tip of the chain is greater than whitelist number then return false
+		if currentHeader >= number { //If current tip of the chain is greater than whitelist number then return false
 			return false
 		} else {
 			return true
@@ -194,7 +192,7 @@ func isValidChain(currentHeader *types.Header, chain []*types.Header, doExist bo
 	}
 
 	// Split the chain into past and future chain
-	pastChain, _ := splitChain(current, chain)
+	pastChain, _ := splitChain(currentHeader, chain)
 
 	// Iterate over the chain and validate against the last milestone
 	// It will handle all cases when the incoming chain has atleast one milestone

@@ -52,7 +52,7 @@ type milestoneService interface {
 
 // IsValidChain checks the validity of chain by comparing it
 // against the local milestone entries
-func (m *milestone) IsValidChain(currentHeader *types.Header, chain []*types.Header) bool {
+func (m *milestone) IsValidChain(currentHeader uint64, chain []*types.Header) bool {
 	//Checking for the milestone flag
 	if !flags.Milestone {
 		return true
