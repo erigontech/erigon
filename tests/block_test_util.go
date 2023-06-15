@@ -116,7 +116,7 @@ func (bt *BlockTest) Run(t *testing.T, _ bool) error {
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(config, log.New())
 	m := stages.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
 
-	bt.br, _ = m.NewBlocksIO()
+	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
 	if m.Genesis.Hash() != bt.json.Genesis.Hash {
 		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
@@ -307,7 +307,6 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 }
 
 func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *stages.MockSentry) error {
-	br, _ := m.NewBlocksIO()
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
 	bmap := make(map[libcommon.Hash]btBlock, len(bt.json.Blocks))
 	for _, b := range validBlocks {
@@ -318,7 +317,7 @@ func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m 
 	// block-by-block, so we can only validate imported headers after
 	// all blocks have been processed by BlockChain, as they may not
 	// be part of the longest chain until last block is imported.
-	for b, _ := br.CurrentBlock(tx); b != nil && b.NumberU64() != 0; {
+	for b, _ := m.BlockReader.CurrentBlock(tx); b != nil && b.NumberU64() != 0; {
 		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
 			return fmt.Errorf("imported block header validation failed: %w", err)
 		}
@@ -326,7 +325,7 @@ func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m 
 		if number == nil {
 			break
 		}
-		b, _, _ = br.BlockWithSenders(m.Ctx, tx, b.ParentHash(), *number)
+		b, _, _ = m.BlockReader.BlockWithSenders(m.Ctx, tx, b.ParentHash(), *number)
 	}
 	return nil
 }

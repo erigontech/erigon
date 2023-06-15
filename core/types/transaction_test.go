@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"math/rand"
 	"reflect"
 	"testing"
 	"time"
@@ -84,15 +85,15 @@ var (
 
 	dynFeeTx = &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			ChainID: u256.Num1,
-			Nonce:   3,
-			To:      &testAddr,
-			Value:   uint256.NewInt(10),
-			Gas:     25000,
-			Data:    common.FromHex("5544"),
+			Nonce: 3,
+			To:    &testAddr,
+			Value: uint256.NewInt(10),
+			Gas:   25000,
+			Data:  common.FromHex("5544"),
 		},
-		Tip:    uint256.NewInt(1),
-		FeeCap: uint256.NewInt(1),
+		ChainID: u256.Num1,
+		Tip:     uint256.NewInt(1),
+		FeeCap:  uint256.NewInt(1),
 	}
 
 	signedDynFeeTx, _ = dynFeeTx.WithSignature(
@@ -577,4 +578,120 @@ func assertEqual(orig Transaction, cpy Transaction) error {
 		}
 	}
 	return nil
+}
+
+const N = 50
+
+var dummySignedBlobTxs = [N]*SignedBlobTx{}
+var addr [20]byte
+
+func randIntInRange(min, max int) int {
+	return (rand.Intn(max-min) + min)
+}
+
+func randAddr() *libcommon.Address {
+	var a libcommon.Address
+	for j := 0; j < 20; j++ {
+		a[j] = byte(rand.Intn(255))
+	}
+	return &a
+}
+
+func randHash() libcommon.Hash {
+	var h libcommon.Hash
+	for i := 0; i < 32; i++ {
+		h[i] = byte(rand.Intn(255))
+	}
+	return h
+}
+
+func randHashes(n int) []libcommon.Hash {
+	h := make([]libcommon.Hash, n)
+	for i := 0; i < n; i++ {
+		h[i] = randHash()
+	}
+	return h
+}
+
+func randAccessList() types2.AccessList {
+	size := randIntInRange(4, 10)
+	var result types2.AccessList
+	for i := 0; i < size; i++ {
+		var tup types2.AccessTuple
+
+		tup.Address = *randAddr()
+		tup.StorageKeys = append(tup.StorageKeys, randHash())
+		result = append(result, tup)
+	}
+	return result
+}
+
+func randData() []byte {
+	data := make([]byte, 0, (1 << 16))
+	for j := 0; j < rand.Intn(1<<16); j++ {
+		data = append(data, byte(rand.Intn(255)))
+	}
+	return data
+}
+
+func newRandSignedBlobTx() *SignedBlobTx {
+	stx := &SignedBlobTx{
+		ChainID:              uint256.NewInt(rand.Uint64()),
+		Nonce:                rand.Uint64(),
+		MaxPriorityFeePerGas: uint256.NewInt(rand.Uint64()),
+		MaxFeePerGas:         uint256.NewInt(rand.Uint64()),
+		Gas:                  rand.Uint64(),
+		To:                   randAddr(),
+		Value:                uint256.NewInt(rand.Uint64()),
+		Data:                 randData(),
+		AccessList:           randAccessList(),
+
+		MaxFeePerDataGas:    uint256.NewInt(rand.Uint64()),
+		BlobVersionedHashes: randHashes(randIntInRange(5, 10)),
+
+		YParity: rand.Intn(2) == 1,
+		R:       *uint256.NewInt(rand.Uint64()),
+		S:       *uint256.NewInt(rand.Uint64()),
+	}
+	return stx
+}
+
+func printSTX(stx *SignedBlobTx) {
+	fmt.Println("--SignedBlobTx")
+	fmt.Printf("ChainID: %v\n", stx.ChainID)
+	fmt.Printf("Nonce: %v\n", stx.Nonce)
+	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.MaxPriorityFeePerGas)
+	fmt.Printf("MaxFeePerGas: %v\n", stx.MaxFeePerGas)
+	fmt.Printf("Gas: %v\n", stx.Gas)
+	fmt.Printf("To: %v\n", stx.To)
+	fmt.Printf("Value: %v\n", stx.Value)
+	fmt.Printf("Data: %v\n", stx.Data)
+	fmt.Printf("AccessList: %v\n", stx.AccessList)
+	fmt.Printf("MaxFeePerDataGas: %v\n", stx.MaxFeePerDataGas)
+	fmt.Printf("BlobVersionedHashes: %v\n", stx.BlobVersionedHashes)
+	fmt.Printf("YParity: %v\n", stx.YParity)
+	fmt.Printf("R: %v\n", stx.R)
+	fmt.Printf("S: %v\n", stx.S)
+	fmt.Println("-----")
+	fmt.Println()
+}
+
+func populateSignedBlobTxs() {
+	for i := 0; i < N; i++ {
+		dummySignedBlobTxs[i] = newRandSignedBlobTx()
+	}
+}
+
+func TestSignedBlobTxEncodeDecode(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	populateSignedBlobTxs()
+	for i := 0; i < N; i++ {
+		// printSTX(dummySignedBlobTxs[i])
+
+		tx, err := encodeDecodeBinary(dummySignedBlobTxs[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertEqual(dummySignedBlobTxs[i], tx)
+	}
 }

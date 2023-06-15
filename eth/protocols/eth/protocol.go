@@ -204,12 +204,12 @@ func (tp TransactionsPacket) EncodeRLP(w io.Writer) error {
 			txLen = t.EncodingSize()
 		}
 		if txLen >= 56 {
-			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+			txsLen += libcommon.BitLenToByteLen(bits.Len(uint(txLen)))
 		}
 		txsLen += txLen
 	}
 	if txsLen >= 56 {
-		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+		encodingSize += libcommon.BitLenToByteLen(bits.Len(uint(txsLen)))
 	}
 	encodingSize += txsLen
 	// encode Transactions
@@ -322,7 +322,7 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	encodingSize++
 	blockLen := nbp.Block.EncodingSize()
 	if blockLen >= 56 {
-		encodingSize += (bits.Len(uint(blockLen)) + 7) / 8
+		encodingSize += libcommon.BitLenToByteLen(bits.Len(uint(blockLen)))
 	}
 	encodingSize += blockLen
 	// size of TD
@@ -331,7 +331,7 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	if nbp.TD != nil {
 		tdBitLen = nbp.TD.BitLen()
 		if tdBitLen >= 8 {
-			tdLen = (tdBitLen + 7) / 8
+			tdLen = libcommon.BitLenToByteLen(tdBitLen)
 		}
 	}
 	encodingSize += tdLen
@@ -519,12 +519,12 @@ func (ptp PooledTransactionsPacket) EncodeRLP(w io.Writer) error {
 			txLen = t.EncodingSize()
 		}
 		if txLen >= 56 {
-			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+			txsLen += libcommon.BitLenToByteLen(bits.Len(uint(txLen)))
 		}
 		txsLen += txLen
 	}
 	if txsLen >= 56 {
-		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+		encodingSize += libcommon.BitLenToByteLen(bits.Len(uint(txsLen)))
 	}
 	encodingSize += txsLen
 	// encode Transactions
@@ -593,12 +593,12 @@ func (ptp66 PooledTransactionsPacket66) EncodeRLP(w io.Writer) error {
 			txLen = t.EncodingSize()
 		}
 		if txLen >= 56 {
-			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+			txsLen += libcommon.BitLenToByteLen(bits.Len(uint(txLen)))
 		}
 		txsLen += txLen
 	}
 	if txsLen >= 56 {
-		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+		encodingSize += libcommon.BitLenToByteLen(bits.Len(uint(txsLen)))
 	}
 	encodingSize += txsLen
 	var b [33]byte

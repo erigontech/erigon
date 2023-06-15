@@ -138,3 +138,9 @@ func NewLatestStateReader(tx kv.Getter) state.StateReader {
 	}
 	return state.NewPlainStateReader(tx)
 }
+func NewLatestStateWriter(tx kv.RwTx, blockNum uint64) state.StateWriter {
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement me")
+	}
+	return state.NewPlainStateWriter(tx, tx, blockNum)
+}

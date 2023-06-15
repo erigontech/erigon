@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -31,7 +31,7 @@ func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
 func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
 
-func (hr *HistoryReaderV3) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
+func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, ok, err := hr.ttx.DomainGetAsOf(kv.AccountsDomain, address.Bytes(), nil, hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
@@ -49,7 +49,7 @@ func (hr *HistoryReaderV3) ReadAccountData(address libcommon.Address) (*accounts
 	return &a, nil
 }
 
-func (hr *HistoryReaderV3) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
+func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	var acc []byte
 	if ethconfig.EnableHistoryV4InTest {
 		acc = address.Bytes()
@@ -65,7 +65,7 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address libcommon.Address, incarna
 	return enc, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
+func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	if codeHash == emptyCodeHashH {
 		return nil, nil
 	}
@@ -76,12 +76,12 @@ func (hr *HistoryReaderV3) ReadAccountCode(address libcommon.Address, incarnatio
 	return code, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
+func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
 	enc, _, err := hr.ttx.DomainGetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	return len(enc), err
 }
 
-func (hr *HistoryReaderV3) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
+func (hr *HistoryReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	enc, ok, err := hr.ttx.DomainGetAsOf(kv.AccountsDomain, address.Bytes(), nil, hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
@@ -106,7 +106,7 @@ func (hr *HistoryReaderV3) ReadAccountIncarnation(address libcommon.Address) (ui
 }
 
 /*
-func (s *HistoryReaderV3) ForEachStorage(addr libcommon.Address, startLocation libcommon.Hash, cb func(key, seckey libcommon.Hash, value uint256.Int) bool, maxResults int) error {
+func (s *HistoryReaderV3) ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
 	acc, err := s.ReadAccountData(addr)
 	if err != nil {
 		return err
@@ -143,7 +143,7 @@ func (s *HistoryReaderV3) ForEachStorage(addr libcommon.Address, startLocation l
 	}
 	numDeletes := st.Len() - overrideCounter
 
-	var lastKey libcommon.Hash
+	var lastKey common.Hash
 	iterator := s.ac.IterateStorageHistory(startLocation.Bytes(), nil, s.txNum)
 	for iterator.HasNext() {
 		k, vs, p := iterator.Next()
@@ -191,7 +191,7 @@ func (s *HistoryReaderV3) ForEachStorage(addr libcommon.Address, startLocation l
 */
 
 /*
-func (s *PlainState) ForEachStorage(addr libcommon.Address, startLocation libcommon.Hash, cb func(key, seckey libcommon.Hash, value uint256.Int) bool, maxResults int) error {
+func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
 	st := btree.New(16)
 	var k [length.Addr + length.Incarnation + length.Hash]byte
 	copy(k[:], addr[:])
@@ -206,7 +206,7 @@ func (s *PlainState) ForEachStorage(addr libcommon.Address, startLocation libcom
 	}
 	binary.BigEndian.PutUint64(k[length.Addr:], acc.Incarnation)
 	copy(k[length.Addr+length.Incarnation:], startLocation[:])
-	var lastKey libcommon.Hash
+	var lastKey common.Hash
 	overrideCounter := 0
 	min := &storageItem{key: startLocation}
 	if t, ok := s.storage[addr]; ok {

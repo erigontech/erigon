@@ -107,10 +107,6 @@ type Header struct {
 	VerkleKeyVals []verkle.KeyValuePair
 }
 
-func bitsToBytes(bitLen int) (byteLen int) {
-	return (bitLen + 7) / 8
-}
-
 func (h *Header) EncodingSize() int {
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */
@@ -139,7 +135,7 @@ func (h *Header) EncodingSize() int {
 		}
 	default:
 		if len(h.Extra) >= 56 {
-			encodingSize += bitsToBytes(bits.Len(uint(len(h.Extra))))
+			encodingSize += libcommon.BitLenToByteLen(bits.Len(uint(len(h.Extra))))
 		}
 		encodingSize += len(h.Extra)
 	}
@@ -147,7 +143,7 @@ func (h *Header) EncodingSize() int {
 	if len(h.AuRaSeal) != 0 {
 		encodingSize += 1 + rlp.IntLenExcludingHead(h.AuRaStep) + 1 + len(h.AuRaSeal)
 		if len(h.AuRaSeal) >= 56 {
-			encodingSize += bitsToBytes(bits.Len(uint(len(h.AuRaSeal))))
+			encodingSize += libcommon.BitLenToByteLen(bits.Len(uint(len(h.AuRaSeal))))
 		}
 	} else {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
@@ -182,7 +178,7 @@ func (h *Header) EncodingSize() int {
 			}
 		default:
 			if len(h.VerkleProof) >= 56 {
-				encodingSize += bitsToBytes(bits.Len(uint(len(h.VerkleProof))))
+				encodingSize += libcommon.BitLenToByteLen(bits.Len(uint(len(h.VerkleProof))))
 			}
 			encodingSize += len(h.VerkleProof)
 		}
@@ -537,9 +533,10 @@ var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
 // Size returns the approximate memory used by all internal contents. It is used
 // to approximate and limit the memory consumption of various caches.
 func (h *Header) Size() common.StorageSize {
-	s := headerSize + common.StorageSize(len(h.Extra)+bitsToBytes(h.Difficulty.BitLen())+bitsToBytes(h.Number.BitLen()))
+	s := headerSize
+	s += common.StorageSize(len(h.Extra) + libcommon.BitLenToByteLen(h.Difficulty.BitLen()) + libcommon.BitLenToByteLen(h.Number.BitLen()))
 	if h.BaseFee != nil {
-		s += common.StorageSize(bitsToBytes(h.BaseFee.BitLen()))
+		s += common.StorageSize(libcommon.BitLenToByteLen(h.BaseFee.BitLen()))
 	}
 	if h.WithdrawalsHash != nil {
 		s += common.StorageSize(32)
@@ -653,7 +650,7 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 		txsLen += len(tx)
 	}
 	if txsLen >= 56 {
-		payloadSize += bitsToBytes(bits.Len(uint(txsLen)))
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(txsLen)))
 	}
 	payloadSize += txsLen
 
@@ -663,12 +660,12 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 		unclesLen++
 		uncleLen := uncle.EncodingSize()
 		if uncleLen >= 56 {
-			unclesLen += bitsToBytes(bits.Len(uint(uncleLen)))
+			unclesLen += libcommon.BitLenToByteLen(bits.Len(uint(uncleLen)))
 		}
 		unclesLen += uncleLen
 	}
 	if unclesLen >= 56 {
-		payloadSize += bitsToBytes(bits.Len(uint(unclesLen)))
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(unclesLen)))
 	}
 	payloadSize += unclesLen
 
@@ -679,12 +676,12 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 			withdrawalsLen++
 			withdrawalLen := withdrawal.EncodingSize()
 			if withdrawalLen >= 56 {
-				withdrawalLen += bitsToBytes(bits.Len(uint(withdrawalLen)))
+				withdrawalLen += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalLen)))
 			}
 			withdrawalsLen += withdrawalLen
 		}
 		if withdrawalsLen >= 56 {
-			payloadSize += bitsToBytes(bits.Len(uint(withdrawalsLen)))
+			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalsLen)))
 		}
 		payloadSize += withdrawalsLen
 	}
@@ -817,12 +814,12 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen 
 		unclesLen++
 		uncleLen := uncle.EncodingSize()
 		if uncleLen >= 56 {
-			unclesLen += bitsToBytes(bits.Len(uint(uncleLen)))
+			unclesLen += libcommon.BitLenToByteLen(bits.Len(uint(uncleLen)))
 		}
 		unclesLen += uncleLen
 	}
 	if unclesLen >= 56 {
-		payloadSize += bitsToBytes(bits.Len(uint(unclesLen)))
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(unclesLen)))
 	}
 	payloadSize += unclesLen
 
@@ -833,12 +830,12 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen 
 			withdrawalsLen++
 			withdrawalLen := withdrawal.EncodingSize()
 			if withdrawalLen >= 56 {
-				withdrawalLen += bitsToBytes(bits.Len(uint(withdrawalLen)))
+				withdrawalLen += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalLen)))
 			}
 			withdrawalsLen += withdrawalLen
 		}
 		if withdrawalsLen >= 56 {
-			payloadSize += bitsToBytes(bits.Len(uint(withdrawalsLen)))
+			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalsLen)))
 		}
 		payloadSize += withdrawalsLen
 	}
@@ -975,12 +972,12 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 			txLen = t.EncodingSize()
 		}
 		if txLen >= 56 {
-			txsLen += bitsToBytes(bits.Len(uint(txLen)))
+			txsLen += libcommon.BitLenToByteLen(bits.Len(uint(txLen)))
 		}
 		txsLen += txLen
 	}
 	if txsLen >= 56 {
-		payloadSize += bitsToBytes(bits.Len(uint(txsLen)))
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(txsLen)))
 	}
 	payloadSize += txsLen
 
@@ -990,12 +987,12 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 		unclesLen++
 		uncleLen := uncle.EncodingSize()
 		if uncleLen >= 56 {
-			unclesLen += bitsToBytes(bits.Len(uint(uncleLen)))
+			unclesLen += libcommon.BitLenToByteLen(bits.Len(uint(uncleLen)))
 		}
 		unclesLen += uncleLen
 	}
 	if unclesLen >= 56 {
-		payloadSize += bitsToBytes(bits.Len(uint(unclesLen)))
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(unclesLen)))
 	}
 	payloadSize += unclesLen
 
@@ -1006,12 +1003,12 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 			withdrawalsLen++
 			withdrawalLen := withdrawal.EncodingSize()
 			if withdrawalLen >= 56 {
-				withdrawalLen += bitsToBytes(bits.Len(uint(withdrawalLen)))
+				withdrawalLen += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalLen)))
 			}
 			withdrawalsLen += withdrawalLen
 		}
 		if withdrawalsLen >= 56 {
-			payloadSize += bitsToBytes(bits.Len(uint(withdrawalsLen)))
+			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalsLen)))
 		}
 		payloadSize += withdrawalsLen
 	}
@@ -1325,7 +1322,7 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 	payloadSize++
 	headerLen := bb.header.EncodingSize()
 	if headerLen >= 56 {
-		payloadSize += bitsToBytes(bits.Len(uint(headerLen)))
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(headerLen)))
 	}
 	payloadSize += headerLen
 
@@ -1335,12 +1332,12 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 		txsLen++
 		txLen := tx.EncodingSize()
 		if txLen >= 56 {
-			txsLen += bitsToBytes(bits.Len(uint(txLen)))
+			txsLen += libcommon.BitLenToByteLen(bits.Len(uint(txLen)))
 		}
 		txsLen += txLen
 	}
 	if txsLen >= 56 {
-		payloadSize += bitsToBytes(bits.Len(uint(txsLen)))
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(txsLen)))
 	}
 	payloadSize += txsLen
 
@@ -1350,12 +1347,12 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 		unclesLen++
 		uncleLen := uncle.EncodingSize()
 		if uncleLen >= 56 {
-			unclesLen += bitsToBytes(bits.Len(uint(uncleLen)))
+			unclesLen += libcommon.BitLenToByteLen(bits.Len(uint(uncleLen)))
 		}
 		unclesLen += uncleLen
 	}
 	if unclesLen >= 56 {
-		payloadSize += bitsToBytes(bits.Len(uint(unclesLen)))
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(unclesLen)))
 	}
 	payloadSize += unclesLen
 
@@ -1366,12 +1363,12 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 			withdrawalsLen++
 			withdrawalLen := withdrawal.EncodingSize()
 			if withdrawalLen >= 56 {
-				withdrawalLen += bitsToBytes(bits.Len(uint(withdrawalLen)))
+				withdrawalLen += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalLen)))
 			}
 			withdrawalsLen += withdrawalLen
 		}
 		if withdrawalsLen >= 56 {
-			payloadSize += bitsToBytes(bits.Len(uint(withdrawalsLen)))
+			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(withdrawalsLen)))
 		}
 		payloadSize += withdrawalsLen
 	}

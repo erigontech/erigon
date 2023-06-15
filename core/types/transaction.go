@@ -160,9 +160,6 @@ func DecodeWrappedTransaction(data []byte) (Transaction, error) {
 	}
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 
-		// EIP-4844 tx differs from previous types of transactions in network
-		// encoding. It's SSZ encoded and includes blobs and kzgs.
-		// Previous types have no different encoding.
 		return UnmarshalWrappedTransactionFromBinary(data)
 	}
 	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
@@ -189,8 +186,9 @@ func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 	}
 	switch data[0] {
 	case BlobTxType:
+		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
 		t := &SignedBlobTx{}
-		if err := DecodeSSZ(data[1:], t); err != nil {
+		if err := t.DecodeRLP(s); err != nil {
 			return nil, err
 		}
 		return t, nil
@@ -225,8 +223,9 @@ func UnmarshalWrappedTransactionFromBinary(data []byte) (Transaction, error) {
 	if data[0] != BlobTxType {
 		return UnmarshalTransactionFromBinary(data)
 	}
+	s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
 	t := &BlobTxWrapper{}
-	if err := DecodeSSZ(data[1:], t); err != nil {
+	if err := t.DecodeRLP(s); err != nil {
 		return nil, err
 	}
 	return t, nil

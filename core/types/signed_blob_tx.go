@@ -1,407 +1,80 @@
 package types
 
 import (
-	"bytes"
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"math/bits"
 
 	"github.com/holiman/uint256"
-	"github.com/protolambda/ztyp/codec"
-	"github.com/protolambda/ztyp/conv"
-	. "github.com/protolambda/ztyp/view"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-type ECDSASignature struct {
-	V Uint8View
-	R Uint256View
-	S Uint256View
-}
-
-func (sig *ECDSASignature) GetV() *uint256.Int {
-	bytes := uint256.Int([4]uint64{uint64(sig.V), 0, 0, 0})
-	return &bytes
-}
-
-func (sig *ECDSASignature) GetR() *uint256.Int {
-	r := uint256.Int(sig.R)
-	return &r
-}
-
-func (sig *ECDSASignature) GetS() *uint256.Int {
-	s := uint256.Int(sig.S)
-	return &s
-}
-
-func (sig *ECDSASignature) Deserialize(dr *codec.DecodingReader) error {
-	return dr.FixedLenContainer(&sig.V, &sig.R, &sig.S)
-}
-
-func (sig *ECDSASignature) Serialize(w *codec.EncodingWriter) error {
-	return w.FixedLenContainer(&sig.V, &sig.R, &sig.S)
-}
-
-func (*ECDSASignature) ByteLength() uint64 {
-	return 1 + 32 + 32
-}
-
-func (*ECDSASignature) FixedLength() uint64 {
-	return 1 + 32 + 32
-}
-
-type AddressSSZ libcommon.Address
-
-func (addr *AddressSSZ) Deserialize(dr *codec.DecodingReader) error {
-	if addr == nil {
-		return errors.New("cannot deserialize into nil Address")
-	}
-	_, err := dr.Read(addr[:])
-	return err
-}
-
-func (addr *AddressSSZ) Serialize(w *codec.EncodingWriter) error {
-	return w.Write(addr[:])
-}
-
-func (*AddressSSZ) ByteLength() uint64 {
-	return 20
-}
-
-func (*AddressSSZ) FixedLength() uint64 {
-	return 20
-}
-
-// AddressOptionalSSZ implements Union[None, Address]
-type AddressOptionalSSZ struct {
-	Address *AddressSSZ
-}
-
-func (ao *AddressOptionalSSZ) Deserialize(dr *codec.DecodingReader) error {
-	if ao == nil {
-		return errors.New("cannot deserialize into nil Address")
-	}
-	if v, err := dr.ReadByte(); err != nil {
-		return err
-	} else if v == 0 {
-		ao.Address = nil
-		return nil
-	} else if v == 1 {
-		ao.Address = new(AddressSSZ)
-		if err := ao.Address.Deserialize(dr); err != nil {
-			return err
-		}
-		return nil
-	} else {
-		return fmt.Errorf("invalid union selector for Union[None, Address]: %d", v)
-	}
-}
-
-func (ao *AddressOptionalSSZ) Serialize(w *codec.EncodingWriter) error {
-	if ao.Address == nil {
-		return w.WriteByte(0)
-	} else {
-		if err := w.WriteByte(1); err != nil {
-			return err
-		}
-		return ao.Address.Serialize(w)
-	}
-}
-
-func (ao *AddressOptionalSSZ) ByteLength() uint64 {
-	if ao.Address == nil {
-		return 1
-	} else {
-		return 1 + 20
-	}
-}
-
-func (*AddressOptionalSSZ) FixedLength() uint64 {
-	return 0
-}
-
-type TxDataView []byte
-
-func (tdv *TxDataView) Deserialize(dr *codec.DecodingReader) error {
-	return dr.ByteList((*[]byte)(tdv), MAX_CALLDATA_SIZE)
-}
-
-func (tdv TxDataView) Serialize(w *codec.EncodingWriter) error {
-	return w.Write(tdv)
-}
-
-func (tdv TxDataView) ByteLength() (out uint64) {
-	return uint64(len(tdv))
-}
-
-func (tdv *TxDataView) FixedLength() uint64 {
-	return 0
-}
-
-func (tdv TxDataView) MarshalText() ([]byte, error) {
-	return conv.BytesMarshalText(tdv[:])
-}
-
-func (tdv TxDataView) String() string {
-	return "0x" + hex.EncodeToString(tdv[:])
-}
-
-func (tdv *TxDataView) UnmarshalText(text []byte) error {
-	if tdv == nil {
-		return errors.New("cannot decode into nil blob data")
-	}
-	return conv.DynamicBytesUnmarshalText((*[]byte)(tdv), text)
-}
-
-func ReadHashes(dr *codec.DecodingReader, hashes *[]libcommon.Hash, length uint64) error {
-	if uint64(len(*hashes)) != length {
-		// re-use space if available (for recycling old state objects)
-		if uint64(cap(*hashes)) >= length {
-			*hashes = (*hashes)[:length]
-		} else {
-			*hashes = make([]libcommon.Hash, length)
-		}
-	} else if *hashes == nil {
-		// make sure the output is never nil
-		*hashes = []libcommon.Hash{}
-	}
-	dst := *hashes
-	for i := uint64(0); i < length; i++ {
-		if _, err := dr.Read(dst[i][:]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func ReadHashesLimited(dr *codec.DecodingReader, hashes *[]libcommon.Hash, limit uint64) error {
-	scope := dr.Scope()
-	if scope%32 != 0 {
-		return fmt.Errorf("bad deserialization scope, cannot decode hashes list")
-	}
-	length := scope / 32
-	if length > limit {
-		return fmt.Errorf("too many hashes: %d > %d", length, limit)
-	}
-	return ReadHashes(dr, hashes, length)
-}
-
-func WriteHashes(ew *codec.EncodingWriter, hashes []libcommon.Hash) error {
-	for i := range hashes {
-		if err := ew.Write(hashes[i][:]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-type VersionedHashesView []libcommon.Hash
-
-func (vhv *VersionedHashesView) Deserialize(dr *codec.DecodingReader) error {
-	return ReadHashesLimited(dr, (*[]libcommon.Hash)(vhv), MAX_VERSIONED_HASHES_LIST_SIZE)
-}
-
-func (vhv VersionedHashesView) Serialize(w *codec.EncodingWriter) error {
-	return WriteHashes(w, vhv)
-}
-
-func (vhv VersionedHashesView) ByteLength() (out uint64) {
-	return uint64(len(vhv)) * 32
-}
-
-func (vhv *VersionedHashesView) FixedLength() uint64 {
-	return 0 // it's a list, no fixed length
-}
-
-type StorageKeysView []libcommon.Hash
-
-func (skv *StorageKeysView) Deserialize(dr *codec.DecodingReader) error {
-	return ReadHashesLimited(dr, (*[]libcommon.Hash)(skv), MAX_ACCESS_LIST_STORAGE_KEYS)
-}
-
-func (skv StorageKeysView) Serialize(w *codec.EncodingWriter) error {
-	return WriteHashes(w, skv)
-}
-
-func (skv StorageKeysView) ByteLength() (out uint64) {
-	return uint64(len(skv)) * 32
-}
-
-func (skv *StorageKeysView) FixedLength() uint64 {
-	return 0 // it's a list, no fixed length
-}
-
-type AccessTupleView types2.AccessTuple
-
-func (atv *AccessTupleView) Deserialize(dr *codec.DecodingReader) error {
-	return dr.Container((*AddressSSZ)(&atv.Address), (*StorageKeysView)(&atv.StorageKeys))
-}
-
-func (atv *AccessTupleView) Serialize(w *codec.EncodingWriter) error {
-	return w.Container((*AddressSSZ)(&atv.Address), (*StorageKeysView)(&atv.StorageKeys))
-}
-
-func (atv *AccessTupleView) ByteLength() uint64 {
-	return codec.ContainerLength((*AddressSSZ)(&atv.Address), (*StorageKeysView)(&atv.StorageKeys))
-}
-
-func (atv *AccessTupleView) FixedLength() uint64 {
-	return 0
-}
-
-type AccessListView types2.AccessList
-
-func (alv *AccessListView) Deserialize(dr *codec.DecodingReader) error {
-	*alv = AccessListView([]types2.AccessTuple{})
-	return dr.List(func() codec.Deserializable {
-		i := len(*alv)
-		*alv = append(*alv, types2.AccessTuple{})
-		return (*AccessTupleView)(&((*alv)[i]))
-	}, 0, MAX_ACCESS_LIST_SIZE)
-}
-
-func (alv AccessListView) Serialize(w *codec.EncodingWriter) error {
-	return w.List(func(i uint64) codec.Serializable {
-		return (*AccessTupleView)(&alv[i])
-	}, 0, uint64(len(alv)))
-}
-
-func (alv AccessListView) ByteLength() (out uint64) {
-	for idx := range alv {
-		out += (*AccessTupleView)(&alv[idx]).ByteLength() + codec.OFFSET_SIZE
-	}
-	return
-}
-
-func (alv *AccessListView) FixedLength() uint64 {
-	return 0
-}
-
-type BlobTxMessage struct {
-	ChainID          Uint256View
-	Nonce            Uint64View
-	GasTipCap        Uint256View // a.k.a. maxPriorityFeePerGas
-	GasFeeCap        Uint256View // a.k.a. maxFeePerGas
-	Gas              Uint64View
-	To               AddressOptionalSSZ // nil means contract creation
-	Value            Uint256View
-	Data             TxDataView
-	AccessList       AccessListView
-	MaxFeePerDataGas Uint256View
-
-	BlobVersionedHashes VersionedHashesView
-}
-
-func (tx *BlobTxMessage) Deserialize(dr *codec.DecodingReader) error {
-	err := dr.Container(&tx.ChainID, &tx.Nonce, &tx.GasTipCap, &tx.GasFeeCap, &tx.Gas, &tx.To, &tx.Value, &tx.Data, &tx.AccessList, &tx.MaxFeePerDataGas, &tx.BlobVersionedHashes)
-	return err
-}
-
-func (tx *BlobTxMessage) Serialize(w *codec.EncodingWriter) error {
-	return w.Container(&tx.ChainID, &tx.Nonce, &tx.GasTipCap, &tx.GasFeeCap, &tx.Gas, &tx.To, &tx.Value, &tx.Data, &tx.AccessList, &tx.MaxFeePerDataGas, &tx.BlobVersionedHashes)
-}
-
-func (tx *BlobTxMessage) ByteLength() uint64 {
-	return codec.ContainerLength(&tx.ChainID, &tx.Nonce, &tx.GasTipCap, &tx.GasFeeCap, &tx.Gas, &tx.To, &tx.Value, &tx.Data, &tx.AccessList, &tx.MaxFeePerDataGas, &tx.BlobVersionedHashes)
-}
-
-func (tx *BlobTxMessage) FixedLength() uint64 {
-	return 0
-}
-
-// copy creates a deep copy of the transaction data and initializes all fields.
-func (tx *BlobTxMessage) copy() *BlobTxMessage {
-	cpy := &BlobTxMessage{
-		ChainID:             tx.ChainID,
-		Nonce:               tx.Nonce,
-		GasTipCap:           tx.GasTipCap,
-		GasFeeCap:           tx.GasFeeCap,
-		Gas:                 tx.Gas,
-		To:                  AddressOptionalSSZ{Address: (*AddressSSZ)(copyAddressPtr((*libcommon.Address)(tx.To.Address)))},
-		Value:               tx.Value,
-		Data:                common.CopyBytes(tx.Data),
-		AccessList:          make([]types2.AccessTuple, len(tx.AccessList)),
-		MaxFeePerDataGas:    tx.MaxFeePerDataGas,
-		BlobVersionedHashes: make([]libcommon.Hash, len(tx.BlobVersionedHashes)),
-	}
-	copy(cpy.AccessList, tx.AccessList)
-	copy(cpy.BlobVersionedHashes, tx.BlobVersionedHashes)
-
-	return cpy
-}
-
 type SignedBlobTx struct {
 	TransactionMisc
 
-	Message   BlobTxMessage
-	Signature ECDSASignature
+	ChainID              *uint256.Int
+	Nonce                uint64 // nonce of sender account
+	MaxPriorityFeePerGas *uint256.Int
+	MaxFeePerGas         *uint256.Int
+	Gas                  uint64
+	To                   *libcommon.Address `rlp:"nil"` // nil means contract creation
+	Value                *uint256.Int       // wei amount
+	Data                 []byte             // contract invocation input data
+	AccessList           types2.AccessList
+
+	MaxFeePerDataGas    *uint256.Int
+	BlobVersionedHashes []libcommon.Hash
+
+	YParity bool
+	R       uint256.Int
+	S       uint256.Int
 }
-
-var _ Transaction = &SignedBlobTx{}
-
-const (
-	MAX_CALLDATA_SIZE              = 1 << 24
-	MAX_ACCESS_LIST_SIZE           = 1 << 24
-	MAX_ACCESS_LIST_STORAGE_KEYS   = 1 << 24
-	MAX_VERSIONED_HASHES_LIST_SIZE = 1 << 24
-)
 
 // copy creates a deep copy of the transaction data and initializes all fields.
 func (stx SignedBlobTx) copy() *SignedBlobTx {
 	cpy := &SignedBlobTx{
-		Message:   *stx.Message.copy(),
-		Signature: stx.Signature,
+		TransactionMisc: TransactionMisc{
+			time: stx.time,
+		},
+		ChainID:              new(uint256.Int),
+		Nonce:                stx.Nonce,
+		MaxPriorityFeePerGas: new(uint256.Int),
+		MaxFeePerGas:         new(uint256.Int),
+		Gas:                  stx.Gas,
+		To:                   new(libcommon.Address),
+		Value:                stx.Value,
+		Data:                 common.CopyBytes(stx.Data),
+		AccessList:           make([]types2.AccessTuple, len(stx.AccessList)),
+		MaxFeePerDataGas:     stx.MaxFeePerDataGas,
+		BlobVersionedHashes:  make([]libcommon.Hash, len(stx.BlobVersionedHashes)),
 	}
-
+	if stx.ChainID != nil {
+		cpy.ChainID.Set(stx.ChainID)
+	}
+	if stx.MaxPriorityFeePerGas != nil {
+		cpy.MaxPriorityFeePerGas.Set(stx.MaxPriorityFeePerGas)
+	}
+	if stx.MaxFeePerGas != nil {
+		cpy.MaxFeePerGas.Set(stx.MaxFeePerGas)
+	}
+	copy(cpy.To[:], stx.To[:]) // TODO: make sure this is the right way
+	copy(cpy.AccessList, stx.AccessList)
+	copy(cpy.BlobVersionedHashes, stx.BlobVersionedHashes)
 	return cpy
 }
 
-func (stx SignedBlobTx) Type() byte { return BlobTxType }
-
-func (stx SignedBlobTx) GetChainID() *uint256.Int {
-	chainID := uint256.Int(stx.Message.ChainID)
-	return &chainID
-}
-
-func (stx SignedBlobTx) GetNonce() uint64 { return uint64(stx.Message.Nonce) }
-func (stx SignedBlobTx) GetGas() uint64   { return uint64(stx.Message.Gas) }
-func (stx SignedBlobTx) GetDataGas() uint64 {
-	return params.DataGasPerBlob * uint64(len(stx.Message.BlobVersionedHashes))
-}
-func (stx SignedBlobTx) GetTo() *libcommon.Address {
-	return (*libcommon.Address)(stx.Message.To.Address)
-}
-func (stx SignedBlobTx) GetAmount() uint256.Int { return uint256.Int(stx.Message.Value) }
-func (stx SignedBlobTx) GetData() []byte        { return stx.Message.Data }
-func (stx SignedBlobTx) GetValue() *uint256.Int {
-	value := uint256.Int(stx.Message.Value)
-	return &value
-}
-
-func (stx SignedBlobTx) GetPrice() *uint256.Int {
-	tip := (uint256.Int)(stx.Message.GasTipCap)
-	return &tip
-}
-func (stx SignedBlobTx) GetFeeCap() *uint256.Int {
-	feeCap := (uint256.Int)(stx.Message.GasFeeCap)
-	return &feeCap
-}
-
-func (stx *SignedBlobTx) GetTip() *uint256.Int {
-	tip := (uint256.Int)(stx.Message.GasTipCap)
-	return &tip
-}
-
-func (stx *SignedBlobTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+func (stx SignedBlobTx) Type() byte               { return BlobTxType }
+func (stx SignedBlobTx) GetChainID() *uint256.Int { return stx.ChainID }
+func (stx SignedBlobTx) GetNonce() uint64         { return stx.Nonce }
+func (stx SignedBlobTx) GetPrice() *uint256.Int   { return stx.MaxPriorityFeePerGas }
+func (stx SignedBlobTx) GetTip() *uint256.Int     { return stx.MaxPriorityFeePerGas }
+func (stx SignedBlobTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
 		return stx.GetTip()
 	}
@@ -417,27 +90,127 @@ func (stx *SignedBlobTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 		return effectiveFee
 	}
 }
+func (stx SignedBlobTx) GetFeeCap() *uint256.Int { return stx.MaxFeePerGas }
+func (stx SignedBlobTx) Cost() *uint256.Int {
+	// total := new(uint256.Int).SetUint64(uint64(stx.Message.Gas))
+	// tip := uint256.Int(stx.Message.GasTipCap)
+	// total.Mul(total, &tip)
 
-func (stx *SignedBlobTx) Cost() *uint256.Int {
-	total := new(uint256.Int).SetUint64(uint64(stx.Message.Gas))
-	tip := uint256.Int(stx.Message.GasTipCap)
-	total.Mul(total, &tip)
+	// value := uint256.Int(stx.Message.Value)
+	// total.Add(total, &value)
+	// return total
 
-	value := uint256.Int(stx.Message.Value)
-	total.Add(total, &value)
+	total := new(uint256.Int).SetUint64(stx.Gas)
+	total.Mul(total, stx.MaxPriorityFeePerGas)
+	total.Add(total, stx.Value)
 	return total
 }
 
-func (stx *SignedBlobTx) GetMaxFeePerDataGas() *uint256.Int {
-	fee := (uint256.Int)(stx.Message.MaxFeePerDataGas)
-	return &fee
+func (stx SignedBlobTx) GetDataHashes() []libcommon.Hash {
+	return stx.BlobVersionedHashes
+}
+func (stx SignedBlobTx) GetGas() uint64 { return stx.Gas }
+func (stx SignedBlobTx) GetDataGas() uint64 {
+	return params.DataGasPerBlob * uint64(len(stx.BlobVersionedHashes))
+}
+func (stx SignedBlobTx) GetValue() *uint256.Int { return stx.Value }
+
+func (stx SignedBlobTx) GetTo() *libcommon.Address { return stx.To }
+
+func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+	msg := Message{
+		nonce:            stx.Nonce,
+		gasLimit:         stx.Gas,
+		gasPrice:         *stx.MaxPriorityFeePerGas,
+		tip:              *stx.MaxFeePerGas,
+		feeCap:           *stx.MaxPriorityFeePerGas,
+		to:               stx.To,
+		amount:           *stx.Value,
+		data:             stx.Data,
+		accessList:       stx.AccessList,
+		checkNonce:       true,
+		maxFeePerDataGas: *stx.MaxFeePerDataGas,
+		dataHashes:       stx.BlobVersionedHashes,
+	}
+	if baseFee != nil {
+		overflow := msg.gasPrice.SetFromBig(baseFee)
+		if overflow {
+			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+		}
+	}
+	msg.gasPrice.Add(&msg.gasPrice, stx.GetTip())
+	if msg.gasPrice.Gt(stx.GetFeeCap()) {
+		msg.gasPrice.Set(stx.GetFeeCap())
+	}
+
+	var err error
+	// msg.from, err = stx.Sender(s)
+	return msg, err
 }
 
-func (stx *SignedBlobTx) GetDataHashes() []libcommon.Hash {
-	return []libcommon.Hash(stx.Message.BlobVersionedHashes)
+func (stx SignedBlobTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+	// TODO
+	cpy := stx.copy()
+	return cpy, nil
 }
 
-// TODO
+func (stx SignedBlobTx) FakeSign(address libcommon.Address) (Transaction, error) {
+	// TODO
+	cpy := stx.copy()
+	return cpy, nil
+}
+
+func (stx SignedBlobTx) Hash() libcommon.Hash {
+	if hash := stx.hash.Load(); hash != nil {
+		return *hash.(*libcommon.Hash)
+	}
+	hash := prefixedRlpHash(BlobTxType, []interface{}{
+		stx.ChainID,
+		stx.Nonce,
+		stx.MaxPriorityFeePerGas,
+		stx.MaxFeePerGas,
+		stx.Gas,
+		stx.To,
+		stx.Value,
+		stx.Data,
+		stx.AccessList,
+		stx.MaxFeePerDataGas,
+		stx.BlobVersionedHashes,
+		stx.YParity,
+		stx.R,
+		stx.S,
+	})
+	stx.hash.Store(&hash)
+	return hash
+}
+
+func (stx SignedBlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
+	return prefixedRlpHash(
+		BlobTxType,
+		[]interface{}{
+			chainID,
+			stx.Nonce,
+			stx.MaxPriorityFeePerGas,
+			stx.MaxFeePerGas,
+			stx.Gas,
+			stx.To,
+			stx.Value,
+			stx.Data,
+			stx.AccessList,
+			stx.MaxFeePerDataGas,
+			stx.BlobVersionedHashes,
+		})
+}
+
+func (stx SignedBlobTx) GetData() []byte                  { return stx.Data }
+func (stx SignedBlobTx) GetAccessList() types2.AccessList { return stx.AccessList }
+func (stx SignedBlobTx) Protected() bool                  { return true }
+
+func (stx SignedBlobTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+	// TODO
+	return nil, nil, nil
+}
+
 func (stx *SignedBlobTx) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := stx.from.Load(); sc != nil {
 		return sc.(libcommon.Address), nil
@@ -452,13 +225,12 @@ func (stx *SignedBlobTx) Sender(signer Signer) (libcommon.Address, error) {
 	return addr, nil
 }
 
-func (stx *SignedBlobTx) GetSender() (libcommon.Address, bool) {
+func (stx SignedBlobTx) GetSender() (libcommon.Address, bool) {
 	if sc := stx.from.Load(); sc != nil {
 		return sc.(libcommon.Address), true
 	}
 	return libcommon.Address{}, false
 }
-
 func (stx *SignedBlobTx) SetSender(addr libcommon.Address) {
 	stx.from.Store(addr)
 }
@@ -466,131 +238,348 @@ func (stx *SignedBlobTx) SetSender(addr libcommon.Address) {
 func (stx *SignedBlobTx) IsContractDeploy() bool {
 	return stx.GetTo() == nil
 }
-
 func (stx *SignedBlobTx) Unwrap() Transaction {
 	return stx
 }
 
-func (stx SignedBlobTx) Protected() bool {
-	return true
-}
-
-func (stx *SignedBlobTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
-	cpy := stx.copy()
-	r, s, v, err := signer.SignatureValues(stx, sig)
-	if err != nil {
-		return nil, err
+func (stx SignedBlobTx) EncodingSize() int {
+	payloadSize, _, _, _, _ := stx.payloadSize()
+	envelopeSize := payloadSize
+	// Add envelope size and type size
+	if payloadSize >= 56 {
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
 	}
-
-	cpy.Signature.R = Uint256View(*r)
-	cpy.Signature.V = Uint8View([4]uint64(*v)[0])
-	cpy.Signature.S = Uint256View(*s)
-	cpy.Message.ChainID = Uint256View(*signer.ChainID())
-	return cpy, nil
+	envelopeSize += 2
+	return envelopeSize
 }
-
-func (tx *SignedBlobTx) FakeSign(address libcommon.Address) (Transaction, error) {
-	cpy := tx.copy()
-	cpy.Signature.R = Uint256View(*u256.Num1)
-	cpy.Signature.S = Uint256View(*u256.Num1)
-	cpy.Signature.V = Uint8View([4]uint64(*u256.Num4)[0])
-
-	cpy.from.Store(address)
-	return cpy, nil
-}
-
-func (tx *SignedBlobTx) GetAccessList() types2.AccessList {
-	return types2.AccessList(tx.Message.AccessList)
-}
-
-func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg := Message{
-		nonce:            stx.GetNonce(),
-		gasLimit:         stx.GetGas(),
-		tip:              *stx.GetTip(),
-		feeCap:           *stx.GetFeeCap(),
-		to:               stx.GetTo(),
-		amount:           stx.GetAmount(),
-		data:             stx.Message.Data,
-		accessList:       stx.GetAccessList(),
-		maxFeePerDataGas: *stx.GetMaxFeePerDataGas(),
-		dataHashes:       stx.GetDataHashes(),
-		checkNonce:       true,
+func (stx SignedBlobTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen, blobHashesLen int) {
+	// size of ChainID
+	payloadSize++
+	payloadSize += rlp.Uint256LenExcludingHead(stx.ChainID)
+	// size of Nonce
+	payloadSize++
+	nonceLen = rlp.IntLenExcludingHead(stx.Nonce)
+	payloadSize += nonceLen
+	// size of MaxPriorityFeePerGas
+	payloadSize++
+	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxPriorityFeePerGas)
+	// size of MaxFeePerGas
+	payloadSize++
+	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxFeePerGas)
+	// size of Gas
+	payloadSize++
+	gasLen = rlp.IntLenExcludingHead(stx.Gas)
+	payloadSize += gasLen
+	// size of To
+	payloadSize++
+	if stx.To != nil {
+		payloadSize += 20
 	}
+	// size of Value
+	payloadSize++
+	payloadSize += rlp.Uint256LenExcludingHead(stx.Value)
+	// size of Data
+	payloadSize++
+	switch len(stx.Data) {
+	case 0:
+	case 1:
+		if stx.Data[0] >= 128 {
+			payloadSize++
+		}
+	default:
+		if len(stx.Data) >= 56 {
+			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(len(stx.Data))))
+		}
+		payloadSize += len(stx.Data)
+	}
+	// size of AccessList
+	payloadSize++
+	accessListLen = accessListSize(stx.AccessList)
+	if accessListLen >= 56 {
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(accessListLen)))
+	}
+	payloadSize += accessListLen
+	// size of MaxFeePerDataGas
+	payloadSize++
+	payloadSize += rlp.Uint256LenExcludingHead(stx.MaxFeePerDataGas)
+	// size of BlobVersionedHashes
+	payloadSize++
+	blobHashesLen = blobVersionedHashesSize(stx.BlobVersionedHashes)
+	if blobHashesLen >= 56 {
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(blobHashesLen)))
+	}
+	payloadSize += blobHashesLen
+	// size of y_parity
+	payloadSize++ // y_parity takes 1 byte?
+	// size of R
+	payloadSize++
+	payloadSize += rlp.Uint256LenExcludingHead(&stx.R)
+	// size of S
+	payloadSize++
+	payloadSize += rlp.Uint256LenExcludingHead(&stx.S)
+	return payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen
+}
 
-	if baseFee != nil {
-		overflow := msg.gasPrice.SetFromBig(baseFee)
-		if overflow {
-			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+func blobVersionedHashesSize(hashes []libcommon.Hash) int {
+	return 33 * len(hashes)
+}
+
+func encodeBloblVersionedHashes(hashes []libcommon.Hash, w io.Writer, b []byte) error {
+	b[0] = 128 + 32
+	for _, h := range hashes {
+		// if _, err := w.Write(b[:1]); err != nil {
+		// 	return err
+		// }
+		// if _, err := w.Write(h.Bytes()); err != nil {
+		// 	return err
+		// }
+		if err := rlp.EncodeString(h[:], w, b); err != nil {
+			return err
 		}
 	}
-	msg.gasPrice.Add(&msg.gasPrice, stx.GetTip())
-	if msg.gasPrice.Gt(stx.GetFeeCap()) {
-		msg.gasPrice.Set(stx.GetFeeCap())
+	return nil
+}
+
+func (stx SignedBlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) error {
+	// prefix
+	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
 	}
-
-	var err error
-	msg.from, err = stx.Sender(s)
-	return msg, err
+	// encode ChainID
+	if err := stx.ChainID.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode Nonce
+	if err := rlp.EncodeInt(stx.Nonce, w, b); err != nil {
+		return err
+	}
+	// encode MaxPriorityFeePerGas
+	if err := stx.MaxPriorityFeePerGas.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode MaxFeePerGas
+	if err := stx.MaxFeePerGas.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode Gas
+	if err := rlp.EncodeInt(stx.Gas, w, b); err != nil {
+		return err
+	}
+	// encode To
+	if stx.To == nil {
+		b[0] = 128
+	} else {
+		b[0] = 128 + 20
+	}
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if stx.To != nil {
+		if _, err := w.Write(stx.To.Bytes()); err != nil {
+			return err
+		}
+	}
+	// encode Value
+	if err := stx.Value.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode Data
+	if err := rlp.EncodeString(stx.Data, w, b); err != nil {
+		return err
+	}
+	// prefix
+	if err := EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+		return err
+	}
+	// encode AccessList
+	if err := encodeAccessList(stx.AccessList, w, b); err != nil {
+		return err
+	}
+	// encode MaxFeePerDataGas
+	if err := stx.MaxFeePerDataGas.EncodeRLP(w); err != nil {
+		return err
+	}
+	// prefix
+	if err := EncodeStructSizePrefix(blobHashesLen, w, b); err != nil {
+		return err
+	}
+	// encode BlobVersionedHashes
+	if err := encodeBloblVersionedHashes(stx.BlobVersionedHashes, w, b); err != nil {
+		return err
+	}
+	// encode y_parity
+	if stx.YParity {
+		b[0] = 1
+	} else {
+		b[0] = 0
+	}
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	// encode R
+	if err := stx.R.EncodeRLP(w); err != nil {
+		return err
+	}
+	// encode S
+	if err := stx.S.EncodeRLP(w); err != nil {
+		return err
+	}
+	return nil
 }
 
-// Hash computes the hash (but not for signatures!)
-func (stx *SignedBlobTx) Hash() libcommon.Hash {
-	return prefixedSSZHash(BlobTxType, stx)
+func (stx SignedBlobTx) EncodeRLP(w io.Writer) error {
+	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
+	envelopeSize := payloadSize
+	if payloadSize >= 56 {
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
+	}
+	// size of struct prefix and TxType
+	envelopeSize += 2
+	var b [33]byte
+	// envelope
+	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode TxType
+	b[0] = BlobTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := stx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen); err != nil {
+		return err
+	}
+	return nil
 }
 
-// MarshalBinary returns the canonical encoding of the transaction.
-// For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
-// transactions, it returns the type and payload.
-func (tx SignedBlobTx) MarshalBinary(w io.Writer) error {
+func (stx SignedBlobTx) MarshalBinary(w io.Writer) error {
+	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
 	var b [33]byte
 	// encode TxType
 	b[0] = BlobTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	wcodec := codec.NewEncodingWriter(w)
-	return tx.Serialize(wcodec)
-}
-
-func (stx SignedBlobTx) EncodeRLP(w io.Writer) error {
-	var buf bytes.Buffer
-	if err := stx.MarshalBinary(&buf); err != nil {
+	if err := stx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen); err != nil {
 		return err
 	}
-	return rlp.Encode(w, buf.Bytes())
+	return nil
 }
 
-func (tx SignedBlobTx) RawSignatureValues() (v *uint256.Int, r *uint256.Int, s *uint256.Int) {
-	return tx.Signature.GetV(), tx.Signature.GetR(), tx.Signature.GetS()
+func (stx *SignedBlobTx) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	var b []byte
+	if b, err = s.Uint256Bytes(); err != nil {
+		return err
+	}
+	stx.ChainID = new(uint256.Int).SetBytes(b)
+
+	if stx.Nonce, err = s.Uint(); err != nil {
+		return err
+	}
+
+	if b, err = s.Uint256Bytes(); err != nil {
+		return err
+	}
+	stx.MaxPriorityFeePerGas = new(uint256.Int).SetBytes(b)
+
+	if b, err = s.Uint256Bytes(); err != nil {
+		return err
+	}
+	stx.MaxFeePerGas = new(uint256.Int).SetBytes(b)
+
+	if stx.Gas, err = s.Uint(); err != nil {
+		return err
+	}
+
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 0 && len(b) != 20 {
+		return fmt.Errorf("wrong size for To: %d", len(b))
+	}
+	if len(b) > 0 {
+		stx.To = &libcommon.Address{}
+		copy((*stx.To)[:], b)
+	}
+
+	if b, err = s.Uint256Bytes(); err != nil {
+		return err
+	}
+	stx.Value = new(uint256.Int).SetBytes(b)
+
+	if stx.Data, err = s.Bytes(); err != nil {
+		return err
+	}
+	// decode AccessList
+	stx.AccessList = types2.AccessList{}
+	if err = decodeAccessList(&stx.AccessList, s); err != nil {
+		return err
+	}
+
+	// decode MaxFeePerDataGas
+	if b, err = s.Uint256Bytes(); err != nil {
+		return err
+	}
+	stx.MaxFeePerDataGas = new(uint256.Int).SetBytes(b)
+
+	// decode BlobVersionedHashes
+	stx.BlobVersionedHashes = []libcommon.Hash{}
+	if err = decodeBlobVersionedHashes(stx.BlobVersionedHashes, s); err != nil {
+		return err
+	}
+
+	// decode y_parity
+	if b, err = s.Bytes(); err != nil {
+		return err
+	}
+	if len(b) > 1 {
+		return fmt.Errorf("wrong size for y_parity: %d", len(b))
+	}
+	if b[0] == 1 {
+		stx.YParity = true
+	} else if b[0] == 0 {
+		stx.YParity = false
+	} else {
+		return fmt.Errorf("wrong value for y_parity: %d", b)
+	}
+
+	// decode R
+	if b, err = s.Uint256Bytes(); err != nil {
+		return err
+	}
+	stx.R.SetBytes(b)
+
+	// decode S
+	if b, err = s.Uint256Bytes(); err != nil {
+		return err
+	}
+	stx.S.SetBytes(b)
+	return s.ListEnd()
 }
 
-func (stx SignedBlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
-	// stx is a shallow copy of the tx so we can modify ChainID without mutating the input
-	stx.Message.ChainID.SetFromBig(chainID)
-	return prefixedSSZHash(BlobTxType, &stx.Message)
-}
+func decodeBlobVersionedHashes(hashes []libcommon.Hash, s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return fmt.Errorf("open BlobVersionedHashes: %w", err)
+	}
+	var b []byte
+	_hash := libcommon.Hash{}
 
-func (tx SignedBlobTx) EncodingSize() int {
-	envelopeSize := int(codec.ContainerLength(&tx.Message, &tx.Signature))
-	// Add type byte
-	envelopeSize++
-	return envelopeSize
-}
+	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
+		if len(b) == 32 {
+			copy((_hash)[:], b)
+			hashes = append(hashes, _hash)
+		} else {
+			return fmt.Errorf("wrong size for blobVersionedHashes: %d, %v", len(b), b[0])
+		}
+	}
 
-func (stx *SignedBlobTx) Deserialize(dr *codec.DecodingReader) error {
-	err := dr.Container(&stx.Message, &stx.Signature)
-	return err
-}
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("close BlobVersionedHashes: %w", err)
+	}
 
-func (stx *SignedBlobTx) Serialize(w *codec.EncodingWriter) error {
-	return w.Container(&stx.Message, &stx.Signature)
-}
-
-func (stx *SignedBlobTx) ByteLength() uint64 {
-	return codec.ContainerLength(&stx.Message, &stx.Signature)
-}
-
-func (stx *SignedBlobTx) FixedLength() uint64 {
-	return 0
+	return nil
 }

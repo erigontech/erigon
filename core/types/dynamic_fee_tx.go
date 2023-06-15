@@ -24,6 +24,7 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -35,6 +36,7 @@ import (
 
 type DynamicFeeTransaction struct {
 	CommonTx
+	ChainID    *uint256.Int
 	Tip        *uint256.Int
 	FeeCap     *uint256.Int
 	AccessList types2.AccessList
@@ -78,14 +80,14 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			TransactionMisc: TransactionMisc{
 				time: tx.time,
 			},
-			ChainID: new(uint256.Int),
-			Nonce:   tx.Nonce,
-			To:      tx.To, // TODO: copy pointed-to address
-			Data:    common.CopyBytes(tx.Data),
-			Gas:     tx.Gas,
+			Nonce: tx.Nonce,
+			To:    tx.To, // TODO: copy pointed-to address
+			Data:  common.CopyBytes(tx.Data),
+			Gas:   tx.Gas,
 			// These are copied below.
 			Value: new(uint256.Int),
 		},
+		ChainID:    new(uint256.Int),
 		AccessList: make(types2.AccessList, len(tx.AccessList)),
 		Tip:        new(uint256.Int),
 		FeeCap:     new(uint256.Int),
@@ -118,7 +120,7 @@ func (tx DynamicFeeTransaction) EncodingSize() int {
 	envelopeSize := payloadSize
 	// Add envelope size and type size
 	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
 	}
 	envelopeSize += 2
 	return envelopeSize
@@ -160,7 +162,7 @@ func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen
 		}
 	default:
 		if len(tx.Data) >= 56 {
-			payloadSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(len(tx.Data))))
 		}
 		payloadSize += len(tx.Data)
 	}
@@ -168,7 +170,7 @@ func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen
 	payloadSize++
 	accessListLen = accessListSize(tx.AccessList)
 	if accessListLen >= 56 {
-		payloadSize += (bits.Len(uint(accessListLen)) + 7) / 8
+		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(accessListLen)))
 	}
 	payloadSize += accessListLen
 	// size of V
@@ -296,7 +298,7 @@ func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	envelopeSize := payloadSize
 	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
 	}
 	// size of struct prefix and TxType
 	envelopeSize += 2
@@ -455,6 +457,10 @@ func (tx DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int
 	return &tx.V, &tx.R, &tx.S
 }
 
+func (tx DynamicFeeTransaction) GetChainID() *uint256.Int {
+	return tx.ChainID
+}
+
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
 		return sc.(libcommon.Address), nil
@@ -471,14 +477,14 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error
 func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
 	return &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			ChainID: &chainID,
-			Nonce:   nonce,
-			To:      &to,
-			Value:   amount,
-			Gas:     gasLimit,
-			Data:    data,
+			Nonce: nonce,
+			To:    &to,
+			Value: amount,
+			Gas:   gasLimit,
+			Data:  data,
 		},
-		Tip:    gasTip,
-		FeeCap: gasFeeCap,
+		ChainID: &chainID,
+		Tip:     gasTip,
+		FeeCap:  gasFeeCap,
 	}
 }

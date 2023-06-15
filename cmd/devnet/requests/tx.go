@@ -9,7 +9,7 @@ type EthTxPool struct {
 	Result interface{} `json:"result"`
 }
 
-func (reqGen *RequestGenerator) TxpoolContent() (int, int, int, error) {
+func (reqGen *requestGenerator) TxpoolContent() (int, int, int, error) {
 	var (
 		b       EthTxPool
 		pending map[string]interface{}
@@ -22,7 +22,11 @@ func (reqGen *RequestGenerator) TxpoolContent() (int, int, int, error) {
 		return len(pending), len(queued), len(baseFee), fmt.Errorf("failed to fetch txpool content: %v", res.Err)
 	}
 
-	resp := b.Result.(map[string]interface{})
+	resp, ok := b.Result.(map[string]interface{})
+
+	if !ok {
+		return 0, 0, 0, fmt.Errorf("Unexpected result type: %T", b.Result)
+	}
 
 	pendingLen := 0
 	queuedLen := 0
@@ -52,7 +56,7 @@ func (reqGen *RequestGenerator) TxpoolContent() (int, int, int, error) {
 	return pendingLen, queuedLen, baseFeeLen, nil
 }
 
-func (req *RequestGenerator) txpoolContent() (RPCMethod, string) {
+func (req *requestGenerator) txpoolContent() (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[],"id":%d}`
 	return Methods.TxpoolContent, fmt.Sprintf(template, Methods.TxpoolContent, req.reqID)
 }

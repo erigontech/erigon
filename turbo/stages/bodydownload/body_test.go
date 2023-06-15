@@ -15,8 +15,7 @@ func TestCreateBodyDownload(t *testing.T) {
 	tx, err := m.DB.BeginRo(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	blockReader, _ := m.NewBlocksIO()
-	bd := bodydownload.NewBodyDownload(ethash.NewFaker(), 100, blockReader)
+	bd := bodydownload.NewBodyDownload(ethash.NewFaker(), 100, m.BlockReader)
 	if _, _, _, _, err := bd.UpdateFromDb(tx); err != nil {
 		t.Fatalf("update from db: %v", err)
 	}

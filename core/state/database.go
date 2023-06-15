@@ -19,7 +19,7 @@ package state
 
 import (
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
@@ -32,19 +32,19 @@ const (
 )
 
 type StateReader interface {
-	ReadAccountData(address libcommon.Address) (*accounts.Account, error)
-	ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error)
-	ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error)
-	ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error)
-	ReadAccountIncarnation(address libcommon.Address) (uint64, error)
+	ReadAccountData(address common.Address) (*accounts.Account, error)
+	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
+	ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error)
+	ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error)
+	ReadAccountIncarnation(address common.Address) (uint64, error)
 }
 
 type StateWriter interface {
-	UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error
-	UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error
-	DeleteAccount(address libcommon.Address, original *accounts.Account) error
-	WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error
-	CreateContract(address libcommon.Address) error
+	UpdateAccountData(address common.Address, original, account *accounts.Account) error
+	UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error
+	DeleteAccount(address common.Address, original *accounts.Account) error
+	WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error
+	CreateContract(address common.Address) error
 }
 
 type WriterWithChangeSets interface {
@@ -62,23 +62,23 @@ func NewNoopWriter() *NoopWriter {
 	return noopWriter
 }
 
-func (nw *NoopWriter) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
+func (nw *NoopWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	return nil
 }
 
-func (nw *NoopWriter) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
+func (nw *NoopWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
 	return nil
 }
 
-func (nw *NoopWriter) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
+func (nw *NoopWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	return nil
 }
 
-func (nw *NoopWriter) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
+func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	return nil
 }
 
-func (nw *NoopWriter) CreateContract(address libcommon.Address) error {
+func (nw *NoopWriter) CreateContract(address common.Address) error {
 	return nil
 }
 

@@ -5,12 +5,10 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -19,11 +17,7 @@ import (
 func TestNotFoundMustReturnNil(t *testing.T) {
 	require := require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(
-		NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs),
+	api := NewEthAPI(newBaseApiForTest(m),
 		m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 	ctx := context.Background()
 

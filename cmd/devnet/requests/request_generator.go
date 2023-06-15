@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/valyala/fastjson"
 )
@@ -34,7 +37,20 @@ type EthError struct {
 	Message string `json:"message"`
 }
 
-type RequestGenerator struct {
+type RequestGenerator interface {
+	PingErigonRpc() CallResult
+	GetBalance(address libcommon.Address, blockNum BlockNumber) (uint64, error)
+	AdminNodeInfo() (p2p.NodeInfo, error)
+	GetBlockByNumberDetails(blockNum string, withTxs bool) (map[string]interface{}, error)
+	GetBlockByNumber(blockNum uint64, withTxs bool) (EthBlockByNumber, error)
+	BlockNumber() (uint64, error)
+	GetTransactionCount(address libcommon.Address, blockNum BlockNumber) (EthGetTransactionCount, error)
+	SendTransaction(signedTx types.Transaction) (*libcommon.Hash, error)
+	GetAndCompareLogs(fromBlock uint64, toBlock uint64, expected Log) error
+	TxpoolContent() (int, int, int, error)
+}
+
+type requestGenerator struct {
 	reqID  int
 	client *http.Client
 	logger log.Logger
@@ -100,7 +116,7 @@ var Methods = struct {
 	ETHNewHeads:            "eth_newHeads",
 }
 
-func (req *RequestGenerator) call(method RPCMethod, body string, response interface{}) CallResult {
+func (req *requestGenerator) call(method RPCMethod, body string, response interface{}) CallResult {
 	start := time.Now()
 	err := post(req.client, req.target, string(method), body, response, req.logger)
 	req.reqID++
@@ -114,7 +130,7 @@ func (req *RequestGenerator) call(method RPCMethod, body string, response interf
 	}
 }
 
-func (req *RequestGenerator) PingErigonRpc() CallResult {
+func (req *requestGenerator) PingErigonRpc() CallResult {
 	start := time.Now()
 	res := CallResult{
 		RequestID: req.reqID,
@@ -156,17 +172,15 @@ func (req *RequestGenerator) PingErigonRpc() CallResult {
 	return res
 }
 
-func NewRequestGenerator(target string, logger log.Logger) *RequestGenerator {
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
-	reqGen := RequestGenerator{
-		client: client,
+func NewRequestGenerator(target string, logger log.Logger) RequestGenerator {
+	return &requestGenerator{
+		client: &http.Client{
+			Timeout: time.Second * 600,
+		},
 		reqID:  1,
 		logger: logger,
 		target: target,
 	}
-	return &reqGen
 }
 
 func post(client *http.Client, url, method, request string, response interface{}, logger log.Logger) error {

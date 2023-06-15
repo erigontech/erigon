@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
@@ -73,7 +72,7 @@ func StageLoop(ctx context.Context,
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
 	logger log.Logger,
-	blockSnapshots *snapshotsync.RoSnapshots,
+	blockReader services.FullBlockReader,
 	hook *Hook,
 ) {
 	defer close(waitForDone)
@@ -90,7 +89,7 @@ func StageLoop(ctx context.Context,
 		}
 
 		// Estimate the current top height seen from the peer
-		headBlockHash, err := StageLoopStep(ctx, db, sync, initialCycle, logger, blockSnapshots, hook)
+		headBlockHash, err := StageLoopStep(ctx, db, sync, initialCycle, logger, blockReader, hook)
 
 		SendPayloadStatus(hd, headBlockHash, err)
 
@@ -123,7 +122,7 @@ func StageLoop(ctx context.Context,
 	}
 }
 
-func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockSnapshots *snapshotsync.RoSnapshots, hook *Hook) (headBlockHash libcommon.Hash, err error) {
+func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (headBlockHash libcommon.Hash, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -144,12 +143,8 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initi
 	}
 	// Sync from scratch must be able Commit partial progress
 	// In all other cases - process blocks batch in 1 RwTx
-	blocksInSnapshots := uint64(0)
-	if blockSnapshots != nil {
-		blocksInSnapshots = blockSnapshots.BlocksAvailable()
-	}
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
-	isSynced := finishProgressBefore > 0 && finishProgressBefore > blocksInSnapshots && finishProgressBefore == headersProgressBefore
+	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 	canRunCycleInOneTransaction := isSynced
 
 	// Main steps:
@@ -352,10 +347,10 @@ func StateStep(ctx context.Context, batch kv.RwTx, blockWriter *blockio.BlockWri
 		currentHash := headersChain[i].Hash()
 		// Prepare memory state for block execution
 		Bd.AddToPrefetch(currentHeader, currentBody)
-		if err := blockWriter.WriteHeader(batch, currentHeader); err != nil {
+		if err := rawdb.WriteHeader(batch, currentHeader); err != nil {
 			return err
 		}
-		if err := blockWriter.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
+		if err := rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
 			return err
 		}
 	}
@@ -368,10 +363,10 @@ func StateStep(ctx context.Context, batch kv.RwTx, blockWriter *blockio.BlockWri
 	height := header.Number.Uint64()
 	hash := header.Hash()
 	// Prepare memory state for block execution
-	if err = blockWriter.WriteHeader(batch, header); err != nil {
+	if err = rawdb.WriteHeader(batch, header); err != nil {
 		return err
 	}
-	if err = blockWriter.WriteCanonicalHash(batch, hash, height); err != nil {
+	if err = rawdb.WriteCanonicalHash(batch, hash, height); err != nil {
 		return err
 	}
 
@@ -400,13 +395,13 @@ func NewDefaultStages(ctx context.Context,
 	notifications *shards.Notifications,
 	snapDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
+	blockRetire services.BlockRetire,
 	agg *state.AggregatorV3,
 	forkValidator *engineapi.ForkValidator,
 	logger log.Logger,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
 	blockWriter := blockio.NewBlockWriter(cfg.HistoryV3)
-	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, blockReader, blockWriter, db, snapDownloader, notifications.Events, logger)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.
@@ -418,7 +413,7 @@ func NewDefaultStages(ctx context.Context,
 		stagedsync.StageCumulativeIndexCfg(db, blockReader),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter),
-		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockRetire, blockWriter, blockReader, controlServer.Hd),
+		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
 		stagedsync.StageExecuteBlocksCfg(
 			db,
 			cfg.Prune,
@@ -449,16 +444,15 @@ func NewDefaultStages(ctx context.Context,
 }
 
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient,
-	dirs datadir.Dirs, notifications *shards.Notifications, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3,
+	dirs datadir.Dirs, notifications *shards.Notifications, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, agg *state.AggregatorV3,
 	logger log.Logger) (*stagedsync.Sync, error) {
-	blockReader, blockWriter := snapshotsync.NewBlockReader(snapshots), blockio.NewBlockWriter(cfg.HistoryV3)
 
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,
 			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, nil, nil),
 			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter),
 			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, dirs.Tmp, cfg.Prune, nil, blockWriter, blockReader, controlServer.Hd),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
