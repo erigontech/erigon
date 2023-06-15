@@ -101,10 +101,10 @@ func CreateTestSentry(t *testing.T) (*stages.MockSentry, *core.ChainPack, []*cor
 		t.Fatal(err)
 	}
 
-	if err = m.InsertChain(orphanedChain); err != nil {
+	if err = m.InsertChain(orphanedChain, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.InsertChain(chain); err != nil {
+	if err = m.InsertChain(chain, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -427,7 +427,7 @@ func CreateTestSentryForTraces(t *testing.T) *stages.MockSentry {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	if err := m.InsertChain(chain); err != nil {
+	if err := m.InsertChain(chain, nil); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	return m
@@ -533,7 +533,7 @@ func CreateTestSentryForTracesCollision(t *testing.T) *stages.MockSentry {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	if err := m.InsertChain(chain); err != nil {
+	if err := m.InsertChain(chain, nil); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 

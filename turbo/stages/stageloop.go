@@ -89,9 +89,11 @@ func StageLoop(ctx context.Context,
 		}
 
 		// Estimate the current top height seen from the peer
-		headBlockHash, err := StageLoopStep(ctx, db, sync, initialCycle, logger, blockReader, hook)
-
-		SendPayloadStatus(hd, headBlockHash, err)
+		err := StageLoopStep(ctx, db, nil, sync, initialCycle, logger, blockReader, hook)
+		db.View(ctx, func(tx kv.Tx) error {
+			SendPayloadStatus(hd, rawdb.ReadHeadBlockHash(tx), err)
+			return nil
+		})
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
@@ -122,30 +124,26 @@ func StageLoop(ctx context.Context,
 	}
 }
 
-func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (headBlockHash libcommon.Hash, err error) {
+func StageLoopStep(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	var finishProgressBefore, headersProgressBefore uint64
-	if err := db.View(ctx, func(tx kv.Tx) error {
-		if finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
-			return err
-		}
-		if headersProgressBefore, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return headBlockHash, err
+	externalTx := tx != nil
+	finishProgressBefore, headersProgressBefore, err := stagesHeadersAndFinish(db, tx)
+	if err != nil {
+		return err
 	}
 	// Sync from scratch must be able Commit partial progress
 	// In all other cases - process blocks batch in 1 RwTx
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 	canRunCycleInOneTransaction := isSynced
+	if externalTx {
+		canRunCycleInOneTransaction = true
+	}
 
 	// Main steps:
 	// - process new blocks
@@ -154,57 +152,60 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initi
 	// - Send Notifications: about new blocks, new receipts, state changes, etc...
 	// - Prune(limited time)+Commit(sync). Write to disk happening here.
 
-	var tx kv.RwTx // on this variable will run sync cycle.
-	if canRunCycleInOneTransaction {
+	if canRunCycleInOneTransaction && !externalTx {
 		tx, err = db.BeginRwNosync(ctx)
 		if err != nil {
-			return headBlockHash, err
+			return err
 		}
 		defer tx.Rollback()
 	}
 
 	if hook != nil {
-		if err = hook.BeforeRun(tx, canRunCycleInOneTransaction); err != nil {
-			return headBlockHash, err
+		if err = hook.BeforeRun(tx, isSynced); err != nil {
+			return err
 		}
 	}
 	err = sync.Run(db, tx, initialCycle)
 	if err != nil {
-		return headBlockHash, err
+		return err
 	}
 	logCtx := sync.PrintTimings()
 	var tableSizes []interface{}
 	var commitTime time.Duration
-	if canRunCycleInOneTransaction {
+	if canRunCycleInOneTransaction && !externalTx {
 		tableSizes = stagedsync.PrintTables(db, tx) // Need to do this before commit to access tx
 		commitStart := time.Now()
 		errTx := tx.Commit()
+		tx = nil
 		if errTx != nil {
-			return headBlockHash, errTx
+			return errTx
 		}
 		commitTime = time.Since(commitStart)
 	}
 
 	// -- send notifications START
-	var head uint64
-	if err := db.View(ctx, func(tx kv.Tx) error {
-		headBlockHash = rawdb.ReadHeadBlockHash(tx)
-		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
-			return err
-		}
+	if externalTx {
 		if hook != nil {
 			if err = hook.AfterRun(tx, finishProgressBefore); err != nil {
 				return err
 			}
 		}
-		return nil
-	}); err != nil {
-		return headBlockHash, err
+	} else {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			if hook != nil {
+				if err = hook.AfterRun(tx, finishProgressBefore); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
-	if canRunCycleInOneTransaction && (head != finishProgressBefore || commitTime > 500*time.Millisecond) {
+	if canRunCycleInOneTransaction && !externalTx && commitTime > 500*time.Millisecond {
 		logger.Info("Commit cycle", "in", commitTime)
 	}
-	if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
+	if len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
 		logger.Info("Timings (slower than 50ms)", logCtx...)
 		if len(tableSizes) > 0 {
 			logger.Info("Tables", tableSizes...)
@@ -213,11 +214,41 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initi
 	// -- send notifications END
 
 	// -- Prune+commit(sync)
-	if err := db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) }); err != nil {
-		return headBlockHash, err
+	if err := stageLoopStepPrune(ctx, db, tx, sync, initialCycle); err != nil {
+		return err
 	}
 
-	return headBlockHash, nil
+	return nil
+}
+func stageLoopStepPrune(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stagedsync.Sync, initialCycle bool) (err error) {
+	if tx != nil {
+		return sync.RunPrune(db, tx, initialCycle)
+	}
+	return db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) })
+}
+
+func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, fin uint64, err error) {
+	if tx != nil {
+		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
+			return head, fin, err
+		}
+		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
+			return head, fin, err
+		}
+		return head, fin, nil
+	}
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
+			return err
+		}
+		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return head, fin, err
+	}
+	return head, fin, nil
 }
 
 type Hook struct {
@@ -233,9 +264,9 @@ type Hook struct {
 func NewHook(ctx context.Context, notifications *shards.Notifications, sync *stagedsync.Sync, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int)) *Hook {
 	return &Hook{ctx: ctx, notifications: notifications, sync: sync, blockReader: blockReader, chainConfig: chainConfig, logger: logger, updateHead: updateHead}
 }
-func (h *Hook) BeforeRun(tx kv.Tx, canRunCycleInOneTransaction bool) error {
+func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
 	notifications := h.notifications
-	if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction {
+	if notifications != nil && notifications.Accumulator != nil && inSync {
 		stateVersion, err := rawdb.GetStateVersion(tx)
 		if err != nil {
 			h.logger.Error("problem reading plain state version", "err", err)

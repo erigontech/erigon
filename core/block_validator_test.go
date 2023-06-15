@@ -61,7 +61,7 @@ func TestHeaderVerification(t *testing.T) {
 		}); err != nil {
 			panic(err)
 		}
-		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 
@@ -102,7 +102,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 		}); err != nil {
 			panic(err)
 		}
-		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 

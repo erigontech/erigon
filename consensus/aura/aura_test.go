@@ -53,6 +53,6 @@ func TestEmptyBlock(t *testing.T) {
 	blocks[0] = block
 
 	chain := &core.ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: block}
-	err = m.InsertChain(chain)
+	err = m.InsertChain(chain, nil)
 	require.NoError(err)
 }

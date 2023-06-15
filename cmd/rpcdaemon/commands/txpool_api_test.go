@@ -28,7 +28,7 @@ func TestTxPoolContent(t *testing.T) {
 		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	require.NoError(err)
-	err = m.InsertChain(chain)
+	err = m.InsertChain(chain, nil)
 	require.NoError(err)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)

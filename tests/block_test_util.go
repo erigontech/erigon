@@ -125,22 +125,23 @@ func (bt *BlockTest) Run(t *testing.T, _ bool) error {
 		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
 	}
 
-	validBlocks, err := bt.insertBlocks(m)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	validBlocks, err := bt.insertBlocks(m, tx)
 	if err != nil {
 		return err
 	}
 
-	tx, err1 := m.DB.BeginRo(context.Background())
-	if err1 != nil {
-		return fmt.Errorf("blockTest create tx: %w", err1)
-	}
-	defer tx.Rollback()
 	cmlast := rawdb.ReadHeadBlockHash(tx)
 	if libcommon.Hash(bt.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
 	}
 	newDB := state.New(m.NewStateReader(tx))
-	if err = bt.validatePostState(newDB); err != nil {
+	if err := bt.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %w", err)
 	}
 	return bt.validateImportedHeaders(tx, validBlocks, m)
@@ -176,7 +177,7 @@ See https://github.com/ethereum/tests/wiki/Blockchain-Tests-II
 	expected we are expected to ignore it and continue processing and then validate the
 	post state.
 */
-func (bt *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
+func (bt *BlockTest) insertBlocks(m *stages.MockSentry, tx kv.RwTx) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
 	// insert the test blocks, which will execute all transaction
 	for bi, b := range bt.json.Blocks {
@@ -190,7 +191,8 @@ func (bt *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 		}
 		// RLP decoding worked, try to insert into chain:
 		chain := &core.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb}
-		err1 := m.InsertChain(chain)
+
+		err1 := m.InsertChain(chain, tx)
 		if err1 != nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
@@ -198,17 +200,12 @@ func (bt *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err1)
 			}
 		} else if b.BlockHeader == nil {
-			if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-				canonical, cErr := bt.br.CanonicalHash(context.Background(), tx, cb.NumberU64())
-				if cErr != nil {
-					return cErr
-				}
-				if canonical == cb.Hash() {
-					return fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
-				}
-				return nil
-			}); err != nil {
-				return nil, err
+			canonical, cErr := bt.br.CanonicalHash(context.Background(), tx, cb.NumberU64())
+			if cErr != nil {
+				return nil, cErr
+			}
+			if canonical == cb.Hash() {
+				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 			}
 		}
 		if b.BlockHeader == nil {
@@ -252,7 +249,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 		return fmt.Errorf("receipt hash: want: %x have: %x", h.ReceiptTrie, h2.ReceiptHash)
 	}
 	if h.TransactionsTrie != h2.TxHash {
-		return fmt.Errorf("tx hash: want: %x have: %x", h.TransactionsTrie, h2.TxHash)
+		return fmt.Errorf("txn hash: want: %x have: %x", h.TransactionsTrie, h2.TxHash)
 	}
 	if h.StateRoot != h2.Root {
 		return fmt.Errorf("state hash: want: %x have: %x", h.StateRoot, h2.Root)
