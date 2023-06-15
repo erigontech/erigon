@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -51,10 +50,10 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) er
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3,
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3,
 	br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine, logger log.Logger) error {
 	// keep Genesis
-	if err := bw.TruncateBlocks(context.Background(), tx, 1); err != nil {
+	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.Bodies, 1); err != nil {
@@ -71,7 +70,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 	if err := rawdb.TruncateCanonicalHash(tx, 1, false); err != nil {
 		return err
 	}
-	if err := bw.TruncateTd(tx, 1); err != nil {
+	if err := rawdb.TruncateTd(tx, 1); err != nil {
 		return err
 	}
 	hash, err := rawdb.ReadCanonicalHash(tx, 0)
@@ -87,20 +86,20 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 		return err
 	}
 
-	if snapshots != nil && snapshots.Cfg().Enabled && snapshots.BlocksAvailable() > 0 {
-		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, dirs, snapshots, br, agg, logger); err != nil {
+	if br.FreezingCfg().Enabled && br.FrozenBlocks() > 0 {
+		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, dirs, br, agg, logger); err != nil {
 			return err
 		}
-		_ = stages.SaveStageProgress(tx, stages.Snapshots, snapshots.BlocksAvailable())
-		_ = stages.SaveStageProgress(tx, stages.Headers, snapshots.BlocksAvailable())
-		_ = stages.SaveStageProgress(tx, stages.Bodies, snapshots.BlocksAvailable())
-		_ = stages.SaveStageProgress(tx, stages.Senders, snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.Snapshots, br.FrozenBlocks())
+		_ = stages.SaveStageProgress(tx, stages.Headers, br.FrozenBlocks())
+		_ = stages.SaveStageProgress(tx, stages.Bodies, br.FrozenBlocks())
+		_ = stages.SaveStageProgress(tx, stages.Senders, br.FrozenBlocks())
 	}
 
 	return nil
 }
-func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx, bw *blockio.BlockWriter) error {
-	if err := bw.ResetSenders(ctx, db, tx); err != nil {
+func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
+	if err := backup.ClearTables(ctx, db, tx, kv.Senders); err != nil {
 		return nil
 	}
 	return clearStageProgress(tx, stages.Senders)

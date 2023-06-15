@@ -121,8 +121,7 @@ func newTestBackend(t *testing.T) *testBackend {
 	if err = m.InsertChain(chain); err != nil {
 		t.Error(err)
 	}
-	br, _ := m.NewBlocksIO()
-	return &testBackend{db: m.DB, cfg: params.TestChainConfig, blockReader: br}
+	return &testBackend{db: m.DB, cfg: params.TestChainConfig, blockReader: m.BlockReader}
 }
 
 func (b *testBackend) CurrentHeader() *types.Header {

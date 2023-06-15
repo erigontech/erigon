@@ -1,4 +1,4 @@
-package snapshotsync
+package freezeblocks
 
 import (
 	"bytes"
@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -22,6 +23,9 @@ type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
 }
 
+func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
+	panic("not implemented")
+}
 func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
@@ -35,6 +39,9 @@ func (r *RemoteBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, f
 	panic("not implemented")
 }
 func (r *RemoteBlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
+	panic("not implemented")
+}
+func (r *RemoteBlockReader) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
 	panic("not implemented")
 }
 
@@ -73,7 +80,10 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 	return block.Header(), nil
 }
 
-func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots { panic("not implemented") }
+func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots    { panic("not implemented") }
+func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
+func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not supported") }
+func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	blockNum := rawdb.ReadHeaderNumber(tx, hash)
@@ -205,7 +215,17 @@ func NewBlockReader(snapshots services.BlockSnapshots) *BlockReader {
 	return &BlockReader{sn: snapshots.(*RoSnapshots), TransactionsV3: true}
 }
 
-func (r *BlockReader) Snapshots() services.BlockSnapshots { return r.sn }
+func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
+	return CanDeleteTo(currentBlockInDB, r.sn.BlocksAvailable())
+}
+func (r *BlockReader) Snapshots() services.BlockSnapshots    { return r.sn }
+func (r *BlockReader) FrozenBlocks() uint64                  { return r.sn.BlocksAvailable() }
+func (r *BlockReader) FrozenFiles() []string                 { return r.sn.Files() }
+func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
+
+func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
+	return ForEachHeader(ctx, r.sn, walker)
+}
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
 	blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)

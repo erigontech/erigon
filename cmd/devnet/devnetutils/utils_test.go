@@ -7,6 +7,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestHexToInt(t *testing.T) {
+	testCases := []struct {
+		hexStr   string
+		expected uint64
+	}{
+		{"0x0", 0},
+		{"0x32424", 205860},
+		{"0x200", 512},
+		{"0x39", 57},
+	}
+
+	for _, testCase := range testCases {
+		got := HexToInt(testCase.hexStr)
+		require.EqualValues(t, testCase.expected, got)
+	}
+}
+
 func TestUniqueIDFromEnode(t *testing.T) {
 	testCases := []struct {
 		input       string

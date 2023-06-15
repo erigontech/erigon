@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -57,8 +58,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-
 	// Force-load native and js packages, to trigger registration
 	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
 	_ "github.com/ledgerwatch/erigon/eth/tracers/native"
@@ -290,7 +289,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	}
 
 	// Configure DB first
-	var allSnapshots *snapshotsync.RoSnapshots
+	var allSnapshots *freezeblocks.RoSnapshots
 	onNewSnapshot := func() {}
 	if cfg.WithDatadir {
 		var rwKv kv.RwDB
@@ -333,7 +332,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 
 		// Configure sapshots
-		allSnapshots = snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
+		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 		allSnapshots.OptimisticReopenWithDB(db)
@@ -380,7 +379,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			}()
 		}
 		onNewSnapshot()
-		blockReader = snapshotsync.NewBlockReader(allSnapshots)
+		blockReader = freezeblocks.NewBlockReader(allSnapshots)
 
 		var histV3Enabled bool
 		_ = db.View(ctx, func(tx kv.Tx) error {
@@ -444,7 +443,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	txPoolService := rpcservices.NewTxPoolService(txPool)
 
 	if !cfg.WithDatadir {
-		blockReader = snapshotsync.NewRemoteBlockReader(remoteBackendClient)
+		blockReader = freezeblocks.NewRemoteBlockReader(remoteBackendClient)
 	}
 
 	remoteEth := rpcservices.NewRemoteBackend(remoteBackendClient, db, blockReader)

@@ -447,13 +447,13 @@ func getTransaction(txJson commands.RPCTransaction) (types.Transaction, error) {
 
 		dynamicFeeTx := types.DynamicFeeTransaction{
 			CommonTx: types.CommonTx{
-				ChainID: chainId,
-				Nonce:   uint64(txJson.Nonce),
-				To:      txJson.To,
-				Value:   value,
-				Gas:     uint64(txJson.Gas),
-				Data:    txJson.Input,
+				Nonce: uint64(txJson.Nonce),
+				To:    txJson.To,
+				Value: value,
+				Gas:   uint64(txJson.Gas),
+				Data:  txJson.Input,
 			},
+			ChainID:    chainId,
 			Tip:        tip,
 			FeeCap:     feeCap,
 			AccessList: *txJson.Accesses,
