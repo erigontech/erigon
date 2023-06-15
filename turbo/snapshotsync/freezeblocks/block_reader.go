@@ -23,6 +23,9 @@ type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
 }
 
+func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
+	panic("not implemented")
+}
 func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	headHash := rawdb.ReadHeadBlockHash(db)
 	headNumber := rawdb.ReadHeaderNumber(db, headHash)
@@ -212,6 +215,9 @@ func NewBlockReader(snapshots services.BlockSnapshots) *BlockReader {
 	return &BlockReader{sn: snapshots.(*RoSnapshots), TransactionsV3: true}
 }
 
+func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
+	return CanDeleteTo(currentBlockInDB, r.sn.BlocksAvailable())
+}
 func (r *BlockReader) Snapshots() services.BlockSnapshots    { return r.sn }
 func (r *BlockReader) FrozenBlocks() uint64                  { return r.sn.BlocksAvailable() }
 func (r *BlockReader) FrozenFiles() []string                 { return r.sn.Files() }

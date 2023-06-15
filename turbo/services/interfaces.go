@@ -21,10 +21,6 @@ type BlockReader interface {
 	BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error)
 	CurrentBlock(db kv.Tx) (*types.Block, error)
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error)
-
-	FrozenBlocks() uint64
-	FrozenFiles() (list []string)
-	FreezingCfg() ethconfig.BlocksFreezing
 }
 
 type HeaderReader interface {
@@ -71,6 +67,11 @@ type FullBlockReader interface {
 	HeaderReader
 	TxnReader
 	CanonicalReader
+
+	FrozenBlocks() uint64
+	FrozenFiles() (list []string)
+	FreezingCfg() ethconfig.BlocksFreezing
+	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
 
 	Snapshots() BlockSnapshots
 }

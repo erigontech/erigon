@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -229,7 +228,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		blockTo = cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 		pruneBor = true
 	} else if cfg.blockReader.FreezingCfg().Enabled {
-		blockTo = freezeblocks.CanDeleteTo(s.ForwardProgress, cfg.blockReader.FrozenBlocks())
+		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
 	// can't prune much here: because tx_lookup index has crypto-hashed-keys, and 1 block producing hundreds of deletes
 	blockTo = cmp.Min(blockTo, blockFrom+10)
