@@ -24,7 +24,7 @@ func TestBodiesUnwind(t *testing.T) {
 	tx, err := db.BeginRw(m.Ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	_, bw := m.NewBlocksIO()
+	_, bw := m.BlocksIO()
 
 	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, ChainID: u256.N1, CommonTx: types.CommonTx{Value: u256.N1, Gas: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
@@ -40,11 +40,11 @@ func TestBodiesUnwind(t *testing.T) {
 	for i := uint64(1); i <= 10; i++ {
 		h.Number = big.NewInt(int64(i))
 		hash := h.Hash()
-		err = bw.WriteHeader(tx, h)
+		err = rawdb.WriteHeader(tx, h)
 		require.NoError(err)
 		err = rawdb.WriteCanonicalHash(tx, hash, i)
 		require.NoError(err)
-		_, err = bw.WriteRawBodyIfNotExists(tx, hash, i, b)
+		_, err = rawdb.WriteRawBodyIfNotExists(tx, hash, i, b)
 		require.NoError(err)
 	}
 
@@ -78,7 +78,7 @@ func TestBodiesUnwind(t *testing.T) {
 		}
 	}
 	{
-		_, err = bw.WriteRawBodyIfNotExists(tx, libcommon.Hash{11}, 11, b)
+		_, err = rawdb.WriteRawBodyIfNotExists(tx, libcommon.Hash{11}, 11, b)
 		require.NoError(err)
 		err = rawdb.WriteCanonicalHash(tx, libcommon.Hash{11}, 11)
 		require.NoError(err)

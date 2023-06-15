@@ -33,6 +33,7 @@ import (
 	librlp "github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
@@ -55,7 +56,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 var (
@@ -138,7 +138,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	}); err != nil {
 		panic(err)
 	}
-	br := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()))
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
 	bw := blockio.NewBlockWriter(histV3)
 	return br, bw
 }
@@ -534,7 +534,7 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 }
 
 func extractBodies(datadir string) error {
-	snaps := snapshotsync.NewRoSnapshots(ethconfig.Snapshot{
+	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		Enabled:    true,
 		KeepBlocks: true,
 		Produce:    false,

@@ -51,9 +51,8 @@ var debugTraceTransactionNoRefundTests = []struct {
 func TestTraceBlockByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
@@ -99,12 +98,8 @@ func TestTraceBlockByNumber(t *testing.T) {
 
 func TestTraceBlockByHash(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
-	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000, log.New())
-	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
+	ethApi := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -135,11 +130,7 @@ func TestTraceBlockByHash(t *testing.T) {
 
 func TestTraceTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
-	api := NewPrivateDebugAPI(base, m.DB, 0)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -168,11 +159,7 @@ func TestTraceTransaction(t *testing.T) {
 
 func TestTraceTransactionNoRefund(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br, _ := m.NewBlocksIO()
-	agg := m.HistoryV3Components()
-	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs),
-		m.DB, 0)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -202,16 +189,12 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 
 func TestStorageRangeAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br, _ := m.NewBlocksIO()
-	agg := m.HistoryV3Components()
-	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs),
-		m.DB, 0)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	t.Run("invalid addr", func(t *testing.T) {
 		var block4 *types.Block
 		var err error
 		err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-			block4, err = br.BlockByNumber(m.Ctx, tx, 4)
+			block4, err = m.BlockReader.BlockByNumber(m.Ctx, tx, 4)
 			return err
 		})
 		require.NoError(t, err)
@@ -224,7 +207,7 @@ func TestStorageRangeAt(t *testing.T) {
 	t.Run("block 4, addr 1", func(t *testing.T) {
 		var block4 *types.Block
 		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-			block4, _ = br.BlockByNumber(m.Ctx, tx, 4)
+			block4, _ = m.BlockReader.BlockByNumber(m.Ctx, tx, 4)
 			return nil
 		})
 		require.NoError(t, err)
@@ -245,7 +228,7 @@ func TestStorageRangeAt(t *testing.T) {
 	t.Run("block latest, addr 1", func(t *testing.T) {
 		var latestBlock *types.Block
 		err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
-			latestBlock, err = br.CurrentBlock(tx)
+			latestBlock, err = m.BlockReader.CurrentBlock(tx)
 			return err
 		})
 		require.NoError(t, err)
@@ -300,11 +283,7 @@ func TestStorageRangeAt(t *testing.T) {
 
 func TestAccountRange(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br, _ := m.NewBlocksIO()
-	agg := m.HistoryV3Components()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
-	api := NewPrivateDebugAPI(base, m.DB, 0)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 
 	t.Run("valid account", func(t *testing.T) {
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
@@ -363,11 +342,7 @@ func TestAccountRange(t *testing.T) {
 
 func TestGetModifiedAccountsByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br, _ := m.NewBlocksIO()
-	agg := m.HistoryV3Components()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
-	api := NewPrivateDebugAPI(base, m.DB, 0)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 
 	t.Run("correct input", func(t *testing.T) {
 		n, n2 := rpc.BlockNumber(1), rpc.BlockNumber(2)
@@ -469,19 +444,15 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 func TestAccountAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
-	api := NewPrivateDebugAPI(base, m.DB, 0)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 
 	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash12 common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		blockHash0, _ = br.CanonicalHash(m.Ctx, tx, 0)
-		blockHash1, _ = br.CanonicalHash(m.Ctx, tx, 1)
-		blockHash3, _ = br.CanonicalHash(m.Ctx, tx, 3)
-		blockHash10, _ = br.CanonicalHash(m.Ctx, tx, 10)
-		blockHash12, _ = br.CanonicalHash(m.Ctx, tx, 12)
+		blockHash0, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
+		blockHash1, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
+		blockHash3, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
+		blockHash10, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
+		blockHash12, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 12)
 		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHash12
 		return nil
 	})

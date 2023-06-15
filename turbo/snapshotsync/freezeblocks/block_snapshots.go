@@ -1,4 +1,4 @@
-package snapshotsync
+package freezeblocks
 
 import (
 	"bytes"
@@ -27,10 +27,8 @@ import (
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/compress"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -41,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -50,12 +49,6 @@ import (
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 )
-
-type DownloadRequest struct {
-	ranges      *Range
-	path        string
-	torrentHash string
-}
 
 type HeaderSegment struct {
 	seg           *compress.Decompressor // value: first_byte_of_header_hash + header_rlp
@@ -337,7 +330,7 @@ type RoSnapshots struct {
 	dir         string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
-	cfg         ethconfig.Snapshot
+	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
 }
 
@@ -346,17 +339,17 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.Snapshot, snapDir string, logger log.Logger) *RoSnapshots {
+func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *RoSnapshots {
 	return &RoSnapshots{dir: snapDir, cfg: cfg, Headers: &headerSegments{}, Bodies: &bodySegments{}, Txs: &txnSegments{}, logger: logger}
 }
 
-func (s *RoSnapshots) Cfg() ethconfig.Snapshot { return s.cfg }
-func (s *RoSnapshots) Dir() string             { return s.dir }
-func (s *RoSnapshots) SegmentsReady() bool     { return s.segmentsReady.Load() }
-func (s *RoSnapshots) IndicesReady() bool      { return s.indicesReady.Load() }
-func (s *RoSnapshots) IndicesMax() uint64      { return s.idxMax.Load() }
-func (s *RoSnapshots) SegmentsMax() uint64     { return s.segmentsMax.Load() }
-func (s *RoSnapshots) BlocksAvailable() uint64 { return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load()) }
+func (s *RoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
+func (s *RoSnapshots) Dir() string                   { return s.dir }
+func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
+func (s *RoSnapshots) IndicesReady() bool            { return s.indicesReady.Load() }
+func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
+func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
+func (s *RoSnapshots) BlocksAvailable() uint64       { return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load()) }
 func (s *RoSnapshots) LogStat() {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -366,6 +359,23 @@ func (s *RoSnapshots) LogStat() {
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
+func (s *RoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, error) {
+	existingFiles, missingSnapshots, err := Segments(s.dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	existingFilesMap := map[string]struct{}{}
+	for _, existingFile := range existingFiles {
+		_, fname := filepath.Split(existingFile.Path)
+		existingFilesMap[fname] = struct{}{}
+	}
+
+	res := make([]*services.Range, 0, len(missingSnapshots))
+	for _, sn := range missingSnapshots {
+		res = append(res, &services.Range{From: sn.from, To: sn.to})
+	}
+	return existingFilesMap, res, nil
+}
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
 		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
@@ -1005,26 +1015,26 @@ type BlockRetire struct {
 	tmpDir  string
 	db      kv.RoDB
 
-	downloader  proto_downloader.DownloaderClient
-	notifier    DBEventNotifier
+	notifier    services.DBEventNotifier
 	logger      log.Logger
 	blockReader services.FullBlockReader
 	blockWriter *blockio.BlockWriter
+	dirs        datadir.Dirs
 }
 
-func NewBlockRetire(workers int, tmpDir string, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier, logger log.Logger) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, blockReader: blockReader, blockWriter: blockWriter, db: db, downloader: downloader, notifier: notifier, logger: logger}
+func NewBlockRetire(workers int, dirs datadir.Dirs, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, db kv.RoDB, notifier services.DBEventNotifier, logger log.Logger) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, db: db, notifier: notifier, logger: logger}
 }
-func (br *BlockRetire) Snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
-func (br *BlockRetire) NeedSaveFilesListInDB() bool {
+func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
+func (br *BlockRetire) HasNewFrozenFiles() bool {
 	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 
-func CanRetire(curBlockNum uint64, snapshots *RoSnapshots) (blockFrom, blockTo uint64, can bool) {
+func CanRetire(curBlockNum uint64, blocksInSnapshots uint64) (blockFrom, blockTo uint64, can bool) {
 	if curBlockNum <= params.FullImmutabilityThreshold {
 		return
 	}
-	blockFrom = snapshots.BlocksAvailable() + 1
+	blockFrom = blocksInSnapshots + 1
 	return canRetire(blockFrom, curBlockNum-params.FullImmutabilityThreshold)
 }
 func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
@@ -1057,20 +1067,20 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	}
 	return blockFrom, blockTo, blockTo-blockFrom >= 1_000
 }
-func CanDeleteTo(curBlockNum uint64, snapshots services.BlockSnapshots) (blockTo uint64) {
+func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) {
 	if curBlockNum+999 < params.FullImmutabilityThreshold {
 		// To prevent overflow of uint64 below
-		return snapshots.BlocksAvailable() + 1
+		return blocksInSnapshots + 1
 	}
 	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
-	return cmp.Min(hardLimit, snapshots.BlocksAvailable()+1)
+	return cmp.Min(hardLimit, blocksInSnapshots+1)
 }
-func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl) error {
+func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) error {
 	chainConfig := fromdb.ChainConfig(br.db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	downloader, notifier, logger, blockReader, tmpDir, db, workers := br.downloader, br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
+	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
-	snapshots := blockReader.Snapshots().(*RoSnapshots)
+	snapshots := br.snapshots()
 	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
 
 	// in future we will do it in background
@@ -1101,36 +1111,35 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 		notifier.OnNewSnapshot()
 	}
 
-	if downloader != nil && !reflect.ValueOf(downloader).IsNil() {
-		downloadRequest := make([]DownloadRequest, 0, len(rangesToMerge))
-		for i := range rangesToMerge {
-			downloadRequest = append(downloadRequest, NewDownloadRequest(&rangesToMerge[i], "", ""))
-		}
+	downloadRequest := make([]services.DownloadRequest, 0, len(rangesToMerge))
+	for i := range rangesToMerge {
+		r := &services.Range{From: rangesToMerge[i].from, To: rangesToMerge[i].to}
+		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", ""))
+	}
 
-		if err := RequestSnapshotsDownload(ctx, downloadRequest, downloader); err != nil {
+	if seedNewSnapshots != nil {
+		if err := seedNewSnapshots(downloadRequest); err != nil {
 			return err
 		}
 	}
 	return nil
 }
-
 func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
-	blockSnapshots := br.blockReader.Snapshots().(*RoSnapshots)
-	if blockSnapshots.cfg.KeepBlocks {
+	if br.blockReader.FreezingCfg().KeepBlocks {
 		return nil
 	}
 	currentProgress, err := stages.GetStageProgress(tx, stages.Senders)
 	if err != nil {
 		return err
 	}
-	canDeleteTo := CanDeleteTo(currentProgress, blockSnapshots)
+	canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks())
 	if err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
 		return nil
 	}
 	return nil
 }
 
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl) {
+func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) {
 	ok := br.working.CompareAndSwap(false, true)
 	if !ok {
 		// go-routine is still working
@@ -1139,20 +1148,51 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 	go func() {
 		defer br.working.Store(false)
 
-		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.Snapshots())
+		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBlocks())
 		if !ok {
 			return
 		}
 
-		err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl)
+		err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots)
 		if err != nil {
 			br.logger.Warn("[snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
 		}
 	}()
 }
+func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
+	snapshots := br.snapshots()
+	snapshots.LogStat()
 
-type DBEventNotifier interface {
-	OnNewSnapshot()
+	// Create .idx files
+	if snapshots.IndicesMax() >= snapshots.SegmentsMax() {
+		return nil
+	}
+
+	if !snapshots.Cfg().Produce && snapshots.IndicesMax() == 0 {
+		return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
+	}
+	if snapshots.Cfg().Produce {
+		if !snapshots.SegmentsReady() {
+			return fmt.Errorf("not all snapshot segments are available")
+		}
+
+		// wait for Downloader service to download all expected snapshots
+		if snapshots.IndicesMax() < snapshots.SegmentsMax() {
+			chainID, _ := uint256.FromBig(cc.ChainID)
+			indexWorkers := estimate.IndexSnapshot.Workers()
+			if err := BuildMissedIndices(logPrefix, ctx, br.dirs, *chainID, indexWorkers, br.logger); err != nil {
+				return fmt.Errorf("BuildMissedIndices: %w", err)
+			}
+		}
+
+		if err := snapshots.ReopenFolder(); err != nil {
+			return err
+		}
+		if notifier != nil {
+			notifier.OnNewSnapshot()
+		}
+	}
+	return nil
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
@@ -1930,11 +1970,11 @@ type Merger struct {
 	compressWorkers int
 	tmpDir          string
 	chainID         uint256.Int
-	notifier        DBEventNotifier
+	notifier        services.DBEventNotifier
 	logger          log.Logger
 }
 
-func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainID uint256.Int, notifier DBEventNotifier, logger log.Logger) *Merger {
+func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainID uint256.Int, notifier services.DBEventNotifier, logger log.Logger) *Merger {
 	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainID: chainID, notifier: notifier, logger: logger}
 }
 
@@ -1942,7 +1982,8 @@ type Range struct {
 	from, to uint64
 }
 
-func (r Range) String() string { return fmt.Sprintf("%dk-%dk", r.from/1000, r.to/1000) }
+func (r Range) From() uint64 { return r.from }
+func (r Range) To() uint64   { return r.to }
 
 func (*Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
@@ -2150,50 +2191,4 @@ func (m *Merger) removeOldFiles(toDel []string, snapDir string) {
 	for _, f := range tmpFiles {
 		_ = os.Remove(f)
 	}
-}
-
-func NewDownloadRequest(ranges *Range, path string, torrentHash string) DownloadRequest {
-	return DownloadRequest{
-		ranges:      ranges,
-		path:        path,
-		torrentHash: torrentHash,
-	}
-}
-
-// RequestSnapshotsDownload - builds the snapshots download request and downloads them
-func RequestSnapshotsDownload(ctx context.Context, downloadRequest []DownloadRequest, downloader proto_downloader.DownloaderClient) error {
-	// start seed large .seg of large size
-	req := BuildProtoRequest(downloadRequest)
-	if _, err := downloader.Download(ctx, req); err != nil {
-		return err
-	}
-	return nil
-}
-
-func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.DownloadRequest {
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snaptype.AllSnapshotTypes))}
-	for _, r := range downloadRequest {
-		if r.path != "" {
-			if r.torrentHash != "" {
-				req.Items = append(req.Items, &proto_downloader.DownloadItem{
-					TorrentHash: downloadergrpc.String2Proto(r.torrentHash),
-					Path:        r.path,
-				})
-			} else {
-				req.Items = append(req.Items, &proto_downloader.DownloadItem{
-					Path: r.path,
-				})
-			}
-		} else {
-			if r.ranges.to-r.ranges.from != snaptype.Erigon2SegmentSize {
-				continue
-			}
-			for _, t := range snaptype.AllSnapshotTypes {
-				req.Items = append(req.Items, &proto_downloader.DownloadItem{
-					Path: snaptype.SegmentFileName(r.ranges.from, r.ranges.to, t),
-				})
-			}
-		}
-	}
-	return req
 }

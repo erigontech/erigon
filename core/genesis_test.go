@@ -9,9 +9,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/stretchr/testify/assert"
@@ -35,12 +33,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer tx.Rollback()
-		histV3, err := kvcfg.HistoryV3.Enabled(tx)
-		if err != nil {
-			panic(err)
-		}
-		blockWriter := blockio.NewBlockWriter(histV3)
-		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, "", logger, blockWriter)
+		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, "", logger)
 		require.NoError(t, err)
 		expect := params.GenesisHashByChainName(network)
 		require.NotNil(t, expect, network)
@@ -86,19 +79,14 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	histV3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		panic(err)
-	}
-	blockWriter := blockio.NewBlockWriter(histV3)
 	genesis := core.GenesisBlockByChainName(networkname.MainnetChainName)
-	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger, blockWriter)
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger, blockWriter)
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "", logger)
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)

@@ -38,8 +38,8 @@ func TestInserter1(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	br, bw := m.NewBlocksIO()
-	hi := headerdownload.NewHeaderInserter("headers", big.NewInt(0), 0, br, bw)
+	br := m.BlockReader
+	hi := headerdownload.NewHeaderInserter("headers", big.NewInt(0), 0, br)
 	h1 := types.Header{
 		Number:     big.NewInt(1),
 		Difficulty: big.NewInt(10),

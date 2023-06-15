@@ -294,9 +294,8 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 	ethashApi := apis[1].Service.(*ethash.API)
 	server := grpc.NewServer()
 
-	br, _ := m.NewBlocksIO()
 	remote.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events,
-		br, nil, nil, nil, false, log.New()))
+		m.BlockReader, nil, nil, nil, false, log.New()))
 	txpool.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
 	txpool.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
 	listener := bufconn.Listen(1024 * 1024)
