@@ -974,42 +974,37 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
+	tx, err := m.DB.BeginRw(m.Ctx)
+	if err != nil {
+		fmt.Printf("beginro error: %v\n", err)
+		return
+	}
+	defer tx.Rollback()
+
 	// account must exist pre eip 161
-	if err = m.InsertChain(chain.Slice(0, 1), nil); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1), tx); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		if st := state.New(m.NewStateReader(tx)); !st.Exist(theAddr) {
-			t.Error("expected account to exist")
-		}
-		return nil
-	})
-	require.NoError(t, err)
+	if st := state.New(m.NewStateReader(tx)); !st.Exist(theAddr) {
+		t.Error("expected account to exist")
+	}
 
 	// account needs to be deleted post eip 161
-	if err = m.InsertChain(chain.Slice(1, 2), nil); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2), tx); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		if st := state.New(m.NewStateReader(tx)); st.Exist(theAddr) {
-			t.Error("account should not exist")
-		}
-		return nil
-	})
-	require.NoError(t, err)
+	if st := state.New(m.NewStateReader(tx)); st.Exist(theAddr) {
+		t.Error("account should not exist")
+	}
 
 	// account mustn't be created post eip 161
-	if err = m.InsertChain(chain.Slice(2, 3), nil); err != nil {
+	if err = m.InsertChain(chain.Slice(2, 3), tx); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		if st := state.New(m.NewStateReader(tx)); st.Exist(theAddr) {
-			t.Error("account should not exist")
-		}
-		return nil
-	})
+	if st := state.New(m.NewStateReader(tx)); st.Exist(theAddr) {
+		t.Error("account should not exist")
+	}
 	require.NoError(t, err)
-
 }
 
 func TestDoubleAccountRemoval(t *testing.T) {
@@ -1057,24 +1052,20 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.InsertChain(chain, nil)
-	assert.NoError(t, err)
-
-	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		st := state.New(m.NewStateReader(tx))
-		assert.NoError(t, err)
-		assert.False(t, st.Exist(theAddr), "Contract should've been removed")
-		return nil
-	})
-	assert.NoError(t, err)
-
-	tx, err := m.DB.BeginRo(m.Ctx)
+	tx, err := m.DB.BeginRw(m.Ctx)
 	if err != nil {
-		t.Fatalf("read only db tx to read state: %v", err)
+		fmt.Printf("beginro error: %v\n", err)
+		return
 	}
 	defer tx.Rollback()
+	err = m.InsertChain(chain, tx)
+	assert.NoError(t, err)
 
-	st := state.New(m.NewHistoryStateReader(1, tx))
+	st := state.New(m.NewStateReader(tx))
+	assert.NoError(t, err)
+	assert.False(t, st.Exist(theAddr), "Contract should've been removed")
+
+	st = state.New(m.NewHistoryStateReader(1, tx))
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
