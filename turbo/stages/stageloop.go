@@ -176,6 +176,7 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stagedsync
 		tableSizes = stagedsync.PrintTables(db, tx) // Need to do this before commit to access tx
 		commitStart := time.Now()
 		errTx := tx.Commit()
+		tx = nil
 		if errTx != nil {
 			return errTx
 		}
