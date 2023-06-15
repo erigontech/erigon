@@ -73,7 +73,7 @@ func StageLoop(ctx context.Context,
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
 	logger log.Logger,
-	blockReader services.BlockReader,
+	blockReader services.FullBlockReader,
 	hook *Hook,
 ) {
 	defer close(waitForDone)
@@ -123,7 +123,7 @@ func StageLoop(ctx context.Context,
 	}
 }
 
-func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockReader services.BlockReader, hook *Hook) (headBlockHash libcommon.Hash, err error) {
+func StageLoopStep(ctx context.Context, db kv.RwDB, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (headBlockHash libcommon.Hash, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())

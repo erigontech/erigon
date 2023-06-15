@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"path/filepath"
 	"runtime"
 	"time"
 
@@ -17,9 +16,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -65,7 +64,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, notifier services.DBEventNotifier, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
-	snapshots := blockReader.Snapshots().(*freezeblocks.RoSnapshots)
+	snapshots := blockReader.Snapshots()
 	if blockReader.FreezingCfg().NoDownloader {
 		if err := snapshots.ReopenFolder(); err != nil {
 			return err
@@ -86,18 +85,13 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *
 		return err
 	}
 	dbEmpty := len(snInDB) == 0
-	var missingSnapshots []freezeblocks.Range
-	var existingFiles []snaptype.FileInfo
+	var existingFilesMap map[string]struct{}
+	var missingSnapshots []*services.Range
 	if !dbEmpty {
-		existingFiles, missingSnapshots, err = freezeblocks.Segments(snapshots.Dir())
+		existingFilesMap, missingSnapshots, err = snapshots.ScanDir()
 		if err != nil {
 			return err
 		}
-	}
-	existingFilesMap := map[string]struct{}{}
-	for _, existingFile := range existingFiles {
-		_, fname := filepath.Split(existingFile.Path)
-		existingFilesMap[fname] = struct{}{}
 	}
 	if len(missingSnapshots) > 0 {
 		log.Warn(fmt.Sprintf("[%s] downloading missing snapshots", logPrefix))
@@ -121,8 +115,7 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *
 	}
 
 	// builds missing snapshots request
-	for i := range missingSnapshots {
-		r := &services.Range{From: missingSnapshots[i].From(), To: missingSnapshots[i].To()}
+	for _, r := range missingSnapshots {
 		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", ""))
 	}
 

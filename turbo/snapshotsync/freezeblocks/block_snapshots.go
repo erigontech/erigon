@@ -359,6 +359,23 @@ func (s *RoSnapshots) LogStat() {
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
+func (s *RoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, error) {
+	existingFiles, missingSnapshots, err := Segments(s.dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	existingFilesMap := map[string]struct{}{}
+	for _, existingFile := range existingFiles {
+		_, fname := filepath.Split(existingFile.Path)
+		existingFilesMap[fname] = struct{}{}
+	}
+
+	res := make([]*services.Range, 0, len(missingSnapshots))
+	for _, sn := range missingSnapshots {
+		res = append(res, &services.Range{From: sn.from, To: sn.to})
+	}
+	return existingFilesMap, res, nil
+}
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
 		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
