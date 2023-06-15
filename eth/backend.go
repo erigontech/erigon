@@ -64,7 +64,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
@@ -136,7 +136,7 @@ type Ethereum struct {
 
 	ethBackendRPC      *privateapi.EthBackendServer
 	miningRPC          txpool_proto.MiningServer
-	stateChangesClient txpool2.StateChangesClient
+	stateChangesClient txpool.StateChangesClient
 
 	miningSealingQuit chan struct{}
 	pendingBlocks     chan *types.Block
@@ -162,10 +162,10 @@ type Ethereum struct {
 	waitForMiningStop    chan struct{}
 
 	txPoolDB                kv.RwDB
-	txPool                  *txpool2.TxPool
+	txPool                  *txpool.TxPool
 	newTxs                  chan types2.Announcements
-	txPoolFetch             *txpool2.Fetch
-	txPoolSend              *txpool2.Send
+	txPoolFetch             *txpool.Fetch
+	txPoolSend              *txpool.Send
 	txPoolGrpcServer        txpool_proto.TxpoolServer
 	notifyMiningAboutNewTxs chan struct{}
 	forkValidator           *engineapi.ForkValidator
@@ -485,7 +485,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	var miningRPC txpool_proto.MiningServer
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 	if config.DeprecatedTxPool.Disable {
-		backend.txPoolGrpcServer = &txpool2.GrpcDisabled{}
+		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
 	} else {
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
 		//cacheConfig.MetricsLabel = "txpool"
@@ -638,11 +638,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if !config.DeprecatedTxPool.Disable {
 		backend.txPoolFetch.ConnectCore()
 		backend.txPoolFetch.ConnectSentries()
-		var newTxsBroadcaster *txpool2.NewSlotsStreams
-		if casted, ok := backend.txPoolGrpcServer.(*txpool2.GrpcServer); ok {
+		var newTxsBroadcaster *txpool.NewSlotsStreams
+		if casted, ok := backend.txPoolGrpcServer.(*txpool.GrpcServer); ok {
 			newTxsBroadcaster = casted.NewSlotsStreams
 		}
-		go txpool2.MainLoop(backend.sentryCtx,
+		go txpool.MainLoop(backend.sentryCtx,
 			backend.txPoolDB, backend.chainDB,
 			backend.txPool, backend.newTxs, backend.txPoolSend, newTxsBroadcaster,
 			func() {
