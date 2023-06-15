@@ -98,8 +98,8 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3,
 
 	return nil
 }
-func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx, bw *blockio.BlockWriter) error {
-	if err := bw.ResetSenders(ctx, db, tx); err != nil {
+func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
+	if err := backup.ClearTables(ctx, db, tx, kv.Senders); err != nil {
 		return nil
 	}
 	return clearStageProgress(tx, stages.Senders)

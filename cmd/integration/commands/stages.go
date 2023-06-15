@@ -809,10 +809,9 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	must(sync.SetCurrentStage(stages.Senders))
 
-	br, bw := blocksIO(db, logger)
+	br, _ := blocksIO(db, logger)
 	if reset {
-		_, bw := blocksIO(db, logger)
-		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, db, tx, bw) })
+		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, db, tx) })
 	}
 
 	tx, err := db.BeginRw(ctx)
