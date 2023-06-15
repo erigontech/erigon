@@ -305,11 +305,11 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 
 	// decode BlobVersionedHashes
 	stx.BlobVersionedHashes = []libcommon.Hash{}
-	if err = decodeBlobVersionedHashes(stx.BlobVersionedHashes, s); err != nil {
+	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
 		return err
 	}
 
-	// decode y_parity
+	// decode V
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
@@ -329,7 +329,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func decodeBlobVersionedHashes(hashes []libcommon.Hash, s *rlp.Stream) error {
+func decodeBlobVersionedHashes(hashes *[]libcommon.Hash, s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open BlobVersionedHashes: %w", err)
@@ -340,7 +340,7 @@ func decodeBlobVersionedHashes(hashes []libcommon.Hash, s *rlp.Stream) error {
 	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
 		if len(b) == 32 {
 			copy((_hash)[:], b)
-			hashes = append(hashes, _hash)
+			*hashes = append(*hashes, _hash)
 		} else {
 			return fmt.Errorf("wrong size for blobVersionedHashes: %d, %v", len(b), b[0])
 		}
