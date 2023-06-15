@@ -21,6 +21,7 @@ linters:
     - errchkjson #TODO: enable me
     - unused #TODO: enable me
     - gocheckcompilerdirectives
+    - gosmopolitan
   enable:
     - unconvert
     #    - predeclared #TODO: enable me
