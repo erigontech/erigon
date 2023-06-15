@@ -173,7 +173,7 @@ func TestLastBlock(t *testing.T) {
 	m := newCanonical(t, 0)
 	var err error
 
-	chain := makeBlockChain(current(m), 1, m, 0)
+	chain := makeBlockChain(current(m, nil), 1, m, 0)
 	if err = m.InsertChain(chain, nil); err != nil {
 		t.Fatalf("Failed to insert block: %v", err)
 	}
@@ -272,7 +272,7 @@ func testBrokenChain(t *testing.T) {
 	m := newCanonical(t, 10)
 
 	// Create a forked chain, and try to insert with a missing link
-	chain := makeBlockChain(current(m), 5, m, forkSeed)
+	chain := makeBlockChain(current(m, nil), 5, m, forkSeed)
 	brokenChain := chain.Slice(1, chain.Length())
 
 	if err := m.InsertChain(brokenChain, nil); err == nil {
@@ -312,13 +312,13 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
 	// Insert an easy and a difficult chain afterwards
-	easyChain, err := core.GenerateChain(m.ChainConfig, current(m), m.Engine, m.DB, len(first), func(i int, b *core.BlockGen) {
+	easyChain, err := core.GenerateChain(m.ChainConfig, current(m, nil), m.Engine, m.DB, len(first), func(i int, b *core.BlockGen) {
 		b.OffsetTime(first[i])
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	diffChain, err := core.GenerateChain(m.ChainConfig, current(m), m.Engine, m.DB, len(second), func(i int, b *core.BlockGen) {
+	diffChain, err := core.GenerateChain(m.ChainConfig, current(m, nil), m.Engine, m.DB, len(second), func(i int, b *core.BlockGen) {
 		b.OffsetTime(second[i])
 	}, false /* intermediateHashes */)
 	if err != nil {
@@ -370,7 +370,7 @@ func testBadHashes(t *testing.T) {
 	var err error
 
 	// Create a chain, ban a hash and try to import
-	chain := makeBlockChain(current(m), 3, m, 10)
+	chain := makeBlockChain(current(m, nil), 3, m, 10)
 
 	core.BadHashes[chain.Headers[2].Hash()] = true
 	defer func() { delete(core.BadHashes, chain.Headers[2].Hash()) }()
@@ -2222,7 +2222,14 @@ func TestEIP1559Transition(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func current(m *stages.MockSentry) *types.Block {
+func current(m *stages.MockSentry, tx kv.Tx) *types.Block {
+	if tx != nil {
+		b, err := m.BlockReader.CurrentBlock(tx)
+		if err != nil {
+			panic(err)
+		}
+		return b
+	}
 	tx, err := m.DB.BeginRo(context.Background())
 	if err != nil {
 		panic(err)
