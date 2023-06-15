@@ -44,7 +44,7 @@ func main() {
 		}
 	}
 	blockReader, blockWriter := blocksIO(db)
-	execution.RegisterExecutionServer(s, NewEth1Execution(db, blockReader, blockWriter))
+	execution.RegisterExecutionServer(s, NewEth1Execution(db, blockReader))
 	log.Info("Serving mock Execution layer.")
 	if err := s.Serve(lis); err != nil {
 		log.Error("failed to serve", "err", err)

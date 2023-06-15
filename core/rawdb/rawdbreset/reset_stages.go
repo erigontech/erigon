@@ -53,7 +53,7 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) er
 func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3,
 	br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine, logger log.Logger) error {
 	// keep Genesis
-	if err := bw.TruncateBlocks(context.Background(), tx, 1); err != nil {
+	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.Bodies, 1); err != nil {
@@ -70,7 +70,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3,
 	if err := rawdb.TruncateCanonicalHash(tx, 1, false); err != nil {
 		return err
 	}
-	if err := bw.TruncateTd(tx, 1); err != nil {
+	if err := rawdb.TruncateTd(tx, 1); err != nil {
 		return err
 	}
 	hash, err := rawdb.ReadCanonicalHash(tx, 0)

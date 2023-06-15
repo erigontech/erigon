@@ -729,7 +729,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 			return fmt.Errorf("re-read Headers progress: %w", err)
 		}
 		{ // hard-unwind stage_body also
-			if err := bw.TruncateBlocks(ctx, tx, progress+1); err != nil {
+			if err := rawdb.TruncateBlocks(ctx, tx, progress+1); err != nil {
 				return err
 			}
 			progressBodies, err := stages.GetStageProgress(tx, stages.Bodies)
@@ -746,7 +746,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err = rawdb.TruncateCanonicalHash(tx, progress+1, false); err != nil {
 			return err
 		}
-		if err = bw.TruncateTd(tx, progress+1); err != nil {
+		if err = rawdb.TruncateTd(tx, progress+1); err != nil {
 			return err
 		}
 		hash, err := br.CanonicalHash(ctx, tx, progress-1)
@@ -869,7 +869,7 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, bw, br, nil)
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, false, tmpdir, pm, br, nil)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
