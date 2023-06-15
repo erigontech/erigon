@@ -656,7 +656,7 @@ func (a *AggregatorV3) integrateFiles(sf AggV3StaticFiles, txNumFrom, txNumTo ui
 	a.tracesTo.integrateFiles(sf.tracesTo, txNumFrom, txNumTo)
 }
 
-func (a *AggregatorV3) NeedSaveFilesListInDB() bool {
+func (a *AggregatorV3) HasNewFrozenFiles() bool {
 	return a.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 

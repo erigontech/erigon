@@ -93,7 +93,7 @@ func TestNonceFromAddress(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(Success, reason, reason.String())
+			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
 
@@ -118,7 +118,7 @@ func TestNonceFromAddress(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(Success, reason, reason.String())
+			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
@@ -138,7 +138,7 @@ func TestNonceFromAddress(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(InsufficientFunds, reason, reason.String())
+			assert.Equal(txpoolcfg.InsufficientFunds, reason, reason.String())
 		}
 	}
 
@@ -156,7 +156,7 @@ func TestNonceFromAddress(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(NonceTooLow, reason, reason.String())
+			assert.Equal(txpoolcfg.NonceTooLow, reason, reason.String())
 		}
 	}
 }
@@ -213,7 +213,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(Success, reason, reason.String())
+			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
 	// Bumped only feeCap, transaction not accepted
@@ -230,7 +230,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(NotReplaced, reason, reason.String())
+			assert.Equal(txpoolcfg.NotReplaced, reason, reason.String())
 		}
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
@@ -250,7 +250,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(NotReplaced, reason, reason.String())
+			assert.Equal(txpoolcfg.NotReplaced, reason, reason.String())
 		}
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
@@ -270,7 +270,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(Success, reason, reason.String())
+			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
@@ -330,7 +330,7 @@ func TestReverseNonces(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(Success, reason, reason.String())
+			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
 	fmt.Printf("AFTER TX 1\n")
@@ -358,7 +358,7 @@ func TestReverseNonces(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(Success, reason, reason.String())
+			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
 	fmt.Printf("AFTER TX 2\n")
@@ -386,7 +386,7 @@ func TestReverseNonces(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(Success, reason, reason.String())
+			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
 	fmt.Printf("AFTER TX 3\n")
@@ -459,7 +459,7 @@ func TestTxPoke(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(Success, reason, reason.String())
+			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
 	var promoted types.Announcements
@@ -485,7 +485,7 @@ func TestTxPoke(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(DuplicateHash, reason, reason.String())
+			assert.Equal(txpoolcfg.DuplicateHash, reason, reason.String())
 		}
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
@@ -514,7 +514,7 @@ func TestTxPoke(t *testing.T) {
 		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 		assert.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(NotReplaced, reason, reason.String())
+			assert.Equal(txpoolcfg.NotReplaced, reason, reason.String())
 		}
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
@@ -623,8 +623,8 @@ func TestShanghaiIntrinsicGas(t *testing.T) {
 
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			gas, reason := CalcIntrinsicGas(c.dataLen, c.dataNonZeroLen, nil, c.creation, true, true, c.isShanghai)
-			if reason != Success {
+			gas, reason := txpoolcfg.CalcIntrinsicGas(c.dataLen, c.dataNonZeroLen, nil, c.creation, true, true, c.isShanghai)
+			if reason != txpoolcfg.Success {
 				t.Errorf("expected success but got reason %v", reason)
 			}
 			if gas != c.expected {
@@ -637,27 +637,27 @@ func TestShanghaiIntrinsicGas(t *testing.T) {
 func TestShanghaiValidateTx(t *testing.T) {
 	asrt := assert.New(t)
 	tests := map[string]struct {
-		expected   DiscardReason
+		expected   txpoolcfg.DiscardReason
 		dataLen    int
 		isShanghai bool
 	}{
 		"no shanghai": {
-			expected:   Success,
+			expected:   txpoolcfg.Success,
 			dataLen:    32,
 			isShanghai: false,
 		},
 		"shanghai within bounds": {
-			expected:   Success,
+			expected:   txpoolcfg.Success,
 			dataLen:    32,
 			isShanghai: true,
 		},
 		"shanghai exactly on bound": {
-			expected:   Success,
+			expected:   txpoolcfg.Success,
 			dataLen:    fixedgas.MaxInitCodeSize,
 			isShanghai: true,
 		},
 		"shanghai one over bound": {
-			expected:   InitCodeTooLarge,
+			expected:   txpoolcfg.InitCodeTooLarge,
 			dataLen:    fixedgas.MaxInitCodeSize + 1,
 			isShanghai: true,
 		},

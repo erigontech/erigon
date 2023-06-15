@@ -7,6 +7,7 @@ import (
 	"context"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"sync"
 )
@@ -53,7 +54,7 @@ var _ Pool = &PoolMock{}
 //	}
 type PoolMock struct {
 	// AddLocalTxsFunc mocks the AddLocalTxs method.
-	AddLocalTxsFunc func(ctx context.Context, newTxs types2.TxSlots, tx kv.Tx) ([]DiscardReason, error)
+	AddLocalTxsFunc func(ctx context.Context, newTxs types2.TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error)
 
 	// AddNewGoodPeerFunc mocks the AddNewGoodPeer method.
 	AddNewGoodPeerFunc func(peerID types2.PeerID)
@@ -146,7 +147,7 @@ type PoolMock struct {
 }
 
 // AddLocalTxs calls AddLocalTxsFunc.
-func (mock *PoolMock) AddLocalTxs(ctx context.Context, newTxs types2.TxSlots, tx kv.Tx) ([]DiscardReason, error) {
+func (mock *PoolMock) AddLocalTxs(ctx context.Context, newTxs types2.TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error) {
 	callInfo := struct {
 		Ctx    context.Context
 		NewTxs types2.TxSlots
@@ -161,7 +162,7 @@ func (mock *PoolMock) AddLocalTxs(ctx context.Context, newTxs types2.TxSlots, tx
 	mock.lockAddLocalTxs.Unlock()
 	if mock.AddLocalTxsFunc == nil {
 		var (
-			discardReasonsOut []DiscardReason
+			discardReasonsOut []txpoolcfg.DiscardReason
 			errOut            error
 		)
 		return discardReasonsOut, errOut

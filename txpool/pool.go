@@ -47,7 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	emath "github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -80,7 +79,7 @@ type Pool interface {
 
 	// Handle 3 main events - new remote txs from p2p, new local txs from RPC, new blocks from execution layer
 	AddRemoteTxs(ctx context.Context, newTxs types.TxSlots)
-	AddLocalTxs(ctx context.Context, newTxs types.TxSlots, tx kv.Tx) ([]DiscardReason, error)
+	AddLocalTxs(ctx context.Context, newTxs types.TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error)
 	OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error
 
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
@@ -112,87 +111,6 @@ const (
 	BaseFeePoolBits = EnoughFeeCapProtocol + NoNonceGaps + EnoughBalance + NotTooMuchGas
 	QueuedPoolBits  = EnoughFeeCapProtocol
 )
-
-type DiscardReason uint8
-
-const (
-	NotSet              DiscardReason = 0 // analog of "nil-value", means it will be set in future
-	Success             DiscardReason = 1
-	AlreadyKnown        DiscardReason = 2
-	Mined               DiscardReason = 3
-	ReplacedByHigherTip DiscardReason = 4
-	UnderPriced         DiscardReason = 5
-	ReplaceUnderpriced  DiscardReason = 6 // if a transaction is attempted to be replaced with a different one without the required price bump.
-	FeeTooLow           DiscardReason = 7
-	OversizedData       DiscardReason = 8
-	InvalidSender       DiscardReason = 9
-	NegativeValue       DiscardReason = 10 // ensure no one is able to specify a transaction with a negative value.
-	Spammer             DiscardReason = 11
-	PendingPoolOverflow DiscardReason = 12
-	BaseFeePoolOverflow DiscardReason = 13
-	QueuedPoolOverflow  DiscardReason = 14
-	GasUintOverflow     DiscardReason = 15
-	IntrinsicGas        DiscardReason = 16
-	RLPTooLong          DiscardReason = 17
-	NonceTooLow         DiscardReason = 18
-	InsufficientFunds   DiscardReason = 19
-	NotReplaced         DiscardReason = 20 // There was an existing transaction with the same sender and nonce, not enough price bump to replace
-	DuplicateHash       DiscardReason = 21 // There was an existing transaction with the same hash
-	InitCodeTooLarge    DiscardReason = 22 // EIP-3860 - transaction init code is too large
-)
-
-func (r DiscardReason) String() string {
-	switch r {
-	case NotSet:
-		return "not set"
-	case Success:
-		return "success"
-	case AlreadyKnown:
-		return "already known"
-	case Mined:
-		return "mined"
-	case ReplacedByHigherTip:
-		return "replaced by transaction with higher tip"
-	case UnderPriced:
-		return "underpriced"
-	case ReplaceUnderpriced:
-		return "replacement transaction underpriced"
-	case FeeTooLow:
-		return "fee too low"
-	case OversizedData:
-		return "oversized data"
-	case InvalidSender:
-		return "invalid sender"
-	case NegativeValue:
-		return "negative value"
-	case Spammer:
-		return "spammer"
-	case PendingPoolOverflow:
-		return "pending sub-pool is full"
-	case BaseFeePoolOverflow:
-		return "baseFee sub-pool is full"
-	case QueuedPoolOverflow:
-		return "queued sub-pool is full"
-	case GasUintOverflow:
-		return "GasUintOverflow"
-	case IntrinsicGas:
-		return "IntrinsicGas"
-	case RLPTooLong:
-		return "RLPTooLong"
-	case NonceTooLow:
-		return "nonce too low"
-	case InsufficientFunds:
-		return "insufficient funds"
-	case NotReplaced:
-		return "could not replace existing tx"
-	case DuplicateHash:
-		return "existing tx with same hash"
-	case InitCodeTooLarge:
-		return "initcode too large"
-	default:
-		panic(fmt.Sprintf("discard reason: %d", r))
-	}
-}
 
 // metaTx holds transaction and some metadata
 type metaTx struct {
@@ -278,9 +196,9 @@ type TxPool struct {
 	//   - batch notifications about new txs (reduce P2P spam to other nodes about txs propagation)
 	//   - and as a result reducing lock contention
 	unprocessedRemoteTxs    *types.TxSlots
-	unprocessedRemoteByHash map[string]int                        // to reject duplicates
-	byHash                  map[string]*metaTx                    // tx_hash => tx : only not committed to db yet records
-	discardReasonsLRU       *simplelru.LRU[string, DiscardReason] // tx_hash => discard_reason : non-persisted
+	unprocessedRemoteByHash map[string]int                                  // to reject duplicates
+	byHash                  map[string]*metaTx                              // tx_hash => tx : only not committed to db yet records
+	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // tx_hash => discard_reason : non-persisted
 	pending                 *PendingPool
 	baseFee                 *SubPool
 	queued                  *SubPool
@@ -306,7 +224,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 	if err != nil {
 		return nil, err
 	}
-	discardHistory, err := simplelru.NewLRU[string, DiscardReason](10_000, nil)
+	discardHistory, err := simplelru.NewLRU[string, txpoolcfg.DiscardReason](10_000, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +549,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
-		intrinsicGas, _ := CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), nil, mt.Tx.Creation, true, true, isShanghai)
+		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), nil, mt.Tx.Creation, true, true, isShanghai)
 		if intrinsicGas > availableGas {
 			// we might find another TX with a low enough intrinsic gas to include so carry on
 			continue
@@ -695,11 +613,11 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs types.TxSlots) {
 	}
 }
 
-func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.CacheView) DiscardReason {
+func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
 	isShanghai := p.isShanghai()
 	if isShanghai {
 		if txn.DataLen > fixedgas.MaxInitCodeSize {
-			return InitCodeTooLarge
+			return txpoolcfg.InitCodeTooLarge
 		}
 	}
 
@@ -708,13 +626,13 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx underpriced idHash=%x local=%t, feeCap=%d, cfg.MinFeeCap=%d", txn.IDHash, isLocal, txn.FeeCap, p.cfg.MinFeeCap))
 		}
-		return UnderPriced
+		return txpoolcfg.UnderPriced
 	}
-	gas, reason := CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), nil, txn.Creation, true, true, isShanghai)
+	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), nil, txn.Creation, true, true, isShanghai)
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
-	if reason != Success {
+	if reason != txpoolcfg.Success {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed idHash=%x reason=%s", txn.IDHash, reason))
 		}
@@ -724,13 +642,13 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, gas, txn.Gas))
 		}
-		return IntrinsicGas
+		return txpoolcfg.IntrinsicGas
 	}
 	if !isLocal && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
 		if txn.Traced {
 			log.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
 		}
-		return Spammer
+		return txpoolcfg.Spammer
 	}
 
 	// check nonce and balance
@@ -739,7 +657,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx nonce too low idHash=%x nonce in state=%d, txn.nonce=%d", txn.IDHash, senderNonce, txn.Nonce))
 		}
-		return NonceTooLow
+		return txpoolcfg.NonceTooLow
 	}
 	// Transactor should have enough funds to cover the costs
 	total := uint256.NewInt(txn.Gas)
@@ -749,9 +667,9 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx insufficient funds idHash=%x balance in state=%d, txn.gas*txn.tip=%d", txn.IDHash, senderBalance, total))
 		}
-		return InsufficientFunds
+		return txpoolcfg.InsufficientFunds
 	}
-	return Success
+	return txpoolcfg.Success
 }
 
 func (p *TxPool) isShanghai() bool {
@@ -798,10 +716,10 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 	}
 	return nil
 }
-func (p *TxPool) validateTxs(txs *types.TxSlots, stateCache kvcache.CacheView) (reasons []DiscardReason, goodTxs types.TxSlots, err error) {
+func (p *TxPool) validateTxs(txs *types.TxSlots, stateCache kvcache.CacheView) (reasons []txpoolcfg.DiscardReason, goodTxs types.TxSlots, err error) {
 	// reasons is pre-sized for direct indexing, with the default zero
 	// value DiscardReason of NotSet
-	reasons = make([]DiscardReason, len(txs.Txs))
+	reasons = make([]txpoolcfg.DiscardReason, len(txs.Txs))
 
 	if err := txs.Valid(); err != nil {
 		return reasons, goodTxs, err
@@ -810,12 +728,12 @@ func (p *TxPool) validateTxs(txs *types.TxSlots, stateCache kvcache.CacheView) (
 	goodCount := 0
 	for i, txn := range txs.Txs {
 		reason := p.validateTx(txn, txs.IsLocal[i], stateCache)
-		if reason == Success {
+		if reason == txpoolcfg.Success {
 			goodCount++
 			// Success here means no DiscardReason yet, so leave it NotSet
 			continue
 		}
-		if reason == Spammer {
+		if reason == txpoolcfg.Spammer {
 			p.punishSpammer(txn.SenderID)
 		}
 		reasons[i] = reason
@@ -825,7 +743,7 @@ func (p *TxPool) validateTxs(txs *types.TxSlots, stateCache kvcache.CacheView) (
 
 	j := 0
 	for i, txn := range txs.Txs {
-		if reasons[i] == NotSet {
+		if reasons[i] == txpoolcfg.NotSet {
 			goodTxs.Txs[j] = txn
 			goodTxs.IsLocal[j] = txs.IsLocal[i]
 			copy(goodTxs.Senders.At(j), txs.Senders.At(i))
@@ -846,27 +764,27 @@ func (p *TxPool) punishSpammer(spammer uint64) {
 			return count > 0
 		})
 		for _, mt := range txsToDelete {
-			p.discardLocked(mt, Spammer) // can't call it while iterating by all
+			p.discardLocked(mt, txpoolcfg.Spammer) // can't call it while iterating by all
 		}
 	}
 }
 
-func fillDiscardReasons(reasons []DiscardReason, newTxs types.TxSlots, discardReasonsLRU *simplelru.LRU[string, DiscardReason]) []DiscardReason {
+func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxs types.TxSlots, discardReasonsLRU *simplelru.LRU[string, txpoolcfg.DiscardReason]) []txpoolcfg.DiscardReason {
 	for i := range reasons {
-		if reasons[i] != NotSet {
+		if reasons[i] != txpoolcfg.NotSet {
 			continue
 		}
 		reason, ok := discardReasonsLRU.Get(string(newTxs.Txs[i].IDHash[:]))
 		if ok {
 			reasons[i] = reason
 		} else {
-			reasons[i] = Success
+			reasons[i] = txpoolcfg.Success
 		}
 	}
 	return reasons
 }
 
-func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots, tx kv.Tx) ([]DiscardReason, error) {
+func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error) {
 	coreTx, err := p.coreDB().BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -903,7 +821,7 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots,
 		p.pendingBaseFee.Load(), p.blockGasLimit.Load(), p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked, true, p.logger)
 	if err == nil {
 		for i, reason := range addReasons {
-			if reason != NotSet {
+			if reason != txpoolcfg.NotSet {
 				reasons[i] = reason
 			}
 		}
@@ -915,7 +833,7 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots,
 
 	reasons = fillDiscardReasons(reasons, newTxs, p.discardReasonsLRU)
 	for i, reason := range reasons {
-		if reason == Success {
+		if reason == txpoolcfg.Success {
 			txn := newTxs.Txs[i]
 			if txn.Traced {
 				p.logger.Info(fmt.Sprintf("TX TRACING: AddLocalTxs promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
@@ -947,8 +865,8 @@ func (p *TxPool) cache() kvcache.Cache {
 func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	newTxs types.TxSlots, pendingBaseFee, blockGasLimit uint64,
 	pending *PendingPool, baseFee, queued *SubPool,
-	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx, *types.Announcements) DiscardReason, discard func(*metaTx, DiscardReason), collect bool,
-	logger log.Logger) (types.Announcements, []DiscardReason, error) {
+	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx, *types.Announcements) txpoolcfg.DiscardReason, discard func(*metaTx, txpoolcfg.DiscardReason), collect bool,
+	logger log.Logger) (types.Announcements, []txpoolcfg.DiscardReason, error) {
 	protocolBaseFee := calcProtocolBaseFee(pendingBaseFee)
 	if assert.Enable {
 		for _, txn := range newTxs.Txs {
@@ -967,11 +885,11 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	// somehow the fact that certain transactions were local, needs to be remembered for some
 	// time (up to some "immutability threshold").
 	sendersWithChangedState := map[uint64]struct{}{}
-	discardReasons := make([]DiscardReason, len(newTxs.Txs))
+	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxs.Txs))
 	announcements := types.Announcements{}
 	for i, txn := range newTxs.Txs {
 		if found, ok := byHash[string(txn.IDHash[:])]; ok {
-			discardReasons[i] = DuplicateHash
+			discardReasons[i] = txpoolcfg.DuplicateHash
 			// In case if the transation is stuck, "poke" it to rebroadcast
 			if collect && newTxs.IsLocal[i] && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
 				announcements.Append(found.Tx.Type, found.Tx.Size, found.Tx.IDHash[:])
@@ -979,11 +897,11 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 			continue
 		}
 		mt := newMetaTx(txn, newTxs.IsLocal[i], blockNum)
-		if reason := add(mt, &announcements); reason != NotSet {
+		if reason := add(mt, &announcements); reason != txpoolcfg.NotSet {
 			discardReasons[i] = reason
 			continue
 		}
-		discardReasons[i] = NotSet
+		discardReasons[i] = txpoolcfg.NotSet
 		if txn.Traced {
 			logger.Info(fmt.Sprintf("TX TRACING: schedule sendersWithChangedState idHash=%x senderId=%d", txn.IDHash, mt.Tx.SenderID))
 		}
@@ -1007,7 +925,7 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remote.StateChangeBatch,
 	senders *sendersBatch, newTxs types.TxSlots, pendingBaseFee uint64, blockGasLimit uint64,
 	pending *PendingPool, baseFee, queued *SubPool,
-	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx, *types.Announcements) DiscardReason, discard func(*metaTx, DiscardReason),
+	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx, *types.Announcements) txpoolcfg.DiscardReason, discard func(*metaTx, txpoolcfg.DiscardReason),
 	logger log.Logger) (types.Announcements, error) {
 	protocolBaseFee := calcProtocolBaseFee(pendingBaseFee)
 	if assert.Enable {
@@ -1033,7 +951,7 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 			continue
 		}
 		mt := newMetaTx(txn, newTxs.IsLocal[i], blockNum)
-		if reason := add(mt, &announcements); reason != NotSet {
+		if reason := add(mt, &announcements); reason != txpoolcfg.NotSet {
 			discard(mt, reason)
 			continue
 		}
@@ -1078,7 +996,7 @@ func (p *TxPool) setBaseFee(baseFee uint64) (uint64, bool) {
 	return p.pendingBaseFee.Load(), changed
 }
 
-func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) DiscardReason {
+func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoolcfg.DiscardReason {
 	// Insert to pending pool, if pool doesn't have txn with same Nonce and bigger Tip
 	found := p.all.get(mt.Tx.SenderID, mt.Tx.Nonce)
 	if found != nil {
@@ -1095,9 +1013,9 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) Disca
 				announcements.Append(found.Tx.Type, found.Tx.Size, found.Tx.IDHash[:])
 			}
 			if bytes.Equal(found.Tx.IDHash[:], mt.Tx.IDHash[:]) {
-				return NotSet
+				return txpoolcfg.NotSet
 			}
-			return NotReplaced
+			return txpoolcfg.NotReplaced
 		}
 
 		switch found.currentSubPool {
@@ -1111,7 +1029,7 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) Disca
 			//already removed
 		}
 
-		p.discardLocked(found, ReplacedByHigherTip)
+		p.discardLocked(found, txpoolcfg.ReplacedByHigherTip)
 	}
 
 	p.byHash[string(mt.Tx.IDHash[:])] = mt
@@ -1127,12 +1045,12 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) Disca
 	}
 	// All transactions are first added to the queued pool and then immediately promoted from there if required
 	p.queued.Add(mt, p.logger)
-	return NotSet
+	return txpoolcfg.NotSet
 }
 
 // dropping transaction from all sub-structures and from db
 // Important: don't call it while iterating by all
-func (p *TxPool) discardLocked(mt *metaTx, reason DiscardReason) {
+func (p *TxPool) discardLocked(mt *metaTx, reason txpoolcfg.DiscardReason) {
 	delete(p.byHash, string(mt.Tx.IDHash[:]))
 	p.deletedTxs = append(p.deletedTxs, mt)
 	p.all.delete(mt)
@@ -1156,7 +1074,7 @@ func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) {
 // modify state_balance and state_nonce, potentially remove some elements (if transaction with some nonce is
 // included into a block), and finally, walk over the transaction records and update SubPool fields depending on
 // the actual presence of nonce gaps and what the balance is.
-func removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot, pending *PendingPool, baseFee, queued *SubPool, discard func(*metaTx, DiscardReason), logger log.Logger) error {
+func removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot, pending *PendingPool, baseFee, queued *SubPool, discard func(*metaTx, txpoolcfg.DiscardReason), logger log.Logger) error {
 	noncesToRemove := map[uint64]uint64{}
 	for _, txn := range minedTxs {
 		nonce, ok := noncesToRemove[txn.SenderID]
@@ -1195,7 +1113,7 @@ func removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot, pending *P
 		})
 
 		for _, mt := range toDel {
-			discard(mt, Mined)
+			discard(mt, txpoolcfg.Mined)
 		}
 		toDel = toDel[:0]
 	}
@@ -1207,7 +1125,7 @@ func removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot, pending *P
 // nonces, and also affect other transactions from the same sender with higher nonce, it loops through all transactions
 // for a given senderID
 func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, byNonce *BySenderAndNonce,
-	protocolBaseFee, blockGasLimit uint64, pending *PendingPool, baseFee, queued *SubPool, discard func(*metaTx, DiscardReason), logger log.Logger) {
+	protocolBaseFee, blockGasLimit uint64, pending *PendingPool, baseFee, queued *SubPool, discard func(*metaTx, txpoolcfg.DiscardReason), logger log.Logger) {
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
@@ -1313,13 +1231,13 @@ func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint
 		return true
 	})
 	for _, mt := range toDel {
-		discard(mt, NonceTooLow)
+		discard(mt, txpoolcfg.NonceTooLow)
 	}
 }
 
 // promote reasserts invariants of the subpool and returns the list of transactions that ended up
 // being promoted to the pending or basefee pool, for re-broadcasting
-func promote(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint64, discard func(*metaTx, DiscardReason), announcements *types.Announcements,
+func promote(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint64, discard func(*metaTx, txpoolcfg.DiscardReason), announcements *types.Announcements,
 	logger log.Logger) {
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
 	for worst := pending.Worst(); pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || worst.minFeeCap.Cmp(uint256.NewInt(pendingBaseFee)) < 0); worst = pending.Worst() {
@@ -1330,7 +1248,7 @@ func promote(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint
 		} else if worst.subPool >= QueuedPoolBits {
 			queued.Add(pending.PopWorst(), logger)
 		} else {
-			discard(pending.PopWorst(), FeeTooLow)
+			discard(pending.PopWorst(), txpoolcfg.FeeTooLow)
 		}
 	}
 
@@ -1346,7 +1264,7 @@ func promote(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint
 		if worst.subPool >= QueuedPoolBits {
 			queued.Add(baseFee.PopWorst(), logger)
 		} else {
-			discard(baseFee.PopWorst(), FeeTooLow)
+			discard(baseFee.PopWorst(), txpoolcfg.FeeTooLow)
 		}
 	}
 
@@ -1363,22 +1281,22 @@ func promote(pending *PendingPool, baseFee, queued *SubPool, pendingBaseFee uint
 
 	// Discard worst transactions from the queued sub pool if they do not qualify
 	for worst := queued.Worst(); queued.Len() > 0 && worst.subPool < QueuedPoolBits; worst = queued.Worst() {
-		discard(queued.PopWorst(), FeeTooLow)
+		discard(queued.PopWorst(), txpoolcfg.FeeTooLow)
 	}
 
 	// Discard worst transactions from pending pool until it is within capacity limit
 	for pending.Len() > pending.limit {
-		discard(pending.PopWorst(), PendingPoolOverflow)
+		discard(pending.PopWorst(), txpoolcfg.PendingPoolOverflow)
 	}
 
 	// Discard worst transactions from pending sub pool until it is within capacity limits
 	for baseFee.Len() > baseFee.limit {
-		discard(baseFee.PopWorst(), BaseFeePoolOverflow)
+		discard(baseFee.PopWorst(), txpoolcfg.BaseFeePoolOverflow)
 	}
 
 	// Discard worst transactions from the queued sub pool until it is within its capacity limits
 	for _ = queued.Worst(); queued.Len() > queued.limit; _ = queued.Worst() {
-		discard(queued.PopWorst(), QueuedPoolOverflow)
+		discard(queued.PopWorst(), txpoolcfg.QueuedPoolOverflow)
 	}
 }
 
@@ -1675,7 +1593,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 
 		isLocalTx := p.isLocalLRU.Contains(string(k))
 
-		if reason := p.validateTx(txn, isLocalTx, cacheView); reason != NotSet && reason != Success {
+		if reason := p.validateTx(txn, isLocalTx, cacheView); reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {
 			return nil
 		}
 		txs.Resize(uint(i + 1))
@@ -1820,87 +1738,6 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 		}
 		return true
 	})
-}
-
-// CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func CalcIntrinsicGas(dataLen, dataNonZeroLen uint64, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028, isShanghai bool) (uint64, DiscardReason) {
-	// Set the starting gas for the raw transaction
-	var gas uint64
-	if isContractCreation && isHomestead {
-		gas = fixedgas.TxGasContractCreation
-	} else {
-		gas = fixedgas.TxGas
-	}
-	// Bump the required gas by the amount of transactional data
-	if dataLen > 0 {
-		// Zero and non-zero bytes are priced differently
-		nz := dataNonZeroLen
-		// Make sure we don't exceed uint64 for all data combinations
-		nonZeroGas := fixedgas.TxDataNonZeroGasFrontier
-		if isEIP2028 {
-			nonZeroGas = fixedgas.TxDataNonZeroGasEIP2028
-		}
-
-		product, overflow := emath.SafeMul(nz, nonZeroGas)
-		if overflow {
-			return 0, GasUintOverflow
-		}
-		gas, overflow = emath.SafeAdd(gas, product)
-		if overflow {
-			return 0, GasUintOverflow
-		}
-
-		z := dataLen - nz
-
-		product, overflow = emath.SafeMul(z, fixedgas.TxDataZeroGas)
-		if overflow {
-			return 0, GasUintOverflow
-		}
-		gas, overflow = emath.SafeAdd(gas, product)
-		if overflow {
-			return 0, GasUintOverflow
-		}
-
-		if isContractCreation && isShanghai {
-			numWords := toWordSize(dataLen)
-			product, overflow = emath.SafeMul(numWords, fixedgas.InitCodeWordGas)
-			if overflow {
-				return 0, GasUintOverflow
-			}
-			gas, overflow = emath.SafeAdd(gas, product)
-			if overflow {
-				return 0, GasUintOverflow
-			}
-		}
-	}
-	if accessList != nil {
-		product, overflow := emath.SafeMul(uint64(len(accessList)), fixedgas.TxAccessListAddressGas)
-		if overflow {
-			return 0, GasUintOverflow
-		}
-		gas, overflow = emath.SafeAdd(gas, product)
-		if overflow {
-			return 0, GasUintOverflow
-		}
-
-		product, overflow = emath.SafeMul(uint64(accessList.StorageKeys()), fixedgas.TxAccessListStorageKeyGas)
-		if overflow {
-			return 0, GasUintOverflow
-		}
-		gas, overflow = emath.SafeAdd(gas, product)
-		if overflow {
-			return 0, GasUintOverflow
-		}
-	}
-	return gas, Success
-}
-
-// toWordSize returns the ceiled word size required for memory expansion.
-func toWordSize(size uint64) uint64 {
-	if size > math.MaxUint64-31 {
-		return math.MaxUint64/32 + 1
-	}
-	return (size + 31) / 32
 }
 
 var PoolChainConfigKey = []byte("chain_config")
