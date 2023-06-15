@@ -16,6 +16,9 @@ func ChainConfig(db kv.RoDB) (cc *chain.Config) {
 		return nil
 	})
 	tool.Check(err)
+	if cc == nil {
+		panic("database is not initalized")
+	}
 	return cc
 }
 
@@ -32,7 +35,7 @@ func PruneMode(db kv.RoDB) (pm prune.Mode) {
 	}
 	return
 }
-func TxsV3(db kv.RoDB) (enabled bool) {
+func HistV3(db kv.RoDB) (enabled bool) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		var err error
 		enabled, err = kvcfg.HistoryV3.Enabled(tx)

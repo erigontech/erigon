@@ -2,9 +2,9 @@ package forkchoice
 
 import (
 	"fmt"
-
-	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
+	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/log/v3"
@@ -35,6 +35,8 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	case fork_graph.PreValidated:
 		return nil
 	case fork_graph.Success:
+	case fork_graph.BelowAnchor:
+		log.Debug("replay block", "code", status)
 	default:
 		return fmt.Errorf("replay block, code: %+v", status)
 	}
@@ -56,6 +58,11 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval {
 		f.proposerBoostRoot = blockRoot
 	}
+	if lastProcessedState.Slot()%f.forkGraph.Config().SlotsPerEpoch == 0 {
+		if err := freezer.PutObjectSSZIntoFreezer("beaconState", "caplin_core", lastProcessedState.Slot(), lastProcessedState, f.recorder); err != nil {
+			return err
+		}
+	}
 	// Update checkpoints
 	f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	// First thing save previous values of the checkpoints (avoid memory copy of all states and ensure easy revert)
@@ -66,7 +73,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 		justificationBits           = lastProcessedState.JustificationBits().Copy()
 	)
 	// Eagerly compute unrealized justification and finality
-	if err := transition.ProcessJustificationBitsAndFinality(lastProcessedState); err != nil {
+	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState); err != nil {
 		return err
 	}
 	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())

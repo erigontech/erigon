@@ -69,7 +69,7 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 		}
 	case rpc.FinalizedBlockNumber:
 		if borwhitelist.GetWhitelistingService() != nil {
-			num, err := borfinality.GetFinalizedBlockNumber(tx)
+			num, err := borfinality.GetFinalizedBlockNumber(tx, api._blockReader)
 			if err != nil {
 				return 0, err
 			}

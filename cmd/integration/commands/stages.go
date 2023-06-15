@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -868,7 +867,7 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	var blockRetire *snapshotsync.BlockRetire
 	if sn.Cfg().Enabled {
-		blockRetire = snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), tmpdir, br, db, nil, nil, logger)
+		blockRetire = snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), tmpdir, br, bw, db, nil, nil, logger)
 	}
 
 	pm, err := prune.Get(tx)
@@ -900,7 +899,6 @@ func stageSenders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 }
 
 func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
-	chainConfig, historyV3, pm := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 	dirs := datadir.New(datadirCli)
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	must(sync.SetCurrentStage(stages.Execution))
@@ -927,6 +925,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	s := stage(sync, nil, db, stages.Execution)
 
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
+	chainConfig, historyV3, pm := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 	if pruneTo > 0 {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
 		pm.Receipts = prune.Distance(s.BlockNumber - pruneTo)
@@ -1412,10 +1411,9 @@ var _blockWriterSingleton *blockio.BlockWriter
 func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter) {
 	openBlockReaderOnce.Do(func() {
 		sn, _ := allSnapshots(context.Background(), db, logger)
-		transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
 		histV3 := kvcfg.HistoryV3.FromDB(db)
-		_blockReaderSingleton = snapshotsync.NewBlockReader(sn, transactionsV3)
-		_blockWriterSingleton = blockio.NewBlockWriter(histV3, transactionsV3)
+		_blockReaderSingleton = snapshotsync.NewBlockReader(sn)
+		_blockWriterSingleton = blockio.NewBlockWriter(histV3)
 	})
 	return _blockReaderSingleton, _blockWriterSingleton
 }

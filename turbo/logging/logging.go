@@ -52,6 +52,11 @@ func SetupLoggerCtx(filePrefix string, ctx *cli.Context, rootHandler bool) log.L
 	} else {
 		logger = log.New()
 	}
+
+	if logDirPrefix := ctx.String(LogDirPrefixFlag.Name); len(logDirPrefix) > 0 {
+		filePrefix = logDirPrefix
+	}
+
 	initSeparatedLogging(logger, filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
 	return logger
 }
@@ -100,6 +105,11 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 			dirPath = filepath.Join(datadir, "logs")
 		}
 	}
+
+	if logDirPrefix := cmd.Flags().Lookup(LogDirPrefixFlag.Name).Value.String(); len(logDirPrefix) > 0 {
+		filePrefix = logDirPrefix
+	}
+
 	initSeparatedLogging(log.Root(), filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
 	return log.Root()
 }
@@ -110,6 +120,7 @@ func SetupLogger(filePrefix string) log.Logger {
 	var logConsoleVerbosity = flag.String(LogConsoleVerbosityFlag.Name, "", LogConsoleVerbosityFlag.Usage)
 	var logDirVerbosity = flag.String(LogDirVerbosityFlag.Name, "", LogDirVerbosityFlag.Usage)
 	var logDirPath = flag.String(LogDirPathFlag.Name, "", LogDirPathFlag.Usage)
+	var logDirPrefix = flag.String(LogDirPrefixFlag.Name, "", LogDirPrefixFlag.Usage)
 	var logVerbosity = flag.String(LogVerbosityFlag.Name, "", LogVerbosityFlag.Usage)
 	var logConsoleJson = flag.Bool(LogConsoleJsonFlag.Name, false, LogConsoleJsonFlag.Usage)
 	var logJson = flag.Bool(LogJsonFlag.Name, false, LogJsonFlag.Usage)
@@ -131,6 +142,10 @@ func SetupLogger(filePrefix string) log.Logger {
 	dirLevel, dErr := tryGetLogLevel(*logDirVerbosity)
 	if dErr != nil {
 		dirLevel = log.LvlInfo
+	}
+
+	if logDirPrefix != nil && len(*logDirPrefix) > 0 {
+		filePrefix = *logDirPrefix
 	}
 
 	initSeparatedLogging(log.Root(), filePrefix, *logDirPath, consoleLevel, dirLevel, consoleJson, *dirJson)

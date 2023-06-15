@@ -33,7 +33,7 @@ func (m *merkleHasher) merkleizeTrieLeavesFlat(leaves []byte, out []byte, limit 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	layer := m.getBufferFromFlat(leaves)
-	for i := uint8(0); i < getDepth(limit); i++ {
+	for i := uint8(0); i < GetDepth(limit); i++ {
 		layerLen := len(layer)
 		if layerLen%2 != 0 {
 			layer = append(layer, ZeroHashes[i])

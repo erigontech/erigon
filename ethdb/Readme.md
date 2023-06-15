@@ -4,7 +4,7 @@ Words "KV" and "DB" have special meaning here:
 - KV - key-value-style API to access data: let developer manage transactions, stateful cursors. 
 - DB - object-oriented-style API to access data: Get/Put/Delete/WalkOverTable/MultiPut, managing transactions internally.
 
-So, DB abstraction fits 95% times and leads to more maintainable code - because it's looks stateless. 
+So, DB abstraction fits 95% times and leads to more maintainable code - because it looks stateless. 
 
 About "key-value-style": Modern key-value databases don't provide Get/Put/Delete methods, 
   because it's very hard-drive-unfriendly - it pushes developers do random-disk-access which is [order of magnitude slower than sequential read](https://www.seagate.com/sg/en/tech-insights/lies-damn-lies-and-ssd-benchmark-master-ti/).
@@ -72,14 +72,14 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
 - MultipleDatabases, Customization: `NewMDBX().Path(path).WithBucketsConfig(config).Open()`
 
 
-- 1 Transaction object can be used only withing 1 goroutine.
+- 1 Transaction object can be used only within 1 goroutine.
 - Only 1 write transaction can be active at a time (other will wait).
 - Unlimited read transactions can be active concurrently (not blocked by write transaction).
 
 
 - Methods db.Update, db.View - can be used to open and close short transaction.
 - Methods Begin/Commit/Rollback - for long transaction.
-- it's safe to call .Rollback() after .Commit(), multiple rollbacks are also safe. Common transaction patter:
+- it's safe to call .Rollback() after .Commit(), multiple rollbacks are also safe. Common transaction pattern:
 
 ```
 tx, err := db.Begin(true, ethdb.RW)
@@ -127,7 +127,7 @@ for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 - method Begin DOESN'T create new TxDb object, it means this object can be passed into other objects by pointer,
   and high-level app code can start/commit transactions when it needs without re-creating all objects which holds
   TxDb pointer.
-- This is reason why txDb.CommitAndBegin() method works: inside it creating new transaction object, pinter to TxDb stays valid.
+- This is the reason why txDb.CommitAndBegin() method works: inside it creating new transaction object, pinter to TxDb stays valid.
 
 ## How to dump/load table
 

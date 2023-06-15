@@ -166,7 +166,7 @@ func HeadersPOS(
 		// Specifically, this allows to execute snapshot blocks before waiting for CL.
 		if execProgress, err := s.ExecutionAt(tx); err != nil {
 			return err
-		} else if s.BlockNumber >= execProgress {
+		} else if s.BlockNumber > execProgress {
 			return nil
 		}
 	}
@@ -712,7 +712,9 @@ func saveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *header
 		logger.Info("PoS headers verified and saved", "requestId", cfg.hd.RequestId(), "fork head", lastValidHash)
 	}
 
-	cfg.hd.HeadersCollector().Close()
+	if cfg.hd.HeadersCollector() != nil {
+		cfg.hd.HeadersCollector().Close()
+	}
 	cfg.hd.SetHeadersCollector(nil)
 	cfg.hd.SetPosStatus(headerdownload.Idle)
 }
@@ -1053,7 +1055,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 			return fmt.Errorf("iterate over headers to mark bad headers: %w", err)
 		}
 	}
-	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, false /* deleteHeaders */); err != nil {
+	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, badBlock); err != nil {
 		return err
 	}
 	if badBlock {

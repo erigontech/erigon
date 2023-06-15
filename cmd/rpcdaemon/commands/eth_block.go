@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/bor"
@@ -376,20 +375,25 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 
 // GetVoteOnHash implements eth_getVoteOnHash. Returns the boolean based on the whitelisting in bor consensus
 func (api *APIImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBlockNr uint64, hash string, milestoneId string) (bool, error) {
+	tx, err := api.db.BeginRo(context.Background())
+	if err != nil {
+		return false, err
+	}
+
 	service := whitelist.GetWhitelistingService()
 
 	if service == nil {
 		return false, errors.New("only available in Bor engine")
 	}
 
-	logger := log.New()
-	reqGen := requests.NewRequestGenerator(logger)
-	localEndBlock, err := requests.GetBlockByNumber(reqGen, endBlockNr, false, logger)
+	localEndBlock, err := api._blockReader.BlockByNumber(ctx, tx, endBlockNr)
+	// block := localEndBlock.(requests.EthBlockByNumbe
+
 	if err != nil {
 		return false, errors.New("failed to get end block")
 	}
 
-	localEndBlockHash := localEndBlock.Result.Hash.String()
+	localEndBlockHash := localEndBlock.Hash().String()
 
 	isLocked := service.LockMutex(endBlockNr)
 
@@ -416,7 +420,7 @@ func (api *APIImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 		return false, errors.New("milestone ID doesn't exist in Heimdall")
 	}
 
-	service.UnlockMutex(true, milestoneId, localEndBlock.Result.Hash)
+	service.UnlockMutex(true, milestoneId, localEndBlock.Hash())
 
 	return true, nil
 }

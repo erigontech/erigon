@@ -28,7 +28,8 @@ CGO_CFLAGS += -Wno-error=strict-prototypes # for Clang15, remove it when can htt
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
-BUILD_TAGS = nosqlite,noboltdb # about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
+# about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
+BUILD_TAGS = nosqlite,noboltdb
 PACKAGE = github.com/ledgerwatch/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
@@ -122,6 +123,8 @@ COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += erigon-el
 COMMANDS += caplin-phase1
+COMMANDS += caplin-regression
+
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -145,14 +148,14 @@ test:
 	$(GOTEST) --timeout 100s
 
 test3:
-	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),erigon3
+	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),e3
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
 test3-integration:
-	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,erigon3
+	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,e3
 
 ## lint:                              run golangci-lint with .golangci.yml config file
 lint:
@@ -166,7 +169,7 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.52.2
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.53.2
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
@@ -187,6 +190,7 @@ devtools:
 #	PATH=$(GOBIN):$(PATH) go generate ./core/types
 	PATH=$(GOBIN):$(PATH) go generate ./consensus/aura/...
 	#PATH=$(GOBIN):$(PATH) go generate ./eth/ethconfig/...
+	cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'

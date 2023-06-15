@@ -130,7 +130,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	blockRetire := snapshotsync.NewBlockRetire(1, "", br, db, nil, nil, logger)
+	blockRetire := snapshotsync.NewBlockRetire(1, "", br, bw, db, nil, nil, logger)
 	cfg := stagedsync.StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, blockRetire, bw, br, nil)
 	err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 3, m.Ctx, log.New())
 	require.NoError(err)
@@ -158,21 +158,18 @@ func TestSenders(t *testing.T) {
 	}
 
 	{
-		if br.TxsV3Enabled() {
-			c, _ := tx.Cursor(kv.EthTx)
-			cnt, _ := c.Count()
-			assert.Equal(t, 5, int(cnt))
-		} else {
-			txs, err := rawdb.CanonicalTransactions(tx, 1, 2)
-			assert.NoError(t, err)
-			assert.Equal(t, 2, len(txs))
-			txs, err = rawdb.CanonicalTransactions(tx, 5, 3)
-			assert.NoError(t, err)
-			assert.Equal(t, 3, len(txs))
-			txs, err = rawdb.CanonicalTransactions(tx, 5, 1024)
-			assert.NoError(t, err)
-			assert.Equal(t, 3, len(txs))
-		}
+		c, _ := tx.Cursor(kv.EthTx)
+		cnt, _ := c.Count()
+		assert.Equal(t, 5, int(cnt))
 
+		txs, err := rawdb.CanonicalTransactions(tx, 1, 2)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(txs))
+		txs, err = rawdb.CanonicalTransactions(tx, 5, 3)
+		assert.NoError(t, err)
+		assert.Equal(t, 3, len(txs))
+		txs, err = rawdb.CanonicalTransactions(tx, 5, 1024)
+		assert.NoError(t, err)
+		assert.Equal(t, 3, len(txs))
 	}
 }

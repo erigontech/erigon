@@ -10,7 +10,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/log/v3"
 
@@ -35,7 +35,6 @@ type BodiesCfg struct {
 	blockReader     services.FullBlockReader
 	blockWriter     *blockio.BlockWriter
 	historyV3       bool
-	transactionsV3  bool
 }
 
 func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
@@ -113,7 +112,7 @@ func BodiesForward(
 	// Property of blockchain: same block in different forks will have different hashes.
 	// Means - can mark all canonical blocks as non-canonical on unwind, and
 	// do opposite here - without storing any meta-info.
-	if err := cfg.blockWriter.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery); err != nil {
+	if err := cfg.blockWriter.MakeBodiesCanonical(tx, s.BlockNumber+1); err != nil {
 		return fmt.Errorf("make block canonical: %w", err)
 	}
 
@@ -202,12 +201,12 @@ func BodiesForward(
 			}
 
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-			ok, lastTxnNum, err := cfg.blockWriter.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
+			ok, err := cfg.blockWriter.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
 			if err != nil {
 				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
 			if cfg.historyV3 && ok {
-				if err := rawdbv3.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
+				if err := rawdb.AppendCanonicalTxNums(tx, blockHeight); err != nil {
 					return false, err
 				}
 			}
@@ -336,8 +335,7 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	badBlock := u.BadBlock != (libcommon.Hash{})
-	if err := cfg.blockWriter.MakeBodiesNonCanonical(tx, u.UnwindPoint+1, badBlock /* deleteBodies */, ctx, u.LogPrefix(), logEvery); err != nil {
+	if err := cfg.blockWriter.MakeBodiesNonCanonical(tx, u.UnwindPoint+1); err != nil {
 		return err
 	}
 

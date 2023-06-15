@@ -14,7 +14,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -253,21 +252,15 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 
 		case stages.Bodies:
 			type LastTxNumProvider interface {
-				LastTxNumInSnapshot(blockNum uint64) (uint64, bool, error)
+				FirstTxNumNotInSnapshots() uint64
 			}
-			lastTxnID, ok, err := blockReader.(LastTxNumProvider).LastTxNumInSnapshot(blocksAvailable)
-			if err != nil {
-				return err
-			}
+			firstTxNum := blockReader.(LastTxNumProvider).FirstTxNumNotInSnapshots()
 			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
+			if err := rawdb.ResetSequence(tx, kv.EthTx, firstTxNum); err != nil {
 				return err
 			}
 			if err != nil {
 				return err
-			}
-			if !ok {
-				return fmt.Errorf("snapshot not found for block: %d", blocksAvailable)
 			}
 
 			historyV3, err := kvcfg.HistoryV3.Enabled(tx)
@@ -275,23 +268,11 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 				return err
 			}
 			if historyV3 {
-				var toBlock uint64
-				if sn != nil {
-					toBlock = sn.BlocksAvailable()
-				}
-				toBlock = cmp.Max(toBlock, progress)
-
 				_ = tx.ClearBucket(kv.MaxTxNum)
-				if err := rawdbv3.TxNums.WriteForGenesis(tx, 1); err != nil {
-					return err
-				}
 				type IterBody interface {
-					IterateBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error
+					IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error
 				}
-				if err := blockReader.(IterBody).IterateBodies(func(blockNum, baseTxNum, txAmount uint64) error {
-					if blockNum == 0 || blockNum > toBlock {
-						return nil
-					}
+				if err := blockReader.(IterBody).IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 					select {
 					case <-ctx.Done():
 						return ctx.Err()
@@ -307,6 +288,15 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 					return nil
 				}); err != nil {
 					return fmt.Errorf("build txNum => blockNum mapping: %w", err)
+				}
+				if blockReader.Snapshots().BlocksAvailable() > 0 {
+					if err := rawdb.AppendCanonicalTxNums(tx, blockReader.Snapshots().BlocksAvailable()+1); err != nil {
+						return err
+					}
+				} else {
+					if err := rawdb.AppendCanonicalTxNums(tx, 0); err != nil {
+						return err
+					}
 				}
 			}
 			if err := rawdb.WriteSnapshots(tx, sn.Files(), agg.Files()); err != nil {
@@ -494,7 +484,7 @@ func calculateTime(amountLeft, rate uint64) string {
 /* ====== PRUNING ====== */
 // snapshots pruning sections works more as a retiring of blocks
 // retiring blocks means moving block data from db into snapshots
-func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
+func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -504,13 +494,14 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		defer tx.Rollback()
 	}
 
-	sn := cfg.blockRetire.Snapshots()
-	if sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce {
-		br := cfg.blockRetire
+	br := cfg.blockRetire
+	sn := br.Snapshots()
+	if sn.Cfg().Enabled {
 		if err := br.PruneAncientBlocks(tx, 100); err != nil {
 			return err
 		}
-
+	}
+	if sn.Cfg().Enabled && sn.Cfg().Produce {
 		//TODO: initialSync maybe save files progress here
 		if cfg.agg.NeedSaveFilesListInDB() || br.NeedSaveFilesListInDB() {
 			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files(), cfg.agg.Files()); err != nil {

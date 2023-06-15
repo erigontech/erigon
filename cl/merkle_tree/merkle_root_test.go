@@ -20,7 +20,7 @@ func TestHashTreeRoot(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(bs, beaconState, int(clparams.DenebVersion)))
 	root, err := bs.HashSSZ()
 	require.NoError(t, err)
-	require.Equal(t, common.Hash(root), common.HexToHash("0x7d085d9f2cce04eefb4c0aafad744fd2ce4ff962b2c3589fda53aab084171406"))
+	require.Equal(t, common.Hash(root), common.HexToHash("0x9f684cf34c4ac8eb9056051f93498c552b59de6b0977c453ee099be68e58d90c"))
 }
 
 func TestHashTreeRootTxs(t *testing.T) {

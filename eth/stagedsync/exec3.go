@@ -49,8 +49,8 @@ var ExecStepsInDB = metrics.NewCounter(`exec_steps_in_db`) //nolint
 var ExecRepeats = metrics.NewCounter(`exec_repeats`)       //nolint
 var ExecTriggers = metrics.NewCounter(`exec_triggers`)     //nolint
 
-func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string) *Progress {
-	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix}
+func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string, logger log.Logger) *Progress {
+	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
 }
 
 type Progress struct {
@@ -62,6 +62,7 @@ type Progress struct {
 
 	workersCount int
 	logPrefix    string
+	logger       log.Logger
 }
 
 func (p *Progress) Log(rs *state.StateV3, in *exec22.QueueWithRetry, rws *exec22.ResultsQueue, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64) {
@@ -77,7 +78,7 @@ func (p *Progress) Log(rs *state.StateV3, in *exec22.QueueWithRetry, rws *exec22
 	if doneCount > p.prevCount {
 		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
 	}
-	log.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
+	p.logger.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
 		//"workers", workerCount,
 		"blk", outputBlockNum,
 		//"blk/s", fmt.Sprintf("%.1f", speedBlock),
@@ -149,6 +150,7 @@ func ExecV3(ctx context.Context,
 	parallel bool, logPrefix string,
 	maxBlockNum uint64,
 	logger log.Logger,
+	initialCycle bool,
 ) error {
 	batchSize := cfg.batchSize
 	chainDb := cfg.db
@@ -165,10 +167,10 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 		defer applyTx.Rollback()
-	} else {
-		if blockSnapshots.Cfg().Enabled {
-			defer blockSnapshots.EnableMadvNormal().DisableReadAhead()
-		}
+		//} else {
+		//	if blockSnapshots.Cfg().Enabled {
+		//defer blockSnapshots.EnableMadvNormal().DisableReadAhead()
+		//}
 	}
 
 	var block, stageProgress uint64
@@ -250,7 +252,7 @@ func ExecV3(ctx context.Context,
 	applyWorker.DiscardReadList()
 
 	commitThreshold := batchSize.Bytes()
-	progress := NewProgress(block, commitThreshold, workerCount, execStage.LogPrefix())
+	progress := NewProgress(block, commitThreshold, workerCount, execStage.LogPrefix(), logger)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
@@ -503,6 +505,8 @@ func ExecV3(ctx context.Context,
 	slowDownLimit := time.NewTicker(time.Second)
 	defer slowDownLimit.Stop()
 
+	stateStream := !initialCycle && cfg.stateStream && maxBlockNum-block < stateStreamLimit
+
 	var b *types.Block
 	var blockNum uint64
 	var err error
@@ -529,7 +533,7 @@ Loop:
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, nil /*excessDataGas*/)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
 
 		if parallel {
 			select {
@@ -560,6 +564,14 @@ Loop:
 					}
 				}
 			}()
+		} else {
+			if !initialCycle && stateStream {
+				txs, err := blockReader.RawTransactions(context.Background(), applyTx, b.NumberU64(), b.NumberU64())
+				if err != nil {
+					return err
+				}
+				cfg.accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
+			}
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
@@ -1046,7 +1058,7 @@ func reconstituteStep(last bool,
 				defer getHashFnMute.Unlock()
 				return f(n)
 			}
-			blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, nil /*excessDataGas*/)
+			blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
 			rules := chainConfig.Rules(bn, b.Time())
 
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {

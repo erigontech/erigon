@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/borfinality/generics"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
@@ -57,20 +56,19 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 	service := whitelist.GetWhitelistingService()
 
 	// check if we have the given blocks
-	currentBlock := rawdb.ReadCurrentBlock(roTx)
+	currentBlock := rawdb.ReadCurrentBlockNumber(roTx)
 	if currentBlock == nil {
 		log.Debug(fmt.Sprintf("Failed to fetch current block from blockchain while verifying incoming %s", str))
 		return hash, errMissingBlocks
 	}
 
-	head := currentBlock.Number().Uint64()
+	head := *currentBlock
 	if head < end {
 		log.Debug(fmt.Sprintf("Current head block behind incoming %s block", str), "head", head, "end block", end)
 		return hash, errMissingBlocks
 	}
 
 	var localHash string
-	reqGen := requests.NewRequestGenerator(config.logger)
 
 	// verify the hash
 	if isCheckpoint {
@@ -85,13 +83,13 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 		}
 	} else {
 		// in case of milestone(isCheckpoint==false) get the hash of endBlock
-		block, err := requests.GetBlockByNumber(reqGen, end, false, config.logger)
+		block, err := config.blockReader.BlockByNumber(context.Background(), roTx, end)
 		if err != nil {
 			log.Debug("Failed to get end block hash while whitelisting milestone", "number", end, "err", err)
 			return hash, errEndBlock
 		}
 
-		localHash = fmt.Sprintf("%v", block.Result.Hash)[2:]
+		localHash = fmt.Sprintf("%v", block.Hash())[2:]
 	}
 
 	//nolint
@@ -130,13 +128,13 @@ func borVerify(ctx context.Context, config *config, start uint64, end uint64, ha
 	}
 
 	// fetch the end block hash
-	block, err := requests.GetBlockByNumber(reqGen, end, false, config.logger)
+	block, err := config.blockReader.BlockByNumber(context.Background(), roTx, end)
 	if err != nil {
 		log.Debug("Failed to get end block hash while whitelisting", "err", err)
 		return hash, errEndBlock
 	}
 
-	hash = fmt.Sprintf("%v", block.Result.Hash)
+	hash = fmt.Sprintf("%v", block.Hash())
 
 	return hash, nil
 }

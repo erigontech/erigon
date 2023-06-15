@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 
-	lru "github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -41,13 +41,14 @@ func newSnapshot(
 	number uint64,
 	hash common.Hash,
 	validators []*valset.Validator,
+	logger log.Logger,
 ) *Snapshot {
 	snap := &Snapshot{
 		config:       config,
 		sigcache:     sigcache,
 		Number:       number,
 		Hash:         hash,
-		ValidatorSet: valset.NewValidatorSet(validators),
+		ValidatorSet: valset.NewValidatorSet(validators, logger),
 		Recents:      make(map[uint64]common.Address),
 	}
 
@@ -137,10 +138,11 @@ func (s *Snapshot) apply(headers []*types.Header, logger log.Logger) (*Snapshot,
 	for _, header := range headers {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
+		sprintLen := s.config.CalculateSprint(number)
 
 		// Delete the oldest signer from the recent list to allow it signing again
-		if number >= s.config.CalculateSprint(number) {
-			delete(snap.Recents, number-s.config.CalculateSprint(number))
+		if number >= sprintLen {
+			delete(snap.Recents, number-sprintLen)
 		}
 
 		// Resolve the authorization key and check against signers
@@ -162,7 +164,7 @@ func (s *Snapshot) apply(headers []*types.Header, logger log.Logger) (*Snapshot,
 		snap.Recents[number] = signer
 
 		// change validator set and change proposer
-		if number > 0 && (number+1)%s.config.CalculateSprint(number) == 0 {
+		if number > 0 && (number+1)%sprintLen == 0 {
 			if err := validateHeaderExtraField(header.Extra); err != nil {
 				return nil, err
 			}
@@ -171,7 +173,7 @@ func (s *Snapshot) apply(headers []*types.Header, logger log.Logger) (*Snapshot,
 			// get validators from headers and use that for new validator set
 			newVals, _ := valset.ParseValidators(validatorBytes)
 			v := getUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals, logger)
-			v.IncrementProposerPriority(1)
+			v.IncrementProposerPriority(1, logger)
 			snap.ValidatorSet = v
 		}
 	}

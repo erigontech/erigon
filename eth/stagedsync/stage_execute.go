@@ -139,7 +139,7 @@ func executeBlock(
 	stateStream bool,
 ) error {
 	blockNum := block.NumberU64()
-	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, stateStream)
+	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, cfg.blockReader, initialCycle, stateStream)
 	if err != nil {
 		return err
 	}
@@ -204,6 +204,7 @@ func newStateReaderWriter(
 	block *types.Block,
 	writeChangesets bool,
 	accumulator *shards.Accumulator,
+	br services.FullBlockReader,
 	initialCycle bool,
 	stateStream bool,
 ) (state.StateReader, state.WriterWithChangeSets, error) {
@@ -214,7 +215,7 @@ func newStateReaderWriter(
 	stateReader = state.NewPlainStateReader(batch)
 
 	if !initialCycle && stateStream {
-		txs, err := rawdb.RawTransactionsRange(tx, block.NumberU64(), block.NumberU64())
+		txs, err := br.RawTransactions(context.Background(), tx, block.NumberU64(), block.NumberU64())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -276,7 +277,7 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	parallel := initialCycle && tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, logPrefix,
-		to, logger); err != nil {
+		to, logger, initialCycle); err != nil {
 		return fmt.Errorf("ExecV3: %w", err)
 	}
 	return nil
@@ -682,7 +683,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 		if err != nil {
 			return fmt.Errorf("read canonical hash of unwind point: %w", err)
 		}
-		txs, err := rawdb.RawTransactionsRange(tx, u.UnwindPoint, s.BlockNumber)
+		txs, err := cfg.blockReader.RawTransactions(ctx, tx, u.UnwindPoint, s.BlockNumber)
 		if err != nil {
 			return err
 		}

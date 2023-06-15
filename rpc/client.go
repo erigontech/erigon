@@ -198,7 +198,7 @@ func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger
 	if err != nil {
 		return nil, err
 	}
-	c := initClient(conn, randomIDGenerator(), new(serviceRegistry), logger)
+	c := initClient(conn, randomIDGenerator(), &serviceRegistry{logger: logger}, logger)
 	c.reconnectFunc = connect
 	return c, nil
 }

@@ -242,7 +242,8 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
-	latestBlock := rawdb.ReadCurrentBlock(tx)
+	latestBlock, err := br.CurrentBlock(tx)
+	require.NoError(t, err)
 	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
 
 	if err != nil {
@@ -280,7 +281,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
-	oldestBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+	oldestBlock, err := br.BlockByNumber(m.Ctx, tx, 0)
 	if err != nil {
 		t.Error("couldn't retrieve oldest block")
 	}
@@ -322,7 +323,8 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
-	latestBlock := rawdb.ReadCurrentBlock(tx)
+	latestBlock, err := br.CurrentBlock(tx)
+	require.NoError(t, err)
 
 	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
 
@@ -371,7 +373,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	}
 
 	middleNumber := (currentHeader.Number.Uint64() + oldestHeader.Number.Uint64()) / 2
-	middleBlock, err := rawdb.ReadBlockByNumber(tx, middleNumber)
+	middleBlock, err := br.BlockByNumber(m.Ctx, tx, middleNumber)
 	if err != nil {
 		t.Error("couldn't retrieve middle block")
 	}
@@ -413,7 +415,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
 	highestBlockNumber := rawdb.ReadCurrentHeader(tx).Number
-	pickedBlock, err := rawdb.ReadBlockByNumber(tx, highestBlockNumber.Uint64()/3)
+	pickedBlock, err := br.BlockByNumber(m.Ctx, tx, highestBlockNumber.Uint64()/3)
 	if err != nil {
 		t.Errorf("couldn't get block %v", pickedBlock.Number())
 	}

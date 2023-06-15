@@ -95,6 +95,11 @@ func (v Validator) PublicKey() (o [48]byte) {
 	copy(o[:], v[:48])
 	return
 }
+
+func (v Validator) PublicKeyBytes() (o []byte) {
+	return v[:48]
+}
+
 func (v Validator) WithdrawalCredentials() (o common.Hash) {
 	copy(o[:], v[48:80])
 	return

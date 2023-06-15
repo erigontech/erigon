@@ -24,7 +24,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 				return nil
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return SnapshotsPrune(p, snapshots, ctx, tx)
+				return SnapshotsPrune(p, firstCycle, snapshots, ctx, tx)
 			},
 		},
 		{
@@ -368,7 +368,6 @@ var StateUnwindOrder = UnwindOrder{
 
 var DefaultPruneOrder = PruneOrder{
 	stages.Finish,
-	stages.Snapshots,
 	stages.TxLookup,
 	stages.LogIndex,
 	stages.StorageHistoryIndex,
@@ -386,6 +385,7 @@ var DefaultPruneOrder = PruneOrder{
 	stages.Bodies,
 	stages.BlockHashes,
 	stages.Headers,
+	stages.Snapshots,
 }
 
 var MiningUnwindOrder = UnwindOrder{} // nothing to unwind in mining - because mining does not commit db changes

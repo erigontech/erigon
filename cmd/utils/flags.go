@@ -335,12 +335,12 @@ var (
 	}
 	HTTPVirtualHostsFlag = cli.StringFlag{
 		Name:  "http.vhosts",
-		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
+		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts 'any' or '*' as wildcard.",
 		Value: strings.Join(nodecfg.DefaultConfig.HTTPVirtualHosts, ","),
 	}
 	AuthRpcVirtualHostsFlag = cli.StringFlag{
 		Name:  "authrpc.vhosts",
-		Usage: "Comma separated list of virtual hostnames from which to accept Engine API requests (server enforced). Accepts '*' wildcard.",
+		Usage: "Comma separated list of virtual hostnames from which to accept Engine API requests (server enforced). Accepts 'any' or '*' as wildcard.",
 		Value: strings.Join(nodecfg.DefaultConfig.HTTPVirtualHosts, ","),
 	}
 	HTTPApiFlag = cli.StringFlag{
@@ -617,10 +617,6 @@ var (
 	HistoryV3Flag = cli.BoolFlag{
 		Name:  "experimental.history.v3",
 		Usage: "(also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
-	}
-	TransactionV3Flag = cli.BoolFlag{
-		Name:  "experimental.transactions.v3",
-		Usage: "(this flag is in testing stage) Not recommended yet: Can't change this flag after node creation. New DB table for transactions allows keeping multiple branches of block bodies in the DB simultaneously",
 	}
 
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
@@ -1502,7 +1498,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
 	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)
-	cfg.TransactionsV3 = ctx.Bool(TransactionV3Flag.Name)
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
 	}

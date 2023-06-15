@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -397,18 +396,11 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
-	var edg *big.Int
-	if n := block.Number().Uint64(); n > 0 {
-		if parentHeader, err := api._blockReader.Header(ctx, tx, block.ParentHash(), n-1); err != nil {
-			return nil, err
-		} else {
-			edg = parentHeader.ExcessDataGas
-		}
-	}
+
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, edg))
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true))
 	}
 
 	if chainConfig.Bor != nil {
@@ -419,7 +411,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 				return nil, err
 			}
 			if borReceipt != nil {
-				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false, edg))
+				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 			}
 		}
 	}

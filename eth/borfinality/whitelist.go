@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -18,22 +19,24 @@ type BorAPI interface {
 }
 
 type config struct {
-	engine  consensus.Engine
-	borDB   kv.RwDB
-	chainDB kv.RwDB
-	logger  log.Logger
-	borAPI  BorAPI
-	closeCh chan struct{}
+	engine      consensus.Engine
+	borDB       kv.RwDB
+	chainDB     kv.RwDB
+	blockReader services.BlockReader
+	logger      log.Logger
+	borAPI      BorAPI
+	closeCh     chan struct{}
 }
 
-func Whitelist(engine consensus.Engine, borDB kv.RwDB, chainDB kv.RwDB, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
+func Whitelist(engine consensus.Engine, borDB kv.RwDB, chainDB kv.RwDB, blockReader services.BlockReader, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
 	config := &config{
-		engine:  engine,
-		borDB:   borDB,
-		chainDB: chainDB,
-		logger:  logger,
-		borAPI:  borAPI,
-		closeCh: closeCh,
+		engine:      engine,
+		borDB:       borDB,
+		chainDB:     chainDB,
+		blockReader: blockReader,
+		logger:      logger,
+		borAPI:      borAPI,
+		closeCh:     closeCh,
 	}
 
 	go startCheckpointWhitelistService(config)

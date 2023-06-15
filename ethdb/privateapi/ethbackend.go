@@ -44,7 +44,8 @@ import (
 // 3.0.0 - adding PoS interfaces
 // 3.1.0 - add Subscribe to logs
 // 3.2.0 - add EngineGetBlobsBundleV1
-var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 2, Patch: 0}
+// 3.3.0 - merge EngineGetBlobsBundleV1 into EngineGetPayload
+var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 3, Patch: 0}
 
 const MaxBuilders = 128
 
@@ -60,7 +61,7 @@ type EthBackendServer struct {
 	eth         EthBackend
 	events      *shards.Events
 	db          kv.RoDB
-	blockReader services.BlockAndTxnReader
+	blockReader services.FullBlockReader
 	config      *chain.Config
 
 	// Block proposing for proof-of-stake
@@ -84,7 +85,7 @@ type EthBackend interface {
 	Peers(ctx context.Context) (*remote.PeersReply, error)
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.BlockAndTxnReader,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.FullBlockReader,
 	config *chain.Config, builderFunc builder.BlockBuilderFunc, hd *headerdownload.HeaderDownload, proposing bool, logger log.Logger,
 ) *EthBackendServer {
 	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
@@ -298,60 +299,6 @@ func (s *EthBackendServer) checkWithdrawalsPresence(time uint64, withdrawals []*
 	return nil
 }
 
-func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
-	// TODO: get the latest update on this function (it was replaced)
-	if !s.proposing {
-		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
-	}
-
-	if s.config.TerminalTotalDifficulty == nil {
-		return nil, fmt.Errorf("not a proof-of-stake chain")
-	}
-
-	s.logger.Debug("[GetBlobsBundleV1] acquiring lock")
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.logger.Debug("[GetBlobsBundleV1] lock acquired")
-
-	builder, ok := s.builders[req.PayloadId]
-	if !ok {
-		s.logger.Warn("Payload not stored", "payloadId", req.PayloadId)
-		return nil, &UnknownPayloadErr
-	}
-
-	block, err := builder.Stop()
-	if err != nil {
-		s.logger.Error("Failed to build PoS block", "err", err)
-		return nil, err
-	}
-
-	blobsBundle := &types2.BlobsBundleV1{
-		BlockHash: gointerfaces.ConvertHashToH256(block.Block.Header().Hash()),
-	}
-	for i, tx := range block.Block.Transactions() {
-		if tx.Type() != types.BlobTxType {
-			continue
-		}
-		blobtx, ok := tx.(*types.BlobTxWrapper)
-		if !ok {
-			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobtx)
-		}
-		versionedHashes, kzgs, blobs, proofs := blobtx.GetDataHashes(), blobtx.Commitments, blobtx.Blobs, blobtx.Proofs
-		lenCheck := len(versionedHashes)
-		if lenCheck != len(kzgs) || lenCheck != len(blobs) || lenCheck != len(blobtx.Proofs) {
-			return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d) / proofs (%d)"+
-				" / versioned hashes (%d)", i, block.Block.Hash(), len(blobs), len(kzgs), len(proofs), lenCheck)
-		}
-		for _, blob := range blobs {
-			blobsBundle.Blobs = append(blobsBundle.Blobs, blob[:])
-		}
-		for _, kzg := range kzgs {
-			blobsBundle.Kzgs = append(blobsBundle.Kzgs, kzg[:])
-		}
-	}
-	return blobsBundle, nil
-}
-
 // EngineNewPayload validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
 	header := types.Header{
@@ -387,11 +334,16 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 	}
 
 	if req.Version >= 3 {
-		header.ExcessDataGas = gointerfaces.ConvertH256ToUint256Int(req.ExcessDataGas).ToBig()
+		header.DataGasUsed = req.DataGasUsed
+		header.ExcessDataGas = req.ExcessDataGas
 	}
 
-	if !s.config.IsCancun(header.Time) && header.ExcessDataGas != nil || s.config.IsCancun(header.Time) && header.ExcessDataGas == nil {
-		return nil, &rpc.InvalidParamsError{Message: "excess data gas setting doesn't match sharding state"}
+	if !s.config.IsCancun(header.Time) && (header.DataGasUsed != nil || header.ExcessDataGas != nil) {
+		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas present before Cancun"}
+	}
+
+	if s.config.IsCancun(header.Time) && (header.DataGasUsed == nil || header.ExcessDataGas == nil) {
+		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas missing"}
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
@@ -511,7 +463,7 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash libcommon.H
 
 	var canonicalHash libcommon.Hash
 	if header != nil {
-		canonicalHash, err = rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
+		canonicalHash, err = s.blockReader.CanonicalHash(context.Background(), tx, header.Number.Uint64())
 	}
 	if err != nil {
 		return nil, err
@@ -619,9 +571,10 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		return nil, err
 	}
 	block := blockWithReceipts.Block
+	header := block.Header()
 
 	baseFee := new(uint256.Int)
-	baseFee.SetFromBig(block.Header().BaseFee)
+	baseFee.SetFromBig(header.BaseFee)
 
 	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
 	if err != nil {
@@ -630,10 +583,10 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 
 	payload := &types2.ExecutionPayload{
 		Version:       1,
-		ParentHash:    gointerfaces.ConvertHashToH256(block.Header().ParentHash),
-		Coinbase:      gointerfaces.ConvertAddressToH160(block.Header().Coinbase),
-		Timestamp:     block.Header().Time,
-		PrevRandao:    gointerfaces.ConvertHashToH256(block.Header().MixDigest),
+		ParentHash:    gointerfaces.ConvertHashToH256(header.ParentHash),
+		Coinbase:      gointerfaces.ConvertAddressToH160(header.Coinbase),
+		Timestamp:     header.Time,
+		PrevRandao:    gointerfaces.ConvertHashToH256(header.MixDigest),
 		StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),
 		ReceiptRoot:   gointerfaces.ConvertHashToH256(block.ReceiptHash()),
 		LogsBloom:     gointerfaces.ConvertBytesToH2048(block.Bloom().Bytes()),
@@ -642,7 +595,7 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		BlockNumber:   block.NumberU64(),
 		ExtraData:     block.Extra(),
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
-		BlockHash:     gointerfaces.ConvertHashToH256(block.Header().Hash()),
+		BlockHash:     gointerfaces.ConvertHashToH256(block.Hash()),
 		Transactions:  encodedTransactions,
 	}
 	if block.Withdrawals() != nil {
@@ -650,17 +603,44 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		payload.Withdrawals = ConvertWithdrawalsToRpc(block.Withdrawals())
 	}
 
-	if block.ExcessDataGas() != nil {
+	if header.DataGasUsed != nil && header.ExcessDataGas != nil {
 		payload.Version = 3
-		var excessDataGas uint256.Int
-		excessDataGas.SetFromBig(block.Header().ExcessDataGas)
-		payload.ExcessDataGas = gointerfaces.ConvertUint256IntToH256(&excessDataGas)
+		payload.DataGasUsed = header.DataGasUsed
+		payload.ExcessDataGas = header.ExcessDataGas
 	}
 
 	blockValue := blockValue(blockWithReceipts, baseFee)
+
+	blobsBundle := &types2.BlobsBundleV1{}
+	for i, tx := range block.Transactions() {
+		if tx.Type() != types.BlobTxType {
+			continue
+		}
+		blobTx, ok := tx.(*types.BlobTxWrapper)
+		if !ok {
+			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobTx)
+		}
+		versionedHashes, commitments, proofs, blobs := blobTx.GetDataHashes(), blobTx.Commitments, blobTx.Proofs, blobTx.Blobs
+		lenCheck := len(versionedHashes)
+		if lenCheck != len(commitments) || lenCheck != len(proofs) || lenCheck != len(blobs) {
+			return nil, fmt.Errorf("tx %d in block %s has inconsistent commitments (%d) / proofs (%d) / blobs (%d) / "+
+				"versioned hashes (%d)", i, block.Hash(), len(commitments), len(proofs), len(blobs), lenCheck)
+		}
+		for _, commitment := range commitments {
+			blobsBundle.Commitments = append(blobsBundle.Commitments, commitment[:])
+		}
+		for _, proof := range proofs {
+			blobsBundle.Proofs = append(blobsBundle.Proofs, proof[:])
+		}
+		for _, blob := range blobs {
+			blobsBundle.Blobs = append(blobsBundle.Blobs, blob[:])
+		}
+	}
+
 	return &remote.EngineGetPayloadResponse{
 		ExecutionPayload: payload,
 		BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
+		BlobsBundle:      blobsBundle,
 	}, nil
 }
 
@@ -787,11 +767,10 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByHashV1(ctx context.Context, r
 
 	for hashIdx, hash := range request.Hashes {
 		h := gointerfaces.ConvertH256ToHash(hash)
-		block, err := rawdb.ReadBlockByHash(tx, h)
+		block, err := s.blockReader.BlockByHash(ctx, tx, h)
 		if err != nil {
 			return nil, err
 		}
-
 		body, err := extractPayloadBodyFromBlock(block)
 		if err != nil {
 			return nil, err
@@ -821,7 +800,10 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByRangeV1(ctx context.Context, 
 			break
 		}
 
-		block := rawdb.ReadBlock(tx, hash, request.Start+i)
+		block, _, err := s.blockReader.BlockWithSenders(ctx, tx, hash, request.Start+i)
+		if err != nil {
+			return nil, err
+		}
 		body, err := extractPayloadBodyFromBlock(block)
 		if err != nil {
 			return nil, err

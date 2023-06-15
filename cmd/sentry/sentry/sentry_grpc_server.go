@@ -565,63 +565,70 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 	if dialCandidates != nil {
 		disc = dialCandidates()
 	}
-	ss.Protocols = append(ss.Protocols, p2p.Protocol{
-		Name:           eth.ProtocolName,
-		Version:        protocol,
-		Length:         17,
-		DialCandidates: disc,
-		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
-			peerID := peer.Pubkey()
-			printablePeerID := hex.EncodeToString(peerID[:])[:20]
-			if ss.getPeer(peerID) != nil {
-				logger.Trace("[p2p] peer already has connection", "peerId", printablePeerID)
-				return nil
-			}
-			logger.Trace("[p2p] start with peer", "peerId", printablePeerID)
-
-			peerInfo := NewPeerInfo(peer, rw)
-			peerInfo.protocol = protocol
-			defer peerInfo.Close()
-
-			defer ss.GoodPeers.Delete(peerID)
-			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash libcommon.Hash) error {
-				ss.GoodPeers.Store(peerID, peerInfo)
-				ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
-				return ss.startSync(ctx, bestHash, peerID)
-			})
-			if err != nil {
-				if errors.Is(err, NetworkIdMissmatchErr) || errors.Is(err, io.EOF) || errors.Is(err, p2p.ErrShuttingDown) {
-					logger.Trace("[p2p] Handshake failure", "peer", printablePeerID, "err", err)
-				} else {
-					logger.Debug("[p2p] Handshake failure", "peer", printablePeerID, "err", err)
+	protocols := []uint{protocol}
+	if protocol == direct.ETH67 {
+		protocols = append(protocols, direct.ETH66)
+	}
+	for _, p := range protocols {
+		protocol := p
+		ss.Protocols = append(ss.Protocols, p2p.Protocol{
+			Name:           eth.ProtocolName,
+			Version:        protocol,
+			Length:         17,
+			DialCandidates: disc,
+			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+				peerID := peer.Pubkey()
+				printablePeerID := hex.EncodeToString(peerID[:])[:20]
+				if ss.getPeer(peerID) != nil {
+					logger.Trace("[p2p] peer already has connection", "peerId", printablePeerID)
+					return nil
 				}
-				return fmt.Errorf("[p2p]handshake to peer %s: %w", printablePeerID, err)
-			}
-			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name())
+				logger.Trace("[p2p] start with peer", "peerId", printablePeerID)
 
-			err = runPeer(
-				ctx,
-				peerID,
-				protocol,
-				rw,
-				peerInfo,
-				ss.send,
-				ss.hasSubscribers,
-				logger,
-			) // runPeer never returns a nil error
-			logger.Trace("[p2p] error while running peer", "peerId", printablePeerID, "err", err)
-			ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
-			return nil
-		},
-		NodeInfo: func() interface{} {
-			return readNodeInfo()
-		},
-		PeerInfo: func(peerID [64]byte) interface{} {
-			// TODO: remember handshake reply per peer ID and return eth-related Status info (see ethPeerInfo in geth)
-			return nil
-		},
-		//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
-	})
+				peerInfo := NewPeerInfo(peer, rw)
+				peerInfo.protocol = protocol
+				defer peerInfo.Close()
+
+				defer ss.GoodPeers.Delete(peerID)
+				err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash libcommon.Hash) error {
+					ss.GoodPeers.Store(peerID, peerInfo)
+					ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
+					return ss.startSync(ctx, bestHash, peerID)
+				})
+				if err != nil {
+					if errors.Is(err, NetworkIdMissmatchErr) || errors.Is(err, io.EOF) || errors.Is(err, p2p.ErrShuttingDown) {
+						logger.Trace("[p2p] Handshake failure", "peer", printablePeerID, "err", err)
+					} else {
+						logger.Debug("[p2p] Handshake failure", "peer", printablePeerID, "err", err)
+					}
+					return fmt.Errorf("[p2p]handshake to peer %s: %w", printablePeerID, err)
+				}
+				logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name())
+
+				err = runPeer(
+					ctx,
+					peerID,
+					protocol,
+					rw,
+					peerInfo,
+					ss.send,
+					ss.hasSubscribers,
+					logger,
+				) // runPeer never returns a nil error
+				logger.Trace("[p2p] error while running peer", "peerId", printablePeerID, "err", err)
+				ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
+				return nil
+			},
+			NodeInfo: func() interface{} {
+				return readNodeInfo()
+			},
+			PeerInfo: func(peerID [64]byte) interface{} {
+				// TODO: remember handshake reply per peer ID and return eth-related Status info (see ethPeerInfo in geth)
+				return nil
+			},
+			//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
+		})
+	}
 
 	return ss
 }

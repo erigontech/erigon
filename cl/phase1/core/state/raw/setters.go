@@ -5,7 +5,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/state_encoding"
 )
 
 func (b *BeaconState) SetVersion(version clparams.StateVersion) {
@@ -215,7 +214,7 @@ func (b *BeaconState) SetValidatorAtIndex(index int, validator solid.Validator) 
 
 func (b *BeaconState) ResetEpochParticipation() {
 	b.previousEpochParticipation = b.currentEpochParticipation
-	b.currentEpochParticipation = solid.NewBitList(b.validators.Length(), state_encoding.ValidatorRegistryLimit)
+	b.currentEpochParticipation = solid.NewBitList(b.validators.Length(), int(b.beaconConfig.ValidatorRegistryLimit))
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
 }

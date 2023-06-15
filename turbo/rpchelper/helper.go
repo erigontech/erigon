@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -128,4 +129,12 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, histor
 	}
 	r.SetTxNum(uint64(int(minTxNum) + txnIndex + 1))
 	return r, nil
+}
+
+func NewLatestStateReader(tx kv.Getter) state.StateReader {
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement me")
+		//b.pendingReader = state.NewReaderV4(b.pendingReaderTx.(kv.TemporalTx))
+	}
+	return state.NewPlainStateReader(tx)
 }

@@ -1,47 +1,44 @@
 package borfinality
 
 import (
+	"context"
 	"errors"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/borfinality/whitelist"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
-func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
+func GetFinalizedBlockNumber(tx kv.Tx, blockReader services.FullBlockReader) (uint64, error) {
 	currentBlockNum := rawdb.ReadCurrentHeader(tx)
 
 	service := whitelist.GetWhitelistingService()
 
-	logger := log.New()
-	reqGen := requests.NewRequestGenerator(logger)
-
 	doExist, number, hash := service.GetWhitelistedMilestone()
 	if doExist && number <= currentBlockNum.Number.Uint64() {
-		block, err := requests.GetBlockByNumber(reqGen, number, false, logger)
+		block, err := blockReader.BlockByNumber(context.Background(), tx, number)
 
 		if err != nil {
 			return 0, err
 		}
 
-		if block.Result.Hash == hash {
+		if block.Hash() == hash {
 			return number, nil
 		}
 	}
 
 	doExist, number, hash = service.GetWhitelistedCheckpoint()
 	if doExist && number <= currentBlockNum.Number.Uint64() {
-		block, err := requests.GetBlockByNumber(reqGen, number, false, logger)
+		block, err := blockReader.BlockByNumber(context.Background(), tx, number)
 
 		if err != nil {
 			return 0, err
 		}
 
-		if block.Result.Hash == hash {
+		if block.Hash() == hash {
 			return number, nil
 		}
 	}

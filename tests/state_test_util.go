@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -44,6 +45,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -192,8 +194,16 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
-	statedb := state.New(state.NewPlainStateReader(tx))
-	w := state.NewPlainStateWriter(tx, nil, writeBlockNr)
+
+	r := rpchelper.NewLatestStateReader(tx)
+	statedb := state.New(r)
+
+	var w state.StateWriter
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement me")
+	} else {
+		w = state.NewPlainStateWriter(tx, nil, writeBlockNr)
+	}
 
 	var baseFee *big.Int
 	if config.IsLondon(0) {
@@ -223,7 +233,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
 	header := block.Header()
-	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase, nil /*excessDataGas*/)
+	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = new(uint256.Int)
@@ -293,12 +303,11 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	if err != nil {
 		return nil, libcommon.Hash{}, fmt.Errorf("error calculating state root: %w", err)
 	}
-
 	return statedb, root, nil
 }
 
 func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	r := state.NewPlainStateReader(tx)
+	r := rpchelper.NewLatestStateReader(tx)
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
@@ -325,11 +334,17 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 		}
 	}
 
+	var w state.StateWriter
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement me")
+	} else {
+		w = state.NewPlainStateWriter(tx, nil, blockNr+1)
+	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(rules, state.NewPlainStateWriter(tx, nil, blockNr+1)); err != nil {
+	if err := statedb.FinalizeTx(rules, w); err != nil {
 		return nil, err
 	}
-	if err := statedb.CommitBlock(rules, state.NewPlainStateWriter(tx, nil, blockNr+1)); err != nil {
+	if err := statedb.CommitBlock(rules, w); err != nil {
 		return nil, err
 	}
 	return statedb, nil

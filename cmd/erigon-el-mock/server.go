@@ -88,7 +88,7 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 				Amount:    withdrawal.Amount,
 			})
 		}
-		if _, _, err := e.blockWriter.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
+		if _, err := e.blockWriter.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
 			body.BlockNumber, &types.RawBody{
 				Transactions: body.Transactions,
 				Uncles:       uncles,

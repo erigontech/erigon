@@ -84,11 +84,9 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/borfinality"
@@ -231,11 +229,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return err
 		}
 
-		config.TransactionsV3, err = kvcfg.TransactionsV3.WriteOnce(tx, config.TransactionsV3)
-		if err != nil {
-			return err
-		}
-
 		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
 		if err != nil {
 			return err
@@ -270,7 +263,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		logger: logger,
 	}
 
-	blockReader, blockWriter, allSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config.Snapshot, config.HistoryV3, config.TransactionsV3, logger)
+	blockReader, blockWriter, allSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config.Snapshot, config.HistoryV3, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +283,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime, tmpdir, logger)
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime, tmpdir, logger, blockWriter)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -311,7 +304,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	if config.HistoryV3 {
-		backend.chainDB, err = temporal.New(backend.chainDB, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+		backend.chainDB, err = temporal.New(backend.chainDB, agg, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 		if err != nil {
 			return nil, err
 		}
@@ -625,7 +618,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 
-		go caplin1.RunCaplinPhase1(ctx, client, beaconCfg, genesisCfg, engine, state)
+		go caplin1.RunCaplinPhase1(ctx, client, beaconCfg, genesisCfg, engine, state, nil)
 	}
 
 	if currentBlock == nil {
@@ -906,12 +899,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		errc := make(chan error, 1)
 
 		for {
-			// Only reset if some work was done previously as we'd like to rely
-			// on the `miner.recommit` as backup.
-			if hasWork {
-				mineEvery.Reset(cfg.Recommit)
-			}
-
 			// Only check for case if you're already mining (i.e. works = true) and
 			// waiting for error or you don't have any work yet (i.e. hasWork = false).
 			if works || !hasWork {
@@ -945,6 +932,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 			if !works && hasWork {
 				works = true
 				hasWork = false
+				mineEvery.Reset(cfg.Recommit)
 				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir) }()
 			}
 		}
@@ -1038,14 +1026,14 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 	return err
 }
 
-func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig ethconfig.Snapshot, histV3, transactionsV3 bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
+func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig ethconfig.Snapshot, histV3 bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
 	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap, logger)
 	var err error
 	if !snConfig.NoDownloader {
 		allSnapshots.OptimisticalyReopenWithDB(db)
 	}
-	blockReader := snapshotsync.NewBlockReader(allSnapshots, transactionsV3)
-	blockWriter := blockio.NewBlockWriter(histV3, transactionsV3)
+	blockReader := snapshotsync.NewBlockReader(allSnapshots)
+	blockWriter := blockio.NewBlockWriter(histV3)
 
 	dir.MustExist(dirs.SnapHistory)
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
@@ -1086,8 +1074,8 @@ func (s *Ethereum) Start() error {
 	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
-	hook := stages2.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, s.sentriesClient.UpdateHead)
-	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, nil, hook)
+	hook := stages2.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentriesClient.UpdateHead)
+	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockSnapshots, hook)
 
 	if s.chainConfig.Bor != nil {
 		borDB := s.engine.(*bor.Bor).DB
@@ -1102,8 +1090,7 @@ func (s *Ethereum) Start() error {
 				break
 			}
 		}
-
-		borfinality.Whitelist(s.engine, borDB, s.chainDB, s.logger, borAPI, s.closeCh)
+		borfinality.Whitelist(s.engine, borDB, s.chainDB, s.blockReader, s.logger, borAPI, s.closeCh)
 	}
 
 	return nil

@@ -23,6 +23,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -32,8 +33,8 @@ import (
 	"github.com/ledgerwatch/erigon/crypto/blake2b"
 	"github.com/ledgerwatch/erigon/crypto/bls12381"
 	"github.com/ledgerwatch/erigon/crypto/bn256"
+	"github.com/ledgerwatch/erigon/crypto/kzg"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/protolambda/go-kzg/eth"
 
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
@@ -1093,5 +1094,5 @@ func (c *pointEvaluation) RequiredGas(input []byte) uint64 {
 }
 
 func (c *pointEvaluation) Run(input []byte) ([]byte, error) {
-	return eth.PointEvaluationPrecompile(input)
+	return kzg.PointEvaluationPrecompile(input)
 }

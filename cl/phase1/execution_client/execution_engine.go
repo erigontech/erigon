@@ -123,8 +123,8 @@ func convertPayloadToGrpc(e *cltypes.Eth1Block) (*types.ExecutionPayload, error)
 		}
 	}
 	withdrawals := make([]*types2.Withdrawal, e.Withdrawals.Len())
-	e.Withdrawals.Range(func(_ int, w *types2.Withdrawal, _ int) bool {
-		withdrawals = append(withdrawals, w)
+	e.Withdrawals.Range(func(idx int, w *types2.Withdrawal, _ int) bool {
+		withdrawals[idx] = w
 		return true
 	})
 
@@ -145,10 +145,16 @@ func convertPayloadToGrpc(e *cltypes.Eth1Block) (*types.ExecutionPayload, error)
 		BlockHash:     gointerfaces.ConvertHashToH256(e.BlockHash),
 		Transactions:  e.Transactions.UnderlyngReference(),
 		Withdrawals:   privateapi.ConvertWithdrawalsToRpc(withdrawals),
+		DataGasUsed:   e.DataGasUsed,
+		ExcessDataGas: e.ExcessDataGas,
 	}
 	if e.Withdrawals != nil {
 		res.Version = 2
 		res.Withdrawals = privateapi.ConvertWithdrawalsToRpc(withdrawals)
+	}
+
+	if e.ExcessDataGas != nil && e.DataGasUsed != nil {
+		res.Version = 3
 	}
 
 	return res, nil
