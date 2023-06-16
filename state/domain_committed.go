@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
 )
@@ -740,6 +741,11 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 
 // Evaluates commitment for processed state.
 func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
+	if dbg.DiscardCommitment() {
+		d.updates.tree.Clear(true)
+		return nil, nil, nil
+	}
+
 	defer func(s time.Time) { d.comTook = time.Since(s) }(time.Now())
 
 	touchedKeys, hashedKeys, updates := d.updates.List(true)

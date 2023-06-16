@@ -150,6 +150,22 @@ func DiscardHistory() bool {
 }
 
 var (
+	discardCommitment     bool
+	discardCommitmentOnce sync.Once
+)
+
+func DiscardCommitment() bool {
+	discardCommitmentOnce.Do(func() {
+		v, _ := os.LookupEnv("DISCARD_COMMITMENT")
+		if v == "true" {
+			discardCommitment = true
+			log.Info("[Experiment]", "DISCARD_COMMITMENT", discardCommitment)
+		}
+	})
+	return discardCommitment
+}
+
+var (
 	bigRoTx    uint
 	getBigRoTx sync.Once
 )
