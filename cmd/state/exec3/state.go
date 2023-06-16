@@ -144,11 +144,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	var err error
 	header := txTask.Header
 
-	fmt.Printf("tx exec %d, %d, %t\n", txTask.BlockNum, txTask.TxNum, txTask.Final)
 	switch {
 	case daoForkTx:
-		fmt.Printf("do fork: %d\n", txTask.BlockNum)
-
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
 		misc.ApplyDAOHardFork(ibs)
 		ibs.SoftFinalise()
@@ -158,7 +155,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
 			// Genesis block
-			fmt.Printf("genesis block!\n")
 			// fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 			_, ibs, err = core.GenesisToBlock(rw.genesis, "")
 			if err != nil {
@@ -224,12 +220,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 
 		// MA applytx
 		vmenv := rw.evm
-		fmt.Printf("core.ApplyMessage\n")
 		applyRes, err := core.ApplyMessage(vmenv, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			txTask.Error = err
 		} else {
-			fmt.Printf("finalizeTx\n")
 			ibs.SoftFinalise()
 			//if err = ibs.FinalizeTx(rules, rw.stateWriter); err != nil {
 			//	panic(err)
@@ -247,7 +241,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		//for addr, bal := range txTask.BalanceIncreaseSet {
 		//	fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
 		//}
-		fmt.Printf("make write set??? %T\n", rw.stateWriter)
 		if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
 			panic(err)
 		}
