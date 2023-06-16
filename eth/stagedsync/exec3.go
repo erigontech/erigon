@@ -526,6 +526,8 @@ func ExecV3(ctx context.Context,
 
 	stateStream := !initialCycle && cfg.stateStream && maxBlockNum-block < stateStreamLimit
 
+	fmt.Printf("start from: %x\n", block)
+
 	var b *types.Block
 	var blockNum uint64
 	var err error
