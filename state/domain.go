@@ -192,6 +192,11 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	return d, nil
 }
 
+func (d *Domain) DiscardHistory() {
+	d.History.DiscardHistory()
+	d.defaultDc = d.MakeContext()
+	d.wal = d.newWriter(d.tmpdir, false, true)
+}
 func (d *Domain) StartUnbufferedWrites() {
 	d.defaultDc = d.MakeContext()
 	d.wal = d.newWriter(d.tmpdir, false, false)
@@ -438,6 +443,7 @@ func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 func (d *Domain) update(key []byte) error {
 	var invertedStep [8]byte
 	binary.BigEndian.PutUint64(invertedStep[:], ^(d.txNum / d.aggregationStep))
+	//fmt.Printf("put: %s, %x, %x\n", d.filenameBase, key, invertedStep[:])
 	if err := d.tx.Put(d.keysTable, key, invertedStep[:]); err != nil {
 		return err
 	}
@@ -452,7 +458,7 @@ func (d *Domain) put(key, val []byte) error {
 	keySuffix := make([]byte, len(key)+8)
 	copy(keySuffix, key)
 	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
-
+	//fmt.Printf("put2: %s, %x, %x\n", d.filenameBase, keySuffix, val)
 	return d.tx.Put(d.valsTable, keySuffix, val)
 }
 
@@ -574,9 +580,11 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 
 	if h.largeValues {
 		if !h.buffered {
+			//fmt.Printf("put: %s, %x, %x\n", h.d.filenameBase, fullkey[:kl], fullkey[kl:])
 			if err := h.d.tx.Put(h.d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
 				return err
 			}
+			//fmt.Printf("put2: %s, %x, %x\n", h.d.filenameBase, fullkey, value)
 			if err := h.d.tx.Put(h.d.valsTable, fullkey, value); err != nil {
 				return err
 			}

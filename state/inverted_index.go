@@ -440,7 +440,7 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 }
 
 func (ii *invertedIndexWAL) Flush(ctx context.Context, tx kv.RwTx) error {
-	if ii.discard {
+	if ii.discard || !ii.buffered {
 		return nil
 	}
 	if err := ii.index.Load(tx, ii.ii.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
