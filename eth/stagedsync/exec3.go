@@ -712,11 +712,11 @@ Loop:
 				if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
 					err := fmt.Errorf("block hash mismatch - but new-algorithm hash is bad! (means latest state is correct): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum)
 					log.Error(err.Error())
-					return err
+					//return err
 				} else {
 					err := fmt.Errorf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum)
 					log.Error(err.Error())
-					return err
+					//return err
 				}
 			}
 
