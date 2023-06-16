@@ -470,7 +470,7 @@ type StateReaderV3 struct {
 func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
 	return &StateReaderV3{
 		rs:        rs,
-		trace:     true,
+		trace:     false,
 		readLists: newReadList(),
 	}
 }
