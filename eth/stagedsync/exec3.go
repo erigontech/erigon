@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -704,10 +703,21 @@ Loop:
 			if err != nil {
 				return fmt.Errorf("StateV3.Apply: %w", err)
 			}
+			_ = rh
 			if !bytes.Equal(rh, header.Root.Bytes()) {
-				log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(header.Root.Bytes()), "bn", blockNum, "txn", inputTxNum)
-
-				return fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, header.Root.Bytes(), blockNum)
+				oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header)
+				if err != nil {
+					panic(err)
+				}
+				if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
+					err := fmt.Errorf("block hash mismatch - but new-algorithm hash is bad! (means latest state is correct): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum)
+					log.Error(err.Error())
+					return err
+				} else {
+					err := fmt.Errorf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum)
+					log.Error(err.Error())
+					return err
+				}
 			}
 
 			select {
