@@ -17,9 +17,6 @@
 package aura
 
 import (
-	"bytes"
-	"container/list"
-	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -27,7 +24,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
@@ -35,14 +31,10 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -58,41 +50,6 @@ Not implemented features from OS:
 
 Repo with solidity sources: https://github.com/poanetwork/posdao-contracts
 */
-
-type StepDurationInfo struct {
-	TransitionStep      uint64
-	TransitionTimestamp uint64
-	StepDuration        uint64
-}
-
-// EpochTransitionProof - Holds 2 proofs inside: ValidatorSetProof and FinalityProof
-type EpochTransitionProof struct {
-	SignalNumber  uint64
-	SetProof      []byte
-	FinalityProof []byte
-}
-
-// ValidatorSetProof - validator set proof
-type ValidatorSetProof struct {
-	Header   *types.Header
-	Receipts types.Receipts
-}
-
-// FirstValidatorSetProof state-dependent proofs for the safe contract:
-// only "first" proofs are such.
-type FirstValidatorSetProof struct { // TODO: whaaat? here is no state!
-	ContractAddress libcommon.Address
-	Header          *types.Header
-}
-
-type EpochTransition struct {
-	/// Block hash at which the transition occurred.
-	BlockHash libcommon.Hash
-	/// Block number at which the transition occurred.
-	BlockNumber uint64
-	/// "transition/epoch" proof from the engine combined with a finality proof.
-	ProofRlp []byte
-}
 
 type Step struct {
 	calibrate bool // whether calibration is enabled.
@@ -133,11 +90,6 @@ func (s *Step) optCalibrate() bool {
 	newStep := (uint64(now)-info.TransitionTimestamp)/info.StepDuration + info.TransitionStep
 	s.inner.Store(newStep)
 	return true
-}
-
-type PermissionedStep struct {
-	inner      *Step
-	canPropose atomic.Bool
 }
 
 type ReceivedStepHashes map[uint64]map[libcommon.Address]libcommon.Hash //BTreeMap<(u64, Address), H256>
@@ -289,36 +241,6 @@ type AuRa struct {
 	certifierLock sync.RWMutex
 }
 
-type GasLimitOverride struct {
-	cache *lru.Cache[libcommon.Hash, *uint256.Int]
-}
-
-func NewGasLimitOverride() *GasLimitOverride {
-	// The number of recent block hashes for which the gas limit override is memoized.
-	const GasLimitOverrideCacheCapacity = 10
-
-	cache, err := lru.New[libcommon.Hash, *uint256.Int](GasLimitOverrideCacheCapacity)
-	if err != nil {
-		panic("error creating prefetching cache for blocks")
-	}
-	return &GasLimitOverride{cache: cache}
-}
-
-func (pb *GasLimitOverride) Pop(hash libcommon.Hash) *uint256.Int {
-	if val, ok := pb.cache.Get(hash); ok && val != nil {
-		pb.cache.Remove(hash)
-		return val
-	}
-	return nil
-}
-
-func (pb *GasLimitOverride) Add(hash libcommon.Hash, b *uint256.Int) {
-	if b == nil {
-		return
-	}
-	pb.cache.ContainsOrAdd(hash, b)
-}
-
 func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 	auraParams, err := FromJson(spec)
 	if err != nil {
@@ -398,54 +320,6 @@ func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 	return c, nil
 }
 
-type epochReader interface {
-	GetEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
-	GetPendingEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
-	FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error)
-}
-type epochWriter interface {
-	epochReader
-	PutEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
-	PutPendingEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
-}
-
-type NonTransactionalEpochReader struct {
-	db kv.RwDB
-}
-
-func newEpochReader(db kv.RwDB) *NonTransactionalEpochReader {
-	return &NonTransactionalEpochReader{db: db}
-}
-
-func (cr *NonTransactionalEpochReader) GetEpoch(hash libcommon.Hash, number uint64) (v []byte, err error) {
-	return v, cr.db.View(context.Background(), func(tx kv.Tx) error {
-		v, err = rawdb.ReadEpoch(tx, number, hash)
-		return err
-	})
-}
-func (cr *NonTransactionalEpochReader) PutEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
-	return cr.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
-		return rawdb.WriteEpoch(tx, number, hash, proof)
-	})
-}
-func (cr *NonTransactionalEpochReader) GetPendingEpoch(hash libcommon.Hash, number uint64) (v []byte, err error) {
-	return v, cr.db.View(context.Background(), func(tx kv.Tx) error {
-		v, err = rawdb.ReadPendingEpoch(tx, number, hash)
-		return err
-	})
-}
-func (cr *NonTransactionalEpochReader) PutPendingEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
-	return cr.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
-		return rawdb.WritePendingEpoch(tx, number, hash, proof)
-	})
-}
-func (cr *NonTransactionalEpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error) {
-	return blockNum, blockHash, transitionProof, cr.db.View(context.Background(), func(tx kv.Tx) error {
-		blockNum, blockHash, transitionProof, err = rawdb.FindEpochBeforeOrEqualNumber(tx, number)
-		return err
-	})
-}
-
 // A helper accumulator function mapping a step duration and a step duration transition timestamp
 // to the corresponding step number and the correct starting second of the step.
 func nextStepTimeDuration(info StepDurationInfo, time uint64) (uint64, uint64, bool) {
@@ -492,10 +366,6 @@ func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 		return consensus.ErrUnknownAncestor
 	}
 	return ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/, c.HasGasLimitContract() /*skipGasLimit*/)
-}
-
-func (c *AuRa) HasGasLimitContract() bool {
-	return len(c.cfg.BlockGasLimitContractTransitions) != 0
 }
 
 // nolint
@@ -765,20 +635,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 	blockNum := header.Number.Uint64()
 
 	//Check block gas limit from smart contract, if applicable
-	gasLimitOverride := c.HasGasLimitContract() && !misc.IsPoSHeader(header)
-	if gasLimitOverride {
-		log.Info("[AuRa] Found Gas limit for pre-merge block, validating gas limit with contract")
-		syscallPrevHeader := func(addr libcommon.Address, data []byte) ([]byte, error) {
-			return syscallCustom(addr, data, state, chain.GetHeaderByHash(header.ParentHash), true)
-		}
-		blockGasLimit := c.GetBlockGasLimitFromContract(config, syscallPrevHeader)
-
-		if blockGasLimit > 0 {
-			if header.GasLimit != blockGasLimit {
-				panic("Block gas limit doesn't match BlockGasLimitContract with AuRa")
-			}
-		}
-	}
+	c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
 
 	for address, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
 		state.SetCode(address, rewrittenCode)
@@ -1203,17 +1060,6 @@ func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTim
 	currentStep := c.step.inner.inner.Load()
 	currentEmptyStepsLen := 0
 	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen)).ToBig()
-
-	/* TODO: do I need gasLimit override logic here ?
-	if let Some(gas_limit) = self.gas_limit_override(header) {
-		trace!(target: "engine", "Setting gas limit to {} for block {}.", gas_limit, header.number());
-		let parent_gas_limit = *parent.gas_limit();
-		header.set_gas_limit(gas_limit);
-		if parent_gas_limit != gas_limit {
-			info!(target: "engine", "Block gas limit was changed from {} to {}.", parent_gas_limit, gas_limit);
-		}
-	}
-	*/
 }
 
 // calculateScore - analog of PoW difficulty:
@@ -1303,16 +1149,6 @@ func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash libcommon.Hash) []
 	return res
 }
 
-func (c *AuRa) GetBlockGasLimitFromContract(_ *chain.Config, syscall consensus.SystemCall) uint64 {
-	// var blockLimitContract
-	addr, ok := c.cfg.BlockGasLimitContractTransitions[0]
-	if !ok {
-		return 0
-	}
-	gasLimit := callBlockGasLimitAbi(addr, syscall)
-	return gasLimit.Uint64()
-}
-
 func (c *AuRa) CalculateRewards(_ *chain.Config, header *types.Header, _ []*types.Header, syscall consensus.SystemCall,
 ) ([]consensus.Reward, error) {
 	var rewardContractAddress BlockRewardContract
@@ -1356,103 +1192,6 @@ func (c *AuRa) CalculateRewards(_ *chain.Config, header *types.Header, _ []*type
 	return []consensus.Reward{r}, nil
 }
 
-func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.SystemCall, beneficiaries []libcommon.Address, rewardKind []consensus.RewardKind) ([]libcommon.Address, []*uint256.Int) {
-	castedKind := make([]uint16, len(rewardKind))
-	for i := range rewardKind {
-		castedKind[i] = uint16(rewardKind[i])
-	}
-	packed, err := blockRewardAbi().Pack("reward", beneficiaries, castedKind)
-	if err != nil {
-		panic(err)
-	}
-	out, err := syscall(contractAddr, packed)
-	if err != nil {
-		panic(err)
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	res, err := blockRewardAbi().Unpack("reward", out)
-	if err != nil {
-		panic(err)
-	}
-	beneficiariesRes := res[0].([]libcommon.Address)
-	rewardsBig := res[1].([]*big.Int)
-	rewardsU256 := make([]*uint256.Int, len(rewardsBig))
-	for i := 0; i < len(rewardsBig); i++ {
-		var overflow bool
-		rewardsU256[i], overflow = uint256.FromBig(rewardsBig[i])
-		if overflow {
-			panic("Overflow in callBlockRewardAbi")
-		}
-	}
-	return beneficiariesRes, rewardsU256
-}
-
-func callBlockGasLimitAbi(contractAddr libcommon.Address, syscall consensus.SystemCall) *uint256.Int {
-	packed, err := blockGasLimitAbi().Pack("blockGasLimit")
-	if err != nil {
-		panic(err)
-	}
-	out, err := syscall(contractAddr, packed)
-	if err != nil {
-		panic(err)
-	}
-	if len(out) == 0 {
-		return uint256.NewInt(0)
-	}
-	res, err := blockGasLimitAbi().Unpack("blockGasLimit", out)
-	if err != nil {
-		panic(err)
-	}
-
-	val, overflow := uint256.FromBig(res[0].(*big.Int))
-	if overflow {
-		panic("Overflow casting bigInt value to uint256")
-	}
-	return val
-}
-
-func blockGasLimitAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.BlockGasLimit))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
-func blockRewardAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.BlockReward))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
-func certifierAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Certifier))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
-func registrarAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Registrar))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
-func withdrawalAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Withdrawal))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
 // See https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
 func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall consensus.SystemCall) error {
 	if c.cfg.WithdrawalContractAddress == nil {
@@ -1477,40 +1216,6 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 		log.Warn("ExecuteSystemWithdrawals", "err", err)
 	}
 	return err
-}
-
-func getCertifier(registrar libcommon.Address, syscall consensus.SystemCall) *libcommon.Address {
-	hashedKey, err := common.HashData([]byte("service_transaction_checker"))
-	if err != nil {
-		panic(err)
-	}
-	packed, err := registrarAbi().Pack("getAddress", hashedKey, "A")
-	if err != nil {
-		panic(err)
-	}
-	out, err := syscall(registrar, packed)
-	if err != nil {
-		panic(err)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	res, err := registrarAbi().Unpack("getAddress", out)
-	if err != nil {
-		panic(err)
-	}
-	certifier := res[0].(libcommon.Address)
-	return &certifier
-}
-
-// An empty step message that is included in a seal, the only difference is that it doesn't include
-// the `parent_hash` in order to save space. The included signature is of the original empty step
-// message, which can be reconstructed by using the parent hash of the block in which this sealed
-// empty message is included.
-// nolint
-type SealedEmptyStep struct {
-	signature []byte // H520
-	step      uint64
 }
 
 /*
@@ -1547,31 +1252,3 @@ func headerEmptyStepsRaw(header *types.Header) []byte {
 	return header.Seal[2]
 }
 */
-
-// nolint
-type unAssembledHeader struct {
-	hash    libcommon.Hash
-	number  uint64
-	signers []libcommon.Address
-}
-type unAssembledHeaders struct {
-	l *list.List
-}
-
-func (u unAssembledHeaders) PushBack(header *unAssembledHeader)  { u.l.PushBack(header) }
-func (u unAssembledHeaders) PushFront(header *unAssembledHeader) { u.l.PushFront(header) }
-func (u unAssembledHeaders) Pop() *unAssembledHeader {
-	e := u.l.Front()
-	if e == nil {
-		return nil
-	}
-	u.l.Remove(e)
-	return e.Value.(*unAssembledHeader)
-}
-func (u unAssembledHeaders) Front() *unAssembledHeader {
-	e := u.l.Front()
-	if e == nil {
-		return nil
-	}
-	return e.Value.(*unAssembledHeader)
-}
