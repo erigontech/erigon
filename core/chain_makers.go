@@ -467,13 +467,11 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV3 bool) (hashRo
 			return libcommon.Hash{}, err
 		}
 
-		i := 0
 		for it.HasNext() {
 			k, v, err := it.Next()
 			if err != nil {
 				return hashRoot, fmt.Errorf("interate over plain state: %w", err)
 			}
-			i++
 			if len(v) > 0 {
 				v, err = accounts.ConvertV3toV2(v)
 				if err != nil {
@@ -508,8 +506,6 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV3 bool) (hashRo
 
 		}
 
-		fmt.Printf("plain state keys count: %d, bn=%d\n", i, header.Number.Uint64())
-
 		root, err := trie.CalcRoot("GenerateChain", tx)
 		return root, err
 	}
@@ -520,12 +516,10 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV3 bool) (hashRo
 	}
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	i := 0
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
 		}
-		i++
 		newK, err := hashKV(k, h)
 		if err != nil {
 			return hashRoot, fmt.Errorf("insert hashed key: %w", err)
@@ -542,7 +536,6 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV3 bool) (hashRo
 
 	}
 	c.Close()
-	fmt.Printf("plain state keys count: %d, bn=%d\n", i, header.Number.Uint64())
 
 	if GenerateTrace {
 		fmt.Printf("State after %d================\n", header.Number)
