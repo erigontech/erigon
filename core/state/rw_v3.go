@@ -206,7 +206,7 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 			enc1 = accounts.SerialiseV3(&acc)
 		}
 
-		fmt.Printf("+applied %v b=%d n=%d c=%x\n", hex.EncodeToString(addrBytes), &acc.Balance, acc.Nonce, acc.CodeHash.Bytes())
+		//fmt.Printf("+applied %v b=%d n=%d c=%x\n", hex.EncodeToString(addrBytes), &acc.Balance, acc.Nonce, acc.CodeHash.Bytes())
 		if err := domains.UpdateAccountData(addrBytes, enc1, enc0); err != nil {
 			return err
 		}
