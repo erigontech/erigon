@@ -648,8 +648,6 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
-// VerifyUncles implements consensus.Engine, always returning an error for any
-// uncles as this consensus mechanism doesn't permit uncles.
 func (c *Bor) VerifyUncles(_ consensus.ChainReader, _ *types.Header, uncles []*types.Header) error {
 	if len(uncles) > 0 {
 		return errUncleDetected
@@ -1023,8 +1021,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	return nil
 }
 
-// Seal implements consensus.Engine, attempting to create a sealed block using
-// the local signing credentials.
+// IsProposer returns true if this instance is the proposer for this block
 func (c *Bor) IsProposer(chain consensus.ChainHeaderReader, block *types.Block) (bool, error) {
 	header := block.Header()
 	number := header.Number.Uint64()
@@ -1052,14 +1049,6 @@ func (c *Bor) IsProposer(chain consensus.ChainHeaderReader, block *types.Block) 
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 // that a new block should have based on the previous blocks in the chain and the
 // current signer.
-// func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
-// 	snap, err := c.snapshot(chain, parent.Number.Uint64(), parent.Hash(), nil)
-// 	if err != nil {
-// 		return nil
-// 	}
-// 	return new(big.Int).SetUint64(snap.Difficulty(c.signer))
-// }
-
 func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ libcommon.Hash, _ uint64) *big.Int {
 	snap, err := c.snapshot(chain, parentNumber, parentHash, nil)
 	if err != nil {
