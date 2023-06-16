@@ -698,6 +698,9 @@ Loop:
 
 		if !parallel {
 			outputBlockNum.Set(blockNum)
+			//if err := agg.Flush(ctx, applyTx); err != nil {
+			//	panic(err)
+			//}
 			// MA commitment
 			rh, err := agg.ComputeCommitment(true, false)
 			if err != nil {
@@ -705,7 +708,7 @@ Loop:
 			}
 			_ = rh
 			if !bytes.Equal(rh, header.Root.Bytes()) {
-				oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header)
+				oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
 				if err != nil {
 					panic(err)
 				}

@@ -388,7 +388,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 
 			var err error
-			b.header.Root, err = CalcHashRootForTests(tx, b.header)
+			b.header.Root, err = CalcHashRootForTests(tx, b.header, ethconfig.EnableHistoryV4InTest)
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
@@ -417,75 +417,29 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
-func CalcHashRootForTests(tx kv.RwTx, header *types.Header) (hashRoot libcommon.Hash, err error) {
-	if ethconfig.EnableHistoryV4InTest {
-		if GenerateTrace {
-			panic("implement me")
-		}
-		agg := tx.(*temporal.Tx).Agg()
-		agg.SetTx(tx)
-		it, err := tx.(*temporal.Tx).AggCtx().DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
-		if err != nil {
-			return libcommon.Hash{}, err
-		}
-
-		if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
-			return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
-		}
-		if err := tx.ClearBucket(kv.HashedStorage); err != nil {
-			return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
-		}
-		if err := tx.ClearBucket(kv.TrieOfAccounts); err != nil {
-			return hashRoot, fmt.Errorf("clear TrieOfAccounts bucket: %w", err)
-		}
-		if err := tx.ClearBucket(kv.TrieOfStorage); err != nil {
-			return hashRoot, fmt.Errorf("clear TrieOfStorage bucket: %w", err)
-		}
-		h := common.NewHasher()
-		defer common.ReturnHasherToPool(h)
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-			}
-			if len(v) > 0 {
-				v, err = accounts.ConvertV3toV2(v)
-				if err != nil {
-					return hashRoot, fmt.Errorf("interate over plain state: %w", err)
-				}
-			}
-			var newK []byte
-			if len(k) == length.Addr {
-				newK = make([]byte, length.Hash)
-			} else {
-				newK = make([]byte, length.Hash*2+length.Incarnation)
-			}
-			h.Sha.Reset()
-			//nolint:errcheck
-			h.Sha.Write(k[:length.Addr])
-			//nolint:errcheck
-			h.Sha.Read(newK[:length.Hash])
-			if len(k) > length.Addr {
-				copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
-				h.Sha.Reset()
-				//nolint:errcheck
-				h.Sha.Write(k[length.Addr+length.Incarnation:])
-				//nolint:errcheck
-				h.Sha.Read(newK[length.Hash+length.Incarnation:])
-				if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
-					return hashRoot, fmt.Errorf("insert hashed key: %w", err)
-				}
-			} else {
-				if err = tx.Put(kv.HashedAccounts, newK, common.CopyBytes(v)); err != nil {
-					return hashRoot, fmt.Errorf("insert hashed key: %w", err)
-				}
-			}
-
-		}
-		root, err := trie.CalcRoot("GenerateChain", tx)
-		return root, err
+func hashKV(k []byte, h *common.Hasher) (newK []byte, err error) {
+	if len(k) == length.Addr {
+		newK = make([]byte, length.Hash)
+	} else {
+		newK = make([]byte, length.Hash*2+length.Incarnation)
 	}
+	h.Sha.Reset()
+	//nolint:errcheck
+	h.Sha.Write(k[:length.Addr])
+	//nolint:errcheck
+	h.Sha.Read(newK[:length.Hash])
+	if len(k) > length.Addr {
+		copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
+		h.Sha.Reset()
+		//nolint:errcheck
+		h.Sha.Write(k[length.Addr+length.Incarnation:])
+		//nolint:errcheck
+		h.Sha.Read(newK[length.Hash+length.Incarnation:])
+	}
+	return newK, nil
+}
 
+func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV3 bool) (hashRoot libcommon.Hash, err error) {
 	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
 		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
 	}
@@ -498,34 +452,85 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header) (hashRoot libcommon.
 	if err := tx.ClearBucket(kv.TrieOfStorage); err != nil {
 		return hashRoot, fmt.Errorf("clear TrieOfStorage bucket: %w", err)
 	}
+
+	if histV3 {
+		if GenerateTrace {
+			panic("implement me")
+		}
+		h := common.NewHasher()
+		defer common.ReturnHasherToPool(h)
+
+		agg := tx.(*temporal.Tx).Agg()
+		agg.SetTx(tx)
+		it, err := tx.(*temporal.Tx).AggCtx().DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
+
+		i := 0
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return hashRoot, fmt.Errorf("interate over plain state: %w", err)
+			}
+			i++
+			if len(v) > 0 {
+				v, err = accounts.ConvertV3toV2(v)
+				if err != nil {
+					return hashRoot, fmt.Errorf("interate over plain state: %w", err)
+				}
+			}
+			newK, err := hashKV(k, h)
+			if err != nil {
+				return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
+			}
+			if err := tx.Put(kv.HashedAccounts, newK, v); err != nil {
+				return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
+			}
+		}
+
+		it, err = tx.(*temporal.Tx).AggCtx().DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return hashRoot, fmt.Errorf("interate over plain state: %w", err)
+			}
+			newK, err := hashKV(k, h)
+			if err != nil {
+				return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
+			}
+			if err := tx.Put(kv.HashedStorage, newK, v); err != nil {
+				return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
+			}
+
+		}
+
+		fmt.Printf("plain state keys count: %d, bn=%d\n", i, header.Number.Uint64())
+
+		root, err := trie.CalcRoot("GenerateChain", tx)
+		return root, err
+	}
+
 	c, err := tx.Cursor(kv.PlainState)
 	if err != nil {
 		return hashRoot, err
 	}
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
+	i := 0
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
 		}
-		var newK []byte
-		if len(k) == length.Addr {
-			newK = make([]byte, length.Hash)
-		} else {
-			newK = make([]byte, length.Hash*2+length.Incarnation)
+		i++
+		newK, err := hashKV(k, h)
+		if err != nil {
+			return hashRoot, fmt.Errorf("insert hashed key: %w", err)
 		}
-		h.Sha.Reset()
-		//nolint:errcheck
-		h.Sha.Write(k[:length.Addr])
-		//nolint:errcheck
-		h.Sha.Read(newK[:length.Hash])
 		if len(k) > length.Addr {
-			copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
-			h.Sha.Reset()
-			//nolint:errcheck
-			h.Sha.Write(k[length.Addr+length.Incarnation:])
-			//nolint:errcheck
-			h.Sha.Read(newK[length.Hash+length.Incarnation:])
 			if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
 				return hashRoot, fmt.Errorf("insert hashed key: %w", err)
 			}
@@ -537,6 +542,8 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header) (hashRoot libcommon.
 
 	}
 	c.Close()
+	fmt.Printf("plain state keys count: %d, bn=%d\n", i, header.Number.Uint64())
+
 	if GenerateTrace {
 		fmt.Printf("State after %d================\n", header.Number)
 		it, err := tx.Range(kv.HashedAccounts, nil, nil)
