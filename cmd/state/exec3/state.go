@@ -2,7 +2,6 @@ package exec3
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"sync"
 
@@ -171,7 +170,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, txTask.Txs, txTask.Uncles, syscall)
 	case txTask.Final:
-		fmt.Printf("final: %d\n", txTask.BlockNum)
 		if txTask.BlockNum == 0 {
 			break
 		}
