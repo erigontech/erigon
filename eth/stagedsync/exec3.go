@@ -698,16 +698,15 @@ Loop:
 
 		if !parallel {
 			outputBlockNum.Set(blockNum)
-			//if err := agg.Flush(ctx, applyTx); err != nil {
-			//	panic(err)
-			//}
 			// MA commitment
 			rh, err := agg.ComputeCommitment(true, false)
 			if err != nil {
 				return fmt.Errorf("StateV3.Apply: %w", err)
 			}
-			_ = rh
 			if !bytes.Equal(rh, header.Root.Bytes()) {
+				if err := agg.Flush(ctx, applyTx); err != nil {
+					panic(err)
+				}
 				oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
 				if err != nil {
 					panic(err)
