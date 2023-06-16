@@ -79,7 +79,7 @@ type sentioTracer struct {
 	config      sentioTracerConfig
 	env         vm.VMInterface
 	functionMap map[string]map[uint64]functionInfo
-	callMap     map[string]map[uint64]bool
+	callMap     map[string]map[uint64]uint64
 
 	previousJump *Trace
 	index        int
@@ -159,7 +159,6 @@ func (t *sentioTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to li
 	if value != nil {
 		t.callstack[size-1].Value = value.Bytes()
 	}
-}
 
 func (t *sentioTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	size := len(t.callstack)
@@ -204,6 +203,7 @@ func (t *sentioTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 	if t.callstack[0].Index == -1 && t.entryPc[pc] {
 		//fillback the index and PC for root
 		t.callstack[0].Pc = pc
+		t.callstack[0].DefPc = pc
 		t.callstack[0].Index = t.index - 1
 		t.previousJump = nil
 		return
@@ -310,7 +310,8 @@ func (t *sentioTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 
 			if funcInfo != nil {
 				// filter those jump are not call site
-				if !t.isCall(t.previousJump.From.String(), t.previousJump.Pc) {
+				refId := t.refId(t.previousJump.From.String(), t.previousJump.Pc)
+				if refId != funcInfo.Id {
 					t.previousJump = nil
 					return
 				}
@@ -413,7 +414,7 @@ func newSentioTracer(name string, ctx *tracers.Context, cfg json.RawMessage) (tr
 
 	var config sentioTracerConfig
 	functionMap := map[string]map[uint64]functionInfo{}
-	callMap := map[string]map[uint64]bool{}
+	callMap := map[string]map[uint64]uint64{}
 
 	if cfg != nil {
 		if err := json.Unmarshal(cfg, &config); err != nil {
@@ -432,10 +433,10 @@ func newSentioTracer(name string, ctx *tracers.Context, cfg json.RawMessage) (tr
 
 		for address, calls := range config.Calls {
 			checkSumAddress := libcommon.HexToAddress(address).String()
-			callMap[checkSumAddress] = make(map[uint64]bool)
+			callMap[checkSumAddress] = make(map[uint64]uint64)
 
 			for _, call := range calls {
-				callMap[checkSumAddress][call] = true
+				callMap[checkSumAddress][call[0]] = call[1]
 			}
 		}
 
@@ -472,14 +473,14 @@ func (t *sentioTracer) getFunctionInfo(address string, pc uint64) *functionInfo 
 	return nil
 }
 
-func (t *sentioTracer) isCall(address string, pc uint64) bool {
+func (t *sentioTracer) refId(address string, pc uint64) uint64 {
 	m, ok := t.callMap[address]
 	if !ok || m == nil {
-		return false
+		return -1
 	}
 	info, ok := m[pc]
 	if ok {
 		return info
 	}
-	return false
+	return -1
 }

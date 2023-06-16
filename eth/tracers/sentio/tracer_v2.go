@@ -56,6 +56,7 @@ type functionInfo struct {
 	address       string
 	Name          string `json:"name"`
 	SignatureHash string `json:"signatureHash"`
+	Id						uint64 `json:"id"`
 
 	Pc           uint64 `json:"pc"`
 	InputSize    int    `json:"inputSize"`
@@ -66,7 +67,7 @@ type functionInfo struct {
 
 type sentioTracerConfig struct {
 	Functions map[string][]functionInfo `json:"functions"`
-	Calls     map[string][]uint64       `json:"calls"`
+	Calls     map[string][]uint64[]       `json:"calls"`
 	Debug     bool                      `json:"debug"`
 }
 
