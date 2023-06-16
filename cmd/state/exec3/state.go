@@ -2,6 +2,7 @@ package exec3
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"sync"
 
@@ -247,7 +248,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.bufferedWriter.PrevAndDels()
 	} else {
 		//TODO: in parallel exec: fail of txn exec in worker - is a normal scenario. Re-exec on later state may fix it. But for e4 debugging let's panic now
-		panic(txTask.Error)
+		panic(fmt.Errorf("blockNum=%d, txNum=%d, %w", txTask.BlockNum, txTask.TxNum, txTask.Error))
 	}
 }
 
