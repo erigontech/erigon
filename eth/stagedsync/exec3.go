@@ -698,9 +698,9 @@ Loop:
 
 		if !parallel {
 			outputBlockNum.Set(blockNum)
-			if err := agg.Flush(ctx, applyTx); err != nil {
-				panic(err)
-			}
+			//if err := agg.Flush(ctx, applyTx); err != nil {
+			//	panic(err)
+			//}
 			// MA commitment
 			rh, err := agg.ComputeCommitment(true, false)
 			if err != nil {
@@ -748,6 +748,7 @@ Loop:
 					//if !bytes.Equal(rh, header.Root.Bytes()) {
 					//	return fmt.Errorf("root hash mismatch: %x != %x, bn=%d", rh, header.Root.Bytes(), blockNum)
 					//}
+					//fmt.Printf("flush\n")
 					if err := agg.Flush(ctx, applyTx); err != nil {
 						return err
 					}
