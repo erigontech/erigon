@@ -137,7 +137,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 
 	rw.ibs.Reset()
 	ibs := rw.ibs
-	ibs.SetTrace(true)
+	//ibs.SetTrace(true)
 
 	rules := txTask.Rules
 	daoForkTx := rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
@@ -148,9 +148,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	case daoForkTx:
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
 		misc.ApplyDAOHardFork(ibs)
-		if err = ibs.FinalizeTx(rules, rw.stateWriter); err != nil {
-			panic(err)
-		}
+		ibs.SoftFinalise()
+		//if err = ibs.FinalizeTx(rules, rw.stateWriter); err != nil {
+		//	panic(err)
+		//}
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
 			// Genesis block
@@ -222,9 +223,10 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		if err != nil {
 			txTask.Error = err
 		} else {
-			if err = ibs.FinalizeTx(rules, rw.stateWriter); err != nil {
-				panic(err)
-			}
+			ibs.SoftFinalise()
+			//if err = ibs.FinalizeTx(rules, rw.stateWriter); err != nil {
+			//	panic(err)
+			//}
 			txTask.UsedGas = applyRes.UsedGas
 			txTask.Logs = ibs.GetLogs(txHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
@@ -233,23 +235,21 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
-	if txTask.Error != nil {
-		fmt.Printf("[ERR] %v\n", txTask.Error)
-		return
+	if txTask.Error == nil {
+		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
+		//for addr, bal := range txTask.BalanceIncreaseSet {
+		//	fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
+		//}
+		if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
+			panic(err)
+		}
+		txTask.ReadLists = rw.stateReader.ReadSet()
+		txTask.WriteLists = rw.bufferedWriter.WriteSet()
+		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.bufferedWriter.PrevAndDels()
+	} else {
+		//TODO: in parallel exec: fail of txn exec in worker - is a normal scenario. Re-exec on later state may fix it. But for e4 debugging let's panic now
+		panic(fmt.Errorf("blockNum=%d, txNum=%d, %w", txTask.BlockNum, txTask.TxNum, txTask.Error))
 	}
-
-	//if txTask.Final {
-	//if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
-	//	panic(err)
-	//}
-	//}
-	txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-	for addr, bal := range txTask.BalanceIncreaseSet {
-		fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
-	}
-	txTask.ReadLists = rw.stateReader.ReadSet()
-	txTask.WriteLists = rw.bufferedWriter.WriteSet()
-	txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.bufferedWriter.PrevAndDels()
 }
 
 type ChainReader struct {

@@ -141,21 +141,20 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 						if err := domains.DeleteAccount(kb, list.Vals[k]); err != nil {
 							return err
 						}
-						fmt.Printf("applied %x DELETE\n", kb)
-						continue
+						//fmt.Printf("applied %x DELETE\n", kb)
 					} else {
 						if err := domains.UpdateAccountData(kb, list.Vals[k], prev); err != nil {
 							return err
 						}
+						acc.Reset()
+						accounts.DeserialiseV3(&acc, list.Vals[k])
+						//fmt.Printf("applied %x b=%d n=%d c=%x\n", kb, &acc.Balance, acc.Nonce, acc.CodeHash)
 					}
-					acc.Reset()
-					accounts.DeserialiseV3(&acc, list.Vals[k])
-					fmt.Printf("applied %x b=%d n=%d c=%x\n", kb, &acc.Balance, acc.Nonce, acc.CodeHash.Bytes())
 				}
 			case kv.CodeDomain:
 				for k, key := range list.Keys {
 					kb, _ := hex.DecodeString(key)
-					fmt.Printf("applied %x c=%x\n", kb, list.Vals[k])
+					//fmt.Printf("applied %x c=%x\n", kb, list.Vals[k])
 					if err := domains.UpdateAccountCode(kb, list.Vals[k], nil); err != nil {
 						return err
 					}
@@ -171,7 +170,7 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 					if err != nil {
 						return fmt.Errorf("latest account %x: %w", key, err)
 					}
-					fmt.Printf("applied %x s=%x\n", hkey, list.Vals[k])
+					//fmt.Printf("applied %x s=%x\n", hkey, list.Vals[k])
 					if err := domains.WriteAccountStorage(addr, loc, list.Vals[k], prev); err != nil {
 						return err
 					}
@@ -181,6 +180,9 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 			}
 		}
 	}
+	//for addr, _ := range txTask.AccountDels {
+	//	fmt.Printf("skipped txTask.AccountDels %x\n", addr)
+	//}
 
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	for addr, increase := range txTask.BalanceIncreaseSet {
@@ -204,7 +206,7 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 			enc1 = accounts.SerialiseV3(&acc)
 		}
 
-		fmt.Printf("+applied %v b=%d n=%d c=%x\n", hex.EncodeToString(addrBytes), &acc.Balance, acc.Nonce, acc.CodeHash.Bytes())
+		//fmt.Printf("+applied %v b=%d n=%d c=%x\n", hex.EncodeToString(addrBytes), &acc.Balance, acc.Nonce, acc.CodeHash.Bytes())
 		if err := domains.UpdateAccountData(addrBytes, enc1, enc0); err != nil {
 			return err
 		}
@@ -468,7 +470,7 @@ type StateReaderV3 struct {
 func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
 	return &StateReaderV3{
 		rs:        rs,
-		trace:     true,
+		trace:     false,
 		readLists: newReadList(),
 	}
 }

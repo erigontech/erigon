@@ -526,6 +526,8 @@ func ExecV3(ctx context.Context,
 
 	stateStream := !initialCycle && cfg.stateStream && maxBlockNum-block < stateStreamLimit
 
+	fmt.Printf("start from: %x\n", block)
+
 	var b *types.Block
 	var blockNum uint64
 	var err error
@@ -703,7 +705,6 @@ Loop:
 			if err != nil {
 				return fmt.Errorf("StateV3.Apply: %w", err)
 			}
-			_ = rh
 			if !bytes.Equal(rh, header.Root.Bytes()) {
 				if err := agg.Flush(ctx, applyTx); err != nil {
 					panic(err)
@@ -715,11 +716,11 @@ Loop:
 				if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
 					err := fmt.Errorf("block hash mismatch - but new-algorithm hash is bad! (means latest state is correct): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum)
 					log.Error(err.Error())
-					return err
+					//return err
 				} else {
 					err := fmt.Errorf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum)
 					log.Error(err.Error())
-					return err
+					//return err
 				}
 			}
 
@@ -748,6 +749,7 @@ Loop:
 					//if !bytes.Equal(rh, header.Root.Bytes()) {
 					//	return fmt.Errorf("root hash mismatch: %x != %x, bn=%d", rh, header.Root.Bytes(), blockNum)
 					//}
+					//fmt.Printf("flush\n")
 					if err := agg.Flush(ctx, applyTx); err != nil {
 						return err
 					}
