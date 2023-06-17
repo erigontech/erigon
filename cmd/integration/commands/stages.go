@@ -955,20 +955,12 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		}
 		return nil
 	}
-	tx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 
-	err = stagedsync.SpawnExecuteBlocksStage(s, sync, tx, block, ctx, cfg, true /* initialCycle */, logger)
+	err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, block, ctx, cfg, true /* initialCycle */, logger)
 	if err != nil {
 		return err
 	}
 
-	if err := tx.Commit(); err != nil {
-		return err
-	}
 	return nil
 }
 
