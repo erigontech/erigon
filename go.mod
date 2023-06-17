@@ -66,7 +66,7 @@ require (
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.0.8
 	github.com/pion/randutil v0.1.0
-	github.com/pion/stun v0.4.0
+	github.com/pion/stun v0.6.0
 	github.com/prometheus/client_golang v1.15.1
 	github.com/prometheus/common v0.42.0
 	github.com/protolambda/ztyp v0.2.2
@@ -206,7 +206,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.9.7 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
 	github.com/pion/datachannel v1.5.2 // indirect
-	github.com/pion/dtls/v2 v2.2.4 // indirect
+	github.com/pion/dtls/v2 v2.2.7 // indirect
 	github.com/pion/ice/v2 v2.2.6 // indirect
 	github.com/pion/interceptor v0.1.11 // indirect
 	github.com/pion/logging v0.2.2 // indirect
@@ -217,9 +217,8 @@ require (
 	github.com/pion/sdp/v3 v3.0.5 // indirect
 	github.com/pion/srtp/v2 v2.0.9 // indirect
 	github.com/pion/transport v0.13.1 // indirect
-	github.com/pion/transport/v2 v2.0.0 // indirect
+	github.com/pion/transport/v2 v2.2.1 // indirect
 	github.com/pion/turn/v2 v2.0.8 // indirect
-	github.com/pion/udp v0.1.4 // indirect
 	github.com/pion/webrtc/v3 v3.1.42 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
