@@ -74,7 +74,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	m := stages.MockWithGenesisEngine(t, genesis, engine, false)
 
 	difficlty, _ := new(big.Int).SetString("340282366920938463463374607431768211454", 10)
-	//Populate a sample valid header for a Pre-merge block 
+	//Populate a sample valid header for a Pre-merge block
 	// - actually sampled from 5000th block in chiado
 	validPreMergeHeader := &types.Header{
 		ParentHash:  libcommon.HexToHash("0x102482332de853f2f8967263e77e71d4fddf68fd5d84b750b2ddb7e501052097"),
@@ -102,19 +102,19 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 		fakeVal, err := fakeAbi.Pack("", big.NewInt(12500000))
 		return fakeVal, err
 	}
-	require.NotPanics( func(){
+	require.NotPanics(func() {
 		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, validPreMergeHeader, nil, nil, nil, syscallCustom)
 	})
 
 	invalidPreMergeHeader := validPreMergeHeader
-	invalidPreMergeHeader.GasLimit = 12_123456	//a different, wrong gasLimit
+	invalidPreMergeHeader.GasLimit = 12_123456 //a different, wrong gasLimit
 	require.Panics(func() {
 		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPreMergeHeader, nil, nil, nil, syscallCustom)
 	})
 
 	invalidPostMergeHeader := invalidPreMergeHeader
-	invalidPostMergeHeader.Difficulty = big.NewInt(0)	//zero difficulty detected as PoS
-	require.NotPanics(func(){
+	invalidPostMergeHeader.Difficulty = big.NewInt(0) //zero difficulty detected as PoS
+	require.NotPanics(func() {
 		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPostMergeHeader, nil, nil, nil, syscallCustom)
 	})
 }
