@@ -85,7 +85,7 @@ setup_xdg_data_home:
 
 ## docker-compose:                    validate build args, setup xdg data home, and run docker-compose up
 docker-compose: validate_docker_build_args setup_xdg_data_home
-	docker-compose up
+	docker compose up
 
 ## dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
 dbg:
@@ -200,7 +200,7 @@ bindings:
 
 ## prometheus:                        run prometheus and grafana with docker-compose
 prometheus:
-	docker-compose up prometheus grafana
+	docker compose up prometheus grafana
 
 ## escape:                            run escape path={path} to check for memory leaks e.g. run escape path=cmd/erigon
 escape:
