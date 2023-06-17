@@ -499,7 +499,7 @@ Windows support for docker-compose is not ready yet. Please help us with .ps1 po
 
 ### Grafana dashboard
 
-`docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
+`docker compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
 
 ###       
 
