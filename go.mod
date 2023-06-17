@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230615053617-4d02e533f428
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230617020636-2aa24aa05de6
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230605042354-196538d42475
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -90,10 +90,10 @@ require (
 	golang.org/x/crypto v0.10.0
 	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
 	golang.org/x/net v0.11.0
-	golang.org/x/sync v0.2.0
+	golang.org/x/sync v0.3.0
 	golang.org/x/sys v0.9.0
 	golang.org/x/time v0.3.0
-	google.golang.org/grpc v1.55.0
+	google.golang.org/grpc v1.56.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
 	google.golang.org/protobuf v1.30.0
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
@@ -255,7 +255,7 @@ require (
 	golang.org/x/mod v0.10.0 // indirect
 	golang.org/x/text v0.10.0 // indirect
 	golang.org/x/tools v0.9.3 // indirect
-	google.golang.org/genproto v0.0.0-20230306155012-7f2fa6fef1f4 // indirect
+	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
 	lukechampine.com/uint128 v1.3.0 // indirect
