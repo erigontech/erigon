@@ -34,7 +34,7 @@
       "29638656": 2
     },
     "stateSyncConfirmationDelay": {
-      "36877056": 128
+      "37075456": 128
     },
     "validatorContract": "0x0000000000000000000000000000000000001000",
     "stateReceiverContract": "0x0000000000000000000000000000000000001001",
@@ -50,6 +50,6 @@
     "calcuttaBlock": 22244000,
     "jaipurBlock": 22770000,
     "delhiBlock": 29638656,
-    "indoreBlock": 36877056
+    "indoreBlock": 37075456
   }
 }
