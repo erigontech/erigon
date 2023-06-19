@@ -39,7 +39,7 @@ type HttpCfg struct {
 	TraceCompatibility       bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	TxPoolApiAddr            string
 	StateCache               kvcache.CoherentConfig
-	Snap                     ethconfig.Snapshot
+	Snap                     ethconfig.BlocksFreezing
 	Sync                     ethconfig.Sync
 
 	// GRPC server

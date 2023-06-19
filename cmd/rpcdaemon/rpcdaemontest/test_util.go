@@ -101,10 +101,10 @@ func CreateTestSentry(t *testing.T) (*stages.MockSentry, *core.ChainPack, []*cor
 		t.Fatal(err)
 	}
 
-	if err = m.InsertChain(orphanedChain); err != nil {
+	if err = m.InsertChain(orphanedChain, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.InsertChain(chain); err != nil {
+	if err = m.InsertChain(chain, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -294,9 +294,8 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 	ethashApi := apis[1].Service.(*ethash.API)
 	server := grpc.NewServer()
 
-	br, _ := m.NewBlocksIO()
 	remote.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events,
-		br, nil, nil, nil, false, log.New()))
+		m.BlockReader, nil, nil, nil, false, log.New()))
 	txpool.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
 	txpool.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
 	listener := bufconn.Listen(1024 * 1024)
@@ -428,7 +427,7 @@ func CreateTestSentryForTraces(t *testing.T) *stages.MockSentry {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	if err := m.InsertChain(chain); err != nil {
+	if err := m.InsertChain(chain, nil); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	return m
@@ -534,7 +533,7 @@ func CreateTestSentryForTracesCollision(t *testing.T) *stages.MockSentry {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	if err := m.InsertChain(chain); err != nil {
+	if err := m.InsertChain(chain, nil); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 

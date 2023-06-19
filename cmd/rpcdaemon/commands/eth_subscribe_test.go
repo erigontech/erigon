@@ -22,7 +22,6 @@ import (
 
 func TestEthSubscribe(t *testing.T) {
 	m, require := stages.Mock(t), require.New(t)
-	br, _ := m.NewBlocksIO()
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 7, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
@@ -42,9 +41,9 @@ func TestEthSubscribe(t *testing.T) {
 
 	ctx := context.Background()
 	logger := log.New()
-	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events, br, nil, nil, nil, false, logger)
+	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events, m.BlockReader, nil, nil, nil, false, logger)
 	backendClient := direct.NewEthBackendClientDirect(backendServer)
-	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, br)
+	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
 	ff := rpchelper.New(ctx, backend, nil, nil, func() {}, m.Log)
 
 	newHeads, id := ff.SubscribeNewHeads(16)
@@ -53,8 +52,8 @@ func TestEthSubscribe(t *testing.T) {
 	initialCycle := stages.MockInsertAsInitialCycle
 	highestSeenHeader := chain.TopBlock.NumberU64()
 
-	hook := stages.NewHook(m.Ctx, m.Notifications, m.Sync, br, m.ChainConfig, m.Log, m.UpdateHead)
-	if _, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, initialCycle, logger, nil, hook); err != nil {
+	hook := stages.NewHook(m.Ctx, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, m.UpdateHead)
+	if err := stages.StageLoopStep(m.Ctx, m.DB, nil, m.Sync, initialCycle, logger, m.BlockReader, hook); err != nil {
 		t.Fatal(err)
 	}
 

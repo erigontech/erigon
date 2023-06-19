@@ -112,7 +112,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		Coinbase:   coinbase,
 	}
 
-	signer := types.MakeSigner(chainConfig, blockNumber)
+	signer := types.MakeSigner(chainConfig, blockNumber, timestamp)
 	rules := chainConfig.Rules(blockNumber, timestamp)
 	firstMsg, err := txs[0].AsMessage(*signer, nil, rules)
 	if err != nil {

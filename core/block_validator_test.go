@@ -42,17 +42,16 @@ func TestHeaderVerification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}
-	blockReader, _ := m.NewBlocksIO()
 	// Run the header checker for blocks one-by-one, checking for both valid and invalid nonces
 	for i := 0; i < chain.Length(); i++ {
 		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 			for j, valid := range []bool{true, false} {
 				if valid {
 					engine := ethash.NewFaker()
-					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: tx, BlockReader: blockReader}, chain.Headers[i], true)
+					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: tx, BlockReader: m.BlockReader}, chain.Headers[i], true)
 				} else {
 					engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
-					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: tx, BlockReader: blockReader}, chain.Headers[i], true)
+					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: tx, BlockReader: m.BlockReader}, chain.Headers[i], true)
 				}
 				if (err == nil) != valid {
 					t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
@@ -62,7 +61,7 @@ func TestHeaderVerification(t *testing.T) {
 		}); err != nil {
 			panic(err)
 		}
-		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 
@@ -84,17 +83,16 @@ func TestHeaderWithSealVerification(t *testing.T) {
 		t.Fatalf("genetate chain: %v", err)
 	}
 
-	blockReader, _ := m.NewBlocksIO()
 	// Run the header checker for blocks one-by-one, checking for both valid and invalid nonces
 	for i := 0; i < chain.Length(); i++ {
 		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 			for j, valid := range []bool{true, false} {
 				if valid {
 					engine := ethash.NewFaker()
-					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: tx, BlockReader: blockReader}, chain.Headers[i], true)
+					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: tx, BlockReader: m.BlockReader}, chain.Headers[i], true)
 				} else {
 					engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
-					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: tx, BlockReader: blockReader}, chain.Headers[i], true)
+					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: tx, BlockReader: m.BlockReader}, chain.Headers[i], true)
 				}
 				if (err == nil) != valid {
 					t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
@@ -104,7 +102,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 		}); err != nil {
 			panic(err)
 		}
-		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 

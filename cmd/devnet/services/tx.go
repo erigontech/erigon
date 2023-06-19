@@ -1,30 +1,34 @@
 package services
 
 import (
-	"github.com/ledgerwatch/erigon/cmd/devnet/node"
-	"github.com/ledgerwatch/log/v3"
+	"context"
+
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 )
 
-func CheckTxPoolContent(node *node.Node, expectedPendingSize, expectedQueuedSize, expectedBaseFeeSize int, logger log.Logger) {
-	pendingSize, queuedSize, baseFeeSize, err := node.TxpoolContent()
+func CheckTxPoolContent(ctx context.Context, expectedPendingSize, expectedQueuedSize, expectedBaseFeeSize int) {
+	pendingSize, queuedSize, baseFeeSize, err := devnet.SelectMiner(ctx).TxpoolContent()
+
+	logger := devnet.Logger(ctx)
+
 	if err != nil {
 		logger.Error("FAILURE getting txpool content", "error", err)
 		return
 	}
 
-	if pendingSize != expectedPendingSize {
+	if expectedPendingSize >= 0 && pendingSize != expectedPendingSize {
 		logger.Error("FAILURE mismatched pending subpool size", "expected", expectedPendingSize, "got", pendingSize)
 		return
 	}
 
-	if queuedSize != expectedQueuedSize {
+	if expectedQueuedSize >= 0 && queuedSize != expectedQueuedSize {
 		logger.Error("FAILURE mismatched queued subpool size", "expected", expectedQueuedSize, "got", queuedSize)
 		return
 	}
 
-	if baseFeeSize != expectedBaseFeeSize {
+	if expectedBaseFeeSize >= 0 && baseFeeSize != expectedBaseFeeSize {
 		logger.Error("FAILURE mismatched basefee subpool size", "expected", expectedBaseFeeSize, "got", baseFeeSize)
 	}
 
-	logger.Info("SUCCESS => subpool sizes", "pending", pendingSize, "queued", queuedSize, "basefee", baseFeeSize)
+	logger.Info("Subpool sizes", "pending", pendingSize, "queued", queuedSize, "basefee", baseFeeSize)
 }

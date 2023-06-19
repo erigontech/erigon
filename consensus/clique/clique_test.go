@@ -59,12 +59,11 @@ func TestReimportMirroredState(t *testing.T) {
 	}
 	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
 	m := stages.MockWithGenesisEngine(t, genspec, engine, false)
-	br, _ := m.NewBlocksIO()
 
 	// Generate a batch of blocks, each properly signed
 	getHeader := func(hash libcommon.Hash, number uint64) (h *types.Header) {
 		if err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
-			h, err = br.Header(m.Ctx, tx, hash, number)
+			h, err = m.BlockReader.Header(m.Ctx, tx, hash, number)
 			return err
 		}); err != nil {
 			panic(err)
@@ -106,11 +105,11 @@ func TestReimportMirroredState(t *testing.T) {
 	}
 
 	// Insert the first two blocks and make sure the chain is valid
-	if err := m.InsertChain(chain.Slice(0, 2)); err != nil {
+	if err := m.InsertChain(chain.Slice(0, 2), nil); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
 	if err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		if head, err1 := br.BlockByHash(m.Ctx, tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
+		if head, err1 := m.BlockReader.BlockByHash(m.Ctx, tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
 			t.Errorf("could not read chain head: %v", err1)
 		} else if head.NumberU64() != 2 {
 			t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 2)
@@ -123,11 +122,11 @@ func TestReimportMirroredState(t *testing.T) {
 	// Simulate a crash by creating a new chain on top of the database, without
 	// flushing the dirty states out. Insert the last block, triggering a sidechain
 	// reimport.
-	if err := m.InsertChain(chain.Slice(2, chain.Length())); err != nil {
+	if err := m.InsertChain(chain.Slice(2, chain.Length()), nil); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
 	if err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		if head, err1 := br.CurrentBlock(tx); err1 != nil {
+		if head, err1 := m.BlockReader.CurrentBlock(tx); err1 != nil {
 			t.Errorf("could not read chain head: %v", err1)
 		} else if head.NumberU64() != 3 {
 			t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 3)

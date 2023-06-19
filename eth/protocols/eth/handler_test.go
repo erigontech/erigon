@@ -90,10 +90,9 @@ func TestGetBlockReceipts(t *testing.T) {
 		hashes   []libcommon.Hash
 		receipts []rlp.RawValue
 	)
-	br, _ := m.NewBlocksIO()
 	err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
-			block, err := br.BlockByNumber(m.Ctx, tx, i)
+			block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, i)
 			require.NoError(t, err)
 
 			hashes = append(hashes, block.Hash())
@@ -138,7 +137,7 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.Block
 	}, testKey, false)
 	if blocks > 0 {
 		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator, true)
-		err := m.InsertChain(chain)
+		err := m.InsertChain(chain, nil)
 		require.NoError(t, err)
 	}
 	return m
