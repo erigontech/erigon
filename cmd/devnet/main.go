@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	dbg "runtime/debug"
+	"syscall"
 	"time"
 
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/commands"
 
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
@@ -21,6 +24,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
@@ -43,6 +47,38 @@ var (
 	WithoutHeimdallFlag = cli.BoolFlag{
 		Name:  "bor.withoutheimdall",
 		Usage: "Run without Heimdall service",
+	}
+
+	MetricsEnabledFlag = cli.BoolFlag{
+		Name:  "metrics",
+		Usage: "Enable metrics collection and reporting",
+	}
+
+	MetricsNodeFlag = cli.IntFlag{
+		Name:  "metrics.node",
+		Usage: "Which node of the cluster to attach to",
+		Value: 0,
+	}
+
+	MetricsPortFlag = cli.IntFlag{
+		Name:  "metrics.port",
+		Usage: "Metrics HTTP server listening port",
+		Value: metrics.DefaultConfig.Port,
+	}
+
+	DiagnosticsURLFlag = cli.StringFlag{
+		Name:  "diagnostics.url",
+		Usage: "URL of the diagnostics system provided by the support team, include unique session PIN",
+	}
+
+	insecureFlag = cli.BoolFlag{
+		Name:  "insecure",
+		Usage: "Allows communication with diagnostics system using self-signed TLS certificates",
+	}
+
+	metricsURLsFlag = cli.StringSliceFlag{
+		Name:  "metrics.urls",
+		Usage: "internal flag",
 	}
 )
 
@@ -68,6 +104,12 @@ func main() {
 		&DataDirFlag,
 		&ChainFlag,
 		&WithoutHeimdallFlag,
+		&MetricsEnabledFlag,
+		&MetricsNodeFlag,
+		&MetricsPortFlag,
+		&DiagnosticsURLFlag,
+		&insecureFlag,
+		&metricsURLsFlag,
 	}
 
 	app.After = func(ctx *cli.Context) error {
@@ -109,10 +151,41 @@ func action(ctx *cli.Context) error {
 		return err
 	}
 
+	metrics := ctx.Bool("metrics")
+
+	if metrics {
+		// TODO should get this from the network as once we have multiple nodes we'll need to iterate the
+		// nodes and create a series of urls - for the moment only one is supported
+		ctx.Set("metrics.urls", fmt.Sprintf("http://localhost:%d/debug/metrics/", ctx.Int("metrics.port")))
+	}
+
 	// start the network with each node in a go routine
 	logger.Info("Starting Network")
-	if err := network.Start(); err != nil {
+	if err := network.Start(ctx); err != nil {
 		return fmt.Errorf("Network start failed: %w", err)
+	}
+
+	go func() {
+		signalCh := make(chan os.Signal, 1)
+		signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
+
+		switch s := <-signalCh; s {
+		case syscall.SIGTERM:
+			logger.Info("Stopping network")
+			network.Stop()
+
+		case syscall.SIGINT:
+			log.Info("Terminating network")
+			os.Exit(-int(syscall.SIGINT))
+		}
+	}()
+
+	diagnosticsUrl := ctx.String("diagnostics.url")
+
+	if metrics && len(diagnosticsUrl) > 0 {
+		go func() {
+			app.ConnectDiagnostics(ctx, logger)
+		}()
 	}
 
 	runCtx := devnet.WithCliContext(context.Background(), ctx)
@@ -137,8 +210,13 @@ func action(ctx *cli.Context) error {
 			},
 		})
 
-	logger.Info("Stopping Network")
-	network.Stop()
+	if metrics && len(diagnosticsUrl) > 0 {
+		logger.Info("Waiting")
+		network.Wait()
+	} else {
+		logger.Info("Stopping Network")
+		network.Stop()
+	}
 
 	return nil
 }

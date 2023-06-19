@@ -20,6 +20,7 @@ import (
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
 )
 
 type Network struct {
@@ -34,7 +35,7 @@ type Network struct {
 }
 
 // Start starts the process for two erigon nodes running on the dev chain
-func (nw *Network) Start() error {
+func (nw *Network) Start(ctx *cli.Context) error {
 
 	type configurable interface {
 		Configure(baseNode args.Node, nodeNumber int) (int, interface{}, error)
@@ -59,9 +60,20 @@ func (nw *Network) Start() error {
 		PrivateApiAddr: nw.BasePrivateApiAddr,
 	}
 
+	metricsEnabled := ctx.Bool("metrics")
+	metricsNode := ctx.Int("metrics.node")
+
 	for i, node := range nw.Nodes {
 		if configurable, ok := node.(configurable); ok {
-			nodePort, args, err := configurable.Configure(baseNode, i)
+
+			base := baseNode
+
+			if metricsEnabled && metricsNode == i {
+				base.Metrics = true
+				base.MetricsPort = ctx.Int("metrics.port")
+			}
+
+			nodePort, args, err := configurable.Configure(base, i)
 
 			if err == nil {
 				node, err = nw.startNode(fmt.Sprintf("http://%s:%d", apiHost, nodePort), args, i)
@@ -189,6 +201,10 @@ func (nw *Network) Stop() {
 		}
 	}
 
+	nw.Wait()
+}
+
+func (nw *Network) Wait() {
 	nw.wg.Wait()
 }
 

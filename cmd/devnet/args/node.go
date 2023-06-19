@@ -33,6 +33,9 @@ type Node struct {
 	WSPort                    int    `arg:"-" default:"8546"` // flag not defined
 	GRPCPort                  int    `arg:"-" default:"8547"` // flag not defined
 	TCPPort                   int    `arg:"-" default:"8548"` // flag not defined
+	Metrics                   bool   `arg:"--metrics" flag:"" default:"false"`
+	MetricsPort               int    `arg:"--metrics.port"`
+	MetricsAddr               string `arg:"--metrics.addr"`
 	StaticPeers               string `arg:"--staticpeers"`
 	WithoutHeimdall           bool   `arg:"--bor.withoutheimdall" flag:"" default:"false"`
 }
@@ -46,6 +49,10 @@ func (node *Node) configure(base Node, nodeNumber int) error {
 	node.Chain = base.Chain
 
 	node.StaticPeers = base.StaticPeers
+
+	node.Metrics = base.Metrics
+	node.MetricsPort = base.MetricsPort
+	node.MetricsAddr = base.MetricsAddr
 
 	var err error
 
