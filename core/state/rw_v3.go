@@ -16,8 +16,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -289,7 +291,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	agg.SetTx(tx)
 	var currentInc uint64
 
-	if err := agg.Unwind(ctx, txUnwindTo, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == length.Addr {
 			if len(v) > 0 {
 				var acc accounts.Account
@@ -322,7 +324,46 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 			accumulator.ChangeStorage(address, currentInc, location, common.Copy(v))
 		}
 		return nil
-	}); err != nil {
+	}
+	stateChanges := etl.NewCollector("", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), rs.logger)
+	defer stateChanges.Close()
+	actx := tx.(*temporal.Tx).AggCtx()
+	{
+		iter, err := actx.AccountHistoryRange(int(txUnwindTo), -1, order.Asc, -1, tx)
+		if err != nil {
+			return err
+		}
+		for iter.HasNext() {
+			k, v, err := iter.Next()
+			if err != nil {
+				return err
+			}
+			if err := stateChanges.Collect(k, v); err != nil {
+				return err
+			}
+		}
+	}
+	{
+		iter, err := actx.StorageHistoryRange(int(txUnwindTo), -1, order.Asc, -1, tx)
+		if err != nil {
+			return err
+		}
+		for iter.HasNext() {
+			k, v, err := iter.Next()
+			if err != nil {
+				return err
+			}
+			if err := stateChanges.Collect(k, v); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+
+	if err := agg.Unwind(ctx, txUnwindTo); err != nil {
 		return err
 	}
 	return nil
