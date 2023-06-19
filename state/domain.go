@@ -195,7 +195,8 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 func (d *Domain) DiscardHistory() {
 	d.History.DiscardHistory()
 	d.defaultDc = d.MakeContext()
-	d.wal = d.newWriter(d.tmpdir, false, true)
+	// can't discard domain wal - it required, but can discard history
+	d.wal = d.newWriter(d.tmpdir, true, false)
 }
 func (d *Domain) StartUnbufferedWrites() {
 	d.defaultDc = d.MakeContext()
