@@ -221,6 +221,7 @@ func (sn *TxnSegment) reopenSeg(dir string) (err error) {
 }
 func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 	sn.closeIdx()
+	fmt.Printf("what the loop4: %t\n", sn.Seg == nil)
 	if sn.Seg == nil {
 		return nil
 	}
