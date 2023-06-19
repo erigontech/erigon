@@ -226,6 +226,7 @@ func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 		return nil
 	}
 	fileName := snaptype.IdxFileName(sn.ranges.from, sn.ranges.to, snaptype.Transactions.String())
+	fmt.Printf("what the loop5: %s\n", fileName)
 	sn.IdxTxnHash, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
