@@ -221,12 +221,10 @@ func (sn *TxnSegment) reopenSeg(dir string) (err error) {
 }
 func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 	sn.closeIdx()
-	fmt.Printf("what the loop4: %t\n", sn.Seg == nil)
 	if sn.Seg == nil {
 		return nil
 	}
 	fileName := snaptype.IdxFileName(sn.ranges.from, sn.ranges.to, snaptype.Transactions.String())
-	fmt.Printf("what the loop5: %s\n", fileName)
 	sn.IdxTxnHash, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
@@ -552,7 +550,6 @@ func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	var segmentsMaxSet bool
 Loop:
 	for _, fName := range fileNames {
-		t := time.Now()
 		f, err := snaptype.ParseFileName(s.dir, fName)
 		if err != nil {
 			s.logger.Warn("invalid segment name", "err", err, "name", fName)
@@ -682,7 +679,6 @@ Loop:
 			segmentsMax = 0
 		}
 		segmentsMaxSet = true
-		fmt.Printf("reopen folder 1: %s, %s\n", time.Since(t), fName)
 	}
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
