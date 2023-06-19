@@ -692,6 +692,7 @@ func (s *RoSnapshots) Ranges() (ranges []Range) {
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
+	defer func(t time.Time) { fmt.Printf("ReopenFolder block_snapshots.go:695: %s\n", time.Since(t)) }(time.Now())
 	files, _, err := Segments(s.dir)
 	if err != nil {
 		return err
