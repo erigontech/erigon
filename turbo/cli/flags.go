@@ -2,8 +2,9 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -194,9 +195,15 @@ var (
 		Usage: "Maximum amount of time to wait for the answer from EVM call.",
 		Value: rpccfg.DefaultEvmCallTimeout,
 	}
+
+	TxPoolCommitEvery = cli.DurationFlag{
+		Name:  "txpool.commit.every",
+		Usage: "How often transactions should be committed to the storage",
+		Value: txpoolcfg.DefaultConfig.CommitEvery,
+	}
 )
 
-func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
+func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
 	mode, err := prune.FromCli(
 		cfg.Genesis.Config.ChainID.Uint64(),
 		ctx.String(PruneFlag.Name),
@@ -208,7 +215,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		ctx.Uint64(PruneReceiptBeforeFlag.Name),
 		ctx.Uint64(PruneTxIndexBeforeFlag.Name),
 		ctx.Uint64(PruneCallTracesBeforeFlag.Name),
-		strings.Split(ctx.String(ExperimentsFlag.Name), ","),
+		utils.SplitAndTrim(ctx.String(ExperimentsFlag.Name)),
 	)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -250,7 +257,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.String(BadBlockFlag.Name) != "" {
 		bytes, err := hexutil.Decode(ctx.String(BadBlockFlag.Name))
 		if err != nil {
-			log.Warn("Error decoding block hash", "hash", ctx.String(BadBlockFlag.Name), "err", err)
+			logger.Warn("Error decoding block hash", "hash", ctx.String(BadBlockFlag.Name), "err", err)
 		} else {
 			cfg.BadBlockHash = libcommon.BytesToHash(bytes)
 		}
@@ -261,7 +268,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	downloadRate := ctx.String(utils.TorrentDownloadRateFlag.Name)
 	uploadRate := ctx.String(utils.TorrentUploadRateFlag.Name)
 
-	log.Info("[Downloader] Runnning with", "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate, "upload.rate", uploadRate)
+	logger.Info("[Downloader] Runnning with", "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate, "upload.rate", uploadRate)
 	if ctx.Bool(utils.DisableIPV6.Name) {
 		cfg.Downloader.ClientConfig.DisableIPv6 = true
 	}
@@ -333,20 +340,20 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	}
 }
 
-func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config) {
+func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
 	setPrivateApi(ctx, cfg)
-	setEmbeddedRpcDaemon(ctx, cfg)
+	setEmbeddedRpcDaemon(ctx, cfg, logger)
 	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.Int(DatabaseVerbosityFlag.Name))
 }
 
-func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
+func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
 	jwtSecretPath := ctx.String(utils.JWTSecretPath.Name)
 	if jwtSecretPath == "" {
 		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
 	}
 
 	apis := ctx.String(utils.HTTPApiFlag.Name)
-	log.Info("starting HTTP APIs", "APIs", apis)
+	logger.Info("starting HTTP APIs", "APIs", apis)
 
 	c := &httpcfg.HttpCfg{
 		Enabled: ctx.Bool(utils.HTTPEnabledFlag.Name),
@@ -363,10 +370,10 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		AuthRpcPort:              ctx.Int(utils.AuthRpcPort.Name),
 		JWTSecretPath:            jwtSecretPath,
 		TraceRequests:            ctx.Bool(utils.HTTPTraceFlag.Name),
-		HttpCORSDomain:           strings.Split(ctx.String(utils.HTTPCORSDomainFlag.Name), ","),
-		HttpVirtualHost:          strings.Split(ctx.String(utils.HTTPVirtualHostsFlag.Name), ","),
-		AuthRpcVirtualHost:       strings.Split(ctx.String(utils.AuthRpcVirtualHostsFlag.Name), ","),
-		API:                      strings.Split(apis, ","),
+		HttpCORSDomain:           utils.SplitAndTrim(ctx.String(utils.HTTPCORSDomainFlag.Name)),
+		HttpVirtualHost:          utils.SplitAndTrim(ctx.String(utils.HTTPVirtualHostsFlag.Name)),
+		AuthRpcVirtualHost:       utils.SplitAndTrim(ctx.String(utils.AuthRpcVirtualHostsFlag.Name)),
+		API:                      utils.SplitAndTrim(apis),
 		HTTPTimeouts: rpccfg.HTTPTimeouts{
 			ReadTimeout:  ctx.Duration(HTTPReadTimeoutFlag.Name),
 			WriteTimeout: ctx.Duration(HTTPWriteTimeoutFlag.Name),

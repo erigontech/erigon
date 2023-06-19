@@ -22,9 +22,9 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"gopkg.in/yaml.v2"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
@@ -43,8 +43,8 @@ const (
 	MaxDialTimeout               = 2 * time.Second
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
-	ReqTimeout     time.Duration = 1 * time.Second
-	RespTimeout    time.Duration = 1 * time.Second
+	ReqTimeout     time.Duration = 10 * time.Second
+	RespTimeout    time.Duration = 15 * time.Second
 )
 
 var (
@@ -68,23 +68,8 @@ var (
 		"enr:-LK4QA8FfhaAjlb_BXsXxSfiysR7R52Nhi9JBt4F8SPssu8hdE1BXQQEtVDC3qStCW60LSO7hEsVHv5zm8_6Vnjhcn0Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhAN4aBKJc2VjcDI1NmsxoQJerDhsJ-KxZ8sHySMOCmTO6sHM3iCFQ6VMvLTe948MyYN0Y3CCI4yDdWRwgiOM",
 		"enr:-LK4QKWrXTpV9T78hNG6s8AM6IO4XH9kFT91uZtFg1GcsJ6dKovDOr1jtAAFPnS2lvNltkOGA9k29BUN7lFh_sjuc9QBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhANAdd-Jc2VjcDI1NmsxoQLQa6ai7y9PMN5hpLe5HmiJSlYzMuzP7ZhwRiwHvqNXdoN0Y3CCI4yDdWRwgiOM",
 	}
-	GoerliBootstrapNodes = []string{
-		"enr:-Ku4QFmUkNp0g9bsLX2PfVeIyT-9WO-PZlrqZBNtEyofOOfLMScDjaTzGxIb1Ns9Wo5Pm_8nlq-SZwcQfTH2cgO-s88Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpDkvpOTAAAQIP__________gmlkgnY0gmlwhBLf22SJc2VjcDI1NmsxoQLV_jMOIxKbjHFKgrkFvwDvpexo6Nd58TK5k7ss4Vt0IoN1ZHCCG1g",
-		"enr:-LK4QH1xnjotgXwg25IDPjrqRGFnH1ScgNHA3dv1Z8xHCp4uP3N3Jjl_aYv_WIxQRdwZvSukzbwspXZ7JjpldyeVDzMCh2F0dG5ldHOIAAAAAAAAAACEZXRoMpB53wQoAAAQIP__________gmlkgnY0gmlwhIe1te-Jc2VjcDI1NmsxoQOkcGXqbCJYbcClZ3z5f6NWhX_1YPFRYRRWQpJjwSHpVIN0Y3CCIyiDdWRwgiMo",
-		"enr:-Ly4QFPk-cTMxZ3jWTafiNblEZkQIXGF2aVzCIGW0uHp6KaEAvBMoctE8S7YU0qZtuS7By0AA4YMfKoN9ls_GJRccVpFh2F0dG5ldHOI__________-EZXRoMpCC9KcrAgAQIIS2AQAAAAAAgmlkgnY0gmlwhKh3joWJc2VjcDI1NmsxoQKrxz8M1IHwJqRIpDqdVW_U1PeixMW5SfnBD-8idYIQrIhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
-		"enr:-L64QJmwSDtaHVgGiqIxJWUtxWg6uLCipsms6j-8BdsOJfTWAs7CLF9HJnVqFE728O-JYUDCxzKvRdeMqBSauHVCMdaCAVWHYXR0bmV0c4j__________4RldGgykIL0pysCABAghLYBAAAAAACCaWSCdjSCaXCEQWxOdolzZWNwMjU2azGhA7Qmod9fK86WidPOzLsn5_8QyzL7ZcJ1Reca7RnD54vuiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
-		"enr:-KG4QCIzJZTY_fs_2vqWEatJL9RrtnPwDCv-jRBuO5FQ2qBrfJubWOWazri6s9HsyZdu-fRUfEzkebhf1nvO42_FVzwDhGV0aDKQed8EKAAAECD__________4JpZIJ2NIJpcISHtbYziXNlY3AyNTZrMaED4m9AqVs6F32rSCGsjtYcsyfQE2K8nDiGmocUY_iq-TSDdGNwgiMog3VkcIIjKA",
-	}
 
-	SepoliaBootstrapNodes = []string{
-		// EF boot nodes
-		"enr:-Iq4QMCTfIMXnow27baRUb35Q8iiFHSIDBJh6hQM5Axohhf4b6Kr_cOCu0htQ5WvVqKvFgY28893DHAg8gnBAXsAVqmGAX53x8JggmlkgnY0gmlwhLKAlv6Jc2VjcDI1NmsxoQK6S-Cii_KmfFdUJL2TANL3ksaKUnNXvTCv1tLwXs0QgIN1ZHCCIyk",
-		"enr:-KG4QE5OIg5ThTjkzrlVF32WT_-XT14WeJtIz2zoTqLLjQhYAmJlnk4ItSoH41_2x0RX0wTFIe5GgjRzU2u7Q1fN4vADhGV0aDKQqP7o7pAAAHAyAAAAAAAAAIJpZIJ2NIJpcISlFsStiXNlY3AyNTZrMaEC-Rrd_bBZwhKpXzFCrStKp1q_HmGOewxY3KwM8ofAj_ODdGNwgiMog3VkcIIjKA",
-		// Teku boot node
-		"enr:-Ly4QFoZTWR8ulxGVsWydTNGdwEESueIdj-wB6UmmjUcm-AOPxnQi7wprzwcdo7-1jBW_JxELlUKJdJES8TDsbl1EdNlh2F0dG5ldHOI__78_v2bsV-EZXRoMpA2-lATkAAAcf__________gmlkgnY0gmlwhBLYJjGJc2VjcDI1NmsxoQI0gujXac9rMAb48NtMqtSTyHIeNYlpjkbYpWJw46PmYYhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
-	}
-
-	GnosisBootstrapNodes = []string{
+	GnosisBootstrapNodes = append(MainnetBootstrapNodes, []string{
 		"enr:-Ly4QMU1y81COwm1VZgxGF4_eZ21ub9-GHF6dXZ29aEJ0oZpcV2Rysw-viaEKfpcpu9ZarILJLxFZjcKOjE0Sybs3MQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhANLnx-Jc2VjcDI1NmsxoQKoaYT8I-wf2I_f_ii6EgoSSXj5T3bhiDyW-7ZLsY3T64hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QBf76jLiCA_pDXoZjhyRbuwzFOscFY-MIKkPnmHPQbvaKhIDZutfe38G9ibzgQP0RKrTo3vcWOy4hf_8wOZ-U5MBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhBLGgjaJc2VjcDI1NmsxoQLGeo0Q4lDvxIjHjnkAqEuETTaFIjsNrEcSpdDhcHXWFYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QLjZUWdqUO_RwyDqCAccIK5-MbLRD6A2c7oBuVbBgBnWDkEf0UKJVAaJqi2pO101WVQQLYSnYgz1Q3pRhYdrlFoBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhANA8sSJc2VjcDI1NmsxoQK4TC_EK1jSs0VVPUpOjIo1rhJmff2SLBPFOWSXMwdLVYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
@@ -93,8 +78,8 @@ var (
 		"enr:-Ly4QBbaKRSX4SncCOxTTL611Kxlz-zYFrIn-k_63jGIPK_wbvFghVUHJICPCxufgTX5h79jvgfPr-2hEEQEdziGQ5MCh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhAMazo6Jc2VjcDI1NmsxoQKt-kbM9isuWp8djhyEq6-4MLv1Sy7dOXeMOMdPgwu9LohzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QKJ5BzgFyJ6BaTlGY0C8ROzl508U3GA6qxdG5Gn2hxdke6nQO187pYlLvhp82Dez4PQn436Fts1F0WAm-_5l2LACh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhA-YLVKJc2VjcDI1NmsxoQI8_Lvr6p_TkcAu8KorKacfUEnoOon0tdO0qWhriPdBP4hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QJMtoiX2bPnVbiQOJCLbtUlqdqZk7kCJQln_W1bp1vOHcxWowE-iMXkKC4_uOb0o73wAW71WYi80Dlsg-7a5wiICh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhDbP3KmJc2VjcDI1NmsxoQNvcfKYUqcemLFlpKxl7JcQJwQ3L9unYL44gY2aEiRnI4hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-	}
-	ChiadoBootstrapNodes = []string{
+	}...)
+	ChiadoBootstrapNodes = append(MainnetBootstrapNodes, []string{
 		"enr:-L64QOijsdi9aVIawMb5h5PWueaPM9Ai6P17GNPFlHzz7MGJQ8tFMdYrEx8WQitNKLG924g2Q9cCdzg54M0UtKa3QIKCMxaHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5AaWYlzZWNwMjU2azGhA8CjTkD4m1s8FbKCN18LgqlYcE65jrT148vFtwd9U62SiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
 		"enr:-L64QKYKGQj5ybkfBxyFU5IEVzP7oJkGHJlie4W8BCGAYEi4P0mmMksaasiYF789mVW_AxYVNVFUjg9CyzmdvpyWQ1KCMlmHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5CtNolzZWNwMjU2azGhAuA7BAwIijy1z81AO9nz_MOukA1ER68rGA67PYQ5pF1qiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
 		"enr:-Ly4QJJUnV9BxP_rw2Bv7E9iyw4sYS2b4OQZIf4Mu_cA6FljJvOeSTQiCUpbZhZjR4R0VseBhdTzrLrlHrAuu_OeZqgJh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGnOJc2VjcDI1NmsxoQPT_u3IjDtB2r-nveH5DhUmlM8F2IgLyxhmwmqW4L5k3ohzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
@@ -103,7 +88,7 @@ var (
 		"enr:-Ly4QCGeYvTCNOGKi0mKRUd45rLj96b4pH98qG7B9TCUGXGpHZALtaL2-XfjASQyhbCqENccI4PGXVqYTIehNT9KJMQgh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQrVSJc2VjcDI1NmsxoQP9iDchx2PGl3JyJ29B9fhLCvVMN6n23pPAIIeFV-sHOIhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QAtr21x5Ps7HYhdZkIBRBgcBkvlIfEel1YNjtFWf4cV3au2LgBGICz9PtEs9-p2HUl_eME8m1WImxTxSB3AkCMwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANHhOeJc2VjcDI1NmsxoQNLp1QPV8-pyMCohOtj6xGtSBM_GtVTqzlbvNsCF4ezkYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QLgn8Bx6faigkKUGZQvd1HDToV2FAxZIiENK-lczruzQb90qJK-4E65ADly0s4__dQOW7IkLMW7ZAyJy2vtiLy8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANFIw2Jc2VjcDI1NmsxoQMa-fWEy9UJHfOl_lix3wdY5qust78sHAqZnWwEiyqKgYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-	}
+	}...)
 )
 
 type NetworkConfig struct {
@@ -174,7 +159,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
 		ContractDeploymentBlock:         1273020,
-		BootNodes:                       SepoliaBootstrapNodes,
+		BootNodes:                       MainnetBootstrapNodes,
 	},
 
 	GoerliNetwork: {
@@ -194,7 +179,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
 		ContractDeploymentBlock:         4367322,
-		BootNodes:                       GoerliBootstrapNodes,
+		BootNodes:                       MainnetBootstrapNodes,
 	},
 
 	GnosisNetwork: {
@@ -266,18 +251,18 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	MainnetNetwork: {
 		"https://sync.invis.tools/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
-		"https://mainnet.checkpoint.sigp.io/eth/v2/debug/beacon/states/finalized",
+		//"https://mainnet.checkpoint.sigp.io/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 		"https://checkpointz.pietjepuk.net/eth/v2/debug/beacon/states/finalized",
 	},
 	GoerliNetwork: {
 		"https://goerli.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 		"https://goerli-sync.invis.tools/eth/v2/debug/beacon/states/finalized",
-		"https://goerli.checkpoint-sync.ethdevops.io/eth/v2/debug/beacon/states/finalized",
+		"https://goerli.checkpoint-sync.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 		"https://prater-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 	},
 	SepoliaNetwork: {
-		"https://sepolia.checkpoint-sync.ethdevops.io/eth/v2/debug/beacon/states/finalized",
+		"https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 	},
 	GnosisNetwork: {
@@ -373,11 +358,14 @@ type BeaconChainConfig struct {
 	ProportionalSlashingMultiplier uint64 `yaml:"PROPORTIONAL_SLASHING_MULTIPLIER" spec:"true"` // ProportionalSlashingMultiplier is used as a multiplier on slashed penalties.
 
 	// Max operations per block constants.
-	MaxProposerSlashings uint64 `yaml:"MAX_PROPOSER_SLASHINGS" spec:"true"` // MaxProposerSlashings defines the maximum number of slashings of proposers possible in a block.
-	MaxAttesterSlashings uint64 `yaml:"MAX_ATTESTER_SLASHINGS" spec:"true"` // MaxAttesterSlashings defines the maximum number of casper FFG slashings possible in a block.
-	MaxAttestations      uint64 `yaml:"MAX_ATTESTATIONS" spec:"true"`       // MaxAttestations defines the maximum allowed attestations in a beacon block.
-	MaxDeposits          uint64 `yaml:"MAX_DEPOSITS" spec:"true"`           // MaxDeposits defines the maximum number of validator deposits in a block.
-	MaxVoluntaryExits    uint64 `yaml:"MAX_VOLUNTARY_EXITS" spec:"true"`    // MaxVoluntaryExits defines the maximum number of validator exits in a block.
+	MaxProposerSlashings             uint64 `yaml:"MAX_PROPOSER_SLASHINGS" spec:"true"`               // MaxProposerSlashings defines the maximum number of slashings of proposers possible in a block.
+	MaxAttesterSlashings             uint64 `yaml:"MAX_ATTESTER_SLASHINGS" spec:"true"`               // MaxAttesterSlashings defines the maximum number of casper FFG slashings possible in a block.
+	MaxAttestations                  uint64 `yaml:"MAX_ATTESTATIONS" spec:"true"`                     // MaxAttestations defines the maximum allowed attestations in a beacon block.
+	MaxDeposits                      uint64 `yaml:"MAX_DEPOSITS" spec:"true"`                         // MaxDeposits defines the maximum number of validator deposits in a block.
+	MaxVoluntaryExits                uint64 `yaml:"MAX_VOLUNTARY_EXITS" spec:"true"`                  // MaxVoluntaryExits defines the maximum number of validator exits in a block.
+	MaxWithdrawalsPerPayload         uint64 `yaml:"MAX_WITHDRAWALS_PER_PAYLOAD" spec:"true"`          // MaxWithdrawalsPerPayload defines the maximum number of withdrawals in a block.
+	MaxBlsToExecutionChanges         uint64 `yaml:"MAX_BLS_TO_EXECUTION_CHANGES" spec:"true"`         // MaxBlsToExecutionChanges defines the maximum number of BLS-to-execution-change objects in a block.
+	MaxValidatorsPerWithdrawalsSweep uint64 `yaml:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP" spec:"true"` //MaxValidatorsPerWithdrawalsSweep bounds the size of the sweep searching for withdrawals per slot.
 
 	// BLS domain values.
 	DomainBeaconProposer              [4]byte `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true"`                // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
@@ -393,6 +381,7 @@ type BeaconChainConfig struct {
 	DomainApplicationMask             [4]byte `yaml:"DOMAIN_APPLICATION_MASK" spec:"true"`               // DomainApplicationMask defines the BLS signature domain for application mask.
 	DomainApplicationBuilder          [4]byte // DomainApplicationBuilder defines the BLS signature domain for application builder.
 	DomainBLSToExecutionChange        [4]byte // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
+	DomainBlobSideCar                 [4]byte `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true"` // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
 
 	// Prysm constants.
 	GweiPerEth                     uint64        // GweiPerEth is the amount of gwei corresponding to 1 eth.
@@ -485,7 +474,7 @@ type BeaconChainConfig struct {
 }
 
 func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
-	forkEpochList := []uint64{b.AltairForkEpoch, b.BellatrixForkEpoch, b.CapellaForkEpoch}
+	forkEpochList := []uint64{b.AltairForkEpoch, b.BellatrixForkEpoch, b.CapellaForkEpoch, b.DenebForkEpoch}
 	stateVersion := Phase0Version
 	for _, forkEpoch := range forkEpochList {
 		if forkEpoch > epoch {
@@ -513,6 +502,7 @@ func configForkSchedule(b *BeaconChainConfig) map[[VersionLength]byte]uint64 {
 	fvs[utils.Uint32ToBytes4(b.AltairForkVersion)] = b.AltairForkEpoch
 	fvs[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = b.BellatrixForkEpoch
 	fvs[utils.Uint32ToBytes4(b.CapellaForkVersion)] = b.CapellaForkEpoch
+	fvs[utils.Uint32ToBytes4(b.DenebForkVersion)] = b.DenebForkEpoch
 	return fvs
 }
 
@@ -522,6 +512,7 @@ func configForkNames(b *BeaconChainConfig) map[[VersionLength]byte]string {
 	fvn[utils.Uint32ToBytes4(b.AltairForkVersion)] = "altair"
 	fvn[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = "bellatrix"
 	fvn[utils.Uint32ToBytes4(b.CapellaForkVersion)] = "capella"
+	fvn[utils.Uint32ToBytes4(b.DenebForkVersion)] = "deneb"
 	return fvn
 }
 
@@ -617,11 +608,14 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ProportionalSlashingMultiplier: 1,
 
 	// Max operations per block constants.
-	MaxProposerSlashings: 16,
-	MaxAttesterSlashings: 2,
-	MaxAttestations:      128,
-	MaxDeposits:          16,
-	MaxVoluntaryExits:    16,
+	MaxProposerSlashings:             16,
+	MaxAttesterSlashings:             2,
+	MaxAttestations:                  128,
+	MaxDeposits:                      16,
+	MaxVoluntaryExits:                16,
+	MaxWithdrawalsPerPayload:         16,
+	MaxBlsToExecutionChanges:         16,
+	MaxValidatorsPerWithdrawalsSweep: 16384,
 
 	// BLS domain values.
 	DomainBeaconProposer:              utils.Uint32ToBytes4(0x00000000),
@@ -670,9 +664,9 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	AltairForkVersion:    0x01000000,
 	AltairForkEpoch:      74240,
 	BellatrixForkVersion: 0x02000000,
-	BellatrixForkEpoch:   144869,
+	BellatrixForkEpoch:   144896,
 	CapellaForkVersion:   0x03000000,
-	CapellaForkEpoch:     math.MaxUint64,
+	CapellaForkEpoch:     194048,
 	DenebForkVersion:     0x04000000,
 	DenebForkEpoch:       math.MaxUint64,
 
@@ -740,16 +734,16 @@ func CustomConfig(configFile string) (BeaconChainConfig, error) {
 	return cfg, err
 }
 
-func ParseGenesisSSZToGenesisConfig(genesisFile string) (GenesisConfig, error) {
+func ParseGenesisSSZToGenesisConfig(genesisFile string, genesisVersion StateVersion) (GenesisConfig, []byte, error) {
 	cfg := GenesisConfig{}
 	b, err := os.ReadFile(genesisFile) // just pass the file name
 	if err != nil {
-		return GenesisConfig{}, nil
+		return GenesisConfig{}, nil, err
 	}
 	// Read first 2 fields of SSZ
-	cfg.GenesisTime = ssz_utils.UnmarshalUint64SSZ(b)
+	cfg.GenesisTime = ssz.UnmarshalUint64SSZ(b)
 	copy(cfg.GenesisValidatorRoot[:], b[8:])
-	return cfg, nil
+	return cfg, b, nil
 }
 
 func sepoliaConfig() BeaconChainConfig {
@@ -819,6 +813,8 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
+	cfg.CapellaForkEpoch = math.MaxUint64
+	cfg.DenebForkEpoch = math.MaxUint64
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -845,6 +841,8 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
+	cfg.CapellaForkEpoch = math.MaxUint64
+	cfg.DenebForkEpoch = math.MaxUint64
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -856,6 +854,10 @@ func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) 
 	case AltairVersion:
 		return b.MinSlashingPenaltyQuotientAltair
 	case BellatrixVersion:
+		return b.MinSlashingPenaltyQuotientBellatrix
+	case CapellaVersion:
+		return b.MinSlashingPenaltyQuotientBellatrix
+	case DenebVersion:
 		return b.MinSlashingPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")
@@ -870,6 +872,10 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 		return b.InactivityPenaltyQuotientAltair
 	case BellatrixVersion:
 		return b.InactivityPenaltyQuotientBellatrix
+	case CapellaVersion:
+		return b.InactivityPenaltyQuotientBellatrix
+	case DenebVersion:
+		return b.InactivityPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")
 	}
@@ -882,6 +888,26 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 	GoerliNetwork:  goerliConfig(),
 	GnosisNetwork:  gnosisConfig(),
 	ChiadoNetwork:  chiadoConfig(),
+}
+
+// Eth1DataVotesLength returns the maximum length of the votes on the Eth1 data,
+// computed from the parameters in BeaconChainConfig.
+func (b *BeaconChainConfig) Eth1DataVotesLength() uint64 {
+	return b.EpochsPerEth1VotingPeriod * b.SlotsPerEpoch
+}
+
+// PreviousEpochAttestationsLength returns the maximum length of the pending
+// attestation list for the previous epoch, computed from the parameters in
+// BeaconChainConfig.
+func (b *BeaconChainConfig) PreviousEpochAttestationsLength() uint64 {
+	return b.SlotsPerEpoch * b.MaxAttestations
+}
+
+// CurrentEpochAttestationsLength returns the maximum length of the pending
+// attestation list for the current epoch, computed from the parameters in
+// BeaconChainConfig.
+func (b *BeaconChainConfig) CurrentEpochAttestationsLength() uint64 {
+	return b.SlotsPerEpoch * b.MaxAttestations
 }
 
 func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
@@ -917,6 +943,9 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 	if !ok {
 		return ""
 	}
+	if len(checkpoints) == 1 {
+		return checkpoints[0]
+	}
 	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(checkpoints)-1)))
 	if err != nil {
 		panic(err)
@@ -931,7 +960,11 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 // 100 is Gnosis Mainnet
 // 10200 is Chiado Testnet
 func EmbeddedSupported(id uint64) bool {
-	return id == 1 || id == 5 || id == 11155111 || id == 100 || id == 10200
+	return id == 1 ||
+		id == 5 ||
+		id == 11155111 ||
+		id == 100 // ||
+	//id == 10200
 }
 
 // Subset of supported networks where embedded CL is stable enough

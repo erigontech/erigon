@@ -34,6 +34,10 @@ integration stage_exec --prune.to=N
 integration stage_history --prune.to=N
 ... 
 
+# Run tx replay with domains [requires 6th stage to be done before run]
+integration state_domains --chain goerli --last-step=4 # stop replay when 4th step is merged
+integration read_domains --chain goerli account <addr> <addr> ... # read values for given accounts 
+
 # hack which allows to force clear unwind stack of all stages
 clear_unwind_stack
 ```

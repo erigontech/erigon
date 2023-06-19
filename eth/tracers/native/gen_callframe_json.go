@@ -7,6 +7,7 @@ import (
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -22,8 +23,8 @@ func (c callFrame) MarshalJSON() ([]byte, error) {
 		Gas        hexutil.Uint64    `json:"gas"`
 		GasUsed    hexutil.Uint64    `json:"gasUsed"`
 		To         libcommon.Address `json:"to,omitempty" rlp:"optional"`
-		Input      hexutil.Bytes     `json:"input" rlp:"optional"`
-		Output     hexutil.Bytes     `json:"output,omitempty" rlp:"optional"`
+		Input      hexutility.Bytes  `json:"input" rlp:"optional"`
+		Output     hexutility.Bytes  `json:"output,omitempty" rlp:"optional"`
 		Error      string            `json:"error,omitempty" rlp:"optional"`
 		Revertal   string            `json:"revertReason,omitempty"`
 		Calls      []callFrame       `json:"calls,omitempty" rlp:"optional"`
@@ -56,8 +57,8 @@ func (c *callFrame) UnmarshalJSON(input []byte) error {
 		Gas      *hexutil.Uint64    `json:"gas"`
 		GasUsed  *hexutil.Uint64    `json:"gasUsed"`
 		To       *libcommon.Address `json:"to,omitempty" rlp:"optional"`
-		Input    *hexutil.Bytes     `json:"input" rlp:"optional"`
-		Output   *hexutil.Bytes     `json:"output,omitempty" rlp:"optional"`
+		Input    *hexutility.Bytes  `json:"input" rlp:"optional"`
+		Output   *hexutility.Bytes  `json:"output,omitempty" rlp:"optional"`
 		Error    *string            `json:"error,omitempty" rlp:"optional"`
 		Revertal *string            `json:"revertReason,omitempty"`
 		Calls    []callFrame        `json:"calls,omitempty" rlp:"optional"`

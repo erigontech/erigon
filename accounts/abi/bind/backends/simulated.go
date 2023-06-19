@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	ethereum "github.com/ledgerwatch/erigon"
@@ -46,11 +47,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -78,7 +76,8 @@ type SimulatedBackend struct {
 	pendingHeader   *types.Header
 	gasPool         *core.GasPool
 	pendingBlock    *types.Block // Currently pending block that will be imported on request
-	pendingReader   *state.PlainStateReader
+	pendingReader   state.StateReader
+	pendingReaderTx kv.Tx
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
 
 	rmLogsFeed event.Feed
@@ -88,16 +87,17 @@ type SimulatedBackend struct {
 
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
 // for testing purposes.
-func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
-	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
+func NewSimulatedBackendWithConfig(alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
+	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
 	m := stages.MockWithGenesisEngine(nil, &genesis, engine, false)
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
 		getHeader: func(hash libcommon.Hash, number uint64) (h *types.Header) {
-			if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-				h = rawdb.ReadHeader(tx, hash, number)
+			var err error
+			if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+				h, err = m.BlockReader.Header(context.Background(), tx, hash, number)
 				return nil
 			}); err != nil {
 				panic(err)
@@ -110,37 +110,28 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *chain.Config
 }
 
 // A simulated backend always uses chainID 1337.
-func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
+func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
 	b := NewSimulatedBackendWithConfig(alloc, params.TestChainConfig, gasLimit)
-	t.Cleanup(func() {
-		b.Close()
-	})
-	if b.m.HistoryV3 {
-		t.Skip("TODO: Fixme")
-	}
+	t.Cleanup(b.Close)
 	return b
 }
 
-func NewTestSimulatedBackendWithConfig(t *testing.T, alloc core.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
+func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
 	b := NewSimulatedBackendWithConfig(alloc, config, gasLimit)
-	t.Cleanup(func() {
-		b.Close()
-	})
-	if b.m.HistoryV3 {
-		t.Skip("TODO: Fixme")
-	}
+	t.Cleanup(b.Close)
 	return b
 }
-func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
-func (b *SimulatedBackend) Agg() *state2.AggregatorV3 { return b.m.HistoryV3Components() }
-func (b *SimulatedBackend) BlockReader() *snapshotsync.BlockReaderWithSnapshots {
-	return snapshotsync.NewBlockReaderWithSnapshots(b.m.BlockSnapshots, b.m.TransactionsV3)
-}
-func (b *SimulatedBackend) HistoryV3() bool          { return b.m.HistoryV3 }
-func (b *SimulatedBackend) Engine() consensus.Engine { return b.m.Engine }
+func (b *SimulatedBackend) DB() kv.RwDB                           { return b.m.DB }
+func (b *SimulatedBackend) Agg() *state2.AggregatorV3             { return b.m.HistoryV3Components() }
+func (b *SimulatedBackend) HistoryV3() bool                       { return b.m.HistoryV3 }
+func (b *SimulatedBackend) Engine() consensus.Engine              { return b.m.Engine }
+func (b *SimulatedBackend) BlockReader() services.FullBlockReader { return b.m.BlockReader }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {
+	if b.pendingReaderTx != nil {
+		b.pendingReaderTx.Rollback()
+	}
 	b.m.Close()
 }
 
@@ -153,7 +144,7 @@ func (b *SimulatedBackend) Commit() {
 		Headers:  []*types.Header{b.pendingHeader},
 		Blocks:   []*types.Block{b.pendingBlock},
 		TopBlock: b.pendingBlock,
-	}); err != nil {
+	}, nil); err != nil {
 		panic(err)
 	}
 	//nolint:prealloc
@@ -179,19 +170,25 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingBlock = chain.Blocks[0]
 	b.pendingReceipts = chain.Receipts[0]
 	b.pendingHeader = chain.Headers[0]
-	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	b.pendingReader = state.NewPlainStateReader(olddb.NewObjectDatabase(b.m.DB))
+	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit).AddDataGas(params.MaxDataGasPerBlock)
+	if b.pendingReaderTx != nil {
+		b.pendingReaderTx.Rollback()
+	}
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	b.pendingReaderTx = tx
+	b.pendingReader = b.m.NewStateReader(b.pendingReaderTx)
 	b.pendingState = state.New(b.pendingReader)
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
-		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()+1, nil))
-		//return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
+		return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
 	}
-	return state.New(state.NewPlainState(db, blockNumber.Uint64()+1, nil))
-	//return state.New(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
+	return state.New(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -260,8 +257,26 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash libcom
 		return nil, err
 	}
 	defer tx.Rollback()
-	receipt, _, _, _, err := rawdb.ReadReceipt(tx, txHash)
-	return receipt, err
+	// Retrieve the context of the receipt based on the transaction hash
+	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	if err != nil {
+		return nil, err
+	}
+	if blockNumber == nil {
+		return nil, nil
+	}
+	block, err := b.BlockReader().BlockByNumber(b.m.Ctx, tx, *blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	// Read all the receipts from the block and return the one with the matching hash
+	receipts := rawdb.ReadReceipts(tx, block, nil)
+	for _, receipt := range receipts {
+		if receipt.TxHash == txHash {
+			return receipt, nil
+		}
+	}
+	return nil, nil
 }
 
 // TransactionByHash checks the pool of pending transactions in addition to the
@@ -272,7 +287,7 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash libcomm
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -282,19 +297,28 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash libcomm
 	if txn != nil {
 		return txn, true, nil
 	}
-	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	blockNumber, ok, err := b.BlockReader().TxnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, false, err
 	}
-	if blockNumber == nil {
+	if !ok {
 		return nil, false, ethereum.NotFound
 	}
-	txn, _, _, _, err = rawdb.ReadTransaction(tx, txHash, *blockNumber)
+	blockHash, err := b.BlockReader().CanonicalHash(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, false, err
 	}
-	if txn != nil {
-		return txn, false, nil
+	body, err := b.BlockReader().BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+	if err != nil {
+		return nil, false, err
+	}
+	if body == nil {
+		return nil, false, ethereum.NotFound
+	}
+	for _, txn = range body.Transactions {
+		if txn.Hash() == txHash {
+			return txn, false, nil
+		}
 	}
 	return nil, false, ethereum.NotFound
 }
@@ -307,13 +331,13 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash libcommon.Hash)
 	if hash == b.pendingBlock.Hash() {
 		return b.pendingBlock, nil
 	}
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(tx, hash)
+	block, err := b.BlockReader().BlockByHash(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +359,7 @@ func (b *SimulatedBackend) BlockByNumber(ctx context.Context, number *big.Int) (
 
 // blockByNumberNoLock retrieves a block from the database by number, caching it
 // (associated with its hash) if found without Lock.
-func (b *SimulatedBackend) blockByNumberNoLock(_ context.Context, number *big.Int) (*types.Block, error) {
+func (b *SimulatedBackend) blockByNumberNoLock(ctx context.Context, number *big.Int) (*types.Block, error) {
 	if number == nil || number.Cmp(b.prependBlock.Number()) == 0 {
 		return b.prependBlock, nil
 	}
@@ -346,11 +370,10 @@ func (b *SimulatedBackend) blockByNumberNoLock(_ context.Context, number *big.In
 	}
 	defer tx.Rollback()
 
-	hash, err := rawdb.ReadCanonicalHash(tx, number.Uint64())
+	block, err := b.BlockReader().BlockByNumber(ctx, tx, number.Uint64())
 	if err != nil {
 		return nil, err
 	}
-	block := rawdb.ReadBlock(tx, hash, number.Uint64())
 	if block == nil {
 		return nil, errBlockDoesNotExist
 	}
@@ -376,7 +399,10 @@ func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash libcommon.Hash
 	if number == nil {
 		return nil, errBlockDoesNotExist
 	}
-	header := rawdb.ReadHeader(tx, hash, *number)
+	header, err := b.BlockReader().Header(ctx, tx, hash, *number)
+	if err != nil {
+		return nil, err
+	}
 	if header == nil {
 		return nil, errBlockDoesNotExist
 	}
@@ -398,11 +424,10 @@ func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, number *big.Int) 
 	if number == nil || number.Cmp(b.prependBlock.Number()) == 0 {
 		return b.prependBlock.Header(), nil
 	}
-	hash, err := rawdb.ReadCanonicalHash(tx, number.Uint64())
+	header, err := b.BlockReader().HeaderByNumber(ctx, tx, number.Uint64())
 	if err != nil {
 		return nil, err
 	}
-	header := rawdb.ReadHeader(tx, hash, number.Uint64())
 	return header, nil
 }
 
@@ -420,7 +445,11 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash libco
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(tx, blockHash)
+	blockNum := rawdb.ReadHeaderNumber(tx, blockHash)
+	if blockNum == nil {
+		return 0, nil
+	}
+	block, _, err := b.BlockReader().BlockWithSenders(ctx, tx, blockHash, *blockNum)
 	if err != nil {
 		return 0, err
 	}
@@ -450,7 +479,11 @@ func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash lib
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(tx, blockHash)
+	blockNum := rawdb.ReadHeaderNumber(tx, blockHash)
+	if blockNum == nil {
+		return nil, nil
+	}
+	block, _, err := b.BlockReader().BlockWithSenders(ctx, tx, blockHash, *blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -514,7 +547,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 	}
 	var res *core.ExecutionResult
 	if err := b.m.DB.View(context.Background(), func(tx kv.Tx) (err error) {
-		s := state.New(state.NewPlainStateReader(tx))
+		s := state.New(b.m.NewStateReader(tx))
 		res, err = b.callContract(ctx, call, b.pendingBlock, s)
 		if err != nil {
 			return err
@@ -570,9 +603,9 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 	// Determine the lowest and highest possible gas limits to binary search in between
 	var (
-		lo  = params.TxGas - 1
-		hi  uint64
-		cap uint64
+		lo     = params.TxGas - 1
+		hi     uint64
+		gasCap uint64
 	)
 	if call.Gas >= params.TxGas {
 		hi = call.Gas
@@ -600,8 +633,8 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 			hi = allowance.Uint64()
 		}
 	}
-	cap = hi
-	b.pendingState.Prepare(libcommon.Hash{}, libcommon.Hash{}, len(b.pendingBlock.Transactions()))
+	gasCap = hi
+	b.pendingState.SetTxContext(libcommon.Hash{}, libcommon.Hash{}, len(b.pendingBlock.Transactions()))
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
@@ -637,7 +670,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 		}
 	}
 	// Reject the transaction as invalid if it still fails at the highest allowance
-	if hi == cap {
+	if hi == gasCap {
 		failed, result, err := executable(hi)
 		if err != nil {
 			return 0, err
@@ -650,7 +683,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 				return 0, result.Err
 			}
 			// Otherwise, the specified gas cap is too low
-			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
+			return 0, fmt.Errorf("gas required exceeds allowance (%d)", gasCap)
 		}
 	}
 	return hi, nil
@@ -688,7 +721,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
-	gasPool := new(core.GasPool).AddGas(math.MaxUint64)
+	gasPool := new(core.GasPool).AddGas(math.MaxUint64).AddDataGas(math.MaxUint64)
 
 	return core.NewStateTransition(vmEnv, msg, gasPool).TransitionDb(true /* refunds */, false /* gasBailout */)
 }
@@ -700,7 +733,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	defer b.mu.Unlock()
 
 	// Check transaction validity.
-	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64())
+	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64(), b.pendingBlock.Time())
 	sender, senderErr := tx.Sender(*signer)
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %w", senderErr)
@@ -710,7 +743,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		return fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.GetNonce(), nonce)
 	}
 
-	b.pendingState.Prepare(tx.Hash(), libcommon.Hash{}, len(b.pendingBlock.Transactions()))
+	b.pendingState.SetTxContext(tx.Hash(), libcommon.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, _, err := core.ApplyTransaction(
 		b.m.ChainConfig, core.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
@@ -799,99 +832,6 @@ func (m callMsg) Data() []byte                  { return m.CallMsg.Data }
 func (m callMsg) AccessList() types2.AccessList { return m.CallMsg.AccessList }
 func (m callMsg) IsFree() bool                  { return false }
 
-// filterBackend implements filters.Backend to support filtering for logs without
-// taking bloom-bits acceleration structures into account.
-type filterBackend struct {
-	db kv.RwDB
-	b  *SimulatedBackend
-}
-
-func (fb *filterBackend) HeaderByNumber(ctx context.Context, block rpc.BlockNumber) (*types.Header, error) {
-	if block == rpc.LatestBlockNumber {
-		return fb.b.HeaderByNumber(ctx, nil)
-	}
-	return fb.b.HeaderByNumber(ctx, big.NewInt(block.Int64()))
-}
-
-func (fb *filterBackend) HeaderByHash(ctx context.Context, hash libcommon.Hash) (*types.Header, error) {
-	return fb.b.HeaderByHash(ctx, hash)
-}
-
-func (fb *filterBackend) GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error) {
-	tx, err := fb.db.BeginRo(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	if number == nil {
-		return nil, err
-	}
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, *number)
-	if err != nil {
-		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-	}
-	b, senders, err := rawdb.ReadBlockWithSenders(tx, hash, *number)
-	if err != nil {
-		return nil, err
-	}
-	return rawdb.ReadReceipts(tx, b, senders), nil
-}
-
-func (fb *filterBackend) GetLogs(ctx context.Context, hash libcommon.Hash) ([][]*types.Log, error) {
-	tx, err := fb.db.BeginRo(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	if number == nil {
-		return nil, err
-	}
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, *number)
-	if err != nil {
-		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-	}
-	b, senders, err := rawdb.ReadBlockWithSenders(tx, hash, *number)
-	if err != nil {
-		return nil, err
-	}
-	receipts := rawdb.ReadReceipts(tx, b, senders)
-	if receipts == nil {
-		return nil, nil
-	}
-	logs := make([][]*types.Log, len(receipts))
-	for i, receipt := range receipts {
-		logs[i] = receipt.Logs
-	}
-	return logs, nil
-}
-
-func (fb *filterBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
-	return nullSubscription()
-}
-
-func (fb *filterBackend) SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription {
-	return fb.b.chainFeed.Subscribe(ch)
-}
-
-func (fb *filterBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {
-	return fb.b.rmLogsFeed.Subscribe(ch)
-}
-
-func (fb *filterBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription {
-	return fb.b.logsFeed.Subscribe(ch)
-}
-
-func (fb *filterBackend) SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription {
-	return nullSubscription()
-}
-
-func (fb *filterBackend) BloomStatus() (uint64, uint64) { return 4096, 0 }
-
-func nullSubscription() event.Subscription {
-	return event.NewSubscription(func(quit <-chan struct{}) error {
-		<-quit
-		return nil
-	})
-}
+func (m callMsg) DataGas() uint64                { return params.DataGasPerBlob * uint64(len(m.CallMsg.DataHashes)) }
+func (m callMsg) MaxFeePerDataGas() *uint256.Int { return m.CallMsg.MaxFeePerDataGas }
+func (m callMsg) DataHashes() []libcommon.Hash   { return m.CallMsg.DataHashes }

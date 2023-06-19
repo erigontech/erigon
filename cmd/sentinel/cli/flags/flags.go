@@ -1,6 +1,8 @@
 package flags
 
-import "github.com/urfave/cli/v2"
+import (
+	"github.com/urfave/cli/v2"
+)
 
 var (
 	SentinelDiscoveryPort = cli.IntFlag{
@@ -18,11 +20,6 @@ var (
 		Usage: "sets lightclient tcp port",
 		Value: 4001,
 	}
-	Verbosity = cli.UintFlag{
-		Name:  "verbosity",
-		Usage: "specify lightclient verbosity level 0=silent, 1=err, 2=warn, 3=info, 4=debug, 5=details",
-		Value: 3,
-	}
 	SentinelServerPort = cli.IntFlag{
 		Name:  "sentinel.port",
 		Usage: "sets the lightclient server port",
@@ -32,6 +29,31 @@ var (
 		Name:  "sentinel.addr",
 		Usage: "sets the lightclient server host addr",
 		Value: "localhost",
+	}
+	NoBeaconApi = cli.BoolFlag{
+		Name:  "no-beacon-api",
+		Usage: "turn off the beacon api",
+		Value: false,
+	}
+	BeaconApiReadTimeout = cli.Uint64Flag{
+		Name:  "beacon.api.read.timeout",
+		Usage: "Sets the seconds for a read time out in the beacon api",
+		Value: 5,
+	}
+	BeaconApiWriteTimeout = cli.Uint64Flag{
+		Name:  "beacon.api.write.timeout",
+		Usage: "Sets the seconds for a write time out in the beacon api",
+		Value: 5,
+	}
+	BeaconApiAddr = cli.StringFlag{
+		Name:  "beacon.api.addr",
+		Usage: "sets the host to listen for beacon api requests",
+		Value: "localhost",
+	}
+	BeaconApiPort = cli.UintFlag{
+		Name:  "beacon.api.port",
+		Usage: "sets the port to listen for beacon api requests",
+		Value: 5555,
 	}
 	BootnodesFlag = cli.StringFlag{
 		Name:  "sentinel.bootnodes",
@@ -63,11 +85,6 @@ var (
 		Usage: "chaindata of database",
 		Value: "",
 	}
-	ELEnabledFlag = cli.BoolFlag{
-		Name:  "el.enabled",
-		Usage: "enables EL support",
-		Value: false,
-	}
 	BeaconDBModeFlag = cli.StringFlag{
 		Name:  "beacon-db-mode",
 		Usage: "level of storing on beacon chain, minimal(only 500k blocks stored), full (all blocks stored), light (no blocks stored)",
@@ -87,5 +104,24 @@ var (
 		Name:  "sentinel.staticpeers",
 		Usage: "connect to comma-separated Consensus static peers",
 		Value: "",
+	}
+	TransitionChainFlag = cli.BoolFlag{
+		Name:  "transition-chain",
+		Usage: "enable chain transition",
+	}
+	InitSyncFlag = cli.BoolFlag{
+		Value: false,
+		Name:  "initial-sync",
+		Usage: "use initial-sync",
+	}
+	RecordModeFlag = cli.BoolFlag{
+		Value: false,
+		Name:  "record-mode",
+		Usage: "enable/disable record mode",
+	}
+	RecordModeDir = cli.StringFlag{
+		Value: "caplin-recordings",
+		Name:  "record-dir",
+		Usage: "directory for states and block recordings",
 	}
 )

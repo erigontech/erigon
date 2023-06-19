@@ -19,33 +19,34 @@ package aura
 import (
 	"bytes"
 	"container/list"
-	"encoding/json"
+	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
-	"go.uber.org/atomic"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -97,7 +98,7 @@ type EpochTransition struct {
 
 type Step struct {
 	calibrate bool // whether calibration is enabled.
-	inner     *atomic.Uint64
+	inner     atomic.Uint64
 	// Planned durations of steps.
 	durations []StepDurationInfo
 }
@@ -138,7 +139,7 @@ func (s *Step) optCalibrate() bool {
 
 type PermissionedStep struct {
 	inner      *Step
-	canPropose *atomic.Bool
+	canPropose atomic.Bool
 }
 
 type ReceivedStepHashes map[uint64]map[libcommon.Address]libcommon.Hash //BTreeMap<(u64, Address), H256>
@@ -192,7 +193,7 @@ func (e *EpochManager) noteNewEpoch() { e.force = true }
 // zoomValidators - Zooms to the epoch after the header with the given hash. Returns true if succeeded, false otherwise.
 // It's analog of zoom_to_after function in OE, but doesn't require external locking
 // nolint
-func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consensus.EpochReader, validators ValidatorSet, hash libcommon.Hash, call consensus.SystemCall) (*RollingFinality, uint64, bool) {
+func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er *NonTransactionalEpochReader, validators ValidatorSet, hash libcommon.Hash, call consensus.SystemCall) (*RollingFinality, uint64, bool) {
 	var lastWasParent bool
 	if e.finalityChecker.lastPushed != nil {
 		lastWasParent = *e.finalityChecker.lastPushed == hash
@@ -209,7 +210,7 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consens
 	// forks it will only need to be called for the block directly after
 	// epoch transition, in which case it will be O(1) and require a single
 	// DB lookup.
-	lastTransition, ok := epochTransitionFor2(chain, er, hash)
+	lastTransition, ok := epochTransitionFor(chain, er, hash)
 	if !ok {
 		if lastTransition.BlockNumber > DEBUG_LOG_FROM {
 			fmt.Printf("zoom1: %d\n", lastTransition.BlockNumber)
@@ -255,7 +256,7 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consens
 // /
 // / The block corresponding the the parent hash must be stored already.
 // nolint
-func epochTransitionFor2(chain consensus.ChainHeaderReader, e consensus.EpochReader, parentHash libcommon.Hash) (transition EpochTransition, ok bool) {
+func epochTransitionFor(chain consensus.ChainHeaderReader, e *NonTransactionalEpochReader, parentHash libcommon.Hash) (transition EpochTransition, ok bool) {
 	//TODO: probably this version of func doesn't support non-canonical epoch transitions
 	h := chain.GetHeaderByHash(parentHash)
 	if h == nil {
@@ -271,62 +272,10 @@ func epochTransitionFor2(chain consensus.ChainHeaderReader, e consensus.EpochRea
 	return EpochTransition{BlockNumber: num, BlockHash: hash, ProofRlp: transitionProof}, true
 }
 
-// nolint
-func epochTransitionFor(chain consensus.ChainHeaderReader, e consensus.EpochReader, parentHash libcommon.Hash) (transition EpochTransition, ok bool) {
-	// slow path: loop back block by block
-	for {
-		h := chain.GetHeaderByHash(parentHash)
-		if h == nil {
-			return transition, false
-		}
-
-		// look for transition in database.
-		transitionProof, err := e.GetEpoch(h.Hash(), h.Number.Uint64())
-		if err != nil {
-			panic(err)
-		}
-
-		if transitionProof != nil {
-			return EpochTransition{
-				BlockNumber: h.Number.Uint64(),
-				BlockHash:   h.Hash(),
-				ProofRlp:    transitionProof,
-			}, true
-		}
-
-		// canonical hash -> fast breakout:
-		// get the last epoch transition up to this block.
-		//
-		// if `block_hash` is canonical it will only return transitions up to
-		// the parent.
-		canonical := chain.GetHeaderByNumber(h.Number.Uint64())
-		if canonical == nil {
-			return transition, false
-		}
-		//nolint
-		if canonical.Hash() == parentHash {
-			return EpochTransition{
-				BlockNumber: 0,
-				BlockHash:   libcommon.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f"),
-				ProofRlp:    params.SokolGenesisEpochProof,
-			}, true
-			/* TODO:
-			   return self
-			       .epoch_transitions()
-			       .map(|(_, t)| t)
-			       .take_while(|t| t.block_number <= details.number)
-			       .last();
-			*/
-		}
-
-		parentHash = h.Hash()
-	}
-}
-
 // AuRa
 // nolint
 type AuRa struct {
-	db     kv.RwDB // Database to store and retrieve snapshot checkpoints
+	e      *NonTransactionalEpochReader
 	exitCh chan struct{}
 	lock   sync.RWMutex // Protects the signer fields
 
@@ -334,24 +283,23 @@ type AuRa struct {
 	// History of step hashes recently received from peers.
 	receivedStepHashes ReceivedStepHashes
 
-	OurSigningAddress libcommon.Address // Same as Etherbase in Mining
-	cfg               AuthorityRoundParams
-	EmptyStepsSet     *EmptyStepSet
-	EpochManager      *EpochManager // Mutex<EpochManager>,
+	cfg           AuthorityRoundParams
+	EmptyStepsSet *EmptyStepSet
+	EpochManager  *EpochManager // Mutex<EpochManager>,
 
 	certifier     *libcommon.Address // certifies service transactions
 	certifierLock sync.RWMutex
 }
 
 type GasLimitOverride struct {
-	cache *lru.Cache
+	cache *lru.Cache[libcommon.Hash, *uint256.Int]
 }
 
 func NewGasLimitOverride() *GasLimitOverride {
 	// The number of recent block hashes for which the gas limit override is memoized.
 	const GasLimitOverrideCacheCapacity = 10
 
-	cache, err := lru.New(GasLimitOverrideCacheCapacity)
+	cache, err := lru.New[libcommon.Hash, *uint256.Int](GasLimitOverrideCacheCapacity)
 	if err != nil {
 		panic("error creating prefetching cache for blocks")
 	}
@@ -361,9 +309,7 @@ func NewGasLimitOverride() *GasLimitOverride {
 func (pb *GasLimitOverride) Pop(hash libcommon.Hash) *uint256.Int {
 	if val, ok := pb.cache.Get(hash); ok && val != nil {
 		pb.cache.Remove(hash)
-		if v, ok := val.(*uint256.Int); ok {
-			return v
-		}
+		return val
 	}
 	return nil
 }
@@ -375,12 +321,7 @@ func (pb *GasLimitOverride) Add(hash libcommon.Hash, b *uint256.Int) {
 	pb.cache.ContainsOrAdd(hash, b)
 }
 
-func NewAuRa(config *chain.AuRaConfig, db kv.RwDB, ourSigningAddress libcommon.Address, engineParamsJson []byte) (*AuRa, error) {
-	spec := JsonSpec{}
-	err := json.Unmarshal(engineParamsJson, &spec)
-	if err != nil {
-		return nil, err
-	}
+func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 	auraParams, err := FromJson(spec)
 	if err != nil {
 		return nil, err
@@ -420,10 +361,10 @@ func NewAuRa(config *chain.AuRaConfig, db kv.RwDB, ourSigningAddress libcommon.A
 		durations = append(durations, durInfo)
 	}
 	step := &Step{
-		inner:     atomic.NewUint64(initialStep),
 		calibrate: auraParams.StartStep == nil,
 		durations: durations,
 	}
+	step.inner.Store(initialStep)
 	step.doCalibrate()
 
 	/*
@@ -447,17 +388,64 @@ func NewAuRa(config *chain.AuRaConfig, db kv.RwDB, ourSigningAddress libcommon.A
 	exitCh := make(chan struct{})
 
 	c := &AuRa{
-		db:                 db,
+		e:                  newEpochReader(db),
 		exitCh:             exitCh,
-		step:               PermissionedStep{inner: step, canPropose: atomic.NewBool(true)},
-		OurSigningAddress:  ourSigningAddress,
+		step:               PermissionedStep{inner: step},
 		cfg:                auraParams,
 		receivedStepHashes: ReceivedStepHashes{},
 		EpochManager:       NewEpochManager(),
 	}
-	_ = config
+	c.step.canPropose.Store(true)
 
 	return c, nil
+}
+
+type epochReader interface {
+	GetEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
+	GetPendingEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
+	FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error)
+}
+type epochWriter interface {
+	epochReader
+	PutEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
+	PutPendingEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
+}
+
+type NonTransactionalEpochReader struct {
+	db kv.RwDB
+}
+
+func newEpochReader(db kv.RwDB) *NonTransactionalEpochReader {
+	return &NonTransactionalEpochReader{db: db}
+}
+
+func (cr *NonTransactionalEpochReader) GetEpoch(hash libcommon.Hash, number uint64) (v []byte, err error) {
+	return v, cr.db.View(context.Background(), func(tx kv.Tx) error {
+		v, err = rawdb.ReadEpoch(tx, number, hash)
+		return err
+	})
+}
+func (cr *NonTransactionalEpochReader) PutEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
+	return cr.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteEpoch(tx, number, hash, proof)
+	})
+}
+func (cr *NonTransactionalEpochReader) GetPendingEpoch(hash libcommon.Hash, number uint64) (v []byte, err error) {
+	return v, cr.db.View(context.Background(), func(tx kv.Tx) error {
+		v, err = rawdb.ReadPendingEpoch(tx, number, hash)
+		return err
+	})
+}
+func (cr *NonTransactionalEpochReader) PutPendingEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
+	return cr.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WritePendingEpoch(tx, number, hash, proof)
+	})
+}
+func (cr *NonTransactionalEpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error) {
+	return blockNum, blockHash, transitionProof, cr.db.View(context.Background(), func(tx kv.Tx) error {
+		blockNum, blockHash, transitionProof, err = rawdb.FindEpochBeforeOrEqualNumber(tx, number)
+		return err
+	})
 }
 
 // A helper accumulator function mapping a step duration and a step duration transition timestamp
@@ -505,7 +493,11 @@ func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 		log.Error("consensus.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
 		return consensus.ErrUnknownAncestor
 	}
-	return ethash.VerifyHeaderBasics(chain, header, parent, false)
+	return ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/, c.HasGasLimitContract() /*skipGasLimit*/)
+}
+
+func (c *AuRa) HasGasLimitContract() bool {
+	return len(c.cfg.BlockRewardContractTransitions) != 0
 }
 
 // nolint
@@ -530,7 +522,7 @@ func (c *AuRa) insertReceivedStepHashes(step uint64, author libcommon.Address, n
 }
 
 // nolint
-func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, call consensus.Call, syscall consensus.SystemCall) error {
+func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e *NonTransactionalEpochReader, header *types.Header, call consensus.Call, syscall consensus.SystemCall) error {
 	// TODO: I call it from Initialize - because looks like no much reason to have separated "verifyFamily" call
 
 	step := header.AuRaStep
@@ -771,9 +763,7 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 	//return nil
 }
 
-func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header,
-	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall,
-) {
+func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 	blockNum := header.Number.Uint64()
 	for address, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
 		state.SetCode(address, rewrittenCode)
@@ -790,7 +780,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 		if err != nil {
 			panic(err)
 		}
-		err = e.PutEpoch(header.ParentHash, 0, proof) //TODO: block 0 hardcoded - need fix it inside validators
+		err = c.e.PutEpoch(header.ParentHash, 0, proof) //TODO: block 0 hardcoded - need fix it inside validators
 		if err != nil {
 			panic(err)
 		}
@@ -802,12 +792,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 
 	// check_and_lock_block -> check_epoch_end_signal
 
-	if e == nil {
-		// for tracing, we pass e that is `nil`
-		return
-	}
-
-	epoch, err := e.GetEpoch(header.ParentHash, blockNum-1)
+	epoch, err := c.e.GetEpoch(header.ParentHash, blockNum-1)
 	if err != nil {
 		log.Warn("[aura] initialize block: on epoch begin", "err", err)
 		return
@@ -825,24 +810,23 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 
 }
 
-func (c *AuRa) ApplyRewards(header *types.Header, state *state.IntraBlockState, syscall consensus.SystemCall) error {
-	beneficiaries, _, rewards, err := calculateRewards(c, header, syscall)
+func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, syscall consensus.SystemCall) error {
+	rewards, err := c.CalculateRewards(nil, header, nil, syscall)
 	if err != nil {
 		return err
 	}
-	for i := range beneficiaries {
-		//fmt.Printf("beneficiary: n=%d, %x,%d\n", header.Number.Uint64(), beneficiaries[i], rewards[i])
-		state.AddBalance(beneficiaries[i], rewards[i])
+	for _, r := range rewards {
+		state.AddBalance(r.Beneficiary, &r.Amount)
 	}
 	return nil
 }
 
 // word `signal epoch` == word `pending epoch`
-func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
-	if err := c.ApplyRewards(header, state, syscall); err != nil {
+	if err := c.applyRewards(header, state, syscall); err != nil {
 		return nil, nil, err
 	}
 
@@ -858,22 +842,22 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
 			fmt.Printf("insert_pending_transition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
 		}
-		if err = e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
+		if err = c.e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
 			return nil, nil, err
 		}
 	}
 	// check_and_lock_block -> check_epoch_end_signal END
 
-	finalized := buildFinality(c.EpochManager, chain, e, c.cfg.Validators, header, syscall)
+	finalized := buildFinality(c.EpochManager, chain, c.e, c.cfg.Validators, header, syscall)
 	c.EpochManager.finalityChecker.print(header.Number.Uint64())
-	epochEndProof, err := isEpochEnd(chain, e, finalized, header)
+	epochEndProof, err := isEpochEnd(chain, c.e, finalized, header)
 	if err != nil {
 		return nil, nil, err
 	}
 	if epochEndProof != nil {
 		c.EpochManager.noteNewEpoch()
 		log.Info("[aura] epoch transition", "block_num", header.Number.Uint64())
-		if err := e.PutEpoch(header.Hash(), header.Number.Uint64(), epochEndProof); err != nil {
+		if err := c.e.PutEpoch(header.Hash(), header.Number.Uint64(), epochEndProof); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -881,7 +865,7 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	return txs, receipts, nil
 }
 
-func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er consensus.EpochReader, validators ValidatorSet, header *types.Header, syscall consensus.SystemCall) []unAssembledHeader {
+func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er *NonTransactionalEpochReader, validators ValidatorSet, header *types.Header, syscall consensus.SystemCall) []unAssembledHeader {
 	// commit_block -> aura.build_finality
 	_, _, ok := e.zoomToAfter(chain, er, validators, header.ParentHash, syscall)
 	if !ok {
@@ -908,7 +892,7 @@ func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er consen
 	return res
 }
 
-func isEpochEnd(chain consensus.ChainHeaderReader, e consensus.EpochReader, finalized []unAssembledHeader, header *types.Header) ([]byte, error) {
+func isEpochEnd(chain consensus.ChainHeaderReader, e *NonTransactionalEpochReader, finalized []unAssembledHeader, header *types.Header) ([]byte, error) {
 	// commit_block -> aura.is_epoch_end
 	for i := range finalized {
 		pendingTransitionProof, err := e.GetPendingEpoch(finalized[i].hash, finalized[i].number)
@@ -978,11 +962,8 @@ func allHeadersUntil(chain consensus.ChainHeaderReader, from *types.Header, to l
 //}
 
 // FinalizeAndAssemble implements consensus.Engine
-func (c *AuRa) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
-) (*types.Block, types.Transactions, types.Receipts, error) {
-	outTxs, outReceipts, err := c.Finalize(chainConfig, header, state, txs, uncles, receipts, withdrawals, e, chain, syscall)
+func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, types.Transactions, types.Receipts, error) {
+	outTxs, outReceipts, err := c.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -1188,7 +1169,7 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 
 // epochSet fetch correct validator set for epoch at header, taking into account
 // finality of previous transitions.
-func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, e consensus.EpochReader, h *types.Header, call consensus.SystemCall) (ValidatorSet, uint64, error) {
+func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, e *NonTransactionalEpochReader, h *types.Header, call consensus.SystemCall) (ValidatorSet, uint64, error) {
 	if c.cfg.ImmediateTransitions {
 		return c.cfg.Validators, h.Number.Uint64(), nil
 	}
@@ -1304,13 +1285,11 @@ func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash libcommon.Hash) []
 	return res
 }
 
-func calculateRewards(aura *AuRa, header *types.Header, syscall consensus.SystemCall) (beneficiaries []libcommon.Address, rewardKind []aurainterfaces.RewardKind, rewards []*uint256.Int, err error) {
-	beneficiaries = append(beneficiaries, header.Coinbase)
-	rewardKind = append(rewardKind, aurainterfaces.RewardAuthor)
-
+func (c *AuRa) CalculateRewards(_ *chain.Config, header *types.Header, _ []*types.Header, syscall consensus.SystemCall,
+) ([]consensus.Reward, error) {
 	var rewardContractAddress BlockRewardContract
 	var foundContract bool
-	for _, c := range aura.cfg.BlockRewardContractTransitions {
+	for _, c := range c.cfg.BlockRewardContractTransitions {
 		if c.blockNum > header.Number.Uint64() {
 			break
 		}
@@ -1318,39 +1297,38 @@ func calculateRewards(aura *AuRa, header *types.Header, syscall consensus.System
 		rewardContractAddress = c
 	}
 	if foundContract {
-		beneficiaries, rewards = callBlockRewardAbi(rewardContractAddress.address, syscall, beneficiaries, rewardKind)
-		rewardKind = make([]aurainterfaces.RewardKind, len(beneficiaries))
-		for i := 0; i < len(rewardKind); i++ {
-			rewardKind[i] = aurainterfaces.RewardExternal
+		beneficiaries := []libcommon.Address{header.Coinbase}
+		rewardKind := []consensus.RewardKind{consensus.RewardAuthor}
+		var amounts []*uint256.Int
+		beneficiaries, amounts = callBlockRewardAbi(rewardContractAddress.address, syscall, beneficiaries, rewardKind)
+		rewards := make([]consensus.Reward, len(amounts))
+		for i, amount := range amounts {
+			rewards[i].Beneficiary = beneficiaries[i]
+			rewards[i].Kind = consensus.RewardExternal
+			rewards[i].Amount = *amount
 		}
-	} else {
-		// block_reward.iter.rev().find(|&(block, _)| *block <= number)
-		var reward BlockReward
-		var found bool
-		for i := range aura.cfg.BlockReward {
-			if aura.cfg.BlockReward[i].blockNum > header.Number.Uint64() {
-				break
-			}
-			found = true
-			reward = aura.cfg.BlockReward[i]
-		}
-		if !found {
-			panic("Current block's reward is not found; this indicates a chain config error")
-		}
-
-		for range beneficiaries {
-			rewards = append(rewards, reward.amount)
-		}
+		return rewards, nil
 	}
 
-	//err = aura.cfg.Validators.onCloseBlock(header, aura.OurSigningAddress)
-	//if err != nil {
-	//	return
-	//}
-	return
+	// block_reward.iter.rev().find(|&(block, _)| *block <= number)
+	var reward BlockReward
+	var found bool
+	for i := range c.cfg.BlockReward {
+		if c.cfg.BlockReward[i].blockNum > header.Number.Uint64() {
+			break
+		}
+		found = true
+		reward = c.cfg.BlockReward[i]
+	}
+	if !found {
+		return nil, errors.New("Current block's reward is not found; this indicates a chain config error")
+	}
+
+	r := consensus.Reward{Beneficiary: header.Coinbase, Kind: consensus.RewardAuthor, Amount: *reward.amount}
+	return []consensus.Reward{r}, nil
 }
 
-func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.SystemCall, beneficiaries []libcommon.Address, rewardKind []aurainterfaces.RewardKind) ([]libcommon.Address, []*uint256.Int) {
+func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.SystemCall, beneficiaries []libcommon.Address, rewardKind []consensus.RewardKind) ([]libcommon.Address, []*uint256.Int) {
 	castedKind := make([]uint16, len(rewardKind))
 	for i := range rewardKind {
 		castedKind[i] = uint16(rewardKind[i])
@@ -1421,6 +1399,7 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 		return nil
 	}
 
+	maxFailedWithdrawalsToProcess := big.NewInt(4)
 	amounts := make([]uint64, 0, len(withdrawals))
 	addresses := make([]libcommon.Address, 0, len(withdrawals))
 	for _, w := range withdrawals {
@@ -1428,12 +1407,15 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 		addresses = append(addresses, w.Address)
 	}
 
-	packed, err := withdrawalAbi().Pack("executeSystemWithdrawals", amounts, addresses)
+	packed, err := withdrawalAbi().Pack("executeSystemWithdrawals", maxFailedWithdrawalsToProcess, amounts, addresses)
 	if err != nil {
 		return err
 	}
 
 	_, err = syscall(*c.cfg.WithdrawalContractAddress, packed)
+	if err != nil {
+		log.Warn("ExecuteSystemWithdrawals", "err", err)
+	}
 	return err
 }
 

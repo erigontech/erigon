@@ -63,7 +63,7 @@
         # Hash is the hash of this transaction.
         hash: Bytes32!
         # Nonce is the nonce of the account this transaction was generated with.
-        nonce: Long!
+        nonce: BigInt!
         # Index is the index of this transaction in the parent block. This will
         # be null if the transaction has not yet been mined.
         index: Int
@@ -161,7 +161,7 @@
         # Parent is the parent block of this block.
         parent: Block
         # Nonce is the block nonce, an 8 byte sequence determined by the miner.
-        nonce: Bytes!
+        nonce: BigInt!
         # TransactionsRoot is the keccak256 hash of the root of the trie of transactions in this block.
         transactionsRoot: Bytes32!
         # TransactionCount is the number of transactions in this block. if
@@ -184,7 +184,7 @@
         # NextBaseFeePerGas is the fee per unit of gas which needs to be burned in the next block.
         nextBaseFeePerGas: BigInt
         # Timestamp is the unix timestamp at which this block was mined.
-        timestamp: Long!
+        timestamp: BigInt!
         # LogsBloom is a bloom filter that can be used to check if a block may
         # contain log entries matching a filter.
         logsBloom: Bytes!

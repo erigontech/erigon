@@ -612,7 +612,7 @@ func (sc *StateCache) SetAccountAbsent(address []byte) {
 	sc.setRead(&ai, true /* absent */)
 }
 
-func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete bool) {
+func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, del bool) {
 	id := id(item)
 	// Check if this is going to be modification of the existing entry
 	if existing := sc.writes[id].Get(writeItem); existing != nil {
@@ -622,7 +622,7 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 		sc.readSize -= cacheItem.GetSize()
 		sc.writeSize += writeItem.GetSize()
 		sc.writeSize -= cacheWriteItem.GetSize()
-		if delete {
+		if del {
 			cacheItem.SetFlags(DeletedFlag)
 		} else {
 			cacheItem.CopyValueFrom(item)
@@ -643,7 +643,7 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 		sc.readSize -= cacheItem.GetSize()
 		cacheItem.SetFlags(ModifiedFlag)
 		cacheItem.ClearFlags(AbsentFlag)
-		if delete {
+		if del {
 			cacheItem.SetFlags(DeletedFlag)
 		} else {
 			cacheItem.CopyValueFrom(item)
@@ -668,7 +668,7 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, delete 
 	sc.sequence++
 	item.SetFlags(ModifiedFlag)
 	item.ClearFlags(AbsentFlag)
-	if delete {
+	if del {
 		item.SetFlags(DeletedFlag)
 	} else {
 		item.ClearFlags(DeletedFlag)

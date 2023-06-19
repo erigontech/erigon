@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/bits"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -16,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
 )
 
 // AssertSubset a & b == a - checks whether a is subset of b
@@ -43,7 +43,7 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 			panic(err)
 		}
 		defer c.Close()
-		clear := kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.TrieOfAccounts, nil, math.MaxInt32)
+		clear := kv.ReadAhead(readAheadCtx, db, &atomic.Bool{}, kv.TrieOfAccounts, nil, math.MaxInt32)
 		defer clear()
 
 		trieAcc2, err := tx.Cursor(kv.TrieOfAccounts)
@@ -57,7 +57,7 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 			panic(err)
 		}
 		defer accC.Close()
-		clear2 := kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.HashedAccounts, nil, math.MaxInt32)
+		clear2 := kv.ReadAhead(readAheadCtx, db, &atomic.Bool{}, kv.HashedAccounts, nil, math.MaxInt32)
 		defer clear2()
 
 		for k, v, errc := c.First(); k != nil; k, v, errc = c.Next() {
@@ -159,7 +159,7 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 			panic(err)
 		}
 		defer c.Close()
-		clear := kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.TrieOfStorage, nil, math.MaxInt32)
+		clear := kv.ReadAhead(readAheadCtx, db, &atomic.Bool{}, kv.TrieOfStorage, nil, math.MaxInt32)
 		defer clear()
 
 		trieStorage, err := tx.Cursor(kv.TrieOfStorage)
@@ -173,7 +173,7 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 			panic(err)
 		}
 		defer storageC.Close()
-		clear2 := kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.HashedStorage, nil, math.MaxInt32)
+		clear2 := kv.ReadAhead(readAheadCtx, db, &atomic.Bool{}, kv.HashedStorage, nil, math.MaxInt32)
 		defer clear2()
 
 		for k, v, errc := c.First(); k != nil; k, v, errc = c.Next() {

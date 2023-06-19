@@ -86,3 +86,6 @@ dist
 __debug_bin
 
 .dccache
+*.log
+
+caplin-recordings

@@ -1,30 +1,21 @@
 package commands
 
 import (
-	"fmt"
-
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
+	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
+	"github.com/ledgerwatch/log/v3"
 )
 
+func init() {
+	scenarios.RegisterStepHandlers(
+		scenarios.StepHandler(services.CheckTxPoolContent),
+		scenarios.StepHandler(services.InitSubscriptions),
+	)
+}
+
 // ExecuteAllMethods runs all the simulation tests for erigon devnet
-func ExecuteAllMethods() {
-	// test connection to JSON RPC
-	fmt.Printf("\nPINGING JSON RPC...\n")
-	if err := pingErigonRpc(); err != nil {
-		return
-	}
-	fmt.Println()
-
-	// get balance of the receiver's account
-	callGetBalance(addr, models.Latest, 0)
-	fmt.Println()
-
-	// confirm that the txpool is empty
-	fmt.Println("CONFIRMING TXPOOL IS EMPTY BEFORE SENDING TRANSACTION...")
-	services.CheckTxPoolContent(0, 0)
-	fmt.Println()
-
+func ExecuteAllMethods(nw *devnet.Network, logger log.Logger) {
 	/*
 	* Cannot run contract tx after running regular tx because contract tx simulates a new backend
 	* and it expects the nonce to be 0.
@@ -39,15 +30,6 @@ func ExecuteAllMethods() {
 	//}
 	//fmt.Println()
 
-	// USING DYNAMIC FEE
-	// send a token from the dev address to the recipient address
-	_, err := callSendTxWithDynamicFee(recipientAddress, models.DevAddress)
-	if err != nil {
-		fmt.Printf("callSendTxWithDynamicFee error: %v\n", err)
-		return
-	}
-	fmt.Println()
-
 	// initiate a contract transaction
 	//fmt.Println("INITIATING A CONTRACT TRANSACTION...")
 	//_, err := callContractTx()
@@ -56,7 +38,4 @@ func ExecuteAllMethods() {
 	//	return
 	//}
 	//fmt.Println()
-
-	fmt.Print("SEND SIGNAL TO QUIT ALL RUNNING NODES")
-	models.QuitNodeChan <- true
 }

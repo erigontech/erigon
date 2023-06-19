@@ -8,18 +8,14 @@ import (
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fastjson"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -53,14 +49,10 @@ func TestCallTraceOneByOne(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 
-	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-	api := NewTraceAPI(
-		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine),
-		m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
-		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
@@ -75,7 +67,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 		ToBlock:   (*hexutil.Uint64)(&toBlock),
 		ToAddress: []*common.Address{&toAddress1},
 	}
-	if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
+	if err = api.Filter(context.Background(), traceReq1, new(bool), stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
@@ -102,10 +94,9 @@ func TestCallTraceUnwind(t *testing.T) {
 		t.Fatalf("generate chainB: %v", err)
 	}
 
-	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, &httpcfg.HttpCfg{})
-	if err = m.InsertChain(chainA); err != nil {
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	if err = m.InsertChain(chainA, nil); err != nil {
 		t.Fatalf("inserting chainA: %v", err)
 	}
 	stream := jsoniter.ConfigDefault.BorrowStream(nil)
@@ -119,12 +110,12 @@ func TestCallTraceUnwind(t *testing.T) {
 		ToBlock:   (*hexutil.Uint64)(&toBlock),
 		ToAddress: []*common.Address{&toAddress1},
 	}
-	if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
+	if err = api.Filter(context.Background(), traceReq1, new(bool), stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
 
-	if err = m.InsertChain(chainB.Slice(0, 12)); err != nil {
+	if err = m.InsertChain(chainB.Slice(0, 12), nil); err != nil {
 		t.Fatalf("inserting chainB: %v", err)
 	}
 	stream.Reset(nil)
@@ -134,12 +125,12 @@ func TestCallTraceUnwind(t *testing.T) {
 		ToBlock:   (*hexutil.Uint64)(&toBlock),
 		ToAddress: []*common.Address{&toAddress1},
 	}
-	if err = api.Filter(context.Background(), traceReq2, stream); err != nil {
+	if err = api.Filter(context.Background(), traceReq2, new(bool), stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 11, 12}, blockNumbersFromTraces(t, stream.Buffer()))
 
-	if err = m.InsertChain(chainB.Slice(12, 20)); err != nil {
+	if err = m.InsertChain(chainB.Slice(12, 20), nil); err != nil {
 		t.Fatalf("inserting chainB: %v", err)
 	}
 	stream.Reset(nil)
@@ -150,7 +141,7 @@ func TestCallTraceUnwind(t *testing.T) {
 		ToBlock:   (*hexutil.Uint64)(&toBlock),
 		ToAddress: []*common.Address{&toAddress1},
 	}
-	if err = api.Filter(context.Background(), traceReq3, stream); err != nil {
+	if err = api.Filter(context.Background(), traceReq3, new(bool), stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
 	assert.Equal(t, []int{12, 13, 14, 15, 16, 17, 18, 19, 20}, blockNumbersFromTraces(t, stream.Buffer()))
@@ -164,12 +155,10 @@ func TestFilterNoAddresses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
-		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
@@ -182,7 +171,7 @@ func TestFilterNoAddresses(t *testing.T) {
 		FromBlock: (*hexutil.Uint64)(&fromBlock),
 		ToBlock:   (*hexutil.Uint64)(&toBlock),
 	}
-	if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
+	if err = api.Filter(context.Background(), traceReq1, new(bool), stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
@@ -190,9 +179,7 @@ func TestFilterNoAddresses(t *testing.T) {
 
 func TestFilterAddressIntersection(t *testing.T) {
 	m := stages.Mock(t)
-	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 
 	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}
 
@@ -218,7 +205,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 	}, false /* intermediateHashes */)
 	require.NoError(t, err, "generate chain")
 
-	err = m.InsertChain(chain)
+	err = m.InsertChain(chain, nil)
 	require.NoError(t, err, "inserting chain")
 
 	fromBlock, toBlock := uint64(1), uint64(15)
@@ -233,7 +220,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 			ToAddress:   []*common.Address{&m.Address, &toAddress2},
 			Mode:        TraceFilterModeIntersection,
 		}
-		if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
+		if err = api.Filter(context.Background(), traceReq1, new(bool), stream); err != nil {
 			t.Fatalf("trace_filter failed: %v", err)
 		}
 		assert.Equal(t, []int{6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
@@ -249,7 +236,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 			ToAddress:   []*common.Address{&toAddress1, &m.Address},
 			Mode:        TraceFilterModeIntersection,
 		}
-		if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
+		if err = api.Filter(context.Background(), traceReq1, new(bool), stream); err != nil {
 			t.Fatalf("trace_filter failed: %v", err)
 		}
 		assert.Equal(t, []int{1, 2, 3, 4, 5}, blockNumbersFromTraces(t, stream.Buffer()))
@@ -265,7 +252,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 			FromAddress: []*common.Address{&toAddress2, &toAddress1, &other},
 			Mode:        TraceFilterModeIntersection,
 		}
-		if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
+		if err = api.Filter(context.Background(), traceReq1, new(bool), stream); err != nil {
 			t.Fatalf("trace_filter failed: %v", err)
 		}
 		require.Empty(t, blockNumbersFromTraces(t, stream.Buffer()))

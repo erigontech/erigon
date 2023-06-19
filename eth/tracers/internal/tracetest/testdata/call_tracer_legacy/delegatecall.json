@@ -40,9 +40,7 @@
     "config": {
       "byzantiumBlock": 1700000,
       "chainId": 3,
-      "daoForkSupport": true,
       "eip150Block": 0,
-      "eip150Hash": "0x41941023680923e0fe4d74a34bdac8141f2540e3ae90623718e47d66d1ca4a2d",
       "eip155Block": 10,
       "eip158Block": 10,
       "ethash": {},

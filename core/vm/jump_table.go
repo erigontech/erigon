@@ -100,6 +100,7 @@ func newPragueInstructionSet() JumpTable {
 // and cancun instructions.
 func newCancunInstructionSet() JumpTable {
 	instructionSet := newShanghaiInstructionSet()
+	enable4844(&instructionSet) // DATAHASH
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

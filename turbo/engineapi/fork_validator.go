@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -49,9 +50,11 @@ type ForkValidator struct {
 	extendingForkHeadHash libcommon.Hash
 	// this is the function we use to perform payload validation.
 	validatePayload validatePayloadFunc
+	blockReader     services.FullBlockReader
 	// this is the current point where we processed the chain so far.
 	currentHeight uint64
 	tmpDir        string
+
 	// we want fork validator to be thread safe so let
 	lock sync.Mutex
 }
@@ -63,12 +66,13 @@ func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	}
 }
 
-func NewForkValidator(currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string) *ForkValidator {
+func NewForkValidator(currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string, blockReader services.FullBlockReader) *ForkValidator {
 	return &ForkValidator{
 		sideForksBlock:  make(map[libcommon.Hash]types.RawBlock),
 		validatePayload: validatePayload,
 		currentHeight:   currentHeight,
 		tmpDir:          tmpDir,
+		blockReader:     blockReader,
 	}
 }
 
@@ -80,16 +84,16 @@ func (fv *ForkValidator) ExtendingForkHeadHash() libcommon.Hash {
 }
 
 func (fv *ForkValidator) notifyTxPool(to uint64, accumulator *shards.Accumulator, c shards.StateChangeConsumer) error {
-	hash, err := rawdb.ReadCanonicalHash(fv.extendingFork, to)
+	hash, err := fv.blockReader.CanonicalHash(context.Background(), fv.extendingFork, to)
 	if err != nil {
 		return fmt.Errorf("read canonical hash of unwind point: %w", err)
 	}
-	header := rawdb.ReadHeader(fv.extendingFork, hash, to)
+	header, _ := fv.blockReader.Header(context.Background(), fv.extendingFork, hash, to)
 	if header == nil {
 		return fmt.Errorf("could not find header for block: %d", to)
 	}
 
-	txs, err := rawdb.RawTransactionsRange(fv.extendingFork, to, to+1)
+	txs, err := fv.blockReader.RawTransactions(context.Background(), fv.extendingFork, to, to+1)
 	if err != nil {
 		return err
 	}
@@ -179,14 +183,14 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	// Let's assemble the side fork backwards
 	var foundCanonical bool
 	currentHash := header.ParentHash
-	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
+	unwindPoint := header.Number.Uint64() - 1
+	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
 	if criticalError != nil {
 		return
 	}
 
 	var bodiesChain []*types.RawBody
 	var headersChain []*types.Header
-	unwindPoint := header.Number.Uint64() - 1
 	for !foundCanonical {
 		var sb types.RawBlock
 		var ok bool
@@ -208,11 +212,11 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 			return
 		}
 		currentHash = sb.Header.ParentHash
-		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash)
+		unwindPoint = sb.Header.Number.Uint64() - 1
+		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
 		if criticalError != nil {
 			return
 		}
-		unwindPoint = sb.Header.Number.Uint64() - 1
 	}
 	// Do not set an unwind point if we are already there.
 	if unwindPoint == fv.currentHeight {
@@ -282,7 +286,7 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 	// If we do not have the body we can recover it from the batch.
 	if body == nil {
 		var bodyFromDb *types.Body
-		bodyFromDb, criticalError = rawdb.ReadBodyWithTransactions(tx, header.Hash(), header.Number.Uint64())
+		bodyFromDb, criticalError = fv.blockReader.BodyWithTransactions(context.Background(), tx, header.Hash(), header.Number.Uint64())
 		if criticalError != nil {
 			return
 		}

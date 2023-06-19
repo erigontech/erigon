@@ -17,19 +17,24 @@
 package debug
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec
+	"os"
+	"path/filepath"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
-	"github.com/ledgerwatch/erigon-lib/common/metrics"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/pelletier/go-toml"
+	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v2"
+	"gopkg.in/yaml.v2"
+
 	"github.com/ledgerwatch/erigon/common/fdlimit"
 	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/metrics/exp"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
-	"github.com/urfave/cli/v2"
 )
 
 var (
@@ -38,6 +43,12 @@ var (
 		Name:  "vmodule",
 		Usage: "Per-module verbosity: comma-separated list of <pattern>=<level> (e.g. eth/*=5,p2p=4)",
 		Value: "",
+	}
+	configFlag = cli.StringFlag{
+		Name: "config",
+	}
+	metricsEnabledFlag = cli.BoolFlag{
+		Name: "metrics",
 	}
 	metricsAddrFlag = cli.StringFlag{
 		Name: "metrics.addr",
@@ -76,96 +87,116 @@ var Flags = []cli.Flag{
 	&cpuprofileFlag, &traceFlag,
 }
 
-func SetupCobra(cmd *cobra.Command) error {
+// SetupCobra sets up logging, profiling and tracing for cobra commands
+func SetupCobra(cmd *cobra.Command, filePrefix string) (log.Logger, error) {
+	// ensure we've read in config file details before setting up metrics etc.
+	if err := SetCobraFlagsFromConfigFile(cmd); err != nil {
+		log.Warn("failed setting config flags from yaml/toml file", "err", err)
+	}
 	RaiseFdLimit()
 	flags := cmd.Flags()
 
-	_ = logging.GetLoggerCmd("debug", cmd)
+	logger := logging.SetupLoggerCmd(filePrefix, cmd)
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	cpuFile, err := flags.GetString(cpuprofileFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 
 	// profiling, tracing
 	if traceFile != "" {
 		if err2 := Handler.StartGoTrace(traceFile); err2 != nil {
-			return err2
+			return logger, err2
 		}
 	}
 	if cpuFile != "" {
 		if err2 := Handler.StartCPUProfile(cpuFile); err2 != nil {
-			return err2
+			return logger, err2
 		}
 	}
 
 	go ListenSignals(nil)
 	pprof, err := flags.GetBool(pprofFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	pprofAddr, err := flags.GetString(pprofAddrFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	pprofPort, err := flags.GetInt(pprofPortFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 
+	metricsEnabled, err := flags.GetBool(metricsEnabledFlag.Name)
+	if err != nil {
+		return logger, err
+	}
 	metricsAddr, err := flags.GetString(metricsAddrFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 	metricsPort, err := flags.GetInt(metricsPortFlag.Name)
 	if err != nil {
-		return err
+		return logger, err
 	}
 
-	if metrics.Enabled && metricsAddr != "" {
+	if metricsEnabled && metricsAddr != "" {
 		address := fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		exp.Setup(address)
 	}
 
-	withMetrics := metrics.Enabled && metricsAddr == ""
+	withMetrics := metricsEnabled && metricsAddr == ""
 	if pprof {
 		// metrics and pprof server
 		StartPProf(fmt.Sprintf("%s:%d", pprofAddr, pprofPort), withMetrics)
 	}
-	return nil
+	return logger, nil
 }
 
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
-func Setup(ctx *cli.Context) error {
+func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
+	// ensure we've read in config file details before setting up metrics etc.
+	if err := SetFlagsFromConfigFile(ctx); err != nil {
+		log.Warn("failed setting config flags from yaml/toml file", "err", err)
+	}
+
 	RaiseFdLimit()
 
-	_ = logging.GetLoggerCtx("debug", ctx)
+	logger := logging.SetupLoggerCtx("erigon", ctx, rootLogger)
 
 	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {
-			return err
+			return logger, err
 		}
 	}
 
 	if cpuFile := ctx.String(cpuprofileFlag.Name); cpuFile != "" {
 		if err := Handler.StartCPUProfile(cpuFile); err != nil {
-			return err
+			return logger, err
 		}
 	}
 	pprofEnabled := ctx.Bool(pprofFlag.Name)
+	metricsEnabled := ctx.Bool(metricsEnabledFlag.Name)
 	metricsAddr := ctx.String(metricsAddrFlag.Name)
 
-	if metrics.Enabled && (!pprofEnabled || metricsAddr != "") {
+	if metricsEnabled && (!pprofEnabled || metricsAddr != "") {
 		metricsPort := ctx.Int(metricsPortFlag.Name)
 		address := fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		exp.Setup(address)
 		diagnostics.SetupLogsAccess(ctx)
 		diagnostics.SetupDbAccess(ctx)
+		diagnostics.SetupCmdLineAccess()
+		diagnostics.SetupFlagsAccess(ctx)
+		diagnostics.SetupVersionAccess()
+		diagnostics.SetupBlockBodyDownload()
+		diagnostics.SetupHeaderDownloadStats()
 	}
 
 	// pprof server
@@ -175,10 +206,10 @@ func Setup(ctx *cli.Context) error {
 		address := fmt.Sprintf("%s:%d", pprofHost, pprofPort)
 		// This context value ("metrics.addr") represents the utils.MetricsHTTPFlag.Name.
 		// It cannot be imported because it will cause a cyclical dependency.
-		withMetrics := metrics.Enabled && metricsAddr == ""
+		withMetrics := metricsEnabled && metricsAddr == ""
 		StartPProf(address, withMetrics)
 	}
-	return nil
+	return logger, nil
 }
 
 func StartPProf(address string, withMetrics bool) {
@@ -217,4 +248,95 @@ func RaiseFdLimit() {
 	if _, err = fdlimit.Raise(uint64(limit)); err != nil {
 		log.Error("Failed to raise file descriptor allowance", "err", err)
 	}
+}
+
+var (
+	metricsConfigs = []string{metricsEnabledFlag.Name, metricsAddrFlag.Name, metricsPortFlag.Name}
+)
+
+func SetFlagsFromConfigFile(ctx *cli.Context) error {
+	filePath := ctx.String(configFlag.Name)
+	if filePath == "" {
+		return nil
+	}
+
+	fileConfig, err := readConfigAsMap(filePath)
+	if err != nil {
+		return err
+	}
+
+	for _, flag := range metricsConfigs {
+		if v, ok := fileConfig[flag]; ok {
+			err = ctx.Set(flag, fmt.Sprintf("%v", v))
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func SetCobraFlagsFromConfigFile(cmd *cobra.Command) error {
+	flags := cmd.Flags()
+
+	// flag might not be set for any reason so just exit if we're not aware of it
+	exists := flags.Lookup(configFlag.Name)
+	if exists == nil {
+		return nil
+	}
+
+	filePath, err := flags.GetString(configFlag.Name)
+	if err != nil {
+		return err
+	}
+	if filePath == "" {
+		return nil
+	}
+
+	fileConfig, err := readConfigAsMap(filePath)
+	if err != nil {
+		return err
+	}
+
+	for _, flag := range metricsConfigs {
+		if v, ok := fileConfig[flag]; ok {
+			err = flags.Set(flag, fmt.Sprintf("%v", v))
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func readConfigAsMap(filePath string) (map[string]interface{}, error) {
+	fileExtension := filepath.Ext(filePath)
+
+	fileConfig := make(map[string]interface{})
+
+	if fileExtension == ".yaml" {
+		yamlFile, err := os.ReadFile(filePath)
+		if err != nil {
+			return fileConfig, err
+		}
+		err = yaml.Unmarshal(yamlFile, fileConfig)
+		if err != nil {
+			return fileConfig, err
+		}
+	} else if fileExtension == ".toml" {
+		tomlFile, err := os.ReadFile(filePath)
+		if err != nil {
+			return fileConfig, err
+		}
+		err = toml.Unmarshal(tomlFile, &fileConfig)
+		if err != nil {
+			return fileConfig, err
+		}
+	} else {
+		return fileConfig, errors.New("config files only accepted are .yaml and .toml")
+	}
+
+	return fileConfig, nil
 }

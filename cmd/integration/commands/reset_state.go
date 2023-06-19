@@ -13,23 +13,35 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 )
 
 var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	Run: func(cmd *cobra.Command, args []string) {
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return
+		}
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
 		ctx, _ := common.RootContext()
-		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
-		sn, agg := allSnapshots(ctx, db)
+		sn, agg := allSnapshots(ctx, db, logger)
 		defer sn.Close()
 		defer agg.Close()
 
@@ -40,8 +52,7 @@ var cmdResetState = &cobra.Command{
 			return
 		}
 
-		err := reset2.ResetState(db, ctx, chain, "")
-		if err != nil {
+		if err = reset2.ResetState(db, ctx, chain, ""); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Error(err.Error())
 			}
@@ -60,13 +71,14 @@ var cmdResetState = &cobra.Command{
 }
 
 func init() {
+	withConfig(cmdResetState)
 	withDataDir(cmdResetState)
 	withChain(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)
 }
 
-func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3) error {
+func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, agg *state.AggregatorV3) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -101,15 +113,8 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots, agg *state.Aggre
 	}
 
 	_, lastBlockInHistSnap, _ := rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
-	fmt.Fprintf(w, "history.v3: %t, idx steps: %.02f, lastMaxTxNum=%d->%d, lastBlockInSnap=%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV), lastBlockInHistSnap)
-
-	transactionsV3, _ := kvcfg.TransactionsV3.Enabled(tx)
-	var s1 uint64
-	if transactionsV3 {
-		s1, err = tx.ReadSequence(kv.EthTxV3)
-	} else {
-		s1, err = tx.ReadSequence(kv.EthTx)
-	}
+	fmt.Fprintf(w, "history.v3: %t,  idx steps: %.02f, lastMaxTxNum=%d->%d, lastBlockInSnap=%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV), lastBlockInHistSnap)
+	s1, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err
 	}

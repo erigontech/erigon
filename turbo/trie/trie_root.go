@@ -9,6 +9,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	length2 "github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -73,7 +74,7 @@ Then delete this account (SELFDESTRUCT).
 // FlatDBTrieLoader reads state and intermediate trie hashes in order equal to "Preorder trie traversal"
 // (Preorder - visit Root, visit Left, visit Right)
 //
-// It produces stream of values and send this stream to `defaultReceiver`
+// It produces stream of values and send this stream to `receiver`
 // It skips storage with incorrect incarnations
 //
 // Each intermediate hash key firstly pass to RetainDecider, only if it returns "false" - such AccTrie can be used.
@@ -89,10 +90,9 @@ type FlatDBTrieLoader struct {
 	// Account item buffer
 	accountValue accounts.Account
 
-	receiver        StreamReceiver
-	defaultReceiver *RootHashAggregator
-	hc              HashCollector2
-	shc             StorageHashCollector2
+	receiver *RootHashAggregator
+	hc       HashCollector2
+	shc      StorageHashCollector2
 }
 
 // RootHashAggregator - calculates Merkle trie root hash from incoming data stream
@@ -125,22 +125,10 @@ type RootHashAggregator struct {
 	a              accounts.Account
 	leafData       GenStructStepLeafData
 	accData        GenStructStepAccountData
-}
 
-type StreamReceiver interface {
-	Receive(
-		itemType StreamItem,
-		accountKey []byte,
-		storageKey []byte,
-		accountValue *accounts.Account,
-		storageValue []byte,
-		hash []byte,
-		hasTree bool,
-		cutoff int,
-	) error
-
-	Result() SubTries
-	Root() libcommon.Hash
+	// Used to construct an Account proof while calculating the tree root.
+	proofRetainer *ProofRetainer
+	cutoff        bool
 }
 
 func NewRootHashAggregator() *RootHashAggregator {
@@ -149,31 +137,32 @@ func NewRootHashAggregator() *RootHashAggregator {
 	}
 }
 
-func NewFlatDBTrieLoader(logPrefix string) *FlatDBTrieLoader {
-	return &FlatDBTrieLoader{
-		logPrefix:       logPrefix,
-		defaultReceiver: NewRootHashAggregator(),
-	}
-}
-
-// Reset prepares the loader for reuse
-func (l *FlatDBTrieLoader) Reset(rd RetainDeciderWithMarker, hc HashCollector2, shc StorageHashCollector2, trace bool) error {
-	l.defaultReceiver.Reset(hc, shc, trace)
-	l.hc = hc
-	l.shc = shc
-	l.receiver = l.defaultReceiver
-	l.trace = trace
-	l.ihSeek, l.accSeek, l.storageSeek, l.kHex, l.kHexS = make([]byte, 0, 128), make([]byte, 0, 128), make([]byte, 0, 128), make([]byte, 0, 128), make([]byte, 0, 128)
-	l.rd = rd
-	if l.trace {
+func NewFlatDBTrieLoader(logPrefix string, rd RetainDeciderWithMarker, hc HashCollector2, shc StorageHashCollector2, trace bool) *FlatDBTrieLoader {
+	if trace {
 		fmt.Printf("----------\n")
 		fmt.Printf("CalcTrieRoot\n")
 	}
-	return nil
+	return &FlatDBTrieLoader{
+		logPrefix: logPrefix,
+		receiver: &RootHashAggregator{
+			hb:    NewHashBuilder(false),
+			hc:    hc,
+			shc:   shc,
+			trace: trace,
+		},
+		ihSeek:      make([]byte, 0, 128),
+		accSeek:     make([]byte, 0, 128),
+		storageSeek: make([]byte, 0, 128),
+		kHex:        make([]byte, 0, 128),
+		kHexS:       make([]byte, 0, 128),
+		rd:          rd,
+		hc:          hc,
+		shc:         shc,
+	}
 }
 
-func (l *FlatDBTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
-	l.receiver = receiver
+func (l *FlatDBTrieLoader) SetProofRetainer(pr *ProofRetainer) {
+	l.receiver.proofRetainer = pr
 }
 
 // CalcTrieRoot algo:
@@ -198,7 +187,7 @@ func (l *FlatDBTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 //	   SkipAccounts:
 //			use(AccTrie)
 //		}
-func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan struct{}) (libcommon.Hash, error) {
+func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcommon.Hash, error) {
 
 	accC, err := tx.Cursor(kv.HashedAccounts)
 	if err != nil {
@@ -231,19 +220,26 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan str
 	defer ss.Close()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	for ihK, ihV, hasTree, err := accTrie.AtPrefix(prefix); ; ihK, ihV, hasTree, err = accTrie.Next() { // no loop termination is at he end of loop
+	for ihK, ihV, hasTree, err := accTrie.AtPrefix(nil); ; ihK, ihV, hasTree, err = accTrie.Next() { // no loop termination is at he end of loop
 		if err != nil {
 			return EmptyRoot, err
 		}
+		var firstPrefix []byte
+		var done bool
 		if accTrie.SkipState {
 			goto SkipAccounts
 		}
 
-		for k, kHex, v, err1 := accs.Seek(accTrie.FirstNotCoveredPrefix()); k != nil; k, kHex, v, err1 = accs.Next() {
+		firstPrefix, done = accTrie.FirstNotCoveredPrefix()
+		if done {
+			goto SkipAccounts
+		}
+
+		for k, kHex, v, err1 := accs.Seek(firstPrefix); k != nil; k, kHex, v, err1 = accs.Next() {
 			if err1 != nil {
 				return EmptyRoot, err1
 			}
-			if keyIsBefore(ihK, kHex) || !bytes.HasPrefix(kHex, prefix) { // read all accounts until next AccTrie
+			if keyIsBefore(ihK, kHex) {
 				break
 			}
 			if err = l.accountValue.DecodeForStorage(v); err != nil {
@@ -267,7 +263,12 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan str
 					goto SkipStorage
 				}
 
-				for vS, err3 := ss.SeekBothRange(accWithInc, storageTrie.FirstNotCoveredPrefix()); vS != nil; _, vS, err3 = ss.NextDup() {
+				firstPrefix, done = storageTrie.FirstNotCoveredPrefix()
+				if done {
+					goto SkipStorage
+				}
+
+				for vS, err3 := ss.SeekBothRange(accWithInc, firstPrefix); vS != nil; _, vS, err3 = ss.NextDup() {
 					if err3 != nil {
 						return EmptyRoot, err3
 					}
@@ -310,7 +311,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan str
 		}
 	}
 
-	if err := l.receiver.Receive(CutoffStreamItem, nil, nil, nil, nil, nil, false, len(prefix)); err != nil {
+	if err := l.receiver.Receive(CutoffStreamItem, nil, nil, nil, nil, nil, false, 0); err != nil {
 		return EmptyRoot, err
 	}
 	return l.receiver.Root(), nil
@@ -328,27 +329,6 @@ func (l *FlatDBTrieLoader) logProgress(accountKey, ihK []byte) {
 
 func (r *RootHashAggregator) RetainNothing(_ []byte) bool {
 	return false
-}
-
-func (r *RootHashAggregator) Reset(hc HashCollector2, shc StorageHashCollector2, trace bool) {
-	r.hc = hc
-	r.shc = shc
-	r.curr.Reset()
-	r.succ.Reset()
-	r.value = nil
-	r.groups = r.groups[:0]
-	r.hasTree = r.hasTree[:0]
-	r.hasHash = r.hasHash[:0]
-	r.a.Reset()
-	r.hb.Reset()
-	r.wasIH = false
-	r.currStorage.Reset()
-	r.succStorage.Reset()
-	r.valueStorage = nil
-	r.wasIHStorage = false
-	r.root = libcommon.Hash{}
-	r.trace = trace
-	r.hb.trace = trace
 }
 
 func (r *RootHashAggregator) Receive(itemType StreamItem,
@@ -371,6 +351,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	//	fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
 	//	//}
 	//}
+	//
 
 	switch itemType {
 	case StorageStreamItem:
@@ -482,6 +463,10 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				r.accData.FieldSet |= AccountFieldStorageOnly
 			}
 		}
+
+		// Used for optional GetProof calculation to trigger inclusion of the top-level node
+		r.cutoff = true
+
 		if r.curr.Len() > 0 {
 			if err := r.genStructAccount(); err != nil {
 				return err
@@ -525,10 +510,6 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 // 	}
 // }
 
-func (r *RootHashAggregator) Result() SubTries {
-	panic("don't call me")
-}
-
 func (r *RootHashAggregator) Root() libcommon.Hash {
 	return r.root
 }
@@ -566,13 +547,32 @@ func (r *RootHashAggregator) genStructStorage() error {
 		r.leafData.Value = rlphacks.RlpSerializableBytes(r.valueStorage)
 		data = &r.leafData
 	}
-	r.groupsStorage, r.hasTreeStorage, r.hasHashStorage, err = GenStructStep(r.RetainNothing, r.currStorage.Bytes(), r.succStorage.Bytes(), r.hb, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+	var wantProof func(_ []byte) *proofElement
+	if r.proofRetainer != nil {
+		var fullKey [2 * (length.Hash + length.Incarnation + length.Hash)]byte
+		for i, b := range r.currAccK {
+			fullKey[i*2] = b / 16
+			fullKey[i*2+1] = b % 16
+		}
+		for i, b := range binary.BigEndian.AppendUint64(nil, r.a.Incarnation) {
+			fullKey[2*length.Hash+i*2] = b / 16
+			fullKey[2*length.Hash+i*2+1] = b % 16
+		}
+		baseKeyLen := 2 * (length.Hash + length.Incarnation)
+		wantProof = func(prefix []byte) *proofElement {
+			copy(fullKey[baseKeyLen:], prefix)
+			return r.proofRetainer.ProofElement(fullKey[:baseKeyLen+len(prefix)])
+		}
+	}
+	r.groupsStorage, r.hasTreeStorage, r.hasHashStorage, err = GenStructStepEx(r.RetainNothing, r.currStorage.Bytes(), r.succStorage.Bytes(), r.hb, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 		if r.shc == nil {
 			return nil
 		}
 		return r.shc(r.currAccK, keyHex, hasState, hasTree, hasHash, hashes, rootHash)
 	}, data, r.groupsStorage, r.hasTreeStorage, r.hasHashStorage,
 		r.trace,
+		wantProof,
+		r.cutoff,
 	)
 	if err != nil {
 		return err
@@ -634,14 +634,21 @@ func (r *RootHashAggregator) genStructAccount() error {
 	r.currStorage.Reset()
 	r.succStorage.Reset()
 	var err error
-	if r.groups, r.hasTree, r.hasHash, err = GenStructStep(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+
+	var wantProof func(_ []byte) *proofElement
+	if r.proofRetainer != nil {
+		wantProof = r.proofRetainer.ProofElement
+	}
+	if r.groups, r.hasTree, r.hasHash, err = GenStructStepEx(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 		if r.hc == nil {
 			return nil
 		}
 		return r.hc(keyHex, hasState, hasTree, hasHash, hashes, rootHash)
 	}, data, r.groups, r.hasTree, r.hasHash,
-		false,
-		//r.trace,
+		//false,
+		r.trace,
+		wantProof,
+		r.cutoff,
 	); err != nil {
 		return err
 	}
@@ -672,7 +679,7 @@ func (r *RootHashAggregator) saveValueAccount(isIH, hasTree bool, v *accounts.Ac
 // has 2 basic operations:  _preOrderTraversalStep and _preOrderTraversalStepNoInDepth
 type AccTrieCursor struct {
 	SkipState       bool
-	is, lvl         int
+	lvl             int
 	k, v            [64][]byte // store up to 64 levels of key/value pairs in nibbles format
 	hasState        [64]uint16 // says that records in dbutil.HashedAccounts exists by given prefix
 	hasTree         [64]uint16 // says that records in dbutil.TrieOfAccounts exists by given prefix
@@ -733,9 +740,10 @@ func (c *AccTrieCursor) _preOrderTraversalStepNoInDepth() error {
 	return nil
 }
 
-func (c *AccTrieCursor) FirstNotCoveredPrefix() []byte {
-	c.firstNotCoveredPrefix = firstNotCoveredPrefix(c.prev, c.prefix, c.firstNotCoveredPrefix)
-	return c.firstNotCoveredPrefix
+func (c *AccTrieCursor) FirstNotCoveredPrefix() ([]byte, bool) {
+	var ok bool
+	c.firstNotCoveredPrefix, ok = firstNotCoveredPrefix(c.prev, c.prefix, c.firstNotCoveredPrefix)
+	return c.firstNotCoveredPrefix, ok
 }
 
 func (c *AccTrieCursor) AtPrefix(prefix []byte) (k, v []byte, hasTree bool, err error) {
@@ -849,29 +857,25 @@ func (c *AccTrieCursor) _nextSiblingInMem() bool {
 }
 
 func (c *AccTrieCursor) _nextSiblingOfParentInMem() bool {
+	originalLvl := c.lvl
 	for c.lvl > 1 {
-		if c.k[c.lvl-1] == nil {
-			nonNilLvl := c.lvl - 1
-			for c.k[nonNilLvl] == nil && nonNilLvl > 1 {
-				nonNilLvl--
-			}
-			c.next = append(append(c.next[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-			c.kBuf = append(append(c.kBuf[:0], c.k[nonNilLvl]...), uint8(c.childID[nonNilLvl]))
-			ok, err := c._seek(c.next, c.kBuf)
-			if err != nil {
-				panic(err)
-			}
-			if ok {
-				return true
-			}
-
-			c.lvl = nonNilLvl + 1
+		c.lvl--
+		if c.k[c.lvl] == nil {
 			continue
 		}
-		c.lvl--
+		c.next = append(append(c.next[:0], c.k[originalLvl]...), uint8(c.childID[originalLvl]))
+		c.kBuf = append(append(c.kBuf[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+		ok, err := c._seek(c.next, c.kBuf)
+		if err != nil {
+			panic(err)
+		}
+		if ok {
+			return true
+		}
 		if c._nextSiblingInMem() {
 			return true
 		}
+		originalLvl = c.lvl
 	}
 	return false
 }
@@ -882,9 +886,13 @@ func (c *AccTrieCursor) _nextSiblingInDB() error {
 		c.k[c.lvl] = nil
 		return nil
 	}
-	c.is++
 	if _, err := c._seek(c.next, []byte{}); err != nil {
 		return err
+	}
+	if c.k[c.lvl] == nil || !bytes.HasPrefix(c.next, c.k[c.lvl]) {
+		// If the cursor has moved beyond the next subtree, we need to check to make
+		// sure that any modified keys in between are processed.
+		c.SkipState = false
 	}
 	return nil
 }
@@ -893,6 +901,18 @@ func (c *AccTrieCursor) _unmarshal(k, v []byte) {
 	from, to := c.lvl+1, len(k)
 	if c.lvl >= len(k) {
 		from, to = len(k)+1, c.lvl+2
+	}
+
+	// Consider a trie DB with keys like: [0xa, 0xbb], then unmarshaling 0xbb
+	// needs to nil the existing 0xa key entry, as it is no longer a parent.
+	for i := from - 1; i > 0; i-- {
+		if c.k[i] == nil {
+			continue
+		}
+		if bytes.HasPrefix(k, c.k[i]) {
+			break
+		}
+		from = i
 	}
 	for i := from; i < to; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
 		c.k[i], c.hasState[i], c.hasTree[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
@@ -980,7 +1000,7 @@ func (c *AccTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 
 // StorageTrieCursor - holds logic related to iteration over AccTrie bucket
 type StorageTrieCursor struct {
-	is, lvl                    int
+	lvl                        int
 	k, v                       [64][]byte
 	hasState, hasTree, hasHash [64]uint16
 	deleted                    [64]bool
@@ -1019,9 +1039,10 @@ func (c *StorageTrieCursor) PrevKey() []byte {
 	return c.prev
 }
 
-func (c *StorageTrieCursor) FirstNotCoveredPrefix() []byte {
-	c.firstNotCoveredPrefix = firstNotCoveredPrefix(c.prev, []byte{0, 0}, c.firstNotCoveredPrefix)
-	return c.firstNotCoveredPrefix
+func (c *StorageTrieCursor) FirstNotCoveredPrefix() ([]byte, bool) {
+	var ok bool
+	c.firstNotCoveredPrefix, ok = firstNotCoveredPrefix(c.prev, []byte{0, 0}, c.firstNotCoveredPrefix)
+	return c.firstNotCoveredPrefix, ok
 }
 
 func (c *StorageTrieCursor) SeekToAccount(accWithInc []byte) (k, v []byte, hasTree bool, err error) {
@@ -1117,7 +1138,6 @@ func (c *StorageTrieCursor) _seek(seek, withinPrefix []byte) (bool, error) {
 	var k, v []byte
 	var err error
 	if len(seek) == 40 {
-		c.is++
 		k, v, err = c.c.Seek(seek)
 	} else {
 		// optimistic .Next call, can use result in 2 cases:
@@ -1129,7 +1149,6 @@ func (c *StorageTrieCursor) _seek(seek, withinPrefix []byte) (bool, error) {
 		//	return false, err
 		//}
 		//if len(k) > c.lvl && c.childID[c.lvl] > int8(bits.TrailingZeros16(c.hasTree[c.lvl])) {
-		c.is++
 		k, v, err = c.c.Seek(seek)
 		//}
 	}
@@ -1213,28 +1232,26 @@ func (c *StorageTrieCursor) _nextSiblingInMem() bool {
 }
 
 func (c *StorageTrieCursor) _nextSiblingOfParentInMem() bool {
+	originalLvl := c.lvl
 	for c.lvl > 0 {
-		if c.k[c.lvl-1] == nil {
-			nonNilLvl := c.lvl - 1
-			for ; c.k[nonNilLvl] == nil && nonNilLvl > 0; nonNilLvl-- {
-			}
-			c.seek = append(append(c.seek[:40], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
-			c.next = append(append(c.next[:0], c.k[nonNilLvl]...), uint8(c.childID[nonNilLvl]))
-			ok, err := c._seek(c.seek, c.next)
-			if err != nil {
-				panic(err)
-			}
-			if ok {
-				return true
-			}
-
-			c.lvl = nonNilLvl + 1
+		c.lvl--
+		if c.k[c.lvl] == nil {
 			continue
 		}
-		c.lvl--
+
+		c.seek = append(append(c.seek[:40], c.k[originalLvl]...), uint8(c.childID[originalLvl]))
+		c.next = append(append(c.next[:0], c.k[c.lvl]...), uint8(c.childID[c.lvl]))
+		ok, err := c._seek(c.seek, c.next)
+		if err != nil {
+			panic(err)
+		}
+		if ok {
+			return true
+		}
 		if c._nextSiblingInMem() {
 			return true
 		}
+		originalLvl = c.lvl
 	}
 	return false
 }
@@ -1248,6 +1265,11 @@ func (c *StorageTrieCursor) _nextSiblingInDB() error {
 	c.seek = append(c.seek[:40], c.next...)
 	if _, err := c._seek(c.seek, []byte{}); err != nil {
 		return err
+	}
+	if c.k[c.lvl] == nil || !bytes.HasPrefix(c.next, c.k[c.lvl]) {
+		// If the cursor has moved beyond the next subtree, we need to check to make
+		// sure that any modified keys in between are processed.
+		c.skipState = false
 	}
 	return nil
 }
@@ -1289,6 +1311,17 @@ func (c *StorageTrieCursor) _unmarshal(k, v []byte) {
 	from, to := c.lvl+1, len(k)
 	if c.lvl >= len(k) {
 		from, to = len(k)+1, c.lvl+2
+	}
+	// Consider a trie DB with keys like: [0xa, 0xbb], then unmarshaling 0xbb
+	// needs to nil the existing 0xa key entry, as it is no longer a parent.
+	for i := from - 1; i > 0; i-- {
+		if c.k[i] == nil {
+			continue
+		}
+		if bytes.HasPrefix(k[40:], c.k[i]) {
+			break
+		}
+		from = i
 	}
 	for i := from; i < to; i++ { // if first meet key is not 0 length, then nullify all shorter metadata
 		c.k[i], c.hasState[i], c.hasTree[i], c.hasHash[i], c.hashID[i], c.childID[i], c.deleted[i] = nil, 0, 0, 0, 0, 0, false
@@ -1361,9 +1394,11 @@ func isDenseSequence(prev []byte, next []byte) bool {
 
 var isSequenceBuf = make([]byte, 256)
 
-func firstNotCoveredPrefix(prev, prefix, buf []byte) []byte {
+func firstNotCoveredPrefix(prev, prefix, buf []byte) ([]byte, bool) {
 	if len(prev) > 0 {
-		_ = dbutils.NextNibblesSubtree(prev, &buf)
+		if !dbutils.NextNibblesSubtree(prev, &buf) {
+			return buf, true
+		}
 	} else {
 		buf = append(buf[:0], prefix...)
 	}
@@ -1371,7 +1406,7 @@ func firstNotCoveredPrefix(prev, prefix, buf []byte) []byte {
 		buf = append(buf, 0)
 	}
 	hexutil.CompressNibbles(buf, &buf)
-	return buf
+	return buf, false
 }
 
 type StateCursor struct {
@@ -1488,12 +1523,9 @@ func CastTrieNodeValue(hashes, rootHash []byte) []libcommon.Hash {
 // CalcRoot is a combination of `ResolveStateTrie` and `UpdateStateTrie`
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 func CalcRoot(logPrefix string, tx kv.Tx) (libcommon.Hash, error) {
-	loader := NewFlatDBTrieLoader(logPrefix)
-	if err := loader.Reset(NewRetainList(0), nil, nil, false); err != nil {
-		return EmptyRoot, err
-	}
+	loader := NewFlatDBTrieLoader(logPrefix, NewRetainList(0), nil, nil, false)
 
-	h, err := loader.CalcTrieRoot(tx, nil, nil)
+	h, err := loader.CalcTrieRoot(tx, nil)
 	if err != nil {
 		return EmptyRoot, err
 	}

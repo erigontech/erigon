@@ -23,7 +23,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 )
@@ -95,7 +94,7 @@ func (b Bloom) Test(topic []byte) bool {
 
 // MarshalText encodes b as a hex string with 0x prefix.
 func (b Bloom) MarshalText() ([]byte, error) {
-	return hexutil.Bytes(b[:]).MarshalText()
+	return hexutility.Bytes(b[:]).MarshalText()
 }
 
 // UnmarshalText b as a hex string with 0x prefix.

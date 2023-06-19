@@ -10,6 +10,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -20,21 +21,23 @@ import (
 )
 
 type CumulativeIndexCfg struct {
-	db kv.RwDB
+	db          kv.RwDB
+	blockReader services.FullBlockReader
 }
 
-func StageCumulativeIndexCfg(db kv.RwDB) CumulativeIndexCfg {
+func StageCumulativeIndexCfg(db kv.RwDB, blockReader services.FullBlockReader) CumulativeIndexCfg {
 	return CumulativeIndexCfg{
-		db: db,
+		db:          db,
+		blockReader: blockReader,
 	}
 }
 
-func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx, ctx context.Context) error {
+func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx, ctx context.Context, logger log.Logger) error {
 	useExternalTx := tx != nil
 
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -79,7 +82,7 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 			return err
 		}
 
-		canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
+		canonicalHash, err := cfg.blockReader.CanonicalHash(ctx, tx, blockNumber)
 		if err != nil {
 			return err
 		}
@@ -102,12 +105,14 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 
 		// Check for logs
 		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Wrote Cumulative Index", s.LogPrefix()),
+			logger.Info(fmt.Sprintf("[%s] Wrote Cumulative Index", s.LogPrefix()),
 				"gasUsed", cumulativeGasUsed.String(), "now", currentBlockNumber, "blk/sec", float64(currentBlockNumber-prevProgress)/float64(logInterval/time.Second))
 			prevProgress = currentBlockNumber
 		default:
-			log.Trace("RequestQueueTime (header) ticked")
+			logger.Trace("RequestQueueTime (header) ticked")
 		}
 		// Cleanup timer
 	}

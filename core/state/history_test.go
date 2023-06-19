@@ -60,7 +60,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 		t.FailNow()
 	}
 
-	index, err := bitmapdb.Get64(tx, kv.AccountsHistory, addr[0].Bytes(), 0, math.MaxUint32)
+	index, err := bitmapdb.Get64(tx, kv.E2AccountsHistory, addr[0].Bytes(), 0, math.MaxUint32)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 		t.Fatal("changeset must be deleted")
 	}
 
-	found, err := tx.GetOne(kv.AccountsHistory, addr[0].Bytes())
+	found, err := tx.GetOne(kv.E2AccountsHistory, addr[0].Bytes())
 	require.NoError(t, err)
 	require.Nil(t, found, "account must be deleted")
 }
@@ -110,7 +110,7 @@ func TestMutationCommit(t *testing.T) {
 			t.Fatal("Accounts not equals")
 		}
 
-		index, err := bitmapdb.Get64(tx, kv.AccountsHistory, addr.Bytes(), 0, math.MaxUint32)
+		index, err := bitmapdb.Get64(tx, kv.E2AccountsHistory, addr.Bytes(), 0, math.MaxUint32)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,9 +136,9 @@ func TestMutationCommit(t *testing.T) {
 		}
 
 		for k, v := range accHistoryStateStorage[i] {
-			c1, _ := tx.Cursor(kv.StorageHistory)
+			c1, _ := tx.Cursor(kv.E2StorageHistory)
 			c2, _ := tx.CursorDupSort(kv.StorageChangeSet)
-			res, err := historyv2read.GetAsOf(tx, c1, c2, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr.Bytes(), acc.Incarnation, k.Bytes()), 1)
+			res, _, err := historyv2read.GetAsOf(tx, c1, c2, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr.Bytes(), acc.Incarnation, k.Bytes()), 1)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -17,11 +17,14 @@
 package common
 
 import (
+	"crypto/rand"
 	"fmt"
+	"math/big"
 	"os"
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"time"
 )
 
 // Report gives off a warning requesting the user to submit an issue to the github tracker.
@@ -49,4 +52,14 @@ func PrintDepricationWarning(str string) {
 %s
 
 `, line, emptyLine, str, emptyLine, line)
+}
+
+// RandomizeDuration - periodic parallel actions may interfere and resonance.
+// Use this func to add small randomness to period
+func RandomizeDuration(in time.Duration) time.Duration {
+	randDuration, err := rand.Int(rand.Reader, big.NewInt(int64(time.Second)))
+	if err != nil {
+		panic(err)
+	}
+	return in + time.Duration(randDuration.Uint64())
 }

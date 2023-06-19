@@ -15,14 +15,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	common2 "github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,10 +51,9 @@ var debugTraceTransactionNoRefundTests = []struct {
 func TestTraceBlockByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
-	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
@@ -101,12 +98,8 @@ func TestTraceBlockByNumber(t *testing.T) {
 
 func TestTraceBlockByHash(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
-	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000)
-	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
+	ethApi := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -137,11 +130,7 @@ func TestTraceBlockByHash(t *testing.T) {
 
 func TestTraceTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
-	api := NewPrivateDebugAPI(base, m.DB, 0)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -154,7 +143,7 @@ func TestTraceTransaction(t *testing.T) {
 		}
 		var er ethapi.ExecutionResult
 		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
-			t.Fatalf("parsing result: %v", err)
+			t.Fatalf("parsing result: %v, %s", err, buf.String())
 		}
 		if er.Gas != tt.gas {
 			t.Errorf("wrong gas for transaction %s, got %d, expected %d", tt.txHash, er.Gas, tt.gas)
@@ -170,11 +159,7 @@ func TestTraceTransaction(t *testing.T) {
 
 func TestTraceTransactionNoRefund(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-	agg := m.HistoryV3Components()
-	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine),
-		m.DB, 0)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -204,16 +189,13 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 
 func TestStorageRangeAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-	agg := m.HistoryV3Components()
-	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine),
-		m.DB, 0)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 	t.Run("invalid addr", func(t *testing.T) {
 		var block4 *types.Block
-		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-			block4, _ = rawdb.ReadBlockByNumber(tx, 4)
-			return nil
+		var err error
+		err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+			block4, err = m.BlockReader.BlockByNumber(m.Ctx, tx, 4)
+			return err
 		})
 		require.NoError(t, err)
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
@@ -225,7 +207,7 @@ func TestStorageRangeAt(t *testing.T) {
 	t.Run("block 4, addr 1", func(t *testing.T) {
 		var block4 *types.Block
 		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-			block4, _ = rawdb.ReadBlockByNumber(tx, 4)
+			block4, _ = m.BlockReader.BlockByNumber(m.Ctx, tx, 4)
 			return nil
 		})
 		require.NoError(t, err)
@@ -245,9 +227,9 @@ func TestStorageRangeAt(t *testing.T) {
 	})
 	t.Run("block latest, addr 1", func(t *testing.T) {
 		var latestBlock *types.Block
-		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-			latestBlock = rawdb.ReadCurrentBlock(tx)
-			return nil
+		err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
+			latestBlock, err = m.BlockReader.CurrentBlock(tx)
+			return err
 		})
 		require.NoError(t, err)
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
@@ -301,11 +283,7 @@ func TestStorageRangeAt(t *testing.T) {
 
 func TestAccountRange(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-	agg := m.HistoryV3Components()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
-	api := NewPrivateDebugAPI(base, m.DB, 0)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 
 	t.Run("valid account", func(t *testing.T) {
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
@@ -364,11 +342,7 @@ func TestAccountRange(t *testing.T) {
 
 func TestGetModifiedAccountsByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-	agg := m.HistoryV3Components()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
-	api := NewPrivateDebugAPI(base, m.DB, 0)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 
 	t.Run("correct input", func(t *testing.T) {
 		n, n2 := rpc.BlockNumber(1), rpc.BlockNumber(2)
@@ -428,38 +402,41 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		}
 	}
 	t.Run("descend", func(t *testing.T) {
-		tx, err := m.DB.(kv.TemporalRoDb).BeginTemporalRo(m.Ctx)
+		dbtx, err := m.DB.BeginRo(m.Ctx)
 		require.NoError(t, err)
-		defer tx.Rollback()
+		defer dbtx.Rollback()
+		tx := dbtx.(kv.TemporalTx)
 
-		txNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 1024, -1, order.Desc, -1)
+		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 1024, -1, order.Desc, kv.Unlim)
 		require.NoError(t, err)
 		txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
-		expectTxNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 1024, -1, order.Desc, -1)
+		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 1024, -1, order.Desc, kv.Unlim)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
 	})
 	t.Run("ascend", func(t *testing.T) {
-		tx, err := m.DB.(kv.TemporalRoDb).BeginTemporalRo(m.Ctx)
+		dbtx, err := m.DB.BeginRo(m.Ctx)
 		require.NoError(t, err)
-		defer tx.Rollback()
+		defer dbtx.Rollback()
+		tx := dbtx.(kv.TemporalTx)
 
-		txNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, order.Asc, -1)
+		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, kv.Unlim)
 		require.NoError(t, err)
 		txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
-		expectTxNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, order.Asc, -1)
+		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, kv.Unlim)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
 	})
 	t.Run("ascend limit", func(t *testing.T) {
-		tx, err := m.DB.(kv.TemporalRoDb).BeginTemporalRo(m.Ctx)
+		dbtx, err := m.DB.BeginRo(m.Ctx)
 		require.NoError(t, err)
-		defer tx.Rollback()
+		defer dbtx.Rollback()
+		tx := dbtx.(kv.TemporalTx)
 
-		txNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
+		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
 		require.NoError(t, err)
 		txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
-		expectTxNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
+		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
 	})
@@ -467,19 +444,15 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 func TestAccountAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
-	api := NewPrivateDebugAPI(base, m.DB, 0)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 
 	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash12 common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		blockHash0, _ = rawdb.ReadCanonicalHash(tx, 0)
-		blockHash1, _ = rawdb.ReadCanonicalHash(tx, 1)
-		blockHash3, _ = rawdb.ReadCanonicalHash(tx, 3)
-		blockHash10, _ = rawdb.ReadCanonicalHash(tx, 10)
-		blockHash12, _ = rawdb.ReadCanonicalHash(tx, 12)
+		blockHash0, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
+		blockHash1, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
+		blockHash3, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
+		blockHash10, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
+		blockHash12, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 12)
 		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHash12
 		return nil
 	})

@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debugprint"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -38,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
@@ -54,20 +54,30 @@ Examples:
 		`,
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	Run: func(cmd *cobra.Command, args []string) {
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return
+		}
 		ctx, _ := common2.RootContext()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		ethConfig.Genesis = core.DefaultGenesisBlockByChainName(chain)
+		ethConfig.Genesis = core.GenesisBlockByChainName(chain)
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
-		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
 		defer db.Close()
 
-		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
+		if err := syncBySmallSteps(db, miningConfig, ctx, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -75,7 +85,7 @@ Examples:
 		if referenceChaindata != "" {
 			if err := compareStates(ctx, chaindata, referenceChaindata); err != nil {
 				if !errors.Is(err, context.Canceled) {
-					log.Error(err.Error())
+					logger.Error(err.Error())
 				}
 				return
 			}
@@ -86,16 +96,26 @@ Examples:
 var loopIhCmd = &cobra.Command{
 	Use: "loop_ih",
 	Run: func(cmd *cobra.Command, args []string) {
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return
+		}
 		ctx, _ := common2.RootContext()
-		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
 		defer db.Close()
 
 		if unwind == 0 {
 			unwind = 1
 		}
-		if err := loopIh(db, ctx, unwind); err != nil {
+		if err := loopIh(db, ctx, unwind, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -105,15 +125,25 @@ var loopIhCmd = &cobra.Command{
 var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
 	Run: func(cmd *cobra.Command, args []string) {
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return
+		}
 		ctx, _ := common2.RootContext()
-		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
 		defer db.Close()
 		if unwind == 0 {
 			unwind = 1
 		}
-		if err := loopExec(db, ctx, unwind); err != nil {
+		if err := loopExec(db, ctx, unwind, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -121,6 +151,7 @@ var loopExecCmd = &cobra.Command{
 }
 
 func init() {
+	withConfig(stateStages)
 	withDataDir2(stateStages)
 	withReferenceChaindata(stateStages)
 	withUnwind(stateStages)
@@ -131,33 +162,32 @@ func init() {
 	withChain(stateStages)
 	withHeimdall(stateStages)
 	withWorkers(stateStages)
-
 	rootCmd.AddCommand(stateStages)
 
+	withConfig(loopIhCmd)
 	withDataDir(loopIhCmd)
 	withBatchSize(loopIhCmd)
 	withUnwind(loopIhCmd)
 	withChain(loopIhCmd)
 	withHeimdall(loopIhCmd)
-
 	rootCmd.AddCommand(loopIhCmd)
 
+	withConfig(loopExecCmd)
 	withDataDir(loopExecCmd)
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
 	withChain(loopExecCmd)
 	withHeimdall(loopExecCmd)
 	withWorkers(loopExecCmd)
-
 	rootCmd.AddCommand(loopExecCmd)
 }
 
-func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.Context) error {
+func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.Context, logger1 log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	sn, agg := allSnapshots(ctx, db)
+	sn, agg := allSnapshots(ctx, db, logger1)
 	defer sn.Close()
 	defer agg.Close()
-	engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
+	engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig, logger1)
 	chainConfig, historyV3, pm := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 
 	tx, err := db.BeginRw(ctx)
@@ -195,16 +225,18 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	stateStages.DisableStages(stages.Snapshots, stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 	changesAcc := shards.NewAccumulator()
 
-	genesis := core.DefaultGenesisBlockByChainName(chain)
+	genesis := core.GenesisBlockByChainName(chain)
 	syncCfg := ethconfig.Defaults.Sync
 	syncCfg.ExecWorkerCount = int(workers)
 	syncCfg.ReconWorkerCount = int(reconWorkers)
 
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, changesAcc, false, false, historyV3, dirs, getBlockReader(db), nil, genesis, syncCfg, agg)
+	br, _ := blocksIO(db, logger1)
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, changesAcc, false, false, historyV3, dirs,
+		br, nil, genesis, syncCfg, agg)
 
-	execUntilFunc := func(execToBlock uint64) func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
-		return func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
-			if err := stagedsync.SpawnExecuteBlocksStage(s, unwinder, tx, execToBlock, ctx, execCfg, firstCycle, quiet); err != nil {
+	execUntilFunc := func(execToBlock uint64) func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
+		return func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
+			if err := stagedsync.SpawnExecuteBlocksStage(s, unwinder, tx, execToBlock, ctx, execCfg, firstCycle, logger); err != nil {
 				return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 			}
 			return nil
@@ -291,7 +323,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		_ = stateStages.SetCurrentStage(stages.Execution)
-		if err := stateStages.Run(db, tx, false /* firstCycle */, false /* quiet */); err != nil {
+		if err := stateStages.Run(db, tx, false /* firstCycle */); err != nil {
 			return err
 		}
 
@@ -318,7 +350,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			break
 		}
 
-		nextBlock, _, err := rawdb.CanonicalBlockByNumberWithSenders(tx, execAtBlock+1)
+		nextBlock, err := br.BlockByNumber(context.Background(), tx, execAtBlock+1)
 		if err != nil {
 			panic(err)
 		}
@@ -326,10 +358,10 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Coinbase() != (common2.Address{}) {
 			miner.MiningConfig.Etherbase = nextBlock.Coinbase()
 			miner.MiningConfig.ExtraData = nextBlock.Extra()
-			miningStages.MockExecFunc(stages.MiningCreateBlock, func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
+			miningStages.MockExecFunc(stages.MiningCreateBlock, func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
-					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp),
-					quit)
+					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, dirs.Tmp, br),
+					quit, logger)
 				if err != nil {
 					return err
 				}
@@ -349,7 +381,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			//})
 
 			_ = miningStages.SetCurrentStage(stages.MiningCreateBlock)
-			if err := miningStages.Run(db, tx, false /* firstCycle */, false /* quiet */); err != nil {
+			if err := miningStages.Run(db, tx, false /* firstCycle */); err != nil {
 				return err
 			}
 			tx.Rollback()
@@ -380,7 +412,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		defer tx.Rollback()
 
 		// allow backward loop
-		if unwind > 0 && unwindEvery == 0 {
+		if unwind > 0 && unwindEvery > 0 {
 			stopAt -= unwind
 		}
 	}
@@ -427,11 +459,11 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *chain2.Config) {
 	}
 }
 
-func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
-	sn, agg := allSnapshots(ctx, db)
+func loopIh(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
+	sn, agg := allSnapshots(ctx, db, logger)
 	defer sn.Close()
 	defer agg.Close()
-	_, _, sync, _, _ := newSync(ctx, db, nil)
+	_, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
 	dirs := datadir.New(datadirCli)
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
 
@@ -441,19 +473,21 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	}
 	defer tx.Rollback()
 	sync.DisableStages(stages.Snapshots, stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Execution, stages.Translation, stages.AccountHistoryIndex, stages.StorageHistoryIndex, stages.TxLookup, stages.Finish)
-	if err = sync.Run(db, tx, false /* firstCycle */, false /* quiet */); err != nil {
+	if err = sync.Run(db, tx, false /* firstCycle */); err != nil {
 		return err
 	}
 	execStage := stage(sync, tx, nil, stages.HashState)
 	to := execStage.BlockNumber - unwind
 	_ = sync.SetCurrentStage(stages.HashState)
 	u := &stagedsync.UnwindState{ID: stages.HashState, UnwindPoint: to}
-	if err = stagedsync.UnwindHashStateStage(u, stage(sync, tx, nil, stages.HashState), tx, stagedsync.StageHashStateCfg(db, dirs, historyV3, agg), ctx); err != nil {
+	if err = stagedsync.UnwindHashStateStage(u, stage(sync, tx, nil, stages.HashState), tx, stagedsync.StageHashStateCfg(db, dirs, historyV3), ctx, logger); err != nil {
 		return err
 	}
 	_ = sync.SetCurrentStage(stages.IntermediateHashes)
 	u = &stagedsync.UnwindState{ID: stages.IntermediateHashes, UnwindPoint: to}
-	if err = stagedsync.UnwindIntermediateHashesStage(u, stage(sync, tx, nil, stages.IntermediateHashes), tx, stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, getBlockReader(db), nil, historyV3, agg), ctx); err != nil {
+	br, _ := blocksIO(db, logger)
+	if err = stagedsync.UnwindIntermediateHashesStage(u, stage(sync, tx, nil, stages.IntermediateHashes), tx, stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp,
+		br, nil, historyV3, agg), ctx, logger); err != nil {
 		return err
 	}
 	must(tx.Commit())
@@ -463,7 +497,7 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 
 	sync.DisableStages(stages.IntermediateHashes)
 	_ = sync.SetCurrentStage(stages.HashState)
-	if err = sync.Run(db, tx, false /* firstCycle */, false /* quiet*/); err != nil {
+	if err = sync.Run(db, tx, false /* firstCycle */); err != nil {
 		return err
 	}
 	must(tx.Commit())
@@ -483,10 +517,10 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 
 		_ = sync.SetCurrentStage(stages.IntermediateHashes)
 		t := time.Now()
-		if err = sync.Run(db, tx, false /* firstCycle */, false /* quiet */); err != nil {
+		if err = sync.Run(db, tx, false /* firstCycle */); err != nil {
 			return err
 		}
-		log.Warn("loop", "time", time.Since(t).String())
+		logger.Warn("loop", "time", time.Since(t).String())
 		tx.Rollback()
 		tx, err = db.BeginRw(ctx)
 		if err != nil {
@@ -496,13 +530,13 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	}
 }
 
-func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
+func loopExec(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
 	chainConfig := fromdb.ChainConfig(db)
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	sn, agg := allSnapshots(ctx, db)
+	sn, agg := allSnapshots(ctx, db, logger)
 	defer sn.Close()
 	defer agg.Close()
-	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
+	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil, logger)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -525,19 +559,20 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	from := progress(tx, stages.Execution)
 	to := from + unwind
 
-	genesis := core.DefaultGenesisBlockByChainName(chain)
+	genesis := core.GenesisBlockByChainName(chain)
 	syncCfg := ethconfig.Defaults.Sync
 	syncCfg.ExecWorkerCount = int(workers)
 	syncCfg.ReconWorkerCount = int(reconWorkers)
 
 	initialCycle := false
+	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ false, historyV3, dirs, getBlockReader(db), nil, genesis, syncCfg, agg)
+		/*badBlockHalt=*/ false, historyV3, dirs, br, nil, genesis, syncCfg, agg)
 
 	// set block limit of execute stage
-	sync.MockExecFunc(stages.Execution, func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
-		if err = stagedsync.SpawnExecuteBlocksStage(stageState, sync, tx, to, ctx, cfg, initialCycle, false /* quiet */); err != nil {
+	sync.MockExecFunc(stages.Execution, func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
+		if err = stagedsync.SpawnExecuteBlocksStage(stageState, sync, tx, to, ctx, cfg, initialCycle, logger); err != nil {
 			return fmt.Errorf("spawnExecuteBlocksStage: %w", err)
 		}
 		return nil
@@ -552,7 +587,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 
 		_ = sync.SetCurrentStage(stages.Execution)
 		t := time.Now()
-		if err = sync.Run(db, tx, initialCycle, false /* quiet */); err != nil {
+		if err = sync.Run(db, tx, initialCycle); err != nil {
 			return err
 		}
 		log.Info("[Integration] ", "loop time", time.Since(t))

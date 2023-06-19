@@ -16,7 +16,6 @@ package sentinel
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,42 +25,25 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
-const (
-	// overlay parameters
-	gossipSubD   = 8  // topic stable mesh target count
-	gossipSubDlo = 6  // topic stable mesh low watermark
-	gossipSubDhi = 12 // topic stable mesh high watermark
-
-	// gossip parameters
-	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
-	gossipSubMcacheGossip = 3   // number of windows to gossip about
-	gossipSubSeenTTL      = 550 // number of heartbeat intervals to retain message IDs
-
-	// fanout ttl
-	gossipSubFanoutTTL = 60000000000 // TTL for fanout maps for topics we are not subscribed to but have published to, in nano seconds
-
-	// heartbeat interval
-	gossipSubHeartbeatInterval = 700 * time.Millisecond // frequency of heartbeat, milliseconds
-
-	// misc
-	rSubD = 8 // random gossip target
+var (
+	// maxInMeshScore describes the max score a peer can attain from being in the mesh.
+	maxInMeshScore = 10.
+	// beaconBlockWeight specifies the scoring weight that we apply to
+	// our beacon block topic.
+	beaconBlockWeight = 0.8
 )
 
-// Specifies the prefix for any pubsub topic.
-const gossipTopicPrefix = "/eth2/"
-const blockSubnetTopicFormat = "/eth2/%x/beacon_block"
 const SSZSnappyCodec = "ssz_snappy"
 
 type TopicName string
 
 const (
-	BeaconBlockTopic                 TopicName = "beacon_block"
-	BeaconAggregateAndProofTopic     TopicName = "beacon_aggregate_and_proof"
-	VoluntaryExitTopic               TopicName = "voluntary_exit"
-	ProposerSlashingTopic            TopicName = "proposer_slashing"
-	AttesterSlashingTopic            TopicName = "attester_slashing"
-	LightClientFinalityUpdateTopic   TopicName = "light_client_finality_update"
-	LightClientOptimisticUpdateTopic TopicName = "light_client_optimistic_update"
+	BeaconBlockTopic             TopicName = "beacon_block"
+	BeaconAggregateAndProofTopic TopicName = "beacon_aggregate_and_proof"
+	VoluntaryExitTopic           TopicName = "voluntary_exit"
+	ProposerSlashingTopic        TopicName = "proposer_slashing"
+	AttesterSlashingTopic        TopicName = "attester_slashing"
+	BlobSidecarTopic             TopicName = "blob_sidecar_%d" // This topic needs an index
 )
 
 type GossipTopic struct {
@@ -89,14 +71,6 @@ var AttesterSlashingSsz = GossipTopic{
 	Name:     AttesterSlashingTopic,
 	CodecStr: SSZSnappyCodec,
 }
-var LightClientFinalityUpdateSsz = GossipTopic{
-	Name:     LightClientFinalityUpdateTopic,
-	CodecStr: SSZSnappyCodec,
-}
-var LightClientOptimisticUpdateSsz = GossipTopic{
-	Name:     LightClientOptimisticUpdateTopic,
-	CodecStr: SSZSnappyCodec,
-}
 
 type GossipManager struct {
 	ch            chan *pubsub.Message
@@ -115,38 +89,18 @@ func NewGossipManager(
 	return g
 }
 
+func GossipSidecarTopics(maxBlobs uint64) (ret []GossipTopic) {
+	for i := uint64(0); i < maxBlobs; i++ {
+		ret = append(ret, GossipTopic{
+			Name:     TopicName(fmt.Sprintf(string(BlobSidecarTopic), i)),
+			CodecStr: SSZSnappyCodec,
+		})
+	}
+	return
+}
+
 func (s *GossipManager) Recv() <-chan *pubsub.Message {
 	return s.ch
-}
-
-// closes a specific topic
-func (s *GossipManager) CloseTopic(topic string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if val, ok := s.subscriptions[topic]; ok {
-		val.Close()
-		delete(s.subscriptions, topic)
-	}
-}
-
-// reset'em
-func (s *GossipManager) Reset() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, val := range s.subscriptions {
-		val.Close() // Close all.
-	}
-	s.subscriptions = map[string]*GossipSubscription{}
-}
-
-// get a specific topic
-func (s *GossipManager) GetSubscription(topic string) (*GossipSubscription, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if val, ok := s.subscriptions[topic]; ok {
-		return val, true
-	}
-	return nil, false
 }
 
 func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscription {
@@ -154,7 +108,7 @@ func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscriptio
 	defer s.mu.Unlock()
 	var sub *GossipSubscription
 	for topic, currSub := range s.subscriptions {
-		if strings.Contains(topic, string(BeaconBlockTopic)) {
+		if strings.Contains(topic, match) {
 			sub = currSub
 		}
 	}
@@ -167,79 +121,106 @@ func (s *GossipManager) AddSubscription(topic string, sub *GossipSubscription) {
 	s.subscriptions[topic] = sub
 }
 
-// starts listening to a specific topic (forwarding its messages to the gossip manager channel)
-func (s *GossipManager) ListenTopic(topic string) error {
+func (s *GossipManager) unsubscribe(topic string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if val, ok := s.subscriptions[topic]; ok {
-		return val.Listen()
+	if _, ok := s.subscriptions[topic]; !ok {
+		return
 	}
-	return nil
-}
-
-// closes the gossip manager
-func (s *GossipManager) Close() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, val := range s.subscriptions {
-		val.Close()
-	}
-	close(s.ch)
-}
-
-func (s *GossipManager) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sb := strings.Builder{}
-	sb.Grow(len(s.subscriptions) * 4)
-
-	for _, v := range s.subscriptions {
-		sb.Write([]byte(v.topic.String()))
-		sb.WriteString("=")
-		sb.WriteString(strconv.Itoa(len(v.topic.ListPeers())))
-		sb.WriteString(" ")
-	}
-	return sb.String()
-}
-
-func (s *Sentinel) RestartTopics() {
-	// Reset all topics
-	s.subManager.Reset()
-	for _, topic := range s.gossipTopics {
-		s.SubscribeGossip(topic)
-	}
+	s.subscriptions[topic].Close()
+	delete(s.subscriptions, topic)
 }
 
 func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
+	digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	if err != nil {
+		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
+	}
 	sub = &GossipSubscription{
 		gossip_topic: topic,
 		ch:           s.subManager.ch,
 		host:         s.host.ID(),
 		ctx:          s.ctx,
 	}
-	path := s.getTopic(topic)
+	path := fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr)
 	sub.topic, err = s.pubsub.Join(path, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
 	}
-	s.subManager.AddSubscription(path, sub)
-	for _, t := range s.gossipTopics {
-		if t.CodecStr == topic.CodecStr {
-			return sub, nil
-		}
+	topicScoreParams := s.topicScoreParams(string(topic.Name))
+	if topicScoreParams != nil {
+		sub.topic.SetScoreParams(topicScoreParams)
 	}
-	s.gossipTopics = append(s.gossipTopics, topic)
+	s.subManager.AddSubscription(path, sub)
+
 	return sub, nil
 }
 
-func (s *Sentinel) LogTopicPeers() {
-	log.Info("[Gossip] Network Update", "topic peers", s.subManager.String())
-}
-
-func (s *Sentinel) getTopic(topic GossipTopic) string {
-	o, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+func (s *Sentinel) Unsubscribe(topic GossipTopic, opts ...pubsub.TopicOpt) (err error) {
+	digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
-	return fmt.Sprintf("/eth2/%x/%s/%s", o, topic.Name, topic.CodecStr)
+	s.subManager.unsubscribe(fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr))
+
+	return nil
+}
+
+func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
+	switch {
+	case strings.Contains(topic, string(BeaconBlockTopic)):
+		return s.defaultBlockTopicParams()
+	/*case strings.Contains(topic, GossipAggregateAndProofMessage):
+		return defaultAggregateTopicParams(activeValidators), nil
+	case strings.Contains(topic, GossipAttestationMessage):
+		return defaultAggregateSubnetTopicParams(activeValidators), nil
+	case strings.Contains(topic, GossipSyncCommitteeMessage):
+		return defaultSyncSubnetTopicParams(activeValidators), nil
+	case strings.Contains(topic, GossipContributionAndProofMessage):
+		return defaultSyncContributionTopicParams(), nil
+	case strings.Contains(topic, GossipExitMessage):
+		return defaultVoluntaryExitTopicParams(), nil
+	case strings.Contains(topic, GossipProposerSlashingMessage):
+		return defaultProposerSlashingTopicParams(), nil
+	case strings.Contains(topic, GossipAttesterSlashingMessage):
+		return defaultAttesterSlashingTopicParams(), nil
+	case strings.Contains(topic, GossipBlsToExecutionChangeMessage):
+		return defaultBlsToExecutionChangeTopicParams(), nil*/
+	default:
+		return nil
+	}
+}
+
+// Based on the lighthouse parameters.
+// https://gist.github.com/blacktemplar/5c1862cb3f0e32a1a7fb0b25e79e6e2c
+func (s *Sentinel) defaultBlockTopicParams() *pubsub.TopicScoreParams {
+	blocksPerEpoch := s.cfg.BeaconConfig.SlotsPerEpoch
+	meshWeight := float64(0)
+	return &pubsub.TopicScoreParams{
+		TopicWeight:                     beaconBlockWeight,
+		TimeInMeshWeight:                maxInMeshScore / s.inMeshCap(),
+		TimeInMeshQuantum:               s.oneSlotDuration(),
+		TimeInMeshCap:                   s.inMeshCap(),
+		FirstMessageDeliveriesWeight:    1,
+		FirstMessageDeliveriesDecay:     s.scoreDecay(20 * s.oneEpochDuration()),
+		FirstMessageDeliveriesCap:       23,
+		MeshMessageDeliveriesWeight:     meshWeight,
+		MeshMessageDeliveriesDecay:      s.scoreDecay(5 * s.oneEpochDuration()),
+		MeshMessageDeliveriesCap:        float64(blocksPerEpoch * 5),
+		MeshMessageDeliveriesThreshold:  float64(blocksPerEpoch*5) / 10,
+		MeshMessageDeliveriesWindow:     2 * time.Second,
+		MeshMessageDeliveriesActivation: 4 * s.oneEpochDuration(),
+		MeshFailurePenaltyWeight:        meshWeight,
+		MeshFailurePenaltyDecay:         s.scoreDecay(5 * s.oneEpochDuration()),
+		InvalidMessageDeliveriesWeight:  -140.4475,
+		InvalidMessageDeliveriesDecay:   s.scoreDecay(50 * s.oneEpochDuration()),
+	}
+}
+
+func (g *GossipManager) Close() {
+	for _, topic := range g.subscriptions {
+		if topic != nil {
+			topic.Close()
+		}
+	}
 }

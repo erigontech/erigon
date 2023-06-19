@@ -3,6 +3,7 @@ package engineapi
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/emirpasic/gods/maps/treemap"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 
 	"github.com/ledgerwatch/erigon/core/types"
-	"go.uber.org/atomic"
 )
 
 // This is the status of a newly execute block.

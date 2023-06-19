@@ -36,7 +36,6 @@ import (
 type CommonTx struct {
 	TransactionMisc
 
-	ChainID *uint256.Int
 	Nonce   uint64             // nonce of sender account
 	Gas     uint64             // gas limit
 	To      *libcommon.Address `rlp:"nil"` // nil means contract creation
@@ -45,16 +44,16 @@ type CommonTx struct {
 	V, R, S uint256.Int        // signature values
 }
 
-func (ct CommonTx) GetChainID() *uint256.Int {
-	return ct.ChainID
-}
-
 func (ct CommonTx) GetNonce() uint64 {
 	return ct.Nonce
 }
 
 func (ct CommonTx) GetTo() *libcommon.Address {
 	return ct.To
+}
+
+func (ct CommonTx) GetDataGas() uint64 {
+	return 0
 }
 
 func (ct CommonTx) GetGas() uint64 {
@@ -86,6 +85,11 @@ func (ct CommonTx) Protected() bool {
 
 func (ct CommonTx) IsContractDeploy() bool {
 	return ct.GetTo() == nil
+}
+
+func (ct *CommonTx) GetDataHashes() []libcommon.Hash {
+	// Only blob txs have data hashes
+	return []libcommon.Hash{}
 }
 
 // LegacyTx is the transaction data of regular Ethereum transactions.
@@ -127,6 +131,10 @@ func (tx LegacyTx) GetAccessList() types2.AccessList {
 
 func (tx LegacyTx) Protected() bool {
 	return isProtectedV(&tx.V)
+}
+
+func (tx *LegacyTx) Unwrap() Transaction {
+	return tx
 }
 
 // NewTransaction creates an unsigned legacy transaction.
@@ -216,7 +224,7 @@ func (tx LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 		}
 	default:
 		if len(tx.Data) >= 56 {
-			payloadSize += (bits.Len(uint(len(tx.Data))) + 7) / 8
+			payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(len(tx.Data))))
 		}
 		payloadSize += len(tx.Data)
 	}

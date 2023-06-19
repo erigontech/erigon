@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
@@ -21,15 +22,21 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
 )
+
+func newBaseApiForTest(m *stages.MockSentry) *commands.BaseAPI {
+	agg := m.HistoryV3Components()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	return commands.NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+}
 
 func TestSendRawTransaction(t *testing.T) {
 	t.Skip("Flaky test")
 	m, require := stages.Mock(t), require.New(t)
+	logger := log.New()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -59,8 +66,8 @@ func TestSendRawTransaction(t *testing.T) {
 		}
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-		initialCycle := true
-		if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
+		initialCycle := stages.MockInsertAsInitialCycle
+		if err := stages.StageLoopStep(m.Ctx, m.DB, nil, m.Sync, initialCycle, logger, m.BlockReader, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -71,10 +78,8 @@ func TestSendRawTransaction(t *testing.T) {
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {})
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-	api := commands.NewEthAPI(commands.NewBaseApi(ff, stateCache, br, nil, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, txPool, nil, 5000000, 100_000)
+	ff := rpchelper.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {}, m.Log)
+	api := commands.NewEthAPI(newBaseApiForTest(m), m.DB, nil, txPool, nil, 5000000, 100_000, logger)
 
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)

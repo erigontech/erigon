@@ -22,14 +22,13 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -46,12 +45,12 @@ type Dumper struct {
 type DumpAccount struct {
 	Balance   string             `json:"balance"`
 	Nonce     uint64             `json:"nonce"`
-	Root      hexutil.Bytes      `json:"root"`
-	CodeHash  hexutil.Bytes      `json:"codeHash"`
-	Code      hexutil.Bytes      `json:"code,omitempty"`
+	Root      hexutility.Bytes   `json:"root"`
+	CodeHash  hexutility.Bytes   `json:"codeHash"`
+	Code      hexutility.Bytes   `json:"code,omitempty"`
 	Storage   map[string]string  `json:"storage,omitempty"`
 	Address   *libcommon.Address `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
-	SecureKey *hexutil.Bytes     `json:"key,omitempty"`     // If we don't have address, we can output the key
+	SecureKey *hexutility.Bytes  `json:"key,omitempty"`     // If we don't have address, we can output the key
 }
 
 // Dump represents the full dump in a collected format, as one large map.
@@ -163,7 +162,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			return nil, err
 		}
 
-		it, err := ttx.DomainRange(temporal.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults+1)
+		it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults+1)
 		if err != nil {
 			return nil, err
 		}
@@ -172,16 +171,15 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			if err != nil {
 				return nil, err
 			}
-			//TODO: what to do in this case? maybe iterator must skip this values??
-			if len(v) == 0 {
-				continue
-			}
 			if maxResults > 0 && numberOfResults >= maxResults {
 				if nextKey == nil {
 					nextKey = make([]byte, len(k))
 				}
 				copy(nextKey, k)
 				break
+			}
+			if len(v) == 0 {
+				continue
 			}
 
 			if e := acc.DecodeForStorage(v); e != nil {
@@ -190,8 +188,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			account := DumpAccount{
 				Balance:  acc.Balance.ToBig().String(),
 				Nonce:    acc.Nonce,
-				Root:     hexutil.Bytes(emptyHash[:]), // We cannot provide historical storage hash
-				CodeHash: hexutil.Bytes(emptyCodeHash[:]),
+				Root:     hexutility.Bytes(emptyHash[:]), // We cannot provide historical storage hash
+				CodeHash: hexutility.Bytes(emptyCodeHash[:]),
 				Storage:  make(map[string]string),
 			}
 			accountList = append(accountList, &account)
@@ -219,8 +217,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			account := DumpAccount{
 				Balance:  acc.Balance.ToBig().String(),
 				Nonce:    acc.Nonce,
-				Root:     hexutil.Bytes(emptyHash[:]), // We cannot provide historical storage hash
-				CodeHash: hexutil.Bytes(emptyCodeHash[:]),
+				Root:     hexutility.Bytes(emptyHash[:]), // We cannot provide historical storage hash
+				CodeHash: hexutility.Bytes(emptyCodeHash[:]),
 				Storage:  make(map[string]string),
 			}
 			accountList = append(accountList, &account)
@@ -261,7 +259,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
 			if d.historyV3 {
-				r, err := d.db.(kv.TemporalTx).DomainRange(temporal.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, -1)
+				r, err := d.db.(kv.TemporalTx).DomainRange(kv.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
 				if err != nil {
 					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 				}

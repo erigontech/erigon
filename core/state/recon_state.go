@@ -5,6 +5,7 @@ import (
 
 	"bytes"
 	"container/heap"
+	"context"
 	"encoding/binary"
 	"sync"
 
@@ -185,21 +186,26 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *ReconnWork) Schedule() (*exec22.TxTask, bool) {
+func (rs *ReconnWork) Schedule(ctx context.Context) (*exec22.TxTask, bool, error) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
+Loop:
 	for rs.queue.Len() < 16 {
-		txTask, ok := <-rs.workCh
-		if !ok {
-			// No more work, channel is closed
-			break
+		select {
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		case txTask, ok := <-rs.workCh:
+			if !ok {
+				// No more work, channel is closed
+				break Loop
+			}
+			heap.Push(&rs.queue, txTask)
 		}
-		heap.Push(&rs.queue, txTask)
 	}
 	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(*exec22.TxTask), true
+		return heap.Pop(&rs.queue).(*exec22.TxTask), true, nil
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 func (rs *ReconnWork) CommitTxNum(txNum uint64) {

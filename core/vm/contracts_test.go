@@ -67,6 +67,7 @@ var allPrecompiles = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{16}):   &bls12381Pairing{},
 	libcommon.BytesToAddress([]byte{17}):   &bls12381MapG1{},
 	libcommon.BytesToAddress([]byte{18}):   &bls12381MapG2{},
+	libcommon.BytesToAddress([]byte{20}):   &pointEvaluation{},
 }
 
 // EIP-152 test vectors
@@ -93,7 +94,7 @@ var blake2FMalformedInputTests = []precompiledFailureTest{
 	},
 }
 
-func testPrecompiled(addr string, test precompiledTest, t *testing.T) {
+func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
 	p := allPrecompiles[libcommon.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
@@ -114,7 +115,7 @@ func testPrecompiled(addr string, test precompiledTest, t *testing.T) {
 	})
 }
 
-func testPrecompiledOOG(addr string, test precompiledTest, t *testing.T) {
+func testPrecompiledOOG(t *testing.T, addr string, test precompiledTest) {
 	p := allPrecompiles[libcommon.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in) - 1
@@ -149,7 +150,7 @@ func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing
 	})
 }
 
-func benchmarkPrecompiled(addr string, test precompiledTest, bench *testing.B) {
+func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 	if test.NoBenchmark {
 		return
 	}
@@ -163,7 +164,7 @@ func benchmarkPrecompiled(addr string, test precompiledTest, bench *testing.B) {
 		data = make([]byte, len(in))
 	)
 
-	bench.Run(fmt.Sprintf("%s-Gas=%d", test.Name, reqGas), func(bench *testing.B) {
+	b.Run(fmt.Sprintf("%s-Gas=%d", test.Name, reqGas), func(bench *testing.B) {
 		bench.ReportAllocs()
 		start := time.Now()
 		bench.ResetTimer()
@@ -200,7 +201,7 @@ func BenchmarkPrecompiledEcrecover(bench *testing.B) {
 		Expected: "000000000000000000000000ceaccac640adf55b2028469bd36ba501f28b699d",
 		Name:     "",
 	}
-	benchmarkPrecompiled("01", t, bench)
+	benchmarkPrecompiled(bench, "01", t)
 }
 
 // Benchmarks the sample inputs from the SHA256 precompile.
@@ -210,27 +211,27 @@ func BenchmarkPrecompiledSha256(bench *testing.B) {
 		Expected: "811c7003375852fabd0d362e40e68607a12bdabae61a7d068fe5fdd1dbbf2a5d",
 		Name:     "128",
 	}
-	benchmarkPrecompiled("02", t, bench)
+	benchmarkPrecompiled(bench, "02", t)
 }
 
 // Benchmarks the sample inputs from the RIPEMD precompile.
-func BenchmarkPrecompiledRipeMD(bench *testing.B) {
+func BenchmarkPrecompiledRipeMD(b *testing.B) {
 	t := precompiledTest{
 		Input:    "38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e000000000000000000000000000000000000000000000000000000000000001b38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e789d1dd423d25f0772d2748d60f7e4b81bb14d086eba8e8e8efb6dcff8a4ae02",
 		Expected: "0000000000000000000000009215b8d9882ff46f0dfde6684d78e831467f65e6",
 		Name:     "128",
 	}
-	benchmarkPrecompiled("03", t, bench)
+	benchmarkPrecompiled(b, "03", t)
 }
 
 // Benchmarks the sample inputs from the identiy precompile.
-func BenchmarkPrecompiledIdentity(bench *testing.B) {
+func BenchmarkPrecompiledIdentity(b *testing.B) {
 	t := precompiledTest{
 		Input:    "38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e000000000000000000000000000000000000000000000000000000000000001b38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e789d1dd423d25f0772d2748d60f7e4b81bb14d086eba8e8e8efb6dcff8a4ae02",
 		Expected: "38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e000000000000000000000000000000000000000000000000000000000000001b38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e789d1dd423d25f0772d2748d60f7e4b81bb14d086eba8e8e8efb6dcff8a4ae02",
 		Name:     "128",
 	}
-	benchmarkPrecompiled("04", t, bench)
+	benchmarkPrecompiled(b, "04", t)
 }
 
 // Tests the sample inputs from the ModExp EIP 198.
@@ -251,7 +252,7 @@ func TestPrecompiledModExpOOG(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, test := range modexpTests {
-		testPrecompiledOOG("05", test, t)
+		testPrecompiledOOG(t, "05", test)
 	}
 }
 
@@ -280,7 +281,7 @@ func testJson(name, addr string, t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, test := range tests {
-		testPrecompiled(addr, test, t)
+		testPrecompiled(t, addr, test)
 	}
 }
 
@@ -300,7 +301,7 @@ func benchJson(name, addr string, b *testing.B) {
 		b.Fatal(err)
 	}
 	for _, test := range tests {
-		benchmarkPrecompiled(addr, test, b)
+		benchmarkPrecompiled(b, addr, test)
 	}
 }
 
@@ -313,6 +314,7 @@ func TestPrecompiledBLS12381G2MultiExp(t *testing.T) { testJson("blsG2MultiExp",
 func TestPrecompiledBLS12381Pairing(t *testing.T)    { testJson("blsPairing", "10", t) }
 func TestPrecompiledBLS12381MapG1(t *testing.T)      { testJson("blsMapG1", "11", t) }
 func TestPrecompiledBLS12381MapG2(t *testing.T)      { testJson("blsMapG2", "12", t) }
+func TestPrecompiledPointEvaluation(t *testing.T)    { testJson("pointEvaluation", "14", t) }
 
 func BenchmarkPrecompiledBLS12381G1Add(b *testing.B)      { benchJson("blsG1Add", "0a", b) }
 func BenchmarkPrecompiledBLS12381G1Mul(b *testing.B)      { benchJson("blsG1Mul", "0b", b) }
@@ -370,7 +372,7 @@ func BenchmarkPrecompiledBLS12381G1MultiExpWorstCase(b *testing.B) {
 		Name:        "WorstCaseG1",
 		NoBenchmark: false,
 	}
-	benchmarkPrecompiled("0c", testcase, b)
+	benchmarkPrecompiled(b, "0c", testcase)
 }
 
 // BenchmarkPrecompiledBLS12381G2MultiExpWorstCase benchmarks the worst case we could find that still fits a gaslimit of 10MGas.
@@ -391,5 +393,5 @@ func BenchmarkPrecompiledBLS12381G2MultiExpWorstCase(b *testing.B) {
 		Name:        "WorstCaseG2",
 		NoBenchmark: false,
 	}
-	benchmarkPrecompiled("0f", testcase, b)
+	benchmarkPrecompiled(b, "0f", testcase)
 }

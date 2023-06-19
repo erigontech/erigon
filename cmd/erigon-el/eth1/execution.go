@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -30,14 +31,16 @@ type Eth1Execution struct {
 	db                kv.RwDB
 	executionPipeline *stagedsync.Sync
 	blockReader       services.FullBlockReader
+	blockWriter       *blockio.BlockWriter
 	mu                sync.Mutex
 }
 
-func NewEth1Execution(db kv.RwDB, blockReader services.FullBlockReader, executionPipeline *stagedsync.Sync) *Eth1Execution {
+func NewEth1Execution(db kv.RwDB, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, executionPipeline *stagedsync.Sync) *Eth1Execution {
 	return &Eth1Execution{
 		db:                db,
 		executionPipeline: executionPipeline,
 		blockReader:       blockReader,
+		blockWriter:       blockWriter,
 	}
 }
 
@@ -55,7 +58,9 @@ func (e *Eth1Execution) InsertHeaders(ctx context.Context, req *execution.Insert
 		if err != nil {
 			return nil, err
 		}
-		rawdb.WriteHeader(tx, h)
+		if err := rawdb.WriteHeader(tx, h); err != nil {
+			return nil, err
+		}
 	}
 	return &execution.EmptyMessage{}, tx.Commit()
 }
@@ -79,20 +84,11 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 			uncles = append(uncles, h)
 		}
 		// Withdrawals processing
-		withdrawals := make([]*types.Withdrawal, 0, len(body.Withdrawals))
-		for _, withdrawal := range body.Withdrawals {
-			withdrawals = append(withdrawals, &types.Withdrawal{
-				Index:     withdrawal.Index,
-				Validator: withdrawal.ValidatorIndex,
-				Address:   gointerfaces.ConvertH160toAddress(withdrawal.Address),
-				Amount:    withdrawal.Amount,
-			})
-		}
-		if _, _, err := rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
+		if _, err := rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
 			body.BlockNumber, &types.RawBody{
 				Transactions: body.Transactions,
 				Uncles:       uncles,
-				Withdrawals:  withdrawals,
+				Withdrawals:  privateapi.ConvertWithdrawalsFromRpc(body.Withdrawals),
 			}); err != nil {
 			return nil, err
 		}
@@ -129,7 +125,7 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 	}
 	currentParentHash := fcuHeader.ParentHash
 	currentParentNumber := fcuHeader.Number.Uint64() - 1
-	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash)
+	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +152,7 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 		}
 		currentParentHash = currentHeader.ParentHash
 		currentParentNumber = currentHeader.Number.Uint64() - 1
-		isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash)
+		isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash, currentParentNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -185,7 +181,7 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 		return nil, err
 	}
 	// Run the forkchoice
-	if err := e.executionPipeline.Run(e.db, tx, false, false); err != nil {
+	if err := e.executionPipeline.Run(e.db, tx, false); err != nil {
 		return nil, err
 	}
 	// if head hash was set then success otherwise no
@@ -299,7 +295,11 @@ func (e *Eth1Execution) IsCanonicalHash(ctx context.Context, req *types2.H256) (
 	defer tx.Rollback()
 
 	blockHash := gointerfaces.ConvertH256ToHash(req)
-	isCanonical, err := rawdb.IsCanonicalHash(tx, blockHash)
+	blockNum := rawdb.ReadHeaderNumber(tx, blockHash)
+	if blockNum == nil {
+		return &execution.IsCanonicalResponse{Canonical: false}, nil
+	}
+	isCanonical, err := rawdb.IsCanonicalHash(tx, blockHash, *blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +337,7 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		GasUsed:     header.GasUsed,
 		Time:        header.Timestamp,
 		Extra:       header.ExtraData,
-		MixDigest:   gointerfaces.ConvertH256ToHash(header.MixDigest),
+		MixDigest:   gointerfaces.ConvertH256ToHash(header.PrevRandao),
 		Nonce:       blockNonce,
 	}
 	if header.BaseFeePerGas != nil {
@@ -351,7 +351,6 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 	if blockHash != h.Hash() {
 		return nil, fmt.Errorf("block %d, %x has invalid hash. expected: %x", header.BlockNumber, h.Hash(), blockHash)
 	}
-	h.BlockHashCL = blockHash
 	return h, nil
 }
 
@@ -376,7 +375,7 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 		TransactionHash: gointerfaces.ConvertHashToH256(header.TxHash),
 		LogsBloom:       gointerfaces.ConvertBytesToH2048(header.Bloom[:]),
 		ReceiptRoot:     gointerfaces.ConvertHashToH256(header.ReceiptHash),
-		MixDigest:       gointerfaces.ConvertHashToH256(header.MixDigest),
+		PrevRandao:      gointerfaces.ConvertHashToH256(header.MixDigest),
 		BlockNumber:     header.Number.Uint64(),
 		Nonce:           header.Nonce.Uint64(),
 		GasLimit:        header.GasLimit,

@@ -76,6 +76,7 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
+
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
@@ -84,7 +85,7 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		transaction["nonce"] = txn.GetNonce()
 		transaction["value"] = txn.GetValue()
 		transaction["data"] = txn.GetData()
-		transaction["gasPrice"] = txn.GetPrice()
+		transaction["logs"] = receipt.Logs
 		result = append(result, transaction)
 	}
 

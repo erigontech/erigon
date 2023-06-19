@@ -82,12 +82,8 @@ func DataDirForNetwork(datadir string, network string) string {
 	switch network {
 	case networkname.DevChainName:
 		return "" // unless explicitly requested, use memory databases
-	case networkname.RinkebyChainName:
-		return networkDataDirCheckingLegacy(datadir, "rinkeby")
 	case networkname.GoerliChainName:
 		return networkDataDirCheckingLegacy(datadir, "goerli")
-	case networkname.SokolChainName:
-		return networkDataDirCheckingLegacy(datadir, "sokol")
 	case networkname.MumbaiChainName:
 		return networkDataDirCheckingLegacy(datadir, "mumbai")
 	case networkname.BorMainnetChainName:

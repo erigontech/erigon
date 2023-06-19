@@ -8,8 +8,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/require"
 )
 
@@ -150,9 +148,7 @@ func TestBackwardBlockProviderWithMultipleChunksBlockNotFound(t *testing.T) {
 
 func TestSearchTransactionsBefore(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-	api := NewOtterscanAPI(NewBaseApi(nil, nil, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB)
+	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB)
 
 	addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
 	t.Run("small page size", func(t *testing.T) {

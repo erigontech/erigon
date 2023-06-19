@@ -8,12 +8,14 @@ import (
 )
 
 const (
-	maxSubscribers = 100 // only 100 lightclients per sentinel
+	maxSubscribers = 100 // only 100 clients per sentinel
 )
 
 type gossipObject struct {
-	data []byte              // gossip data
-	t    sentinel.GossipType // determine which gossip message we are notifying of
+	data      []byte              // gossip data
+	t         sentinel.GossipType // determine which gossip message we are notifying of
+	pid       string              // pid is the peer id of the sender
+	blobIndex *uint32             // index of the blob
 }
 
 type gossipNotifier struct {
@@ -28,7 +30,7 @@ func newGossipNotifier() *gossipNotifier {
 	}
 }
 
-func (g *gossipNotifier) notify(t sentinel.GossipType, data []byte) {
+func (g *gossipNotifier) notify(t sentinel.GossipType, data []byte, pid string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -36,6 +38,23 @@ func (g *gossipNotifier) notify(t sentinel.GossipType, data []byte) {
 		ch <- gossipObject{
 			data: data,
 			t:    t,
+			pid:  pid,
+		}
+	}
+}
+
+func (g *gossipNotifier) notifyBlob(t sentinel.GossipType, data []byte, pid string, blobIndex int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	index := new(uint32)
+	*index = uint32(blobIndex)
+	for _, ch := range g.notifiers {
+		ch <- gossipObject{
+			data:      data,
+			t:         t,
+			pid:       pid,
+			blobIndex: index,
 		}
 	}
 }

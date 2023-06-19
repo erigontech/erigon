@@ -32,7 +32,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -44,7 +44,7 @@ func (a allocList) Len() int           { return len(a) }
 func (a allocList) Less(i, j int) bool { return a[i].Addr.Cmp(a[j].Addr) < 0 }
 func (a allocList) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
-func makelist(g *core.Genesis) allocList {
+func makelist(g *types.Genesis) allocList {
 	a := make(allocList, 0, len(g.Alloc))
 	for addr, account := range g.Alloc {
 		if len(account.Storage) > 0 || len(account.Code) > 0 || account.Nonce != 0 {
@@ -57,7 +57,7 @@ func makelist(g *core.Genesis) allocList {
 	return a
 }
 
-func makealloc(g *core.Genesis) string {
+func makealloc(g *types.Genesis) string {
 	a := makelist(g)
 	data, err := rlp.EncodeToBytes(a)
 	if err != nil {
@@ -72,7 +72,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	g := new(core.Genesis)
+	g := new(types.Genesis)
 	file, err := os.Open(os.Args[1])
 	if err != nil {
 		panic(err)

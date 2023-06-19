@@ -23,7 +23,8 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -34,9 +35,8 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-func getBlock(transactions int, uncles int, dataSize int, tmpDir string) *types.Block {
-	db := memdb.New(tmpDir)
-	defer db.Close()
+func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string) *types.Block {
+	_, db, _ := temporal.NewTestDB(tb, datadir.New(tmpDir), nil)
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset
@@ -45,11 +45,11 @@ func getBlock(transactions int, uncles int, dataSize int, tmpDir string) *types.
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &Genesis{
+		gspec   = &types.Genesis{
 			Config: params.TestChainConfig,
-			Alloc:  GenesisAlloc{address: {Balance: funds}},
+			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
 		}
-		genesis = gspec.MustCommit(db, tmpDir)
+		genesis = MustCommitGenesis(gspec, db, tmpDir)
 	)
 
 	// We need to generate as many blocks +1 as uncles
@@ -91,7 +91,7 @@ func TestRlpIterator(t *testing.T) {
 
 func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 	desc := fmt.Sprintf("%d txs [%d datasize] and %d uncles", txs, datasize, uncles)
-	bodyRlp, _ := rlp.EncodeToBytes(getBlock(txs, uncles, datasize, "").Body())
+	bodyRlp, _ := rlp.EncodeToBytes(getBlock(t, txs, uncles, datasize, "").Body())
 	it, err := rlp.NewListIterator(bodyRlp)
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func BenchmarkHashing(b *testing.B) {
 		blockRlp []byte
 	)
 	{
-		block := getBlock(200, 2, 50, "")
+		block := getBlock(b, 200, 2, 50, "")
 		bodyRlp, _ = rlp.EncodeToBytes(block.Body())
 		blockRlp, _ = rlp.EncodeToBytes(block)
 	}

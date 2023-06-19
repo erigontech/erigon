@@ -25,25 +25,24 @@ CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'd
 CGO_CFLAGS += -O
 CGO_CFLAGS += -D__BLST_PORTABLE__
 CGO_CFLAGS += -Wno-error=strict-prototypes # for Clang15, remove it when can https://github.com/ledgerwatch/erigon/issues/6113#issuecomment-1359526277
-CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
-DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
+# about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
 BUILD_TAGS = nosqlite,noboltdb
 PACKAGE = github.com/ledgerwatch/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
 GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
 
-GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
-GO_DBG_BUILD = $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = $(CGO_CFLAGS) GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
+GOBUILD = CGO_CFLAGS="$(CGO_CFLAGS)" $(GO) build $(GO_FLAGS)
+GO_DBG_BUILD = CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" $(GO) build -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
+GOTEST = CGO_CFLAGS="$(CGO_CFLAGS)" GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
 
 default: all
 
 ## go-version:                        print and verify go version
 go-version:
-	@if [ $(shell $(GO) version | cut -c 16-17) -lt 18 ]; then \
-		echo "minimum required Golang version is 1.18"; \
+	@if [ $(shell $(GO) version | cut -c 16-17) -lt 19 ]; then \
+		echo "minimum required Golang version is 1.19"; \
 		exit 1 ;\
 	fi
 
@@ -86,7 +85,7 @@ setup_xdg_data_home:
 
 ## docker-compose:                    validate build args, setup xdg data home, and run docker-compose up
 docker-compose: validate_docker_build_args setup_xdg_data_home
-	docker-compose up
+	docker compose up
 
 ## dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
 dbg:
@@ -108,7 +107,6 @@ erigon: go-version erigon.cmd
 COMMANDS += devnet
 COMMANDS += erigon-el-mock
 COMMANDS += downloader
-COMMANDS += erigon-cl
 COMMANDS += hack
 COMMANDS += integration
 COMMANDS += observer
@@ -120,9 +118,11 @@ COMMANDS += state
 COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
-COMMANDS += lightclient
 COMMANDS += sentinel
 COMMANDS += erigon-el
+COMMANDS += caplin-phase1
+COMMANDS += caplin-regression
+
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -136,6 +136,7 @@ db-tools:
 
 	go mod vendor
 	cd vendor/github.com/torquem-ch/mdbx-go && MDBX_BUILD_TIMESTAMP=unknown make tools
+	mkdir -p $(GOBIN)
 	cd vendor/github.com/torquem-ch/mdbx-go/mdbxdist && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
@@ -145,14 +146,14 @@ test:
 	$(GOTEST) --timeout 100s
 
 test3:
-	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),erigon3
+	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),e3
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
 test3-integration:
-	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,erigon3
+	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,e3
 
 ## lint:                              run golangci-lint with .golangci.yml config file
 lint:
@@ -166,7 +167,7 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.51.2
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.53.2
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
@@ -185,6 +186,7 @@ devtools:
 	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
 	PATH=$(GOBIN):$(PATH) go generate ./common
 #	PATH=$(GOBIN):$(PATH) go generate ./core/types
+	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 	PATH=$(GOBIN):$(PATH) go generate ./consensus/aura/...
 	#PATH=$(GOBIN):$(PATH) go generate ./eth/ethconfig/...
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
@@ -198,7 +200,7 @@ bindings:
 
 ## prometheus:                        run prometheus and grafana with docker-compose
 prometheus:
-	docker-compose up prometheus grafana
+	docker compose up prometheus grafana
 
 ## escape:                            run escape path={path} to check for memory leaks e.g. run escape path=cmd/erigon
 escape:

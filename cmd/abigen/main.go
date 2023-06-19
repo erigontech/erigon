@@ -119,8 +119,6 @@ func init() {
 }
 
 func abigen(c *cli.Context) error {
-	//fmt.Printf("a? %s\n", c.FlagNames())
-
 	utils.CheckExclusive(c, &abiFlag, &jsonFlag, &solFlag, &vyFlag) // Only one source can be selected.
 	if c.String(pkgFlag.Name) == "" {
 		utils.Fatalf("No destination package specified (--pkg)")
@@ -182,7 +180,7 @@ func abigen(c *cli.Context) error {
 	} else {
 		// Generate the list of types to exclude from binding
 		exclude := make(map[string]bool)
-		for _, kind := range strings.Split(c.String(excFlag.Name), ",") {
+		for _, kind := range utils.SplitAndTrim(c.String(excFlag.Name)) {
 			exclude[strings.ToLower(kind)] = true
 		}
 		var err error

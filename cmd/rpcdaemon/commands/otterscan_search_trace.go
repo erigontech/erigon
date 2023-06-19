@@ -44,7 +44,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	receipts := make([]map[string]interface{}, 0)
 
 	// Retrieve the transaction and assemble its EVM context
-	blockHash, err := rawdb.ReadCanonicalHash(dbtx, blockNum)
+	blockHash, err := api._blockReader.CanonicalHash(ctx, dbtx, blockNum)
 	if err != nil {
 		return false, nil, err
 	}
@@ -64,7 +64,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 
 	ibs := state.New(cachedReader)
-	signer := types.MakeSigner(chainConfig, blockNum)
+	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, e := api._blockReader.Header(ctx, dbtx, hash, number)
@@ -80,7 +80,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	rules := chainConfig.Rules(block.NumberU64(), header.Time)
 	found := false
 	for idx, tx := range block.Transactions() {
-		ibs.Prepare(tx.Hash(), block.Hash(), idx)
+		ibs.SetTxContext(tx.Hash(), block.Hash(), idx)
 
 		msg, _ := tx.AsMessage(*signer, header.BaseFee, rules)
 
@@ -89,7 +89,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 		TxContext := core.NewEVMTxContext(msg)
 
 		vmenv := vm.NewEVM(BlockContext, TxContext, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
-		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()), true /* refunds */, false /* gasBailout */); err != nil {
+		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()).AddDataGas(tx.GetDataGas()), true /* refunds */, false /* gasBailout */); err != nil {
 			return false, nil, err
 		}
 		_ = ibs.FinalizeTx(rules, cachedWriter)

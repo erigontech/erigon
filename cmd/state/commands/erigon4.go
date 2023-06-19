@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/bits"
 	"os"
 	"os/signal"
 	"path"
@@ -16,9 +15,11 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/commitment"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
+
+	"github.com/ledgerwatch/erigon-lib/commitment"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -40,9 +41,13 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+)
+
+var (
+	blockTo    int
+	traceBlock int
 )
 
 func init() {
@@ -50,9 +55,9 @@ func init() {
 	withDataDir(erigon4Cmd)
 	withChain(erigon4Cmd)
 
-	erigon4Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
+	erigon4Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 125000, "how many blocks to skip between calculating commitment")
 	erigon4Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
-	erigon4Cmd.Flags().StringVar(&commitmentsMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
+	erigon4Cmd.Flags().StringVar(&commitmentMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
 	erigon4Cmd.Flags().Uint64Var(&startTxNumFrom, "tx", 0, "tx number to start from")
 	erigon4Cmd.Flags().StringVar(&commitmentTrie, "commitments.trie", "hex", "hex - use Hex Patricia Hashed Trie for commitments, bin - use of binary patricia trie")
 	erigon4Cmd.Flags().IntVar(&height, "height", 32, "amount of steps in biggest file")
@@ -63,7 +68,7 @@ func init() {
 
 var (
 	startTxNumFrom      uint64                           // flag --tx
-	commitmentsMode     string                           // flag --commitments.mode [direct|update]
+	commitmentMode      string                           // flag --commitments.mode [direct|update]
 	logInterval         = 30 * time.Second               // time period to print aggregation stat to log
 	dirtySpaceThreshold = uint64(2 * 1024 * 1024 * 1024) /* threshold of dirty space in MDBX transaction that triggers a commit */
 	commitmentFrequency int                              // How many blocks to skip between calculating commitment
@@ -81,12 +86,17 @@ var erigon4Cmd = &cobra.Command{
 	Use:   "erigon4",
 	Short: "Experimental command to re-execute blocks from beginning using erigon2 state representation and history/domain",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := logging.GetLoggerCmd("erigon4", cmd)
+		var logger log.Logger
+		var err error
+		if logger, err = debug.SetupCobra(cmd, "erigon4"); err != nil {
+			logger.Error("Setting up", "error", err)
+			return err
+		}
 		return Erigon4(genesis, chainConfig, logger)
 	},
 }
 
-func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logger) error {
+func Erigon4(genesis *types.Genesis, chainConfig *chain2.Config, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -108,6 +118,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		return err1
 	}
 	defer historyTx.Rollback()
+
 	stateDbPath := path.Join(datadirCli, "db4")
 	if _, err = os.Stat(stateDbPath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -133,28 +144,14 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		return err
 	}
 
-	var trieVariant commitment.TrieVariant
-	switch commitmentTrie {
-	case "bin":
-		trieVariant = commitment.VariantBinPatriciaTrie
+	trieVariant := commitment.ParseTrieVariant(commitmentTrie)
+	if trieVariant != commitment.VariantHexPatriciaTrie {
 		blockRootMismatchExpected = true
-	case "hex":
-		fallthrough
-	default:
-		trieVariant = commitment.VariantHexPatriciaTrie
 	}
-
-	var mode libstate.CommitmentMode
-	switch commitmentsMode {
-	case "update":
-		mode = libstate.CommitmentModeUpdate
-	default:
-		mode = libstate.CommitmentModeDirect
-	}
-
+	mode := libstate.ParseCommitmentMode(commitmentMode)
 	logger.Info("aggregator commitment trie", "variant", trieVariant, "mode", mode.String())
 
-	agg, err3 := libstate.NewAggregator(aggPath, dirs.Tmp, stepSize, mode, trieVariant)
+	agg, err3 := libstate.NewAggregator(aggPath, dirs.Tmp, stepSize, mode, trieVariant, logger)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -171,7 +168,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 	agg.StartWrites()
 	defer agg.FinishWrites()
 
-	latestTx, err := agg.SeekCommitment()
+	latestBlock, latestTx, err := agg.SeekCommitment()
 	if err != nil && startTxNum != 0 {
 		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
 	}
@@ -185,12 +182,12 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 
 	interrupt := false
 	if startTxNum == 0 {
-		genBlock, genesisIbs, err := genesis.ToBlock("")
+		genBlock, genesisIbs, err := core.GenesisToBlock(genesis, "")
 		if err != nil {
 			return err
 		}
 		agg.SetTxNum(0)
-		if err = genesisIbs.CommitBlock(&chain2.Rules{}, &WriterWrapper23{w: agg}); err != nil {
+		if err = genesisIbs.CommitBlock(&chain2.Rules{}, &StateWriterV4{w: agg}); err != nil {
 			return fmt.Errorf("cannot write state: %w", err)
 		}
 
@@ -208,7 +205,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		}
 	}
 
-	logger.Info("Initialised chain configuration", "startTxNum", startTxNum, "config", chainConfig)
+	logger.Info("Initialised chain configuration", "startTxNum", startTxNum, "block", latestBlock, "config", chainConfig)
 
 	var (
 		blockNum uint64
@@ -217,6 +214,11 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		txNum    uint64 = 2 // Consider that each block contains at least first system tx and enclosing transactions, except for Clique consensus engine
 		started         = time.Now()
 	)
+
+	if startTxNum != 0 {
+		txNum = startTxNum
+		blockNum = latestBlock
+	}
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -234,15 +236,13 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 	}()
 
 	var blockReader services.FullBlockReader
-	var allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
+	var allSnapshots = freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), logger)
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	//transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
-	transactionsV3 := false
-	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, transactionsV3)
-	engine := initConsensusEngine(chainConfig, allSnapshots)
+	blockReader = freezeblocks.NewBlockReader(allSnapshots)
+	engine := initConsensusEngine(chainConfig, allSnapshots, logger)
 
 	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 		h, err := blockReader.Header(ctx, historyTx, hash, number)
@@ -251,8 +251,8 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		}
 		return h
 	}
-	readWrapper := &ReaderWrapper23{ac: agg.MakeContext(), roTx: rwTx}
-	writeWrapper := &WriterWrapper23{w: agg}
+	readWrapper := &StateReaderV4{ac: agg.MakeContext(), roTx: rwTx}
+	writeWrapper := &StateWriterV4{w: agg}
 
 	commitFn := func(txn uint64) error {
 		if db == nil || rwTx == nil {
@@ -263,9 +263,9 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 			return fmt.Errorf("retrieving spaceDirty: %w", err)
 		}
 		if spaceDirty >= dirtySpaceThreshold {
-			log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+			logger.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
 		}
-		log.Info("database commitment", "block", blockNum, "txNum", txn, "uptime", time.Since(started))
+		logger.Info("database commitment", "block", blockNum, "txNum", txn, "uptime", time.Since(started))
 		if err := agg.Flush(ctx); err != nil {
 			return err
 		}
@@ -301,14 +301,15 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 			return err
 		}
 		if b == nil {
-			log.Info("history: block is nil", "block", blockNum)
+			logger.Info("history: block is nil", "block", blockNum)
 			break
 		}
 		agg.SetTx(rwTx)
 		agg.SetTxNum(txNum)
+		agg.SetBlockNum(blockNum)
 
 		if txNum, _, err = processBlock23(startTxNum, trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, b, vmConfig); err != nil {
-			log.Error("processing error", "block", blockNum, "err", err)
+			logger.Error("processing error", "block", blockNum, "err", err)
 			return fmt.Errorf("processing block %d: %w", blockNum, err)
 		}
 
@@ -317,16 +318,16 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		case interrupt = <-interruptCh:
 			// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
 			if err := agg.Flush(ctx); err != nil {
-				log.Error("aggregator flush", "err", err)
+				logger.Error("aggregator flush", "err", err)
 			}
 
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", txNum))
+			logger.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", agg.Stats().TxCount))
 			if err := commitFn(txNum); err != nil {
-				log.Error("db commit", "err", err)
+				logger.Error("db commit", "err", err)
 			}
 		case <-mergedRoots:
 			if err := commitFn(txNum); err != nil {
-				log.Error("db commit on merge", "err", err)
+				logger.Error("db commit on merge", "err", err)
 			}
 		default:
 		}
@@ -381,14 +382,14 @@ func (s *stat23) delta(aStats libstate.FilesStats, blockNum, txNum uint64) *stat
 	return s
 }
 
-func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *ReaderWrapper23, ww *WriterWrapper23, chainConfig *chain2.Config,
+func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *StateReaderV4, ww *StateWriterV4, chainConfig *chain2.Config,
 	engine consensus.Engine, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config,
 ) (uint64, types.Receipts, error) {
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 
 	header := block.Header()
 	vmConfig.Debug = true
-	gp := new(core.GasPool).AddGas(block.GasLimit())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 	usedGas := new(uint64)
 	var receipts types.Receipts
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
@@ -396,9 +397,8 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	ww.w.SetTxNum(txNum)
 
 	rw.blockNum = block.NumberU64()
-	ww.blockNum = block.NumberU64()
 
-	daoFork := txNum >= startTxNum && chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
+	daoFork := txNum >= startTxNum && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	if daoFork {
 		ibs := state.New(rw)
 		// TODO Actually add tracing to the DAO related accounts
@@ -418,11 +418,10 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	}
 
 	getHashFn := core.GetHashFn(header, getHeader)
-
 	for i, tx := range block.Transactions() {
 		if txNum >= startTxNum {
 			ibs := state.New(rw)
-			ibs.Prepare(tx.Hash(), block.Hash(), i)
+			ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			vmConfig.Tracer = ct
 			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig)
@@ -482,7 +481,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 		}
 
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, _, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil); err != nil {
+		if _, _, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil); err != nil {
 			return 0, nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 
@@ -501,7 +500,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	txNum++ // Post-block transaction
 	ww.w.SetTxNum(txNum)
 	if txNum >= startTxNum {
-		if commitments && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
+		if commitments && commitmentFrequency > 0 && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
 			rootHash, err := ww.w.ComputeCommitment(true, trace)
 			if err != nil {
 				return 0, nil, err
@@ -520,18 +519,17 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 }
 
 // Implements StateReader and StateWriter
-type ReaderWrapper23 struct {
+type StateReaderV4 struct {
 	roTx     kv.Tx
 	ac       *libstate.AggregatorContext
 	blockNum uint64
 }
 
-type WriterWrapper23 struct {
-	blockNum uint64
-	w        *libstate.Aggregator
+type StateWriterV4 struct {
+	w *libstate.Aggregator
 }
 
-func (rw *ReaderWrapper23) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
+func (rw *StateReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	enc, err := rw.ac.ReadAccountData(address.Bytes(), rw.roTx)
 	if err != nil {
 		return nil, err
@@ -540,35 +538,13 @@ func (rw *ReaderWrapper23) ReadAccountData(address libcommon.Address) (*accounts
 		return nil, nil
 	}
 	var a accounts.Account
-	a.Reset()
-	pos := 0
-	nonceBytes := int(enc[pos])
-	pos++
-	if nonceBytes > 0 {
-		a.Nonce = bytesToUint64(enc[pos : pos+nonceBytes])
-		pos += nonceBytes
-	}
-	balanceBytes := int(enc[pos])
-	pos++
-	if balanceBytes > 0 {
-		a.Balance.SetBytes(enc[pos : pos+balanceBytes])
-		pos += balanceBytes
-	}
-	codeHashBytes := int(enc[pos])
-	pos++
-	if codeHashBytes > 0 {
-		copy(a.CodeHash[:], enc[pos:pos+codeHashBytes])
-		pos += codeHashBytes
-	}
-	incBytes := int(enc[pos])
-	pos++
-	if incBytes > 0 {
-		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
+	if err := accounts.DeserialiseV3(&a, enc); err != nil {
+		return nil, err
 	}
 	return &a, nil
 }
 
-func (rw *ReaderWrapper23) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
+func (rw *StateReaderV4) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	enc, err := rw.ac.ReadAccountStorage(address.Bytes(), key.Bytes(), rw.roTx)
 	if err != nil {
 		return nil, err
@@ -582,115 +558,52 @@ func (rw *ReaderWrapper23) ReadAccountStorage(address libcommon.Address, incarna
 	return enc, nil
 }
 
-func (rw *ReaderWrapper23) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
+func (rw *StateReaderV4) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
 	return rw.ac.ReadAccountCode(address.Bytes(), rw.roTx)
 }
 
-func (rw *ReaderWrapper23) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
+func (rw *StateReaderV4) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
 	return rw.ac.ReadAccountCodeSize(address.Bytes(), rw.roTx)
 }
 
-func (rw *ReaderWrapper23) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
+func (rw *StateReaderV4) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	return 0, nil
 }
 
-func (ww *WriterWrapper23) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
-	var l int
-	l++
-	if account.Nonce > 0 {
-		l += (bits.Len64(account.Nonce) + 7) / 8
-	}
-	l++
-	if !account.Balance.IsZero() {
-		l += account.Balance.ByteLen()
-	}
-	l++
-	if !account.IsEmptyCodeHash() {
-		l += 32
-	}
-	l++
-	if account.Incarnation > 0 {
-		l += (bits.Len64(account.Incarnation) + 7) / 8
-	}
-	value := make([]byte, l)
-	pos := 0
-
-	if account.Nonce == 0 {
-		value[pos] = 0
-		pos++
-	} else {
-		nonceBytes := (bits.Len64(account.Nonce) + 7) / 8
-		value[pos] = byte(nonceBytes)
-		var nonce = account.Nonce
-		for i := nonceBytes; i > 0; i-- {
-			value[pos+i] = byte(nonce)
-			nonce >>= 8
-		}
-		pos += nonceBytes + 1
-	}
-	if account.Balance.IsZero() {
-		value[pos] = 0
-		pos++
-	} else {
-		balanceBytes := account.Balance.ByteLen()
-		value[pos] = byte(balanceBytes)
-		pos++
-		account.Balance.WriteToSlice(value[pos : pos+balanceBytes])
-		pos += balanceBytes
-	}
-	if account.IsEmptyCodeHash() {
-		value[pos] = 0
-		pos++
-	} else {
-		value[pos] = 32
-		pos++
-		copy(value[pos:pos+32], account.CodeHash[:])
-		pos += 32
-	}
-	if account.Incarnation == 0 {
-		value[pos] = 0
-	} else {
-		incBytes := (bits.Len64(account.Incarnation) + 7) / 8
-		value[pos] = byte(incBytes)
-		var inc = account.Incarnation
-		for i := incBytes; i > 0; i-- {
-			value[pos+i] = byte(inc)
-			inc >>= 8
-		}
-	}
+func (ww *StateWriterV4) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
+	value := accounts.SerialiseV3(account)
 	if err := ww.w.UpdateAccountData(address.Bytes(), value); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper23) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
+func (ww *StateWriterV4) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	if err := ww.w.UpdateAccountCode(address.Bytes(), code); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper23) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
+func (ww *StateWriterV4) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
 	if err := ww.w.DeleteAccount(address.Bytes()); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper23) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
+func (ww *StateWriterV4) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	if err := ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value.Bytes()); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper23) CreateContract(address libcommon.Address) error {
+func (ww *StateWriterV4) CreateContract(address libcommon.Address) error {
 	return nil
 }
 
-func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots) (engine consensus.Engine) {
-	l := log.New()
+func initConsensusEngine(cc *chain2.Config, snapshots *freezeblocks.RoSnapshots, logger log.Logger) (engine consensus.Engine) {
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}
@@ -698,24 +611,12 @@ func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots)
 	if cc.Clique != nil {
 		consensusConfig = params.CliqueSnapshot
 	} else if cc.Aura != nil {
-		config.Aura.Etherbase = config.Miner.Etherbase
 		consensusConfig = &config.Aura
-	} else if cc.Parlia != nil {
-		consensusConfig = &config.Parlia
 	} else if cc.Bor != nil {
 		consensusConfig = &config.Bor
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress, config.HeimdallURL, config.WithoutHeimdall, datadirCli, snapshots, true /* readonly */)
-}
-
-func bytesToUint64(buf []byte) (x uint64) {
-	for i, b := range buf {
-		x = x<<8 + uint64(b)
-		if i == 7 {
-			return
-		}
-	}
-	return
+	return ethconsensusconfig.CreateConsensusEngine(cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress,
+		config.HeimdallURL, config.WithoutHeimdall, datadirCli, true /* readonly */, logger)
 }

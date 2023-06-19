@@ -21,14 +21,13 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -73,8 +72,7 @@ type StateTransition struct {
 	sharedBuyGas        *uint256.Int
 	sharedBuyGasBalance *uint256.Int
 
-	isParlia bool
-	isBor    bool
+	isBor bool
 }
 
 // Message represents a message sent to a contract.
@@ -86,12 +84,15 @@ type Message interface {
 	FeeCap() *uint256.Int
 	Tip() *uint256.Int
 	Gas() uint64
+	DataGas() uint64
+	MaxFeePerDataGas() *uint256.Int
 	Value() *uint256.Int
 
 	Nonce() uint64
 	CheckNonce() bool
 	Data() []byte
 	AccessList() types2.AccessList
+	DataHashes() []libcommon.Hash
 
 	IsFree() bool
 }
@@ -99,9 +100,10 @@ type Message interface {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	UsedGas    uint64 // Total used gas but include the refunded gas
-	Err        error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	ReturnData []byte // Returned data from evm(function result or data supplied with revert opcode)
+	UsedGas     uint64 // Total used gas but include the refunded gas
+	UsedDataGas uint64 // Total data gas used
+	Err         error  // Any error encountered during the execution(listed in core/vm/errors.go)
+	ReturnData  []byte // Returned data from evm(function result or data supplied with revert opcode)
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -142,8 +144,8 @@ func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation 
 		}
 	}
 
-	gas, status := txpool.CalcIntrinsicGas(dataLen, dataNonZeroLen, accessList, isContractCreation, isHomestead, isEIP2028, isEIP3860)
-	if status != txpool.Success {
+	gas, status := txpoolcfg.CalcIntrinsicGas(dataLen, dataNonZeroLen, accessList, isContractCreation, isHomestead, isEIP2028, isEIP3860)
+	if status != txpoolcfg.Success {
 		return 0, ErrGasUintOverflow
 	}
 	return gas, nil
@@ -151,7 +153,6 @@ func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation 
 
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTransition {
-	isParlia := evm.ChainConfig().Parlia != nil
 	isBor := evm.ChainConfig().Bor != nil
 	return &StateTransition{
 		gp:        gp,
@@ -167,8 +168,7 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 		sharedBuyGas:        uint256.NewInt(0),
 		sharedBuyGasBalance: uint256.NewInt(0),
 
-		isParlia: isParlia,
-		isBor:    isBor,
+		isBor: isBor,
 	}
 }
 
@@ -201,6 +201,24 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	if overflow {
 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 	}
+
+	// compute data fee for eip-4844 data blobs if any
+	dgval := new(uint256.Int)
+	var dataGasUsed uint64
+	if st.evm.ChainRules().IsCancun {
+		if st.evm.Context().ExcessDataGas == nil {
+			return fmt.Errorf("%w: Cancun is active but ExcessDataGas is nil", ErrInternalFailure)
+		}
+		dataGasPrice, err := misc.GetDataGasPrice(*st.evm.Context().ExcessDataGas)
+		if err != nil {
+			return err
+		}
+		_, overflow = dgval.MulOverflow(dataGasPrice, new(uint256.Int).SetUint64(st.dataGasUsed()))
+		if overflow {
+			return fmt.Errorf("%w: overflow converting datagas: %v", ErrInsufficientFunds, dgval)
+		}
+	}
+
 	balanceCheck := mgval
 	if st.gasFeeCap != nil {
 		balanceCheck = st.sharedBuyGasBalance.SetUint64(st.msg.Gas())
@@ -209,6 +227,10 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 		}
 		balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, st.value)
+		if overflow {
+			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+		}
+		balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, dgval)
 		if overflow {
 			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 		}
@@ -227,10 +249,15 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		}
 	}
 	st.gas += st.msg.Gas()
-
 	st.initialGas = st.msg.Gas()
+
+	if err := st.gp.SubDataGas(dataGasUsed); err != nil {
+		return err
+	}
+
 	if subBalance {
 		st.state.SubBalance(st.msg.From(), mgval)
+		st.state.SubBalance(st.msg.From(), dgval)
 	}
 	return nil
 }
@@ -282,6 +309,22 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
+	if st.dataGasUsed() > 0 && st.evm.ChainRules().IsCancun {
+		if st.evm.Context().ExcessDataGas == nil {
+			return fmt.Errorf("%w: Cancun is active but ExcessDataGas is nil", ErrInternalFailure)
+		}
+		dataGasPrice, err := misc.GetDataGasPrice(*st.evm.Context().ExcessDataGas)
+		if err != nil {
+			return err
+		}
+		maxFeePerDataGas := st.msg.MaxFeePerDataGas()
+		if dataGasPrice.Cmp(maxFeePerDataGas) > 0 {
+			return fmt.Errorf("%w: address %v, maxFeePerDataGas: %v dataGasPrice: %v, excessDataGas: %v",
+				ErrMaxFeePerDataGas,
+				st.msg.From().Hex(), st.msg.MaxFeePerDataGas(), dataGasPrice, st.evm.Context().ExcessDataGas)
+		}
+	}
+
 	return st.buyGas(gasBailout)
 }
 
@@ -299,11 +342,13 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*ExecutionResult, error) {
+	coinbase := st.evm.Context().Coinbase
+
 	var input1 *uint256.Int
 	var input2 *uint256.Int
 	if st.isBor {
 		input1 = st.state.GetBalance(st.msg.From()).Clone()
-		input2 = st.state.GetBalance(st.evm.Context().Coinbase).Clone()
+		input2 = st.state.GetBalance(coinbase).Clone()
 	}
 
 	// First check this message satisfies all consensus rules before
@@ -315,12 +360,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	// 4. the purchased gas is enough to cover intrinsic usage
 	// 5. there is no overflow when calculating intrinsic gas
 	// 6. caller has enough balance to cover asset transfer for **topmost** call
-
-	// BSC always gave gas bailout due to system transactions that set 2^256/2 gas limit and
-	// for Parlia consensus this flag should be always be set
-	if st.isParlia {
-		gasBailout = true
-	}
 
 	// Check clauses 1-3 and 6, buy gas if everything is correct
 	if err := st.preCheck(gasBailout); err != nil {
@@ -339,17 +378,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
-
-	if rules.IsNano {
-		for _, blackListAddr := range types.NanoBlackList {
-			if blackListAddr == sender.Address() {
-				return nil, fmt.Errorf("block blacklist account")
-			}
-			if msg.To() != nil && *msg.To() == blackListAddr {
-				return nil, fmt.Errorf("block blacklist account")
-			}
-		}
-	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
 	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860)
@@ -374,14 +402,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
 
-	// Set up the initial access list.
-	if rules.IsBerlin {
-		st.state.PrepareAccessList(msg.From(), msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
-		// EIP-3651 warm COINBASE
-		if rules.IsShanghai {
-			st.state.AddAddressToAccessList(st.evm.Context().Coinbase)
-		}
-	}
+	// Execute the preparatory steps for state transition which includes:
+	// - prepare accessList(post-berlin)
+	// - reset transient storage(eip 1153)
+	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
 
 	var (
 		ret   []byte
@@ -417,11 +441,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-	if st.isParlia {
-		st.state.AddBalance(consensus.SystemAddress, amount)
-	} else {
-		st.state.AddBalance(st.evm.Context().Coinbase, amount)
-	}
+	st.state.AddBalance(coinbase, amount)
 	if !msg.IsFree() && rules.IsLondon && rules.IsEip1559FeeCollector {
 		burntContractAddress := *st.evm.ChainConfig().Eip1559FeeCollector
 		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
@@ -436,7 +456,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 			st.state,
 
 			msg.From(),
-			st.evm.Context().Coinbase,
+			coinbase,
 
 			amount,
 			input1,
@@ -447,9 +467,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 
 	return &ExecutionResult{
-		UsedGas:    st.gasUsed(),
-		Err:        vmerr,
-		ReturnData: ret,
+		UsedGas:     st.gasUsed(),
+		UsedDataGas: st.dataGasUsed(),
+		Err:         vmerr,
+		ReturnData:  ret,
 	}, nil
 }
 
@@ -473,4 +494,8 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gas
+}
+
+func (st *StateTransition) dataGasUsed() uint64 {
+	return misc.GetDataGasUsed(len(st.msg.DataHashes()))
 }

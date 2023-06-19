@@ -19,7 +19,7 @@
 
 ## Introduction
 
-Erigon's `rpcdaemon` runs in its own seperate process.
+Erigon's `rpcdaemon` runs in its own separate process.
 
 This brings many benefits including easier development, the ability to run multiple daemons at once, and the ability to
 run the daemon remotely. It is possible to run the daemon locally as well (read-only) if both processes have access to
@@ -92,7 +92,7 @@ Configuration of the health check is sent as POST body of the method.
 
 Not adding a check disables that.
 
-**`min_peer_count`** -- checks for mimimum of healthy node peers. Requires
+**`min_peer_count`** -- checks for minimum of healthy node peers. Requires
 `net` namespace to be listed in `http.api`.
 
 **`known_block`** -- sets up the block that node has to know about. Requires
@@ -184,7 +184,7 @@ Next options available (by `--prune` flag):
 
 By default data pruned after 90K blocks, can change it by flags like `--prune.history.after=100_000`
 
-Some methods, if not found historical data in DB, can fallback to old blocks re-execution - but it require `h`.
+Some methods, if not found historical data in DB, can fallback to old blocks re-execution - but it requires `h`.
 
 ### RPC Implementation Status
 
@@ -243,6 +243,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_newFilter                              | Yes     | Added by PR#4253                     |
 | eth_newBlockFilter                         | Yes     |                                      |
 | eth_newPendingTransactionFilter            | Yes     |                                      |
+| eth_getFilterLogs                          | Yes     | Added by PR#6514                     |
 | eth_getFilterChanges                       | Yes     |                                      |
 | eth_uninstallFilter                        | Yes     |                                      |
 | eth_getLogs                                | Yes     |                                      |
@@ -254,7 +255,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_signTransaction                        | -       | not yet implemented                  |
 | eth_signTypedData                          | -       | ????                                 |
 |                                            |         |                                      |
-| eth_getProof                               | -       | not yet implemented                  |
+| eth_getProof                               | Yes     | Limited to last 1000 blocks          |
 |                                            |         |                                      |
 | eth_mining                                 | Yes     | returns true if --mine flag provided |
 | eth_coinbase                               | Yes     |                                      |
@@ -353,7 +354,7 @@ Erigon and RPC daemon nodes that are supposed to work together):
    counterparts.
 3. For each Erigon instance and each RPC daemon instance, generate a key pair. If you are lazy, you can generate one
    pair for all Erigon nodes, and one pair for all RPC daemons, and copy these keys around.
-4. Using the CA private key, create cerificate file for each public key generated on the previous step. This
+4. Using the CA private key, create certificate file for each public key generated on the previous step. This
    effectively "inducts" these keys into the "cluster of trust".
 5. On each instance, deploy 3 files - CA certificate, instance key, and certificate signed by CA for this instance key.
 
@@ -427,8 +428,8 @@ daemon needs to be started with these extra options:
 ```
 
 **WARNING** Normally, the "client side" (which in our case is RPC daemon), verifies that the host name of the server
-matches the "Common Name" attribute of the "server" cerificate. At this stage, this verification is turned off, and it
-will be turned on again once we have updated the instruction above on how to properly generate cerificates with "Common
+matches the "Common Name" attribute of the "server" certificate. At this stage, this verification is turned off, and it
+will be turned on again once we have updated the instruction above on how to properly generate certificates with "Common
 Name".
 
 When running Erigon instance in the Google Cloud, for example, you need to specify the **Internal IP** in

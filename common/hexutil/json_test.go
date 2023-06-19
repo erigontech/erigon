@@ -18,7 +18,6 @@ package hexutil
 
 import (
 	"bytes"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math/big"
@@ -49,80 +48,7 @@ func referenceBig(s string) *big.Int {
 	return b
 }
 
-func referenceBytes(s string) []byte {
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		panic(err)
-	}
-	return b
-}
-
 var errJSONEOF = errors.New("unexpected end of JSON input")
-
-var unmarshalBytesTests = []unmarshalTest{
-	// invalid encoding
-	{input: "", wantErr: errJSONEOF},
-	{input: "null", wantErr: errNonString(bytesT)},
-	{input: "10", wantErr: errNonString(bytesT)},
-	{input: `"0"`, wantErr: wrapTypeError(ErrMissingPrefix, bytesT)},
-	{input: `"0x0"`, wantErr: wrapTypeError(ErrOddLength, bytesT)},
-	{input: `"0xxx"`, wantErr: wrapTypeError(ErrSyntax, bytesT)},
-	{input: `"0x01zz01"`, wantErr: wrapTypeError(ErrSyntax, bytesT)},
-
-	// valid encoding
-	{input: `""`, want: referenceBytes("")},
-	{input: `"0x"`, want: referenceBytes("")},
-	{input: `"0x02"`, want: referenceBytes("02")},
-	{input: `"0X02"`, want: referenceBytes("02")},
-	{input: `"0xffffffffff"`, want: referenceBytes("ffffffffff")},
-	{
-		input: `"0xffffffffffffffffffffffffffffffffffff"`,
-		want:  referenceBytes("ffffffffffffffffffffffffffffffffffff"),
-	},
-}
-
-func TestUnmarshalBytes(t *testing.T) {
-	for _, test := range unmarshalBytesTests {
-		var v Bytes
-		err := json.Unmarshal([]byte(test.input), &v)
-		if !checkError(t, test.input, err, test.wantErr) {
-			continue
-		}
-		if !bytes.Equal(test.want.([]byte), v) {
-			t.Errorf("input %s: value mismatch: got %x, want %x", test.input, &v, test.want)
-			continue
-		}
-	}
-}
-
-func BenchmarkUnmarshalBytes(b *testing.B) {
-	input := []byte(`"0x123456789abcdef123456789abcdef"`)
-	for i := 0; i < b.N; i++ {
-		var v Bytes
-		if err := v.UnmarshalJSON(input); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func TestMarshalBytes(t *testing.T) {
-	for _, test := range encodeBytesTests {
-		in := test.input.([]byte)
-		out, err := json.Marshal(Bytes(in))
-		if err != nil {
-			t.Errorf("%x: %v", in, err)
-			continue
-		}
-		if want := `"` + test.want + `"`; string(out) != want {
-			t.Errorf("%x: MarshalJSON output mismatch: got %q, want %q", in, out, want)
-			continue
-		}
-		if out := Bytes(in).String(); out != test.want {
-			t.Errorf("%x: String mismatch: got %q, want %q", in, out, test.want)
-			continue
-		}
-	}
-}
 
 var unmarshalBigTests = []unmarshalTest{
 	// invalid encoding

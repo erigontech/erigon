@@ -6,18 +6,62 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-func GetBlockByNumber(reqId int, blockNum uint64, withTxs bool) (rpctest.EthBlockByNumber, error) {
-	reqGen := initialiseRequestGenerator(reqId)
-	var b rpctest.EthBlockByNumber
+type EthBlockNumber struct {
+	CommonResponse
+	Number hexutil.Uint64 `json:"result"`
+}
 
-	req := reqGen.GetBlockByNumber(blockNum, withTxs)
+type EthBlockByNumber struct {
+	CommonResponse
+	Result *EthBlockByNumberResult `json:"result"`
+}
 
-	res := reqGen.Erigon(models.ETHGetBlockByNumber, req, &b)
+type EthBlockByNumberResult struct {
+	Difficulty   hexutil.Big       `json:"difficulty"`
+	Miner        libcommon.Address `json:"miner"`
+	Transactions []EthTransaction  `json:"transactions"`
+	TxRoot       libcommon.Hash    `json:"transactionsRoot"`
+	Hash         libcommon.Hash    `json:"hash"`
+}
+
+type EthGetTransactionCount struct {
+	CommonResponse
+	Result hexutil.Uint64 `json:"result"`
+}
+
+type EthSendRawTransaction struct {
+	CommonResponse
+	TxnHash libcommon.Hash `json:"result"`
+}
+
+func (reqGen *requestGenerator) BlockNumber() (uint64, error) {
+	var b EthBlockNumber
+
+	method, body := reqGen.blockNumber()
+	res := reqGen.call(method, body, &b)
+	number := uint64(b.Number)
+
+	if res.Err != nil {
+		return number, fmt.Errorf("error getting current block number: %v", res.Err)
+	}
+
+	return number, nil
+}
+
+func (req *requestGenerator) blockNumber() (RPCMethod, string) {
+	const template = `{"jsonrpc":"2.0","method":%q,"id":%d}`
+	return Methods.ETHBlockNumber, fmt.Sprintf(template, Methods.ETHBlockNumber, req.reqID)
+}
+
+func (reqGen *requestGenerator) GetBlockByNumber(blockNum uint64, withTxs bool) (EthBlockByNumber, error) {
+	var b EthBlockByNumber
+
+	method, body := reqGen.getBlockByNumber(blockNum, withTxs)
+	res := reqGen.call(method, body, &b)
 	if res.Err != nil {
 		return b, fmt.Errorf("error getting block by number: %v", res.Err)
 	}
@@ -29,16 +73,24 @@ func GetBlockByNumber(reqId int, blockNum uint64, withTxs bool) (rpctest.EthBloc
 	return b, nil
 }
 
-func GetBlockByNumberDetails(reqId int, blockNum string, withTxs bool) (map[string]interface{}, error) {
-	reqGen := initialiseRequestGenerator(reqId)
+func (req *requestGenerator) getBlockByNumber(blockNum uint64, withTxs bool) (RPCMethod, string) {
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x",%t],"id":%d}`
+	return Methods.ETHGetBlockByNumber, fmt.Sprintf(template, Methods.ETHGetBlockByNumber, blockNum, withTxs, req.reqID)
+}
+
+func (req *requestGenerator) getBlockByNumberI(blockNum string, withTxs bool) (RPCMethod, string) {
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["%s",%t],"id":%d}`
+	return Methods.ETHGetBlockByNumber, fmt.Sprintf(template, Methods.ETHGetBlockByNumber, blockNum, withTxs, req.reqID)
+}
+
+func (reqGen *requestGenerator) GetBlockByNumberDetails(blockNum string, withTxs bool) (map[string]interface{}, error) {
 	var b struct {
-		rpctest.CommonResponse
+		CommonResponse
 		Result interface{} `json:"result"`
 	}
 
-	req := reqGen.GetBlockByNumberI(blockNum, withTxs)
-
-	res := reqGen.Erigon(models.ETHGetBlockByNumber, req, &b)
+	method, body := reqGen.getBlockByNumberI(blockNum, withTxs)
+	res := reqGen.call(method, body, &b)
 	if res.Err != nil {
 		return nil, fmt.Errorf("error getting block by number: %v", res.Err)
 	}
@@ -55,11 +107,11 @@ func GetBlockByNumberDetails(reqId int, blockNum string, withTxs bool) (map[stri
 	return m, nil
 }
 
-func GetTransactionCount(reqId int, address libcommon.Address, blockNum models.BlockNumber) (rpctest.EthGetTransactionCount, error) {
-	reqGen := initialiseRequestGenerator(reqId)
-	var b rpctest.EthGetTransactionCount
+func (reqGen *requestGenerator) GetTransactionCount(address libcommon.Address, blockNum BlockNumber) (EthGetTransactionCount, error) {
+	var b EthGetTransactionCount
 
-	if res := reqGen.Erigon(models.ETHGetTransactionCount, reqGen.GetTransactionCount(address, blockNum), &b); res.Err != nil {
+	method, body := reqGen.getTransactionCount(address, blockNum)
+	if res := reqGen.call(method, body, &b); res.Err != nil {
 		return b, fmt.Errorf("error getting transaction count: %v", res.Err)
 	}
 
@@ -70,18 +122,41 @@ func GetTransactionCount(reqId int, address libcommon.Address, blockNum models.B
 	return b, nil
 }
 
-func SendTransaction(reqId int, signedTx *types.Transaction) (*libcommon.Hash, error) {
-	reqGen := initialiseRequestGenerator(reqId)
-	var b rpctest.EthSendRawTransaction
+func (req *requestGenerator) getTransactionCount(address libcommon.Address, blockNum BlockNumber) (RPCMethod, string) {
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x","%v"],"id":%d}`
+	return Methods.ETHGetTransactionCount, fmt.Sprintf(template, Methods.ETHGetTransactionCount, address, blockNum, req.reqID)
+}
+
+func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (*libcommon.Hash, error) {
+	var b EthSendRawTransaction
 
 	var buf bytes.Buffer
-	if err := (*signedTx).MarshalBinary(&buf); err != nil {
+	if err := signedTx.MarshalBinary(&buf); err != nil {
 		return nil, fmt.Errorf("failed to marshal binary: %v", err)
 	}
 
-	if res := reqGen.Erigon(models.ETHSendRawTransaction, reqGen.SendRawTransaction(buf.Bytes()), &b); res.Err != nil {
+	method, body := reqGen.sendRawTransaction(buf.Bytes())
+	if res := reqGen.call(method, body, &b); res.Err != nil {
 		return nil, fmt.Errorf("could not make to request to eth_sendRawTransaction: %v", res.Err)
 	}
 
+	zeroHash := true
+
+	for _, hb := range b.TxnHash {
+		if hb != 0 {
+			zeroHash = false
+			break
+		}
+	}
+
+	if zeroHash {
+		return nil, fmt.Errorf("Request: %d, hash: %s, nonce  %d: returned a zero transaction hash", b.RequestId, signedTx.Hash().Hex(), signedTx.GetNonce())
+	}
+
 	return &b.TxnHash, nil
+}
+
+func (req *requestGenerator) sendRawTransaction(signedTx []byte) (RPCMethod, string) {
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x"],"id":%d}`
+	return Methods.ETHSendRawTransaction, fmt.Sprintf(template, Methods.ETHSendRawTransaction, signedTx, req.reqID)
 }

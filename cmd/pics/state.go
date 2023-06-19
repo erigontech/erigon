@@ -72,8 +72,8 @@ import (
 var bucketLabels = map[string]string{
 	kv.Receipts:          "Receipts",
 	kv.Log:               "Event Logs",
-	kv.AccountsHistory:   "History Of Accounts",
-	kv.StorageHistory:    "History Of Storage",
+	kv.E2AccountsHistory: "History Of Accounts",
+	kv.E2StorageHistory:  "History Of Storage",
 	kv.Headers:           "Headers",
 	kv.HeaderCanonical:   "Canonical headers",
 	kv.HeaderTD:          "Headers TD",
@@ -273,9 +273,9 @@ func initialState1() error {
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		theAddr  = libcommon.Address{1}
-		gspec    = &core.Genesis{
+		gspec    = &types.Genesis{
 			Config: params.AllProtocolChanges,
-			Alloc: core.GenesisAlloc{
+			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
 				address2: {Balance: big.NewInt(300000000000000000)},
@@ -283,7 +283,7 @@ func initialState1() error {
 			GasLimit: 10000000,
 		}
 		// this code generates a log
-		signer = types.MakeSigner(params.AllProtocolChanges, 1)
+		signer = types.MakeSigner(params.AllProtocolChanges, 1, 0)
 	)
 	m := stages.MockWithGenesis(nil, gspec, key, false)
 	defer m.DB.Close()
@@ -430,13 +430,13 @@ func initialState1() error {
 	// BLOCKS
 
 	for i := 0; i < chain.Length(); i++ {
-		if err = m2.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m2.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			return err
 		}
 		if err = stateDatabaseComparison(m.DB, m2.DB, i+1); err != nil {
 			return err
 		}
-		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			return err
 		}
 	}

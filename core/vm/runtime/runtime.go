@@ -17,6 +17,7 @@
 package runtime
 
 import (
+	"context"
 	"math"
 	"math/big"
 	"time"
@@ -24,11 +25,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 )
 
 // Config is a basic type specifying certain configuration flags for running
@@ -59,10 +60,7 @@ func setDefaults(cfg *Config) {
 		cfg.ChainConfig = &chain.Config{
 			ChainID:               big.NewInt(1),
 			HomesteadBlock:        new(big.Int),
-			DAOForkBlock:          new(big.Int),
-			DAOForkSupport:        false,
 			TangerineWhistleBlock: new(big.Int),
-			TangerineWhistleHash:  libcommon.Hash{},
 			SpuriousDragonBlock:   new(big.Int),
 			ByzantiumBlock:        new(big.Int),
 			ConstantinopleBlock:   new(big.Int),
@@ -115,21 +113,28 @@ func Execute(code, input []byte, cfg *Config, bn uint64) ([]byte, *state.IntraBl
 	}
 	setDefaults(cfg)
 
-	if cfg.State == nil {
-		db := olddb.NewObjectDatabase(memdb.New(""))
+	externalState := cfg.State != nil
+	var tx kv.RwTx
+	var err error
+	if !externalState {
+		db := memdb.New("")
 		defer db.Close()
-		cfg.r = state.NewDbStateReader(db)
-		cfg.w = state.NewDbStateWriter(db, 0)
+		tx, err = db.BeginRw(context.Background())
+		if err != nil {
+			return nil, nil, err
+		}
+		defer tx.Rollback()
+		cfg.r = state.NewPlainStateReader(tx)
+		cfg.w = state.NewPlainStateWriter(tx, tx, 0)
 		cfg.State = state.New(cfg.r)
 	}
 	var (
 		address = libcommon.BytesToAddress([]byte("contract"))
 		vmenv   = NewEnv(cfg)
 		sender  = vm.AccountRef(cfg.Origin)
+		rules   = cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time)
 	)
-	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time); rules.IsBerlin {
-		cfg.State.PrepareAccessList(cfg.Origin, &address, vm.ActivePrecompiles(rules), nil)
-	}
+	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil)
 	cfg.State.CreateAccount(address, true)
 	// set the receiver's (the executing contract) code for execution.
 	cfg.State.SetCode(address, code)
@@ -153,20 +158,27 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 	}
 	setDefaults(cfg)
 
-	if cfg.State == nil {
-		db := olddb.NewObjectDatabase(memdb.New(""))
+	externalState := cfg.State != nil
+	var tx kv.RwTx
+	var err error
+	if !externalState {
+		db := memdb.New("")
 		defer db.Close()
-		cfg.r = state.NewDbStateReader(db)
-		cfg.w = state.NewDbStateWriter(db, 0)
+		tx, err = db.BeginRw(context.Background())
+		if err != nil {
+			return nil, [20]byte{}, 0, err
+		}
+		defer tx.Rollback()
+		cfg.r = state.NewPlainStateReader(tx)
+		cfg.w = state.NewPlainStateWriter(tx, tx, 0)
 		cfg.State = state.New(cfg.r)
 	}
 	var (
 		vmenv  = NewEnv(cfg)
 		sender = vm.AccountRef(cfg.Origin)
+		rules  = cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time)
 	)
-	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time); rules.IsBerlin {
-		cfg.State.PrepareAccessList(cfg.Origin, nil, vm.ActivePrecompiles(rules), nil)
-	}
+	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, nil, vm.ActivePrecompiles(rules), nil)
 
 	// Call the code with the given configuration.
 	code, address, leftOverGas, err := vmenv.Create(
@@ -190,9 +202,8 @@ func Call(address libcommon.Address, input []byte, cfg *Config) ([]byte, uint64,
 
 	sender := cfg.State.GetOrNewStateObject(cfg.Origin)
 	statedb := cfg.State
-	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time); rules.IsBerlin {
-		statedb.PrepareAccessList(cfg.Origin, &address, vm.ActivePrecompiles(rules), nil)
-	}
+	rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time)
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil)
 
 	// Call the code with the given configuration.
 	ret, leftOverGas, err := vmenv.Call(

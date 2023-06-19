@@ -12,15 +12,17 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/btree"
-	"github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -29,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -37,13 +38,14 @@ import (
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
-	"go.uber.org/atomic"
 )
 
 const (
-	checkpointInterval = 1024 // Number of blocks after which to save the vote snapshot to the database
-	inmemorySnapshots  = 128  // Number of recent vote snapshots to keep in memory
-	inmemorySignatures = 4096 // Number of recent block signatures to keep in memory
+	spanLength              = 6400 // Number of blocks in a span
+	zerothSpanEnd           = 255  // End block of 0th span
+	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
+	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
+	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
 )
 
 // Bor protocol constants.
@@ -247,6 +249,7 @@ type Bor struct {
 	spanCache *btree.BTree
 
 	closeOnce sync.Once
+	logger    log.Logger
 }
 
 type signer struct {
@@ -261,6 +264,7 @@ func New(
 	spanner Spanner,
 	heimdallClient IHeimdallClient,
 	genesisContracts GenesisContract,
+	logger log.Logger,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor
@@ -284,6 +288,7 @@ func New(
 		HeimdallClient:         heimdallClient,
 		spanCache:              btree.New(32),
 		execCtx:                context.Background(),
+		logger:                 logger,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -402,11 +407,6 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, gasCap)
 	}
 
-	// If all checks passed, validate any special fields for hard forks
-	if err := misc.VerifyForkHashes(chain.Config(), header, false); err != nil {
-		return err
-	}
-
 	// All basic checks passed, verify cascading fields
 	return c.verifyCascadingFields(chain, header, parents)
 }
@@ -463,7 +463,7 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 		if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 			return err
 		}
-	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
+	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header, false /*skipGasLimit*/); err != nil {
 		// Verify the header's EIP-1559 attributes.
 		return err
 	}
@@ -480,6 +480,40 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
 	if err != nil {
 		return err
+	}
+
+	// Verify the validator list match the local contract
+	//
+	// Note: Here we fetch the data from span instead of contract
+	// as done in bor client. The contract (validator set) returns
+	// a fixed span for 0th span i.e. 0 - 255 blocks. Hence, the
+	// contract data and span data won't match for that. Skip validating
+	// for 0th span. TODO: Remove `number > zerothSpanEnd` check
+	// once we start fetching validator data from contract.
+	if number > zerothSpanEnd && isSprintStart(number+1, c.config.CalculateSprint(number)) {
+		producerSet, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
+
+		if err != nil {
+			return err
+		}
+
+		sort.Sort(valset.ValidatorsByAddress(producerSet))
+
+		headerVals, err := valset.ParseValidators(header.Extra[extraVanity : len(header.Extra)-extraSeal])
+
+		if err != nil {
+			return err
+		}
+
+		if len(producerSet) != len(headerVals) {
+			return errInvalidSpanValidators
+		}
+
+		for i, val := range producerSet {
+			if !bytes.Equal(val.HeaderBytes(), headerVals[i].HeaderBytes()) {
+				return errInvalidSpanValidators
+			}
+		}
 	}
 
 	// verify the validator list in the last sprint block
@@ -519,10 +553,10 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			break
 		}
 
-		// If an on-disk checkpoint snapshot can be found, use that
-		if number%checkpointInterval == 0 {
+		// If an on-disk snapshot can be found, use that
+		if number%snapshotPersistInterval == 0 {
 			if s, err := loadSnapshot(c.config, c.signatures, c.DB, hash); err == nil {
-				log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
+				c.logger.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 
 				snap = s
 
@@ -550,12 +584,12 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 				}
 
 				// new snap shot
-				snap = newSnapshot(c.config, c.signatures, number, hash, validators)
+				snap = newSnapshot(c.config, c.signatures, number, hash, validators, c.logger)
 				if err := snap.store(c.DB); err != nil {
 					return nil, err
 				}
 
-				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
+				c.logger.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
 
 				break
 			}
@@ -593,20 +627,20 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
 
-	snap, err := snap.apply(headers)
+	snap, err := snap.apply(headers, c.logger)
 	if err != nil {
 		return nil, err
 	}
 
 	c.recents.Add(snap.Hash, snap)
 
-	// If we've generated a new checkpoint snapshot, save to disk
-	if snap.Number%checkpointInterval == 0 && len(headers) > 0 {
+	// If we've generated a new persistent snapshot, save to disk
+	if snap.Number%snapshotPersistInterval == 0 && len(headers) > 0 {
 		if err = snap.store(c.DB); err != nil {
 			return nil, err
 		}
 
-		log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+		c.logger.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
 
 	return snap, err
@@ -713,8 +747,12 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	header.Extra = header.Extra[:extraVanity]
 
 	// get validator set if number
+	// Note: headers.Extra has producer set and not validator set. The bor
+	// client calls `GetCurrentValidators` because it makes a contract call
+	// where it fetches producers internally. As we fetch data from span
+	// in Erigon, use directly the `GetCurrentProducers` function.
 	if isSprintStart(number+1, c.config.CalculateSprint(number)) {
-		newValidators, err := c.spanner.GetCurrentValidators(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
+		newValidators, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
 		if err != nil {
 			return errUnknownValidators
 		}
@@ -756,11 +794,16 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	return nil
 }
 
+func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall,
+) ([]consensus.Reward, error) {
+	return []consensus.Reward{}, nil
+}
+
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
 	var err error
 
@@ -770,7 +813,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 		// check and commit span
 		if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
-			log.Error("Error while committing span", "err", err)
+			c.logger.Error("Error while committing span", "err", err)
 			return nil, types.Receipts{}, err
 		}
 
@@ -778,14 +821,14 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 			// commit states
 			_, err = c.CommitStates(state, header, cx, syscall)
 			if err != nil {
-				log.Error("Error while committing states", "err", err)
+				c.logger.Error("Error while committing states", "err", err)
 				return nil, types.Receipts{}, err
 			}
 		}
 	}
 
 	if err = c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
-		log.Error("Error changing contract code", "err", err)
+		c.logger.Error("Error changing contract code", "err", err)
 		return nil, types.Receipts{}, err
 	}
 
@@ -799,8 +842,8 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 	return nil, types.Receipts{}, nil
 }
 
-func decodeGenesisAlloc(i interface{}) (core.GenesisAlloc, error) {
-	var alloc core.GenesisAlloc
+func decodeGenesisAlloc(i interface{}) (types.GenesisAlloc, error) {
+	var alloc types.GenesisAlloc
 
 	b, err := json.Marshal(i)
 	if err != nil {
@@ -823,7 +866,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 			}
 
 			for addr, account := range allocs {
-				log.Trace("change contract code", "address", addr)
+				c.logger.Trace("change contract code", "address", addr)
 				state.SetCode(addr, account.Code)
 			}
 		}
@@ -836,7 +879,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 // nor block rewards given, and returns the final block.
 func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// stateSyncData := []*types.StateSyncData{}
 
@@ -847,7 +890,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		// check and commit span
 		err := c.checkAndCommitSpan(state, header, cx, syscall)
 		if err != nil {
-			log.Error("Error while committing span", "err", err)
+			c.logger.Error("Error while committing span", "err", err)
 			return nil, nil, types.Receipts{}, err
 		}
 
@@ -855,14 +898,14 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 			// commit states
 			_, err = c.CommitStates(state, header, cx, syscall)
 			if err != nil {
-				log.Error("Error while committing states", "err", err)
+				c.logger.Error("Error while committing states", "err", err)
 				return nil, nil, types.Receipts{}, err
 			}
 		}
 	}
 
 	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
-		log.Error("Error changing contract code", "err", err)
+		c.logger.Error("Error changing contract code", "err", err)
 		return nil, nil, types.Receipts{}, err
 	}
 
@@ -885,7 +928,7 @@ func (c *Bor) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *ty
 	return nil
 }
 
-func (c *Bor) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header,
+func (c *Bor) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 }
 
@@ -911,7 +954,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 
 	// For 0-period chains, refuse to seal empty blocks (no reward but would spin sealing)
 	if c.config.CalculatePeriod(number) == 0 && len(block.Transactions()) == 0 {
-		log.Trace("Sealing paused, waiting for transactions")
+		c.logger.Trace("Sealing paused, waiting for transactions")
 		return nil
 	}
 
@@ -948,16 +991,16 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 
 	// Wait until sealing is terminated or delay timeout.
-	log.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay-in-sec", uint(delay), "delay", common.PrettyDuration(delay))
+	c.logger.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay-in-sec", uint(delay), "delay", common.PrettyDuration(delay))
 
 	go func() {
 		select {
 		case <-stop:
-			log.Info("Discarding sealing operation for block", "number", number)
+			c.logger.Info("Discarding sealing operation for block", "number", number)
 			return
 		case <-time.After(delay):
 			if wiggle > 0 {
-				log.Info(
+				c.logger.Info(
 					"Sealing out-of-turn",
 					"number", number,
 					"wiggle", common.PrettyDuration(wiggle),
@@ -965,7 +1008,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 				)
 			}
 
-			log.Info(
+			c.logger.Info(
 				"Sealing successful",
 				"number", number,
 				"delay", delay,
@@ -975,7 +1018,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 		select {
 		case results <- block.WithSeal(header):
 		default:
-			log.Warn("Sealing result was not read by miner", "number", number, "sealhash", SealHash(header, c.config))
+			c.logger.Warn("Sealing result was not read by miner", "number", number, "sealhash", SealHash(header, c.config))
 		}
 	}()
 	return nil
@@ -1073,42 +1116,33 @@ func (c *Bor) needToCommitSpan(currentSpan *span.Span, headerNumber uint64) bool
 }
 
 func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
-	log.Info("Getting span", "for block", blockNum)
+	c.logger.Debug("Getting span", "for block", blockNum)
 	var borSpan *span.HeimdallSpan
 	c.spanCache.AscendGreaterOrEqual(&span.HeimdallSpan{Span: span.Span{EndBlock: blockNum}}, func(item btree.Item) bool {
 		borSpan = item.(*span.HeimdallSpan)
 		return false
 	})
 
-	if borSpan == nil {
-		// Span with high enough block number is not loaded
-		var spanID uint64
-		if c.spanCache.Len() > 0 {
-			spanID = c.spanCache.Max().(*span.HeimdallSpan).ID + 1
-		}
-		for borSpan == nil || borSpan.EndBlock < blockNum {
-			log.Info("Span with high enough block number is not loaded", "fetching span", spanID)
-			response, err := c.HeimdallClient.Span(c.execCtx, spanID)
-			if err != nil {
-				return nil, err
-			}
-			borSpan = response
-			c.spanCache.ReplaceOrInsert(borSpan)
-			spanID++
-		}
-	} else {
-		for borSpan.StartBlock > blockNum {
-			// Span wit low enough block number is not loaded
-			var spanID = borSpan.ID - 1
-			log.Info("Span with low enough block number is not loaded", "fetching span", spanID)
-			response, err := c.HeimdallClient.Span(c.execCtx, spanID)
-			if err != nil {
-				return nil, err
-			}
-			borSpan = response
-			c.spanCache.ReplaceOrInsert(borSpan)
-		}
+	if borSpan != nil && borSpan.StartBlock <= blockNum && borSpan.EndBlock >= blockNum {
+		return borSpan, nil
 	}
+
+	// Span with given block block number is not loaded
+	// As span has fixed set of blocks (except 0th span), we can
+	// formulate it and get the exact ID we'd need to fetch.
+	var spanID uint64
+	if blockNum > zerothSpanEnd {
+		spanID = 1 + (blockNum-zerothSpanEnd-1)/spanLength
+	}
+
+	c.logger.Info("Span with given block number is not loaded", "fetching span", spanID)
+
+	response, err := c.HeimdallClient.Span(c.execCtx, spanID)
+	if err != nil {
+		return nil, err
+	}
+	borSpan = response
+	c.spanCache.ReplaceOrInsert(borSpan)
 
 	for c.spanCache.Len() > 128 {
 		c.spanCache.DeleteMin()
@@ -1162,21 +1196,39 @@ func (c *Bor) CommitStates(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) ([]*types.StateSyncData, error) {
-	stateSyncs := make([]*types.StateSyncData, 0)
+	fetchStart := time.Now()
 	number := header.Number.Uint64()
 
-	_lastStateID, err := c.GenesisContractsClient.LastStateId(syscall)
+	var (
+		lastStateIDBig *big.Int
+		from           uint64
+		to             time.Time
+		err            error
+	)
+
+	// Explicit condition for Indore fork won't be needed for fetching this
+	// as erigon already performs this call on the IBS (Intra block state) of
+	// the incoming chain.
+	lastStateIDBig, err = c.GenesisContractsClient.LastStateId(syscall)
 	if err != nil {
 		return nil, err
 	}
 
-	to := time.Unix(int64(chain.Chain.GetHeaderByNumber(number-c.config.CalculateSprint(number)).Time), 0)
-	lastStateID := _lastStateID.Uint64()
+	if c.config.IsIndore(number) {
+		stateSyncDelay := c.config.CalculateStateSyncDelay(number)
+		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
+	} else {
+		to = time.Unix(int64(chain.Chain.GetHeaderByNumber(number-c.config.CalculateSprint(number)).Time), 0)
+	}
 
-	log.Debug(
+	lastStateID := lastStateIDBig.Uint64()
+	from = lastStateID + 1
+
+	c.logger.Debug(
 		"Fetching state updates from Heimdall",
-		"fromID", lastStateID+1,
-		"to", to.Format(time.RFC3339))
+		"fromID", from,
+		"to", to.Format(time.RFC3339),
+	)
 
 	eventRecords, err := c.HeimdallClient.StateSyncEvents(c.execCtx, lastStateID+1, to.Unix())
 	if err != nil {
@@ -1189,14 +1241,18 @@ func (c *Bor) CommitStates(
 		}
 	}
 
+	fetchTime := time.Since(fetchStart)
+	processStart := time.Now()
 	chainID := c.chainConfig.ChainID.String()
+	stateSyncs := make([]*types.StateSyncData, 0, len(eventRecords))
+
 	for _, eventRecord := range eventRecords {
 		if eventRecord.ID <= lastStateID {
 			continue
 		}
 
 		if err := validateEventRecord(eventRecord, number, to, lastStateID, chainID); err != nil {
-			log.Error(err.Error())
+			c.logger.Error("while validating event record", "block", number, "to", to, "stateID", lastStateID+1, "error", err.Error())
 			break
 		}
 
@@ -1211,8 +1267,13 @@ func (c *Bor) CommitStates(
 		if err := c.GenesisContractsClient.CommitState(eventRecord, syscall); err != nil {
 			return nil, err
 		}
+
 		lastStateID++
 	}
+
+	processTime := time.Since(processStart)
+
+	c.logger.Debug("StateSyncData", "number", number, "lastStateID", lastStateID, "total records", len(eventRecords), "fetch time", int(fetchTime.Milliseconds()), "process time", int(processTime.Milliseconds()))
 
 	return stateSyncs, nil
 }
@@ -1293,7 +1354,7 @@ func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Vali
 	return nil, false
 }
 
-func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*valset.Validator) *valset.ValidatorSet {
+func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*valset.Validator, logger log.Logger) *valset.ValidatorSet {
 	v := oldValidatorSet
 	oldVals := v.Validators
 
@@ -1315,8 +1376,8 @@ func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*val
 		}
 	}
 
-	if err := v.UpdateWithChangeSet(changes); err != nil {
-		log.Error("Error while updating change set", "error", err)
+	if err := v.UpdateWithChangeSet(changes, logger); err != nil {
+		logger.Error("Error while updating change set", "error", err)
 	}
 
 	return v

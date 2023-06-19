@@ -1,31 +1,42 @@
 package commands
 
 import (
-	"fmt"
+	"context"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
 )
 
-const (
-	addr = "0x71562b71999873DB5b286dF957af199Ec94617F7"
-)
+func init() {
+	scenarios.MustRegisterStepHandlers(
+		scenarios.StepHandler(GetBalance),
+	)
+}
 
-func callGetBalance(addr string, blockNum models.BlockNumber, checkBal uint64) {
-	fmt.Printf("Getting balance for address: %q...\n", addr)
+//const (
+//	addr = "0x71562b71999873DB5b286dF957af199Ec94617F7"
+//)
+
+func GetBalance(ctx context.Context, addr string, blockNum requests.BlockNumber, checkBal uint64) {
+	logger := devnet.Logger(ctx)
+
+	logger.Info("Getting balance", "addeess", addr)
+
 	address := libcommon.HexToAddress(addr)
-	bal, err := requests.GetBalance(models.ReqId, address, blockNum)
+	bal, err := devnet.SelectMiner(ctx).GetBalance(address, blockNum)
+
 	if err != nil {
-		fmt.Printf("FAILURE => %v\n", err)
+		logger.Error("FAILURE", "error", err)
 		return
 	}
 
 	if checkBal > 0 && checkBal != bal {
-		fmt.Printf("FAILURE => Balance should be %d, got %d\n", checkBal, bal)
+		logger.Error("FAILURE => Balance mismatch", "expected", checkBal, "got", bal)
 		return
 	}
 
-	fmt.Printf("SUCCESS => Balance: %d\n", bal)
+	logger.Info("SUCCESS", "balance", bal)
 }

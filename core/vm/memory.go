@@ -30,7 +30,9 @@ type Memory struct {
 
 // NewMemory returns a new memory model.
 func NewMemory() *Memory {
-	return &Memory{}
+	return &Memory{
+		store: make([]byte, 0, 4*1024),
+	}
 }
 
 // Set sets offset + size to value
@@ -56,9 +58,8 @@ func (m *Memory) Set32(offset uint64, val *uint256.Int) {
 		panic("invalid memory: store empty")
 	}
 	// Zero the memory area
-	copy(m.store[offset:offset+32], []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
-	// Fill in relevant bits
-	val.WriteToSlice(m.store[offset:])
+	copy(m.store[offset:offset+32], zeroes)
+	val.WriteToSlice(m.store[offset : offset+32])
 }
 
 // zeroes - pre-allocated zeroes for Resize()
@@ -75,6 +76,11 @@ func (m *Memory) Resize(size uint64) {
 		return
 	}
 	m.store = append(m.store, zeroes[:l]...)
+}
+
+func (m *Memory) Reset() {
+	m.lastGasCost = 0
+	m.store = m.store[:0]
 }
 
 // GetCopy returns offset + size as a new slice

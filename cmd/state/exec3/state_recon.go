@@ -7,13 +7,14 @@ import (
 	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
@@ -21,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -30,11 +30,10 @@ import (
 )
 
 type ScanWorker struct {
-	txNum          uint64
-	as             *libstate.AggregatorStep
-	fromKey, toKey []byte
-	currentKey     []byte
-	bitmap         roaring64.Bitmap
+	txNum  uint64
+	as     *libstate.AggregatorStep
+	toKey  []byte
+	bitmap roaring64.Bitmap
 }
 
 func NewScanWorker(txNum uint64, as *libstate.AggregatorStep) *ScanWorker {
@@ -58,13 +57,13 @@ func NewFillWorker(txNum uint64, as *libstate.AggregatorStep) *FillWorker {
 	return fw
 }
 
-func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
+func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) error {
 	it := fw.as.IterateAccountsHistory(fw.txNum)
 	value := make([]byte, 1024)
 	for it.HasNext() {
 		key, val, err := it.Next()
 		if err != nil {
-			panic(err)
+			return err
 		}
 		if len(val) > 0 {
 			var a accounts.Account
@@ -102,42 +101,44 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 			value = value[:a.EncodingLengthForStorage()]
 			a.EncodeForStorage(value)
 			if err := plainStateCollector.Collect(key, value); err != nil {
-				panic(err)
+				return err
 			}
 			//fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
 		} else {
 			if err := plainStateCollector.Collect(key, nil); err != nil {
-				panic(err)
+				return err
 			}
 		}
 	}
+	return nil
 }
 
-func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
+func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) error {
 	it := fw.as.IterateStorageHistory(fw.txNum)
 	var compositeKey = make([]byte, length.Addr+length.Incarnation+length.Hash)
 	binary.BigEndian.PutUint64(compositeKey[20:], state.FirstContractIncarnation)
 	for it.HasNext() {
 		key, val, err := it.Next()
 		if err != nil {
-			panic(err)
+			return err
 		}
 		copy(compositeKey[:20], key[:20])
 		copy(compositeKey[20+8:], key[20:])
 		if len(val) > 0 {
 			if err := plainStateCollector.Collect(compositeKey, val); err != nil {
-				panic(err)
+				return err
 			}
 			//fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
 		} else {
 			if err := plainStateCollector.Collect(compositeKey, nil); err != nil {
-				panic(err)
+				return err
 			}
 		}
 	}
+	return nil
 }
 
-func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collector) {
+func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collector) error {
 	it := fw.as.IterateCodeHistory(fw.txNum)
 	var compositeKey = make([]byte, length.Addr+length.Incarnation)
 	binary.BigEndian.PutUint64(compositeKey[length.Addr:], state.FirstContractIncarnation)
@@ -145,28 +146,29 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 	for it.HasNext() {
 		key, val, err := it.Next()
 		if err != nil {
-			panic(err)
+			return err
 		}
 		copy(compositeKey, key)
 		if len(val) > 0 {
 
 			codeHash, err := common.HashData(val)
 			if err != nil {
-				panic(err)
+				return err
 			}
 			if err = codeCollector.Collect(codeHash[:], val); err != nil {
-				panic(err)
+				return err
 			}
 			if err = plainContractCollector.Collect(compositeKey, codeHash[:]); err != nil {
-				panic(err)
+				return err
 			}
 			//fmt.Printf("Code [%x] => %d\n", compositeKey, len(val))
 		} else {
 			if err := plainContractCollector.Collect(compositeKey, nil); err != nil {
-				panic(err)
+				return err
 			}
 		}
 	}
+	return nil
 }
 
 func (sw *ScanWorker) BitmapAccounts() error {
@@ -219,7 +221,6 @@ func (sw *ScanWorker) Bitmap() *roaring64.Bitmap { return &sw.bitmap }
 
 type ReconWorker struct {
 	lock        sync.Locker
-	wg          *sync.WaitGroup
 	rs          *state.ReconState
 	blockReader services.FullBlockReader
 	stateWriter *state.StateReconWriterInc
@@ -228,27 +229,23 @@ type ReconWorker struct {
 	engine      consensus.Engine
 	chainConfig *chain.Config
 	logger      log.Logger
-	genesis     *core.Genesis
-	epoch       EpochReader
+	genesis     *types.Genesis
 	chain       ChainReader
-	isPoSA      bool
-	posa        consensus.PoSA
 
 	evm *vm.EVM
 	ibs *state.IntraBlockState
 }
 
-func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
+func NewReconWorker(lock sync.Locker, ctx context.Context, rs *state.ReconState,
 	as *libstate.AggregatorStep, blockReader services.FullBlockReader,
-	chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
+	chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, engine consensus.Engine,
 	chainTx kv.Tx,
 ) *ReconWorker {
 	rw := &ReconWorker{
 		lock:        lock,
-		wg:          wg,
+		ctx:         ctx,
 		rs:          rs,
 		blockReader: blockReader,
-		ctx:         context.Background(),
 		stateWriter: state.NewStateReconWriterInc(as, rs),
 		stateReader: state.NewHistoryReaderInc(as, rs),
 		chainConfig: chainConfig,
@@ -257,10 +254,8 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 		engine:      engine,
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 	}
-	rw.epoch = NewEpochReader(chainTx)
 	rw.chain = NewChainReader(chainConfig, chainTx, blockReader)
 	rw.ibs = state.New(rw.stateReader)
-	rw.posa, rw.isPoSA = engine.(consensus.PoSA)
 	return rw
 }
 
@@ -274,16 +269,21 @@ func (rw *ReconWorker) SetChainTx(chainTx kv.Tx) {
 	rw.stateWriter.SetChainTx(chainTx)
 }
 
-func (rw *ReconWorker) Run() {
-	defer rw.wg.Done()
-	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
-		rw.runTxTask(txTask)
+func (rw *ReconWorker) Run() error {
+	for txTask, ok, err := rw.rs.Schedule(rw.ctx); ok || err != nil; txTask, ok, err = rw.rs.Schedule(rw.ctx) {
+		if err != nil {
+			return err
+		}
+		if err := rw.runTxTask(txTask); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 var noop = state.NewNoopWriter()
 
-func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
+func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.stateReader.SetTxNum(txTask.TxNum)
@@ -292,14 +292,14 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 	rw.ibs.Reset()
 	ibs := rw.ibs
 	rules := txTask.Rules
-	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
+	daoForkTx := rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = rw.genesis.ToBlock("")
+		_, ibs, err = core.GenesisToBlock(rw.genesis, "")
 		if err != nil {
-			panic(err)
+			return err
 		}
 		// For Genesis, rules should be empty, so that empty accounts can be included
 		rules = &chain.Rules{}
@@ -312,37 +312,25 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
+				return core.SysCallContract(contract, data, rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, txTask.Withdrawals, rw.epoch, rw.chain, syscall); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall); err != nil {
 				if _, readError := rw.stateReader.ReadError(); !readError {
-					panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
+					return fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err)
 				}
 			}
 		}
 	} else if txTask.TxIndex == -1 {
 		// Block initialisation
-		if rw.isPoSA {
-			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, txTask.Header.Number, ibs)
-		}
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
+			return core.SysCallContract(contract, data, rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
 		}
 
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, ibs, txTask.Txs, txTask.Uncles, syscall)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, txTask.Header, ibs, txTask.Txs, txTask.Uncles, syscall)
 	} else {
-		if rw.isPoSA {
-			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
-				if _, readError := rw.stateReader.ReadError(); !readError {
-					panic(err)
-				}
-			} else if isSystemTx {
-				return
-			}
-		}
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
-		ibs.Prepare(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
+		ibs.SetTxContext(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
@@ -351,12 +339,12 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {
-				panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d txNum=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, txTask.Tx.Hash(), err))
+				return fmt.Errorf("could not apply blockNum=%d, txIdx=%d txNum=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, txTask.Tx.Hash(), err)
 			}
 		}
 		if err = ibs.FinalizeTx(rules, noop); err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {
-				panic(err)
+				return err
 			}
 		}
 	}
@@ -365,9 +353,10 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 		rw.rs.RollbackTx(txTask, dependency)
 	} else {
 		if err = ibs.CommitBlock(rules, rw.stateWriter); err != nil {
-			panic(err)
+			return err
 		}
 		//fmt.Printf("commit %d\n", txNum)
 		rw.rs.CommitTxNum(txTask.TxNum)
 	}
+	return nil
 }

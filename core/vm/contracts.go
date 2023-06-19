@@ -23,6 +23,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto/blake2b"
 	"github.com/ledgerwatch/erigon/crypto/bls12381"
 	"github.com/ledgerwatch/erigon/crypto/bn256"
+	"github.com/ledgerwatch/erigon/crypto/kzg"
 	"github.com/ledgerwatch/erigon/params"
 
 	//lint:ignore SA1019 Needed for precompile
@@ -82,51 +84,6 @@ var PrecompiledContractsIstanbul = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{9}): &blake2F{},
 }
 
-var PrecompiledContractsIstanbulForBSC = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{1}): &ecrecover{},
-	libcommon.BytesToAddress([]byte{2}): &sha256hash{},
-	libcommon.BytesToAddress([]byte{3}): &ripemd160hash{},
-	libcommon.BytesToAddress([]byte{4}): &dataCopy{},
-	libcommon.BytesToAddress([]byte{5}): &bigModExp{},
-	libcommon.BytesToAddress([]byte{6}): &bn256AddIstanbul{},
-	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
-	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
-	libcommon.BytesToAddress([]byte{9}): &blake2F{},
-
-	libcommon.BytesToAddress([]byte{100}): &tmHeaderValidate{},
-	libcommon.BytesToAddress([]byte{101}): &iavlMerkleProofValidate{},
-}
-
-var PrecompiledContractsNano = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{1}): &ecrecover{},
-	libcommon.BytesToAddress([]byte{2}): &sha256hash{},
-	libcommon.BytesToAddress([]byte{3}): &ripemd160hash{},
-	libcommon.BytesToAddress([]byte{4}): &dataCopy{},
-	libcommon.BytesToAddress([]byte{5}): &bigModExp{},
-	libcommon.BytesToAddress([]byte{6}): &bn256AddIstanbul{},
-	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
-	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
-	libcommon.BytesToAddress([]byte{9}): &blake2F{},
-
-	libcommon.BytesToAddress([]byte{100}): &tmHeaderValidateNano{},
-	libcommon.BytesToAddress([]byte{101}): &iavlMerkleProofValidateNano{},
-}
-
-var PrecompiledContractsIsMoran = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{1}): &ecrecover{},
-	libcommon.BytesToAddress([]byte{2}): &sha256hash{},
-	libcommon.BytesToAddress([]byte{3}): &ripemd160hash{},
-	libcommon.BytesToAddress([]byte{4}): &dataCopy{},
-	libcommon.BytesToAddress([]byte{5}): &bigModExp{},
-	libcommon.BytesToAddress([]byte{6}): &bn256AddIstanbul{},
-	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
-	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
-	libcommon.BytesToAddress([]byte{9}): &blake2F{},
-
-	libcommon.BytesToAddress([]byte{100}): &tmHeaderValidate{},
-	libcommon.BytesToAddress([]byte{101}): &iavlMerkleProofValidateMoran{},
-}
-
 // PrecompiledContractsBerlin contains the default set of pre-compiled Ethereum
 // contracts used in the Berlin release.
 var PrecompiledContractsBerlin = map[libcommon.Address]PrecompiledContract{
@@ -155,14 +112,25 @@ var PrecompiledContractsBLS = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{18}): &bls12381MapG2{},
 }
 
+var PrecompiledContractsCancun = map[libcommon.Address]PrecompiledContract{
+	libcommon.BytesToAddress([]byte{1}):  &ecrecover{},
+	libcommon.BytesToAddress([]byte{2}):  &sha256hash{},
+	libcommon.BytesToAddress([]byte{3}):  &ripemd160hash{},
+	libcommon.BytesToAddress([]byte{4}):  &dataCopy{},
+	libcommon.BytesToAddress([]byte{5}):  &bigModExp{eip2565: true},
+	libcommon.BytesToAddress([]byte{6}):  &bn256AddIstanbul{},
+	libcommon.BytesToAddress([]byte{7}):  &bn256ScalarMulIstanbul{},
+	libcommon.BytesToAddress([]byte{8}):  &bn256PairingIstanbul{},
+	libcommon.BytesToAddress([]byte{9}):  &blake2F{},
+	libcommon.BytesToAddress([]byte{20}): &pointEvaluation{},
+}
+
 var (
-	PrecompiledAddressesMoran          []libcommon.Address
-	PrecompiledAddressesNano           []libcommon.Address
-	PrecompiledAddressesBerlin         []libcommon.Address
-	PrecompiledAddressesIstanbul       []libcommon.Address
-	PrecompiledAddressesIstanbulForBSC []libcommon.Address
-	PrecompiledAddressesByzantium      []libcommon.Address
-	PrecompiledAddressesHomestead      []libcommon.Address
+	PrecompiledAddressesCancun    []libcommon.Address
+	PrecompiledAddressesBerlin    []libcommon.Address
+	PrecompiledAddressesIstanbul  []libcommon.Address
+	PrecompiledAddressesByzantium []libcommon.Address
+	PrecompiledAddressesHomestead []libcommon.Address
 )
 
 func init() {
@@ -175,33 +143,22 @@ func init() {
 	for k := range PrecompiledContractsIstanbul {
 		PrecompiledAddressesIstanbul = append(PrecompiledAddressesIstanbul, k)
 	}
-	for k := range PrecompiledContractsIstanbulForBSC {
-		PrecompiledAddressesIstanbulForBSC = append(PrecompiledAddressesIstanbulForBSC, k)
-	}
 	for k := range PrecompiledContractsBerlin {
 		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
 	}
-	for k := range PrecompiledContractsNano {
-		PrecompiledAddressesNano = append(PrecompiledAddressesNano, k)
-	}
-	for k := range PrecompiledContractsIsMoran {
-		PrecompiledAddressesMoran = append(PrecompiledAddressesMoran, k)
+	for k := range PrecompiledContractsCancun {
+		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
 	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 	switch {
-	case rules.IsMoran:
-		return PrecompiledAddressesMoran
-	case rules.IsNano:
-		return PrecompiledAddressesNano
+	case rules.IsCancun:
+		return PrecompiledAddressesCancun
 	case rules.IsBerlin:
 		return PrecompiledAddressesBerlin
 	case rules.IsIstanbul:
-		if rules.IsParlia {
-			return PrecompiledAddressesIstanbulForBSC
-		}
 		return PrecompiledAddressesIstanbul
 	case rules.IsByzantium:
 		return PrecompiledAddressesByzantium
@@ -1125,4 +1082,17 @@ func (c *bls12381MapG2) Run(input []byte) ([]byte, error) {
 
 	// Encode the G2 point to 256 bytes
 	return g.EncodePoint(r), nil
+}
+
+// pointEvaluation implements the EIP-4844 point evaluation precompile
+// to check if a value is part of a blob at a specific point with a KZG proof.
+type pointEvaluation struct{}
+
+// RequiredGas returns the gas required to execute the pre-compiled contract.
+func (c *pointEvaluation) RequiredGas(input []byte) uint64 {
+	return params.PointEvaluationGas
+}
+
+func (c *pointEvaluation) Run(input []byte) ([]byte, error) {
+	return kzg.PointEvaluationPrecompile(input)
 }

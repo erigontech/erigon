@@ -26,14 +26,14 @@ import (
 	"time"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
-	"github.com/ledgerwatch/erigon-lib/common/metrics"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -117,16 +117,17 @@ type Peer struct {
 	disc     chan DiscReason
 
 	// events receives message send / receive events if set
-	events *event.Feed
-	pubkey [64]byte
+	events         *event.Feed
+	pubkey         [64]byte
+	metricsEnabled bool
 }
 
 // NewPeer returns a peer for testing purposes.
-func NewPeer(id enode.ID, pubkey [64]byte, name string, caps []Cap) *Peer {
+func NewPeer(id enode.ID, pubkey [64]byte, name string, caps []Cap, metricsEnabled bool) *Peer {
 	pipe, _ := net.Pipe()
 	node := enode.SignNull(new(enr.Record), id)
 	conn := &conn{fd: pipe, transport: nil, node: node, caps: caps, name: name}
-	peer := newPeer(log.Root(), conn, nil, pubkey)
+	peer := newPeer(log.Root(), conn, nil, pubkey, metricsEnabled)
 	close(peer.closed) // ensures Disconnect doesn't block
 	return peer
 }
@@ -209,17 +210,18 @@ func (p *Peer) Inbound() bool {
 	return p.rw.is(inboundConn)
 }
 
-func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byte) *Peer {
+func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byte, metricsEnabled bool) *Peer {
 	protomap := matchProtocols(protocols, conn.caps, conn)
 	p := &Peer{
-		rw:       conn,
-		running:  protomap,
-		created:  mclock.Now(),
-		disc:     make(chan DiscReason),
-		protoErr: make(chan error, len(protomap)+1), // protocols + pingLoop
-		closed:   make(chan struct{}),
-		log:      logger.New("id", conn.node.ID(), "conn", conn.flags),
-		pubkey:   pubkey,
+		rw:             conn,
+		running:        protomap,
+		created:        mclock.Now(),
+		disc:           make(chan DiscReason),
+		protoErr:       make(chan error, len(protomap)+1), // protocols + pingLoop
+		closed:         make(chan struct{}),
+		log:            logger.New("id", conn.node.ID(), "conn", conn.flags),
+		pubkey:         pubkey,
+		metricsEnabled: metricsEnabled,
 	}
 	return p
 }
@@ -335,7 +337,7 @@ func (p *Peer) handle(msg Msg) error {
 		if err != nil {
 			return fmt.Errorf("msg code out of range: %v", msg.Code)
 		}
-		if metrics.Enabled {
+		if p.metricsEnabled {
 			m := fmt.Sprintf("%s_%s_%d_%#02x", ingressMeterName, proto.Name, proto.Version, msg.Code-proto.offset)
 			metrics2.GetOrCreateCounter(m).Set(uint64(msg.meterSize))
 			metrics2.GetOrCreateCounter(m + "_packets").Set(1)

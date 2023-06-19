@@ -32,6 +32,7 @@ type GenesisContractsClient struct {
 	ValidatorContract     string
 	StateReceiverContract string
 	chainConfig           *chain.Config
+	logger                log.Logger
 }
 
 const (
@@ -43,6 +44,7 @@ func NewGenesisContractsClient(
 	chainConfig *chain.Config,
 	validatorContract,
 	stateReceiverContract string,
+	logger log.Logger,
 ) *GenesisContractsClient {
 	return &GenesisContractsClient{
 		validatorSetABI:       ValidatorSet(),
@@ -50,13 +52,11 @@ func NewGenesisContractsClient(
 		ValidatorContract:     validatorContract,
 		StateReceiverContract: stateReceiverContract,
 		chainConfig:           chainConfig,
+		logger:                logger,
 	}
 }
 
-func (gc *GenesisContractsClient) CommitState(
-	event *clerk.EventRecordWithTime,
-	syscall consensus.SystemCall,
-) error {
+func (gc *GenesisContractsClient) CommitState(event *clerk.EventRecordWithTime, syscall consensus.SystemCall) error {
 	eventRecord := event.BuildEventRecord()
 
 	recordBytes, err := rlp.EncodeToBytes(eventRecord)
@@ -70,26 +70,22 @@ func (gc *GenesisContractsClient) CommitState(
 
 	data, err := gc.stateReceiverABI.Pack(method, big.NewInt(0).SetInt64(t), recordBytes)
 	if err != nil {
-		log.Error("Unable to pack tx for commitState", "err", err)
+		gc.logger.Error("Unable to pack tx for commitState", "err", err)
 		return err
 	}
 
-	log.Trace("→ committing new state", "eventRecord", event.String())
+	gc.logger.Debug("→ committing new state", "eventRecord", event.String())
 	_, err = syscall(libcommon.HexToAddress(gc.StateReceiverContract), data)
 
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
-func (gc *GenesisContractsClient) LastStateId(syscall consensus.SystemCall,
-) (*big.Int, error) {
+func (gc *GenesisContractsClient) LastStateId(syscall consensus.SystemCall) (*big.Int, error) {
 	const method = "lastStateId"
 
 	data, err := gc.stateReceiverABI.Pack(method)
 	if err != nil {
-		log.Error("Unable to pack tx for LastStateId", "err", err)
+		gc.logger.Error("Unable to pack tx for LastStateId", "err", err)
 		return nil, err
 	}
 

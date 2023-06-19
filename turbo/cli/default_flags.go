@@ -4,7 +4,6 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 // DefaultFlags contains all flags that are used and supported by Erigon binary.
@@ -12,7 +11,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DataDirFlag,
 	&utils.EthashDatasetDirFlag,
 	&utils.SnapshotFlag,
-	&utils.ExternalConsensusFlag,
+	&utils.InternalConsensusFlag,
 	&utils.TxPoolDisableFlag,
 	&utils.TxPoolLocalsFlag,
 	&utils.TxPoolNoLocalsFlag,
@@ -25,6 +24,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolGlobalQueueFlag,
 	&utils.TxPoolLifetimeFlag,
 	&utils.TxPoolTraceSendersFlag,
+	&utils.TxPoolCommitEveryFlag,
 	&PruneFlag,
 	&PruneHistoryFlag,
 	&PruneReceiptFlag,
@@ -85,10 +85,12 @@ var DefaultFlags = []cli.Flag{
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,
 	&utils.DbPageSizeFlag,
+	&utils.DbSizeLimitFlag,
 	&utils.TorrentPortFlag,
 	&utils.TorrentMaxPeersFlag,
 	&utils.TorrentConnsPerFileFlag,
 	&utils.TorrentDownloadSlotsFlag,
+	&utils.TorrentStaticPeersFlag,
 	&utils.TorrentUploadRateFlag,
 	&utils.TorrentDownloadRateFlag,
 	&utils.TorrentVerbosityFlag,
@@ -114,11 +116,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.GpoBlocksFlag,
 	&utils.GpoPercentileFlag,
 	&utils.InsecureUnlockAllowedFlag,
-	&utils.MetricsEnabledFlag,
-	&utils.MetricsHTTPFlag,
-	&utils.MetricsPortFlag,
 	&utils.HistoryV3Flag,
-	&utils.TransactionV3Flag,
 	&utils.IdentityFlag,
 	&utils.CliqueSnapshotCheckpointIntervalFlag,
 	&utils.CliqueSnapshotInmemorySnapshotsFlag,
@@ -148,12 +146,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.OverrideShanghaiTime,
 
 	&utils.ConfigFlag,
-	&logging.LogConsoleVerbosityFlag,
-	&logging.LogDirVerbosityFlag,
-	&logging.LogDirPathFlag,
-	&logging.LogConsoleJsonFlag,
-	&logging.LogJsonFlag,
-	&logging.LogDirJsonFlag,
 
 	&utils.LightClientDiscoveryAddrFlag,
 	&utils.LightClientDiscoveryPortFlag,

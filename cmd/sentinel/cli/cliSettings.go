@@ -2,39 +2,55 @@ package cli
 
 import (
 	"fmt"
-	"strings"
+	"time"
 
+	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
+	"github.com/ledgerwatch/erigon/turbo/logging"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 type ConsensusClientCliCfg struct {
-	GenesisCfg       *clparams.GenesisConfig     `json:"genesisCfg"`
-	BeaconCfg        *clparams.BeaconChainConfig `json:"beaconCfg"`
-	NetworkCfg       *clparams.NetworkConfig     `json:"networkCfg"`
-	BeaconDataCfg    *rawdb.BeaconDataConfig     `json:"beaconDataConfig"`
-	Port             uint                        `json:"port"`
-	Addr             string                      `json:"address"`
-	ServerAddr       string                      `json:"serverAddr"`
-	ServerProtocol   string                      `json:"serverProtocol"`
-	ServerTcpPort    uint                        `json:"serverTcpPort"`
-	LogLvl           uint                        `json:"logLevel"`
-	NoDiscovery      bool                        `json:"noDiscovery"`
-	CheckpointUri    string                      `json:"checkpointUri"`
-	Chaindata        string                      `json:"chaindata"`
-	ELEnabled        bool                        `json:"elEnabled"`
-	ErigonPrivateApi string                      `json:"erigonPrivateApi"`
+	GenesisCfg            *clparams.GenesisConfig     `json:"genesisCfg"`
+	BeaconCfg             *clparams.BeaconChainConfig `json:"beaconCfg"`
+	NetworkCfg            *clparams.NetworkConfig     `json:"networkCfg"`
+	BeaconDataCfg         *rawdb.BeaconDataConfig     `json:"beaconDataConfig"`
+	Port                  uint                        `json:"port"`
+	Addr                  string                      `json:"address"`
+	ServerAddr            string                      `json:"serverAddr"`
+	ServerProtocol        string                      `json:"serverProtocol"`
+	ServerTcpPort         uint                        `json:"serverTcpPort"`
+	LogLvl                uint                        `json:"logLevel"`
+	NoDiscovery           bool                        `json:"noDiscovery"`
+	CheckpointUri         string                      `json:"checkpointUri"`
+	Chaindata             string                      `json:"chaindata"`
+	ErigonPrivateApi      string                      `json:"erigonPrivateApi"`
+	TransitionChain       bool                        `json:"transitionChain"`
+	NetworkType           clparams.NetworkType        `json:"networkType"`
+	InitialSync           bool                        `json:"initialSync"`
+	NoBeaconApi           bool                        `json:"noBeaconApi"`
+	BeaconApiReadTimeout  time.Duration               `json:"beaconApiReadTimeout"`
+	BeaconApiWriteTimeout time.Duration               `json:"beaconApiWriteTimeout"`
+	BeaconAddr            string                      `json:"beaconAddr"`
+	BeaconProtocol        string                      `json:"beaconProtocol"`
+	RecordMode            bool                        `json:"recordMode"`
+	RecordDir             string                      `json:"recordDir"`
+
+	InitalState *state.BeaconState
 }
 
 func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg := &ConsensusClientCliCfg{}
 	chainName := ctx.String(flags.Chain.Name)
 	var err error
-	var network clparams.NetworkType
-	cfg.GenesisCfg, cfg.NetworkCfg, cfg.BeaconCfg, network, err = clparams.GetConfigsByNetworkName(chainName)
+	cfg.GenesisCfg, cfg.NetworkCfg, cfg.BeaconCfg, cfg.NetworkType, err = clparams.GetConfigsByNetworkName(chainName)
 	if err != nil {
 		return nil, err
 	}
@@ -48,33 +64,55 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 			return nil, fmt.Errorf("no genesis file provided")
 		}
 		cfg.GenesisCfg = new(clparams.GenesisConfig)
+		var stateByte []byte
 		// Now parse genesis time and genesis fork
-		if *cfg.GenesisCfg, err = clparams.ParseGenesisSSZToGenesisConfig(ctx.String(flags.GenesisSSZFlag.Name)); err != nil {
+		if *cfg.GenesisCfg, stateByte, err = clparams.ParseGenesisSSZToGenesisConfig(
+			ctx.String(flags.GenesisSSZFlag.Name),
+			cfg.BeaconCfg.GetCurrentStateVersion(0)); err != nil {
+			return nil, err
+		}
+		cfg.InitalState = state.New(cfg.BeaconCfg)
+		if cfg.InitalState.DecodeSSZ(stateByte, int(cfg.BeaconCfg.GetCurrentStateVersion(0))); err != nil {
 			return nil, err
 		}
 	}
 	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.String(flags.SentinelServerAddr.Name), ctx.Int(flags.SentinelServerPort.Name))
 	cfg.ServerProtocol = "tcp"
 
+	cfg.NoBeaconApi = ctx.Bool(flags.NoBeaconApi.Name)
+	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(flags.BeaconApiReadTimeout.Name)) * time.Second
+	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint(flags.BeaconApiWriteTimeout.Name)) * time.Second
+	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(flags.BeaconApiAddr.Name), ctx.Int(flags.BeaconApiPort.Name))
+	cfg.BeaconProtocol = "tcp"
+	cfg.RecordMode = ctx.Bool(flags.RecordModeFlag.Name)
+	cfg.RecordDir = ctx.String(flags.RecordModeDir.Name)
+
 	cfg.Port = uint(ctx.Int(flags.SentinelDiscoveryPort.Name))
 	cfg.Addr = ctx.String(flags.SentinelDiscoveryAddr.Name)
 
-	cfg.LogLvl = ctx.Uint(flags.Verbosity.Name)
+	cfg.LogLvl = ctx.Uint(logging.LogVerbosityFlag.Name)
+	fmt.Println(cfg.LogLvl)
+	if cfg.LogLvl == uint(log.LvlInfo) || cfg.LogLvl == 0 {
+		cfg.LogLvl = uint(log.LvlDebug)
+	}
 	cfg.NoDiscovery = ctx.Bool(flags.NoDiscovery.Name)
 	if ctx.String(flags.CheckpointSyncUrlFlag.Name) != "" {
 		cfg.CheckpointUri = ctx.String(flags.CheckpointSyncUrlFlag.Name)
 	} else {
-		cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(network)
+		cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(cfg.NetworkType)
+		fmt.Println(cfg.CheckpointUri)
 	}
 	cfg.Chaindata = ctx.String(flags.ChaindataFlag.Name)
-	cfg.ELEnabled = ctx.Bool(flags.ELEnabledFlag.Name)
 	cfg.BeaconDataCfg = rawdb.BeaconDataConfigurations[ctx.String(flags.BeaconDBModeFlag.Name)]
 	// Process bootnodes
 	if ctx.String(flags.BootnodesFlag.Name) != "" {
-		cfg.NetworkCfg.BootNodes = strings.Split(ctx.String(flags.BootnodesFlag.Name), ",")
+		cfg.NetworkCfg.BootNodes = utils.SplitAndTrim(ctx.String(flags.BootnodesFlag.Name))
 	}
 	if ctx.String(flags.SentinelStaticPeersFlag.Name) != "" {
-		cfg.NetworkCfg.StaticPeers = strings.Split(ctx.String(flags.SentinelStaticPeersFlag.Name), ",")
+		cfg.NetworkCfg.StaticPeers = utils.SplitAndTrim(ctx.String(flags.SentinelStaticPeersFlag.Name))
+		fmt.Println(cfg.NetworkCfg.StaticPeers)
 	}
+	cfg.TransitionChain = ctx.Bool(flags.TransitionChainFlag.Name)
+	cfg.InitialSync = ctx.Bool(flags.InitSyncFlag.Name)
 	return cfg, nil
 }

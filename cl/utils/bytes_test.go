@@ -17,7 +17,7 @@ func TestSSZSnappy(t *testing.T) {
 	sussyEncoded, err := utils.EncodeSSZSnappy(verySussyMessage)
 	require.NoError(t, err)
 	sussyDecoded := &cltypes.Metadata{}
-	require.NoError(t, utils.DecodeSSZSnappy(sussyDecoded, sussyEncoded))
+	require.NoError(t, utils.DecodeSSZSnappy(sussyDecoded, sussyEncoded, 0))
 	require.Equal(t, verySussyMessage.SeqNumber, sussyDecoded.SeqNumber)
 	require.Equal(t, verySussyMessage.Attnets, sussyDecoded.Attnets)
 }

@@ -75,7 +75,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address libcommon.A
 }
 
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
-func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getCode cannot open tx: %w", err1)
@@ -92,11 +92,11 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
-		return hexutil.Bytes(""), nil
+		return hexutility.Bytes(""), nil
 	}
 	res, _ := reader.ReadAccountCode(address, acc.Incarnation, acc.CodeHash)
 	if res == nil {
-		return hexutil.Bytes(""), nil
+		return hexutility.Bytes(""), nil
 	}
 	return res, nil
 }
