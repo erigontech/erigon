@@ -601,20 +601,21 @@ Loop:
 				return err
 			}
 		case snaptype.Bodies:
-			//for _, sn := range s.Bodies.segments {
-			//	if sn.seg == nil {
-			//		continue
-			//	}
-			//	_, name := filepath.Split(sn.seg.FilePath())
-			//	if fName == name {
-			//		if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-			//			return err
-			//		}
-			//		continue Loop
-			//	}
-			//}
-
-			sn := &BodySegment{ranges: Range{f.From, f.To}}
+			var sn *BodySegment
+			var exists bool
+			for _, sn2 := range s.Bodies.segments {
+				if sn2.seg == nil { // it's ok if some segment was not able to open
+					continue
+				}
+				if fName == sn2.seg.FileName() {
+					sn = sn2
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				sn = &BodySegment{ranges: Range{f.From, f.To}}
+			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
@@ -630,27 +631,28 @@ Loop:
 					return err
 				}
 			}
-			s.Bodies.segments = append(s.Bodies.segments, sn)
+			if !exists {
+				s.Bodies.segments = append(s.Bodies.segments, sn)
+			}
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
 		case snaptype.Transactions:
-			//for _, sn := range s.Txs.segments {
-			//	if sn.Seg == nil {
-			//		continue
-			//	}
-			//	_, name := filepath.Split(sn.Seg.FilePath())
-			//	fmt.Printf("what the loop??? %s, %s\n", fName, name)
-			//	if fName == name {
-			//		fmt.Printf("what the loop1\n")
-			//		if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-			//			return err
-			//		}
-			//		continue Loop
-			//	}
-			//}
-
-			sn := &TxnSegment{ranges: Range{f.From, f.To}}
+			var sn *TxnSegment
+			var exists bool
+			for _, sn2 := range s.Txs.segments {
+				if sn2.Seg == nil { // it's ok if some segment was not able to open
+					continue
+				}
+				if fName == sn2.Seg.FileName() {
+					sn = sn2
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				sn = &TxnSegment{ranges: Range{f.From, f.To}}
+			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
@@ -666,8 +668,9 @@ Loop:
 					return err
 				}
 			}
-			s.Txs.segments = append(s.Txs.segments, sn)
-			fmt.Printf("what the loop2\n")
+			if !exists {
+				s.Txs.segments = append(s.Txs.segments, sn)
+			}
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
