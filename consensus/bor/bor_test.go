@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
@@ -19,8 +20,10 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -361,3 +364,53 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 		}
 	}
 }
+
+func TestSendBlock(t *testing.T) {
+	heimdall := newTestHeimdall(params.BorDevnetChainConfig)
+	blocks := map[uint64]*types.Block{}
+
+	s := newValidator(t, heimdall, blocks)
+	r := newValidator(t, heimdall, blocks)
+
+	chain, err := s.generateChain(1)
+
+	if err != nil {
+		t.Fatalf("generate blocks failed: %v", err)
+	}
+
+	sealedBlocks, err := s.sealBlocks(chain.Blocks)
+
+	if err != nil {
+		t.Fatalf("seal block failed: %v", err)
+	}
+
+	err = s.verifyBlocks(sealedBlocks)
+
+	if err != nil {
+		t.Fatalf("verify blocks failed: %v", err)
+	}
+
+	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
+		Block: sealedBlocks[0],
+		TD:    big.NewInt(1), // This is ignored anyway
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r.ReceiveWg.Add(1)
+	for _, err = range r.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: s.PeerId}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.ReceiveWg.Wait()
+}
+
+/*
+
+	if err = m.InsertChain(longerChain, nil); err != nil {
+		t.Fatal(err)
+	}
+*/
