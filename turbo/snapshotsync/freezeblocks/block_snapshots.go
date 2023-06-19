@@ -249,7 +249,6 @@ func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 }
 
 func (sn *TxnSegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
-	fmt.Printf("what the loop3: %t, %t\n", sn.IdxTxnHash != nil, sn.IdxTxnHash2BlockNum != nil)
 	if sn.IdxTxnHash != nil && sn.IdxTxnHash2BlockNum != nil {
 		return nil
 	}
@@ -703,7 +702,6 @@ func (s *RoSnapshots) Ranges() (ranges []Range) {
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
-	defer func(t time.Time) { fmt.Printf("ReopenFolder block_snapshots.go:695: %s\n", time.Since(t)) }(time.Now())
 	files, _, err := Segments(s.dir)
 	if err != nil {
 		return err
