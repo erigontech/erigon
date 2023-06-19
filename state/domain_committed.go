@@ -405,14 +405,14 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 		return err
 	}
 
-	var dbuf [8]byte
-	binary.BigEndian.PutUint64(dbuf[:], d.txNum)
+	//var dbuf [8]byte
+	//binary.BigEndian.PutUint64(dbuf[:], d.txNum)
 
 	mw := md5.New()
 	mw.Write(encoded)
 
 	fmt.Printf("commitment put %d rh %x vh %x\n", d.txNum, rh, mw.Sum(nil))
-	if err := d.Domain.PutWithPrev(keyCommitmentState, dbuf[:], encoded, d.prevState); err != nil {
+	if err := d.Domain.PutWithPrev(keyCommitmentState, nil, encoded, d.prevState); err != nil {
 		return err
 	}
 	d.prevState = encoded
@@ -422,7 +422,10 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 func (d *DomainCommitted) Restore(value []byte) (uint64, uint64, error) {
 	cs := new(commitmentState)
 	if err := cs.Decode(value); err != nil {
-		return 0, 0, fmt.Errorf("failed to decode previous stored commitment state: %w", err)
+		if len(value) > 0 {
+			return 0, 0, fmt.Errorf("failed to decode previous stored commitment state: %w", err)
+		}
+		// nil value is acceptable for SetState and will reset trie
 	}
 	if hext, ok := d.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
 		if err := hext.SetState(cs.trieState); err != nil {
@@ -795,34 +798,20 @@ func (d *DomainCommitted) SeekCommitment(sinceTx uint64) (blockNum, txNum uint64
 		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 	// todo add support of bin state dumping
-	var (
-		latestState []byte
-		latestTxNum uint64
-	)
-	if sinceTx > 0 {
-		latestTxNum = sinceTx - 1
-	}
-
-	d.SetTxNum(latestTxNum)
 	ctx := d.MakeContext()
 	defer ctx.Close()
 
-	fmt.Printf("seek tx %d\n", sinceTx)
+	var latestState []byte
 	d.defaultDc.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) {
 		txn := binary.BigEndian.Uint64(value)
 		if txn == sinceTx {
 			latestState = value
 		}
-		latestTxNum = txn
 		mw := md5.New()
 		mw.Write(value)
 
-		fmt.Printf("commitment get txn: %d hash %x hs %x value: %x\n", txn, key, mw.Sum(nil), value[:])
-		//latestTxNum, latestState = txn, value
+		fmt.Printf("[commitment] GET txn=%d %x hash %x value: %x\n", txn, key, mw.Sum(nil), value[:])
 	})
-	txn := binary.BigEndian.Uint64(latestState)
-	fmt.Printf("restoring state as of tx %d\n", txn)
-
 	return d.Restore(latestState)
 }
 
@@ -834,7 +823,7 @@ type commitmentState struct {
 
 func (cs *commitmentState) Decode(buf []byte) error {
 	if len(buf) < 10 {
-		return fmt.Errorf("ivalid commitment state buffer size")
+		return fmt.Errorf("ivalid commitment state buffer size %d, expected at least 10b", len(buf))
 	}
 	pos := 0
 	cs.txNum = binary.BigEndian.Uint64(buf[pos : pos+8])

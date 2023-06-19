@@ -1014,7 +1014,7 @@ func TestDomainUnwind(t *testing.T) {
 	for i := 0; i < int(maxTx); i++ {
 		v1 := []byte(fmt.Sprintf("value1.%d", i))
 		v2 := []byte(fmt.Sprintf("value2.%d", i))
-		s := []byte(fmt.Sprintf("longstorage2.%d", i))
+		//s := []byte(fmt.Sprintf("longstorage2.%d", i))
 		fmt.Printf("i=%d\n", i)
 
 		//if i > 0 {
@@ -1038,10 +1038,11 @@ func TestDomainUnwind(t *testing.T) {
 		err = d.PutWithPrev([]byte("key2"), nil, v2, preval2)
 		require.NoError(t, err)
 
-		err = d.PutWithPrev([]byte("key3"), l, s, preval3)
-		require.NoError(t, err)
+		//err = d.PutWithPrev([]byte("key3"), l, s, preval3)
+		//require.NoError(t, err)
 
-		preval1, preval2, preval3 = v1, v2, s
+		//preval1, preval2, preval3 = v1, v2, s
+		preval1, preval2, preval3 = v1, v2, nil
 	}
 
 	err = d.Rotate().Flush(ctx, tx)

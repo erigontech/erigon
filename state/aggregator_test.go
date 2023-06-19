@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"os"
@@ -13,9 +14,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/common/background"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -650,6 +652,29 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (string, kv.RwDB, *Aggr
 	return path, db, agg
 }
 
+// generate test data for table tests, containing n; n < 20 keys of length 20 bytes and values of length <= 16 bytes
+func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byte, [][]byte) {
+	tb.Helper()
+
+	rnd := rand.New(rand.NewSource(0))
+	values := make([][]byte, keyCount)
+	keys := make([][]byte, keyCount)
+
+	bk, bv := make([]byte, keySize), make([]byte, valueSize)
+	for i := 0; i < keyCount; i++ {
+		n, err := rnd.Read(bk[:])
+		require.EqualValues(tb, keySize, n)
+		require.NoError(tb, err)
+		keys[i] = common.Copy(bk[:n])
+
+		n, err = rnd.Read(bv[:rnd.Intn(valueSize)+1])
+		require.NoError(tb, err)
+
+		values[i] = common.Copy(bv[:n])
+	}
+	return keys, values
+}
+
 func TestAggregatorV3_SharedDomains(t *testing.T) {
 	_, db, agg := testDbAndAggregatorv3(t, 20)
 	defer agg.Close()
@@ -663,18 +688,23 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	domains.SetTx(rwTx)
 	agg.SetTx(rwTx)
-	agg.StartUnbufferedWrites()
+	agg.StartWrites()
+
+	//agg.StartUnbufferedWrites()
 	defer agg.FinishWrites()
 	defer domains.Close()
 
-	var i uint64
-	roots := make([][]byte, 0, 10)
-	for i = 0; i < 6; i++ {
-		domains.SetTxNum(uint64(i))
-		key := make([]byte, 8)
-		binary.BigEndian.PutUint64(key, uint64(i))
+	keys, vals := generateInputData(t, 8, 16, 8)
+	keys = keys[:2]
 
-		err = domains.UpdateAccountCode(key, []byte{byte(i)}, nil)
+	var i int
+	roots := make([][]byte, 0, 10)
+	var pruneFrom uint64 = 5
+
+	for i = 0; i < len(vals); i++ {
+		domains.SetTxNum(uint64(i))
+
+		err = domains.UpdateAccountCode(keys[i%len(keys)], vals[i], nil)
 		require.NoError(t, err)
 
 		rh, err := domains.Commit(true, false)
@@ -682,29 +712,44 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		require.NotEmpty(t, rh)
 		roots = append(roots, rh)
 	}
-	//err = agg.Flush(context.Background(), rwTx)
-	//require.NoError(t, err)
 
-	err = agg.Unwind(context.Background(), 4, nil)
-
-	mc := agg.MakeContext()
-	mc.commitment.IteratePrefix(rwTx, nil, func(key, value []byte) {
-		fmt.Printf("commitment %x %x\n", key, value)
-	})
+	err = agg.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
 
-	for i = 4; i < 12; i++ {
-		domains.SetTxNum(uint64(i))
-		key := make([]byte, 8)
-		binary.BigEndian.PutUint64(key, uint64(i))
+	err = agg.Unwind(context.Background(), pruneFrom)
+	require.NoError(t, err)
 
-		err = domains.UpdateAccountCode(key, []byte{byte(i)}, nil)
+	mc := agg.MakeContext()
+	defer mc.Close()
+
+	//mc.commitment.IteratePrefix(rwTx, []byte{}, func(key []byte, value []byte) {
+	//	v, ok := expectedCommit[string(key)]
+	//	require.True(t, ok)
+	//	require.EqualValues(t, v, value)
+	//})
+	//
+
+	for i = int(pruneFrom); i < len(vals); i++ {
+		domains.SetTxNum(uint64(i))
+
+		err = domains.UpdateAccountCode(keys[i%len(keys)], vals[i], nil)
 		require.NoError(t, err)
 
 		rh, err := domains.Commit(true, false)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
-		roots = append(roots, rh)
+		require.EqualValues(t, roots[i], rh)
 	}
+
+	// history is [key+NewTxNum] : [OldTxNum+value]
+	//2- 1 = set at tx 1, updated at 2
+}
+
+func Test_helper_decodeAccountv3Bytes(t *testing.T) {
+	input, err := hex.DecodeString("00011e0000")
+	require.NoError(t, err)
+
+	n, b, ch := DecodeAccountBytes(input)
+	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, n, b.Uint64(), ch)
 
 }

@@ -1602,6 +1602,23 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 
 // buf expected to be encoded hph state. Decode state and set up hph to that state.
 func (hph *HexPatriciaHashed) SetState(buf []byte) error {
+	if buf == nil {
+		// reset state to 'empty'
+		hph.currentKeyLen = 0
+		hph.rootChecked = false
+		hph.rootTouched = false
+		hph.rootPresent = false
+		hph.activeRows = 0
+
+		for i := 0; i < len(hph.depths); i++ {
+			hph.depths[i] = 0
+			hph.branchBefore[i] = false
+			hph.touchMap[i] = 0
+			hph.afterMap[i] = 0
+		}
+		hph.root = Cell{}
+		return nil
+	}
 	if hph.activeRows != 0 {
 		return fmt.Errorf("has active rows, could not reset state")
 	}

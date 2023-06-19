@@ -36,10 +36,9 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-
-	"github.com/ledgerwatch/erigon-lib/common/background"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -167,6 +166,8 @@ type Domain struct {
 	valsTable string // key + invertedStep -> values
 	stats     DomainStats
 	wal       *domainWAL
+	values    *btree2.Map[string, []byte]
+	estSize   atomic.Uint64
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 	logger       log.Logger
@@ -178,6 +179,7 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	d := &Domain{
 		keysTable: keysTable,
 		valsTable: valsTable,
+		values:    btree2.NewMap[string, []byte](128),
 		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:     DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 		logger:    logger,
@@ -198,6 +200,7 @@ func (d *Domain) DiscardHistory() {
 	// can't discard domain wal - it required, but can discard history
 	d.wal = d.newWriter(d.tmpdir, true, false)
 }
+
 func (d *Domain) StartUnbufferedWrites() {
 	d.defaultDc = d.MakeContext()
 	d.wal = d.newWriter(d.tmpdir, false, false)
@@ -526,15 +529,16 @@ func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 }
 
 type domainWAL struct {
-	d           *Domain
-	keys        *etl.Collector
-	values      *etl.Collector
-	kvsize      atomic.Uint64
-	aux         []byte
-	tmpdir      string
-	buffered    bool
-	discard     bool
-	largeValues bool
+	d             *Domain
+	keys          *etl.Collector
+	values        *etl.Collector
+	kvsize        atomic.Uint64
+	aux           []byte
+	tmpdir        string
+	buffered      bool
+	discard       bool
+	largeValues   bool
+	skipKeySuffix bool // if true invstep will be added as 8bytes suffix to each key, if false - 8b suffix set by caller
 }
 
 func (h *domainWAL) close() {
@@ -553,14 +557,19 @@ func (h *domainWAL) size() uint64 {
 	return h.kvsize.Load()
 }
 
+func loadPrintFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	fmt.Printf("[flush] %x -> %x\n", k, v)
+	return next(k, k, v)
+}
+
 func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if h.discard || !h.buffered {
 		return nil
 	}
-	if err := h.keys.Load(tx, h.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := h.keys.Load(tx, h.d.keysTable, loadPrintFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := h.values.Load(tx, h.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := h.values.Load(tx, h.d.valsTable, loadPrintFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	return nil
@@ -572,12 +581,20 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 	}
 
 	kl := len(key1) + len(key2)
-	fullkey := h.aux[:kl+8]
+	offt := 0
+	if !h.skipKeySuffix {
+		offt = 8
+	}
+	fullkey := h.aux[:kl+offt]
 	copy(fullkey, key1)
 	copy(fullkey[len(key1):], key2)
 
-	step := ^(h.d.txNum / h.d.aggregationStep)
-	binary.BigEndian.PutUint64(fullkey[kl:], step)
+	if !h.skipKeySuffix {
+		istep := ^(h.d.txNum / h.d.aggregationStep)
+		binary.BigEndian.PutUint64(fullkey[kl:], istep)
+	} else {
+		kl -= 8
+	}
 
 	if h.largeValues {
 		if !h.buffered {
@@ -1257,14 +1274,132 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 	d.reCalcRoFiles()
 }
 
-func (d *Domain) pruneF(ctx context.Context, step, txFrom, txTo, limit uint64, f func(txnum uint64, k, v []byte) error) error {
+func (d *Domain) pruneF(ctx context.Context, step, txFrom, txTo, limit uint64, f func(step uint64, k, v []byte) error) error {
 	keysCursor, err := d.tx.RwCursorDupSort(d.keysTable)
 	if err != nil {
 		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
 	}
 	defer keysCursor.Close()
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
+
+	var k, v []byte
+	var valsC kv.RwCursor
+	var valsCDup kv.RwCursorDupSort
+
+	if d.largeValues {
+		valsC, err = d.tx.RwCursor(d.valsTable)
+		if err != nil {
+			return err
+		}
+		defer valsC.Close()
+	} else {
+		valsCDup, err = d.tx.RwCursorDupSort(d.valsTable)
+		if err != nil {
+			return err
+		}
+		defer valsCDup.Close()
+	}
+
+	fmt.Printf("prune %s from %d to %d step %d\n", d.filenameBase, txFrom, txTo, step)
+	mc := d.MakeContext()
+	defer mc.Close()
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^step)
+
+	seen := make(map[string]uint64)
+	wal := d.newWriter(d.tmpdir+"_prune", true, false)
+	wal.skipKeySuffix = true
+	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
+		if !bytes.Equal(v, stepBytes) {
+			continue
+		}
+		txNumHist, pk, pv, err := mc.hc.GetRecent(k, txFrom, d.tx)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("recent %x txn '%x' v '%x' ? ", k, txNumHist, pv)
+		if len(pk) != 0 {
+			if txNumHist < txFrom && len(pv) == 0 {
+				// recent value installed at txNumHist is in domain, skip
+				fmt.Printf("skip\n")
+				continue
+			}
+			//if _, ok := seen[string(k)]; ok {
+			//	continue
+			//}
+			fmt.Printf("restoring\n")
+			wal.addValue(k, v, pv)
+			seen[string(k)] = txNumHist
+			//continue
+		}
+
+		seek := common.Append(k, stepBytes)
+		if d.largeValues {
+			kk, vv, err := valsC.SeekExact(seek)
+			if err != nil {
+				return err
+			}
+			if f != nil {
+				if err := f(step, kk, vv); err != nil {
+					return err
+				}
+			}
+			if kk != nil {
+				fmt.Printf("rm large value %x v %x\n", kk, vv)
+				if err = valsC.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
+		} else {
+			vv, err := valsCDup.SeekBothRange(seek, nil)
+			if err != nil {
+				return err
+			}
+			if f != nil {
+				if err := f(step, k, vv); err != nil {
+					return err
+				}
+			}
+			dups, err := valsCDup.CountDuplicates()
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("rm %d dupes %x v %x\n", dups, seek, vv)
+			if err = valsCDup.DeleteCurrentDuplicates(); err != nil {
+				return err
+			}
+		}
+
+		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
+		if err = keysCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
+	}
+
+	if err = wal.flush(ctx, d.tx); err != nil {
+		return err
+	}
+
+	logEvery := time.NewTicker(time.Second * 30)
+	defer logEvery.Stop()
+	if err := d.History.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
+		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
+	}
+	return nil
+}
+
+// history prunes keys in range [txFrom; txTo), domain prunes whole step.
+func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+	keysCursor, err := d.tx.RwCursorDupSort(d.keysTable)
+	if err != nil {
+		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
+	}
+	defer keysCursor.Close()
+
 	var k, v []byte
 	var valsC kv.RwCursor
 	var valsCDup kv.RwCursorDupSort
@@ -1282,51 +1417,34 @@ func (d *Domain) pruneF(ctx context.Context, step, txFrom, txTo, limit uint64, f
 		defer valsCDup.Close()
 	}
 
+	mc := d.MakeContext()
+	defer mc.Close()
+
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
 	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
-		txStep := binary.BigEndian.Uint64(v)
 		if !bytes.Equal(v, stepBytes) {
-
-			if txStep&(1>>63)-1 == 0 {
-				// this is txnumber not invstep
-				if txStep > txFrom {
-					// not needed that
-					continue
-				}
-
-			}
 			continue
 		}
 
+		seek := common.Append(k, v)
 		if d.largeValues {
-			seek := common.Append(k, v)
-			kk, vv, err := valsC.SeekExact(seek)
+			kk, _, err := valsC.SeekExact(seek)
 			if err != nil {
 				return err
 			}
-			if err := f(txStep, kk[:len(kk)-8], vv); err != nil {
-				return err
-			}
 			if kk != nil {
-				//fmt.Printf("del buffered key %x v %x\n", kk, vv)
 				if err = valsC.DeleteCurrent(); err != nil {
 					return err
 				}
 			}
 		} else {
-			vv, err := valsCDup.SeekBothRange(k, nil)
+			vv, err := valsCDup.SeekBothRange(seek, nil)
 			if err != nil {
 				return err
 			}
-			if binary.BigEndian.Uint64(vv) != txStep {
-				continue
-			}
-			if err := f(txStep, v, vv[8:]); err != nil {
-				return err
-			}
-			//fmt.Printf("del buffered key %x v %x\n", k, vv)
+			fmt.Printf("del buffered value %x v %x\n", k, vv)
 			if err = valsCDup.DeleteCurrent(); err != nil {
 				return err
 			}
@@ -1340,30 +1458,15 @@ func (d *Domain) pruneF(ctx context.Context, step, txFrom, txTo, limit uint64, f
 	if err != nil {
 		return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
 	}
-	exists := map[string]struct{}{}
-	if err := d.History.pruneF(txFrom, txTo, func(txNum uint64, k, v []byte) error {
-		if _, ok := exists[string(k)]; ok {
-			return nil
-		}
-		exists[string(k)] = struct{}{}
 
-		//d.SetTxNum(txNum)
-		fmt.Printf("puts bakc %x %x from tx %d\n", k, v, txNum)
-		//return d.History.AddPrevValue(k, nil, v)
-		return nil
-		//return d.
-	}); err != nil {
-		return err
+	if err := d.History.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
+		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
-	//if err := d.History.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
-	//	return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
-	//}
 	return nil
-
 }
 
 // [txFrom; txTo)
-func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+func (d *Domain) pruneOld(ctx context.Context, step uint64, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
 	defer func(t time.Time) { d.stats.LastPruneTook = time.Since(t) }(time.Now())
 	mxPruningProgress.Inc()
 	defer mxPruningProgress.Dec()
@@ -1387,7 +1490,7 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 
 	var (
 		k, v, stepBytes []byte
-		keyMaxSteps     = make(map[string]struct{})
+		deleteKeys      = make(map[string]struct{})
 	)
 
 	hctx := d.History.MakeContext()
@@ -1395,35 +1498,27 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 
 	stepBytes = make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
-	//prevAgg := 0
-	//if d.txNum > d.aggregationStep {
-	//	mn := d.txNum / d.aggregationStep
-	//	prevAgg = int(mn * d.aggregationStep)
-	//}
 
-	//iter, err := hctx.WalkAsOf(txFrom, []byte{}, []byte{}, d.tx, math.MaxUint64)
-	//if err != nil {
-	//	return fmt.Errorf("walk history: %w", err)
-	//}
-	//
-	//for k, v, err := iter.Next(); iter.HasNext() && err == nil && k != nil; k, v, err = iter.Next() {
-	//
-	//}
-
+	// MA prune
 	kwal := d.newWriter(path.Join(d.tmpdir, "prune_keys"), true, false)
 	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.NextNoDup() {
-		if bytes.Equal(v, stepBytes) {
+		//if bytes.Equal(v, stepBytes) {
+		txNum := binary.BigEndian.Uint64(v)
+		if txNum >= txFrom && txNum < txTo {
 			// remove those keys with values equal to stepBytes and has history
-			val, existed, err := hctx.GetNoStateWithRecent(k, txFrom, d.tx)
-			if err != nil {
-				return err
-			}
-			if !existed {
-				continue
-			}
-			if err := kwal.addValue(k, nil, val); err != nil {
-				return err
-			}
+			//val, existed, err := hctx.GetNoStateWithRecent(k, txFrom, d.tx)
+			//if err != nil {
+			//	return err
+			//}
+			////if !existed || val == nil {
+			////	fmt.Printf("[%s] skip key %x %x |%t,%v\n", d.valsTable, k, v, existed, val)
+			////	continue
+			////}
+			//if existed && len(val) > 0 {
+			//	if err := kwal.addValue(k, nil, val); err != nil {
+			//		return err
+			//	}
+			//}
 			dupes, err := keysCursor.CountDuplicates()
 			if err != nil {
 				return err
@@ -1433,7 +1528,7 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 			}
 			mxPruneSize.Add(int(dupes))
 			fmt.Printf("[%s] prune key dups %d %x %x\n", d.valsTable, dupes, k, v)
-			keyMaxSteps[string(k)] = struct{}{}
+			deleteKeys[string(common.Append(k, v))] = struct{}{}
 			pos.Add(dupes)
 
 			//pk, pv, err := keysCursor.PrevDup()
@@ -1468,6 +1563,10 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 		return fmt.Errorf("iterate of %s keys: %w", d.filenameBase, err)
 	}
 
+	for k, _ := range deleteKeys {
+		fmt.Printf("[map] delete key %x\n", k)
+	}
+
 	_state = "delete vals"
 	pos.Store(0)
 
@@ -1479,21 +1578,38 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 			return fmt.Errorf("%s vals cursor: %w", d.filenameBase, err)
 		}
 		defer valsCursor.Close()
-		for k, _, err := valsCursor.First(); err == nil && k != nil; k, _, err = valsCursor.Next() {
-			//if bytes.HasSuffix(k, stepBytes) {
-			if _, ok := keyMaxSteps[string(k)]; !ok {
-				continue
+		for k, _, err := valsCursor.First(); err == nil && k != nil; k, _, err = valsCursor.NextNoDup() {
+			//if bytes.HasPrefix(k, keyCommitmentState) {
+			//	txn := binary.BigEndian.Uint64(k[len(keyCommitmentState):])
+			//	if txn < txFrom || txn > txTo {
+			//		continue
+			//	}
+			//}
+			for kn, vn, err := valsCursor.NextDup(); err != nil && kn != nil; kn, vn, err = valsCursor.NextDup() {
+				fmt.Printf("[%s] prune value %x %x\n", d.valsTable, kn, vn)
+				txNum := binary.BigEndian.Uint64(kn[len(kn)-8:])
+				if txNum >= txFrom && txNum < txTo {
+					fmt.Printf("[%s] prune val %x %x\n", d.valsTable, k, v)
+					if err := valsCursor.DeleteCurrent(); err != nil {
+						return fmt.Errorf("prune key %x: %w", k, err)
+					}
+				} else {
+					fmt.Printf("[%s] notprune value %x %x\n", d.valsTable, kn, vn)
+				}
 			}
-			dupes, err := valsCursor.CountDuplicates()
-			if err != nil {
-				return err
-			}
-			fmt.Printf("[%s] prune val %x %x\n", d.valsTable, k, v)
-			if err := valsCursor.DeleteCurrentDuplicates(); err != nil {
-				return fmt.Errorf("prune val %x: %w", k, err)
-			}
-			mxPruneSize.Add(int(dupes))
-			pos.Add(dupes)
+
+			//if _, ok := deleteKeys[string(k)]; !ok {
+			//	continue
+			//}
+			//dupes, err := valsCursor.CountDuplicates()
+			//if err != nil {
+			//	return err
+			//}
+			//if err := valsCursor.DeleteCurrentDuplicates(); err != nil {
+			//	return fmt.Errorf("prune val %x: %w", k, err)
+			//}
+			//mxPruneSize.Add(int(dupes))
+			//pos.Add(dupes)
 
 			select {
 			case <-ctx.Done():
@@ -1518,11 +1634,17 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 			return fmt.Errorf("%s vals cursor: %w", d.filenameBase, err)
 		}
 		defer valsCursor.Close()
-		for k, _, err := valsCursor.First(); err == nil && k != nil; k, _, err = valsCursor.Next() {
-			if _, ok := keyMaxSteps[string(k)]; !ok {
+		for k, v, err := valsCursor.First(); err == nil && k != nil; k, v, err = valsCursor.Next() {
+			txnum := binary.BigEndian.Uint64(k[len(k)-8:])
+			if txnum < txFrom || txnum > txTo {
+				fmt.Printf("[%s] notprune value %x %x\n", d.valsTable, k, v)
 				continue
 			}
-			fmt.Printf("[%s] prune v %x %x\n", d.valsTable, k, v)
+			fmt.Printf("[%s] prune sval %x %x\n", d.valsTable, k, v)
+			//if _, ok := deleteKeys[string(k)]; !ok {
+			//	continue
+			//}
+			//fmt.Printf("[%s] prune v %x %x\n", d.valsTable, k, v)
 			if err := valsCursor.DeleteCurrent(); err != nil {
 				return fmt.Errorf("prune val %x: %w", k, err)
 			}

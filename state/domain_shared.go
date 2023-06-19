@@ -3,9 +3,11 @@ package state
 import (
 	"bytes"
 	"container/heap"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -71,11 +73,13 @@ type SharedDomains struct {
 	Storage    *Domain
 	Code       *Domain
 	Commitment *DomainCommitted
+	//TracesTo   *InvertedIndex
+	//LogAddrs   *InvertedIndex
+	//LogTopics  *InvertedIndex
+	//TracesFrom *InvertedIndex
 }
 
-func (sd *SharedDomains) Unwind(rwtx kv.RwTx) {
-	sd.muMaps.Lock()
-	defer sd.muMaps.Unlock()
+func (sd *SharedDomains) Unwind(ctx context.Context, rwtx kv.RwTx, step uint64, txUnwindTo uint64) error {
 	//ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	//defer cancel()
 	//
@@ -92,12 +96,79 @@ func (sd *SharedDomains) Unwind(rwtx kv.RwTx) {
 	//if err := sd.flushBtree(ctx, rwtx, sd.Commitment.valsTable, sd.commitment, "sd_unwind", logEvery); err != nil {
 	//	panic(err)
 	//}
-	sd.account.Clear()
-	sd.code.Clear()
-	sd.commitment.Clear()
-	sd.Commitment.patriciaTrie.Reset()
-	sd.storage.Clear()
-	sd.estSize.Store(0)
+	sd.clear()
+
+	sd.muMaps.Lock()
+	defer sd.muMaps.Unlock()
+	var useNew bool
+	useNew = true
+	if !useNew {
+		logEvery := time.NewTicker(time.Second * 30)
+		err := sd.Account.prune(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery)
+		if err != nil {
+			panic(err)
+		}
+		err = sd.Code.prune(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery)
+		if err != nil {
+			panic(err)
+		}
+		err = sd.Storage.prune(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery)
+		if err != nil {
+			panic(err)
+		}
+		err = sd.Commitment.prune(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery)
+		if err != nil {
+			panic(err)
+		}
+		//if err := a.logAddrs.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+		//	return err
+		//}
+		//if err := a.logTopics.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+		//	return err
+		//}
+		//if err := a.tracesFrom.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+		//	return err
+		//}
+		//if err := a.tracesTo.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+		//	return err
+		//}
+		return nil
+	}
+
+	if err := sd.Account.pruneF(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, func(txN uint64, k, v []byte) error {
+		//fmt.Printf("d code: %x %x\n", k, v)
+		//pv, _, err := actx.accounts.hc.GetNoStateWithRecent(k, txUnwindTo, a.rwTx)
+		//if err != nil {
+		//	return err
+		//}
+		//if len(pv) > 0 {
+		//	fmt.Printf("restoring %x %x\n", k, pv)
+		//}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := sd.Storage.pruneF(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
+		return err
+	}
+	if err := sd.Code.pruneF(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
+		return err
+	}
+
+	if err := sd.Commitment.pruneF(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
+		return err
+	}
+
+	cmcx := sd.Commitment.MakeContext()
+	defer cmcx.Close()
+
+	_, _, rv, err := cmcx.hc.GetRecent(keyCommitmentState, txUnwindTo, rwtx)
+	if err != nil {
+		return err
+	}
+	bn, txn, err := sd.Commitment.Restore(rv)
+	fmt.Printf("Unwind domains to block %d, txn %d wanted to %d\n", bn, txn, txUnwindTo)
+	return err
 }
 
 func (sd *SharedDomains) clear() {
@@ -106,7 +177,7 @@ func (sd *SharedDomains) clear() {
 	sd.account.Clear()
 	sd.code.Clear()
 	sd.commitment.Clear()
-	sd.Commitment.patriciaTrie.Reset()
+	//sd.Commitment.patriciaTrie.Reset()
 	sd.storage.Clear()
 	sd.estSize.Store(0)
 }
@@ -272,7 +343,7 @@ func (sd *SharedDomains) BranchFn(pref []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("branchFn failed: %w", err)
 	}
-	fmt.Printf("branchFn[sd]: %x: %x\n", pref, v)
+	//fmt.Printf("branchFn[sd]: %x: %x\n", pref, v)
 	if len(v) == 0 {
 		return nil, nil
 	}
@@ -294,7 +365,7 @@ func (sd *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error
 		if len(chash) > 0 {
 			copy(cell.CodeHash[:], chash)
 		}
-		fmt.Printf("accountFn[sd]: %x: n=%d b=%d ch=%x\n", plainKey, nonce, balance, chash)
+		//fmt.Printf("accountFn[sd]: %x: n=%d b=%d ch=%x\n", plainKey, nonce, balance, chash)
 	}
 
 	code, err := sd.LatestCode(plainKey)
@@ -302,7 +373,7 @@ func (sd *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error
 		return fmt.Errorf("accountFn[sd]: failed to read latest code: %w", err)
 	}
 	if len(code) > 0 {
-		fmt.Printf("accountFn[sd]: code %x - %x\n", plainKey, code)
+		//fmt.Printf("accountFn[sd]: code %x - %x\n", plainKey, code)
 		sd.Commitment.updates.keccak.Reset()
 		sd.Commitment.updates.keccak.Write(code)
 		copy(cell.CodeHash[:], sd.Commitment.updates.keccak.Sum(nil))
@@ -320,7 +391,7 @@ func (sd *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error
 	if err != nil {
 		return err
 	}
-	fmt.Printf("storageFn[sd]: %x|%x - %x\n", addr, loc, enc)
+	//fmt.Printf("storageFn[sd]: %x|%x - %x\n", addr, loc, enc)
 	cell.StorageLen = len(enc)
 	copy(cell.Storage[:], enc)
 	cell.Delete = cell.StorageLen == 0

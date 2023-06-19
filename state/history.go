@@ -585,11 +585,16 @@ func (h *History) newWriter(tmpdir string, buffered, discard bool) *historyWAL {
 	return w
 }
 
+func loadHistPrintFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	fmt.Printf("[hflush] %x -> %x\n", k, v)
+	return next(k, k, v)
+}
+
 func (h *historyWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if h.discard || !h.buffered {
 		return nil
 	}
-	if err := h.historyVals.Load(tx, h.h.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := h.historyVals.Load(tx, h.h.historyValsTable, loadHistPrintFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	h.close()
@@ -1121,146 +1126,14 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 			if err = valsCDup.DeleteCurrent(); err != nil {
 				return err
 			}
-		}
+			fmt.Printf("[%s] prune history key: tx=%d %x %x\n", h.filenameBase, txNum, k, v)
 
-		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if err = historyKeysCursor.DeleteCurrent(); err != nil {
-			return err
+			// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
+			if err = historyKeysCursor.DeleteCurrent(); err != nil {
+				return err
+			}
 		}
 	}
-	if err != nil {
-		return fmt.Errorf("iterate over %s history keys: %w", h.filenameBase, err)
-	}
-
-	/*
-		   historyKeysCursor, err := h.tx.RwCursorDupSort(h.indexKeysTable)
-		   	if err != nil {
-		   		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
-		   	}
-		   	defer historyKeysCursor.Close()
-		   	var txKey [8]byte
-		   	binary.BigEndian.PutUint64(txKey[:], txFrom)
-
-		   	k, v, err := historyKeysCursor.Seek(txKey[:])
-		   	if err != nil {
-		   		return err
-		   	}
-		   	if k == nil {
-		   		return nil
-		   	}
-		   	txFrom = binary.BigEndian.Uint64(k)
-		   	if limit != math.MaxUint64 && limit != 0 {
-		   		txTo = cmp.Min(txTo, txFrom+limit)
-		   	}
-		   	if txFrom >= txTo {
-		   		return nil
-		   	}
-
-		   	collector := etl.NewCollector("snapshots", h.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), h.logger)
-		   	defer collector.Close()
-
-		// Invariant: if some `txNum=N` pruned - it's pruned Fully
-		// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-		for ; err == nil && k != nil; k, v, err = historyKeysCursor.NextNoDup() {
-			txNum := binary.BigEndian.Uint64(k)
-			if txNum >= txTo {
-				break
-			}
-			if txNum < txFrom {
-				continue
-			}
-			for ; err == nil && k != nil; k, v, err = historyKeysCursor.NextDup() {
-				if err := collector.Collect(v, nil); err != nil {
-					return err
-				}
-				fmt.Printf("prune %s history: tx=%d %x %x\n", h.filenameBase, txNum, k, v)
-			}
-
-		   		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		   		if err = historyKeysCursor.DeleteCurrentDuplicates(); err != nil {
-		   			return err
-		   		}
-		   	}
-
-		   	if h.largeValues {
-		   		valsC, err := h.tx.RwCursor(h.historyValsTable)
-		   		if err != nil {
-		   			return err
-		   		}
-		   		defer valsC.Close()
-
-		   		if err := collector.Load(h.tx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		   			for k, _, err := valsC.Seek(key); k != nil; k, _, err = valsC.Next() {
-		   				if err != nil {
-		   					return err
-		   				}
-		   				if !bytes.HasPrefix(k, key) {
-		   					break
-		   				}
-		   				txNum := binary.BigEndian.Uint64(k[len(k)-8:])
-		   				if txNum >= txTo {
-		   					break
-		   				}
-		   				if txNum < txFrom {
-						continue
-					}
-					fmt.Printf("prune7 %s history: tx=%d %x %x\n", h.filenameBase, txNum, k, v)
-					if err = valsC.DeleteCurrent(); err != nil {
-		   					return err
-		   				}
-
-		   				select {
-		   				case <-logEvery.C:
-		   					log.Info("[snapshots] prune history", "name", h.filenameBase, "to_step", fmt.Sprintf("%.2f", float64(txTo)/float64(h.aggregationStep)), "prefix", fmt.Sprintf("%x", key[:8]))
-		   				default:
-		   				}
-		   			}
-		   			return nil
-		   		}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		   			return err
-		   		}
-		   		if err != nil {
-		   			return fmt.Errorf("iterate over %s history keys: %w", h.filenameBase, err)
-		   		}
-		   	} else {
-		   		valsC, err := h.tx.RwCursorDupSort(h.historyValsTable)
-		   		if err != nil {
-		   			return err
-		   		}
-		   		defer valsC.Close()
-
-		   		if err := collector.Load(h.tx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		   			for k, v, err := valsC.SeekExact(key); k != nil; k, v, err = valsC.NextDup() {
-		   				if err != nil {
-		   					return err
-		   				}
-		   				txNum := binary.BigEndian.Uint64(v)
-		   				if txNum < txFrom {
-						continue
-					}
-					if txNum >= txTo {
-		   					break
-		   				}
-					fmt.Printf("prune1 %s history: tx=%d %x %x\n", h.filenameBase, txNum, k, v)
-		   				if err = valsC.DeleteCurrent(); err != nil {
-		   					return err
-		   				}
-
-		   				select {
-		   				case <-logEvery.C:
-		   					log.Info("[snapshots] prune history", "name", h.filenameBase, "to_step", fmt.Sprintf("%.2f", float64(txTo)/float64(h.aggregationStep)), "prefix", fmt.Sprintf("%x", key[:8]))
-		   				default:
-		   				}
-		   			}
-		   			return nil
-		   		}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		   			return err
-		   		}
-		   		if err != nil {
-		   			return fmt.Errorf("iterate over %s history keys: %w", h.filenameBase, err)
-		   		}
-		   	}
-	*/
 	return nil
 }
 
@@ -1631,6 +1504,113 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 	}
 	// `val == []byte{}` means key was created in this txNum and doesn't exists before.
 	return val[8:], true, nil
+}
+
+func (hc *HistoryContext) GetRecent(key []byte, txNum uint64, roTx kv.Tx) (uint64, []byte, []byte, error) {
+	v, ok, err := hc.GetNoState(key, txNum)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	if ok {
+		return 0, key, v, nil
+	}
+
+	// Value not found in history files, look in the recent history
+	if roTx == nil {
+		return 0, nil, nil, fmt.Errorf("roTx is nil")
+	}
+	return hc.getRecentFromDB(key, txNum, roTx)
+}
+
+// keyNewTx -> value
+// if points to nil key then actual value stored in domain
+// if points to non-nil key then first 8 bytes of value stores txNum when value has been added
+func (hc *HistoryContext) getRecentFromDB(key []byte, beforeTxNum uint64, tx kv.Tx) (uint64, []byte, []byte, error) {
+	proceedKV := func(kAndTxNum, val []byte) (uint64, []byte, []byte, bool) {
+		newTxn := binary.BigEndian.Uint64(kAndTxNum[len(kAndTxNum)-8:])
+		if newTxn < beforeTxNum {
+			if len(val) == 0 {
+				val = []byte{}
+				//val == []byte{} means key was created in this txNum and doesn't exists before.
+			}
+			return newTxn, kAndTxNum[:len(kAndTxNum)-8], val, true
+		}
+		return 0, nil, nil, false
+	}
+
+	if hc.h.largeValues {
+		c, err := tx.Cursor(hc.h.historyValsTable)
+		if err != nil {
+			return 0, nil, nil, err
+		}
+		defer c.Close()
+		seek := make([]byte, len(key)+8)
+		copy(seek, key)
+		binary.BigEndian.PutUint64(seek[len(key):], beforeTxNum)
+
+		kAndTxNum, val, err := c.Seek(seek)
+		if err != nil {
+			return 0, nil, nil, err
+		}
+		if len(kAndTxNum) > 0 && bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) && bytes.Equal(kAndTxNum[len(kAndTxNum)-8:], seek[len(key):]) {
+			// exact match
+			return beforeTxNum, kAndTxNum, val, nil
+		}
+
+		for kAndTxNum, val, err = c.Prev(); kAndTxNum != nil && bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key); kAndTxNum, val, err = c.Prev() {
+			txn, k, v, exit := proceedKV(kAndTxNum, val)
+			if exit {
+				return txn, k, v, nil
+			}
+			//newTxn := binary.BigEndian.Uint64(kAndTxNum[len(kAndTxNum)-8:])
+			//if newTxn < beforeTxNum {
+			//	fmt.Printf("OLDL1 k %x val: %x\n", seek, val)
+			//	// val == []byte{} means key was created in this txNum and doesn't exists before.
+			//	return newTxn, kAndTxNum[:len(kAndTxNum)-8], val, nil
+			//}
+			//if len(val) != 0 && len(val) >= 8 {
+			//	oldTxn := binary.BigEndian.Uint64(val[:8])
+			//	if oldTxn < beforeTxNum {
+			//		fmt.Printf("OLDL2 k %x val: %x\n", seek, val)
+			//		return oldTxn, kAndTxNum[:len(kAndTxNum)-8], val, nil
+			//	}
+			//}
+		}
+		return 0, nil, nil, nil
+	}
+	c, err := tx.CursorDupSort(hc.h.historyValsTable)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	defer c.Close()
+
+	kAndTxNum := make([]byte, len(key)+8)
+	copy(kAndTxNum, key)
+
+	binary.BigEndian.PutUint64(kAndTxNum[len(key):], beforeTxNum)
+
+	val, err := c.SeekBothRange(key, kAndTxNum[len(key):])
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	if val == nil {
+		return 0, nil, nil, nil
+	}
+
+	txn, k, v, exit := proceedKV(kAndTxNum, val)
+	if exit {
+		return txn, k, v, nil
+	}
+
+	for kAndTxNum, val, err = c.Prev(); kAndTxNum != nil && bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key); kAndTxNum, val, err = c.Prev() {
+		fmt.Printf("dup %x %x\n", kAndTxNum, val)
+		txn, k, v, exit = proceedKV(kAndTxNum, val)
+		if exit {
+			return txn, k, v, nil
+		}
+	}
+	return 0, nil, nil, err
+	// `val == []byte{}` means key was created in this beforeTxNum and doesn't exists before.
 }
 
 func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, limit int) (iter.KV, error) {

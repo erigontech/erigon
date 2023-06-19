@@ -54,10 +54,10 @@ type AggregatorV3 struct {
 	code             *Domain
 	commitment       *DomainCommitted
 	tracesTo         *InvertedIndex
-	backgroundResult *BackgroundResult
 	logAddrs         *InvertedIndex
 	logTopics        *InvertedIndex
 	tracesFrom       *InvertedIndex
+	backgroundResult *BackgroundResult
 	logPrefix        string
 	dir              string
 	tmpdir           string
@@ -111,7 +111,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 		logger:           logger,
 	}
 	var err error
-	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, false, false, logger); err != nil {
+	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, false, true, logger); err != nil {
 		return nil, err
 	}
 	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, true, true, logger); err != nil {
@@ -911,87 +911,15 @@ func (a *AggregatorV3) HasNewFrozenFiles() bool {
 
 func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64) error {
 	//TODO: use ETL to avoid OOM (or specialized history-iterator instead of pruneF)
-	//stateChanges := etl.NewCollector(a.logPrefix, a.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), a.logger)
-	//defer stateChanges.Close()
-	//txUnwindTo--
-	//{
-	//	exists := map[string]struct{}{}
-	//	if err := a.accounts.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
-	//		if _, ok := exists[string(k)]; ok {
-	//			return nil
-	//		}
-	//		exists[string(k)] = struct{}{}
-	//
-	//		a.accounts.SetTxNum(txNum)
-	//		return a.accounts.put(k, v)
-	//	}); err != nil {
-	//		return err
-	//	}
-	//}
-	//{
-	//	exists := map[string]struct{}{}
-	//	if err := a.storage.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
-	//		if _, ok := exists[string(k)]; ok {
-	//			return nil
-	//		}
-	//		exists[string(k)] = struct{}{}
-	//
-	//		a.storage.SetTxNum(txNum)
-	//		return a.storage.put(k, v)
-	//	}); err != nil {
-	//		return err
-	//	}
-	//}
-	//{
-	//	exists := map[string]struct{}{}
-	//	if err := a.code.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
-	//		if _, ok := exists[string(k)]; ok {
-	//			return nil
-	//		}
-	//		exists[string(k)] = struct{}{}
-	//
-	//		a.code.SetTxNum(txNum)
-	//		return a.code.put(k, v)
-	//	}); err != nil {
-	//		return err
-	//	}
-	//}
-	//{
-	//	exists := map[string]struct{}{}
-	//	if err := a.commitment.pruneF(txUnwindTo, math2.MaxUint64, func(txNum uint64, k, v []byte) error {
-	//		if _, ok := exists[string(k)]; ok {
-	//			return nil
-	//		}
-	//		exists[string(k)] = struct{}{}
-	//
-	//		a.commitment.SetTxNum(txNum)
-	//		return a.commitment.put(k, v)
-	//	}); err != nil {
-	//		return err
-	//	}
-	//}
-	a.domains.Unwind(a.rwTx)
+	step := txUnwindTo / a.aggregationStep
+	if err := a.domains.Unwind(ctx, a.rwTx, step, txUnwindTo); err != nil {
+		return err
+	}
 
 	//a.Flush(ctx, a.rwTx)
-
-	//if err := stateChanges.Load(a.rwTx, kv.PlainState, stateLoad, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-	//	return err
-	//}
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	step := txUnwindTo / a.aggregationStep
-	if err := a.accounts.prune(ctx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		return err
-	}
-	if err := a.storage.prune(ctx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		return err
-	}
-	if err := a.code.prune(ctx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		return err
-	}
-	if err := a.commitment.prune(ctx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		return err
-	}
+
 	if err := a.logAddrs.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
 		return err
 	}
@@ -1005,16 +933,25 @@ func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64) error {
 		return err
 	}
 
+	//bn, txn, err := a.domains.Commitment.SeekCommitment(txUnwindTo - 1)
+	//if err != nil {
+	//	return err
+	//}
+	//fmt.Printf("Unwind domains to block %d, txn %d wanted to %d\n", bn, txn, txUnwindTo)
+
 	a.accounts.MakeContext().IteratePrefix(a.rwTx, []byte{}, func(k, v []byte) {
 		n, b, _ := DecodeAccountBytes(v)
 		fmt.Printf("acc - %x - n=%d b=%d\n", k, n, b.Uint64())
 	})
-
-	bn, txn, err := a.domains.Commitment.SeekCommitment(txUnwindTo - 1)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Unwind domains to block %d, txn %d wanted to %d\n", bn, txn, txUnwindTo)
+	a.code.MakeContext().IteratePrefix(a.rwTx, []byte{}, func(k, v []byte) {
+		fmt.Printf("cod - %x : %x\n", k, v)
+	})
+	a.storage.MakeContext().IteratePrefix(a.rwTx, []byte{}, func(k, v []byte) {
+		fmt.Printf("sto - %x : %x\n", k, v)
+	})
+	a.commitment.MakeContext().IteratePrefix(a.rwTx, []byte{}, func(k, v []byte) {
+		fmt.Printf("com - %x : %x\n", k, v)
+	})
 	return nil
 }
 
@@ -1129,7 +1066,6 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	a.SharedDomains().clear()
 	return nil
 }
 
