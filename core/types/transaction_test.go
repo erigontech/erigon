@@ -561,6 +561,19 @@ func encodeDecodeBinary(tx Transaction) (Transaction, error) {
 	return parsedTx, nil
 }
 
+func encodeDecodeWrappedBinary(tx *BlobTxWrapper) (*BlobTxWrapper, error) {
+	var buf bytes.Buffer
+	var err error
+	if err = tx.MarshalBinary(&buf); err != nil {
+		return nil, fmt.Errorf("rlp encoding failed: %w", err)
+	}
+	var parsedTx Transaction
+	if parsedTx, err = UnmarshalWrappedTransactionFromBinary(buf.Bytes()); err != nil {
+		return nil, fmt.Errorf("rlp decoding failed: %w", err)
+	}
+	return parsedTx.(*BlobTxWrapper), nil
+}
+
 func assertEqual(orig Transaction, cpy Transaction) error {
 	// compare nonce, price, gaslimit, recipient, amount, payload, V, R, S
 	if want, got := orig.Hash(), cpy.Hash(); want != got {
@@ -580,10 +593,39 @@ func assertEqual(orig Transaction, cpy Transaction) error {
 	return nil
 }
 
+func assertEqualBlobWrapper(orig *BlobTxWrapper, cpy *BlobTxWrapper) error {
+	// compare commitments, blobs, proofs
+	if want, got := len(orig.Commitments), len(cpy.Commitments); want != got {
+		return fmt.Errorf("parsed tx commitments have unequal size: want%v, got %v", want, got)
+	}
+
+	if want, got := len(orig.Blobs), len(cpy.Blobs); want != got {
+		return fmt.Errorf("parsed tx blobs have unequal size: want%v, got %v", want, got)
+	}
+
+	if want, got := len(orig.Proofs), len(cpy.Proofs); want != got {
+		return fmt.Errorf("parsed tx proofs have unequal size: want%v, got %v", want, got)
+	}
+
+	if want, got := orig.Commitments, cpy.Commitments; !reflect.DeepEqual(want, got) {
+		return fmt.Errorf("parsed tx commitments unequal: want%v, got %v", want, got)
+	}
+
+	if want, got := orig.Blobs, cpy.Blobs; !reflect.DeepEqual(want, got) {
+		return fmt.Errorf("parsed tx blobs unequal: want%v, got %v", want, got)
+	}
+
+	if want, got := orig.Proofs, cpy.Proofs; !reflect.DeepEqual(want, got) {
+		return fmt.Errorf("parsed tx proofs unequal: want%v, got %v", want, got)
+	}
+
+	return nil
+}
+
 const N = 50
 
-var dummySignedBlobTxs = [N]*SignedBlobTx{}
-var addr [20]byte
+var dummyBlobTxs = [N]*BlobTx{}
+var dummyBlobWrapperTxs = [N]*BlobTxWrapper{}
 
 func randIntInRange(min, max int) int {
 	return (rand.Intn(max-min) + min)
@@ -634,34 +676,35 @@ func randData() []byte {
 	return data
 }
 
-func newRandSignedBlobTx() *SignedBlobTx {
-	stx := &SignedBlobTx{
-		ChainID:              uint256.NewInt(rand.Uint64()),
-		Nonce:                rand.Uint64(),
-		MaxPriorityFeePerGas: uint256.NewInt(rand.Uint64()),
-		MaxFeePerGas:         uint256.NewInt(rand.Uint64()),
-		Gas:                  rand.Uint64(),
-		To:                   randAddr(),
-		Value:                uint256.NewInt(rand.Uint64()),
-		Data:                 randData(),
-		AccessList:           randAccessList(),
-
+func newRandBlobTx() *BlobTx {
+	stx := &BlobTx{DynamicFeeTransaction: DynamicFeeTransaction{
+		CommonTx: CommonTx{
+			Nonce: rand.Uint64(),
+			Gas:   rand.Uint64(),
+			To:    randAddr(),
+			Value: uint256.NewInt(rand.Uint64()),
+			Data:  randData(),
+			V:     *uint256.NewInt(rand.Uint64()),
+			R:     *uint256.NewInt(rand.Uint64()),
+			S:     *uint256.NewInt(rand.Uint64()),
+		},
+		ChainID:    uint256.NewInt(rand.Uint64()),
+		Tip:        uint256.NewInt(rand.Uint64()),
+		FeeCap:     uint256.NewInt(rand.Uint64()),
+		AccessList: randAccessList(),
+	},
 		MaxFeePerDataGas:    uint256.NewInt(rand.Uint64()),
 		BlobVersionedHashes: randHashes(randIntInRange(5, 10)),
-
-		YParity: rand.Intn(2) == 1,
-		R:       *uint256.NewInt(rand.Uint64()),
-		S:       *uint256.NewInt(rand.Uint64()),
 	}
 	return stx
 }
 
-func printSTX(stx *SignedBlobTx) {
-	fmt.Println("--SignedBlobTx")
+func printSTX(stx *BlobTx) {
+	fmt.Println("--BlobTx")
 	fmt.Printf("ChainID: %v\n", stx.ChainID)
 	fmt.Printf("Nonce: %v\n", stx.Nonce)
-	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.MaxPriorityFeePerGas)
-	fmt.Printf("MaxFeePerGas: %v\n", stx.MaxFeePerGas)
+	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.Tip)
+	fmt.Printf("MaxFeePerGas: %v\n", stx.FeeCap)
 	fmt.Printf("Gas: %v\n", stx.Gas)
 	fmt.Printf("To: %v\n", stx.To)
 	fmt.Printf("Value: %v\n", stx.Value)
@@ -669,29 +712,120 @@ func printSTX(stx *SignedBlobTx) {
 	fmt.Printf("AccessList: %v\n", stx.AccessList)
 	fmt.Printf("MaxFeePerDataGas: %v\n", stx.MaxFeePerDataGas)
 	fmt.Printf("BlobVersionedHashes: %v\n", stx.BlobVersionedHashes)
-	fmt.Printf("YParity: %v\n", stx.YParity)
+	fmt.Printf("V: %v\n", stx.V)
 	fmt.Printf("R: %v\n", stx.R)
 	fmt.Printf("S: %v\n", stx.S)
 	fmt.Println("-----")
 	fmt.Println()
 }
 
-func populateSignedBlobTxs() {
-	for i := 0; i < N; i++ {
-		dummySignedBlobTxs[i] = newRandSignedBlobTx()
+func printSTXW(txw *BlobTxWrapper) {
+	fmt.Println("--BlobTxWrapper")
+	printSTX(&txw.Tx)
+	fmt.Printf("Commitments LEN: %v\n", txw.Commitments)
+	fmt.Printf("Proofs LEN: %v\n", txw.Proofs)
+	fmt.Println("-----")
+	fmt.Println()
+}
+
+func randByte() byte {
+	return byte(rand.Intn(256))
+}
+
+func newRandCommitments(size int) BlobKzgs {
+	var result BlobKzgs
+	for i := 0; i < size; i++ {
+		var arr [LEN_48]byte
+		for j := 0; j < LEN_48; j++ {
+			arr[j] = randByte()
+		}
+		result = append(result, arr)
+	}
+	return result
+}
+
+func newRandProofs(size int) KZGProofs {
+	var result KZGProofs
+	for i := 0; i < size; i++ {
+		var arr [LEN_48]byte
+		for j := 0; j < LEN_48; j++ {
+			arr[j] = randByte()
+		}
+		result = append(result, arr)
+	}
+	return result
+}
+
+func newRandBlobs(size int) Blobs {
+	var result Blobs
+	for i := 0; i < size; i++ {
+		var arr [LEN_BLOB]byte
+		for j := 0; j < LEN_BLOB; j++ {
+			arr[j] = randByte()
+		}
+		result = append(result, arr)
+	}
+	return result
+}
+
+func newRandBlobWrapper(size int) *BlobTxWrapper {
+	return &BlobTxWrapper{
+		Tx:          *newRandBlobTx(),
+		Commitments: newRandCommitments(size),
+		Blobs:       newRandBlobs(size),
+		Proofs:      newRandProofs(size),
 	}
 }
 
-func TestSignedBlobTxEncodeDecode(t *testing.T) {
-	rand.Seed(time.Now().UnixNano())
-	populateSignedBlobTxs()
+func populateBlobTxs() {
 	for i := 0; i < N; i++ {
-		// printSTX(dummySignedBlobTxs[i])
+		dummyBlobTxs[i] = newRandBlobTx()
+	}
+}
 
-		tx, err := encodeDecodeBinary(dummySignedBlobTxs[i])
+func populateBlobWrapperTxs() {
+	for i := 0; i < N-1; i++ {
+		n := randIntInRange(0, 10)
+		dummyBlobWrapperTxs[i] = newRandBlobWrapper(n)
+	}
+
+	dummyBlobWrapperTxs[N-1] = &BlobTxWrapper{
+		Tx:          *newRandBlobTx(),
+		Commitments: nil,
+		Blobs:       nil,
+		Proofs:      nil,
+	}
+}
+
+func TestBlobTxEncodeDecode(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	populateBlobTxs()
+	for i := 0; i < N; i++ {
+		// printSTX(dummyBlobTxs[i])
+
+		tx, err := encodeDecodeBinary(dummyBlobTxs[i])
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertEqual(dummySignedBlobTxs[i], tx)
+		if err := assertEqual(dummyBlobTxs[i], tx); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestBlobTxWrappedEncodeDecode(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	populateBlobWrapperTxs()
+	for i := 0; i < N; i++ {
+		tx, err := encodeDecodeWrappedBinary(dummyBlobWrapperTxs[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := assertEqual(dummyBlobWrapperTxs[i], tx); err != nil {
+			t.Fatal(err)
+		}
+		if err := assertEqualBlobWrapper(dummyBlobWrapperTxs[i], tx); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

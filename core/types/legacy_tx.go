@@ -44,10 +44,6 @@ type CommonTx struct {
 	V, R, S uint256.Int        // signature values
 }
 
-func (ct CommonTx) GetChainID() *uint256.Int {
-	return nil
-}
-
 func (ct CommonTx) GetNonce() uint64 {
 	return ct.Nonce
 }

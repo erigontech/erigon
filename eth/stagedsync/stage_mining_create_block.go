@@ -145,19 +145,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		return
 	}
 
-	type envT struct {
-		signer    *types.Signer
-		ancestors mapset.Set // ancestor set (used for checking uncle parent validity)
-		family    mapset.Set // family set (used for checking uncle invalidity)
-		uncles    mapset.Set // uncle set
-	}
-	env := &envT{
-		signer:    types.MakeSigner(&cfg.chainConfig, blockNum),
-		ancestors: mapset.NewSet(),
-		family:    mapset.NewSet(),
-		uncles:    mapset.NewSet(),
-	}
-
 	// re-written miner/worker.go:commitNewWork
 	var timestamp uint64
 	if cfg.blockBuilderParameters == nil {
@@ -168,6 +155,19 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	} else {
 		// If we are on proof-of-stake timestamp should be already set for us
 		timestamp = cfg.blockBuilderParameters.Timestamp
+	}
+
+	type envT struct {
+		signer    *types.Signer
+		ancestors mapset.Set // ancestor set (used for checking uncle parent validity)
+		family    mapset.Set // family set (used for checking uncle invalidity)
+		uncles    mapset.Set // uncle set
+	}
+	env := &envT{
+		signer:    types.MakeSigner(&cfg.chainConfig, blockNum, timestamp),
+		ancestors: mapset.NewSet(),
+		family:    mapset.NewSet(),
+		uncles:    mapset.NewSet(),
 	}
 
 	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)

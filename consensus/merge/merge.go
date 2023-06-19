@@ -10,7 +10,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -71,7 +70,7 @@ func (s *Merge) Type() chain.ConsensusName {
 // proof-of-stake verified author of the block.
 // This is thread-safe (only access the header.Coinbase or the underlying engine's thread-safe method)
 func (s *Merge) Author(header *types.Header) (libcommon.Address, error) {
-	if !IsPoSHeader(header) {
+	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.Author(header)
 	}
 	return header.Coinbase, nil
@@ -98,7 +97,7 @@ func (s *Merge) VerifyHeader(chain consensus.ChainHeaderReader, header *types.He
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
 func (s *Merge) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
-	if !IsPoSHeader(header) {
+	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.VerifyUncles(chain, header, uncles)
 	}
 	if len(uncles) > 0 {
@@ -124,7 +123,7 @@ func (s *Merge) Prepare(chain consensus.ChainHeaderReader, header *types.Header,
 func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall,
 ) ([]consensus.Reward, error) {
 	_, isAura := s.eth1Engine.(*aura.AuRa)
-	if !IsPoSHeader(header) || isAura {
+	if !misc.IsPoSHeader(header) || isAura {
 		return s.eth1Engine.CalculateRewards(config, header, uncles, syscall)
 	}
 	return []consensus.Reward{}, nil
@@ -134,7 +133,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
-	if !IsPoSHeader(header) {
+	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, chain, syscall)
 	}
 
@@ -166,7 +165,7 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
-	if !IsPoSHeader(header) {
+	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, call)
 	}
 	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall)
@@ -233,11 +232,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		return errInvalidUncleHash
 	}
 
-	skipGasLimit := false
-	if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
-		skipGasLimit = auraEngine.HasGasLimitContract()
-	}
-	if err := misc.VerifyEip1559Header(chain.Config(), parent, header, skipGasLimit); err != nil {
+	if err := misc.VerifyEip1559Header(chain.Config(), parent, header, false); err != nil {
 		return err
 	}
 
@@ -265,7 +260,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 }
 
 func (s *Merge) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	if !IsPoSHeader(block.Header()) {
+	if !misc.IsPoSHeader(block.Header()) {
 		return s.eth1Engine.Seal(chain, block, results, stop)
 	}
 	return nil
@@ -279,7 +274,7 @@ func (s *Merge) IsServiceTransaction(sender libcommon.Address, syscall consensus
 	return s.eth1Engine.IsServiceTransaction(sender, syscall)
 }
 
-func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SysCallCustom) {
 	s.eth1Engine.Initialize(config, chain, header, state, txs, uncles, syscall)
 }
 
@@ -289,16 +284,6 @@ func (s *Merge) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 
 func (s *Merge) Close() error {
 	return s.eth1Engine.Close()
-}
-
-// IsPoSHeader reports the header belongs to the PoS-stage with some special fields.
-// This function is not suitable for a part of APIs like Prepare or CalcDifficulty
-// because the header difficulty is not set yet.
-func IsPoSHeader(header *types.Header) bool {
-	if header.Difficulty == nil {
-		panic("IsPoSHeader called with invalid difficulty")
-	}
-	return header.Difficulty.Cmp(ProofOfStakeDifficulty) == 0
 }
 
 // IsTTDReached checks if the TotalTerminalDifficulty has been surpassed on the `parentHash` block.
