@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
@@ -15,6 +16,7 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -182,7 +184,9 @@ func TestExec22(t *testing.T) {
 		t.Skip()
 	}
 	logger := log.New()
-	ctx, db1, db2 := context.Background(), memdb.NewTestDB(t), memdb.NewTestDB(t)
+	ctx := context.Background()
+	_, db1, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	_, db2, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	agg := newAgg(t, logger)
 	cfg := ExecuteBlockCfg{historyV3: true, agg: agg}
 
