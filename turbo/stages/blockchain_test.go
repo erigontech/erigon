@@ -662,15 +662,15 @@ func TestEIP155Transition(t *testing.T) {
 	}
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 		block, _ := m.BlockReader.BlockByNumber(m.Ctx, tx, 1)
-		if block.Transactions()[0].Protected() {
+		if block.Transactions()[0].ReplayProtected() {
 			t.Error("Expected block[0].txs[0] to not be replay protected")
 		}
 
 		block, _ = m.BlockReader.BlockByNumber(m.Ctx, tx, 3)
-		if block.Transactions()[0].Protected() {
+		if block.Transactions()[0].ReplayProtected() {
 			t.Error("Expected block[3].txs[0] to not be replay protected")
 		}
-		if !block.Transactions()[1].Protected() {
+		if !block.Transactions()[1].ReplayProtected() {
 			t.Error("Expected block[3].txs[1] to be replay protected")
 		}
 		return nil
@@ -2011,12 +2011,12 @@ func TestEIP2718Transition(t *testing.T) {
 		// One transaction to 0xAAAA
 		signer := types.LatestSigner(gspec.Config)
 		tx, _ := types.SignNewTx(key, *signer, &types.AccessListTx{
-			ChainID: chainID,
 			LegacyTx: types.LegacyTx{
 				CommonTx: types.CommonTx{
-					Nonce: 0,
-					To:    &aa,
-					Gas:   30000,
+					ChainID: chainID,
+					Nonce:   0,
+					To:      &aa,
+					Gas:     30000,
 				},
 				GasPrice: gasPrice,
 			},
@@ -2115,12 +2115,12 @@ func TestEIP1559Transition(t *testing.T) {
 			chainID.SetFromBig(gspec.Config.ChainID)
 			var tx types.Transaction = &types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{
-					Nonce: 0,
-					To:    &aa,
-					Gas:   30000,
-					Data:  []byte{},
+					ChainID: &chainID,
+					Nonce:   0,
+					To:      &aa,
+					Gas:     30000,
+					Data:    []byte{},
 				},
-				ChainID:    &chainID,
 				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)),
 				Tip:        u256.Num2,
 				AccessList: accesses,

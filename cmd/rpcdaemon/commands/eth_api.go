@@ -355,6 +355,7 @@ type RPCTransaction struct {
 	GasPrice            *hexutil.Big       `json:"gasPrice,omitempty"`
 	Tip                 *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
 	FeeCap              *hexutil.Big       `json:"maxFeePerGas,omitempty"`
+	MaxFeePerDataGas    *hexutil.Big       `json:"maxFeePerDataGas,omitempty"`
 	Hash                common.Hash        `json:"hash"`
 	Input               hexutility.Bytes   `json:"input"`
 	Nonce               hexutil.Uint64     `json:"nonce"`
@@ -363,10 +364,10 @@ type RPCTransaction struct {
 	Value               *hexutil.Big       `json:"value"`
 	Type                hexutil.Uint64     `json:"type"`
 	Accesses            *types2.AccessList `json:"accessList,omitempty"`
-	ChainID             *hexutil.Big       `json:"chainId,omitempty"`
-	MaxFeePerDataGas    *hexutil.Big       `json:"maxFeePerDataGas,omitempty"`
 	BlobVersionedHashes []common.Hash      `json:"blobVersionedHashes,omitempty"`
-	V                   *hexutil.Big       `json:"v"`
+	YParity             *int               `json:"yParity,omitempty"`
+	ChainID             *hexutil.Big       `json:"chainId,omitempty"`
+	V                   *hexutil.Big       `json:"v,omitempty"`
 	R                   *hexutil.Big       `json:"r"`
 	S                   *hexutil.Big       `json:"s"`
 }
@@ -374,11 +375,6 @@ type RPCTransaction struct {
 // newRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
 func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
-	// Determine the signer. For replay-protected transactions, use the most permissive
-	// signer, because we assume that signers are backwards-compatible with old
-	// transactions. For non-protected transactions, the homestead signer signer is used
-	// because the return value of ChainId is zero for those transactions.
-	chainId := uint256.NewInt(0)
 	result := &RPCTransaction{
 		Type:  hexutil.Uint64(tx.Type()),
 		Gas:   hexutil.Uint64(tx.GetGas()),
@@ -388,49 +384,56 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		To:    tx.GetTo(),
 		Value: (*hexutil.Big)(tx.GetValue().ToBig()),
 	}
+	r, s := tx.RawSignatureValues()
+	result.R = (*hexutil.Big)(r.ToBig())
+	result.S = (*hexutil.Big)(s.ToBig())
+	if tx.ReplayProtected() {
+		result.ChainID = (*hexutil.Big)(tx.GetChainID().ToBig())
+	}
+
+	yParity := 0
 	switch t := tx.(type) {
 	case *types.LegacyTx:
-		chainId = types.DeriveChainId(&t.V)
-		// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
-		if !chainId.IsZero() {
-			result.ChainID = (*hexutil.Big)(chainId.ToBig())
-		}
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
-		result.V = (*hexutil.Big)(t.V.ToBig())
-		result.R = (*hexutil.Big)(t.R.ToBig())
-		result.S = (*hexutil.Big)(t.S.ToBig())
+		result.V = (*hexutil.Big)(t.V().ToBig())
 	case *types.AccessListTx:
-		chainId.Set(t.ChainID)
-		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
-		result.V = (*hexutil.Big)(t.V.ToBig())
-		result.R = (*hexutil.Big)(t.R.ToBig())
-		result.S = (*hexutil.Big)(t.S.ToBig())
+		if t.YParity {
+			yParity = 1
+		}
+		result.YParity = &yParity
 		result.Accesses = &t.AccessList
 	case *types.DynamicFeeTransaction:
-		chainId.Set(t.ChainID)
-		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
 		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
-		result.V = (*hexutil.Big)(t.V.ToBig())
-		result.R = (*hexutil.Big)(t.R.ToBig())
-		result.S = (*hexutil.Big)(t.S.ToBig())
+		if t.YParity {
+			yParity = 1
+		}
+		result.YParity = &yParity
 		result.Accesses = &t.AccessList
 		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
 	case *types.BlobTx:
-		chainId.Set(t.ChainID)
-		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
 		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
-		result.V = (*hexutil.Big)(t.V.ToBig())
-		result.R = (*hexutil.Big)(t.R.ToBig())
-		result.S = (*hexutil.Big)(t.S.ToBig())
+		if t.YParity {
+			yParity = 1
+		}
+		result.YParity = &yParity
 		result.Accesses = &t.AccessList
 		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
 		result.MaxFeePerDataGas = (*hexutil.Big)(t.MaxFeePerDataGas.ToBig())
 		result.BlobVersionedHashes = t.BlobVersionedHashes
 	}
-	signer := types.LatestSignerForChainID(chainId.ToBig())
+
+	// Determine the signer. For replay-protected transactions, use the most permissive
+	// signer, because we assume that signers are backwards-compatible with old
+	// transactions. For non-protected transactions, the homestead signer signer is used
+	// because the return value of ChainId is zero for those transactions.
+	var chainId *big.Int
+	if tx.ReplayProtected() {
+		chainId = tx.GetChainID().ToBig()
+	}
+	signer := types.LatestSignerForChainID(chainId)
 	result.From, _ = tx.Sender(*signer)
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash

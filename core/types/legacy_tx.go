@@ -24,6 +24,7 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -36,12 +37,20 @@ import (
 type CommonTx struct {
 	TransactionMisc
 
+	ChainID *uint256.Int       // nil for un-protected (pre-EIP155) transactions
 	Nonce   uint64             // nonce of sender account
 	Gas     uint64             // gas limit
 	To      *libcommon.Address `rlp:"nil"` // nil means contract creation
 	Value   *uint256.Int       // wei amount
 	Data    []byte             // contract invocation input data
-	V, R, S uint256.Int        // signature values
+
+	// Signature
+	YParity bool // false=even, true=odd
+	R, S    uint256.Int
+}
+
+func (ct CommonTx) GetChainID() *uint256.Int {
+	return ct.ChainID
 }
 
 func (ct CommonTx) GetNonce() uint64 {
@@ -79,8 +88,12 @@ func (ct *CommonTx) SetSender(addr libcommon.Address) {
 	ct.from.Store(addr)
 }
 
-func (ct CommonTx) Protected() bool {
-	return true
+func (ct CommonTx) ReplayProtected() bool {
+	return ct.ChainID != nil
+}
+
+func (ct *CommonTx) RawSignatureValues() (*uint256.Int, *uint256.Int) {
+	return &ct.R, &ct.S
 }
 
 func (ct CommonTx) IsContractDeploy() bool {
@@ -129,10 +142,6 @@ func (tx LegacyTx) GetAccessList() types2.AccessList {
 	return types2.AccessList{}
 }
 
-func (tx LegacyTx) Protected() bool {
-	return isProtectedV(&tx.V)
-}
-
 func (tx *LegacyTx) Unwrap() Transaction {
 	return tx
 }
@@ -173,10 +182,11 @@ func (tx LegacyTx) copy() *LegacyTx {
 			TransactionMisc: TransactionMisc{
 				time: tx.time,
 			},
-			Nonce: tx.Nonce,
-			To:    tx.To, // TODO: copy pointed-to address
-			Data:  common.CopyBytes(tx.Data),
-			Gas:   tx.Gas,
+			Nonce:   tx.Nonce,
+			To:      tx.To, // TODO: copy pointed-to address
+			Data:    common.CopyBytes(tx.Data),
+			Gas:     tx.Gas,
+			YParity: tx.YParity,
 			// These are initialized below.
 			Value: new(uint256.Int),
 		},
@@ -188,7 +198,9 @@ func (tx LegacyTx) copy() *LegacyTx {
 	if tx.GasPrice != nil {
 		cpy.GasPrice.Set(tx.GasPrice)
 	}
-	cpy.V.Set(&tx.V)
+	if tx.ChainID != nil {
+		cpy.ChainID = new(uint256.Int).Set(tx.ChainID)
+	}
 	cpy.R.Set(&tx.R)
 	cpy.S.Set(&tx.S)
 	return cpy
@@ -197,6 +209,24 @@ func (tx LegacyTx) copy() *LegacyTx {
 func (tx LegacyTx) EncodingSize() int {
 	payloadSize, _, _ := tx.payloadSize()
 	return payloadSize
+}
+
+// See EIP-155: Simple replay attack protection
+func (tx LegacyTx) V() *uint256.Int {
+	v := uint256.NewInt(27)
+	if tx.ChainID != nil {
+		v.Mul(tx.ChainID, u256.Num2)
+		v.AddUint64(v, 35)
+	}
+	if tx.YParity {
+		v.AddUint64(v, 1)
+	}
+	return v
+}
+func (tx LegacyTx) SetV(v *uint256.Int) error {
+	var err error
+	tx.ChainID, tx.YParity, err = DeriveChainIdAndYParity(v)
+	return err
 }
 
 func (tx LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
@@ -230,7 +260,7 @@ func (tx LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	}
 	// size of V
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
+	payloadSize += rlp.Uint256LenExcludingHead(tx.V())
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.R)
 	payloadSize++
@@ -289,7 +319,7 @@ func (tx LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
-	if err := tx.V.EncodeRLP(w); err != nil {
+	if err := tx.V().EncodeRLP(w); err != nil {
 		return err
 	}
 	if err := tx.R.EncodeRLP(w); err != nil {
@@ -346,7 +376,9 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read V: %w", err)
 	}
-	tx.V.SetBytes(b)
+	if err := tx.SetV(new(uint256.Int).SetBytes(b)); err != nil {
+		return err
+	}
 	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read R: %w", err)
 	}
@@ -383,13 +415,13 @@ func (tx LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (Message, err
 
 func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
-	r, s, v, err := signer.SignatureValues(tx, sig)
+	r, s, yParity, err := signer.SignatureValues(tx, sig)
 	if err != nil {
 		return nil, err
 	}
 	cpy.R.Set(r)
 	cpy.S.Set(s)
-	cpy.V.Set(v)
+	cpy.YParity = yParity
 	return cpy, nil
 }
 
@@ -397,7 +429,7 @@ func (tx *LegacyTx) FakeSign(address libcommon.Address) (Transaction, error) {
 	cpy := tx.copy()
 	cpy.R.Set(u256.Num1)
 	cpy.S.Set(u256.Num1)
-	cpy.V.Set(u256.Num4)
+	cpy.YParity = false
 	cpy.from.Store(address)
 	return cpy, nil
 }
@@ -414,7 +446,7 @@ func (tx *LegacyTx) Hash() libcommon.Hash {
 		tx.To,
 		tx.Value,
 		tx.Data,
-		tx.V, tx.R, tx.S,
+		tx.V(), tx.R, tx.S,
 	})
 	tx.hash.Store(&hash)
 	return hash
@@ -443,14 +475,6 @@ func (tx LegacyTx) SigningHash(chainID *big.Int) libcommon.Hash {
 }
 
 func (tx LegacyTx) Type() byte { return LegacyTxType }
-
-func (tx LegacyTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
-	return &tx.V, &tx.R, &tx.S
-}
-
-func (tx LegacyTx) GetChainID() *uint256.Int {
-	return DeriveChainId(&tx.V)
-}
 
 func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := tx.from.Load(); sc != nil {

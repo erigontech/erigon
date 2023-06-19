@@ -276,9 +276,9 @@ func (txw *BlobTxWrapper) GetData() []byte { return txw.Tx.GetData() }
 
 func (txw *BlobTxWrapper) GetAccessList() types2.AccessList { return txw.Tx.GetAccessList() }
 
-func (txw *BlobTxWrapper) Protected() bool { return txw.Tx.Protected() }
+func (txw *BlobTxWrapper) ReplayProtected() bool { return txw.Tx.ReplayProtected() }
 
-func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int) {
 	return txw.Tx.RawSignatureValues()
 }
 

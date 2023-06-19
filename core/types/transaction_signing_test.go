@@ -75,11 +75,11 @@ func TestEIP155ChainId(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !tx.Protected() {
+	if !tx.ReplayProtected() {
 		t.Fatal("expected tx to be protected")
 	}
 
-	if !tx.GetChainID().Eq(&signer.chainID) {
+	if !tx.GetChainID().Eq(signer.chainID) {
 		t.Errorf("expected chainId to be %s, got %s", &signer.chainID, tx.GetChainID())
 	}
 
@@ -89,7 +89,7 @@ func TestEIP155ChainId(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if tx.Protected() {
+	if tx.ReplayProtected() {
 		t.Error("didn't expect tx to be protected")
 	}
 

@@ -18,6 +18,7 @@ import (
 
 type BlobTx struct {
 	DynamicFeeTransaction
+
 	MaxFeePerDataGas    *uint256.Int
 	BlobVersionedHashes []libcommon.Hash
 }
@@ -71,7 +72,7 @@ func (stx BlobTx) Hash() libcommon.Hash {
 		stx.AccessList,
 		stx.MaxFeePerDataGas,
 		stx.BlobVersionedHashes,
-		stx.V, stx.R, stx.S,
+		stx.YParity, stx.R, stx.S,
 	})
 	stx.hash.Store(&hash)
 	return hash
@@ -190,8 +191,8 @@ func (stx BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, ga
 	if err := encodeBlobVersionedHashes(stx.BlobVersionedHashes, w, b); err != nil {
 		return err
 	}
-	// encode y_parity
-	if err := stx.V.EncodeRLP(w); err != nil {
+	// encode YParity
+	if err := rlp.EncodeBool(stx.YParity, w, b); err != nil {
 		return err
 	}
 	// encode R
@@ -309,11 +310,10 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	// decode y_parity
-	if b, err = s.Uint256Bytes(); err != nil {
+	// decode YParity
+	if stx.YParity, err = s.Bool(); err != nil {
 		return err
 	}
-	stx.V.SetBytes(b)
 
 	// decode R
 	if b, err = s.Uint256Bytes(); err != nil {

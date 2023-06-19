@@ -214,7 +214,7 @@ func getNextTransactions(
 		if err != nil {
 			return nil, 0, err
 		}
-		if !transaction.GetChainID().IsZero() && transaction.GetChainID().Cmp(chainID) != 0 {
+		if transaction.GetChainID() != nil && transaction.GetChainID().Cmp(chainID) != 0 {
 			continue
 		}
 
@@ -433,7 +433,7 @@ LOOP:
 
 		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
-		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) {
+		if txn.ReplayProtected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) {
 			logger.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
 
 			txs.Pop()

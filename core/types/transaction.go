@@ -78,8 +78,8 @@ type Transaction interface {
 	SigningHash(chainID *big.Int) libcommon.Hash
 	GetData() []byte
 	GetAccessList() types2.AccessList
-	Protected() bool
-	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
+	ReplayProtected() bool
+	RawSignatureValues() (*uint256.Int, *uint256.Int)
 	EncodingSize() int
 	EncodeRLP(w io.Writer) error
 	MarshalBinary(w io.Writer) error
@@ -268,6 +268,7 @@ func TypedTransactionMarshalledAsRlpString(data []byte) bool {
 }
 
 func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {
+	// TODO(yperbasis): improve
 	if isProtectedV(v) && !maybeProtected {
 		return ErrUnexpectedProtection
 	}

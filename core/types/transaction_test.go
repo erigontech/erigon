@@ -65,14 +65,14 @@ var (
 	)
 
 	emptyEip2718Tx = &AccessListTx{
-		ChainID: u256.Num1,
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
-				Nonce: 3,
-				To:    &testAddr,
-				Value: uint256.NewInt(10),
-				Gas:   25000,
-				Data:  common.FromHex("5544"),
+				ChainID: u256.Num1,
+				Nonce:   3,
+				To:      &testAddr,
+				Value:   uint256.NewInt(10),
+				Gas:     25000,
+				Data:    common.FromHex("5544"),
 			},
 			GasPrice: uint256.NewInt(1),
 		},
@@ -85,15 +85,15 @@ var (
 
 	dynFeeTx = &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			Nonce: 3,
-			To:    &testAddr,
-			Value: uint256.NewInt(10),
-			Gas:   25000,
-			Data:  common.FromHex("5544"),
+			ChainID: u256.Num1,
+			Nonce:   3,
+			To:      &testAddr,
+			Value:   uint256.NewInt(10),
+			Gas:     25000,
+			Data:    common.FromHex("5544"),
 		},
-		ChainID: u256.Num1,
-		Tip:     uint256.NewInt(1),
-		FeeCap:  uint256.NewInt(1),
+		Tip:    uint256.NewInt(1),
+		FeeCap: uint256.NewInt(1),
 	}
 
 	signedDynFeeTx, _ = dynFeeTx.WithSignature(
@@ -157,8 +157,8 @@ func TestEIP2930Signer(t *testing.T) {
 		signer1 = LatestSignerForChainID(big.NewInt(1))
 		signer2 = LatestSignerForChainID(big.NewInt(2))
 		tx0     = &AccessListTx{LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}}
-		tx1     = &AccessListTx{ChainID: u256.Num1, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}}
-		tx2, _  = SignNewTx(key, *signer2, &AccessListTx{ChainID: u256.Num2, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}})
+		tx1     = &AccessListTx{LegacyTx: LegacyTx{CommonTx: CommonTx{ChainID: u256.Num1, Nonce: 1}}}
+		tx2, _  = SignNewTx(key, *signer2, &AccessListTx{LegacyTx: LegacyTx{CommonTx: CommonTx{ChainID: u256.Num2, Nonce: 1}}})
 	)
 
 	tests := []struct {
@@ -472,13 +472,13 @@ func TestTransactionCoding(t *testing.T) {
 		case 2:
 			// Tx with non-zero access list.
 			txdata = &AccessListTx{
-				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
-						Nonce: i,
-						To:    &recipient,
-						Gas:   123457,
-						Data:  []byte("abcdef"),
+						ChainID: uint256.NewInt(1),
+						Nonce:   i,
+						To:      &recipient,
+						Gas:     123457,
+						Data:    []byte("abcdef"),
 					},
 					GasPrice: uint256.NewInt(10),
 				},
@@ -487,13 +487,13 @@ func TestTransactionCoding(t *testing.T) {
 		case 3:
 			// Tx with empty access list.
 			txdata = &AccessListTx{
-				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
-						Nonce: i,
-						To:    &recipient,
-						Gas:   123457,
-						Data:  []byte("abcdef"),
+						ChainID: uint256.NewInt(1),
+						Nonce:   i,
+						To:      &recipient,
+						Gas:     123457,
+						Data:    []byte("abcdef"),
 					},
 					GasPrice: uint256.NewInt(10),
 				},
@@ -501,11 +501,11 @@ func TestTransactionCoding(t *testing.T) {
 		case 4:
 			// Contract creation with access list.
 			txdata = &AccessListTx{
-				ChainID: uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
-						Nonce: i,
-						Gas:   123457,
+						ChainID: uint256.NewInt(1),
+						Nonce:   i,
+						Gas:     123457,
 					},
 					GasPrice: uint256.NewInt(10),
 				},
@@ -637,16 +637,16 @@ func randData() []byte {
 func newRandBlobTx() *BlobTx {
 	stx := &BlobTx{DynamicFeeTransaction: DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			Nonce: rand.Uint64(),
-			Gas:   rand.Uint64(),
-			To:    randAddr(),
-			Value: uint256.NewInt(rand.Uint64()),
-			Data:  randData(),
-			V:     *uint256.NewInt(uint64(rand.Intn(2))),
-			R:     *uint256.NewInt(rand.Uint64()),
-			S:     *uint256.NewInt(rand.Uint64()),
+			ChainID: uint256.NewInt(rand.Uint64()),
+			Nonce:   rand.Uint64(),
+			Gas:     rand.Uint64(),
+			To:      randAddr(),
+			Value:   uint256.NewInt(rand.Uint64()),
+			Data:    randData(),
+			YParity: rand.Intn(2) != 0,
+			R:       *uint256.NewInt(rand.Uint64()),
+			S:       *uint256.NewInt(rand.Uint64()),
 		},
-		ChainID:    uint256.NewInt(rand.Uint64()),
 		Tip:        uint256.NewInt(rand.Uint64()),
 		FeeCap:     uint256.NewInt(rand.Uint64()),
 		AccessList: randAccessList(),
@@ -670,7 +670,7 @@ func printSTX(stx *BlobTx) {
 	fmt.Printf("AccessList: %v\n", stx.AccessList)
 	fmt.Printf("MaxFeePerDataGas: %v\n", stx.MaxFeePerDataGas)
 	fmt.Printf("BlobVersionedHashes: %v\n", stx.BlobVersionedHashes)
-	fmt.Printf("YParity: %v\n", stx.V)
+	fmt.Printf("YParity: %v\n", stx.YParity)
 	fmt.Printf("R: %v\n", stx.R)
 	fmt.Printf("S: %v\n", stx.S)
 	fmt.Println("-----")

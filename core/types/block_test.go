@@ -115,12 +115,12 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 	feeCap, _ := uint256.FromBig(block.BaseFee())
 	var tx2 Transaction = &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			Nonce: 0,
-			To:    &to,
-			Gas:   123457,
-			Data:  []byte{},
+			ChainID: u256.Num1,
+			Nonce:   0,
+			To:      &to,
+			Gas:     123457,
+			Data:    []byte{},
 		},
-		ChainID:    u256.Num1,
 		FeeCap:     feeCap,
 		Tip:        u256.Num0,
 		AccessList: accesses,
@@ -184,12 +184,12 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 	// Create ACL tx.
 	addr := libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
 	var tx2 Transaction = &AccessListTx{
-		ChainID: chainID,
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
-				Nonce: 0,
-				To:    &to,
-				Gas:   123457,
+				ChainID: chainID,
+				Nonce:   0,
+				To:      &to,
+				Gas:     123457,
 			},
 			GasPrice: ten,
 		},

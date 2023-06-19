@@ -487,8 +487,8 @@ func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Tran
 	for i, txWithKey := range txs {
 		tx := txWithKey.tx
 		key := txWithKey.key
-		v, r, s := tx.RawSignatureValues()
-		if key != nil && v.IsZero() && r.IsZero() && s.IsZero() {
+		r, s := tx.RawSignatureValues()
+		if key != nil && r.IsZero() && s.IsZero() {
 			// This transaction needs to be signed
 			signed, err := types.SignTx(tx, signer, key)
 			if err != nil {

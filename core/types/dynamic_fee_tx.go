@@ -36,7 +36,7 @@ import (
 
 type DynamicFeeTransaction struct {
 	CommonTx
-	ChainID    *uint256.Int
+
 	Tip        *uint256.Int
 	FeeCap     *uint256.Int
 	AccessList types2.AccessList
@@ -80,14 +80,15 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			TransactionMisc: TransactionMisc{
 				time: tx.time,
 			},
-			Nonce: tx.Nonce,
-			To:    tx.To, // TODO: copy pointed-to address
-			Data:  common.CopyBytes(tx.Data),
-			Gas:   tx.Gas,
+			ChainID: new(uint256.Int),
+			Nonce:   tx.Nonce,
+			To:      tx.To, // TODO: copy pointed-to address
+			Data:    common.CopyBytes(tx.Data),
+			Gas:     tx.Gas,
+			YParity: tx.YParity,
 			// These are copied below.
 			Value: new(uint256.Int),
 		},
-		ChainID:    new(uint256.Int),
 		AccessList: make(types2.AccessList, len(tx.AccessList)),
 		Tip:        new(uint256.Int),
 		FeeCap:     new(uint256.Int),
@@ -105,7 +106,6 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	if tx.FeeCap != nil {
 		cpy.FeeCap.Set(tx.FeeCap)
 	}
-	cpy.V.Set(&tx.V)
 	cpy.R.Set(&tx.R)
 	cpy.S.Set(&tx.S)
 	return cpy
@@ -173,9 +173,8 @@ func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen
 		payloadSize += libcommon.BitLenToByteLen(bits.Len(uint(accessListLen)))
 	}
 	payloadSize += accessListLen
-	// size of V
+	// size of YParity
 	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
 	// size of R
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.R)
@@ -187,13 +186,13 @@ func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen
 
 func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
-	r, s, v, err := signer.SignatureValues(tx, sig)
+	r, s, yParity, err := signer.SignatureValues(tx, sig)
 	if err != nil {
 		return nil, err
 	}
 	cpy.R.Set(r)
 	cpy.S.Set(s)
-	cpy.V.Set(v)
+	cpy.YParity = yParity
 	cpy.ChainID = signer.ChainID()
 	return cpy, nil
 }
@@ -202,7 +201,7 @@ func (tx *DynamicFeeTransaction) FakeSign(address libcommon.Address) (Transactio
 	cpy := tx.copy()
 	cpy.R.Set(u256.Num1)
 	cpy.S.Set(u256.Num1)
-	cpy.V.Set(u256.Num4)
+	cpy.YParity = false
 	cpy.from.Store(address)
 	return cpy, nil
 }
@@ -279,8 +278,8 @@ func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize
 	if err := encodeAccessList(tx.AccessList, w, b); err != nil {
 		return err
 	}
-	// encode V
-	if err := tx.V.EncodeRLP(w); err != nil {
+	// encode YParity
+	if err := rlp.EncodeBool(tx.YParity, w, b); err != nil {
 		return err
 	}
 	// encode R
@@ -359,16 +358,13 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if tx.Data, err = s.Bytes(); err != nil {
 		return err
 	}
-	// decode AccessList
 	tx.AccessList = types2.AccessList{}
 	if err = decodeAccessList(&tx.AccessList, s); err != nil {
 		return err
 	}
-	// decode V
-	if b, err = s.Uint256Bytes(); err != nil {
+	if tx.YParity, err = s.Bool(); err != nil {
 		return err
 	}
-	tx.V.SetBytes(b)
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
@@ -428,7 +424,7 @@ func (tx *DynamicFeeTransaction) Hash() libcommon.Hash {
 		tx.Value,
 		tx.Data,
 		tx.AccessList,
-		tx.V, tx.R, tx.S,
+		tx.YParity, tx.R, tx.S,
 	})
 	tx.hash.Store(&hash)
 	return hash
@@ -453,14 +449,6 @@ func (tx DynamicFeeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 // accessors for innerTx.
 func (tx DynamicFeeTransaction) Type() byte { return DynamicFeeTxType }
 
-func (tx DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
-	return &tx.V, &tx.R, &tx.S
-}
-
-func (tx DynamicFeeTransaction) GetChainID() *uint256.Int {
-	return tx.ChainID
-}
-
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
 		return sc.(libcommon.Address), nil
@@ -477,14 +465,14 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error
 func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
 	return &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			Nonce: nonce,
-			To:    &to,
-			Value: amount,
-			Gas:   gasLimit,
-			Data:  data,
+			ChainID: &chainID,
+			Nonce:   nonce,
+			To:      &to,
+			Value:   amount,
+			Gas:     gasLimit,
+			Data:    data,
 		},
-		ChainID: &chainID,
-		Tip:     gasTip,
-		FeeCap:  gasFeeCap,
+		Tip:    gasTip,
+		FeeCap: gasFeeCap,
 	}
 }

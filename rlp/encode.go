@@ -775,6 +775,17 @@ func Uint256LenExcludingHead(i *uint256.Int) int {
 	return libcommon.BitLenToByteLen(bitLen)
 }
 
+// precondition: len(buffer) >= 1
+func EncodeBool(b bool, w io.Writer, buffer []byte) error {
+	if b {
+		buffer[0] = 1
+	} else {
+		buffer[0] = EmptyStringCode
+	}
+	_, err := w.Write(buffer[:1])
+	return err
+}
+
 // precondition: len(buffer) >= 9
 func EncodeInt(i uint64, w io.Writer, buffer []byte) error {
 	if 0 < i && i < 0x80 {

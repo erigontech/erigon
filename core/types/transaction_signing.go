@@ -179,7 +179,7 @@ func MustSignNewTx(prv *ecdsa.PrivateKey, s Signer, tx Transaction) Transaction 
 // Note that this interface is not a stable API and may change at any time to accommodate
 // new protocol rules.
 type Signer struct {
-	chainID, chainIDMul uint256.Int
+	chainID, chainIDMul *uint256.Int
 	malleable           bool // Whether this signer should allow legacy transactions with malleability
 	unprotected         bool // Whether this signer should allow legacy transactions without chainId protection
 	protected           bool // Whether this signer should allow transactions with replay protection via chainId
@@ -206,7 +206,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 	// recoverPlain below will subract 27 from V
 	switch t := tx.(type) {
 	case *LegacyTx:
-		if !t.Protected() {
+		if !t.ReplayProtected() {
 			if !sg.unprotected {
 				return libcommon.Address{}, fmt.Errorf("unprotected tx is not supported by signer %s", sg)
 			}
@@ -274,49 +274,26 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 	return recoverPlain(context, tx.SigningHash(signChainID), R, S, &V, !sg.malleable)
 }
 
-// SignatureValues returns the raw R, S, V values corresponding to the
-// given signature.
-func (sg Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
-	switch t := tx.(type) {
-	case *LegacyTx:
-		R, S, V = decodeSignature(sig)
-		if sg.chainID.IsZero() {
-			V.Add(V, u256.Num27)
-		} else {
-			V.Add(V, u256.Num35)
-			V.Add(V, &sg.chainIDMul)
-		}
-	case *AccessListTx:
-		// Check that chain ID of tx matches the signer. We also accept ID zero here,
-		// because it indicates that the chain ID was not specified in the tx.
-		if t.ChainID != nil && !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
-			return nil, nil, nil, ErrInvalidChainId
-		}
-		R, S, V = decodeSignature(sig)
-	case *DynamicFeeTransaction:
-		// Check that chain ID of tx matches the signer. We also accept ID zero here,
-		// because it indicates that the chain ID was not specified in the tx.
-		if t.ChainID != nil && !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
-			return nil, nil, nil, ErrInvalidChainId
-		}
-		R, S, V = decodeSignature(sig)
-	case *BlobTx:
-		// Check that chain ID of tx matches the signer. We also accept ID zero here,
-		// because it indicates that the chain ID was not specified in the tx.
-		if t.ChainID != nil && !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
-			return nil, nil, nil, ErrInvalidChainId
-		}
-		R, S, V = decodeSignature(sig)
-	default:
-		return nil, nil, nil, ErrTxTypeNotSupported
+func (sg Signer) SignatureValues(tx Transaction, sig []byte) (r, s *uint256.Int, yParity bool, err error) {
+	// Check that chain ID of tx matches the signer.
+	if tx.GetChainID() != nil && sg.chainID != nil && !tx.GetChainID().Eq(sg.chainID) {
+		return nil, nil, false, ErrInvalidChainId
 	}
-	return R, S, V, nil
+
+	var y byte
+	r, s, y = decodeSignature(sig)
+	if y != 0 && y != 1 {
+		return nil, nil, false, ErrInvalidSig
+	}
+	yParity = y != 0
+	return
 }
 
 func (sg Signer) ChainID() *uint256.Int {
-	return &sg.chainID
+	return sg.chainID
 }
 
+/*
 // Equal returns true if the given signer is the same as the receiver.
 func (sg Signer) Equal(other Signer) bool {
 	return sg.chainID.Eq(&other.chainID) &&
@@ -327,23 +304,25 @@ func (sg Signer) Equal(other Signer) bool {
 		sg.dynamicFee == other.dynamicFee &&
 		sg.blob == other.blob
 }
+*/
 
-func decodeSignature(sig []byte) (r, s, v *uint256.Int) {
+func decodeSignature(sig []byte) (r, s *uint256.Int, yParity byte) {
 	if len(sig) != crypto.SignatureLength {
 		panic(fmt.Sprintf("wrong size for signature: got %d, want %d", len(sig), crypto.SignatureLength))
 	}
 	r = new(uint256.Int).SetBytes(sig[:32])
 	s = new(uint256.Int).SetBytes(sig[32:64])
-	v = new(uint256.Int).SetBytes(sig[64:65])
-	return r, s, v
+	yParity = sig[64]
+	return r, s, yParity
 }
 
-func recoverPlain(context *secp256k1.Context, sighash libcommon.Hash, R, S, Vb *uint256.Int, homestead bool) (libcommon.Address, error) {
-	if Vb.BitLen() > 8 {
-		return libcommon.Address{}, ErrInvalidSig
+func recoverPlain(context *secp256k1.Context, sighash libcommon.Hash, yParity bool, R, S *uint256.Int, homestead bool,
+) (libcommon.Address, error) {
+	var v byte
+	if yParity {
+		v = 1
 	}
-	V := byte(Vb.Uint64() - 27)
-	if !crypto.ValidateSignatureValues(V, R, S, homestead) {
+	if !crypto.ValidateSignatureValues(v, R, S, homestead) {
 		return libcommon.Address{}, ErrInvalidSig
 	}
 	// encode the signature in uncompressed format
@@ -351,7 +330,7 @@ func recoverPlain(context *secp256k1.Context, sighash libcommon.Hash, R, S, Vb *
 	sig := make([]byte, crypto.SignatureLength)
 	copy(sig[32-len(r):32], r)
 	copy(sig[64-len(s):64], s)
-	sig[64] = V
+	sig[64] = v
 	// recover the public key from the signature
 	pub, err := crypto.EcrecoverWithContext(context, sighash[:], sig)
 	if err != nil {
@@ -365,15 +344,20 @@ func recoverPlain(context *secp256k1.Context, sighash libcommon.Hash, R, S, Vb *
 	return addr, nil
 }
 
-// deriveChainID derives the chain id from the given v parameter
-func DeriveChainId(v *uint256.Int) *uint256.Int {
-	if v.IsUint64() {
-		v := v.Uint64()
-		if v == 27 || v == 28 {
-			return new(uint256.Int)
-		}
-		return new(uint256.Int).SetUint64((v - 35) / 2)
+// See EIP-155: Simple replay attack protection
+func DeriveChainIdAndYParity(v *uint256.Int) (chainId *uint256.Int, yParity bool, err error) {
+	if v.CmpUint64(27) == 0 {
+		return nil, false, nil
+	} else if v.CmpUint64(28) == 0 {
+		return nil, true, nil
+	} else if v.CmpUint64(35) < 0 {
+		return nil, false, ErrInvalidSig
 	}
-	r := new(uint256.Int).Sub(v, u256.Num35)
-	return r.Div(r, u256.Num2)
+
+	// Find chainId and yParity ∈ {0, 1} such that
+	// v = chainId * 2 + 35 + yParity
+	r := new(uint256.Int).SubUint64(v, 35) // r := v - 35
+	yParity = (r.Uint64() % 2) != 0        // = r mod 2
+	chainId = new(uint256.Int).Rsh(r, 1)   // = r/2
+	return chainId, yParity, nil
 }
