@@ -116,6 +116,7 @@ func (sn *HeaderSegment) reopenIdx(dir string) (err error) {
 		return nil
 	}
 	fileName := snaptype.IdxFileName(sn.ranges.from, sn.ranges.to, snaptype.Headers.String())
+	defer func(t time.Time) { fmt.Printf("reopen idx: %s, %s\n", time.Since(t), fileName) }(time.Now())
 	sn.idxHeaderHash, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
