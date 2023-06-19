@@ -634,7 +634,9 @@ Loop:
 					continue
 				}
 				_, name := filepath.Split(sn.Seg.FilePath())
+				fmt.Printf("what the loop??? %s, %s\n", fName, name)
 				if fName == name {
+					fmt.Printf("what the loop1\n")
 					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 						return err
 					}
@@ -659,6 +661,7 @@ Loop:
 				}
 			}
 			s.Txs.segments = append(s.Txs.segments, sn)
+			fmt.Printf("what the loop2\n")
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
