@@ -99,6 +99,16 @@ func (sd *SharedDomains) Unwind(rwtx kv.RwTx) {
 	sd.storage.Clear()
 }
 
+func (sd *SharedDomains) clear() {
+	sd.muMaps.Lock()
+	defer sd.muMaps.Unlock()
+	sd.account.Clear()
+	sd.code.Clear()
+	sd.commitment.Clear()
+	sd.Commitment.patriciaTrie.Reset()
+	sd.storage.Clear()
+}
+
 func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 	sd := &SharedDomains{
 		Account:    a,

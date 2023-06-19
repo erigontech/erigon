@@ -1129,6 +1129,7 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
+	a.SharedDomains().clear()
 	return nil
 }
 
