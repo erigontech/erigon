@@ -1,4 +1,4 @@
-package snapshotsync_test
+package freezeblocks_test
 
 import (
 	"math/big"
@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
@@ -31,7 +31,7 @@ func TestDump(t *testing.T) {
 
 		var systemTxs int
 		var nonceList []uint64
-		cnt, err := snapshotsync.DumpTxs(m.Ctx, m.DB, 0, 10, m.ChainConfig, 1, log.LvlInfo, log.New(), func(v []byte) error {
+		cnt, err := freezeblocks.DumpTxs(m.Ctx, m.DB, 0, 10, m.ChainConfig, 1, log.LvlInfo, log.New(), func(v []byte) error {
 			if v == nil {
 				systemTxs++
 			} else {
@@ -56,7 +56,7 @@ func TestDump(t *testing.T) {
 
 		var systemTxs int
 		var nonceList []uint64
-		cnt, err := snapshotsync.DumpTxs(m.Ctx, m.DB, 2, 5, m.ChainConfig, 1, log.LvlInfo, log.New(), func(v []byte) error {
+		cnt, err := freezeblocks.DumpTxs(m.Ctx, m.DB, 2, 5, m.ChainConfig, 1, log.LvlInfo, log.New(), func(v []byte) error {
 			if v == nil {
 				systemTxs++
 			} else {
@@ -75,7 +75,7 @@ func TestDump(t *testing.T) {
 	t.Run("headers", func(t *testing.T) {
 		require := require.New(t)
 		var nonceList []uint64
-		err := snapshotsync.DumpHeaders(m.Ctx, m.DB, 0, 10, 1, log.LvlInfo, log.New(), func(v []byte) error {
+		err := freezeblocks.DumpHeaders(m.Ctx, m.DB, 0, 10, 1, log.LvlInfo, log.New(), func(v []byte) error {
 			h := types.Header{}
 			if err := rlp.DecodeBytes(v[1:], &h); err != nil {
 				return err
@@ -89,7 +89,7 @@ func TestDump(t *testing.T) {
 	t.Run("headers_not_from_zero", func(t *testing.T) {
 		require := require.New(t)
 		var nonceList []uint64
-		err := snapshotsync.DumpHeaders(m.Ctx, m.DB, 2, 5, 1, log.LvlInfo, log.New(), func(v []byte) error {
+		err := freezeblocks.DumpHeaders(m.Ctx, m.DB, 2, 5, 1, log.LvlInfo, log.New(), func(v []byte) error {
 			h := types.Header{}
 			if err := rlp.DecodeBytes(v[1:], &h); err != nil {
 				return err
@@ -106,7 +106,7 @@ func TestDump(t *testing.T) {
 		txsAmount := uint64(0)
 		var baseIdList []uint64
 		firstTxNum := uint64(0)
-		err := snapshotsync.DumpBodies(m.Ctx, m.DB, 0, 2, firstTxNum, 1, log.LvlInfo, log.New(), func(v []byte) error {
+		err := freezeblocks.DumpBodies(m.Ctx, m.DB, 0, 2, firstTxNum, 1, log.LvlInfo, log.New(), func(v []byte) error {
 			i++
 			body := &types.BodyForStorage{}
 			require.NoError(rlp.DecodeBytes(v, body))
@@ -122,7 +122,7 @@ func TestDump(t *testing.T) {
 		firstTxNum += txsAmount
 		i = 0
 		baseIdList = baseIdList[:0]
-		err = snapshotsync.DumpBodies(m.Ctx, m.DB, 2, 10, firstTxNum, 1, log.LvlInfo, log.New(), func(v []byte) error {
+		err = freezeblocks.DumpBodies(m.Ctx, m.DB, 2, 10, firstTxNum, 1, log.LvlInfo, log.New(), func(v []byte) error {
 			i++
 			body := &types.BodyForStorage{}
 			require.NoError(rlp.DecodeBytes(v, body))
@@ -140,7 +140,7 @@ func TestDump(t *testing.T) {
 		i := 0
 		var baseIdList []uint64
 		firstTxNum := uint64(1000)
-		err := snapshotsync.DumpBodies(m.Ctx, m.DB, 2, 5, firstTxNum, 1, log.LvlInfo, log.New(), func(v []byte) error {
+		err := freezeblocks.DumpBodies(m.Ctx, m.DB, 2, 5, firstTxNum, 1, log.LvlInfo, log.New(), func(v []byte) error {
 			i++
 			body := &types.BodyForStorage{}
 			require.NoError(rlp.DecodeBytes(v, body))
@@ -178,7 +178,7 @@ func createDumpTestKV(t *testing.T, chainSize int) *stages.MockSentry {
 		t.Error(err)
 	}
 	// Construct testing chain
-	if err = m.InsertChain(chain); err != nil {
+	if err = m.InsertChain(chain, nil); err != nil {
 		t.Error(err)
 	}
 

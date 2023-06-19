@@ -507,7 +507,7 @@ func (e *intraBlockExec) changeBlock(header *types.Header) {
 	e.blockHash = header.Hash()
 	e.header = header
 	e.rules = e.chainConfig.Rules(e.blockNum, header.Time)
-	e.signer = types.MakeSigner(e.chainConfig, e.blockNum)
+	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time)
 	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }
 
@@ -722,12 +722,6 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		if t.Protected() {
 			chainId = types.DeriveChainId(&t.V).ToBig()
 		}
-	case *types.AccessListTx:
-		chainId = t.ChainID.ToBig()
-	case *types.DynamicFeeTransaction:
-		chainId = t.ChainID.ToBig()
-		// case *types.SignedBlobTx: // TODO: needs eip-4844 signer
-		// 	chainId = t.GetChainID().ToBig()
 	default:
 		chainId = txn.GetChainID().ToBig()
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -21,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 var cmdResetState = &cobra.Command{
@@ -78,7 +78,7 @@ func init() {
 	rootCmd.AddCommand(cmdResetState)
 }
 
-func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3) error {
+func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, agg *state.AggregatorV3) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)

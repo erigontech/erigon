@@ -115,12 +115,12 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 	feeCap, _ := uint256.FromBig(block.BaseFee())
 	var tx2 Transaction = &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			ChainID: u256.Num1,
-			Nonce:   0,
-			To:      &to,
-			Gas:     123457,
-			Data:    []byte{},
+			Nonce: 0,
+			To:    &to,
+			Gas:   123457,
+			Data:  []byte{},
 		},
+		ChainID:    u256.Num1,
 		FeeCap:     feeCap,
 		Tip:        u256.Num0,
 		AccessList: accesses,

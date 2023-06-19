@@ -100,7 +100,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		return err
 	}
 
-	signer := types.MakeSigner(chainConfig, block.NumberU64())
+	signer := types.MakeSigner(chainConfig, block.NumberU64(), block.Time())
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()
 
@@ -435,7 +435,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
-	signer := types.MakeSigner(chainConfig, blockNum)
+	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 	rules := chainConfig.Rules(blockNum, blockCtx.Time)
 
 	// Setup the gas pool (also for unmetered requests)

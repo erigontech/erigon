@@ -8,8 +8,6 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -42,10 +40,7 @@ func TestGasPrice(t *testing.T) {
 		t.Run(testCase.description, func(t *testing.T) {
 			m := createGasPriceTestKV(t, testCase.chainSize)
 			defer m.DB.Close()
-			stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-			br, _ := m.NewBlocksIO()
-			base := NewBaseApi(nil, stateCache, br, nil, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
-			eth := NewEthAPI(base, m.DB, nil, nil, nil, 5000000, 100_000, log.New())
+			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 100_000, log.New())
 
 			ctx := context.Background()
 			result, err := eth.GasPrice(ctx)
@@ -86,7 +81,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *stages.MockSentry {
 		t.Error(err)
 	}
 	// Construct testing chain
-	if err = m.InsertChain(chain); err != nil {
+	if err = m.InsertChain(chain, nil); err != nil {
 		t.Error(err)
 	}
 

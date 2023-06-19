@@ -28,9 +28,8 @@ Testing tracing RPC API by generating patters of contracts invoking one another 
 func TestGeneratedDebugApi(t *testing.T) {
 	m := rpcdaemontest.CreateTestSentryForTraces(t)
 	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	var buf bytes.Buffer
 	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -116,9 +115,8 @@ func TestGeneratedDebugApi(t *testing.T) {
 func TestGeneratedTraceApi(t *testing.T) {
 	m := rpcdaemontest.CreateTestSentryForTraces(t)
 	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 	api := NewTraceAPI(baseApi, m.DB, &httpcfg.HttpCfg{})
 	traces, err := api.Block(context.Background(), rpc.BlockNumber(1), new(bool))
 	if err != nil {
@@ -274,11 +272,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 
 func TestGeneratedTraceApiCollision(t *testing.T) {
 	m := rpcdaemontest.CreateTestSentryForTracesCollision(t)
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
-	api := NewTraceAPI(baseApi, m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	traces, err := api.Transaction(context.Background(), common.HexToHash("0xb2b9fa4c999c1c8370ce1fbd1c4315a9ce7f8421fe2ebed8a9051ff2e4e7e3da"), new(bool))
 	if err != nil {
 		t.Errorf("trace_block %d: %v", 0, err)
