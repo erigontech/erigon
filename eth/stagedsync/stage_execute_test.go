@@ -7,6 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
@@ -18,8 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
 )
 
 func TestExec(t *testing.T) {
@@ -176,7 +179,9 @@ func newAgg(t *testing.T, logger log.Logger) *libstate.AggregatorV3 {
 
 func TestExec22(t *testing.T) {
 	logger := log.New()
-	ctx, db1, db2 := context.Background(), memdb.NewTestDB(t), memdb.NewTestDB(t)
+	ctx := context.Background()
+	_, db1, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
+	_, db2, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	agg := newAgg(t, logger)
 	cfg := ExecuteBlockCfg{historyV3: true, agg: agg}
 
