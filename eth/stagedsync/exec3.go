@@ -742,6 +742,15 @@ Loop:
 					log.Error(err.Error())
 					//return err
 				}
+				if cfg.hd != nil {
+					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+				}
+				if maxBlockNum > execStage.BlockNumber {
+					unwindTo := (maxBlockNum + execStage.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
+					logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
+					u.UnwindTo(unwindTo, header.Hash())
+				}
+				break Loop
 			}
 
 			select {
