@@ -561,18 +561,18 @@ Loop:
 
 		switch f.T {
 		case snaptype.Headers:
-			for _, sn := range s.Headers.segments {
-				if sn.seg == nil { // it's ok if some segment was not able to open
-					continue
-				}
-				_, name := filepath.Split(sn.seg.FilePath())
-				if fName == name {
-					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-						return err
-					}
-					continue Loop
-				}
-			}
+			//for _, sn := range s.Headers.segments {
+			//	if sn.seg == nil { // it's ok if some segment was not able to open
+			//		continue
+			//	}
+			//	_, name := filepath.Split(sn.seg.FilePath())
+			//	if fName == name {
+			//		if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+			//			return err
+			//		}
+			//		continue Loop
+			//	}
+			//}
 
 			sn := &HeaderSegment{ranges: Range{f.From, f.To}}
 			if err := sn.reopenSeg(s.dir); err != nil {
@@ -598,18 +598,18 @@ Loop:
 				return err
 			}
 		case snaptype.Bodies:
-			for _, sn := range s.Bodies.segments {
-				if sn.seg == nil {
-					continue
-				}
-				_, name := filepath.Split(sn.seg.FilePath())
-				if fName == name {
-					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-						return err
-					}
-					continue Loop
-				}
-			}
+			//for _, sn := range s.Bodies.segments {
+			//	if sn.seg == nil {
+			//		continue
+			//	}
+			//	_, name := filepath.Split(sn.seg.FilePath())
+			//	if fName == name {
+			//		if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+			//			return err
+			//		}
+			//		continue Loop
+			//	}
+			//}
 
 			sn := &BodySegment{ranges: Range{f.From, f.To}}
 			if err := sn.reopenSeg(s.dir); err != nil {
@@ -632,20 +632,20 @@ Loop:
 				return err
 			}
 		case snaptype.Transactions:
-			for _, sn := range s.Txs.segments {
-				if sn.Seg == nil {
-					continue
-				}
-				_, name := filepath.Split(sn.Seg.FilePath())
-				fmt.Printf("what the loop??? %s, %s\n", fName, name)
-				if fName == name {
-					fmt.Printf("what the loop1\n")
-					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-						return err
-					}
-					continue Loop
-				}
-			}
+			//for _, sn := range s.Txs.segments {
+			//	if sn.Seg == nil {
+			//		continue
+			//	}
+			//	_, name := filepath.Split(sn.Seg.FilePath())
+			//	fmt.Printf("what the loop??? %s, %s\n", fName, name)
+			//	if fName == name {
+			//		fmt.Printf("what the loop1\n")
+			//		if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
+			//			return err
+			//		}
+			//		continue Loop
+			//	}
+			//}
 
 			sn := &TxnSegment{ranges: Range{f.From, f.To}}
 			if err := sn.reopenSeg(s.dir); err != nil {
