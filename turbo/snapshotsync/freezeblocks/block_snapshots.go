@@ -249,6 +249,7 @@ func (sn *TxnSegment) reopenIdx(dir string) (err error) {
 }
 
 func (sn *TxnSegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
+	fmt.Printf("what the loop3: %t, %t\n", sn.IdxTxnHash != nil, sn.IdxTxnHash2BlockNum != nil)
 	if sn.IdxTxnHash != nil && sn.IdxTxnHash2BlockNum != nil {
 		return nil
 	}
