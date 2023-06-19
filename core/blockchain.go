@@ -442,8 +442,8 @@ func FinalizeBlockExecution(
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *chain.Config, ibs *state.IntraBlockState) error {
-	engine.Initialize(cc, chain, header, ibs, txs, uncles, func(contract libcommon.Address, data []byte) ([]byte, error) {
-		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
+	engine.Initialize(cc, chain, header, ibs, txs, uncles, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+		return SysCallContract(contract, data, cc, ibState, header, engine, constCall)
 	})
 	noop := state.NewNoopWriter()
 	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), noop)

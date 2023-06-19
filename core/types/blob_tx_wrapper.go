@@ -40,7 +40,7 @@ type BlobTxWrapper struct {
 /* Blob methods */
 
 func (b *Blob) payloadSize() int {
-	size := 1                                             // 0xb7
+	size := 1                                             // 0xb7..0xbf
 	size += libcommon.BitLenToByteLen(bits.Len(LEN_BLOB)) // params.FieldElementsPerBlob * 32 = 131072 (length encoding size)
 	size += LEN_BLOB                                      // byte_array it self
 	return size
@@ -55,11 +55,7 @@ func (li BlobKzgs) copy() BlobKzgs {
 }
 
 func (li BlobKzgs) payloadSize() int {
-	size := 49 * len(li)
-	if size >= 56 {
-		size += libcommon.BitLenToByteLen(bits.Len(uint(size))) // BE encoding of the length of hashes
-	}
-	return size
+	return 49 * len(li)
 }
 
 func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
@@ -68,15 +64,35 @@ func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 		return err
 	}
 
-	b[0] = 128 + LEN_48
-	for _, arr := range li {
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-		if _, err := w.Write(arr[:]); err != nil {
+	for _, cmtmt := range li {
+		if err := rlp.EncodeString(cmtmt[:], w, b); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+func (li *BlobKzgs) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return fmt.Errorf("open BlobKzgs (Commitments): %w", err)
+	}
+	var b []byte
+	cmtmt := KZGCommitment{}
+
+	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
+		if len(b) == LEN_48 {
+			copy((cmtmt)[:], b)
+			*li = append(*li, cmtmt)
+		} else {
+			return fmt.Errorf("wrong size for BlobKzgs (Commitments): %d, %v", len(b), b[0])
+		}
+	}
+
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("close BlobKzgs (Commitments): %w", err)
+	}
+
 	return nil
 }
 
@@ -89,11 +105,7 @@ func (li KZGProofs) copy() KZGProofs {
 }
 
 func (li KZGProofs) payloadSize() int {
-	size := 49 * len(li)
-	if size >= 56 {
-		size += libcommon.BitLenToByteLen(bits.Len(uint(size))) // BE encoding of the length of hashes
-	}
-	return size
+	return 49 * len(li)
 }
 
 func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
@@ -102,15 +114,36 @@ func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 		return err
 	}
 
-	b[0] = 128 + LEN_48
-	for _, arr := range li {
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-		if _, err := w.Write(arr[:]); err != nil {
+	for _, proof := range li {
+		if err := rlp.EncodeString(proof[:], w, b); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+func (li *KZGProofs) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+
+	if err != nil {
+		return fmt.Errorf("open KZGProofs (Proofs): %w", err)
+	}
+	var b []byte
+	proof := KZGProof{}
+
+	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
+		if len(b) == LEN_48 {
+			copy((proof)[:], b)
+			*li = append(*li, proof)
+		} else {
+			return fmt.Errorf("wrong size for KZGProofs (Proofs): %d, %v", len(b), b[0])
+		}
+	}
+
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("close KZGProofs (Proofs): %w", err)
+	}
+
 	return nil
 }
 
@@ -123,12 +156,10 @@ func (blobs Blobs) copy() Blobs {
 }
 
 func (blobs Blobs) payloadSize() int {
-	total := 0
 	if len(blobs) > 0 {
-		total = len(blobs) * blobs[0].payloadSize()
-		total += libcommon.BitLenToByteLen(bits.Len(uint(total)))
+		return len(blobs) * blobs[0].payloadSize()
 	}
-	return total
+	return 0
 }
 
 func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
@@ -137,13 +168,34 @@ func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 		return err
 	}
 
-	for _, arr := range blobs {
-		if err := rlp.EncodeStringSizePrefix(LEN_BLOB, w, b); err != nil {
+	for _, blob := range blobs {
+		if err := rlp.EncodeString(blob[:], w, b); err != nil {
 			return err
 		}
-		if _, err := w.Write(arr[:]); err != nil {
-			return err
+	}
+
+	return nil
+}
+
+func (blobs *Blobs) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return fmt.Errorf("open Blobs: %w", err)
+	}
+	var b []byte
+	blob := Blob{}
+
+	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
+		if len(b) == LEN_BLOB {
+			copy((blob)[:], b)
+			*blobs = append(*blobs, blob)
+		} else {
+			return fmt.Errorf("wrong size for Blobs: %d, %v", len(b), b[0])
 		}
+	}
+
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("close Blobs: %w", err)
 	}
 
 	return nil
@@ -293,32 +345,55 @@ func (txw *BlobTxWrapper) IsContractDeploy() bool { return txw.Tx.IsContractDepl
 func (txw *BlobTxWrapper) Unwrap() Transaction { return &txw.Tx }
 
 func (txw BlobTxWrapper) EncodingSize() int {
-	txSize, commitmentsSize, proofsSize, blobsSize := txw.payloadSize()
-	payloadSize := txSize + commitmentsSize + proofsSize + blobsSize
-	envelopeSize := payloadSize
+	total, _, _, _, _ := txw.payloadSize()
+	envelopeSize := total
 	// Add envelope size and type size
-	if payloadSize >= 56 {
-		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
+	if total >= 56 {
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(total)))
 	}
 	envelopeSize += 2
 	return envelopeSize
 }
 
-func (txw BlobTxWrapper) payloadSize() (int, int, int, int) {
+func (txw BlobTxWrapper) payloadSize() (int, int, int, int, int) {
+	total := 1
 	txSize, _, _, _, _ := txw.Tx.payloadSize()
+	if txSize >= 56 {
+		total += libcommon.BitLenToByteLen(bits.Len(uint(txSize)))
+	}
+	total += txSize
+
+	total++
 	commitmentsSize := txw.Commitments.payloadSize()
-	proofsSize := txw.Proofs.payloadSize()
+	if commitmentsSize >= 56 {
+		total += libcommon.BitLenToByteLen(bits.Len(uint(commitmentsSize)))
+	}
+	total += commitmentsSize
+
+	total++
 	blobsSize := txw.Blobs.payloadSize()
-	return txSize, commitmentsSize, proofsSize, blobsSize
+	if blobsSize >= 56 {
+		total += libcommon.BitLenToByteLen(bits.Len(uint(blobsSize)))
+	}
+	total += blobsSize
+
+	total++
+	proofsSize := txw.Proofs.payloadSize()
+	if proofsSize >= 56 {
+		total += libcommon.BitLenToByteLen(bits.Len(uint(proofsSize)))
+	}
+	total += proofsSize
+	return total, txSize, commitmentsSize, blobsSize, proofsSize
 }
 
-func (txw BlobTxWrapper) encodePayload(w io.Writer, b []byte, payloadSize, commitmentsSize, proofsSize, blobsSize int) error {
+func (txw BlobTxWrapper) encodePayload(w io.Writer, b []byte, total, txSize, commitmentsSize, blobsSize, proofsSize int) error {
 	// prefix, encode txw payload size
-	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := EncodeStructSizePrefix(total, w, b); err != nil {
 		return err
 	}
 
 	txPayloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := txw.Tx.payloadSize()
+
 	if err := txw.Tx.encodePayload(w, b, txPayloadSize, nonceLen, gasLen, accessListLen, blobHashesLen); err != nil {
 		return err
 	}
@@ -330,20 +405,31 @@ func (txw BlobTxWrapper) encodePayload(w io.Writer, b []byte, payloadSize, commi
 	if err := txw.Blobs.encodePayload(w, b, blobsSize); err != nil {
 		return err
 	}
-	txw.Proofs.encodePayload(w, b, proofsSize)
+	if err := txw.Proofs.encodePayload(w, b, proofsSize); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
+	total, txSize, commitmentsSize, blobsSize, proofsSize := txw.payloadSize()
+	var b [33]byte
+	// encode TxType
+	b[0] = BlobTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := txw.encodePayload(w, b[:], total, txSize, commitmentsSize, blobsSize, proofsSize); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
-	txSize, commitmentsSize, proofsSize, blobsSize := txw.payloadSize()
-	payloadSize := txSize + commitmentsSize + proofsSize + blobsSize
-	envelopeSize := payloadSize
-	if payloadSize >= 56 {
-		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(payloadSize)))
+	total, txSize, commitmentsSize, proofsSize, blobsSize := txw.payloadSize()
+	envelopeSize := total
+	if total >= 56 {
+		envelopeSize += libcommon.BitLenToByteLen(bits.Len(uint(total)))
 	}
 	// size of struct prefix and TxType
 	envelopeSize += 2
@@ -357,13 +443,33 @@ func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := txw.encodePayload(w, b[:], payloadSize, commitmentsSize, proofsSize, blobsSize); err != nil {
+	if err := txw.encodePayload(w, b[:], total, txSize, commitmentsSize, proofsSize, blobsSize); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (txw BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
-	// TODO
-	return nil
+func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+
+	if err := txw.Tx.DecodeRLP(s); err != nil {
+		return err
+	}
+
+	if err := txw.Commitments.DecodeRLP(s); err != nil {
+		return err
+	}
+
+	if err := txw.Blobs.DecodeRLP(s); err != nil {
+		return err
+	}
+
+	if err := txw.Proofs.DecodeRLP(s); err != nil {
+		return err
+	}
+
+	return s.ListEnd()
 }

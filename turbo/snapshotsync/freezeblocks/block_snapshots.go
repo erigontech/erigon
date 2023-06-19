@@ -556,20 +556,21 @@ Loop:
 
 		switch f.T {
 		case snaptype.Headers:
-			for _, sn := range s.Headers.segments {
-				if sn.seg == nil { // it's ok if some segment was not able to open
+			var sn *HeaderSegment
+			var exists bool
+			for _, sn2 := range s.Headers.segments {
+				if sn2.seg == nil { // it's ok if some segment was not able to open
 					continue
 				}
-				_, name := filepath.Split(sn.seg.FilePath())
-				if fName == name {
-					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-						return err
-					}
-					continue Loop
+				if fName == sn2.seg.FileName() {
+					sn = sn2
+					exists = true
+					break
 				}
 			}
-
-			sn := &HeaderSegment{ranges: Range{f.From, f.To}}
+			if !exists {
+				sn = &HeaderSegment{ranges: Range{f.From, f.To}}
+			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
@@ -586,27 +587,30 @@ Loop:
 				}
 			}
 
-			// it's possible to iterate over .seg file even if you don't have index
-			// then make segment available even if index open may fail
-			s.Headers.segments = append(s.Headers.segments, sn)
+			if !exists {
+				// it's possible to iterate over .seg file even if you don't have index
+				// then make segment available even if index open may fail
+				s.Headers.segments = append(s.Headers.segments, sn)
+			}
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
 		case snaptype.Bodies:
-			for _, sn := range s.Bodies.segments {
-				if sn.seg == nil {
+			var sn *BodySegment
+			var exists bool
+			for _, sn2 := range s.Bodies.segments {
+				if sn2.seg == nil { // it's ok if some segment was not able to open
 					continue
 				}
-				_, name := filepath.Split(sn.seg.FilePath())
-				if fName == name {
-					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-						return err
-					}
-					continue Loop
+				if fName == sn2.seg.FileName() {
+					sn = sn2
+					exists = true
+					break
 				}
 			}
-
-			sn := &BodySegment{ranges: Range{f.From, f.To}}
+			if !exists {
+				sn = &BodySegment{ranges: Range{f.From, f.To}}
+			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
@@ -622,25 +626,28 @@ Loop:
 					return err
 				}
 			}
-			s.Bodies.segments = append(s.Bodies.segments, sn)
+			if !exists {
+				s.Bodies.segments = append(s.Bodies.segments, sn)
+			}
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
 		case snaptype.Transactions:
-			for _, sn := range s.Txs.segments {
-				if sn.Seg == nil {
+			var sn *TxnSegment
+			var exists bool
+			for _, sn2 := range s.Txs.segments {
+				if sn2.Seg == nil { // it's ok if some segment was not able to open
 					continue
 				}
-				_, name := filepath.Split(sn.Seg.FilePath())
-				if fName == name {
-					if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-						return err
-					}
-					continue Loop
+				if fName == sn2.Seg.FileName() {
+					sn = sn2
+					exists = true
+					break
 				}
 			}
-
-			sn := &TxnSegment{ranges: Range{f.From, f.To}}
+			if !exists {
+				sn = &TxnSegment{ranges: Range{f.From, f.To}}
+			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
@@ -656,7 +663,9 @@ Loop:
 					return err
 				}
 			}
-			s.Txs.segments = append(s.Txs.segments, sn)
+			if !exists {
+				s.Txs.segments = append(s.Txs.segments, sn)
+			}
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
