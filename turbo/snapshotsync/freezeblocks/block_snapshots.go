@@ -549,6 +549,7 @@ func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	var segmentsMaxSet bool
 Loop:
 	for _, fName := range fileNames {
+		t := time.Now()
 		f, err := snaptype.ParseFileName(s.dir, fName)
 		if err != nil {
 			s.logger.Warn("invalid segment name", "err", err, "name", fName)
@@ -669,6 +670,7 @@ Loop:
 			segmentsMax = 0
 		}
 		segmentsMaxSet = true
+		fmt.Printf("reopen folder 1: %s, %s\n", time.Since(t), fName)
 	}
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
