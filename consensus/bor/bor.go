@@ -3,7 +3,6 @@ package bor
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -818,8 +817,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 
 		if c.HeimdallClient != nil {
 			// commit states
-			_, err = c.CommitStates(state, header, cx, syscall)
-			if err != nil {
+			if err = c.CommitStates(state, header, cx, syscall); err != nil {
 				c.logger.Error("Error while committing states", "err", err)
 				return nil, types.Receipts{}, err
 			}
@@ -895,8 +893,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 
 		if c.HeimdallClient != nil {
 			// commit states
-			_, err = c.CommitStates(state, header, cx, syscall)
-			if err != nil {
+			if err = c.CommitStates(state, header, cx, syscall); err != nil {
 				c.logger.Error("Error while committing states", "err", err)
 				return nil, nil, types.Receipts{}, err
 			}
@@ -1195,7 +1192,7 @@ func (c *Bor) CommitStates(
 	header *types.Header,
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
-) ([]*types.StateSyncData, error) {
+) error {
 	fetchStart := time.Now()
 	number := header.Number.Uint64()
 
@@ -1211,7 +1208,7 @@ func (c *Bor) CommitStates(
 	// the incoming chain.
 	lastStateIDBig, err = c.GenesisContractsClient.LastStateId(syscall)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if c.config.IsIndore(number) {
@@ -1232,7 +1229,7 @@ func (c *Bor) CommitStates(
 
 	eventRecords, err := c.HeimdallClient.StateSyncEvents(c.execCtx, lastStateID+1, to.Unix())
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if c.config.OverrideStateSyncRecords != nil {
@@ -1244,7 +1241,6 @@ func (c *Bor) CommitStates(
 	fetchTime := time.Since(fetchStart)
 	processStart := time.Now()
 	chainID := c.chainConfig.ChainID.String()
-	stateSyncs := make([]*types.StateSyncData, 0, len(eventRecords))
 
 	for _, eventRecord := range eventRecords {
 		if eventRecord.ID <= lastStateID {
@@ -1256,16 +1252,8 @@ func (c *Bor) CommitStates(
 			break
 		}
 
-		stateData := types.StateSyncData{
-			ID:       eventRecord.ID,
-			Contract: eventRecord.Contract,
-			Data:     hex.EncodeToString(eventRecord.Data),
-			TxHash:   eventRecord.TxHash,
-		}
-		stateSyncs = append(stateSyncs, &stateData)
-
 		if err := c.GenesisContractsClient.CommitState(eventRecord, syscall); err != nil {
-			return nil, err
+			return err
 		}
 
 		lastStateID++
@@ -1275,7 +1263,7 @@ func (c *Bor) CommitStates(
 
 	c.logger.Debug("StateSyncData", "number", number, "lastStateID", lastStateID, "total records", len(eventRecords), "fetch time", int(fetchTime.Milliseconds()), "process time", int(processTime.Milliseconds()))
 
-	return stateSyncs, nil
+	return nil
 }
 
 func validateEventRecord(eventRecord *clerk.EventRecordWithTime, number uint64, to time.Time, lastStateID uint64, chainID string) error {
