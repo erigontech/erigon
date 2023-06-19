@@ -65,6 +65,9 @@ type ChainReader interface {
 }
 
 type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)
+
+// Use more options to call contract
+type SysCallCustom func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
 type Call func(contract libcommon.Address, data []byte) ([]byte, error)
 
 // RewardKind - The kind of block reward.
@@ -129,7 +132,7 @@ type EngineWriter interface {
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
 	Initialize(config *chain.Config, chain ChainHeaderReader, header *types.Header,
-		state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
+		state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SysCallCustom)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
