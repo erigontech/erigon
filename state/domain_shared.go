@@ -97,6 +97,7 @@ func (sd *SharedDomains) Unwind(rwtx kv.RwTx) {
 	sd.commitment.Clear()
 	sd.Commitment.patriciaTrie.Reset()
 	sd.storage.Clear()
+	sd.estSize.Store(0)
 }
 
 func (sd *SharedDomains) clear() {
@@ -107,6 +108,7 @@ func (sd *SharedDomains) clear() {
 	sd.commitment.Clear()
 	sd.Commitment.patriciaTrie.Reset()
 	sd.storage.Clear()
+	sd.estSize.Store(0)
 }
 
 func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
