@@ -561,20 +561,21 @@ Loop:
 
 		switch f.T {
 		case snaptype.Headers:
-			//for _, sn := range s.Headers.segments {
-			//	if sn.seg == nil { // it's ok if some segment was not able to open
-			//		continue
-			//	}
-			//	_, name := filepath.Split(sn.seg.FilePath())
-			//	if fName == name {
-			//		if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-			//			return err
-			//		}
-			//		continue Loop
-			//	}
-			//}
-
-			sn := &HeaderSegment{ranges: Range{f.From, f.To}}
+			var sn *HeaderSegment
+			var exists bool
+			for _, sn2 := range s.Headers.segments {
+				if sn2.seg == nil { // it's ok if some segment was not able to open
+					continue
+				}
+				if fName == sn2.seg.FileName() {
+					sn = sn2
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				sn = &HeaderSegment{ranges: Range{f.From, f.To}}
+			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
@@ -591,9 +592,11 @@ Loop:
 				}
 			}
 
-			// it's possible to iterate over .seg file even if you don't have index
-			// then make segment available even if index open may fail
-			s.Headers.segments = append(s.Headers.segments, sn)
+			if !exists {
+				// it's possible to iterate over .seg file even if you don't have index
+				// then make segment available even if index open may fail
+				s.Headers.segments = append(s.Headers.segments, sn)
+			}
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
