@@ -17,36 +17,26 @@
 package aura
 
 import (
-	"bytes"
-	"container/list"
-	"context"
 	"errors"
 	"fmt"
 	"math/big"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -60,41 +50,6 @@ Not implemented features from OS:
 
 Repo with solidity sources: https://github.com/poanetwork/posdao-contracts
 */
-
-type StepDurationInfo struct {
-	TransitionStep      uint64
-	TransitionTimestamp uint64
-	StepDuration        uint64
-}
-
-// EpochTransitionProof - Holds 2 proofs inside: ValidatorSetProof and FinalityProof
-type EpochTransitionProof struct {
-	SignalNumber  uint64
-	SetProof      []byte
-	FinalityProof []byte
-}
-
-// ValidatorSetProof - validator set proof
-type ValidatorSetProof struct {
-	Header   *types.Header
-	Receipts types.Receipts
-}
-
-// FirstValidatorSetProof state-dependent proofs for the safe contract:
-// only "first" proofs are such.
-type FirstValidatorSetProof struct { // TODO: whaaat? here is no state!
-	ContractAddress libcommon.Address
-	Header          *types.Header
-}
-
-type EpochTransition struct {
-	/// Block hash at which the transition occurred.
-	BlockHash libcommon.Hash
-	/// Block number at which the transition occurred.
-	BlockNumber uint64
-	/// "transition/epoch" proof from the engine combined with a finality proof.
-	ProofRlp []byte
-}
 
 type Step struct {
 	calibrate bool // whether calibration is enabled.
@@ -135,11 +90,6 @@ func (s *Step) optCalibrate() bool {
 	newStep := (uint64(now)-info.TransitionTimestamp)/info.StepDuration + info.TransitionStep
 	s.inner.Store(newStep)
 	return true
-}
-
-type PermissionedStep struct {
-	inner      *Step
-	canPropose atomic.Bool
 }
 
 type ReceivedStepHashes map[uint64]map[libcommon.Address]libcommon.Hash //BTreeMap<(u64, Address), H256>
@@ -291,36 +241,6 @@ type AuRa struct {
 	certifierLock sync.RWMutex
 }
 
-type GasLimitOverride struct {
-	cache *lru.Cache[libcommon.Hash, *uint256.Int]
-}
-
-func NewGasLimitOverride() *GasLimitOverride {
-	// The number of recent block hashes for which the gas limit override is memoized.
-	const GasLimitOverrideCacheCapacity = 10
-
-	cache, err := lru.New[libcommon.Hash, *uint256.Int](GasLimitOverrideCacheCapacity)
-	if err != nil {
-		panic("error creating prefetching cache for blocks")
-	}
-	return &GasLimitOverride{cache: cache}
-}
-
-func (pb *GasLimitOverride) Pop(hash libcommon.Hash) *uint256.Int {
-	if val, ok := pb.cache.Get(hash); ok && val != nil {
-		pb.cache.Remove(hash)
-		return val
-	}
-	return nil
-}
-
-func (pb *GasLimitOverride) Add(hash libcommon.Hash, b *uint256.Int) {
-	if b == nil {
-		return
-	}
-	pb.cache.ContainsOrAdd(hash, b)
-}
-
 func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 	auraParams, err := FromJson(spec)
 	if err != nil {
@@ -400,54 +320,6 @@ func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 	return c, nil
 }
 
-type epochReader interface {
-	GetEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
-	GetPendingEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
-	FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error)
-}
-type epochWriter interface {
-	epochReader
-	PutEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
-	PutPendingEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
-}
-
-type NonTransactionalEpochReader struct {
-	db kv.RwDB
-}
-
-func newEpochReader(db kv.RwDB) *NonTransactionalEpochReader {
-	return &NonTransactionalEpochReader{db: db}
-}
-
-func (cr *NonTransactionalEpochReader) GetEpoch(hash libcommon.Hash, number uint64) (v []byte, err error) {
-	return v, cr.db.View(context.Background(), func(tx kv.Tx) error {
-		v, err = rawdb.ReadEpoch(tx, number, hash)
-		return err
-	})
-}
-func (cr *NonTransactionalEpochReader) PutEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
-	return cr.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
-		return rawdb.WriteEpoch(tx, number, hash, proof)
-	})
-}
-func (cr *NonTransactionalEpochReader) GetPendingEpoch(hash libcommon.Hash, number uint64) (v []byte, err error) {
-	return v, cr.db.View(context.Background(), func(tx kv.Tx) error {
-		v, err = rawdb.ReadPendingEpoch(tx, number, hash)
-		return err
-	})
-}
-func (cr *NonTransactionalEpochReader) PutPendingEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
-	return cr.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
-		return rawdb.WritePendingEpoch(tx, number, hash, proof)
-	})
-}
-func (cr *NonTransactionalEpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error) {
-	return blockNum, blockHash, transitionProof, cr.db.View(context.Background(), func(tx kv.Tx) error {
-		blockNum, blockHash, transitionProof, err = rawdb.FindEpochBeforeOrEqualNumber(tx, number)
-		return err
-	})
-}
-
 // A helper accumulator function mapping a step duration and a step duration transition timestamp
 // to the corresponding step number and the correct starting second of the step.
 func nextStepTimeDuration(info StepDurationInfo, time uint64) (uint64, uint64, bool) {
@@ -494,10 +366,6 @@ func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 		return consensus.ErrUnknownAncestor
 	}
 	return ethash.VerifyHeaderBasics(chain, header, parent, true /*checkTimestamp*/, c.HasGasLimitContract() /*skipGasLimit*/)
-}
-
-func (c *AuRa) HasGasLimitContract() bool {
-	return len(c.cfg.BlockRewardContractTransitions) != 0
 }
 
 // nolint
@@ -763,12 +631,19 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, 
 	//return nil
 }
 
-func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscallCustom consensus.SysCallCustom) {
 	blockNum := header.Number.Uint64()
+
+	//Check block gas limit from smart contract, if applicable
+	c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
+
 	for address, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
 		state.SetCode(address, rewrittenCode)
 	}
 
+	syscall := func(addr libcommon.Address, data []byte) ([]byte, error) {
+		return syscallCustom(addr, data, state, header, true)
+	}
 	c.certifierLock.Lock()
 	if c.cfg.Registrar != nil && c.certifier == nil && config.IsLondon(blockNum) {
 		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
@@ -1185,17 +1060,6 @@ func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTim
 	currentStep := c.step.inner.inner.Load()
 	currentEmptyStepsLen := 0
 	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen)).ToBig()
-
-	/* TODO: do I need gasLimit override logic here ?
-	if let Some(gas_limit) = self.gas_limit_override(header) {
-		trace!(target: "engine", "Setting gas limit to {} for block {}.", gas_limit, header.number());
-		let parent_gas_limit = *parent.gas_limit();
-		header.set_gas_limit(gas_limit);
-		if parent_gas_limit != gas_limit {
-			info!(target: "engine", "Block gas limit was changed from {} to {}.", parent_gas_limit, gas_limit);
-		}
-	}
-	*/
 }
 
 // calculateScore - analog of PoW difficulty:
@@ -1328,71 +1192,6 @@ func (c *AuRa) CalculateRewards(_ *chain.Config, header *types.Header, _ []*type
 	return []consensus.Reward{r}, nil
 }
 
-func callBlockRewardAbi(contractAddr libcommon.Address, syscall consensus.SystemCall, beneficiaries []libcommon.Address, rewardKind []consensus.RewardKind) ([]libcommon.Address, []*uint256.Int) {
-	castedKind := make([]uint16, len(rewardKind))
-	for i := range rewardKind {
-		castedKind[i] = uint16(rewardKind[i])
-	}
-	packed, err := blockRewardAbi().Pack("reward", beneficiaries, castedKind)
-	if err != nil {
-		panic(err)
-	}
-	out, err := syscall(contractAddr, packed)
-	if err != nil {
-		panic(err)
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	res, err := blockRewardAbi().Unpack("reward", out)
-	if err != nil {
-		panic(err)
-	}
-	beneficiariesRes := res[0].([]libcommon.Address)
-	rewardsBig := res[1].([]*big.Int)
-	rewardsU256 := make([]*uint256.Int, len(rewardsBig))
-	for i := 0; i < len(rewardsBig); i++ {
-		var overflow bool
-		rewardsU256[i], overflow = uint256.FromBig(rewardsBig[i])
-		if overflow {
-			panic("Overflow in callBlockRewardAbi")
-		}
-	}
-	return beneficiariesRes, rewardsU256
-}
-
-func blockRewardAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.BlockReward))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
-func certifierAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Certifier))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
-func registrarAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Registrar))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
-func withdrawalAbi() abi.ABI {
-	a, err := abi.JSON(bytes.NewReader(contracts.Withdrawal))
-	if err != nil {
-		panic(err)
-	}
-	return a
-}
-
 // See https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
 func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall consensus.SystemCall) error {
 	if c.cfg.WithdrawalContractAddress == nil {
@@ -1417,40 +1216,6 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 		log.Warn("ExecuteSystemWithdrawals", "err", err)
 	}
 	return err
-}
-
-func getCertifier(registrar libcommon.Address, syscall consensus.SystemCall) *libcommon.Address {
-	hashedKey, err := common.HashData([]byte("service_transaction_checker"))
-	if err != nil {
-		panic(err)
-	}
-	packed, err := registrarAbi().Pack("getAddress", hashedKey, "A")
-	if err != nil {
-		panic(err)
-	}
-	out, err := syscall(registrar, packed)
-	if err != nil {
-		panic(err)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	res, err := registrarAbi().Unpack("getAddress", out)
-	if err != nil {
-		panic(err)
-	}
-	certifier := res[0].(libcommon.Address)
-	return &certifier
-}
-
-// An empty step message that is included in a seal, the only difference is that it doesn't include
-// the `parent_hash` in order to save space. The included signature is of the original empty step
-// message, which can be reconstructed by using the parent hash of the block in which this sealed
-// empty message is included.
-// nolint
-type SealedEmptyStep struct {
-	signature []byte // H520
-	step      uint64
 }
 
 /*
@@ -1487,300 +1252,3 @@ func headerEmptyStepsRaw(header *types.Header) []byte {
 	return header.Seal[2]
 }
 */
-
-// A message broadcast by authorities when it's their turn to seal a block but there are no
-// transactions. Other authorities accumulate these messages and later include them in the seal as
-// proof.
-//
-// An empty step message is created _instead of_ a block if there are no pending transactions.
-// It cannot itself be a parent, and `parent_hash` always points to the most recent block. E.g.:
-//   - Validator A creates block `bA`.
-//   - Validator B has no pending transactions, so it signs an empty step message `mB`
-//     instead whose hash points to block `bA`.
-//   - Validator C also has no pending transactions, so it also signs an empty step message `mC`
-//     instead whose hash points to block `bA`.
-//   - Validator D creates block `bD`. The parent is block `bA`, and the header includes `mB` and `mC`.
-type EmptyStep struct {
-	// The signature of the other two fields, by the message's author.
-	signature []byte // H520
-	// This message's step number.
-	step uint64
-	// The hash of the most recent block.
-	parentHash libcommon.Hash //     H256
-}
-
-func (s *EmptyStep) Less(other *EmptyStep) bool {
-	if s.step < other.step {
-		return true
-	}
-	if bytes.Compare(s.parentHash[:], other.parentHash[:]) < 0 {
-		return true
-	}
-	if bytes.Compare(s.signature, other.signature) < 0 {
-		return true
-	}
-	return false
-}
-func (s *EmptyStep) LessOrEqual(other *EmptyStep) bool {
-	if s.step <= other.step {
-		return true
-	}
-	if bytes.Compare(s.parentHash[:], other.parentHash[:]) <= 0 {
-		return true
-	}
-	if bytes.Compare(s.signature, other.signature) <= 0 {
-		return true
-	}
-	return false
-}
-
-// Returns `true` if the message has a valid signature by the expected proposer in the message's step.
-func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) { //nolint
-	//sRlp, err := EmptyStepRlp(s.step, s.parentHash)
-	//if err != nil {
-	//	return false, err
-	//}
-	//message := crypto.Keccak256(sRlp)
-
-	/*
-		let correct_proposer = step_proposer(validators, &self.parent_hash, self.step);
-
-		publickey::verify_address(&correct_proposer, &self.signature.into(), &message)
-		.map_err(|e| e.into())
-	*/
-	return true, nil
-}
-
-// nolint
-func (s *EmptyStep) author() (libcommon.Address, error) {
-	sRlp, err := EmptyStepRlp(s.step, s.parentHash)
-	if err != nil {
-		return libcommon.Address{}, err
-	}
-	message := crypto.Keccak256(sRlp)
-	public, err := secp256k1.RecoverPubkey(message, s.signature)
-	if err != nil {
-		return libcommon.Address{}, err
-	}
-	ecdsa, err := crypto.UnmarshalPubkeyStd(public)
-	if err != nil {
-		return libcommon.Address{}, err
-	}
-	return crypto.PubkeyToAddress(*ecdsa), nil
-}
-
-type EmptyStepSet struct {
-	lock sync.Mutex
-	list []*EmptyStep
-}
-
-func (s *EmptyStepSet) Less(i, j int) bool { return s.list[i].Less(s.list[j]) }
-func (s *EmptyStepSet) Swap(i, j int)      { s.list[i], s.list[j] = s.list[j], s.list[i] }
-func (s *EmptyStepSet) Len() int           { return len(s.list) }
-
-func (s *EmptyStepSet) Sort() {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	sort.Stable(s)
-}
-
-func (s *EmptyStepSet) ForEach(f func(int, *EmptyStep)) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	for i, el := range s.list {
-		f(i, el)
-	}
-}
-
-func EmptyStepFullRlp(signature []byte, emptyStepRlp []byte) ([]byte, error) {
-	type A struct {
-		s []byte
-		r []byte
-	}
-
-	return rlp.EncodeToBytes(A{s: signature, r: emptyStepRlp})
-}
-
-func EmptyStepRlp(step uint64, parentHash libcommon.Hash) ([]byte, error) {
-	type A struct {
-		s uint64
-		h libcommon.Hash
-	}
-	return rlp.EncodeToBytes(A{s: step, h: parentHash})
-}
-
-// nolint
-type unAssembledHeader struct {
-	hash    libcommon.Hash
-	number  uint64
-	signers []libcommon.Address
-}
-type unAssembledHeaders struct {
-	l *list.List
-}
-
-func (u unAssembledHeaders) PushBack(header *unAssembledHeader)  { u.l.PushBack(header) }
-func (u unAssembledHeaders) PushFront(header *unAssembledHeader) { u.l.PushFront(header) }
-func (u unAssembledHeaders) Pop() *unAssembledHeader {
-	e := u.l.Front()
-	if e == nil {
-		return nil
-	}
-	u.l.Remove(e)
-	return e.Value.(*unAssembledHeader)
-}
-func (u unAssembledHeaders) Front() *unAssembledHeader {
-	e := u.l.Front()
-	if e == nil {
-		return nil
-	}
-	return e.Value.(*unAssembledHeader)
-}
-
-// RollingFinality checker for authority round consensus.
-// Stores a chain of unfinalized hashes that can be pushed onto.
-// nolint
-type RollingFinality struct {
-	headers    unAssembledHeaders //nolint
-	signers    *SimpleList
-	signCount  map[libcommon.Address]uint
-	lastPushed *libcommon.Hash // Option<H256>,
-}
-
-// NewRollingFinality creates a blank finality checker under the given validator set.
-func NewRollingFinality(signers []libcommon.Address) *RollingFinality {
-	return &RollingFinality{
-		signers:   NewSimpleList(signers),
-		headers:   unAssembledHeaders{l: list.New()},
-		signCount: map[libcommon.Address]uint{},
-	}
-}
-
-// Clears the finality status, but keeps the validator set.
-func (f *RollingFinality) print(num uint64) {
-	if num > DEBUG_LOG_FROM {
-		h := f.headers
-		fmt.Printf("finality_heads: %d\n", num)
-		i := 0
-		for e := h.l.Front(); e != nil; e = e.Next() {
-			i++
-			a := e.Value.(*unAssembledHeader)
-			fmt.Printf("\t%d,%x\n", a.number, a.signers[0])
-		}
-		if i == 0 {
-			fmt.Printf("\tempty\n")
-		}
-	}
-}
-
-func (f *RollingFinality) clear() {
-	f.headers = unAssembledHeaders{l: list.New()}
-	f.signCount = map[libcommon.Address]uint{}
-	f.lastPushed = nil
-}
-
-// Push a hash onto the rolling finality checker (implying `subchain_head` == head.parent)
-//
-// Fails if `signer` isn't a member of the active validator set.
-// Returns a list of all newly finalized headers.
-func (f *RollingFinality) push(head libcommon.Hash, num uint64, signers []libcommon.Address) (newlyFinalized []unAssembledHeader, err error) {
-	for i := range signers {
-		if !f.hasSigner(signers[i]) {
-			return nil, fmt.Errorf("unknown validator")
-		}
-	}
-
-	f.addSigners(signers)
-	f.headers.PushBack(&unAssembledHeader{hash: head, number: num, signers: signers})
-
-	for f.isFinalized() {
-		e := f.headers.Pop()
-		if e == nil {
-			panic("headers length always greater than sign count length")
-		}
-		f.removeSigners(e.signers)
-		newlyFinalized = append(newlyFinalized, *e)
-	}
-	f.lastPushed = &head
-	return newlyFinalized, nil
-}
-
-// isFinalized returns whether the first entry in `self.headers` is finalized.
-func (f *RollingFinality) isFinalized() bool {
-	e := f.headers.Front()
-	if e == nil {
-		return false
-	}
-	return len(f.signCount)*2 > len(f.signers.validators)
-}
-func (f *RollingFinality) hasSigner(signer libcommon.Address) bool {
-	for j := range f.signers.validators {
-		if f.signers.validators[j] == signer {
-			return true
-
-		}
-	}
-	return false
-}
-func (f *RollingFinality) addSigners(signers []libcommon.Address) bool {
-	for i := range signers {
-		count, ok := f.signCount[signers[i]]
-		if ok {
-			f.signCount[signers[i]] = count + 1
-		} else {
-			f.signCount[signers[i]] = 1
-		}
-	}
-	return false
-}
-func (f *RollingFinality) removeSigners(signers []libcommon.Address) {
-	for i := range signers {
-		count, ok := f.signCount[signers[i]]
-		if !ok {
-			panic("all hashes in `header` should have entries in `sign_count` for their signers")
-			//continue
-		}
-		if count <= 1 {
-			delete(f.signCount, signers[i])
-		} else {
-			f.signCount[signers[i]] = count - 1
-		}
-	}
-}
-func (f *RollingFinality) buildAncestrySubChain(get func(hash libcommon.Hash) ([]libcommon.Address, libcommon.Hash, libcommon.Hash, uint64, bool), parentHash, epochTransitionHash libcommon.Hash) error { // starts from chainHeadParentHash
-	f.clear()
-
-	for {
-		signers, blockHash, newParentHash, blockNum, ok := get(parentHash)
-		if !ok {
-			return nil
-		}
-		if blockHash == epochTransitionHash {
-			return nil
-		}
-		for i := range signers {
-			if !f.hasSigner(signers[i]) {
-				return fmt.Errorf("unknown validator: blockNum=%d", blockNum)
-			}
-		}
-		if f.lastPushed == nil {
-			copyHash := parentHash
-			f.lastPushed = &copyHash
-		}
-		f.addSigners(signers)
-		f.headers.PushFront(&unAssembledHeader{hash: blockHash, number: blockNum, signers: signers})
-		// break when we've got our first finalized block.
-		if f.isFinalized() {
-			e := f.headers.Pop()
-			if e == nil {
-				panic("we just pushed a block")
-			}
-			f.removeSigners(e.signers)
-			//log.Info("[aura] finality encountered already finalized block", "hash", e.hash.String(), "number", e.number)
-			break
-		}
-
-		parentHash = newParentHash
-	}
-	return nil
-}
