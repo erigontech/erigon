@@ -6,15 +6,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 func TestBodiesUnwind(t *testing.T) {
@@ -26,7 +27,8 @@ func TestBodiesUnwind(t *testing.T) {
 	defer tx.Rollback()
 	_, bw := m.BlocksIO()
 
-	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, ChainID: u256.N1, CommonTx: types.CommonTx{Value: u256.N1, Gas: 1, Nonce: 1}}
+	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1,
+		CommonTx: types.CommonTx{ChainID: u256.N1, Value: u256.N1, Gas: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
 	require.NoError(err)

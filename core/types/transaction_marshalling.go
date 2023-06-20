@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/holiman/uint256"
 	"github.com/valyala/fastjson"
@@ -81,7 +82,11 @@ func (tx AccessListTx) MarshalJSON() ([]byte, error) {
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
 	enc.Data = (*hexutility.Bytes)(&tx.Data)
 	enc.To = tx.To
-	enc.V = (*hexutil.Big)(tx.V.ToBig())
+	yParity := new(big.Int)
+	if tx.YParity {
+		yParity.SetInt64(1)
+	}
+	enc.V = (*hexutil.Big)(yParity)
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
 	enc.S = (*hexutil.Big)(tx.S.ToBig())
 	return json.Marshal(&enc)
@@ -101,7 +106,11 @@ func (tx DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
 	enc.Data = (*hexutility.Bytes)(&tx.Data)
 	enc.To = tx.To
-	enc.V = (*hexutil.Big)(tx.V.ToBig())
+	yParity := new(big.Int)
+	if tx.YParity {
+		yParity.SetInt64(1)
+	}
+	enc.V = (*hexutil.Big)(yParity)
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
 	enc.S = (*hexutil.Big)(tx.S.ToBig())
 	return json.Marshal(&enc)
@@ -121,7 +130,11 @@ func toBlobTxJSON(tx *BlobTx) *txJSON {
 	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
 	enc.Data = (*hexutility.Bytes)(&tx.Data)
 	enc.To = tx.To
-	enc.V = (*hexutil.Big)(tx.V.ToBig())
+	yParity := new(big.Int)
+	if tx.YParity {
+		yParity.SetInt64(1)
+	}
+	enc.V = (*hexutil.Big)(yParity)
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
 	enc.S = (*hexutil.Big)(tx.S.ToBig())
 	enc.MaxFeePerDataGas = (*hexutil.Big)(tx.MaxFeePerDataGas.ToBig())
@@ -225,9 +238,12 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	if dec.V == nil {
 		return errors.New("missing required field 'v' in transaction")
 	}
-	overflow = tx.V.SetFromBig(dec.V.ToInt())
+	v, overflow := uint256.FromBig(dec.V.ToInt())
 	if overflow {
 		return fmt.Errorf("dec.V higher than 2^256-1")
+	}
+	if err := tx.SetV(v); err != nil {
+		return err
 	}
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
@@ -246,9 +262,9 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	if overflow {
 		return errors.New("'s' in transaction does not fit in 256 bits")
 	}
-	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
+	withSignature := tx.YParity || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
-		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, true); err != nil {
+		if err := sanityCheckSignature(tx.YParity, &tx.R, &tx.S); err != nil {
 			return err
 		}
 	}
@@ -304,10 +320,14 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	if dec.V == nil {
 		return errors.New("missing required field 'v' in transaction")
 	}
-	overflow = tx.V.SetFromBig(dec.V.ToInt())
+	yParity, overflow := uint256.FromBig(dec.V.ToInt())
 	if overflow {
 		return fmt.Errorf("dec.V higher than 2^256-1")
 	}
+	if yParity.CmpUint64(1) > 0 {
+		return fmt.Errorf("dec.V must be 0 or 1")
+	}
+	tx.YParity = !yParity.IsZero()
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
@@ -322,9 +342,9 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	if overflow {
 		return fmt.Errorf("dec.S higher than 2^256-1")
 	}
-	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
+	withSignature := tx.YParity || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
-		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, false); err != nil {
+		if err := sanityCheckSignature(tx.YParity, &tx.R, &tx.S); err != nil {
 			return err
 		}
 	}
@@ -384,10 +404,14 @@ func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
 	if dec.V == nil {
 		return errors.New("missing required field 'v' in transaction")
 	}
-	overflow = tx.V.SetFromBig(dec.V.ToInt())
+	yParity, overflow := uint256.FromBig(dec.V.ToInt())
 	if overflow {
 		return fmt.Errorf("dec.V higher than 2^256-1")
 	}
+	if yParity.CmpUint64(1) > 0 {
+		return fmt.Errorf("dec.V must be 0 or 1")
+	}
+	tx.YParity = !yParity.IsZero()
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
@@ -405,9 +429,9 @@ func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
 	if overflow {
 		return errors.New("'s' in transaction does not fit in 256 bits")
 	}
-	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
+	withSignature := tx.YParity || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
-		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, false); err != nil {
+		if err := sanityCheckSignature(tx.YParity, &tx.R, &tx.S); err != nil {
 			return err
 		}
 	}

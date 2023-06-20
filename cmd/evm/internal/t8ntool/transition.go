@@ -412,14 +412,27 @@ func getTransaction(txJson commands.RPCTransaction) (types.Transaction, error) {
 			toAddr = *txJson.To
 		}
 		legacyTx := types.NewTransaction(uint64(txJson.Nonce), toAddr, value, uint64(txJson.Gas), gasPrice, txJson.Input)
-		legacyTx.V.SetFromBig(txJson.V.ToInt())
+		v, overflow := uint256.FromBig(txJson.V.ToInt())
+		if overflow {
+			return nil, fmt.Errorf("v field caused an overflow (uint256)")
+		}
+		if txJson.Type == types.LegacyTxType {
+			if err := legacyTx.SetV(v); err != nil {
+				return nil, err
+			}
+		} else {
+			if v.CmpUint64(1) > 0 {
+				return nil, fmt.Errorf("v must be 0 or 1 for AccessListTxType")
+			}
+			legacyTx.YParity = !v.IsZero()
+			legacyTx.ChainID = chainId
+		}
 		legacyTx.S.SetFromBig(txJson.S.ToInt())
 		legacyTx.R.SetFromBig(txJson.R.ToInt())
 
 		if txJson.Type == types.AccessListTxType {
 			accessListTx := types.AccessListTx{
 				LegacyTx:   *legacyTx,
-				ChainID:    chainId,
 				AccessList: *txJson.Accesses,
 			}
 
@@ -445,21 +458,29 @@ func getTransaction(txJson commands.RPCTransaction) (types.Transaction, error) {
 			}
 		}
 
+		v, overflow := uint256.FromBig(txJson.V.ToInt())
+		if overflow {
+			return nil, fmt.Errorf("v field caused an overflow (uint256)")
+		}
+		if v.CmpUint64(1) > 0 {
+			return nil, fmt.Errorf("v must be 0 or 1 for DynamicFeeTxType")
+		}
+
 		dynamicFeeTx := types.DynamicFeeTransaction{
 			CommonTx: types.CommonTx{
-				Nonce: uint64(txJson.Nonce),
-				To:    txJson.To,
-				Value: value,
-				Gas:   uint64(txJson.Gas),
-				Data:  txJson.Input,
+				ChainID: chainId,
+				Nonce:   uint64(txJson.Nonce),
+				To:      txJson.To,
+				Value:   value,
+				Gas:     uint64(txJson.Gas),
+				Data:    txJson.Input,
+				YParity: !v.IsZero(),
 			},
-			ChainID:    chainId,
 			Tip:        tip,
 			FeeCap:     feeCap,
 			AccessList: *txJson.Accesses,
 		}
 
-		dynamicFeeTx.V.SetFromBig(txJson.V.ToInt())
 		dynamicFeeTx.S.SetFromBig(txJson.S.ToInt())
 		dynamicFeeTx.R.SetFromBig(txJson.R.ToInt())
 

@@ -8,23 +8,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/migrations"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/migrations"
 )
 
 func TestTxsBeginEnd(t *testing.T) {
 	require, tmpDir, db := require.New(t), t.TempDir(), memdb.NewTestDB(t)
-	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, ChainID: u256.N1, CommonTx: types.CommonTx{Value: u256.N1, Gas: 1, Nonce: 1}}
+	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1,
+		CommonTx: types.CommonTx{ChainID: u256.N1, Value: u256.N1, Gas: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
 	err := txn.MarshalBinary(buf)
 	require.NoError(err)
