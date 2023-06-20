@@ -428,6 +428,7 @@ func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error
 	cpy.R.Set(r)
 	cpy.S.Set(s)
 	cpy.YParity = yParity
+	cpy.ChainID = signer.ChainID()
 	return cpy, nil
 }
 
@@ -459,7 +460,7 @@ func (tx *LegacyTx) Hash() libcommon.Hash {
 }
 
 func (tx LegacyTx) SigningHash(chainID *big.Int) libcommon.Hash {
-	if chainID != nil && chainID.Sign() != 0 {
+	if chainID != nil {
 		return rlpHash([]interface{}{
 			tx.Nonce,
 			tx.GasPrice,
