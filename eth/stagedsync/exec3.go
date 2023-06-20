@@ -729,6 +729,9 @@ Loop:
 				}
 				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, block, rh, header.Root.Bytes(), header.Hash()))
 
+				if err := agg.Flush(ctx, applyTx); err != nil {
+					panic(err)
+				}
 				if cfg.hd != nil {
 					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 				}
