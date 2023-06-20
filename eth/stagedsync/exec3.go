@@ -529,8 +529,6 @@ func ExecV3(ctx context.Context,
 
 	stateStream := !initialCycle && cfg.stateStream && maxBlockNum-block < stateStreamLimit
 
-	fmt.Printf("start from: %x\n", block)
-
 	var readAhead chan uint64
 	if !parallel {
 		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
