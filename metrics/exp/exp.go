@@ -14,7 +14,7 @@ import (
 
 // Setup starts a dedicated metrics server at the given address.
 // This function enables metrics reporting separate from pprof.
-func Setup(address string) {
+func Setup(address string, logger log.Logger) {
 	http.HandleFunc("/debug/metrics/prometheus", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		metrics2.WritePrometheus(w, true)
@@ -30,12 +30,12 @@ func Setup(address string) {
 	})
 	//m.Handle("/debug/metrics", ExpHandler(metrics.DefaultRegistry))
 	//http.Handle("/debug/metrics/prometheus2", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
-	log.Info("Starting metrics server", "addr",
+	logger.Info("Starting metrics server", "addr",
 		fmt.Sprintf("http://%s/debug/metrics/prometheus", address),
 	)
 	go func() {
 		if err := http.ListenAndServe(address, nil); err != nil { // nolint:gosec
-			log.Error("Failure in running metrics server", "err", err)
+			logger.Error("Failure in running metrics server", "err", err)
 		}
 	}()
 }

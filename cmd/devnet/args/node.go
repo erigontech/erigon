@@ -12,29 +12,32 @@ import (
 
 type Node struct {
 	requests.RequestGenerator `arg:"-"`
-	BuildDir                  string `arg:"positional" default:"./build/bin/devnet"`
-	DataDir                   string `arg:"--datadir" default:"./dev"`
-	Chain                     string `arg:"--chain" default:"dev"`
-	Port                      int    `arg:"--port"`
-	AllowedPorts              string `arg:"--p2p.allowed-ports"`
-	NAT                       string `arg:"--nat" default:"none"`
-	ConsoleVerbosity          string `arg:"--log.console.verbosity" default:"0"`
-	DirVerbosity              string `arg:"--log.dir.verbosity"`
-	LogDirPath                string `arg:"--log.dir.path"`
-	LogDirPrefix              string `arg:"--log.dir.prefix"`
-	P2PProtocol               string `arg:"--p2p.protocol" default:"68"`
-	Downloader                string `arg:"--no-downloader" default:"true"`
-	WS                        string `arg:"--ws" flag:"" default:"true"`
-	PrivateApiAddr            string `arg:"--private.api.addr" default:"localhost:9090"`
-	HttpPort                  int    `arg:"--http.port" default:"8545"`
-	HttpVHosts                string `arg:"--http.vhosts"`
-	AuthRpcPort               int    `arg:"--authrpc.port" default:"8551"`
-	AuthRpcVHosts             string `arg:"--authrpc.vhosts"`
-	WSPort                    int    `arg:"-" default:"8546"` // flag not defined
-	GRPCPort                  int    `arg:"-" default:"8547"` // flag not defined
-	TCPPort                   int    `arg:"-" default:"8548"` // flag not defined
-	StaticPeers               string `arg:"--staticpeers"`
-	WithoutHeimdall           bool   `arg:"--bor.withoutheimdall" flag:"" default:"false"`
+	BuildDir                  string `arg:"positional" default:"./build/bin/devnet" json:"builddir"`
+	DataDir                   string `arg:"--datadir" default:"./dev" json:"--datadir"`
+	Chain                     string `arg:"--chain" default:"dev" json:"--chain"`
+	Port                      int    `arg:"--port" json:"--port,omitempty"`
+	AllowedPorts              string `arg:"--p2p.allowed-ports" json:"--p2p.allowed-ports,omitempty"`
+	NAT                       string `arg:"--nat" default:"none" json:"--nat"`
+	ConsoleVerbosity          string `arg:"--log.console.verbosity" default:"0" json:"--log.console.verbosity"`
+	DirVerbosity              string `arg:"--log.dir.verbosity" json:"--log.dir.verbosity,omitempty"`
+	LogDirPath                string `arg:"--log.dir.path" json:"--log.dir.path,omitempty"`
+	LogDirPrefix              string `arg:"--log.dir.prefix" json:"--log.dir.prefix,omitempty"`
+	P2PProtocol               string `arg:"--p2p.protocol" default:"68" json:"--p2p.protocol"`
+	Downloader                string `arg:"--no-downloader" default:"true" json:"--no-downloader"`
+	WS                        string `arg:"--ws" flag:"" default:"true" json:"--ws"`
+	PrivateApiAddr            string `arg:"--private.api.addr" default:"localhost:9090" json:"--private.api.addr"`
+	HttpPort                  int    `arg:"--http.port" default:"8545" json:"--http.port"`
+	HttpVHosts                string `arg:"--http.vhosts" json:"--http.vhosts"`
+	AuthRpcPort               int    `arg:"--authrpc.port" default:"8551" json:"--authrpc.port"`
+	AuthRpcVHosts             string `arg:"--authrpc.vhosts" json:"--authrpc.vhosts"`
+	WSPort                    int    `arg:"-" default:"8546" json:"-"` // flag not defined
+	GRPCPort                  int    `arg:"-" default:"8547" json:"-"` // flag not defined
+	TCPPort                   int    `arg:"-" default:"8548" json:"-"` // flag not defined
+	Metrics                   bool   `arg:"--metrics" flag:"" default:"false" json:"--metrics"`
+	MetricsPort               int    `arg:"--metrics.port" json:"--metrics.port,omitempty"`
+	MetricsAddr               string `arg:"--metrics.addr" json:"--metrics.addr,omitempty"`
+	StaticPeers               string `arg:"--staticpeers" json:"--staticpeers,omitempty"`
+	WithoutHeimdall           bool   `arg:"--bor.withoutheimdall" flag:"" default:"false" json:"--bor.withoutheimdall,omitempty"`
 }
 
 func (node *Node) configure(base Node, nodeNumber int) error {
@@ -46,6 +49,10 @@ func (node *Node) configure(base Node, nodeNumber int) error {
 	node.Chain = base.Chain
 
 	node.StaticPeers = base.StaticPeers
+
+	node.Metrics = base.Metrics
+	node.MetricsPort = base.MetricsPort
+	node.MetricsAddr = base.MetricsAddr
 
 	var err error
 
@@ -68,12 +75,12 @@ func (node *Node) configure(base Node, nodeNumber int) error {
 
 type Miner struct {
 	Node
-	Mine            bool   `arg:"--mine" flag:"true"`
-	DevPeriod       int    `arg:"--dev.period"`
-	BorPeriod       int    `arg:"--bor.period"`
-	BorMinBlockSize int    `arg:"--bor.minblocksize"`
-	HttpApi         string `arg:"--http.api" default:"admin,eth,erigon,web3,net,debug,trace,txpool,parity,ots"`
-	AccountSlots    int    `arg:"--txpool.accountslots" default:"16"`
+	Mine            bool   `arg:"--mine" flag:"true" json:"--mine"`
+	DevPeriod       int    `arg:"--dev.period" json:"--dev.period"`
+	BorPeriod       int    `arg:"--bor.period" json:"--bor.period"`
+	BorMinBlockSize int    `arg:"--bor.minblocksize" json:"--bor.minblocksize"`
+	HttpApi         string `arg:"--http.api" default:"admin,eth,erigon,web3,net,debug,trace,txpool,parity,ots" json:"--http.api"`
+	AccountSlots    int    `arg:"--txpool.accountslots" default:"16" json:"--txpool.accountslots"`
 }
 
 func (m Miner) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
@@ -99,9 +106,9 @@ func (n Miner) IsMiner() bool {
 
 type NonMiner struct {
 	Node
-	HttpApi     string `arg:"--http.api" default:"admin,eth,debug,net,trace,web3,erigon,txpool"`
-	TorrentPort string `arg:"--torrent.port" default:"42070"`
-	NoDiscover  string `arg:"--nodiscover" flag:"" default:"true"`
+	HttpApi     string `arg:"--http.api" default:"admin,eth,debug,net,trace,web3,erigon,txpool" json:"--http.api"`
+	TorrentPort string `arg:"--torrent.port" default:"42070" json:"--torrent.port"`
+	NoDiscover  string `arg:"--nodiscover" flag:"" default:"true" json:"--nodiscover"`
 }
 
 func (n NonMiner) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
