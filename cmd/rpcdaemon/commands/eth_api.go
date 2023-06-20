@@ -365,9 +365,8 @@ type RPCTransaction struct {
 	Type                hexutil.Uint64     `json:"type"`
 	Accesses            *types2.AccessList `json:"accessList,omitempty"`
 	BlobVersionedHashes []common.Hash      `json:"blobVersionedHashes,omitempty"`
-	YParity             *int               `json:"yParity,omitempty"`
 	ChainID             *hexutil.Big       `json:"chainId,omitempty"`
-	V                   *hexutil.Big       `json:"v,omitempty"`
+	V                   *hexutil.Big       `json:"v"`
 	R                   *hexutil.Big       `json:"r"`
 	S                   *hexutil.Big       `json:"s"`
 }
@@ -384,41 +383,35 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		To:    tx.GetTo(),
 		Value: (*hexutil.Big)(tx.GetValue().ToBig()),
 	}
-	r, s := tx.RawSignatureValues()
+	yParity, r, s := tx.RawSignatureValues()
 	result.R = (*hexutil.Big)(r.ToBig())
 	result.S = (*hexutil.Big)(s.ToBig())
+	yParityBig := big.NewInt(0)
+	if yParity {
+		yParityBig.SetInt64(1)
+	}
 	if tx.ReplayProtected() {
 		result.ChainID = (*hexutil.Big)(tx.GetChainID().ToBig())
 	}
 
-	yParity := 0
 	switch t := tx.(type) {
 	case *types.LegacyTx:
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
 		result.V = (*hexutil.Big)(t.V().ToBig())
 	case *types.AccessListTx:
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
-		if t.YParity {
-			yParity = 1
-		}
-		result.YParity = &yParity
+		result.V = (*hexutil.Big)(yParityBig)
 		result.Accesses = &t.AccessList
 	case *types.DynamicFeeTransaction:
 		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
 		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
-		if t.YParity {
-			yParity = 1
-		}
-		result.YParity = &yParity
+		result.V = (*hexutil.Big)(yParityBig)
 		result.Accesses = &t.AccessList
 		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
 	case *types.BlobTx:
 		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
 		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
-		if t.YParity {
-			yParity = 1
-		}
-		result.YParity = &yParity
+		result.V = (*hexutil.Big)(yParityBig)
 		result.Accesses = &t.AccessList
 		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
 		result.MaxFeePerDataGas = (*hexutil.Big)(t.MaxFeePerDataGas.ToBig())

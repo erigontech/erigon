@@ -396,8 +396,7 @@ type RPCTransaction struct {
 	Accesses            *types2.AccessList `json:"accessList,omitempty"`
 	BlobVersionedHashes []libcommon.Hash   `json:"blobVersionedHashes,omitempty"`
 	ChainID             *hexutil.Big       `json:"chainId,omitempty"`
-	YParity             *int               `json:"yParity,omitempty"`
-	V                   *hexutil.Big       `json:"v,omitempty"`
+	V                   *hexutil.Big       `json:"v"`
 	R                   *hexutil.Big       `json:"r"`
 	S                   *hexutil.Big       `json:"s"`
 }
@@ -414,42 +413,36 @@ func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumb
 		To:    tx.GetTo(),
 		Value: (*hexutil.Big)(tx.GetValue().ToBig()),
 	}
-	r, s := tx.RawSignatureValues()
+	yParity, r, s := tx.RawSignatureValues()
 	result.R = (*hexutil.Big)(r.ToBig())
 	result.S = (*hexutil.Big)(s.ToBig())
+	yParityBig := big.NewInt(0)
+	if yParity {
+		yParityBig.SetInt64(1)
+	}
 	if tx.ReplayProtected() {
 		result.ChainID = (*hexutil.Big)(tx.GetChainID().ToBig())
 	}
 
-	yParity := 0
 	switch t := tx.(type) {
 	case *types.LegacyTx:
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
 		result.V = (*hexutil.Big)(t.V().ToBig())
 	case *types.AccessListTx:
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
-		if t.YParity {
-			yParity = 1
-		}
-		result.YParity = &yParity
+		result.V = (*hexutil.Big)(yParityBig)
 		result.Accesses = &t.AccessList
 	case *types.DynamicFeeTransaction:
 		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
 		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
-		if t.YParity {
-			yParity = 1
-		}
-		result.YParity = &yParity
+		result.V = (*hexutil.Big)(yParityBig)
 		result.Accesses = &t.AccessList
 		// if the transaction has been mined, compute the effective gas price
 		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
 	case *types.BlobTx:
 		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
 		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
-		if t.YParity {
-			yParity = 1
-		}
-		result.YParity = &yParity
+		result.V = (*hexutil.Big)(yParityBig)
 		result.Accesses = &t.AccessList
 		// if the transaction has been mined, compute the effective gas price
 		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)

@@ -92,8 +92,8 @@ func (ct CommonTx) ReplayProtected() bool {
 	return ct.ChainID != nil
 }
 
-func (ct *CommonTx) RawSignatureValues() (*uint256.Int, *uint256.Int) {
-	return &ct.R, &ct.S
+func (ct *CommonTx) RawSignatureValues() (bool, *uint256.Int, *uint256.Int) {
+	return ct.YParity, &ct.R, &ct.S
 }
 
 func (ct CommonTx) IsContractDeploy() bool {
@@ -211,9 +211,15 @@ func (tx LegacyTx) EncodingSize() int {
 	return payloadSize
 }
 
-// See EIP-155: Simple replay attack protection
 func (tx LegacyTx) V() *uint256.Int {
-	v := uint256.NewInt(27)
+	v := uint256.NewInt(0)
+	withSignature := tx.YParity || !tx.R.IsZero() || !tx.S.IsZero()
+	if !withSignature {
+		return v // return 0 for backwards compatibility with tests
+	}
+
+	// See EIP-155: Simple replay attack protection
+	v.SetUint64(27)
 	if tx.ChainID != nil {
 		v.Mul(tx.ChainID, u256.Num2)
 		v.AddUint64(v, 35)

@@ -203,29 +203,25 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		}
 	}
 
-	var yParity bool
-	switch t := tx.(type) {
+	switch tx.(type) {
 	case *LegacyTx:
-		yParity = t.YParity
+		// do nothing
 	case *AccessListTx:
 		if !sg.accessList {
 			return libcommon.Address{}, fmt.Errorf("accessList tx is not supported by signer %s", sg)
 		}
-		yParity = t.YParity
 	case *DynamicFeeTransaction:
 		if !sg.dynamicFee {
 			return libcommon.Address{}, fmt.Errorf("dynamicFee tx is not supported by signer %s", sg)
 		}
-		yParity = t.YParity
 	case *BlobTx:
 		if !sg.blob {
 			return libcommon.Address{}, fmt.Errorf("blob tx is not supported by signer %s", sg)
 		}
-		yParity = t.YParity
 	default:
 		return libcommon.Address{}, ErrTxTypeNotSupported
 	}
-	r, s := tx.RawSignatureValues()
+	yParity, r, s := tx.RawSignatureValues()
 	return recoverPlain(context, tx.SigningHash(signChainID), yParity, r, s, !sg.malleable)
 }
 

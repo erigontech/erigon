@@ -330,7 +330,7 @@ func (txw *BlobTxWrapper) GetAccessList() types2.AccessList { return txw.Tx.GetA
 
 func (txw *BlobTxWrapper) ReplayProtected() bool { return txw.Tx.ReplayProtected() }
 
-func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int) {
+func (txw *BlobTxWrapper) RawSignatureValues() (bool, *uint256.Int, *uint256.Int) {
 	return txw.Tx.RawSignatureValues()
 }
 

@@ -80,7 +80,7 @@ type Transaction interface {
 	GetData() []byte
 	GetAccessList() types2.AccessList
 	ReplayProtected() bool
-	RawSignatureValues() (*uint256.Int, *uint256.Int)
+	RawSignatureValues() (bool, *uint256.Int, *uint256.Int)
 	EncodingSize() int
 	EncodeRLP(w io.Writer) error
 	MarshalBinary(w io.Writer) error
