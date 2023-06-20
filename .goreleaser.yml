@@ -70,7 +70,7 @@ dockers:
       - 0xpolygon/{{ .ProjectName }}:{{ .Version }}-amd64
     dockerfile: Dockerfile.release
     use: buildx
-    skip_push: false
+    skip_push: true
     goarch: amd64
     ids:
       - linux-amd64
@@ -80,24 +80,13 @@ dockers:
   - image_templates:
       - 0xpolygon/{{ .ProjectName }}:{{ .Version }}-arm64
     dockerfile: Dockerfile.release
-    skip_push: false
+    skip_push: true
     use: buildx
     goarch: arm64
     ids:
       - linux-arm64
     build_flag_templates:
       - --platform=linux/arm64/v8
-
-docker_manifests:
-  - name_template: 0xpolygon/{{ .ProjectName }}:{{ .Version }}
-    image_templates:
-      - 0xpolygon/{{ .ProjectName }}:{{ .Version }}-amd64
-      - 0xpolygon/{{ .ProjectName }}:{{ .Version }}-arm64
-
-  - name_template: 0xpolygon/{{ .ProjectName }}:latest
-    image_templates:
-    - 0xpolygon/{{ .ProjectName }}:{{ .Version }}-amd64
-    - 0xpolygon/{{ .ProjectName }}:{{ .Version }}-arm64
 
 announce:
   slack:

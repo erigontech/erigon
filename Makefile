@@ -216,7 +216,7 @@ git-submodules:
 	@git submodule update --quiet --init --recursive --force || true
 
 PACKAGE_NAME          := github.com/maticnetwork/erigon
-GOLANG_CROSS_VERSION  ?= v1.18.1
+GOLANG_CROSS_VERSION  ?= v1.20.5
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
