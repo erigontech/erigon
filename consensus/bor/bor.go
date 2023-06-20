@@ -3,7 +3,6 @@ package bor
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -476,11 +475,7 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 		return ErrInvalidTimestamp
 	}
 
-	// Retrieve the snapshot needed to verify this header and cache it
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
-	if err != nil {
-		return err
-	}
+	sprintLength := c.config.CalculateSprint(number)
 
 	// Verify the validator list match the local contract
 	//
@@ -490,7 +485,7 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	// contract data and span data won't match for that. Skip validating
 	// for 0th span. TODO: Remove `number > zerothSpanEnd` check
 	// once we start fetching validator data from contract.
-	if number > zerothSpanEnd && isSprintStart(number+1, c.config.CalculateSprint(number)) {
+	if number > zerothSpanEnd && isSprintStart(number+1, sprintLength) {
 		producerSet, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
 
 		if err != nil {
@@ -515,9 +510,14 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 			}
 		}
 	}
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
+	if err != nil {
+		return err
+	}
 
 	// verify the validator list in the last sprint block
-	if isSprintStart(number, c.config.CalculateSprint(number)) {
+	if isSprintStart(number, sprintLength) {
+		// Retrieve the snapshot needed to verify this header and cache it
 		parentValidatorBytes := parent.Extra[extraVanity : len(parent.Extra)-extraSeal]
 		validatorsBytes := make([]byte, len(snap.ValidatorSet.Validators)*validatorHeaderBytesLength)
 
@@ -534,7 +534,7 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	}
 
 	// All basic checks passed, verify the seal and return
-	return c.verifySeal(chain, header, parents)
+	return c.verifySeal(chain, header, parents, snap)
 }
 
 // snapshot retrieves the authorization snapshot at a given point in time.
@@ -661,14 +661,18 @@ func (c *Bor) VerifyUncles(_ consensus.ChainReader, _ *types.Header, uncles []*t
 // VerifySeal implements consensus.Engine, checking whether the signature contained
 // in the header satisfies the consensus protocol requirements.
 func (c *Bor) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
-	return c.verifySeal(chain, header, nil)
+	snap, err := c.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
+	if err != nil {
+		return err
+	}
+	return c.verifySeal(chain, header, nil, snap)
 }
 
 // verifySeal checks whether the signature contained in the header satisfies the
 // consensus protocol requirements. The method accepts an optional list of parent
 // headers that aren't yet part of the local blockchain to generate the snapshots
 // from.
-func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
+func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, snap *Snapshot) error {
 	// Verifying the genesis block is not supported
 	number := header.Number.Uint64()
 	if number == 0 {
@@ -676,12 +680,6 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 	}
 	// Resolve the authorization key and check against signers
 	signer, err := ecrecover(header, c.signatures, c.config)
-	if err != nil {
-		return err
-	}
-
-	// Retrieve the snapshot needed to verify this header and cache it
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
 	if err != nil {
 		return err
 	}
@@ -819,8 +817,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 
 		if c.HeimdallClient != nil {
 			// commit states
-			_, err = c.CommitStates(state, header, cx, syscall)
-			if err != nil {
+			if err = c.CommitStates(state, header, cx, syscall); err != nil {
 				c.logger.Error("Error while committing states", "err", err)
 				return nil, types.Receipts{}, err
 			}
@@ -896,8 +893,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 
 		if c.HeimdallClient != nil {
 			// commit states
-			_, err = c.CommitStates(state, header, cx, syscall)
-			if err != nil {
+			if err = c.CommitStates(state, header, cx, syscall); err != nil {
 				c.logger.Error("Error while committing states", "err", err)
 				return nil, nil, types.Receipts{}, err
 			}
@@ -1106,9 +1102,10 @@ func (c *Bor) needToCommitSpan(currentSpan *span.Span, headerNumber uint64) bool
 	if currentSpan.EndBlock == 0 {
 		return true
 	}
+	sprintLength := c.config.CalculateSprint(headerNumber)
 
 	// if current block is first block of last sprint in current span
-	if currentSpan.EndBlock > c.config.CalculateSprint(headerNumber) && currentSpan.EndBlock-c.config.CalculateSprint(headerNumber)+1 == headerNumber {
+	if currentSpan.EndBlock > sprintLength && currentSpan.EndBlock-sprintLength+1 == headerNumber {
 		return true
 	}
 
@@ -1195,7 +1192,7 @@ func (c *Bor) CommitStates(
 	header *types.Header,
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
-) ([]*types.StateSyncData, error) {
+) error {
 	fetchStart := time.Now()
 	number := header.Number.Uint64()
 
@@ -1211,7 +1208,7 @@ func (c *Bor) CommitStates(
 	// the incoming chain.
 	lastStateIDBig, err = c.GenesisContractsClient.LastStateId(syscall)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if c.config.IsIndore(number) {
@@ -1232,7 +1229,7 @@ func (c *Bor) CommitStates(
 
 	eventRecords, err := c.HeimdallClient.StateSyncEvents(c.execCtx, lastStateID+1, to.Unix())
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if c.config.OverrideStateSyncRecords != nil {
@@ -1244,7 +1241,6 @@ func (c *Bor) CommitStates(
 	fetchTime := time.Since(fetchStart)
 	processStart := time.Now()
 	chainID := c.chainConfig.ChainID.String()
-	stateSyncs := make([]*types.StateSyncData, 0, len(eventRecords))
 
 	for _, eventRecord := range eventRecords {
 		if eventRecord.ID <= lastStateID {
@@ -1256,16 +1252,8 @@ func (c *Bor) CommitStates(
 			break
 		}
 
-		stateData := types.StateSyncData{
-			ID:       eventRecord.ID,
-			Contract: eventRecord.Contract,
-			Data:     hex.EncodeToString(eventRecord.Data),
-			TxHash:   eventRecord.TxHash,
-		}
-		stateSyncs = append(stateSyncs, &stateData)
-
 		if err := c.GenesisContractsClient.CommitState(eventRecord, syscall); err != nil {
-			return nil, err
+			return err
 		}
 
 		lastStateID++
@@ -1275,7 +1263,7 @@ func (c *Bor) CommitStates(
 
 	c.logger.Debug("StateSyncData", "number", number, "lastStateID", lastStateID, "total records", len(eventRecords), "fetch time", int(fetchTime.Milliseconds()), "process time", int(processTime.Milliseconds()))
 
-	return stateSyncs, nil
+	return nil
 }
 
 func validateEventRecord(eventRecord *clerk.EventRecordWithTime, number uint64, to time.Time, lastStateID uint64, chainID string) error {
