@@ -1,6 +1,7 @@
 package filecache
 
 import (
+	"encoding"
 	"encoding/binary"
 	"io/fs"
 	"os"
@@ -10,7 +11,12 @@ import (
 	"time"
 )
 
-type Cache[K ~string, V any] struct {
+type BinarySerializable interface {
+	encoding.BinaryMarshaler
+	encoding.BinaryUnmarshaler
+}
+
+type Cache[K ~string, V BinarySerializable] struct {
 	maxEntries int
 
 	rootPath string
@@ -20,7 +26,7 @@ type Cache[K ~string, V any] struct {
 	mu      sync.RWMutex
 }
 
-func NewCache[K ~string, V any](entries int, root string) (*Cache[K, V], error) {
+func NewCache[K ~string, V BinarySerializable](entries int, root string) (*Cache[K, V], error) {
 	root = filepath.Clean(root)
 	c := &Cache[K, V]{
 		maxEntries: entries,
@@ -35,6 +41,8 @@ func NewCache[K ~string, V any](entries int, root string) (*Cache[K, V], error) 
 }
 
 func (c *Cache[K, V]) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	err := os.RemoveAll(c.rootPath)
 	if err != nil {
 		return err
@@ -42,33 +50,32 @@ func (c *Cache[K, V]) Close() error {
 	return nil
 }
 
-func (c *Cache[K, V]) Get(key K) (val *V, ok bool, err error) {
-	val = new(V)
+func (c *Cache[K, V]) Get(key K, val V) (ok bool, err error) {
 	// see if exists
 	fpath, err := joinValidate(c.rootPath, string(key))
 	if err != nil {
-		return val, false, err
+		return false, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	_, err = os.Stat(fpath)
 	if err != nil {
-		return val, false, nil
+		return false, nil
 	}
 	fp, err := os.Open(fpath)
 	if err != nil {
-		return val, false, nil
+		return false, nil
 	}
 	err = binary.Read(fp, binary.LittleEndian, val)
 	if err != nil {
-		return val, false, err
+		return false, err
 	}
 	c.entries[fpath] = time.Now()
 	ok = true
 	return
 }
 
-func (c *Cache[K, V]) Add(key K, value *V) (evicted bool, err error) {
+func (c *Cache[K, V]) Add(key K, value V) (evicted bool, err error) {
 	fpath, err := joinValidate(c.rootPath, string(key))
 	if err != nil {
 		return false, err
@@ -93,6 +100,8 @@ func (c *Cache[K, V]) Delete(key K) (err error) {
 	if err != nil {
 		return err
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.deleteAt(fpath)
 }
 

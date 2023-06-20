@@ -1,6 +1,8 @@
 package filecache_test
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,11 +18,23 @@ type s struct {
 	B uint64
 }
 
+func (o *s) MarshalBinary() (data []byte, err error) {
+	buf := new(bytes.Buffer)
+	err = binary.Write(buf, binary.LittleEndian, o)
+	return buf.Bytes(), err
+}
+
+func (o *s) UnmarshalBinary(data []byte) error {
+	buf := bytes.NewBuffer(data)
+	err := binary.Read(buf, binary.LittleEndian, o)
+	return err
+}
+
 func TestCache(t *testing.T) {
 
 	rootDir := filepath.Join(os.TempDir(), fmt.Sprintf("caplin-fixture-%d", time.Now().Unix()))
 	func() {
-		c, err := filecache.NewCache[string, s](3, rootDir)
+		c, err := filecache.NewCache[string, *s](3, rootDir)
 		require.NoError(t, err)
 		defer c.Close()
 
@@ -41,11 +55,12 @@ func TestCache(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, evicted)
 
+		val := &s{}
 		// access one to reset the timer
-		v1, ok, err := c.Get("one")
+		ok, err := c.Get("one", val)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.EqualValues(t, &s{A: 4, B: 4}, v1)
+		require.EqualValues(t, &s{A: 4, B: 4}, val)
 
 		// add four
 		evicted, err = c.Add("four", &s{A: 16, B: 7})
@@ -53,19 +68,19 @@ func TestCache(t *testing.T) {
 		require.True(t, evicted)
 
 		// ensure four is here
-		v4, ok, err := c.Get("four")
+		ok, err = c.Get("four", val)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.EqualValues(t, &s{A: 16, B: 7}, v4)
+		require.EqualValues(t, &s{A: 16, B: 7}, val)
 
 		// ensure one is still here
-		v1, ok, err = c.Get("one")
+		ok, err = c.Get("one", val)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.EqualValues(t, &s{A: 4, B: 4}, v1)
+		require.EqualValues(t, &s{A: 4, B: 4}, val)
 
 		// ensure two is evicted
-		_, ok, err = c.Get("two")
+		ok, err = c.Get("two", val)
 		require.NoError(t, err)
 		require.False(t, ok)
 	}()
