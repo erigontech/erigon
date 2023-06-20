@@ -752,7 +752,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 }
 
 func Test_helper_decodeAccountv3Bytes(t *testing.T) {
-	input, err := hex.DecodeString("01020609184bf1c16c0000")
+	input, err := hex.DecodeString("01020609184bf1c1800000")
 	require.NoError(t, err)
 
 	n, b, ch := DecodeAccountBytes(input)

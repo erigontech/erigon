@@ -1323,20 +1323,39 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 			continue
 		}
 		if txFrom != 0 {
-			txNumHist, pk, pv, err := mc.hc.GetRecent(k, txFrom, d.tx)
+			txNumHist, isLatest, pk, pv, err := mc.hc.GetRecent(k, txFrom, d.tx)
 			if err != nil {
 				return err
 			}
 			fmt.Printf("recent %x txn %x '%x' ? ", k, txNumHist, pv)
 			if len(pk) != 0 && txNumHist <= txFrom {
-				if len(pv) == 0 {
-					// prev value is creation mark, nothing to put back into domain
-					fmt.Printf("skip\n")
-					continue
+				if isLatest {
+					if txNumHist == txFrom {
+						// exact at this txNum value has been set.restore.
+						fmt.Printf("restoring exact\n")
+						wal.addValue(k, v, pv)
+					} else {
+						fmt.Printf("skip\n")
+						continue
+					}
+					// value is in domain
+				} else {
+					// there were txs after txFrom, domain value is not actual
+					fmt.Printf("restoring\n")
+					wal.addValue(k, v, pv)
 				}
-				fmt.Printf("restoring\n")
-				wal.addValue(k, v, pv)
+
 			}
+			//if len(pk) != 0 && txNumHist <= txFrom {
+			//	if len(pv) == 0 {
+			//		// prev value is creation mark, nothing to put back into domain
+			//		fmt.Printf("skip\n")
+			//		continue
+			//	}
+			//	fmt.Printf("restoring\n")
+			//	d.SetTxNum(txNumHist)
+			//	wal.addValue(k, v, pv)
+			//}
 
 		}
 

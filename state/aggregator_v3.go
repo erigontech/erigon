@@ -950,7 +950,7 @@ func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64) error {
 		fmt.Printf("sto - %x : %x\n", k, v)
 	})
 	a.commitment.MakeContext().IteratePrefix(a.rwTx, []byte{}, func(k, v []byte) {
-		fmt.Printf("com - %x : %x\n", k, v)
+		fmt.Printf("com - %x : %x\n", k, truncate(v, 80))
 	})
 	return nil
 }
