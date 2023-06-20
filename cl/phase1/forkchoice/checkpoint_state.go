@@ -1,6 +1,9 @@
 package forkchoice
 
 import (
+	"bytes"
+	"encoding/binary"
+	"encoding/gob"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -18,20 +21,20 @@ const randaoMixesLength = 65536
 
 // Active returns if validator is active for given epoch
 func (cv *checkpointValidator) active(epoch uint64) bool {
-	return cv.activationEpoch <= epoch && epoch < cv.exitEpoch
+	return cv.ActivationEpoch <= epoch && epoch < cv.ExitEpoch
 }
 
 type checkpointValidator struct {
-	publicKey       [48]byte
-	activationEpoch uint64
-	exitEpoch       uint64
-	balance         uint64
-	slashed         bool
+	PublicKey       [48]byte
+	ActivationEpoch uint64
+	ExitEpoch       uint64
+	Balance         uint64
+	Slashed         bool
 }
 
 type shuffledSet struct {
-	set       []uint64
-	lenActive uint64
+	Set       []uint64
+	LenActive uint64
 }
 
 // We only keep in memory a fraction of the beacon state
@@ -47,16 +50,148 @@ type checkpointState struct {
 	activeBalance, epoch  uint64 // current active balance and epoch
 }
 
+// encoding format:
+// [
+// 1 bytesize:[
+//  2 [genesisValidatorsRoot][activeBalance][epoch][fork]
+//  3 [bytesize:[randao ssz]]
+//  4 [bytesize:[validator gob]]
+//  5 [bytesize:[beaconConfig gob]]
+//  6 [bytesize:[shuffledsets gob]]
+// ]
+// ]
+
+func (c *checkpointState) UnmarshalBinary(data []byte) (err error) {
+	rd := bytes.NewBuffer(data)
+	// 1. length prefix,
+	var leng uint32
+	if err := binary.Read(rd, binary.LittleEndian, &leng); err != nil {
+		return err
+	}
+	rd = bytes.NewBuffer(rd.Next(int(leng)))
+	// 2. read the header
+	if err = binary.Read(rd, binary.LittleEndian, &c.genesisValidatorsRoot); err != nil {
+		return err
+	}
+	if err = binary.Read(rd, binary.LittleEndian, &c.activeBalance); err != nil {
+		return err
+	}
+	if err = binary.Read(rd, binary.LittleEndian, &c.epoch); err != nil {
+		return err
+	}
+	if err = binary.Read(rd, binary.LittleEndian, &c.fork); err != nil {
+		return err
+	}
+	// 3. randaoMixes
+	if err = binary.Read(rd, binary.LittleEndian, &leng); err != nil {
+		return err
+	}
+	// note that version is ignored
+	if err := c.randaoMixes.DecodeSSZ(rd.Next(int(leng)), 0); err != nil {
+		return err
+	}
+	// 4. validator
+	if err = binary.Read(rd, binary.LittleEndian, &leng); err != nil {
+		return err
+	}
+	if err := gob.NewDecoder(bytes.NewBuffer(rd.Next(int(leng)))).
+		Decode(&c.validators); err != nil {
+		return err
+	}
+	// 5. beaconConfig
+	if err = binary.Read(rd, binary.LittleEndian, &leng); err != nil {
+		return err
+	}
+	if err := gob.NewDecoder(bytes.NewBuffer(rd.Next(int(leng)))).
+		Decode(&c.beaconConfig); err != nil {
+		return err
+	}
+	// 6. shuffledSetsCache
+	if err = binary.Read(rd, binary.LittleEndian, &leng); err != nil {
+		return err
+	}
+	if err := gob.NewDecoder(bytes.NewBuffer(rd.Next(int(leng)))).
+		Decode(&c.shuffledSetsCache); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *checkpointState) MarshalBinary() (data []byte, err error) {
+	o := new(bytes.Buffer)
+	tmp := new(bytes.Buffer)
+
+	// 1 leave four bytes for eventual length offset of entire packet
+	o.Write(make([]byte, 4))
+
+	// 2 encode the fixed fields first, as binary
+	binary.Write(o, binary.LittleEndian, c.genesisValidatorsRoot)
+	binary.Write(o, binary.LittleEndian, c.activeBalance)
+	binary.Write(o, binary.LittleEndian, c.epoch)
+	binary.Write(o, binary.LittleEndian, c.fork)
+
+	// 3 ssz encode the randao
+	randao, err := c.randaoMixes.EncodeSSZ(tmp.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	// byte size prefix
+	binary.Write(o, binary.LittleEndian, uint32(len(randao)))
+	o.Write(randao)
+	tmp.Reset()
+	// fin
+
+	//4  gob encode the validators
+	tmp.Reset()
+	err = gob.NewEncoder(tmp).Encode(c.validators)
+	if err != nil {
+		return
+	}
+	binary.Write(o, binary.LittleEndian, uint32(tmp.Len()))
+	tmp.WriteTo(o)
+	tmp.Reset()
+	// fin
+
+	//5 gob encode the beacon chain config
+	tmp.Reset()
+	err = gob.NewEncoder(tmp).Encode(c.beaconConfig)
+	if err != nil {
+		return
+	}
+	binary.Write(o, binary.LittleEndian, uint32(tmp.Len()))
+	tmp.WriteTo(o)
+	tmp.Reset()
+	// fin
+
+	//6 gob encode the shuffledSetsCache
+	tmp.Reset()
+	err = gob.NewEncoder(tmp).Encode(c.shuffledSetsCache)
+	if err != nil {
+		return
+	}
+	binary.Write(o, binary.LittleEndian, uint32(tmp.Len()))
+	tmp.WriteTo(o)
+	tmp.Reset()
+	// fin
+
+	bts := o.Bytes()
+
+	// put the length prefix
+	binary.LittleEndian.PutUint32(bts[:4], uint32(len(bts))-4)
+	return bts, nil
+}
+
 func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
 	genesisValidatorsRoot libcommon.Hash, fork *cltypes.Fork, activeBalance, epoch uint64) *checkpointState {
 	validators := make([]*checkpointValidator, len(validatorSet))
 	for i := range validatorSet {
 		validators[i] = &checkpointValidator{
-			publicKey:       validatorSet[i].PublicKey(),
-			activationEpoch: validatorSet[i].ActivationEpoch(),
-			exitEpoch:       validatorSet[i].ExitEpoch(),
-			balance:         validatorSet[i].EffectiveBalance(),
-			slashed:         validatorSet[i].Slashed(),
+			PublicKey:       validatorSet[i].PublicKey(),
+			ActivationEpoch: validatorSet[i].ActivationEpoch(),
+			ExitEpoch:       validatorSet[i].ExitEpoch(),
+			Balance:         validatorSet[i].EffectiveBalance(),
+			Slashed:         validatorSet[i].Slashed(),
 		}
 	}
 	mixes := solid.NewHashVector(randaoMixesLength)
@@ -89,13 +224,13 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationDat
 	// Input for the seed hash.
 
 	if shuffledIndicesCached, ok := c.shuffledSetsCache[epoch]; ok {
-		shuffledIndicies = shuffledIndicesCached.set
-		lenIndicies = shuffledIndicesCached.lenActive
+		shuffledIndicies = shuffledIndicesCached.Set
+		lenIndicies = shuffledIndicesCached.LenActive
 	} else {
 		activeIndicies := c.getActiveIndicies(epoch)
 		lenIndicies = uint64(len(activeIndicies))
 		shuffledIndicies = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes.Get(int(mixPosition)), activeIndicies, slot)
-		c.shuffledSetsCache[epoch] = &shuffledSet{set: shuffledIndicies, lenActive: uint64(len(activeIndicies))}
+		c.shuffledSetsCache[epoch] = &shuffledSet{Set: shuffledIndicies, LenActive: uint64(len(activeIndicies))}
 	}
 	committeesPerSlot := c.committeeCount(epoch, lenIndicies)
 	count := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
@@ -156,7 +291,7 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 
 	pks := [][]byte{}
 	inds.Range(func(_ int, v uint64, _ int) bool {
-		publicKey := c.validators[v].publicKey
+		publicKey := c.validators[v].PublicKey
 		pks = append(pks, publicKey[:])
 		return true
 	})
