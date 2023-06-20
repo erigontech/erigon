@@ -1048,7 +1048,7 @@ func TestDomainUnwind(t *testing.T) {
 	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 
-	//err = d.pruneF(ctx, 0, 5, maxTx, maxTx, func(_ uint64, k, v []byte) error { return nil })
+	//err = d.unwind(ctx, 0, 5, maxTx, maxTx, func(_ uint64, k, v []byte) error { return nil })
 	err = d.prune(ctx, 0, 5, maxTx, maxTx, logEvery)
 	require.NoError(t, err)
 	d.MakeContext().IteratePrefix(tx, []byte("key1"), func(k, v []byte) {

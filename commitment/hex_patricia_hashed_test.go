@@ -327,17 +327,14 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	var s state
 	s.Root = make([]byte, 128)
 	rnd := rand.New(rand.NewSource(42))
-	n, err := rnd.Read(s.CurrentKey[:])
-	require.NoError(t, err)
-	require.EqualValues(t, 128, n)
-	n, err = rnd.Read(s.Root[:])
+
+	n, err := rnd.Read(s.Root[:])
 	require.NoError(t, err)
 	require.EqualValues(t, len(s.Root), n)
 	s.RootPresent = true
 	s.RootTouched = true
 	s.RootChecked = true
 
-	s.CurrentKeyLen = int8(rnd.Intn(129))
 	for i := 0; i < len(s.Depths); i++ {
 		s.Depths[i] = rnd.Intn(256)
 	}
@@ -363,8 +360,6 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 
 	require.EqualValues(t, s.Root[:], s1.Root[:])
 	require.EqualValues(t, s.Depths[:], s1.Depths[:])
-	require.EqualValues(t, s.CurrentKeyLen, s1.CurrentKeyLen)
-	require.EqualValues(t, s.CurrentKey[:], s1.CurrentKey[:])
 	require.EqualValues(t, s.AfterMap[:], s1.AfterMap[:])
 	require.EqualValues(t, s.TouchMap[:], s1.TouchMap[:])
 	require.EqualValues(t, s.BranchBefore[:], s1.BranchBefore[:])
@@ -543,6 +538,22 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 	hashAfterRestore, err := trieOne.RootHash()
 	require.NoError(t, err)
 	require.EqualValues(t, beforeRestore, hashAfterRestore)
+
+	require.EqualValues(t, trieTwo.currentKey[:trieTwo.currentKeyLen], trieOne.currentKey[:trieOne.currentKeyLen])
+
+	trieTwo.currentKeyLen = 10
+	for i := 0; i < trieTwo.currentKeyLen; i++ {
+		trieTwo.currentKey[i] = 8
+	}
+
+	buf, err = trieTwo.EncodeCurrentState(nil)
+	require.NoError(t, err)
+
+	err = trieOne.SetState(buf)
+	require.NoError(t, err)
+
+	require.EqualValues(t, trieTwo.currentKey[:trieTwo.currentKeyLen], trieOne.currentKey[:trieOne.currentKeyLen])
+
 }
 
 func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestore(t *testing.T) {

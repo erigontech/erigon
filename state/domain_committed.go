@@ -411,7 +411,7 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 	mw := md5.New()
 	mw.Write(encoded)
 
-	fmt.Printf("commitment put %d rh %x vh %x\n", d.txNum, rh, mw.Sum(nil))
+	fmt.Printf("commitment put %d rh %x vh %x\n\n", d.txNum, rh, mw.Sum(nil))
 	if err := d.Domain.PutWithPrev(keyCommitmentState, nil, encoded, d.prevState); err != nil {
 		return err
 	}

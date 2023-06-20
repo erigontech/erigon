@@ -557,8 +557,15 @@ func (h *domainWAL) size() uint64 {
 	return h.kvsize.Load()
 }
 
+func truncate(val []byte, max int) []byte {
+	if len(val) > max {
+		return val[:max]
+	}
+	return val
+}
+
 func loadPrintFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	fmt.Printf("[flush] %x -> %x\n", k, v)
+	fmt.Printf("[flush] %x -> %x\n", k, truncate(v, 80))
 	return next(k, k, v)
 }
 
@@ -566,10 +573,10 @@ func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if h.discard || !h.buffered {
 		return nil
 	}
-	if err := h.keys.Load(tx, h.d.keysTable, loadPrintFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := h.keys.Load(tx, h.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := h.values.Load(tx, h.d.valsTable, loadPrintFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := h.values.Load(tx, h.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	return nil
@@ -595,6 +602,8 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 	} else {
 		kl -= 8
 	}
+
+	fmt.Printf("[wal] txn %d %x -> %x\n", h.d.txNum, fullkey, truncate(value, 80))
 
 	if h.largeValues {
 		if !h.buffered {
@@ -1274,7 +1283,7 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 	d.reCalcRoFiles()
 }
 
-func (d *Domain) pruneF(ctx context.Context, step, txFrom, txTo, limit uint64, f func(step uint64, k, v []byte) error) error {
+func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f func(step uint64, k, v []byte) error) error {
 	keysCursor, err := d.tx.RwCursorDupSort(d.keysTable)
 	if err != nil {
 		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
@@ -1299,38 +1308,36 @@ func (d *Domain) pruneF(ctx context.Context, step, txFrom, txTo, limit uint64, f
 		defer valsCDup.Close()
 	}
 
-	fmt.Printf("prune %s from %d to %d step %d\n", d.filenameBase, txFrom, txTo, step)
+	fmt.Printf("unwind %s txs [%d; %d) step %d\n", d.filenameBase, txFrom, txTo, step)
 	mc := d.MakeContext()
 	defer mc.Close()
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
-	seen := make(map[string]uint64)
 	wal := d.newWriter(d.tmpdir+"_prune", true, false)
 	wal.skipKeySuffix = true
+
 	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
 		if !bytes.Equal(v, stepBytes) {
 			continue
 		}
-		txNumHist, pk, pv, err := mc.hc.GetRecent(k, txFrom, d.tx)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("recent %x txn '%x' v '%x' ? ", k, txNumHist, pv)
-		if len(pk) != 0 {
-			if txNumHist < txFrom && len(pv) == 0 {
-				// recent value installed at txNumHist is in domain, skip
-				fmt.Printf("skip\n")
-				continue
+		if txFrom != 0 {
+			txNumHist, pk, pv, err := mc.hc.GetRecent(k, txFrom, d.tx)
+			if err != nil {
+				return err
 			}
-			//if _, ok := seen[string(k)]; ok {
-			//	continue
-			//}
-			fmt.Printf("restoring\n")
-			wal.addValue(k, v, pv)
-			seen[string(k)] = txNumHist
-			//continue
+			fmt.Printf("recent %x txn %x '%x' ? ", k, txNumHist, pv)
+			if len(pk) != 0 && txNumHist <= txFrom {
+				if len(pv) == 0 {
+					// prev value is creation mark, nothing to put back into domain
+					fmt.Printf("skip\n")
+					continue
+				}
+				fmt.Printf("restoring\n")
+				wal.addValue(k, v, pv)
+			}
+
 		}
 
 		seek := common.Append(k, stepBytes)
@@ -1673,7 +1680,7 @@ func (d *Domain) pruneOld(ctx context.Context, step uint64, txFrom, txTo, limit 
 
 	defer func(t time.Time) { d.stats.LastPruneHistTook = time.Since(t) }(time.Now())
 	//exists := map[string]struct{}{}
-	//if err := d.History.pruneF(txFrom, txTo, func(txNum uint64, k, v []byte) error {
+	//if err := d.History.unwind(txFrom, txTo, func(txNum uint64, k, v []byte) error {
 	//	if txNum > txFrom {
 	//		return nil
 	//	}

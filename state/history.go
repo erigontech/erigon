@@ -593,7 +593,7 @@ func (h *History) newWriter(tmpdir string, buffered, discard bool) *historyWAL {
 }
 
 func loadHistPrintFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	fmt.Printf("[hflush] %x -> %x\n", k, v)
+	fmt.Printf("[hflus] %x -> %x\n", k, truncate(v, 80))
 	return next(k, k, v)
 }
 
@@ -601,7 +601,7 @@ func (h *historyWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if h.discard || !h.buffered {
 		return nil
 	}
-	if err := h.historyVals.Load(tx, h.h.historyValsTable, loadHistPrintFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := h.historyVals.Load(tx, h.h.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	h.close()
@@ -1567,21 +1567,16 @@ func (hc *HistoryContext) getRecentFromDB(key []byte, beforeTxNum uint64, tx kv.
 		for kAndTxNum, val, err = c.Prev(); kAndTxNum != nil && bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key); kAndTxNum, val, err = c.Prev() {
 			txn, k, v, exit := proceedKV(kAndTxNum, val)
 			if exit {
+				kk, vv, err := c.Next()
+				if err != nil {
+					return 0, nil, nil, err
+				}
+				if kk != nil && bytes.Equal(kk[:len(kk)-8], key) {
+					v = vv
+				}
+				fmt.Printf("checked neighbour %x -> %x\n", kk, vv)
 				return txn, k, v, nil
 			}
-			//newTxn := binary.BigEndian.Uint64(kAndTxNum[len(kAndTxNum)-8:])
-			//if newTxn < beforeTxNum {
-			//	fmt.Printf("OLDL1 k %x val: %x\n", seek, val)
-			//	// val == []byte{} means key was created in this txNum and doesn't exists before.
-			//	return newTxn, kAndTxNum[:len(kAndTxNum)-8], val, nil
-			//}
-			//if len(val) != 0 && len(val) >= 8 {
-			//	oldTxn := binary.BigEndian.Uint64(val[:8])
-			//	if oldTxn < beforeTxNum {
-			//		fmt.Printf("OLDL2 k %x val: %x\n", seek, val)
-			//		return oldTxn, kAndTxNum[:len(kAndTxNum)-8], val, nil
-			//	}
-			//}
 		}
 		return 0, nil, nil, nil
 	}

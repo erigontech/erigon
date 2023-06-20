@@ -80,62 +80,9 @@ type SharedDomains struct {
 }
 
 func (sd *SharedDomains) Unwind(ctx context.Context, rwtx kv.RwTx, step uint64, txUnwindTo uint64) error {
-	//ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
-	//defer cancel()
-	//
-	//logEvery := time.NewTicker(time.Second * 30)
-	//if err := sd.flushBtree(ctx, rwtx, sd.Account.valsTable, sd.account, "sd_unwind", logEvery); err != nil {
-	//	panic(err)
-	//}
-	//if err := sd.flushBtree(ctx, rwtx, sd.Storage.valsTable, sd.storage, "sd_unwind", logEvery); err != nil {
-	//	panic(err)
-	//}
-	//if err := sd.flushBtree(ctx, rwtx, sd.Code.valsTable, sd.code, "sd_unwind", logEvery); err != nil {
-	//	panic(err)
-	//}
-	//if err := sd.flushBtree(ctx, rwtx, sd.Commitment.valsTable, sd.commitment, "sd_unwind", logEvery); err != nil {
-	//	panic(err)
-	//}
 	sd.clear()
 
-	sd.muMaps.Lock()
-	defer sd.muMaps.Unlock()
-	var useNew bool
-	useNew = true
-	if !useNew {
-		logEvery := time.NewTicker(time.Second * 30)
-		err := sd.Account.prune(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery)
-		if err != nil {
-			panic(err)
-		}
-		err = sd.Code.prune(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery)
-		if err != nil {
-			panic(err)
-		}
-		err = sd.Storage.prune(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery)
-		if err != nil {
-			panic(err)
-		}
-		err = sd.Commitment.prune(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery)
-		if err != nil {
-			panic(err)
-		}
-		//if err := a.logAddrs.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		//	return err
-		//}
-		//if err := a.logTopics.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		//	return err
-		//}
-		//if err := a.tracesFrom.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		//	return err
-		//}
-		//if err := a.tracesTo.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		//	return err
-		//}
-		return nil
-	}
-
-	if err := sd.Account.pruneF(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, func(txN uint64, k, v []byte) error {
+	if err := sd.Account.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, func(txN uint64, k, v []byte) error {
 		//fmt.Printf("d code: %x %x\n", k, v)
 		//pv, _, err := actx.accounts.hc.GetNoStateWithRecent(k, txUnwindTo, a.rwTx)
 		//if err != nil {
@@ -148,21 +95,20 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwtx kv.RwTx, step uint64, 
 	}); err != nil {
 		return err
 	}
-	if err := sd.Storage.pruneF(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
+	if err := sd.Storage.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
 		return err
 	}
-	if err := sd.Code.pruneF(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
+	if err := sd.Code.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
 		return err
 	}
-
-	if err := sd.Commitment.pruneF(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
+	if err := sd.Commitment.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
 		return err
 	}
 
 	cmcx := sd.Commitment.MakeContext()
 	defer cmcx.Close()
 
-	_, _, rv, err := cmcx.hc.GetRecent(keyCommitmentState, txUnwindTo, rwtx)
+	rv, _, err := cmcx.GetLatest(keyCommitmentState, nil, rwtx)
 	if err != nil {
 		return err
 	}

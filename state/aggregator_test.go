@@ -694,19 +694,29 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	defer agg.FinishWrites()
 	defer domains.Close()
 
-	keys, vals := generateInputData(t, 8, 16, 8)
+	keys, vals := generateInputData(t, 8, 16, 20)
 	keys = keys[:2]
 
 	var i int
 	roots := make([][]byte, 0, 10)
 	var pruneFrom uint64 = 5
 
+	mc := agg.MakeContext()
+	defer mc.Close()
+
 	for i = 0; i < len(vals); i++ {
 		domains.SetTxNum(uint64(i))
+		fmt.Printf("txn=%d\n", i)
 
-		err = domains.UpdateAccountCode(keys[i%len(keys)], vals[i], nil)
-		require.NoError(t, err)
+		for j := 0; j < len(keys); j++ {
+			buf := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			prev, _, err := mc.AccountLatest(keys[j], rwTx)
+			require.NoError(t, err)
 
+			err = domains.UpdateAccountData(keys[j], buf, prev)
+			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
+			require.NoError(t, err)
+		}
 		rh, err := domains.Commit(true, false)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
@@ -719,34 +729,30 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	err = agg.Unwind(context.Background(), pruneFrom)
 	require.NoError(t, err)
 
-	mc := agg.MakeContext()
-	defer mc.Close()
-
-	//mc.commitment.IteratePrefix(rwTx, []byte{}, func(key []byte, value []byte) {
-	//	v, ok := expectedCommit[string(key)]
-	//	require.True(t, ok)
-	//	require.EqualValues(t, v, value)
-	//})
-	//
-
 	for i = int(pruneFrom); i < len(vals); i++ {
 		domains.SetTxNum(uint64(i))
 
-		err = domains.UpdateAccountCode(keys[i%len(keys)], vals[i], nil)
-		require.NoError(t, err)
+		fmt.Printf("txn=%d\n", i)
+		for j := 0; j < len(keys); j++ {
+			buf := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			prev, _, err := mc.AccountLatest(keys[j], rwTx)
+			require.NoError(t, err)
+
+			err = domains.UpdateAccountData(keys[j], buf, prev)
+			require.NoError(t, err)
+			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
+			//require.NoError(t, err)
+		}
 
 		rh, err := domains.Commit(true, false)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.EqualValues(t, roots[i], rh)
 	}
-
-	// history is [key+NewTxNum] : [OldTxNum+value]
-	//2- 1 = set at tx 1, updated at 2
 }
 
 func Test_helper_decodeAccountv3Bytes(t *testing.T) {
-	input, err := hex.DecodeString("00011e0000")
+	input, err := hex.DecodeString("01020609184bf1c16c0000")
 	require.NoError(t, err)
 
 	n, b, ch := DecodeAccountBytes(input)

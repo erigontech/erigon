@@ -910,7 +910,7 @@ func (a *AggregatorV3) HasNewFrozenFiles() bool {
 }
 
 func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64) error {
-	//TODO: use ETL to avoid OOM (or specialized history-iterator instead of pruneF)
+	//TODO: use ETL to avoid OOM (or specialized history-iterator instead of unwind)
 	step := txUnwindTo / a.aggregationStep
 	if err := a.domains.Unwind(ctx, a.rwTx, step, txUnwindTo); err != nil {
 		return err

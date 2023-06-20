@@ -1504,12 +1504,10 @@ func (bph *BinPatriciaHashed) SetState(buf []byte) error {
 		return err
 	}
 
-	bph.currentKeyLen = int(s.CurrentKeyLen)
 	bph.rootChecked = s.RootChecked
 	bph.rootTouched = s.RootTouched
 	bph.rootPresent = s.RootPresent
 
-	copy(bph.currentKey[:], s.CurrentKey[:])
 	copy(bph.depths[:], s.Depths[:])
 	copy(bph.branchBefore[:], s.BranchBefore[:])
 	copy(bph.touchMap[:], s.TouchMap[:])

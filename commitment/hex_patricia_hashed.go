@@ -792,6 +792,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int)
 	if err != nil {
 		return false, err
 	}
+	fmt.Printf("unflding %x -> %x\n", hexToCompact(hph.currentKey[:hph.currentKeyLen]), branchData)
 	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
 		// Special case - empty or deleted root
 		hph.rootChecked = true
@@ -1355,16 +1356,14 @@ var (
 
 // represents state of the tree
 type state struct {
-	Root          []byte      // encoded root cell
-	Depths        [128]int    // For each row, the depth of cells in that row
-	TouchMap      [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
-	AfterMap      [128]uint16 // For each row, bitmap of cells that were present after modification
-	BranchBefore  [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
-	CurrentKey    [128]byte   // For each row indicates which column is currently selected
-	CurrentKeyLen int8
-	RootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
-	RootTouched   bool
-	RootPresent   bool
+	Root         []byte      // encoded root cell
+	Depths       [128]int    // For each row, the depth of cells in that row
+	TouchMap     [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
+	AfterMap     [128]uint16 // For each row, bitmap of cells that were present after modification
+	BranchBefore [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
+	RootChecked  bool        // Set to false if it is not known whether the root is empty, set to true if it is checked
+	RootTouched  bool
+	RootPresent  bool
 }
 
 func (s *state) Encode(buf []byte) ([]byte, error) {
@@ -1380,14 +1379,8 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 	}
 
 	ee := bytes.NewBuffer(buf)
-	if err := binary.Write(ee, binary.BigEndian, s.CurrentKeyLen); err != nil {
-		return nil, fmt.Errorf("encode currentKeyLen: %w", err)
-	}
 	if err := binary.Write(ee, binary.BigEndian, int8(rootFlags)); err != nil {
 		return nil, fmt.Errorf("encode rootFlags: %w", err)
-	}
-	if n, err := ee.Write(s.CurrentKey[:]); err != nil || n != len(s.CurrentKey) {
-		return nil, fmt.Errorf("encode currentKey: %w", err)
 	}
 	if err := binary.Write(ee, binary.BigEndian, uint16(len(s.Root))); err != nil {
 		return nil, fmt.Errorf("encode root len: %w", err)
@@ -1431,9 +1424,6 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 
 func (s *state) Decode(buf []byte) error {
 	aux := bytes.NewBuffer(buf)
-	if err := binary.Read(aux, binary.BigEndian, &s.CurrentKeyLen); err != nil {
-		return fmt.Errorf("currentKeyLen: %w", err)
-	}
 	var rootFlags stateRootFlag
 	if err := binary.Read(aux, binary.BigEndian, &rootFlags); err != nil {
 		return fmt.Errorf("rootFlags: %w", err)
@@ -1448,9 +1438,7 @@ func (s *state) Decode(buf []byte) error {
 	if rootFlags&stateRootChecked != 0 {
 		s.RootChecked = true
 	}
-	if n, err := aux.Read(s.CurrentKey[:]); err != nil || n != 128 {
-		return fmt.Errorf("currentKey: %w", err)
-	}
+
 	var rootSize uint16
 	if err := binary.Read(aux, binary.BigEndian, &rootSize); err != nil {
 		return fmt.Errorf("root size: %w", err)
@@ -1584,14 +1572,12 @@ func (c *Cell) Decode(buf []byte) error {
 // Encode current state of hph into bytes
 func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 	s := state{
-		CurrentKeyLen: int8(hph.currentKeyLen),
-		RootChecked:   hph.rootChecked,
-		RootTouched:   hph.rootTouched,
-		RootPresent:   hph.rootPresent,
+		RootChecked: hph.rootChecked,
+		RootTouched: hph.rootTouched,
+		RootPresent: hph.rootPresent,
 	}
 
 	s.Root = hph.root.Encode()
-	copy(s.CurrentKey[:], hph.currentKey[:])
 	copy(s.Depths[:], hph.depths[:])
 	copy(s.BranchBefore[:], hph.branchBefore[:])
 	copy(s.TouchMap[:], hph.touchMap[:])
@@ -1603,6 +1589,7 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 // buf expected to be encoded hph state. Decode state and set up hph to that state.
 func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	if buf == nil {
+		fmt.Printf("reset commitment trie since empty buffer")
 		// reset state to 'empty'
 		hph.currentKeyLen = 0
 		hph.rootChecked = false
@@ -1633,13 +1620,10 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	if err := hph.root.Decode(s.Root); err != nil {
 		return err
 	}
-
-	hph.currentKeyLen = int(s.CurrentKeyLen)
 	hph.rootChecked = s.RootChecked
 	hph.rootTouched = s.RootTouched
 	hph.rootPresent = s.RootPresent
 
-	copy(hph.currentKey[:], s.CurrentKey[:])
 	copy(hph.depths[:], s.Depths[:])
 	copy(hph.branchBefore[:], s.BranchBefore[:])
 	copy(hph.touchMap[:], s.TouchMap[:])
