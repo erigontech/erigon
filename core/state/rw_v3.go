@@ -327,7 +327,15 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	}
 	stateChanges := etl.NewCollector("", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), rs.logger)
 	defer stateChanges.Close()
-	actx := tx.(*temporal.Tx).AggCtx()
+
+	var actx *libstate.AggregatorV3Context
+	switch ttx := tx.(type) {
+	case *temporal.Tx:
+		actx = ttx.AggCtx()
+	default:
+		actx = agg.MakeContext()
+	}
+
 	{
 		iter, err := actx.AccountHistoryRange(int(txUnwindTo), -1, order.Asc, -1, tx)
 		if err != nil {
