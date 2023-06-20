@@ -193,6 +193,82 @@ func (api *BorImpl) GetCurrentValidators() ([]*valset.Validator, error) {
 	return snap.ValidatorSet.Validators, nil
 }
 
+type BlockSigners struct {
+	Signers []difficultiesKV
+	Diff    int
+	Author  common.Address
+}
+
+type difficultiesKV struct {
+	Signer     common.Address
+	Difficulty uint64
+}
+
+func (api *BorImpl) GetSnapshotProposerSequence(number *rpc.BlockNumber) (BlockSigners, error) {
+	// init chain db
+	ctx := context.Background()
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return BlockSigners{}, err
+	}
+	defer tx.Rollback()
+
+	// Retrieve the requested block number (or current if none requested)
+	var header *types.Header
+	if number == nil || *number == rpc.LatestBlockNumber {
+		header = rawdb.ReadCurrentHeader(tx)
+	} else {
+		header, _ = getHeaderByNumber(ctx, *number, api, tx)
+	}
+	// Ensure we have an actually valid block
+	if header == nil {
+		return BlockSigners{}, errUnknownBlock
+	}
+
+	// init consensus db
+	borTx, err := api.borDb.BeginRo(ctx)
+	if err != nil {
+		return BlockSigners{}, err
+	}
+	defer borTx.Rollback()
+	snap, err := snapshot(ctx, api, tx, borTx, header)
+
+	var difficulties = make(map[common.Address]uint64)
+
+	if err != nil {
+		return BlockSigners{}, err
+	}
+
+	proposer := snap.ValidatorSet.GetProposer().Address
+	proposerIndex, _ := snap.ValidatorSet.GetByAddress(proposer)
+
+	signers := snap.signers()
+	for i := 0; i < len(signers); i++ {
+		tempIndex := i
+		if tempIndex < proposerIndex {
+			tempIndex = tempIndex + len(signers)
+		}
+
+		difficulties[signers[i]] = uint64(len(signers) - (tempIndex - proposerIndex))
+	}
+
+	rankedDifficulties := rankMapDifficulties(difficulties)
+
+	author, err := author(api, tx, header)
+	if err != nil {
+		return BlockSigners{}, err
+	}
+
+	diff := int(difficulties[author])
+	blockSigners := BlockSigners{
+		Signers: rankedDifficulties,
+		Diff:    diff,
+		Author:  author,
+	}
+
+	return blockSigners, nil
+}
+
 // GetRootHash returns the merkle root of the start to end block headers
 func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
 	length := end - start + 1
