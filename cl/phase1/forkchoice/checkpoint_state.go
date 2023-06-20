@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"fmt"
+	"io"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
@@ -69,6 +70,9 @@ func (c *checkpointState) UnmarshalBinary(data []byte) (err error) {
 		return err
 	}
 	rd = bytes.NewBuffer(rd.Next(int(leng)))
+	if rd.Len() != int(leng) {
+		return io.ErrUnexpectedEOF
+	}
 	// 2. read the header
 	if err = binary.Read(rd, binary.LittleEndian, &c.genesisValidatorsRoot); err != nil {
 		return err
