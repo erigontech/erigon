@@ -65,7 +65,14 @@ type History struct {
 	compressWorkers         int
 	compressVals            bool
 	integrityFileExtensions []string
-	largeValues             bool // can't use DupSort optimization (aka. prefix-compression) if values size > 4kb
+
+	// not large:
+	//   keys: txNum -> key1+key2
+	//   vals: key1+key2 -> txNum + value (DupSort)
+	// large:
+	//   keys: txNum -> key1+key2
+	//   vals: key1+key2+txNum -> value (not DupSort)
+	largeValues bool // can't use DupSort optimization (aka. prefix-compression) if values size > 4kb
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 
