@@ -63,8 +63,8 @@ type checkpointState struct {
 
 func (c *checkpointState) UnmarshalBinary(data []byte) (err error) {
 	rd := bytes.NewBuffer(data)
-	// 1. length prefix,
 	var leng uint32
+	// 1. length prefix,
 	if err := binary.Read(rd, binary.LittleEndian, &leng); err != nil {
 		return err
 	}
