@@ -716,10 +716,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 }
 
 func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, txnHash common.Hash, signed bool) map[string]interface{} {
-	var chainId *big.Int
-	if txn.ReplayProtected() {
-		chainId = txn.GetChainID().ToBig()
-	}
+	chainId := txn.GetChainID().ToBig()
 
 	var from common.Address
 	if signed {

@@ -244,19 +244,6 @@ func (sg Signer) ChainID() *uint256.Int {
 	return sg.chainID
 }
 
-/*
-// Equal returns true if the given signer is the same as the receiver.
-func (sg Signer) Equal(other Signer) bool {
-	return sg.chainID.Eq(&other.chainID) &&
-		sg.malleable == other.malleable &&
-		sg.unprotected == other.unprotected &&
-		sg.protected == other.protected &&
-		sg.accessList == other.accessList &&
-		sg.dynamicFee == other.dynamicFee &&
-		sg.blob == other.blob
-}
-*/
-
 func decodeSignature(sig []byte) (r, s *uint256.Int, yParity byte) {
 	if len(sig) != crypto.SignatureLength {
 		panic(fmt.Sprintf("wrong size for signature: got %d, want %d", len(sig), crypto.SignatureLength))
@@ -264,7 +251,7 @@ func decodeSignature(sig []byte) (r, s *uint256.Int, yParity byte) {
 	r = new(uint256.Int).SetBytes(sig[:32])
 	s = new(uint256.Int).SetBytes(sig[32:64])
 	yParity = sig[64]
-	return r, s, yParity
+	return
 }
 
 func recoverPlain(context *secp256k1.Context, sighash libcommon.Hash, yParity bool, R, S *uint256.Int, homestead bool,

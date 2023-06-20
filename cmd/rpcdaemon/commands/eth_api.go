@@ -355,7 +355,6 @@ type RPCTransaction struct {
 	GasPrice            *hexutil.Big       `json:"gasPrice,omitempty"`
 	Tip                 *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
 	FeeCap              *hexutil.Big       `json:"maxFeePerGas,omitempty"`
-	MaxFeePerDataGas    *hexutil.Big       `json:"maxFeePerDataGas,omitempty"`
 	Hash                common.Hash        `json:"hash"`
 	Input               hexutility.Bytes   `json:"input"`
 	Nonce               hexutil.Uint64     `json:"nonce"`
@@ -364,8 +363,9 @@ type RPCTransaction struct {
 	Value               *hexutil.Big       `json:"value"`
 	Type                hexutil.Uint64     `json:"type"`
 	Accesses            *types2.AccessList `json:"accessList,omitempty"`
-	BlobVersionedHashes []common.Hash      `json:"blobVersionedHashes,omitempty"`
 	ChainID             *hexutil.Big       `json:"chainId,omitempty"`
+	MaxFeePerDataGas    *hexutil.Big       `json:"maxFeePerDataGas,omitempty"`
+	BlobVersionedHashes []common.Hash      `json:"blobVersionedHashes,omitempty"`
 	V                   *hexutil.Big       `json:"v"`
 	R                   *hexutil.Big       `json:"r"`
 	S                   *hexutil.Big       `json:"s"`
@@ -374,24 +374,27 @@ type RPCTransaction struct {
 // newRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
 func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
-	result := &RPCTransaction{
-		Type:  hexutil.Uint64(tx.Type()),
-		Gas:   hexutil.Uint64(tx.GetGas()),
-		Hash:  tx.Hash(),
-		Input: hexutility.Bytes(tx.GetData()),
-		Nonce: hexutil.Uint64(tx.GetNonce()),
-		To:    tx.GetTo(),
-		Value: (*hexutil.Big)(tx.GetValue().ToBig()),
-	}
+	// Determine the signer. For replay-protected transactions, use the most permissive
+	// signer, because we assume that signers are backwards-compatible with old
+	// transactions. For non-protected transactions, the homestead signer signer is used
+	// because the return value of ChainId is nil for those transactions.
+	chainId := tx.GetChainID()
 	yParity, r, s := tx.RawSignatureValues()
-	result.R = (*hexutil.Big)(r.ToBig())
-	result.S = (*hexutil.Big)(s.ToBig())
+	result := &RPCTransaction{
+		Type:    hexutil.Uint64(tx.Type()),
+		Gas:     hexutil.Uint64(tx.GetGas()),
+		Hash:    tx.Hash(),
+		Input:   hexutility.Bytes(tx.GetData()),
+		Nonce:   hexutil.Uint64(tx.GetNonce()),
+		To:      tx.GetTo(),
+		Value:   (*hexutil.Big)(tx.GetValue().ToBig()),
+		ChainID: (*hexutil.Big)(chainId.ToBig()),
+		R:       (*hexutil.Big)(r.ToBig()),
+		S:       (*hexutil.Big)(s.ToBig()),
+	}
 	yParityBig := big.NewInt(0)
 	if yParity {
 		yParityBig.SetInt64(1)
-	}
-	if tx.ReplayProtected() {
-		result.ChainID = (*hexutil.Big)(tx.GetChainID().ToBig())
 	}
 
 	switch t := tx.(type) {
@@ -417,16 +420,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.MaxFeePerDataGas = (*hexutil.Big)(t.MaxFeePerDataGas.ToBig())
 		result.BlobVersionedHashes = t.BlobVersionedHashes
 	}
-
-	// Determine the signer. For replay-protected transactions, use the most permissive
-	// signer, because we assume that signers are backwards-compatible with old
-	// transactions. For non-protected transactions, the homestead signer signer is used
-	// because the return value of ChainId is zero for those transactions.
-	var chainId *big.Int
-	if tx.ReplayProtected() {
-		chainId = tx.GetChainID().ToBig()
-	}
-	signer := types.LatestSignerForChainID(chainId)
+	signer := types.LatestSignerForChainID(chainId.ToBig())
 	result.From, _ = tx.Sender(*signer)
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
