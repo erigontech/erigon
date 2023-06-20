@@ -604,9 +604,9 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	defer stateChanges.Close()
 
 	var actx *libstate.AggregatorV3Context
-	switch tx.(type) {
+	switch ttx := tx.(type) {
 	case *temporal.Tx:
-		actx = tx.(*temporal.Tx).AggCtx()
+		actx = ttx.AggCtx()
 	default:
 		actx = agg.MakeContext()
 	}
