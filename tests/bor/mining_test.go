@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -38,6 +39,7 @@ var (
 	// addr1 = 0x71562b71999873DB5b286dF957af199Ec94617F7
 	pkey1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	addr1    = crypto.PubkeyToAddress(pkey1.PublicKey)
+
 	// addr2 = 0x9fB29AAc15b9A4B7F17c3385939b007540f4d791
 	pkey2, _ = crypto.HexToECDSA("9b28f36fbd67381120752d6172ecdcf10e06ab2d9a1367aac00cdcd6ac7855d3")
 	addr2    = crypto.PubkeyToAddress(pkey2.PublicKey)
@@ -45,16 +47,17 @@ var (
 	pkeys = []*ecdsa.PrivateKey{pkey1, pkey2}
 )
 
-func TestMining(t *testing.T) {
+func TestMiningBenchmark(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 	fdlimit.Raise(2048)
 
-	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 8)
+	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64)
 
 	var stacks []*node.Node
 	var ethbackends []*eth.Ethereum
 	var enodes []string
-	var txInTxpool = 10
+	var txInTxpool = 5000
+	var txs []*types.Transaction
 
 	for i := 0; i < 1; i++ {
 		stack, ethBackend, err := helper.InitMiner(&genesis, pkeys[i], true, i)
@@ -77,25 +80,42 @@ func TestMining(t *testing.T) {
 		enodes = append(enodes, nodeInfo.NodesInfo[0].Enode)
 	}
 
-	// Iterate over all the nodes and start mining
-	time.Sleep(8 * time.Second)
-
 	// nonce starts from 0 because have no txs yet
 	initNonce := uint64(0)
 
 	for i := 0; i < txInTxpool; i++ {
 		tx := *newRandomTxWithNonce(false, initNonce+uint64(i), ethbackends[0].TxpoolServer())
+		txs = append(txs, &tx)
+	}
 
+	start := time.Now()
+
+	for _, tx := range txs {
 		buf := bytes.NewBuffer(nil)
-		err := tx.MarshalBinary(buf)
+		txV := *tx
+		err := txV.MarshalBinary(buf)
+		if err != nil {
+			panic(err)
+		}
+		ethbackends[0].TxpoolServer().Add(context.Background(), &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
+	}
+
+	for {
+		pendingReply, err := ethbackends[0].TxpoolServer().Status(context.Background(), &txpool_proto.StatusRequest{})
 		if err != nil {
 			panic(err)
 		}
 
-		ethbackends[0].TxpoolServer().Add(context.Background(), &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
+		if pendingReply.PendingCount == 0 {
+			break
+		}
+
+		time.Sleep(5 * time.Millisecond)
 	}
 
-	time.Sleep(30 * time.Second)
+	timeToExecute := time.Since(start)
+
+	fmt.Printf("\n\nTime to execute %d txs: %s\n", txInTxpool, timeToExecute)
 
 }
 

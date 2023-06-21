@@ -117,7 +117,7 @@ func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdal
 		GPO:       ethconfig.Defaults.GPO,
 		Miner: params.MiningConfig{
 			Etherbase:  crypto.PubkeyToAddress(privKey.PublicKey),
-			GasLimit:   genesis.GasLimit * 11 / 10,
+			GasLimit:   genesis.GasLimit,
 			GasPrice:   big.NewInt(1),
 			Recommit:   125 * time.Second,
 			SigKey:     privKey,
@@ -141,6 +141,9 @@ func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdal
 	ethCfg.DeprecatedTxPool.CommitEvery = 15 * time.Second
 	ethCfg.DeprecatedTxPool.StartOnInit = true
 	ethCfg.Downloader.ListenPort = utils.TorrentPortFlag.Value + minerID
+	ethCfg.TxPool.AccountSlots = 1000000
+	ethCfg.DeprecatedTxPool.AccountSlots = 1000000
+	ethCfg.DeprecatedTxPool.GlobalSlots = 1000000
 
 	ethBackend, err := eth.New(stack, ethCfg, logger)
 	if err != nil {

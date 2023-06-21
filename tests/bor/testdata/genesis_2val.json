@@ -12,12 +12,12 @@
       "istanbulBlock": 0,
       "muirGlacierBlock": 0,
       "berlinBlock": 0,
-      "londonBlock": 1,
+      "londonBlock": 20,
       "bor": {
-        "jaipurBlock": 1,
-        "delhiBlock" :1,
+        "jaipurBlock": 20,
+        "delhiBlock" :20,
         "period": {
-          "0": 1
+          "0": 2
         },
         "producerDelay": {
           "0": 4
@@ -38,7 +38,7 @@
     "nonce": "0x0",
     "timestamp": "0x5ce28211",
     "extraData": "",
-    "gasLimit": "0x989680",
+    "gasLimit": "0x1312D00",
     "difficulty": "0x1",
     "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "coinbase": "0x0000000000000000000000000000000000000000",
