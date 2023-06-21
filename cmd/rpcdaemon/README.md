@@ -328,6 +328,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | bor_getSigners                             | Yes     | Bor only                             |
 | bor_getSignersAtHash                       | Yes     | Bor only                             |
 | bor_getCurrentProposer                     | Yes     | Bor only                             |
+| bor_getSnapshotProposer                    | Yes     | Bor only                             |
 | bor_getCurrentValidators                   | Yes     | Bor only                             |
 | bor_getRootHash                            | Yes     | Bor only                             |
 
