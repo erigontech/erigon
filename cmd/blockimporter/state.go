@@ -175,6 +175,14 @@ func (state *State) ProcessBlock(block types.Block) error {
 		return err
 	}
 
+	signer := types.MakeSigner(state.chainConfig, block.NumberU64())
+	for tx_index, tx := range block.Transactions() {
+		if sender, err := tx.Sender(*signer); err == nil {
+			block.Transactions()[tx_index].SetSender(sender)
+		} else {
+			return err
+		}
+	}
 	if err := rawdb.WriteSenders(tx, block.Hash(), block.NumberU64(), block.Body().SendersFromTxs()); err != nil {
 		return err
 	}
