@@ -452,8 +452,7 @@ func (sdb *IntraBlockState) GetTransientState(addr libcommon.Address, key libcom
 
 func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject *stateObject) {
 	// Prefer 'live' objects.
-	if obj, ok := sdb.stateObjects[addr]; obj != nil && ok {
-		//fmt.Printf("getStateObject: %x %v n=%d\n", addr, obj.data.Balance.Uint64(), obj.data.Nonce)
+	if obj := sdb.stateObjects[addr]; obj != nil {
 		return obj
 	}
 
