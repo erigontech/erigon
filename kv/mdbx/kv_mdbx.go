@@ -579,6 +579,7 @@ func (db *MdbxKV) AllTables() kv.TableCfg {
 	return db.buckets
 }
 
+func (tx *MdbxTx) IsRo() bool     { return tx.readOnly }
 func (tx *MdbxTx) ViewID() uint64 { return tx.tx.ID() }
 
 func (tx *MdbxTx) CollectMetrics() {
