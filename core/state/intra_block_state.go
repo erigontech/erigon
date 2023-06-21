@@ -598,6 +598,10 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 			return err
 		}
 		stateObject.deleted = true
+	} else if stateObject.created {
+		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
+			return err
+		}
 	}
 	if isDirty && (stateObject.created || !stateObject.selfdestructed) && !emptyRemoval {
 		stateObject.deleted = false
