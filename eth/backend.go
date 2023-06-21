@@ -1151,7 +1151,7 @@ func (s *Ethereum) BlockIO() (services.FullBlockReader, *blockio.BlockWriter) {
 }
 
 func (s *Ethereum) TxpoolServer() txpool_proto.TxpoolServer {
-	return s.txPool2GrpcServer
+	return s.txPoolGrpcServer
 }
 
 // RemoveContents is like os.RemoveAll, but preserve dir itself
