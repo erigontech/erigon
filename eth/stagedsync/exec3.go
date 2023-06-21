@@ -539,6 +539,8 @@ func ExecV3(ctx context.Context,
 		defer clean()
 	}
 
+	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
+
 	var b *types.Block
 	var blockNum uint64
 	var err error
@@ -771,21 +773,22 @@ Loop:
 				var t1, t2, t3, t4 time.Duration
 				commitStart := time.Now()
 				if err := func() error {
+					_, err := agg.ComputeCommitment(true, false)
+					if err != nil {
+						return err
+					}
 					t1 = time.Since(commitStart)
+
+					// prune befor flush, to speedup flush
 					tt := time.Now()
-					//if err := rs.Flush(ctx, applyTx, logPrefix, logEvery); err != nil {
-					//	return err
-					//}
+					if agg.CanPrune(applyTx) { //TODO: sequential exec likely will work on tip of chain: means no prune here, but parallel exec doesn't work yet
+						if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
+							return err
+						}
+					}
 					t2 = time.Since(tt)
+
 					tt = time.Now()
-					//rh, err := agg.ComputeCommitment(true, false)
-					//if err != nil {
-					//	return err
-					//}
-					//if !bytes.Equal(rh, header.Root.Bytes()) {
-					//	return fmt.Errorf("root hash mismatch: %x != %x, bn=%d", rh, header.Root.Bytes(), blockNum)
-					//}
-					//fmt.Printf("flush\n")
 					if err := agg.Flush(ctx, applyTx); err != nil {
 						return err
 					}
@@ -797,9 +800,11 @@ Loop:
 
 					applyTx.CollectMetrics()
 					if !useExternalTx {
+						tt = time.Now()
 						if err = applyTx.Commit(); err != nil {
 							return err
 						}
+						t3 = time.Since(tt)
 						applyTx, err = cfg.db.BeginRw(context.Background())
 						if err != nil {
 							return err
@@ -807,25 +812,18 @@ Loop:
 						applyWorker.ResetTx(applyTx)
 						agg.SetTx(applyTx)
 						doms.SetTx(applyTx)
-						//agg.FinishWrites()
-						//if dbg.DiscardHistory() {
-						//	defer agg.DiscardHistory().FinishWrites()
-						//} else {
-						//	defer agg.StartWrites().FinishWrites()
-						//}
-						//fmt.Printf("alex: %d\n", rs.SizeEstimate())
 					}
 
 					return nil
 				}(); err != nil {
 					return err
 				}
-				logger.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
+				logger.Info("Committed", "time", time.Since(commitStart), "commitment", t1, "agg.prune", t2, "agg.flush", t3, "tx.commit", t4)
 			default:
 			}
 		}
 
-		if cfg.blockReader.FreezingCfg().Produce {
+		if blocksFreezeCfg.Produce {
 			//agg.BuildFilesInBackground(outputTxNum.Load())
 			agg.AggregateFilesInBackground()
 		}
@@ -862,7 +860,7 @@ Loop:
 		}
 	}
 
-	if cfg.blockReader.FreezingCfg().Produce {
+	if blocksFreezeCfg.Produce {
 		//agg.BuildFilesInBackground(outputTxNum.Load())
 		agg.AggregateFilesInBackground()
 	}
