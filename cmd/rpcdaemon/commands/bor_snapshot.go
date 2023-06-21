@@ -218,10 +218,11 @@ func (api *BorImpl) GetSnapshotProposerSequence(number *rpc.BlockNumber) (BlockS
 	if number == nil || *number == rpc.LatestBlockNumber {
 		header = rawdb.ReadCurrentHeader(tx)
 	} else {
-		header, _ = getHeaderByNumber(ctx, *number, api, tx)
+		header, err = getHeaderByNumber(ctx, *number, api, tx)
 	}
+
 	// Ensure we have an actually valid block
-	if header == nil {
+	if header == nil || err != nil {
 		return BlockSigners{}, errUnknownBlock
 	}
 
@@ -231,7 +232,12 @@ func (api *BorImpl) GetSnapshotProposerSequence(number *rpc.BlockNumber) (BlockS
 		return BlockSigners{}, err
 	}
 	defer borTx.Rollback()
-	snap, err := snapshot(ctx, api, tx, borTx, header)
+
+	parent, err := getHeaderByNumber(ctx, rpc.BlockNumber(int64(header.Number.Uint64()-1)), api, tx)
+	if parent == nil || err != nil {
+		return BlockSigners{}, errUnknownBlock
+	}
+	snap, err := snapshot(ctx, api, tx, borTx, parent)
 
 	var difficulties = make(map[common.Address]uint64)
 
