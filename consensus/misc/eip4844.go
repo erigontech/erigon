@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 
 	"github.com/ledgerwatch/erigon/core/types"
@@ -36,10 +37,10 @@ func CalcExcessDataGas(parent *types.Header) uint64 {
 		dataGasUsed = *parent.DataGasUsed
 	}
 
-	if excessDataGas+dataGasUsed < params.TargetDataGasPerBlock {
+	if excessDataGas+dataGasUsed < chain.TargetDataGasPerBlock {
 		return 0
 	}
-	return excessDataGas + dataGasUsed - params.TargetDataGasPerBlock
+	return excessDataGas + dataGasUsed - chain.TargetDataGasPerBlock
 }
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
@@ -87,5 +88,5 @@ func GetDataGasPrice(excessDataGas uint64) (*uint256.Int, error) {
 }
 
 func GetDataGasUsed(numBlobs int) uint64 {
-	return uint64(numBlobs) * params.DataGasPerBlob
+	return uint64(numBlobs) * chain.DataGasPerBlob
 }

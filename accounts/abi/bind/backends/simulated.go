@@ -26,14 +26,14 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -49,6 +49,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -166,11 +167,11 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	chain, _ := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
-	b.pendingBlock = chain.Blocks[0]
-	b.pendingReceipts = chain.Receipts[0]
-	b.pendingHeader = chain.Headers[0]
-	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit).AddDataGas(params.MaxDataGasPerBlock)
+	blockChain, _ := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
+	b.pendingBlock = blockChain.Blocks[0]
+	b.pendingReceipts = blockChain.Receipts[0]
+	b.pendingHeader = blockChain.Headers[0]
+	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit).AddDataGas(chain.MaxDataGasPerBlock)
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
 	}
@@ -833,6 +834,6 @@ func (m callMsg) Data() []byte                  { return m.CallMsg.Data }
 func (m callMsg) AccessList() types2.AccessList { return m.CallMsg.AccessList }
 func (m callMsg) IsFree() bool                  { return false }
 
-func (m callMsg) DataGas() uint64                { return params.DataGasPerBlob * uint64(len(m.CallMsg.DataHashes)) }
+func (m callMsg) DataGas() uint64                { return chain.DataGasPerBlob * uint64(len(m.CallMsg.DataHashes)) }
 func (m callMsg) MaxFeePerDataGas() *uint256.Int { return m.CallMsg.MaxFeePerDataGas }
 func (m callMsg) DataHashes() []libcommon.Hash   { return m.CallMsg.DataHashes }

@@ -49,7 +49,7 @@ type MiningExecCfg struct {
 }
 
 type TxPoolForMining interface {
-	YieldBest(n uint16, txs *types2.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error)
+	YieldBest(n uint16, txs *types2.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableDataGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error)
 }
 
 func StageMiningExecCfg(
@@ -194,7 +194,11 @@ func getNextTransactions(
 		counter := 0
 		for !onTime && counter < 1000 {
 			remainingGas := header.GasLimit - header.GasUsed
-			if onTime, count, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, alreadyYielded); err != nil {
+			remainingDataGas := uint64(0)
+			if header.DataGasUsed != nil {
+				remainingDataGas = chain.MaxDataGasPerBlock - *header.DataGasUsed
+			}
+			if onTime, count, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, remainingDataGas, alreadyYielded); err != nil {
 				return err
 			}
 			time.Sleep(1 * time.Millisecond)

@@ -12,7 +12,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -43,7 +42,7 @@ func (stx BlobTx) GetDataHashes() []libcommon.Hash {
 }
 
 func (stx BlobTx) GetDataGas() uint64 {
-	return params.DataGasPerBlob * uint64(len(stx.BlobVersionedHashes))
+	return chain.DataGasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
 
 func (stx BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {

@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -511,7 +510,7 @@ func (b *blockProcessor) applyBlock(
 
 	header := block.Header()
 	b.vmConfig.Debug = true
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(chain2.MaxDataGasPerBlock)
 	usedGas := new(uint64)
 	usedDataGas := new(uint64)
 	var receipts types.Receipts

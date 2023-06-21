@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -88,7 +87,7 @@ func ExecuteBlockEphemerally(
 	usedGas := new(uint64)
 	usedDataGas := new(uint64)
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
+	gp.AddGas(block.GasLimit()).AddDataGas(chain.MaxDataGasPerBlock)
 
 	var (
 		rejectedTxs []*RejectedTx
