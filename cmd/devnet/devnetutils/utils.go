@@ -2,8 +2,8 @@ package devnetutils
 
 import (
 	"crypto/rand"
+	"encoding/binary"
 	"fmt"
-	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -46,6 +46,13 @@ func ClearDevDB(dataDir string, logger log.Logger) error {
 	return nil
 }
 
+// HexToInt converts a hexadecimal string to uint64
+func HexToInt(hexStr string) uint64 {
+	cleaned := strings.ReplaceAll(hexStr, "0x", "") // remove the 0x prefix
+	result, _ := strconv.ParseUint(cleaned, 16, 64)
+	return result
+}
+
 // UniqueIDFromEnode returns the unique ID from a node's enode, removing the `?discport=0` part
 func UniqueIDFromEnode(enode string) (string, error) {
 	if len(enode) == 0 {
@@ -85,6 +92,16 @@ func UniqueIDFromEnode(enode string) (string, error) {
 	return enode[:i], nil
 }
 
+func RandomInt(max int) int {
+	if max == 0 {
+		return 0
+	}
+
+	var n uint16
+	binary.Read(rand.Reader, binary.LittleEndian, &n)
+	return int(n) % (max + 1)
+}
+
 // NamespaceAndSubMethodFromMethod splits a parent method into namespace and the actual method
 func NamespaceAndSubMethodFromMethod(method string) (string, string, error) {
 	parts := strings.SplitN(method, "_", 2)
@@ -105,14 +122,7 @@ func RandomNumberInRange(min, max uint64) (uint64, error) {
 		return 0, fmt.Errorf("Invalid range: upper bound %d less or equal than lower bound %d", max, min)
 	}
 
-	diff := int64(max - min)
-
-	n, err := rand.Int(rand.Reader, big.NewInt(diff))
-	if err != nil {
-		return 0, err
-	}
-
-	return uint64(n.Int64() + int64(min)), nil
+	return uint64(RandomInt(int(max-min)) + int(min)), nil
 }
 
 type Args []string
@@ -176,7 +186,17 @@ func AsArgs(args interface{}) (Args, error) {
 			key = "--" + strings.ToLower(field.Name)
 		}
 
-		value := fmt.Sprintf("%v", v.FieldByIndex(field.Index).Interface())
+		var value string
+
+		switch fv := v.FieldByIndex(field.Index); fv.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			if fv.Int() == 0 {
+				break
+			}
+			fallthrough
+		default:
+			value = fmt.Sprintf("%v", fv.Interface())
+		}
 
 		flagValue, isFlag := field.Tag.Lookup("flag")
 
@@ -188,7 +208,7 @@ func AsArgs(args interface{}) (Args, error) {
 			}
 		}
 
-		if len(value) == 0 || value == "0" {
+		if len(value) == 0 {
 			if defaultString, hasDefault := field.Tag.Lookup("default"); hasDefault {
 				value = defaultString
 			}

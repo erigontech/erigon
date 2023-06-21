@@ -17,7 +17,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -45,8 +44,12 @@ type MiningExecCfg struct {
 	tmpdir      string
 	interrupt   *int32
 	payloadId   uint64
-	txPool2     *txpool.TxPool
+	txPool2     TxPoolForMining
 	txPool2DB   kv.RoDB
+}
+
+type TxPoolForMining interface {
+	YieldBest(n uint16, txs *types2.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error)
 }
 
 func StageMiningExecCfg(
@@ -54,7 +57,7 @@ func StageMiningExecCfg(
 	notifier ChainEventNotifier, chainConfig chain.Config,
 	engine consensus.Engine, vmConfig *vm.Config,
 	tmpdir string, interrupt *int32, payloadId uint64,
-	txPool2 *txpool.TxPool, txPool2DB kv.RoDB,
+	txPool2 TxPoolForMining, txPool2DB kv.RoDB,
 	blockReader services.FullBlockReader,
 ) MiningExecCfg {
 	return MiningExecCfg{
@@ -356,7 +359,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
-	signer := types.MakeSigner(&chainConfig, header.Number.Uint64())
+	signer := types.MakeSigner(&chainConfig, header.Number.Uint64(), header.Time)
 
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()

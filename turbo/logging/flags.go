@@ -38,6 +38,11 @@ var (
 		Usage: "Path to store user and error logs to disk",
 	}
 
+	LogDirPrefixFlag = cli.StringFlag{
+		Name:  "log.dir.prefix",
+		Usage: "The file name prefix for logs stored to disk",
+	}
+
 	LogDirVerbosityFlag = cli.StringFlag{
 		Name:  "log.dir.verbosity",
 		Usage: "Set the log verbosity for logs stored to disk",
@@ -52,5 +57,6 @@ var Flags = []cli.Flag{
 	&LogVerbosityFlag,
 	&LogConsoleVerbosityFlag,
 	&LogDirPathFlag,
+	&LogDirPrefixFlag,
 	&LogDirVerbosityFlag,
 }

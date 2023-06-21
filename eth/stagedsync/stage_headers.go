@@ -106,8 +106,8 @@ func SpawnStageHeaders(
 		}
 		defer tx.Rollback()
 	}
-	if initialCycle && cfg.blockReader != nil && cfg.blockReader.Snapshots() != nil && cfg.blockReader.Snapshots().Cfg().Enabled {
-		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader.Snapshots().BlocksAvailable(), cfg.blockReader); err != nil {
+	if initialCycle && cfg.blockReader.FreezingCfg().Enabled {
+		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader); err != nil {
 			return err
 		}
 	}
@@ -178,7 +178,7 @@ func HeadersPOS(
 	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(syncing, test)
 
 	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
-	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader, cfg.blockWriter)
+	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
 	interrupted, err := handleInterrupt(interrupt, cfg, tx, headerInserter, useExternalTx, logger)
 	if err != nil {
@@ -811,7 +811,7 @@ func HeadersPOW(
 	if localTd == nil {
 		return fmt.Errorf("localTD is nil: %d, %x", headerProgress, hash)
 	}
-	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress, cfg.blockReader, cfg.blockWriter)
+	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress, cfg.blockReader)
 	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	stopped := false

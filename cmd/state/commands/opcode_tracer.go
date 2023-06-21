@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -430,7 +430,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 		}
 		return nil
 	})
-	blockReader := snapshotsync.NewBlockReader(snapshotsync.NewRoSnapshots(ethconfig.Snapshot{Enabled: false}, "", log.New()))
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{Tracer: ot, Debug: true}

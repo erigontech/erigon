@@ -224,7 +224,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		if err != nil {
 			return nil, libcommon.Hash{}, err
 		}
-		msg, err = txn.AsMessage(*types.MakeSigner(config, 0), baseFee, config.Rules(0, 0))
+		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, config.Rules(0, 0))
 		if err != nil {
 			return nil, libcommon.Hash{}, err
 		}
@@ -397,13 +397,13 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 
 	// Get values specific to this post state.
 	if ps.Indexes.Data > len(tx.Data) {
-		return nil, fmt.Errorf("tx data index %d out of bounds", ps.Indexes.Data)
+		return nil, fmt.Errorf("txn data index %d out of bounds", ps.Indexes.Data)
 	}
 	if ps.Indexes.Value > len(tx.Value) {
-		return nil, fmt.Errorf("tx value index %d out of bounds", ps.Indexes.Value)
+		return nil, fmt.Errorf("txn value index %d out of bounds", ps.Indexes.Value)
 	}
 	if ps.Indexes.Gas > len(tx.GasLimit) {
-		return nil, fmt.Errorf("tx gas limit index %d out of bounds", ps.Indexes.Gas)
+		return nil, fmt.Errorf("txn gas limit index %d out of bounds", ps.Indexes.Gas)
 	}
 	dataHex := tx.Data[ps.Indexes.Data]
 	valueHex := tx.Value[ps.Indexes.Value]
@@ -413,17 +413,17 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 	if valueHex != "0x" {
 		va, ok := math.ParseBig256(valueHex)
 		if !ok {
-			return nil, fmt.Errorf("invalid tx value %q", valueHex)
+			return nil, fmt.Errorf("invalid txn value %q", valueHex)
 		}
 		v, overflow := uint256.FromBig(va)
 		if overflow {
-			return nil, fmt.Errorf("invalid tx value (overflowed) %q", valueHex)
+			return nil, fmt.Errorf("invalid txn value (overflowed) %q", valueHex)
 		}
 		value = v
 	}
 	data, err := hex.DecodeString(strings.TrimPrefix(dataHex, "0x"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid tx data %q", dataHex)
+		return nil, fmt.Errorf("invalid txn data %q", dataHex)
 	}
 	var accessList types2.AccessList
 	if tx.AccessLists != nil && tx.AccessLists[ps.Indexes.Data] != nil {

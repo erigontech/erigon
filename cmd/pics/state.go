@@ -283,7 +283,7 @@ func initialState1() error {
 			GasLimit: 10000000,
 		}
 		// this code generates a log
-		signer = types.MakeSigner(params.AllProtocolChanges, 1)
+		signer = types.MakeSigner(params.AllProtocolChanges, 1, 0)
 	)
 	m := stages.MockWithGenesis(nil, gspec, key, false)
 	defer m.DB.Close()
@@ -430,13 +430,13 @@ func initialState1() error {
 	// BLOCKS
 
 	for i := 0; i < chain.Length(); i++ {
-		if err = m2.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m2.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			return err
 		}
 		if err = stateDatabaseComparison(m.DB, m2.DB, i+1); err != nil {
 			return err
 		}
-		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			return err
 		}
 	}

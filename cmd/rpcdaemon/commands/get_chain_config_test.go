@@ -4,13 +4,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func TestGetChainConfig(t *testing.T) {
-	db := memdb.NewTestDB(t)
+	_, db, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
 	config, _, err := core.CommitGenesisBlock(db, core.MainnetGenesisBlock(), "", log.New())
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)

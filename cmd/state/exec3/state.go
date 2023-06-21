@@ -156,8 +156,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		}
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
+		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */)
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, txTask.Txs, txTask.Uncles, syscall)
 	case txTask.Final:

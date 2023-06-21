@@ -12,7 +12,7 @@ type AdminNodeInfoResponse struct {
 	Result p2p.NodeInfo `json:"result"`
 }
 
-func (reqGen *RequestGenerator) AdminNodeInfo() (p2p.NodeInfo, error) {
+func (reqGen *requestGenerator) AdminNodeInfo() (p2p.NodeInfo, error) {
 	var b AdminNodeInfoResponse
 
 	method, body := reqGen.adminNodeInfo()
@@ -23,7 +23,7 @@ func (reqGen *RequestGenerator) AdminNodeInfo() (p2p.NodeInfo, error) {
 	return b.Result, nil
 }
 
-func (req *RequestGenerator) adminNodeInfo() (RPCMethod, string) {
+func (req *requestGenerator) adminNodeInfo() (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"id":%d}`
 	return Methods.AdminNodeInfo, fmt.Sprintf(template, Methods.AdminNodeInfo, req.reqID)
 }

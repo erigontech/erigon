@@ -50,7 +50,7 @@ func TestLookupStorage(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			m := stages.Mock(t)
-			br, bw := m.NewBlocksIO()
+			br := m.BlockReader
 			tx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
 			defer tx.Rollback()
@@ -72,7 +72,7 @@ func TestLookupStorage(t *testing.T) {
 			if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
 				t.Fatal(err)
 			}
-			if err := bw.WriteBlock(tx, block); err != nil {
+			if err := rawdb.WriteBlock(tx, block); err != nil {
 				t.Fatal(err)
 			}
 			if err := rawdb.WriteSenders(tx, block.Hash(), block.NumberU64(), block.Body().SendersFromTxs()); err != nil {
