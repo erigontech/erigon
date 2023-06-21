@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"github.com/urfave/cli/v2"
-
 	"github.com/ledgerwatch/erigon/cmd/utils"
 )
 
@@ -72,6 +70,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcGasCapFlag,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
+	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
 	&HTTPReadTimeoutFlag,
