@@ -204,7 +204,7 @@ type difficultiesKV struct {
 	Difficulty uint64
 }
 
-func (api *BorImpl) GetSnapshotProposerSequence(number *rpc.BlockNumber) (BlockSigners, error) {
+func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOrHash) (BlockSigners, error) {
 	// init chain db
 	ctx := context.Background()
 	tx, err := api.db.BeginRo(ctx)
@@ -215,10 +215,20 @@ func (api *BorImpl) GetSnapshotProposerSequence(number *rpc.BlockNumber) (BlockS
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
-	if number == nil || *number == rpc.LatestBlockNumber {
+	if blockNrOrHash == nil {
 		header = rawdb.ReadCurrentHeader(tx)
 	} else {
-		header, err = getHeaderByNumber(ctx, *number, api, tx)
+		if blockNr, ok := blockNrOrHash.Number(); ok {
+			if blockNr == rpc.LatestBlockNumber {
+				header = rawdb.ReadCurrentHeader(tx)
+			} else {
+				header, err = getHeaderByNumber(ctx, blockNr, api, tx)
+			}
+		} else {
+			if blockHash, ok := blockNrOrHash.Hash(); ok {
+				header, err = getHeaderByHash(ctx, api, tx, blockHash)
+			}
+		}
 	}
 
 	// Ensure we have an actually valid block
