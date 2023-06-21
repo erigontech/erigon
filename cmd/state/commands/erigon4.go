@@ -618,5 +618,5 @@ func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots,
 		consensusConfig = &config.Ethash
 	}
 	return ethconsensusconfig.CreateConsensusEngine(cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress,
-		config.HeimdallURL, config.WithoutHeimdall, datadirCli, true /* readonly */, logger)
+		config.HeimdallURL, config.WithoutHeimdall, datadirCli, true /* readonly */, logger, nil)
 }

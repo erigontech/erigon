@@ -5,6 +5,7 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/abi"
@@ -66,53 +67,50 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 	return &span, nil
 }
 
-func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
-	// Use signer as validator in case of bor devent
+// GetCurrentValidatorsFromContract get current validators from genesis contract
+func (c *ChainSpanner) GetCurrentValidatorsFromContract(blockNumber uint64, syscall consensus.SystemCall) ([]*valset.Validator, error) {
 
-	switch c.chainConfig.ChainName {
-	case networkname.BorDevnetChainName:
-		validators := []*valset.Validator{
-			{
-				ID:               1,
-				Address:          signer,
-				VotingPower:      1000,
-				ProposerPriority: 1,
-			},
-		}
+	// method
+	const method = "getBorValidators"
 
-		return validators, nil
-
-	case networkname.BorE2ETestChainName:
-		validators := []*valset.Validator{
-			{
-				ID:               1,
-				Address:          libcommon.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"),
-				VotingPower:      1000,
-				ProposerPriority: 1,
-			}, {
-				ID:               2,
-				Address:          libcommon.HexToAddress("0x9fB29AAc15b9A4B7F17c3385939b007540f4d791"),
-				VotingPower:      1000,
-				ProposerPriority: 2,
-			},
-		}
-
-		return validators, nil
+	data, err := c.validatorSet.Pack(method, big.NewInt(0).SetUint64(blockNumber))
+	if err != nil {
+		log.Error("Unable to pack tx for getValidator", "error", err)
+		return nil, err
 	}
-
-	span, err := getSpanForBlock(blockNumber)
+	result, err := syscall(libcommon.HexToAddress(c.chainConfig.Bor.ValidatorContract), data)
 	if err != nil {
 		return nil, err
 	}
+	var (
+		ret0 = new([]common.Address)
+		ret1 = new([]*big.Int)
+	)
 
-	return span.ValidatorSet.Validators, nil
+	out := &[]interface{}{
+		ret0,
+		ret1,
+	}
+
+	if err := c.validatorSet.UnpackIntoInterface(out, method, result); err != nil {
+		return nil, err
+	}
+
+	valz := make([]*valset.Validator, len(*ret0))
+	for i, a := range *ret0 {
+		valz[i] = &valset.Validator{
+			Address:     a,
+			VotingPower: (*ret1)[i].Int64(),
+		}
+	}
+
+	return valz, nil
 }
 
-func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
+func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, syscall consensus.SystemCall, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
 	// Use signer as validator in case of bor devent
 
-	switch c.chainConfig.ChainName {
-	case networkname.BorDevnetChainName:
+	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
 		validators := []*valset.Validator{
 			{
 				ID:               1,
@@ -123,36 +121,37 @@ func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.
 		}
 
 		return validators, nil
+	}
 
-	case networkname.BorE2ETestChainName:
+	vals, err := c.GetCurrentValidatorsFromContract(blockNumber, syscall)
+	if err != nil {
+		return nil, err
+	}
+
+	return vals, nil
+}
+
+func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.Address, syscall consensus.SystemCall, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
+	// Use signer as validator in case of bor devent
+
+	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
 		validators := []*valset.Validator{
 			{
 				ID:               1,
-				Address:          libcommon.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"),
+				Address:          signer,
 				VotingPower:      1000,
 				ProposerPriority: 1,
-			}, {
-				ID:               2,
-				Address:          libcommon.HexToAddress("0x9fB29AAc15b9A4B7F17c3385939b007540f4d791"),
-				VotingPower:      1000,
-				ProposerPriority: 2,
 			},
 		}
 
 		return validators, nil
 	}
 
-	span, err := getSpanForBlock(blockNumber)
+	vals, err := c.GetCurrentValidatorsFromContract(blockNumber, syscall)
 	if err != nil {
 		return nil, err
 	}
-
-	producers := make([]*valset.Validator, len(span.SelectedProducers))
-	for i := range span.SelectedProducers {
-		producers[i] = &span.SelectedProducers[i]
-	}
-
-	return producers, nil
+	return vals, nil
 }
 
 func (c *ChainSpanner) CommitSpan(heimdallSpan HeimdallSpan, syscall consensus.SystemCall) error {

@@ -125,8 +125,6 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 }
 
 func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishStageAfterSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx, logger log.Logger, blockReader services.FullBlockReader) error {
-	fmt.Println("SHIVAM 10.1")
-
 	t := time.Now()
 	if notifier == nil {
 		logger.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
@@ -170,11 +168,8 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		logger.Error("RPC Daemon notification failed", "err", err)
 		return err
 	}
-	fmt.Println("SHIVAM 11")
 
 	if len(headersRlp) > 0 {
-		fmt.Println("SHIVAM 12")
-
 		notifier.OnNewHeader(headersRlp)
 		headerTiming := time.Since(t)
 

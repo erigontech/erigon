@@ -1622,5 +1622,5 @@ func initConsensusEngine(cc *chain2.Config, datadir string, db kv.RwDB, logger l
 		consensusConfig = &config.Ethash
 	}
 	return ethconsensusconfig.CreateConsensusEngine(cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
-		HeimdallgRPCAddress, HeimdallURL, config.WithoutHeimdall, datadir, db.ReadOnly(), logger)
+		HeimdallgRPCAddress, HeimdallURL, config.WithoutHeimdall, datadir, db.ReadOnly(), logger, nil)
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"math/big"
 	"os"
-	"testing"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -21,23 +20,23 @@ import (
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func InitGenesis(t *testing.T, fileLocation string, sprintSize uint64) types.Genesis {
-	t.Helper()
+func InitGenesis(fileLocation string, sprintSize uint64) types.Genesis {
 
 	// sprint size = 8 in genesis
 	genesisData, err := os.ReadFile(fileLocation)
 	if err != nil {
-		t.Fatalf("%s", err)
+		panic(err)
 	}
 
 	genesis := &types.Genesis{}
 
 	if err := json.Unmarshal(genesisData, genesis); err != nil {
-		t.Fatalf("%s", err)
+		panic(err)
 	}
 
 	genesis.Config.Bor.Sprint["0"] = sprintSize
@@ -64,7 +63,7 @@ func NewNodeConfig() *nodecfg.Config {
 	return &nodeConfig
 }
 
-func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool) (*node.Node, *eth.Ethereum, error) {
+func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
 	// Define the basic configurations for the Ethereum node
 	ddir, _ := os.MkdirTemp("", "")
 
@@ -79,8 +78,9 @@ func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdal
 			ProtocolVersion: []uint{direct.ETH68, direct.ETH67}, // No need to specify direct.ETH66, because 1 sentry is used for both 66 and 67
 			MaxPeers:        100,
 			MaxPendingPeers: 1000,
-			AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307},
+			AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307, 30308, 30309, 30310},
 			PrivateKey:      privKey,
+			NAT:             nat.Any(),
 		},
 	}
 
@@ -115,26 +115,42 @@ func InitMiner(genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdal
 		NetworkID: genesis.Config.ChainID.Uint64(),
 		TxPool:    txpoolcfg.DefaultConfig,
 		GPO:       ethconfig.Defaults.GPO,
-		Ethash:    ethconfig.Defaults.Ethash,
 		Miner: params.MiningConfig{
-			Etherbase: crypto.PubkeyToAddress(privKey.PublicKey),
-			GasLimit:  genesis.GasLimit * 11 / 10,
-			GasPrice:  big.NewInt(1),
-			Recommit:  100 * time.Second,
-			SigKey:    privKey,
-			Enabled:   true,
+			Etherbase:  crypto.PubkeyToAddress(privKey.PublicKey),
+			GasLimit:   genesis.GasLimit * 11 / 10,
+			GasPrice:   big.NewInt(1),
+			Recommit:   125 * time.Second,
+			SigKey:     privKey,
+			Enabled:    true,
+			EnabledPOS: true,
 		},
+		Sync:            ethconfig.Defaults.Sync,
 		Downloader:      downloaderConfig,
 		WithoutHeimdall: withoutHeimdall,
+		ImportMode:      ethconfig.Defaults.ImportMode,
+
+		DeprecatedTxPool: ethconfig.Defaults.DeprecatedTxPool,
+		RPCGasCap:        50000000,
+		RPCTxFeeCap:      1, // 1 ether
+		Snapshot:         ethconfig.Defaults.Snapshot,
+		DropUselessPeers: ethconfig.Defaults.DropUselessPeers,
+		P2PEnabled:       true,
+		StateStream:      true,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool
+	ethCfg.DeprecatedTxPool.CommitEvery = 15 * time.Second
+	ethCfg.DeprecatedTxPool.StartOnInit = true
+	ethCfg.Downloader.ListenPort = utils.TorrentPortFlag.Value + minerID
 
 	ethBackend, err := eth.New(stack, ethCfg, logger)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	err = stack.Start()
+	err = ethBackend.Init(stack, ethCfg)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	return stack, ethBackend, err
 }

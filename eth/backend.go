@@ -460,7 +460,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		consensusConfig = &config.Ethash
 	}
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress, config.HeimdallURL,
-		config.WithoutHeimdall, stack.DataDir(), false /* readonly */, logger)
+		config.WithoutHeimdall, stack.DataDir(), false /* readonly */, logger, backend.chainDB)
 	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader)
 
 	backend.sentriesClient, err = sentry.NewMultiClient(
@@ -891,46 +891,30 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		var works bool
 		hasWork := true // Start mining immediately
 		errc := make(chan error, 1)
-		fmt.Println("SHIVAM 1")
 
 		for {
-			fmt.Println("SHIVAM 2")
-
 			// Only reset if some work was done previously as we'd like to rely
 			// on the `miner.recommit` as backup.
 			if hasWork {
-				fmt.Println("SHIVAM 3")
-
 				mineEvery.Reset(cfg.Recommit)
 			}
 
 			// Only check for case if you're already mining (i.e. works = true) and
 			// waiting for error or you don't have any work yet (i.e. hasWork = false).
 			if works || !hasWork {
-				fmt.Println("SHIVAM 4")
-
 				select {
 				case <-newHeadCh:
-					fmt.Println("SHIVAM 5")
-
-					s.logger.Debug("Start mining new block based on new head channel")
 					hasWork = true
 				case <-s.notifyMiningAboutNewTxs:
-					fmt.Println("SHIVAM 6")
-
 					// Skip mining based on new tx notif for bor consensus
 					hasWork = s.chainConfig.Bor == nil
 					if hasWork {
 						s.logger.Debug("Start mining new block based on txpool notif")
 					}
 				case <-mineEvery.C:
-					fmt.Println("SHIVAM 7")
-
 					s.logger.Debug("Start mining new block based on miner.recommit")
 					hasWork = true
 				case err := <-errc:
-					fmt.Println("SHIVAM 8", err)
-
 					works = false
 					hasWork = false
 					if errors.Is(err, libcommon.ErrStopped) {
@@ -940,15 +924,11 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 						s.logger.Warn("mining", "err", err)
 					}
 				case <-quitCh:
-					fmt.Println("SHIVAM 9")
-
 					return
 				}
 			}
 
 			if !works && hasWork {
-				fmt.Println("SHIVAM 10")
-
 				works = true
 				hasWork = false
 				mineEvery.Reset(cfg.Recommit)
@@ -1167,6 +1147,10 @@ func (s *Ethereum) SentryControlServer() *sentry.MultiClient {
 }
 func (s *Ethereum) BlockIO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return s.blockReader, s.blockWriter
+}
+
+func (s *Ethereum) TxpoolServer() txpool_proto.TxpoolServer {
+	return s.txPool2GrpcServer
 }
 
 // RemoveContents is like os.RemoveAll, but preserve dir itself

@@ -189,7 +189,7 @@ func getNextTransactions(
 	if err := cfg.txPool2DB.View(context.Background(), func(poolTx kv.Tx) error {
 		var err error
 		counter := 0
-		for !onTime && counter < 1000 {
+		for !onTime && counter < 20 {
 			remainingGas := header.GasLimit - header.GasUsed
 			if onTime, count, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, alreadyYielded); err != nil {
 				return err
