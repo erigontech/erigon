@@ -779,11 +779,12 @@ Loop:
 
 					// prune befor flush, to speedup flush
 					tt := time.Now()
-					if agg.CanPrune(applyTx) { //TODO: sequential exec likely will work on tip of chain: means no prune here, but parallel exec doesn't work yet
-						if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
-							return err
-						}
-					}
+					//TODO: bronen, uncomment after fix tests
+					//if agg.CanPrune(applyTx) {
+					//	if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
+					//		return err
+					//	}
+					//}
 					t2 = time.Since(tt)
 
 					tt = time.Now()
