@@ -2,14 +2,15 @@ package eth2_test
 
 import (
 	_ "embed"
-	"github.com/ledgerwatch/erigon/cl/transition"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/stretchr/testify/require"
 )
 
 //go:embed statechange/test_data/block_processing/capella_block.ssz_snappy

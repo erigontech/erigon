@@ -3,7 +3,6 @@ package blockio
 import (
 	"context"
 	"encoding/binary"
-	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -12,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -32,22 +30,6 @@ type BlockWriter struct {
 
 func NewBlockWriter(historyV3 bool) *BlockWriter {
 	return &BlockWriter{historyV3: historyV3, txsV3: true}
-}
-
-func (w *BlockWriter) WriteBlock(tx kv.RwTx, block *types.Block) error {
-	return rawdb.WriteBlock(tx, block)
-}
-func (w *BlockWriter) WriteHeader(tx kv.RwTx, header *types.Header) error {
-	return rawdb.WriteHeader(tx, header)
-}
-func (w *BlockWriter) WriteHeaderRaw(tx kv.StatelessRwTx, number uint64, hash common.Hash, headerRlp []byte, skipIndexing bool) error {
-	return rawdb.WriteHeaderRaw(tx, number, hash, headerRlp, skipIndexing)
-}
-func (w *BlockWriter) WriteCanonicalHash(tx kv.RwTx, hash common.Hash, number uint64) error {
-	return rawdb.WriteCanonicalHash(tx, hash, number)
-}
-func (w *BlockWriter) WriteTd(db kv.Putter, hash common.Hash, number uint64, td *big.Int) error {
-	return rawdb.WriteTd(db, hash, number, td)
 }
 
 func (w *BlockWriter) FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir string, from, to uint64, ctx context.Context, logger log.Logger) error {
@@ -97,12 +79,6 @@ func extractHeaders(k []byte, _ []byte, next etl.ExtractNextFunc) error {
 	return next(k, k[8:], k[:8])
 }
 
-func (w *BlockWriter) WriteRawBodyIfNotExists(tx kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, err error) {
-	return rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
-}
-func (w *BlockWriter) WriteBody(tx kv.RwTx, hash common.Hash, number uint64, body *types.Body) error {
-	return rawdb.WriteBody(tx, hash, number, body)
-}
 func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error {
 	fromB := hexutility.EncodeTs(from)
 	if err := tx.ForEach(kv.BlockBody, fromB, func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
@@ -124,16 +100,6 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 		return err
 	}
 	return nil
-}
-
-func (w *BlockWriter) TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
-	return rawdb.TruncateBlocks(ctx, tx, blockFrom)
-}
-func (w *BlockWriter) TruncateTd(tx kv.RwTx, blockFrom uint64) error {
-	return rawdb.TruncateTd(tx, blockFrom)
-}
-func (w *BlockWriter) ResetSenders(ctx context.Context, db kv.RoDB, tx kv.RwTx) error {
-	return backup.ClearTables(ctx, db, tx, kv.Senders)
 }
 
 // PruneBlocks - [1, to) old blocks after moving it to snapshots.

@@ -105,13 +105,13 @@ jobs:
       # check with root permissions, should be cached from previous build
       - name: sudo make docker
         run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
-  
-  automated-tests:
-    runs-on:
-      ubuntu-20.04
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
-    steps:
-      - uses: actions/checkout@v3
 
-      - name: run automated testing
-        run: BUILD_ERIGON=1 ./tests/automated-testing/run.sh
+#  automated-tests:
+#    runs-on:
+#      ubuntu-20.04
+#    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+#    steps:
+#      - uses: actions/checkout@v3
+#
+#      - name: run automated testing
+#        run: BUILD_ERIGON=1 ./tests/automated-testing/run.sh

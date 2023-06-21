@@ -23,7 +23,7 @@ type EthTransaction struct {
 	Value    hexutil.Big        `json:"value"`
 }
 
-func (reqGen *RequestGenerator) GetBalance(address libcommon.Address, blockNum BlockNumber) (uint64, error) {
+func (reqGen *requestGenerator) GetBalance(address libcommon.Address, blockNum BlockNumber) (uint64, error) {
 	var b EthBalance
 
 	method, body := reqGen.getBalance(address, blockNum)
@@ -38,7 +38,7 @@ func (reqGen *RequestGenerator) GetBalance(address libcommon.Address, blockNum B
 	return b.Balance.ToInt().Uint64(), nil
 }
 
-func (req *RequestGenerator) getBalance(address libcommon.Address, blockNum BlockNumber) (RPCMethod, string) {
+func (req *requestGenerator) getBalance(address libcommon.Address, blockNum BlockNumber) (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x","%v"],"id":%d}`
 	return Methods.ETHGetBalance, fmt.Sprintf(template, Methods.ETHGetBalance, address, blockNum, req.reqID)
 }

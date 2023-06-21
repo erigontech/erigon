@@ -34,7 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 )
@@ -265,13 +265,13 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	}
 	cfg := ethconfig.NewSnapCfg(true, true, false)
 
-	allSnapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap, logger)
+	allSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
 	allSnapshots.LogStat()
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := snapshotsync.BuildMissedIndices("Indexing", ctx, dirs, *chainID, indexWorkers, logger); err != nil {
+	if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, *chainID, indexWorkers, logger); err != nil {
 		return err
 	}
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
@@ -411,14 +411,14 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, true, true)
-	snapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap, logger)
+	snapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err := snapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	blockReader := snapshotsync.NewBlockReader(snapshots)
+	blockReader := freezeblocks.NewBlockReader(snapshots)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
 
-	br := snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs.Tmp, blockReader, blockWriter, db, nil, nil, logger)
+	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, nil, logger)
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return err
@@ -436,7 +436,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
 			return err
 		})
-		from2, to2, ok := snapshotsync.CanRetire(forwardProgress, br.Snapshots())
+		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks())
 		if ok {
 			from, to, every = from2, to2, to2-from2
 		}
@@ -444,11 +444,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	logger.Info("Params", "from", from, "to", to, "every", every)
 	for i := from; i < to; i += every {
-		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo); err != nil {
+		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo, nil); err != nil {
 			panic(err)
 		}
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files(), agg.Files()); err != nil {
+			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
 				return err
 			}
 			for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs

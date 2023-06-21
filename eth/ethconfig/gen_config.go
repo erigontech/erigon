@@ -27,7 +27,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		BatchSize                      datasize.ByteSize
 		ImportMode                     bool
 		BadBlockHash                   libcommon.Hash
-		Snapshot                       Snapshot
+		Snapshot                       BlocksFreezing
 		BlockDownloaderWindow          int
 		ExternalSnapshotDownloaderAddr string
 		Whitelist                      map[uint64]libcommon.Hash `toml:"-"`
@@ -78,7 +78,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		BatchSize                      *datasize.ByteSize
 		ImportMode                     *bool
 		BadBlockHash                   *libcommon.Hash
-		Snapshot                       *Snapshot
+		Snapshot                       *BlocksFreezing
 		BlockDownloaderWindow          *int
 		ExternalSnapshotDownloaderAddr *string
 		Whitelist                      map[uint64]libcommon.Hash `toml:"-"`

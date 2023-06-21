@@ -84,8 +84,9 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 
 	hash := block.Hash()
 
+	signer := types.MakeSigner(chainConfig, blockNumber, block.Time())
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, _, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txIndex, *gasBailOut, types.MakeSigner(chainConfig, blockNumber), chainConfig)
+	traces, _, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txIndex, *gasBailOut, signer, chainConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +179,8 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	if err != nil {
 		return nil, err
 	}
-	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut /* gasBailOut */, types.MakeSigner(cfg, blockNum), cfg)
+	signer := types.MakeSigner(cfg, blockNum, block.Time())
+	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut /* gasBailOut */, signer, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +414,8 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		blockHash := block.Hash()
 		blockNumber := block.NumberU64()
 		txs := block.Transactions()
-		t, syscall, tErr := api.callManyTransactions(ctx, dbtx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut, types.MakeSigner(chainConfig, b), chainConfig)
+		signer := types.MakeSigner(chainConfig, b, block.Time())
+		t, syscall, tErr := api.callManyTransactions(ctx, dbtx, block, []string{TraceTypeTrace}, -1 /* all tx indices */, *gasBailOut, signer, chainConfig)
 		if tErr != nil {
 			if first {
 				first = false
@@ -607,7 +610,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			}
 
 			lastBlockHash = lastHeader.Hash()
-			lastSigner = types.MakeSigner(chainConfig, blockNum)
+			lastSigner = types.MakeSigner(chainConfig, blockNum, lastHeader.Time)
 			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)
 		}
 		if isFnalTxn {

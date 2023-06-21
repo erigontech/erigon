@@ -5,18 +5,13 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
-	"path/filepath"
-	"runtime"
+	"reflect"
 	"time"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -30,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 )
 
 type SnapshotsCfg struct {
@@ -38,10 +32,10 @@ type SnapshotsCfg struct {
 	chainConfig chain.Config
 	dirs        datadir.Dirs
 
-	blockRetire        *snapshotsync.BlockRetire
+	blockRetire        services.BlockRetire
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        services.FullBlockReader
-	dbEventNotifier    snapshotsync.DBEventNotifier
+	dbEventNotifier    services.DBEventNotifier
 
 	historyV3 bool
 	agg       *state.AggregatorV3
@@ -49,9 +43,9 @@ type SnapshotsCfg struct {
 
 func StageSnapshotsCfg(db kv.RwDB,
 	chainConfig chain.Config, dirs datadir.Dirs,
-	blockRetire *snapshotsync.BlockRetire,
+	blockRetire services.BlockRetire,
 	snapshotDownloader proto_downloader.DownloaderClient,
-	blockReader services.FullBlockReader, dbEventNotifier snapshotsync.DBEventNotifier,
+	blockReader services.FullBlockReader, dbEventNotifier services.DBEventNotifier,
 	historyV3 bool, agg *state.AggregatorV3,
 ) SnapshotsCfg {
 	return SnapshotsCfg{
@@ -111,50 +105,24 @@ func SpawnStageSnapshots(
 }
 
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool, logger log.Logger) error {
-	if !initialCycle || cfg.blockReader == nil {
+	if !initialCycle {
 		return nil
 	}
-	snapshots := cfg.blockReader.Snapshots().(*snapshotsync.RoSnapshots)
-	if snapshots == nil || !snapshots.Cfg().Enabled {
+	if !cfg.blockReader.FreezingCfg().Enabled {
 		return nil
 	}
 
-	if err := WaitForDownloader(s, ctx, cfg, tx); err != nil {
+	if err := snapshotsync.WaitForDownloader(s.LogPrefix(), ctx, cfg.historyV3, cfg.agg, tx, cfg.blockReader, cfg.dbEventNotifier, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
 		return err
 	}
 
-	snapshots.LogStat()
 	cfg.agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 		return histBlockNumProgress
 	})
 
-	// Create .idx files
-	if snapshots.IndicesMax() < snapshots.SegmentsMax() {
-		if !snapshots.Cfg().Produce && snapshots.IndicesMax() == 0 {
-			return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
-		}
-		if snapshots.Cfg().Produce {
-			if !snapshots.SegmentsReady() {
-				return fmt.Errorf("not all snapshot segments are available")
-			}
-
-			// wait for Downloader service to download all expected snapshots
-			if snapshots.IndicesMax() < snapshots.SegmentsMax() {
-				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				indexWorkers := estimate.IndexSnapshot.Workers()
-				if err := snapshotsync.BuildMissedIndices(s.LogPrefix(), ctx, cfg.dirs, *chainID, indexWorkers, logger); err != nil {
-					return fmt.Errorf("BuildMissedIndices: %w", err)
-				}
-			}
-
-			if err := snapshots.ReopenFolder(); err != nil {
-				return err
-			}
-			if cfg.dbEventNotifier != nil {
-				cfg.dbEventNotifier.OnNewSnapshot()
-			}
-		}
+	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.dbEventNotifier, &cfg.chainConfig); err != nil {
+		return err
 	}
 
 	if cfg.historyV3 {
@@ -169,25 +137,22 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
-	blocksAvailable := snapshots.BlocksAvailable()
-	if s.BlockNumber < blocksAvailable { // allow genesis
-		if err := s.Update(tx, blocksAvailable); err != nil {
+	frozenBlocks := cfg.blockReader.FrozenBlocks()
+	if s.BlockNumber < frozenBlocks { // allow genesis
+		if err := s.Update(tx, frozenBlocks); err != nil {
 			return err
 		}
-		s.BlockNumber = blocksAvailable
+		s.BlockNumber = frozenBlocks
 	}
 
-	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, snapshots, cfg.blockReader, cfg.agg, logger); err != nil {
+	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, cfg.agg, logger); err != nil {
 		return err
 	}
 	return nil
 }
 
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
-	dirs datadir.Dirs, sn *snapshotsync.RoSnapshots,
-	blockReader services.FullBlockReader, agg *state.AggregatorV3,
-	logger log.Logger) error {
-	blocksAvailable := sn.BlocksAvailable()
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.AggregatorV3, logger log.Logger) error {
+	blocksAvailable := blockReader.FrozenBlocks()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
@@ -213,7 +178,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 			// for now easier just store them in db
 			td := big.NewInt(0)
 			blockNumBytes := make([]byte, 8)
-			if err := snapshotsync.ForEachHeader(ctx, sn, func(header *types.Header) error {
+			if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
 				blockNum, blockHash := header.Number.Uint64(), header.Hash()
 				td.Add(td, header.Difficulty)
 
@@ -232,7 +197,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %dk/%dk", logPrefix, header.Number.Uint64()/1000, sn.BlocksAvailable()/1000))
+					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %dk/%dk", logPrefix, header.Number.Uint64()/1000, blockReader.FrozenBlocks()/1000))
 				default:
 				}
 				return nil
@@ -277,7 +242,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 					case <-ctx.Done():
 						return ctx.Err()
 					case <-logEvery.C:
-						logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, sn.BlocksAvailable()/1000))
+						logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, blockReader.FrozenBlocks()/1000))
 					default:
 					}
 					maxTxNum := baseTxNum + txAmount - 1
@@ -289,8 +254,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 				}); err != nil {
 					return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 				}
-				if blockReader.Snapshots().BlocksAvailable() > 0 {
-					if err := rawdb.AppendCanonicalTxNums(tx, blockReader.Snapshots().BlocksAvailable()+1); err != nil {
+				if blockReader.FrozenBlocks() > 0 {
+					if err := rawdb.AppendCanonicalTxNums(tx, blockReader.FrozenBlocks()+1); err != nil {
 						return err
 					}
 				} else {
@@ -299,186 +264,12 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx,
 					}
 				}
 			}
-			if err := rawdb.WriteSnapshots(tx, sn.Files(), agg.Files()); err != nil {
+			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
-}
-
-// WaitForDownloader - wait for Downloader service to download all expected snapshots
-// for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(s *StageState, ctx context.Context, cfg SnapshotsCfg, tx kv.RwTx) error {
-	snapshots := cfg.blockReader.Snapshots().(*snapshotsync.RoSnapshots)
-	if snapshots.Cfg().NoDownloader {
-		if err := snapshots.ReopenFolder(); err != nil {
-			return err
-		}
-		if cfg.dbEventNotifier != nil { // can notify right here, even that write txn is not commit
-			cfg.dbEventNotifier.OnNewSnapshot()
-		}
-		return nil
-	}
-	// Original intent of snInDB was to contain the file names of the snapshot files for the very first run of the Erigon instance
-	// Then, we would insist to only download such files, and no others (whitelist)
-	// However, at some point later, the code was incorrectly changed to update this record in each iteration of the stage loop (function WriteSnapshots)
-	// And so this list cannot be relied upon as the whitelist, because it also includes all the files created by the node itself
-	// Not sure what to do it is so far, but the temporary solution is to instead use it as a blacklist (existingFilesMap)
-	snInDB, snHistInDB, err := rawdb.ReadSnapshots(tx)
-	if err != nil {
-		return err
-	}
-	dbEmpty := len(snInDB) == 0
-	var missingSnapshots []snapshotsync.Range
-	var existingFiles []snaptype.FileInfo
-	if !dbEmpty {
-		existingFiles, missingSnapshots, err = snapshotsync.Segments(snapshots.Dir())
-		if err != nil {
-			return err
-		}
-	}
-	existingFilesMap := map[string]struct{}{}
-	for _, existingFile := range existingFiles {
-		_, fname := filepath.Split(existingFile.Path)
-		existingFilesMap[fname] = struct{}{}
-	}
-	if len(missingSnapshots) > 0 {
-		log.Warn(fmt.Sprintf("[%s] downloading missing snapshots", s.LogPrefix()))
-	}
-
-	// send all hashes to the Downloader service
-	preverifiedBlockSnapshots := snapcfg.KnownCfg(cfg.chainConfig.ChainName, snInDB, snHistInDB).Preverified
-	downloadRequest := make([]snapshotsync.DownloadRequest, 0, len(preverifiedBlockSnapshots)+len(missingSnapshots))
-	// build all download requests
-	// builds preverified snapshots request
-	for _, p := range preverifiedBlockSnapshots {
-		if _, exists := existingFilesMap[p.Name]; !exists { // Not to download existing files "behind the scenes"
-			downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
-		}
-	}
-	if cfg.historyV3 {
-		preverifiedHistorySnapshots := snapcfg.KnownCfg(cfg.chainConfig.ChainName, snInDB, snHistInDB).PreverifiedHistory
-		for _, p := range preverifiedHistorySnapshots {
-			downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(nil, p.Name, p.Hash))
-		}
-	}
-
-	// builds missing snapshots request
-	for i := range missingSnapshots {
-		downloadRequest = append(downloadRequest, snapshotsync.NewDownloadRequest(&missingSnapshots[i], "", ""))
-	}
-
-	log.Info(fmt.Sprintf("[%s] Fetching torrent files metadata", s.LogPrefix()))
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
-			log.Error(fmt.Sprintf("[%s] call downloader", s.LogPrefix()), "err", err)
-			time.Sleep(10 * time.Second)
-			continue
-		}
-		break
-	}
-	downloadStartTime := time.Now()
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-	var m runtime.MemStats
-
-	// Check once without delay, for faster erigon re-start
-	stats, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
-	if err == nil && stats.Completed {
-		goto Finish
-	}
-
-	// Print download progress until all segments are available
-Loop:
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			if stats, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else if stats.Completed {
-				if !snapshots.Cfg().Verify { // will verify after loop
-					if _, err := cfg.snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
-						return err
-					}
-				}
-				log.Info(fmt.Sprintf("[%s] download finished", s.LogPrefix()), "time", time.Since(downloadStartTime).String())
-				break Loop
-			} else {
-				if stats.MetadataReady < stats.FilesTotal {
-					log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", s.LogPrefix(), stats.MetadataReady, stats.FilesTotal))
-					continue
-				}
-				dbg.ReadMemStats(&m)
-				downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
-				log.Info(fmt.Sprintf("[%s] download", s.LogPrefix()),
-					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),
-					"download-time-left", downloadTimeLeft,
-					"total-download-time", time.Since(downloadStartTime).Round(time.Second).String(),
-					"download", libcommon.ByteCount(stats.DownloadRate)+"/s",
-					"upload", libcommon.ByteCount(stats.UploadRate)+"/s",
-				)
-				log.Info(fmt.Sprintf("[%s] download", s.LogPrefix()),
-					"peers", stats.PeersUnique,
-					"connections", stats.ConnectionsTotal,
-					"files", stats.FilesTotal,
-					"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
-				)
-			}
-		}
-	}
-
-Finish:
-	if snapshots.Cfg().Verify {
-		if _, err := cfg.snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
-			return err
-		}
-	}
-
-	if err := snapshots.ReopenFolder(); err != nil {
-		return err
-	}
-	if err := cfg.agg.OpenFolder(); err != nil {
-		return err
-	}
-
-	if err := rawdb.WriteSnapshots(tx, snapshots.Files(), cfg.agg.Files()); err != nil {
-		return err
-	}
-	if cfg.dbEventNotifier != nil { // can notify right here, even that write txn is not commit
-		cfg.dbEventNotifier.OnNewSnapshot()
-	}
-
-	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
-	if err != nil {
-		return err
-	}
-	if firstNonGenesis != nil {
-		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
-		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
-			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db", s.LogPrefix()), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
-		}
-	}
-	return nil
-}
-
-func calculateTime(amountLeft, rate uint64) string {
-	if rate == 0 {
-		return "999hrs:99m"
-	}
-	timeLeftInSeconds := amountLeft / rate
-
-	hours := timeLeftInSeconds / 3600
-	minutes := (timeLeftInSeconds / 60) % 60
-
-	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
 }
 
 /* ====== PRUNING ====== */
@@ -494,22 +285,28 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 		defer tx.Rollback()
 	}
 
-	br := cfg.blockRetire
-	sn := br.Snapshots()
-	if sn.Cfg().Enabled {
-		if err := br.PruneAncientBlocks(tx, 100); err != nil {
+	freezingCfg := cfg.blockReader.FreezingCfg()
+	if freezingCfg.Enabled {
+		if err := cfg.blockRetire.PruneAncientBlocks(tx, 100); err != nil {
 			return err
 		}
 	}
-	if sn.Cfg().Enabled && sn.Cfg().Produce {
+	if freezingCfg.Enabled && freezingCfg.Produce {
 		//TODO: initialSync maybe save files progress here
-		if cfg.agg.NeedSaveFilesListInDB() || br.NeedSaveFilesListInDB() {
-			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files(), cfg.agg.Files()); err != nil {
+		if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
+			if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), cfg.agg.Files()); err != nil {
 				return err
 			}
 		}
 
-		br.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlDebug)
+		cfg.blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
+			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
+				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 		//cfg.agg.BuildFilesInBackground()
 	}
 

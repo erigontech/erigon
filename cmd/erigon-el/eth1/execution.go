@@ -58,7 +58,7 @@ func (e *Eth1Execution) InsertHeaders(ctx context.Context, req *execution.Insert
 		if err != nil {
 			return nil, err
 		}
-		if err := e.blockWriter.WriteHeader(tx, h); err != nil {
+		if err := rawdb.WriteHeader(tx, h); err != nil {
 			return nil, err
 		}
 	}
@@ -84,7 +84,7 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 			uncles = append(uncles, h)
 		}
 		// Withdrawals processing
-		if _, err := e.blockWriter.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
+		if _, err := rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
 			body.BlockNumber, &types.RawBody{
 				Transactions: body.Transactions,
 				Uncles:       uncles,

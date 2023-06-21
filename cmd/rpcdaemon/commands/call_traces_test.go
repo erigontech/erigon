@@ -8,14 +8,11 @@ import (
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fastjson"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -52,14 +49,10 @@ func TestCallTraceOneByOne(t *testing.T) {
 		t.Fatalf("generate chain: %v", err)
 	}
 
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
-	api := NewTraceAPI(
-		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs),
-		m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
-		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
@@ -101,11 +94,9 @@ func TestCallTraceUnwind(t *testing.T) {
 		t.Fatalf("generate chainB: %v", err)
 	}
 
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
-	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 
-	if err = m.InsertChain(chainA); err != nil {
+	if err = m.InsertChain(chainA, nil); err != nil {
 		t.Fatalf("inserting chainA: %v", err)
 	}
 	stream := jsoniter.ConfigDefault.BorrowStream(nil)
@@ -124,7 +115,7 @@ func TestCallTraceUnwind(t *testing.T) {
 	}
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
 
-	if err = m.InsertChain(chainB.Slice(0, 12)); err != nil {
+	if err = m.InsertChain(chainB.Slice(0, 12), nil); err != nil {
 		t.Fatalf("inserting chainB: %v", err)
 	}
 	stream.Reset(nil)
@@ -139,7 +130,7 @@ func TestCallTraceUnwind(t *testing.T) {
 	}
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 11, 12}, blockNumbersFromTraces(t, stream.Buffer()))
 
-	if err = m.InsertChain(chainB.Slice(12, 20)); err != nil {
+	if err = m.InsertChain(chainB.Slice(12, 20), nil); err != nil {
 		t.Fatalf("inserting chainB: %v", err)
 	}
 	stream.Reset(nil)
@@ -164,12 +155,10 @@ func TestFilterNoAddresses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
-	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Insert blocks 1 by 1, to tirgget possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
-		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err = m.InsertChain(chain.Slice(i, i+1), nil); err != nil {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
@@ -190,9 +179,7 @@ func TestFilterNoAddresses(t *testing.T) {
 
 func TestFilterAddressIntersection(t *testing.T) {
 	m := stages.Mock(t)
-	agg := m.HistoryV3Components()
-	br, _ := m.NewBlocksIO()
-	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 
 	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}
 
@@ -218,7 +205,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 	}, false /* intermediateHashes */)
 	require.NoError(t, err, "generate chain")
 
-	err = m.InsertChain(chain)
+	err = m.InsertChain(chain, nil)
 	require.NoError(t, err, "inserting chain")
 
 	fromBlock, toBlock := uint64(1), uint64(15)

@@ -27,7 +27,6 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
@@ -157,7 +156,6 @@ func ExecV3(ctx context.Context,
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
-	blockSnapshots := blockReader.Snapshots().(*snapshotsync.RoSnapshots)
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
@@ -472,7 +470,7 @@ func ExecV3(ctx context.Context,
 		})
 	}
 
-	if block < blockSnapshots.BlocksAvailable() {
+	if block < cfg.blockReader.FrozenBlocks() {
 		agg.KeepInDB(0)
 		defer agg.KeepInDB(ethconfig.HistoryV3AggregationStep)
 	}
@@ -524,7 +522,7 @@ Loop:
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
-		signer := *types.MakeSigner(chainConfig, blockNum)
+		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
@@ -710,7 +708,7 @@ Loop:
 			}
 		}
 
-		if blockSnapshots.Cfg().Produce {
+		if cfg.blockReader.FreezingCfg().Produce {
 			agg.BuildFilesInBackground(outputTxNum.Load())
 		}
 		select {
@@ -738,7 +736,7 @@ Loop:
 		}
 	}
 
-	if blockSnapshots.Cfg().Produce {
+	if cfg.blockReader.FreezingCfg().Produce {
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
@@ -1049,7 +1047,7 @@ func reconstituteStep(last bool,
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
 			skipAnalysis := core.SkipAnalysis(chainConfig, bn)
-			signer := *types.MakeSigner(chainConfig, bn)
+			signer := *types.MakeSigner(chainConfig, bn, header.Time)
 
 			f := core.GetHashFn(header, getHeaderFunc)
 			getHashFnMute := &sync.Mutex{}
@@ -1338,8 +1336,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	chainConfig *chain.Config, genesis *types.Genesis) (err error) {
 	startTime := time.Now()
 	defer agg.EnableMadvNormal().DisableReadAhead()
-	blockSnapshots := blockReader.Snapshots().(*snapshotsync.RoSnapshots)
-	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
 
 	// force merge snapshots before reconstitution, to allign domains progress
 	// un-finished merge can happen at "kill -9" during merge
