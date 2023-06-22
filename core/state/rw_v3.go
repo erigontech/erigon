@@ -129,29 +129,35 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 	//return nil
 	var acc accounts.Account
 
+	for addr, original := range txTask.AccountDels {
+		var originalBytes []byte
+		if original != nil {
+			originalBytes = accounts.SerialiseV3(original)
+		}
+		addrB, _ := hex.DecodeString(addr)
+		if err := domains.DeleteAccount(addrB, originalBytes); err != nil {
+			return err
+		}
+	}
 	if txTask.WriteLists != nil {
 		for table, list := range txTask.WriteLists {
 			switch kv.Domain(table) {
 			case kv.AccountsDomain:
 				for k, key := range list.Keys {
+					if list.Vals[k] == nil { // delete accounts already applied
+						continue
+					}
 					kb, _ := hex.DecodeString(key)
 					prev, err := domains.LatestAccount(kb)
 					if err != nil {
 						return fmt.Errorf("latest account %x: %w", key, err)
 					}
-					if list.Vals[k] == nil {
-						if err := domains.DeleteAccount(kb, list.Vals[k]); err != nil {
-							return err
-						}
-						//fmt.Printf("applied %x DELETE\n", kb)
-					} else {
-						if err := domains.UpdateAccountData(kb, list.Vals[k], prev); err != nil {
-							return err
-						}
-						acc.Reset()
-						accounts.DeserialiseV3(&acc, list.Vals[k])
-						//fmt.Printf("applied %x b=%d n=%d c=%x\n", kb, &acc.Balance, acc.Nonce, acc.CodeHash)
+					if err := domains.UpdateAccountData(kb, list.Vals[k], prev); err != nil {
+						return err
 					}
+					//acc.Reset()
+					//accounts.DeserialiseV3(&acc, list.Vals[k])
+					//fmt.Printf("applied %x b=%d n=%d c=%x\n", kb, &acc.Balance, acc.Nonce, acc.CodeHash)
 				}
 			case kv.CodeDomain:
 				for k, key := range list.Keys {
@@ -182,9 +188,6 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 			}
 		}
 	}
-	//for addr, _ := range txTask.AccountDels {
-	//	fmt.Printf("skipped txTask.AccountDels %x\n", addr)
-	//}
 
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	for addr, increase := range txTask.BalanceIncreaseSet {
