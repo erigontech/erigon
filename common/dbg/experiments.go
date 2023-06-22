@@ -150,22 +150,6 @@ func DiscardHistory() bool {
 }
 
 var (
-	discardCommitment     bool
-	discardCommitmentOnce sync.Once
-)
-
-func DiscardCommitment() bool {
-	discardCommitmentOnce.Do(func() {
-		v, _ := os.LookupEnv("DISCARD_COMMITMENT")
-		if v == "true" {
-			discardCommitment = true
-			log.Info("[Experiment]", "DISCARD_COMMITMENT", discardCommitment)
-		}
-	})
-	return discardCommitment
-}
-
-var (
 	bigRoTx    uint
 	getBigRoTx sync.Once
 )
@@ -296,4 +280,36 @@ func StopAfterReconst() bool {
 		}
 	})
 	return stopAfterReconst
+}
+
+var (
+	discardCommitment     bool
+	discardCommitmentOnce sync.Once
+)
+
+func DiscardCommitment() bool {
+	discardCommitmentOnce.Do(func() {
+		v, _ := os.LookupEnv("DISCARD_COMMITMENT")
+		if v == "true" {
+			discardCommitment = true
+			log.Info("[Experiment]", "DISCARD_COMMITMENT", discardCommitment)
+		}
+	})
+	return discardCommitment
+}
+
+var (
+	noPrune     bool
+	noPruneOnce sync.Once
+)
+
+func NoPrune() bool {
+	noPruneOnce.Do(func() {
+		v, _ := os.LookupEnv("NO_PRUNE")
+		if v == "true" {
+			noPrune = true
+			log.Info("[Experiment]", "NO_PRUNE", noPrune)
+		}
+	})
+	return noPrune
 }
