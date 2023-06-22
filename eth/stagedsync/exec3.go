@@ -719,46 +719,46 @@ Loop:
 		if !parallel {
 			outputBlockNum.Set(blockNum)
 			// MA commitment
-			rh, err := agg.ComputeCommitment(true, false)
-			if err != nil {
-				return fmt.Errorf("StateV3.Apply: %w", err)
-			}
-			if !bytes.Equal(rh, header.Root.Bytes()) {
-				if cfg.badBlockHalt {
-					return fmt.Errorf("wrong trie root")
-				}
-				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, block, rh, header.Root.Bytes(), header.Hash()))
-
-				if err := agg.Flush(ctx, applyTx); err != nil {
-					panic(err)
-				}
-				if cfg.hd != nil {
-					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
-				}
-				if maxBlockNum > execStage.BlockNumber {
-					unwindTo := (maxBlockNum + execStage.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
-					//unwindTo := blockNum - 1
-
-					logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-					u.UnwindTo(unwindTo, header.Hash())
-				}
-
-				/* uncomment it if need debug state-root missmatch
-				if err := agg.Flush(ctx, applyTx); err != nil {
-					panic(err)
-				}
-				oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
-				if err != nil {
-					panic(err)
-				}
-				if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
-					log.Error(fmt.Sprintf("block hash mismatch - but new-algorithm hash is bad! (means latest state is correct): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum))
-				} else {
-					log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum))
-				}
-				*/
-				break Loop
-			}
+			//rh, err := agg.ComputeCommitment(true, false)
+			//if err != nil {
+			//	return fmt.Errorf("StateV3.Apply: %w", err)
+			//}
+			//if !bytes.Equal(rh, header.Root.Bytes()) {
+			//	if cfg.badBlockHalt {
+			//		return fmt.Errorf("wrong trie root")
+			//	}
+			//	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, block, rh, header.Root.Bytes(), header.Hash()))
+			//
+			//	if err := agg.Flush(ctx, applyTx); err != nil {
+			//		panic(err)
+			//	}
+			//	if cfg.hd != nil {
+			//		cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+			//	}
+			//	if maxBlockNum > execStage.BlockNumber {
+			//		unwindTo := (maxBlockNum + execStage.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
+			//		//unwindTo := blockNum - 1
+			//
+			//		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
+			//		u.UnwindTo(unwindTo, header.Hash())
+			//	}
+			//
+			//	/* uncomment it if need debug state-root missmatch
+			//	if err := agg.Flush(ctx, applyTx); err != nil {
+			//		panic(err)
+			//	}
+			//	oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
+			//	if err != nil {
+			//		panic(err)
+			//	}
+			//	if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
+			//		log.Error(fmt.Sprintf("block hash mismatch - but new-algorithm hash is bad! (means latest state is correct): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum))
+			//	} else {
+			//		log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum))
+			//	}
+			//	*/
+			//	break Loop
+			//}
 
 			select {
 			case <-logEvery.C:

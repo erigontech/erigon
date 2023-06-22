@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -125,39 +126,49 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *exec22.
 	return count
 }
 
+const Assert = false
+
 func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDomains) error {
 	//return nil
 	var acc accounts.Account
 
-	for addr, original := range txTask.AccountDels {
-		var originalBytes []byte
-		if original != nil {
-			originalBytes = accounts.SerialiseV3(original)
-		}
-		addrB, _ := hex.DecodeString(addr)
-		if err := domains.DeleteAccount(addrB, originalBytes); err != nil {
-			return err
-		}
-	}
 	if txTask.WriteLists != nil {
 		for table, list := range txTask.WriteLists {
 			switch kv.Domain(table) {
 			case kv.AccountsDomain:
 				for k, key := range list.Keys {
-					if list.Vals[k] == nil { // delete accounts already applied
-						continue
-					}
 					kb, _ := hex.DecodeString(key)
 					prev, err := domains.LatestAccount(kb)
 					if err != nil {
 						return fmt.Errorf("latest account %x: %w", key, err)
 					}
-					if err := domains.UpdateAccountData(kb, list.Vals[k], prev); err != nil {
-						return err
+					if list.Vals[k] == nil {
+						if Assert {
+							original := txTask.AccountDels[key]
+							var originalBytes []byte
+							if original != nil {
+								originalBytes = accounts.SerialiseV3(original)
+							}
+							if err := domains.DeleteAccount(kb, prev); err != nil {
+								return err
+							}
+							if !bytes.Equal(prev, originalBytes) {
+								panic(fmt.Sprintf("different prev value %x, %x, %x, %t, %t\n", kb, prev, originalBytes, prev == nil, originalBytes == nil))
+							}
+						}
+
+						if err := domains.DeleteAccount(kb, prev); err != nil {
+							return err
+						}
+						//fmt.Printf("applied %x DELETE\n", kb)
+					} else {
+						if err := domains.UpdateAccountData(kb, list.Vals[k], prev); err != nil {
+							return err
+						}
+						//acc.Reset()
+						//accounts.DeserialiseV3(&acc, list.Vals[k])
+						//fmt.Printf("applied %x b=%d n=%d c=%x\n", kb, &acc.Balance, acc.Nonce, acc.CodeHash)
 					}
-					//acc.Reset()
-					//accounts.DeserialiseV3(&acc, list.Vals[k])
-					//fmt.Printf("applied %x b=%d n=%d c=%x\n", kb, &acc.Balance, acc.Nonce, acc.CodeHash)
 				}
 			case kv.CodeDomain:
 				for k, key := range list.Keys {
