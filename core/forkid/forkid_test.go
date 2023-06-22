@@ -75,7 +75,7 @@ func TestCreation(t *testing.T) {
 				{15049999, 1656586434, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}},   // Last Arrow Glacier block
 				{15050000, 1656586444, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // First Gray Glacier block
 				{17034869, 1681338443, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // Last pre-Shanghai block
-				{17034870, 1681338455, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // First Shanghai block
+				{17034870, 1681338479, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // First Shanghai block
 				{19000000, 1700000000, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // Future Shanghai block (mock)
 			},
 		},
@@ -136,8 +136,8 @@ func TestCreation(t *testing.T) {
 			params.ChiadoGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}},
-				{4101957, 1684934215, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}}, // Last pre-Shanghai block (approx)
-				{4101958, 1684934220, ID{Hash: checksumToBytes(0xa15a4252), Next: 0}},          // First Shanghai block (approx)
+				{4100418, 1684934215, ID{Hash: checksumToBytes(0x50d39d7b), Next: 1684934220}}, // Last pre-Shanghai block
+				{4100419, 1684934220, ID{Hash: checksumToBytes(0xa15a4252), Next: 0}},          // First Shanghai block
 			},
 		},
 	}
