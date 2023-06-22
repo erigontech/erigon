@@ -31,6 +31,7 @@ type Network struct {
 	Nodes              []Node
 	wg                 sync.WaitGroup
 	peers              []string
+	namedNodes         map[string]Node
 }
 
 // Start starts the process for two erigon nodes running on the dev chain
@@ -59,6 +60,8 @@ func (nw *Network) Start() error {
 		PrivateApiAddr: nw.BasePrivateApiAddr,
 	}
 
+	nw.namedNodes = map[string]Node{}
+
 	for i, node := range nw.Nodes {
 		if configurable, ok := node.(configurable); ok {
 			nodePort, args, err := configurable.Configure(baseNode, i)
@@ -73,6 +76,7 @@ func (nw *Network) Start() error {
 			}
 
 			nw.Nodes[i] = node
+			nw.namedNodes[node.Name()] = node
 
 			// get the enode of the node
 			// - note this has the side effect of waiting for the node to start

@@ -1,7 +1,8 @@
-package commands
+package accounts_steps
 
 import (
 	"context"
+	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -13,6 +14,7 @@ import (
 func init() {
 	scenarios.MustRegisterStepHandlers(
 		scenarios.StepHandler(GetBalance),
+		scenarios.StepHandler(GetNonce),
 	)
 }
 
@@ -20,23 +22,29 @@ func init() {
 //	addr = "0x71562b71999873DB5b286dF957af199Ec94617F7"
 //)
 
-func GetBalance(ctx context.Context, addr string, blockNum requests.BlockNumber, checkBal uint64) {
+func GetBalance(ctx context.Context, addr string, blockNum requests.BlockNumber) (uint64, error) {
 	logger := devnet.Logger(ctx)
 
 	logger.Info("Getting balance", "addeess", addr)
-
 	address := libcommon.HexToAddress(addr)
 	bal, err := devnet.SelectMiner(ctx).GetBalance(address, blockNum)
 
 	if err != nil {
 		logger.Error("FAILURE", "error", err)
-		return
-	}
-
-	if checkBal > 0 && checkBal != bal {
-		logger.Error("FAILURE => Balance mismatch", "expected", checkBal, "got", bal)
-		return
+		return 0, err
 	}
 
 	logger.Info("SUCCESS", "balance", bal)
+
+	return bal, nil
+}
+
+func GetNonce(ctx context.Context, address libcommon.Address) (uint64, error) {
+	res, err := devnet.CurrentNode(ctx).GetTransactionCount(address, requests.BlockNumbers.Latest)
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to get transaction count for address 0x%x: %v", address, err)
+	}
+
+	return uint64(res.Result), nil
 }
