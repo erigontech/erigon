@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/params"
@@ -16,7 +17,9 @@ import (
 
 type Node interface {
 	requests.RequestGenerator
+	Name() string
 	IsMiner() bool
+	Account() *accounts.Account
 }
 
 type NodeSelector interface {
@@ -52,15 +55,7 @@ func (n *node) Stop() {
 		toClose.Close()
 	}
 
-<<<<<<< HEAD
 	n.done()
-=======
-	if n.wg != nil {
-		wg := n.wg
-		n.wg = nil
-		wg.Done()
-	}
->>>>>>> 89e335022 (fixes for testing dev networks (runs slowly in multi node mode))
 }
 
 func (n *node) running() bool {
@@ -82,6 +77,22 @@ func (n *node) done() {
 func (n *node) IsMiner() bool {
 	_, isMiner := n.args.(args.Miner)
 	return isMiner
+}
+
+func (n node) Account() *accounts.Account {
+	if miner, ok := n.args.(args.Miner); ok {
+		return miner.Account()
+	}
+
+	return nil
+}
+
+func (n node) Name() string {
+	if named, ok := n.args.(interface{ Name() string }); ok {
+		return named.Name()
+	}
+
+	return ""
 }
 
 // run configures, creates and serves an erigon node

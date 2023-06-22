@@ -33,6 +33,7 @@ type Network struct {
 	Nodes              []Node
 	wg                 sync.WaitGroup
 	peers              []string
+	namedNodes         map[string]Node
 }
 
 // Start starts the process for two erigon nodes running on the dev chain
@@ -64,6 +65,7 @@ func (nw *Network) Start(ctx *cli.Context) error {
 
 	metricsEnabled := ctx.Bool("metrics")
 	metricsNode := ctx.Int("metrics.node")
+	nw.namedNodes = map[string]Node{}
 
 	for i, node := range nw.Nodes {
 		if configurable, ok := node.(configurable); ok {
@@ -87,6 +89,7 @@ func (nw *Network) Start(ctx *cli.Context) error {
 			}
 
 			nw.Nodes[i] = node
+			nw.namedNodes[node.Name()] = node
 
 			// get the enode of the node
 			// - note this has the side effect of waiting for the node to start
@@ -151,14 +154,7 @@ func (nw *Network) startNode(nodeAddr string, cfg interface{}, nodeNumber int) (
 		app := erigonapp.MakeApp(fmt.Sprintf("node-%d", nodeNumber), node.run, erigoncli.DefaultFlags)
 
 		if err := app.Run(args); err != nil {
-<<<<<<< HEAD
 			nw.Logger.Warn("App run returned error", "node", fmt.Sprintf("node-%d", nodeNumber), "err", err)
-=======
-			_, printErr := fmt.Fprintln(os.Stderr, err)
-			if printErr != nil {
-				nw.Logger.Warn("Error writing app run error to stderr", "err", printErr)
-			}
->>>>>>> 89e335022 (fixes for testing dev networks (runs slowly in multi node mode))
 		}
 	}()
 

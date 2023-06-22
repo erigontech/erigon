@@ -6,12 +6,14 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 type Node struct {
 	requests.RequestGenerator `arg:"-"`
+	Name                      string `arg:"-"`
 	BuildDir                  string `arg:"positional" default:"./build/bin/devnet" json:"builddir"`
 	DataDir                   string `arg:"--datadir" default:"./dev" json:"datadir"`
 	Chain                     string `arg:"--chain" default:"dev" json:"chain"`
@@ -44,8 +46,12 @@ type Node struct {
 func (node *Node) configure(base Node, nodeNumber int) error {
 	node.DataDir = filepath.Join(base.DataDir, fmt.Sprintf("%d", nodeNumber))
 
+	if len(node.Name) == 0 {
+		node.Name = fmt.Sprintf("node-%d", nodeNumber)
+	}
+
 	node.LogDirPath = filepath.Join(base.DataDir, "logs")
-	node.LogDirPrefix = fmt.Sprintf("node-%d", nodeNumber)
+	node.LogDirPrefix = node.Name
 
 	node.Chain = base.Chain
 
@@ -78,12 +84,14 @@ func (node *Node) configure(base Node, nodeNumber int) error {
 
 type Miner struct {
 	Node
-	Mine            bool   `arg:"--mine" flag:"true" json:"mine"`
-	DevPeriod       int    `arg:"--dev.period" json:"dev.period"`
-	BorPeriod       int    `arg:"--bor.period" json:"bor.period"`
-	BorMinBlockSize int    `arg:"--bor.minblocksize" json:"bor.minblocksize"`
-	HttpApi         string `arg:"--http.api" default:"admin,eth,erigon,web3,net,debug,trace,txpool,parity,ots" json:"http.api"`
-	AccountSlots    int    `arg:"--txpool.accountslots" default:"16" json:"txpool.accountslots"`
+	Mine            bool   `arg:"--mine" flag:"true"`
+	Etherbase       string `arg:"--miner.etherbase"`
+	DevPeriod       int    `arg:"--dev.period"`
+	BorPeriod       int    `arg:"--bor.period"`
+	BorMinBlockSize int    `arg:"--bor.minblocksize"`
+	HttpApi         string `arg:"--http.api" default:"admin,eth,erigon,web3,net,debug,trace,txpool,parity,ots"`
+	AccountSlots    int    `arg:"--txpool.accountslots" default:"16"`
+	account         *accounts.Account
 }
 
 func (m Miner) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
@@ -98,13 +106,28 @@ func (m Miner) Configure(baseNode Node, nodeNumber int) (int, interface{}, error
 		if m.DevPeriod == 0 {
 			m.DevPeriod = 30
 		}
+		m.account = accounts.NewAccount(m.Name() + "-etherbase")
+	case networkname.BorDevnetChainName:
+		m.account = accounts.NewAccount(m.Name() + "-etherbase")
+	}
+
+	if m.account != nil {
+		m.Etherbase = m.account.Address.Hex()
 	}
 
 	return m.HttpPort, m, nil
 }
 
+func (n Miner) Name() string {
+	return n.Node.Name
+}
+
 func (n Miner) IsMiner() bool {
 	return true
+}
+
+func (n Miner) Account() *accounts.Account {
+	return n.account
 }
 
 type NonMiner struct {
@@ -124,8 +147,16 @@ func (n NonMiner) Configure(baseNode Node, nodeNumber int) (int, interface{}, er
 	return n.HttpPort, n, nil
 }
 
+func (n NonMiner) Name() string {
+	return n.Node.Name
+}
+
 func (n NonMiner) IsMiner() bool {
 	return false
+}
+
+func (n NonMiner) Account() *accounts.Account {
+	return nil
 }
 
 func portFromBase(baseAddr string, increment int, portCount int) (string, int, error) {

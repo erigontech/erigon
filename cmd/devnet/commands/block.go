@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/log/v3"
 
+	accounts_steps "github.com/ledgerwatch/erigon/cmd/devnet/accounts/steps"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
@@ -24,11 +25,11 @@ func init() {
 	)
 }
 
-func callSendTx(node devnet.Node, value uint64, toAddr, fromAddr string, logger log.Logger) (*libcommon.Hash, error) {
+func callSendTx(ctx context.Context, value uint64, toAddr, fromAddr string, logger log.Logger) (*libcommon.Hash, error) {
 	logger.Info("Sending tx", "value", value, "to", toAddr, "from", fromAddr)
 
 	// get the latest nonce for the next transaction
-	nonce, err := services.GetNonce(node, libcommon.HexToAddress(fromAddr))
+	nonce, err := accounts_steps.GetNonce(ctx, libcommon.HexToAddress(fromAddr))
 	if err != nil {
 		logger.Error("failed to get latest nonce", "error", err)
 		return nil, err
@@ -40,6 +41,8 @@ func callSendTx(node devnet.Node, value uint64, toAddr, fromAddr string, logger 
 		logger.Error("failed to create a transaction", "error", err)
 		return nil, err
 	}
+
+	node := devnet.SelectNode(ctx)
 
 	// send the signed transaction
 	hash, err := node.SendTransaction(signedTx)
@@ -58,10 +61,9 @@ func callSendTx(node devnet.Node, value uint64, toAddr, fromAddr string, logger 
 
 func SendTxWithDynamicFee(ctx context.Context, toAddr, fromAddr string, amount uint64) ([]*libcommon.Hash, error) {
 	// get the latest nonce for the next transaction
-	node := devnet.SelectNode(ctx)
 	logger := devnet.Logger(ctx)
 
-	nonce, err := services.GetNonce(node, libcommon.HexToAddress(fromAddr))
+	nonce, err := accounts_steps.GetNonce(ctx, libcommon.HexToAddress(fromAddr))
 
 	if err != nil {
 		logger.Error("failed to get latest nonce", "error", err)
@@ -133,11 +135,11 @@ func AwaitBlocks(ctx context.Context, sleepTime time.Duration) error {
 	return nil
 }
 
-func callContractTx(node devnet.Node, logger log.Logger) (*libcommon.Hash, error) {
+func callContractTx(ctx context.Context, logger log.Logger) (*libcommon.Hash, error) {
 	// hashset to hold hashes for search after mining
 	hashes := make(map[libcommon.Hash]bool)
 	// get the latest nonce for the next transaction
-	nonce, err := services.GetNonce(node, libcommon.HexToAddress(services.DevAddress))
+	nonce, err := accounts_steps.GetNonce(ctx, libcommon.HexToAddress(services.DevAddress))
 
 	if err != nil {
 		logger.Error("failed to get latest nonce", "error", err)
@@ -151,6 +153,8 @@ func callContractTx(node devnet.Node, logger log.Logger) (*libcommon.Hash, error
 		logger.Error("failed to create transaction", "error", err)
 		return nil, err
 	}
+
+	node := devnet.SelectNode(ctx)
 
 	// send the contract transaction to the node
 	hash, err := node.SendTransaction(signedTx)
