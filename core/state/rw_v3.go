@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -125,6 +126,8 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *exec22.
 	return count
 }
 
+const Assert = false
+
 func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDomains) error {
 	//return nil
 	var acc accounts.Account
@@ -140,7 +143,21 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 						return fmt.Errorf("latest account %x: %w", key, err)
 					}
 					if list.Vals[k] == nil {
-						if err := domains.DeleteAccount(kb, list.Vals[k]); err != nil {
+						if Assert {
+							original := txTask.AccountDels[key]
+							var originalBytes []byte
+							if original != nil {
+								originalBytes = accounts.SerialiseV3(original)
+							}
+							if err := domains.DeleteAccount(kb, prev); err != nil {
+								return err
+							}
+							if !bytes.Equal(prev, originalBytes) {
+								panic(fmt.Sprintf("different prev value %x, %x, %x, %t, %t\n", kb, prev, originalBytes, prev == nil, originalBytes == nil))
+							}
+						}
+
+						if err := domains.DeleteAccount(kb, prev); err != nil {
 							return err
 						}
 						//fmt.Printf("applied %x DELETE\n", kb)
@@ -148,8 +165,8 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 						if err := domains.UpdateAccountData(kb, list.Vals[k], prev); err != nil {
 							return err
 						}
-						acc.Reset()
-						accounts.DeserialiseV3(&acc, list.Vals[k])
+						//acc.Reset()
+						//accounts.DeserialiseV3(&acc, list.Vals[k])
 						//fmt.Printf("applied %x b=%d n=%d c=%x\n", kb, &acc.Balance, acc.Nonce, acc.CodeHash)
 					}
 				}
@@ -182,9 +199,6 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 			}
 		}
 	}
-	//for addr, _ := range txTask.AccountDels {
-	//	fmt.Printf("skipped txTask.AccountDels %x\n", addr)
-	//}
 
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	for addr, increase := range txTask.BalanceIncreaseSet {

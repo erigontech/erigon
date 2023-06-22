@@ -716,9 +716,8 @@ Loop:
 			inputTxNum++
 		}
 
-		if !parallel {
-			outputBlockNum.Set(blockNum)
-			// MA commitment
+		if !parallel && !dbg.DiscardCommitment() {
+
 			rh, err := agg.ComputeCommitment(true, false)
 			if err != nil {
 				return fmt.Errorf("StateV3.Apply: %w", err)
@@ -759,7 +758,10 @@ Loop:
 				*/
 				break Loop
 			}
-
+		}
+		if !parallel {
+			outputBlockNum.Set(blockNum)
+			// MA commitment
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
