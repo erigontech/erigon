@@ -114,20 +114,20 @@ func TestCreation(t *testing.T) {
 			params.GnosisChainConfig,
 			params.GnosisGenesisHash,
 			[]testcase{
-				{0, 0, ID{Hash: checksumToBytes(0xf64909b1), Next: 1604400}},         // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium
-				{1604399, 0, ID{Hash: checksumToBytes(0xf64909b1), Next: 1604400}},   // Last Byzantium block
-				{1604400, 0, ID{Hash: checksumToBytes(0xfde2d083), Next: 2508800}},   // First Constantinople block
-				{2508799, 0, ID{Hash: checksumToBytes(0xfde2d083), Next: 2508800}},   // Last Constantinople block
-				{2508800, 0, ID{Hash: checksumToBytes(0xfc1d8f2f), Next: 7298030}},   // First Petersburg block
-				{7298029, 0, ID{Hash: checksumToBytes(0xfc1d8f2f), Next: 7298030}},   // Last Petersburg block
-				{7298030, 0, ID{Hash: checksumToBytes(0x54d05e6c), Next: 9186425}},   // First Istanbul block
-				{9186424, 0, ID{Hash: checksumToBytes(0x54d05e6c), Next: 9186425}},   // Last Istanbul block
-				{9186425, 0, ID{Hash: checksumToBytes(0xb6e6cd81), Next: 16101500}},  // First POSDAO Activation block
-				{16101499, 0, ID{Hash: checksumToBytes(0xb6e6cd81), Next: 16101500}}, // Last POSDAO Activation block
-				{16101500, 0, ID{Hash: checksumToBytes(0x069a83d9), Next: 19040000}}, // First Berlin block
-				{19039999, 0, ID{Hash: checksumToBytes(0x069a83d9), Next: 19040000}}, // Last Berlin block
-				{19040000, 0, ID{Hash: checksumToBytes(0x018479d3), Next: 0}},        // First London block
-				{21735000, 0, ID{Hash: checksumToBytes(0x018479d3), Next: 0}},        // First GIP-31 block
+				{0, 0, ID{Hash: checksumToBytes(0xf64909b1), Next: 1604400}},                  // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium
+				{1604399, 1547205885, ID{Hash: checksumToBytes(0xf64909b1), Next: 1604400}},   // Last Byzantium block
+				{1604400, 1547205890, ID{Hash: checksumToBytes(0xfde2d083), Next: 2508800}},   // First Constantinople block
+				{2508799, 1551879340, ID{Hash: checksumToBytes(0xfde2d083), Next: 2508800}},   // Last Constantinople block
+				{2508800, 1551879345, ID{Hash: checksumToBytes(0xfc1d8f2f), Next: 7298030}},   // First Petersburg block
+				{7298029, 1576134775, ID{Hash: checksumToBytes(0xfc1d8f2f), Next: 7298030}},   // Last Petersburg block
+				{7298030, 1576134780, ID{Hash: checksumToBytes(0x54d05e6c), Next: 9186425}},   // First Istanbul block
+				{9186424, 1585729685, ID{Hash: checksumToBytes(0x54d05e6c), Next: 9186425}},   // Last Istanbul block
+				{9186425, 1585729690, ID{Hash: checksumToBytes(0xb6e6cd81), Next: 16101500}},  // First POSDAO Activation block
+				{16101499, 1621258420, ID{Hash: checksumToBytes(0xb6e6cd81), Next: 16101500}}, // Last POSDAO Activation block
+				{16101500, 1621258425, ID{Hash: checksumToBytes(0x069a83d9), Next: 19040000}}, // First Berlin block
+				{19039999, 1636753575, ID{Hash: checksumToBytes(0x069a83d9), Next: 19040000}}, // Last Berlin block
+				{19040000, 1636753580, ID{Hash: checksumToBytes(0x018479d3), Next: 0}},        // First London block
+				{21735000, 1650443255, ID{Hash: checksumToBytes(0x018479d3), Next: 0}},        // First GIP-31 block
 			},
 		},
 		// Chiado test cases
