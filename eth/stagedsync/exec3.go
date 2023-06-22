@@ -726,7 +726,7 @@ Loop:
 				if cfg.badBlockHalt {
 					return fmt.Errorf("wrong trie root")
 				}
-				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, block, rh, header.Root.Bytes(), header.Hash()))
+				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, blockNum, rh, header.Root.Bytes(), header.Hash()))
 
 				if err := agg.Flush(ctx, applyTx); err != nil {
 					panic(err)
