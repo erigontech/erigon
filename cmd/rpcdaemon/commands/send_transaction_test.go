@@ -40,7 +40,7 @@ func TestSendRawTransaction(t *testing.T) {
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	require.NoError(err)
 	{ // Do 1 step to start txPool
 

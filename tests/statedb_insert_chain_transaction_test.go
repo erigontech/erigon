@@ -770,7 +770,7 @@ func genBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*stages.Moc
 		}
 
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate chain: %w", err)
 	}
