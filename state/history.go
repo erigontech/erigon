@@ -1660,7 +1660,6 @@ type StateAsOfIterDB struct {
 	roTx        kv.Tx
 	valsC       kv.Cursor
 	valsCDup    kv.CursorDupSort
-	hc          *HistoryContext
 	valsTable   string
 
 	from, to []byte

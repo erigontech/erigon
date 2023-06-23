@@ -22,7 +22,7 @@ var _ Pool = &PoolMock{}
 //
 //		// make and configure a mocked Pool
 //		mockedPool := &PoolMock{
-//			AddLocalTxsFunc: func(ctx context.Context, newTxs types2.TxSlots, tx kv.Tx) ([]DiscardReason, error) {
+//			AddLocalTxsFunc: func(ctx context.Context, newTxs types2.TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error) {
 //				panic("mock out the AddLocalTxs method")
 //			},
 //			AddNewGoodPeerFunc: func(peerID types2.PeerID)  {
