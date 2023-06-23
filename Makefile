@@ -180,7 +180,6 @@ clean:
 ## devtools:                          installs dev tools (and checks for npm installation etc.)
 devtools:
 	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
-	$(GOBUILD) -o $(GOBIN)/go-bindata github.com/kevinburke/go-bindata/go-bindata
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
 	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
 	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
