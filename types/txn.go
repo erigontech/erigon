@@ -93,6 +93,7 @@ type TxSlot struct {
 	DataNonZeroLen int
 	AlAddrCount    int      // Number of addresses in the access list
 	AlStorCount    int      // Number of storage keys in the access list
+	BlobCount      uint64   // Number of blobs contained by the transaction
 	Gas            uint64   // Gas limit of the transaction
 	IDHash         [32]byte // Transaction hash for the purposes of using it as a transaction Id
 	Traced         bool     // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
@@ -103,8 +104,9 @@ type TxSlot struct {
 
 const (
 	LegacyTxType     byte = 0
-	AccessListTxType byte = 1
-	DynamicFeeTxType byte = 2
+	AccessListTxType byte = 1 // EIP-2930
+	DynamicFeeTxType byte = 2 // EIP-1559
+	BlobTxType       byte = 3 // EIP-4844
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -121,9 +123,14 @@ func (ctx *TxParseContext) ChainIDRequired() *TxParseContext {
 	return ctx
 }
 
-// ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot
-// it also performs syntactic validation of the transactions
-func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlot, sender []byte, hasEnvelope bool, validateHash func([]byte) error) (p int, err error) {
+// ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot.
+// It also performs syntactic validation of the transactions.
+// wrappedWithBlobs means that for blob (type 3) transactions the full version with blobs/commitments/proofs is expected
+// (see https://eips.ethereum.org/EIPS/eip-4844#networking).
+func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlot, sender []byte, hasEnvelope, wrappedWithBlobs bool, validateHash func([]byte) error) (p int, err error) {
+	// TODO(eip-4844) implement blob txn parsing with and w/o wrappedWithBlobs
+	// Ensure that TxSlot.BlobCount is properly populated
+
 	if len(payload) == 0 {
 		return 0, fmt.Errorf("%w: empty rlp", ErrParseTxn)
 	}

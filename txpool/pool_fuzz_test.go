@@ -209,7 +209,7 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 			FeeCap: *uint256.NewInt(feeCap[i%len(feeCap)]),
 		}
 		txRlp := fakeRlpTx(txs.Txs[i], senders.At(i%senders.Len()))
-		_, err := parseCtx.ParseTransaction(txRlp, 0, txs.Txs[i], nil, false, nil)
+		_, err := parseCtx.ParseTransaction(txRlp, 0, txs.Txs[i], nil, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
 		if err != nil {
 			panic(err)
 		}

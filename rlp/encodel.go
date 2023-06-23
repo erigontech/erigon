@@ -267,6 +267,7 @@ func AnnouncementsLen(types []byte, sizes []uint32, hashes []byte) int {
 	return ListPrefixLen(totalLen) + totalLen
 }
 
+// EIP-5793: eth/68 - Add tx type to tx announcement
 func EncodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf []byte) int {
 	if len(types) == 0 {
 		encodeBuf[0] = 0xc3
