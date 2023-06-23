@@ -1333,7 +1333,9 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 					if txNumHist == txFrom {
 						// exact at this txNum value has been set.restore.
 						fmt.Printf("restoring exact\n")
-						wal.addValue(k, v, pv)
+						if err := wal.addValue(k, v, pv); err != nil {
+							return err
+						}
 					} else {
 						fmt.Printf("skip\n")
 						continue
@@ -1342,7 +1344,9 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 				} else {
 					// there were txs after txFrom, domain value is not actual
 					fmt.Printf("restoring\n")
-					wal.addValue(k, v, pv)
+					if err := wal.addValue(k, v, pv); err != nil {
+						return err
+					}
 				}
 
 			}

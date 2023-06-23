@@ -1113,14 +1113,8 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 
 		if h.largeValues {
 			seek := append(common.Copy(v), k...)
-			kk, _, err := valsC.SeekExact(seek)
-			if err != nil {
+			if err := valsC.Delete(seek); err != nil {
 				return err
-			}
-			if kk != nil {
-				if err = valsC.DeleteCurrent(); err != nil {
-					return err
-				}
 			}
 		} else {
 			vv, err := valsCDup.SeekBothRange(v, k)
@@ -1133,12 +1127,10 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 			if err = valsCDup.DeleteCurrent(); err != nil {
 				return err
 			}
-			fmt.Printf("[%s] prune history key: tx=%d %x %x\n", h.filenameBase, txNum, k, v)
-
-			// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-			if err = historyKeysCursor.DeleteCurrent(); err != nil {
-				return err
-			}
+		}
+		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
+		if err = historyKeysCursor.DeleteCurrent(); err != nil {
+			return err
 		}
 	}
 	return nil
