@@ -11,15 +11,14 @@ type Sub[T any] interface {
 }
 
 type chan_sub[T any] struct {
+	lock   sync.Mutex // protects all fileds of this struct
 	ch     chan T
 	closed bool
-	lock   sync.Mutex
 }
 
-// buffered channel
+// newChanSub - buffered channel
 func newChanSub[T any](size int) *chan_sub[T] {
-	// set min size to 8.
-	if size < 8 {
+	if size < 8 { // set min size to 8
 		size = 8
 	}
 	o := &chan_sub[T]{}
