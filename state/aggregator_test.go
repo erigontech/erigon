@@ -694,7 +694,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	defer agg.FinishWrites()
 	defer domains.Close()
 
-	keys, vals := generateInputData(t, 8, 16, 20)
+	keys, vals := generateInputData(t, 8, 16, 10)
 	keys = keys[:2]
 
 	var i int
@@ -710,7 +710,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 		for j := 0; j < len(keys); j++ {
 			buf := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
-			prev, _, err := mc.AccountLatest(keys[j], rwTx)
+			prev, err := domains.LatestAccount(keys[j])
 			require.NoError(t, err)
 
 			err = domains.UpdateAccountData(keys[j], buf, prev)
@@ -749,10 +749,38 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		require.NotEmpty(t, rh)
 		require.EqualValues(t, roots[i], rh)
 	}
+
+	err = agg.Flush(context.Background(), rwTx)
+	require.NoError(t, err)
+
+	pruneFrom = 3
+	err = agg.Unwind(context.Background(), pruneFrom)
+	require.NoError(t, err)
+
+	for i = int(pruneFrom); i < len(vals); i++ {
+		domains.SetTxNum(uint64(i))
+
+		fmt.Printf("txn=%d\n", i)
+		for j := 0; j < len(keys); j++ {
+			buf := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			prev, _, err := mc.AccountLatest(keys[j], rwTx)
+			require.NoError(t, err)
+
+			err = domains.UpdateAccountData(keys[j], buf, prev)
+			require.NoError(t, err)
+			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
+			//require.NoError(t, err)
+		}
+
+		rh, err := domains.Commit(true, false)
+		require.NoError(t, err)
+		require.NotEmpty(t, rh)
+		require.EqualValues(t, roots[i], rh)
+	}
 }
 
 func Test_helper_decodeAccountv3Bytes(t *testing.T) {
-	input, err := hex.DecodeString("01020609184bf1c1800000")
+	input, err := hex.DecodeString("000114000101")
 	require.NoError(t, err)
 
 	n, b, ch := DecodeAccountBytes(input)

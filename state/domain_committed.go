@@ -229,7 +229,6 @@ func (t *UpdateTree) TouchStorage(c *CommitmentItem, val []byte) {
 	} else {
 		c.update.Flags |= commitment.StorageUpdate
 		copy(c.update.CodeHashOrStorage[:], val)
-		//c.update.CodeValue = make([]byte, 0)
 	}
 }
 
@@ -411,7 +410,9 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 	mw := md5.New()
 	mw.Write(encoded)
 
-	fmt.Printf("commitment put %d rh %x vh %x\n\n", d.txNum, rh, mw.Sum(nil))
+	if d.trace {
+		fmt.Printf("commitment put %d rh %x vh %x\n\n", d.txNum, rh, mw.Sum(nil))
+	}
 	if err := d.Domain.PutWithPrev(keyCommitmentState, nil, encoded, d.prevState); err != nil {
 		return err
 	}
@@ -758,9 +759,6 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 		rootHash, err = d.patriciaTrie.RootHash()
 		return rootHash, nil, err
 	}
-	//if len(updates) > 1 {
-	//	d.patriciaTrie.Reset()
-	//}
 
 	// data accessing functions should be set once before
 	d.patriciaTrie.SetTrace(trace)

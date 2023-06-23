@@ -36,11 +36,11 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -529,16 +529,15 @@ func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 }
 
 type domainWAL struct {
-	d             *Domain
-	keys          *etl.Collector
-	values        *etl.Collector
-	kvsize        atomic.Uint64
-	aux           []byte
-	tmpdir        string
-	buffered      bool
-	discard       bool
-	largeValues   bool
-	skipKeySuffix bool // if true invstep will be added as 8bytes suffix to each key, if false - 8b suffix set by caller
+	d           *Domain
+	keys        *etl.Collector
+	values      *etl.Collector
+	kvsize      atomic.Uint64
+	aux         []byte
+	tmpdir      string
+	buffered    bool
+	discard     bool
+	largeValues bool
 }
 
 func (h *domainWAL) close() {
@@ -587,31 +586,21 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 		return nil
 	}
 
-	kl := len(key1) + len(key2)
-	offt := 0
-	if !h.skipKeySuffix {
-		offt = 8
-	}
+	offt, kl := 8, len(key1)+len(key2)
 	fullkey := h.aux[:kl+offt]
 	copy(fullkey, key1)
 	copy(fullkey[len(key1):], key2)
 
-	if !h.skipKeySuffix {
-		istep := ^(h.d.txNum / h.d.aggregationStep)
-		binary.BigEndian.PutUint64(fullkey[kl:], istep)
-	} else {
-		kl -= 8
-	}
-
-	fmt.Printf("[wal] txn %d %x -> %x\n", h.d.txNum, fullkey, truncate(value, 80))
+	istep := ^(h.d.txNum / h.d.aggregationStep)
+	binary.BigEndian.PutUint64(fullkey[kl:], istep)
 
 	if h.largeValues {
 		if !h.buffered {
-			//fmt.Printf("put: %s, %x, %x\n", h.d.filenameBase, fullkey[:kl], fullkey[kl:])
+			//fmt.Printf("put key: %s, %x, %x\n", h.d.filenameBase, fullkey[:kl], fullkey[kl:])
 			if err := h.d.tx.Put(h.d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
 				return err
 			}
-			//fmt.Printf("put2: %s, %x, %x\n", h.d.filenameBase, fullkey, value)
+			//fmt.Printf("put val: %s, %x, %x\n", h.d.filenameBase, fullkey, value)
 			if err := h.d.tx.Put(h.d.valsTable, fullkey, value); err != nil {
 				return err
 			}
@@ -1316,52 +1305,69 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
 	wal := d.newWriter(d.tmpdir+"_prune", true, false)
-	wal.skipKeySuffix = true
 
 	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
 		if !bytes.Equal(v, stepBytes) {
 			continue
 		}
-		if txFrom != 0 {
-			txNumHist, isLatest, pk, pv, err := mc.hc.GetRecent(k, txFrom, d.tx)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("recent %x txn %x '%x' ? ", k, txNumHist, pv)
-			if len(pk) != 0 && txNumHist <= txFrom {
-				if isLatest {
-					if txNumHist == txFrom {
-						// exact at this txNum value has been set.restore.
-						fmt.Printf("restoring exact\n")
-						if err := wal.addValue(k, v, pv); err != nil {
-							return err
-						}
-					} else {
-						fmt.Printf("skip\n")
-						continue
-					}
-					// value is in domain
-				} else {
-					// there were txs after txFrom, domain value is not actual
-					fmt.Printf("restoring\n")
-					if err := wal.addValue(k, v, pv); err != nil {
-						return err
-					}
-				}
 
+		edgeRecords, err := d.History.unwindKey(k, txFrom, d.tx)
+		switch len(edgeRecords) {
+		case 1: // its value should be nil, actual value is in domain, BUT if txNum exatcly match, need to restore
+			fmt.Printf("recent %x txn %d '%x'\n", k, edgeRecords[0].TxNum, edgeRecords[0].Value)
+			if edgeRecords[0].TxNum == txFrom && edgeRecords[0].Value != nil {
+				d.SetTxNum(edgeRecords[0].TxNum)
+				wal.addValue(k, nil, edgeRecords[0].Value)
+			} else if edgeRecords[0].TxNum < txFrom {
+				//} else {
+				continue
 			}
-			//if len(pk) != 0 && txNumHist <= txFrom {
-			//	if len(pv) == 0 {
-			//		// prev value is creation mark, nothing to put back into domain
-			//		fmt.Printf("skip\n")
-			//		continue
-			//	}
-			//	fmt.Printf("restoring\n")
-			//	d.SetTxNum(txNumHist)
-			//	wal.addValue(k, v, pv)
-			//}
+		case 2:
+			l, r := edgeRecords[0], edgeRecords[1]
+			if r.TxNum >= txFrom /*&& l.TxNum < txFrom*/ && r.Value != nil {
+				d.SetTxNum(l.TxNum)
+				wal.addValue(k, nil, r.Value)
+			} else {
+				continue
+			}
 
+			fmt.Printf("restore %x txn [%d, %d] '%x' '%x'\n", k, l.TxNum, r.TxNum, l.Value, r.Value)
 		}
+
+		//if txFrom != 0 {
+		//	txNumHist, isLatest, pk, pv, err := mc.hc.GetRecent(k, txFrom, d.tx)
+		//	if err != nil {
+		//		return err
+		//	}
+		//	fmt.Printf("recent %x txn %x '%x' ? ", k, txNumHist, pv)
+		//	if len(pk) != 0 && txNumHist <= txFrom {
+		//		if isLatest {
+		//			if txNumHist == txFrom && len(pv) > 0 {
+		//				// exact at this txNum value has been set.restore.
+		//				fmt.Printf("restoring exact\n")
+		//				d.SetTxNum(txNumHist)
+		//				if err := wal.addValue(k, v, pv); err != nil {
+		//					return err
+		//				}
+		//			} else {
+		//				fmt.Printf("skip\n")
+		//				continue
+		//			}
+		//			// value is in domain
+		//		} else {
+		//			// there were txs after txFrom, domain value is not actual
+		//			if len(pv) == 0 {
+		//				fmt.Printf("skip\n")
+		//				continue
+		//			}
+		//			fmt.Printf("restoring\n")
+		//			d.SetTxNum(txNumHist)
+		//			if err := wal.addValue(k, v, pv); err != nil {
+		//				return err
+		//			}
+		//		}
+		//	}
+		//}
 
 		seek := common.Append(k, stepBytes)
 		if d.largeValues {

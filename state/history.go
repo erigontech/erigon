@@ -592,11 +592,6 @@ func (h *History) newWriter(tmpdir string, buffered, discard bool) *historyWAL {
 	return w
 }
 
-func loadHistPrintFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	fmt.Printf("[hflus] %x -> %x\n", k, truncate(v, 80))
-	return next(k, k, v)
-}
-
 func (h *historyWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if h.discard || !h.buffered {
 		return nil
@@ -1075,6 +1070,140 @@ func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 		return false, err
 	}
 	return k == nil && k2 == nil, nil
+}
+
+type HistoryRecord struct {
+	TxNum uint64
+	Key   []byte
+	Value []byte
+}
+
+// returns up to 2 records: one has txnum <= beforeTxNum, another has txnum > beforeTxNum, if any
+func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]HistoryRecord, error) {
+	res := make([]HistoryRecord, 0, 2)
+
+	if h.largeValues {
+		c, err := tx.RwCursor(h.historyValsTable)
+		if err != nil {
+			return nil, err
+		}
+		defer c.Close()
+
+		seek := make([]byte, len(key)+8)
+		copy(seek, key)
+		binary.BigEndian.PutUint64(seek[len(key):], beforeTxNum)
+
+		//ic, err := tx.RwCursorDupSort(h.indexKeysTable)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//defer ic.Close()
+		//
+		//v, err := ic.SeekBothRange(seek[len(key):], seek[:len(key)])
+		//if err != nil {
+		//	return nil, err
+		//}
+		//if !bytes.Equal(v, seek[:len(key)]) {
+		//	// lookup next/prev txnum
+		//}
+
+		kAndTxNum, val, err := c.Seek(seek)
+		if err != nil {
+			return nil, err
+		}
+		if len(kAndTxNum) == 0 || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
+			// need to go back to the previous key
+			kAndTxNum, val, err = c.Prev()
+			if err != nil {
+				return nil, err
+			}
+			if len(kAndTxNum) == 0 || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
+				return nil, nil
+			}
+		}
+
+		rec := HistoryRecord{binary.BigEndian.Uint64(kAndTxNum[len(kAndTxNum)-8:]), common.Copy(kAndTxNum[:len(kAndTxNum)-8]), common.Copy(val)}
+		switch {
+		case rec.TxNum < beforeTxNum:
+			nk, nv, err := c.Next()
+			if err != nil {
+				return nil, err
+			}
+
+			res = append(res, rec)
+			if nk != nil && bytes.Equal(nk[:len(nk)-8], key) {
+				res = append(res, HistoryRecord{binary.BigEndian.Uint64(nk[len(nk)-8:]), common.Copy(nk[:len(nk)-8]), common.Copy(nv)})
+			}
+		case rec.TxNum >= beforeTxNum:
+			// kAndTxNum/val are invalidated by DeleteCurrent
+			//if err := c.DeleteCurrent(); err != nil {
+			//	return nil, err
+			//	// need to delete index kery
+			//}
+
+			pk, pv, err := c.Prev()
+			if err != nil {
+				return nil, err
+			}
+
+			if pk != nil && bytes.Equal(pk[:len(pk)-8], key) {
+				res = append(res, HistoryRecord{binary.BigEndian.Uint64(pk[len(pk)-8:]), common.Copy(pk[:len(pk)-8]), common.Copy(pv)})
+				// this case will be removed by pruning. Or need to implement cleaning through txTo
+			}
+			res = append(res, rec)
+		}
+		return res, nil
+	}
+
+	c, err := tx.RwCursorDupSort(h.historyValsTable)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	kAndTxNum := make([]byte, len(key)+8)
+	copy(kAndTxNum, key)
+	binary.BigEndian.PutUint64(kAndTxNum[len(key):], beforeTxNum)
+
+	val, err := c.SeekBothRange(key, kAndTxNum[len(key):])
+	if err != nil {
+		return nil, err
+	}
+	if val == nil {
+		return nil, err
+	}
+
+	txNum := binary.BigEndian.Uint64(kAndTxNum[len(kAndTxNum)-8:])
+	switch {
+	case txNum <= beforeTxNum:
+		nk, nv, err := c.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		res = append(res, HistoryRecord{beforeTxNum, kAndTxNum[:len(kAndTxNum)-8], val})
+		if nk != nil && bytes.Equal(nk[:len(nk)-8], key) {
+			res = append(res, HistoryRecord{binary.BigEndian.Uint64(nk[len(nk)-8:]), nk[:len(nk)-8], nv})
+			if err := c.DeleteCurrent(); err != nil {
+				return nil, err
+			}
+		}
+	case txNum > beforeTxNum:
+		pk, pv, err := c.Prev()
+		if err != nil {
+			return nil, err
+		}
+
+		if pk != nil && bytes.Equal(pk[:len(pk)-8], key) {
+			res = append(res, HistoryRecord{binary.BigEndian.Uint64(pk[len(pk)-8:]), pk[:len(pk)-8], pv})
+			if err := c.DeleteCurrent(); err != nil {
+				return nil, err
+			}
+			// this case will be removed by pruning. Or need to implement cleaning through txTo
+		}
+		res = append(res, HistoryRecord{beforeTxNum, kAndTxNum[:len(kAndTxNum)-8], val})
+	}
+	return res, nil
 }
 
 func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
@@ -1571,7 +1700,7 @@ func (hc *HistoryContext) getRecentFromDB(key []byte, beforeTxNum uint64, tx kv.
 					v = vv
 					isLatest = false
 				}
-				fmt.Printf("checked neighbour %x -> %x\n", kk, vv)
+				//fmt.Printf("checked neighbour %x -> %x\n", kk, vv)
 				return txn, isLatest, k, v, nil
 			}
 		}

@@ -792,7 +792,6 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int)
 	if err != nil {
 		return false, err
 	}
-	fmt.Printf("unflding %x -> %x\n", hexToCompact(hph.currentKey[:hph.currentKeyLen]), branchData)
 	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
 		// Special case - empty or deleted root
 		hph.rootChecked = true
@@ -1905,7 +1904,7 @@ type Update struct {
 	Nonce             uint64
 	ValLength         int
 	CodeHashOrStorage [length.Hash]byte
-	CodeValue         []byte
+	CodeValue         []byte // does not need during commitment, but helpful for debugging. Could be removed
 }
 
 func (u *Update) Reset() {

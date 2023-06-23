@@ -112,8 +112,9 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwtx kv.RwTx, step uint64, 
 	if err != nil {
 		return err
 	}
+
 	bn, txn, err := sd.Commitment.Restore(rv)
-	fmt.Printf("Unwind domains to block %d, txn %d wanted to %d\n", bn, txn, txUnwindTo)
+	fmt.Printf("Unwinded domains to block %d, txn %d wanted to %d\n", bn, txn, txUnwindTo)
 	return err
 }
 
@@ -123,7 +124,9 @@ func (sd *SharedDomains) clear() {
 	sd.account.Clear()
 	sd.code.Clear()
 	sd.commitment.Clear()
-	//sd.Commitment.patriciaTrie.Reset()
+
+	sd.Commitment.updates.List(true)
+	sd.Commitment.patriciaTrie.Reset()
 	sd.storage.Clear()
 	sd.estSize.Store(0)
 }
