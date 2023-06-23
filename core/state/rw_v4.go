@@ -32,7 +32,7 @@ func (w *StateWriterV4) UpdateAccountData(address common.Address, original, acco
 func (w *StateWriterV4) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	//addressBytes, codeHashBytes := address.Bytes(), codeHash.Bytes()
 	//fmt.Printf("code [%x] => [%x] CodeHash: %x, txNum: %d\n", address, code, codeHash, w.txNum)
-	return w.SharedDomains.UpdateAccountCode(address.Bytes(), code, nil)
+	return w.SharedDomains.UpdateAccountCode(address.Bytes(), code, codeHash[:])
 }
 
 func (w *StateWriterV4) DeleteAccount(address common.Address, original *accounts.Account) error {
