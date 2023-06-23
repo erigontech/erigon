@@ -82,7 +82,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, build []byte) {
 		if len(build) < 12 {
-			f.SkipNow()
+			t.Skip()
 		}
 		i := 0
 		keysCount := binary.BigEndian.Uint32(build[i : i+4])
