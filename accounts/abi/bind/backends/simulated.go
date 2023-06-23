@@ -166,7 +166,7 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	chain, _ := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
+	chain, _ := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *core.BlockGen) {})
 	b.pendingBlock = chain.Blocks[0]
 	b.pendingReceipts = chain.Receipts[0]
 	b.pendingHeader = chain.Headers[0]
@@ -759,7 +759,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 			block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
 		}
 		block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		return err
 	}
@@ -804,7 +804,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 			block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		return err
 	}
