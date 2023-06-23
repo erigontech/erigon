@@ -1733,30 +1733,6 @@ func commonPrefixLen(b1, b2 []byte) int {
 	return i
 }
 
-func (hph *HexPatriciaHashed) foldRoot() (BranchData, error) {
-	if hph.trace {
-		fmt.Printf("foldRoot: activeRows: %d\n", hph.activeRows)
-	}
-	if hph.activeRows != 0 {
-		return nil, fmt.Errorf("cannot fold root - there are still active rows: %d", hph.activeRows)
-	}
-	if hph.root.downHashedLen == 0 {
-		// Not overwrite previous branch node
-		return nil, nil
-	}
-
-	rootGetter := func(_ int, _ bool) (*Cell, error) {
-		_, err := hph.RootHash()
-		if err != nil {
-			return nil, fmt.Errorf("folding root failed: %w", err)
-		}
-		return &hph.root, nil
-	}
-
-	branchData, _, err := EncodeBranch(1, 1, 1, rootGetter)
-	return branchData, err
-}
-
 func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
 	branchNodeUpdates = make(map[string]BranchData)
 

@@ -436,6 +436,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 
 	trieOne := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	err := ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
 
 	beforeRestore, branchNodeUpdatesOne, err := trieOne.ReviewKeys(plainKeys, hashedKeys)
 	require.NoError(t, err)

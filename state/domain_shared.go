@@ -53,7 +53,6 @@ func splitKey(key []byte) (k1, k2 []byte) {
 	default:
 		panic(fmt.Sprintf("invalid key length %d", len(key)))
 	}
-	return
 }
 
 type SharedDomains struct {
@@ -79,20 +78,26 @@ type SharedDomains struct {
 	//TracesFrom *InvertedIndex
 }
 
-func (sd *SharedDomains) Unwind(ctx context.Context, rwtx kv.RwTx, step uint64, txUnwindTo uint64) error {
+func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
+	sd := &SharedDomains{
+		Account:    a,
+		account:    btree2.NewMap[string, []byte](128),
+		Code:       c,
+		code:       btree2.NewMap[string, []byte](128),
+		Storage:    s,
+		storage:    btree2.NewMap[string, []byte](128),
+		Commitment: comm,
+		commitment: btree2.NewMap[string, []byte](128),
+	}
+
+	sd.Commitment.ResetFns(sd.BranchFn, sd.AccountFn, sd.StorageFn)
+	return sd
+}
+
+func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, step uint64, txUnwindTo uint64) error {
 	sd.clear()
 
-	if err := sd.Account.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, func(txN uint64, k, v []byte) error {
-		//fmt.Printf("d code: %x %x\n", k, v)
-		//pv, _, err := actx.accounts.hc.GetNoStateWithRecent(k, txUnwindTo, a.rwTx)
-		//if err != nil {
-		//	return err
-		//}
-		//if len(pv) > 0 {
-		//	fmt.Printf("restoring %x %x\n", k, pv)
-		//}
-		return nil
-	}); err != nil {
+	if err := sd.Account.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
 		return err
 	}
 	if err := sd.Storage.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
@@ -105,10 +110,23 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwtx kv.RwTx, step uint64, 
 		return err
 	}
 
+	//if err := sd.logAddrs.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+	//	return err
+	//}
+	//if err := sd.logTopics.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+	//	return err
+	//}
+	//if err := sd.tracesFrom.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+	//	return err
+	//}
+	//if err := sd.tracesTo.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+	//	return err
+	//}
+
 	cmcx := sd.Commitment.MakeContext()
 	defer cmcx.Close()
 
-	rv, _, err := cmcx.GetLatest(keyCommitmentState, nil, rwtx)
+	rv, _, err := cmcx.GetLatest(keyCommitmentState, nil, rwTx)
 	if err != nil {
 		return err
 	}
@@ -129,22 +147,6 @@ func (sd *SharedDomains) clear() {
 	sd.Commitment.patriciaTrie.Reset()
 	sd.storage.Clear()
 	sd.estSize.Store(0)
-}
-
-func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
-	sd := &SharedDomains{
-		Account:    a,
-		account:    btree2.NewMap[string, []byte](128),
-		Code:       c,
-		code:       btree2.NewMap[string, []byte](128),
-		Storage:    s,
-		storage:    btree2.NewMap[string, []byte](128),
-		Commitment: comm,
-		commitment: btree2.NewMap[string, []byte](128),
-	}
-
-	sd.Commitment.ResetFns(sd.BranchFn, sd.AccountFn, sd.StorageFn)
-	return sd
 }
 
 func (sd *SharedDomains) put(table kv.Domain, key, val []byte) {
@@ -496,12 +498,9 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 	var err error
 
 	iter := sd.storage.Iter()
-	cnt := 0
 	if iter.Seek(string(prefix)) {
 		kx := iter.Key()
 		v = iter.Value()
-		cnt++
-		//fmt.Printf("c %d kx: %s, k: %x\n", cnt, kx, v)
 		k, _ = hex.DecodeString(kx)
 
 		if len(kx) > 0 && bytes.HasPrefix(k, prefix) {

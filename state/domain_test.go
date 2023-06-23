@@ -989,8 +989,6 @@ func TestDomainContext_IteratePrefix(t *testing.T) {
 }
 
 func TestDomainUnwind(t *testing.T) {
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
 	_, db, d := testDbAndDomain(t, log.New())
 	ctx := context.Background()
 	defer d.Close()
@@ -1002,19 +1000,16 @@ func TestDomainUnwind(t *testing.T) {
 	d.StartWrites()
 	defer d.FinishWrites()
 
-	var preval1, preval2, preval3 []byte
+	var preval1, preval2 []byte
 	maxTx := uint64(16)
 	d.aggregationStep = maxTx
 
 	dctx := d.MakeContext()
 	defer dctx.Close()
 
-	l := []byte("asd9s9af0afa9sfh9afha")
-
 	for i := 0; i < int(maxTx); i++ {
 		v1 := []byte(fmt.Sprintf("value1.%d", i))
 		v2 := []byte(fmt.Sprintf("value2.%d", i))
-		//s := []byte(fmt.Sprintf("longstorage2.%d", i))
 		fmt.Printf("i=%d\n", i)
 
 		//if i > 0 {
@@ -1038,60 +1033,16 @@ func TestDomainUnwind(t *testing.T) {
 		err = d.PutWithPrev([]byte("key2"), nil, v2, preval2)
 		require.NoError(t, err)
 
-		//err = d.PutWithPrev([]byte("key3"), l, s, preval3)
-		//require.NoError(t, err)
-
-		//preval1, preval2, preval3 = v1, v2, s
-		preval1, preval2, preval3 = v1, v2, nil
+		preval1, preval2 = v1, v2
 	}
 
 	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 
-	//err = d.unwind(ctx, 0, 5, maxTx, maxTx, func(_ uint64, k, v []byte) error { return nil })
-	err = d.prune(ctx, 0, 5, maxTx, maxTx, logEvery)
+	err = d.unwind(ctx, 0, 5, maxTx, maxTx, nil)
 	require.NoError(t, err)
 	d.MakeContext().IteratePrefix(tx, []byte("key1"), func(k, v []byte) {
 		fmt.Printf("%s: %s\n", k, v)
 	})
 	return
-
-	c, err := d.collate(ctx, 0, 0, maxTx, tx, logEvery)
-
-	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "base.0-1.kv"))
-	require.Equal(t, 3, c.valuesCount)
-	require.True(t, strings.HasSuffix(c.historyPath, "base.0-1.v"))
-	require.EqualValues(t, 3*maxTx, c.historyCount)
-	require.Equal(t, 3, len(c.indexBitmaps))
-	require.Len(t, c.indexBitmaps["key2"].ToArray(), int(maxTx))
-	require.Len(t, c.indexBitmaps["key1"].ToArray(), int(maxTx))
-	require.Len(t, c.indexBitmaps["key3"+string(l)].ToArray(), int(maxTx))
-
-	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
-	require.NoError(t, err)
-	defer sf.Close()
-	c.Close()
-
-	g := sf.valuesDecomp.MakeGetter()
-	g.Reset(0)
-	var words []string
-	for g.HasNext() {
-		w, _ := g.Next(nil)
-		words = append(words, string(w))
-	}
-	require.EqualValues(t, []string{"key1", string(preval1), "key2", string(preval2), "key3" + string(l), string(preval3)}, words)
-	// Check index
-	require.Equal(t, 3, int(sf.valuesIdx.KeyCount()))
-
-	r := recsplit.NewIndexReader(sf.valuesIdx)
-	defer r.Close()
-	for i := 0; i < len(words); i += 2 {
-		offset := r.Lookup([]byte(words[i]))
-		g.Reset(offset)
-		w, _ := g.Next(nil)
-		require.Equal(t, words[i], string(w))
-		w, _ = g.Next(nil)
-		require.Equal(t, words[i+1], string(w))
-	}
 }

@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -913,13 +912,11 @@ func (a *AggregatorV3) HasNewFrozenFiles() bool {
 }
 
 func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64) error {
-	//TODO: use ETL to avoid OOM (or specialized history-iterator instead of unwind)
 	step := txUnwindTo / a.aggregationStep
 	if err := a.domains.Unwind(ctx, a.rwTx, step, txUnwindTo); err != nil {
 		return err
 	}
 
-	//a.Flush(ctx, a.rwTx)
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -935,26 +932,6 @@ func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64) error {
 	if err := a.tracesTo.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
 		return err
 	}
-
-	//bn, txn, err := a.domains.Commitment.SeekCommitment(txUnwindTo - 1)
-	//if err != nil {
-	//	return err
-	//}
-	//fmt.Printf("Unwind domains to block %d, txn %d wanted to %d\n", bn, txn, txUnwindTo)
-
-	a.accounts.MakeContext().IteratePrefix(a.rwTx, []byte{}, func(k, v []byte) {
-		n, b, _ := DecodeAccountBytes(v)
-		fmt.Printf("acc - %x - n=%d b=%d\n", k, n, b.Uint64())
-	})
-	a.code.MakeContext().IteratePrefix(a.rwTx, []byte{}, func(k, v []byte) {
-		fmt.Printf("cod - %x : %x\n", k, v)
-	})
-	a.storage.MakeContext().IteratePrefix(a.rwTx, []byte{}, func(k, v []byte) {
-		fmt.Printf("sto - %x : %x\n", k, v)
-	})
-	a.commitment.MakeContext().IteratePrefix(a.rwTx, []byte{}, func(k, v []byte) {
-		fmt.Printf("com - %x : %x\n", k, truncate(v, 80))
-	})
 	return nil
 }
 
@@ -1894,8 +1871,7 @@ func (ac *AggregatorV3Context) CodeHistoricalStateRange(startTxNum uint64, from,
 	return ac.code.hc.WalkAsOf(startTxNum, from, to, tx, limit)
 }
 
-type FilesStats22 struct {
-}
+type FilesStats22 struct{}
 
 func (a *AggregatorV3) Stats() FilesStats22 {
 	var fs FilesStats22
@@ -1938,60 +1914,6 @@ func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
 }
 
 // --- Domain part START ---
-// Deprecated
-func (ac *AggregatorV3Context) branchFn(prefix []byte) ([]byte, error) {
-	stateValue, ok, err := ac.CommitmentLatest(prefix, ac.a.rwTx)
-	if err != nil {
-		return nil, fmt.Errorf("failed read branch %x: %w", commitment.CompactedKeyToHex(prefix), err)
-	}
-	if !ok || stateValue == nil {
-		return nil, nil
-	}
-	// fmt.Printf("Returning branch data prefix [%x], mergeVal=[%x]\n", commitment.CompactedKeyToHex(prefix), stateValue)
-	return stateValue[2:], nil // Skip touchMap but keep afterMap
-}
-
-func (ac *AggregatorV3Context) accountFn(plainKey []byte, cell *commitment.Cell) error {
-	encAccount, _, err := ac.AccountLatest(plainKey, ac.a.rwTx)
-	if err != nil {
-		return err
-	}
-	cell.Nonce = 0
-	cell.Balance.Clear()
-	copy(cell.CodeHash[:], commitment.EmptyCodeHash)
-	if len(encAccount) > 0 {
-		nonce, balance, chash := DecodeAccountBytes(encAccount)
-		cell.Nonce = nonce
-		cell.Balance.Set(balance)
-		if chash != nil {
-			copy(cell.CodeHash[:], chash)
-		}
-	}
-
-	code, ok, err := ac.CodeLatest(plainKey, ac.a.rwTx)
-	if err != nil {
-		return err
-	}
-	if ok && code != nil {
-		ac.a.commitment.updates.keccak.Reset()
-		ac.a.commitment.updates.keccak.Write(code)
-		copy(cell.CodeHash[:], ac.a.commitment.updates.keccak.Sum(nil))
-	}
-	cell.Delete = len(encAccount) == 0 && len(code) == 0
-	return nil
-}
-
-func (ac *AggregatorV3Context) storageFn(plainKey []byte, cell *commitment.Cell) error {
-	// Look in the summary table first
-	enc, _, err := ac.StorageLatest(plainKey[:length.Addr], plainKey[length.Addr:], ac.a.rwTx)
-	if err != nil {
-		return err
-	}
-	cell.StorageLen = len(enc)
-	copy(cell.Storage[:], enc)
-	cell.Delete = cell.StorageLen == 0
-	return nil
-}
 
 func (ac *AggregatorV3Context) DomainRange(tx kv.Tx, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error) {
 	switch domain {

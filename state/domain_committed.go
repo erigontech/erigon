@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"container/heap"
 	"context"
-	"crypto/md5"
 	"encoding/binary"
 	"fmt"
 	"hash"
@@ -78,19 +77,19 @@ func ParseCommitmentMode(s string) CommitmentMode {
 type ValueMerger func(prev, current []byte) (merged []byte, err error)
 
 type UpdateTree struct {
-	tree   *btree.BTreeG[*CommitmentItem]
+	tree   *btree.BTreeG[*commitmentItem]
 	keccak hash.Hash
 }
 
 func NewUpdateTree() *UpdateTree {
 	return &UpdateTree{
-		tree:   btree.NewG[*CommitmentItem](64, commitmentItemLess),
+		tree:   btree.NewG[*commitmentItem](64, commitmentItemLess),
 		keccak: sha3.NewLegacyKeccak256(),
 	}
 }
 
-func (t *UpdateTree) Get(key []byte) (*CommitmentItem, bool) {
-	c := &CommitmentItem{plainKey: common.Copy(key),
+func (t *UpdateTree) Get(key []byte) (*commitmentItem, bool) {
+	c := &commitmentItem{plainKey: common.Copy(key),
 		hashedKey: t.hashAndNibblizeKey(key),
 		update:    commitment.Update{}}
 	copy(c.update.CodeHashOrStorage[:], commitment.EmptyCodeHash)
@@ -100,8 +99,8 @@ func (t *UpdateTree) Get(key []byte) (*CommitmentItem, bool) {
 	return c, false
 }
 
-func (t *UpdateTree) GetWithDomain(key []byte, domain *SharedDomains) (*CommitmentItem, bool) {
-	c := &CommitmentItem{plainKey: common.Copy(key), hashedKey: t.hashAndNibblizeKey(key)}
+func (t *UpdateTree) GetWithDomain(key []byte, domain *SharedDomains) (*commitmentItem, bool) {
+	c := &commitmentItem{plainKey: common.Copy(key), hashedKey: t.hashAndNibblizeKey(key)}
 	if t.tree.Has(c) {
 		return t.tree.Get(c)
 	}
@@ -171,19 +170,19 @@ func (t *UpdateTree) TouchUpdate(key []byte, update commitment.Update) {
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
-func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *CommitmentItem, val []byte)) {
+func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, val []byte)) {
 	item, _ := t.Get(key)
 	fn(item, val)
 	t.tree.ReplaceOrInsert(item)
 }
 
-func (t *UpdateTree) TouchPlainKeyDom(d *SharedDomains, key, val []byte, fn func(c *CommitmentItem, val []byte)) {
+func (t *UpdateTree) TouchPlainKeyDom(d *SharedDomains, key, val []byte, fn func(c *commitmentItem, val []byte)) {
 	item, _ := t.GetWithDomain(key, d)
 	fn(item, val)
 	t.tree.ReplaceOrInsert(item)
 }
 
-func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
+func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = commitment.DeleteUpdate
 		return
@@ -212,8 +211,8 @@ func (t *UpdateTree) TouchAccount(c *CommitmentItem, val []byte) {
 	}
 }
 
-func (t *UpdateTree) UpdatePrefix(prefix, val []byte, fn func(c *CommitmentItem, val []byte)) {
-	t.tree.AscendGreaterOrEqual(&CommitmentItem{}, func(item *CommitmentItem) bool {
+func (t *UpdateTree) UpdatePrefix(prefix, val []byte, fn func(c *commitmentItem, val []byte)) {
+	t.tree.AscendGreaterOrEqual(&commitmentItem{}, func(item *commitmentItem) bool {
 		if !bytes.HasPrefix(item.plainKey, prefix) {
 			return false
 		}
@@ -222,7 +221,7 @@ func (t *UpdateTree) UpdatePrefix(prefix, val []byte, fn func(c *CommitmentItem,
 	})
 }
 
-func (t *UpdateTree) TouchStorage(c *CommitmentItem, val []byte) {
+func (t *UpdateTree) TouchStorage(c *commitmentItem, val []byte) {
 	c.update.ValLength = len(val)
 	if len(val) == 0 {
 		c.update.Flags = commitment.DeleteUpdate
@@ -232,7 +231,7 @@ func (t *UpdateTree) TouchStorage(c *CommitmentItem, val []byte) {
 	}
 }
 
-func (t *UpdateTree) TouchCode(c *CommitmentItem, val []byte) {
+func (t *UpdateTree) TouchCode(c *commitmentItem, val []byte) {
 	t.keccak.Reset()
 	t.keccak.Write(val)
 	copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
@@ -240,11 +239,11 @@ func (t *UpdateTree) TouchCode(c *CommitmentItem, val []byte) {
 	c.update.Flags |= commitment.CodeUpdate
 }
 
-func (t *UpdateTree) ListItems() []CommitmentItem {
-	updates := make([]CommitmentItem, t.tree.Len())
+func (t *UpdateTree) ListItems() []commitmentItem {
+	updates := make([]commitmentItem, t.tree.Len())
 
 	j := 0
-	t.tree.Ascend(func(item *CommitmentItem) bool {
+	t.tree.Ascend(func(item *commitmentItem) bool {
 		updates[j] = *item
 		j++
 		return true
@@ -259,7 +258,7 @@ func (t *UpdateTree) List(clear bool) ([][]byte, [][]byte, []commitment.Update) 
 	updates := make([]commitment.Update, t.tree.Len())
 
 	j := 0
-	t.tree.Ascend(func(item *CommitmentItem) bool {
+	t.tree.Ascend(func(item *commitmentItem) bool {
 		plainKeys[j] = item.plainKey
 		hashedKeys[j] = item.hashedKey
 		updates[j] = item.update
@@ -278,7 +277,7 @@ func (t *UpdateTree) hashAndNibblizeKey(key []byte) []byte {
 
 	t.keccak.Reset()
 	if len(key) < length.Addr {
-		t.keccak.Write(key[:])
+		t.keccak.Write(key)
 	} else {
 		t.keccak.Write(key[:length.Addr])
 	}
@@ -355,41 +354,29 @@ func (d *DomainCommitted) SetCommitmentMode(m CommitmentMode) { d.mode = m }
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
-func (d *DomainCommitted) TouchPlainKey(key, val []byte, fn func(c *CommitmentItem, val []byte)) {
+func (d *DomainCommitted) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, val []byte)) {
 	d.updates.TouchPlainKey(key, val, fn)
 }
 
-func (d *DomainCommitted) TouchAccount(c *CommitmentItem, val []byte) {
+func (d *DomainCommitted) TouchAccount(c *commitmentItem, val []byte) {
 	d.updates.TouchAccount(c, val)
 }
 
-func (d *DomainCommitted) TouchStorage(c *CommitmentItem, val []byte) {
+func (d *DomainCommitted) TouchStorage(c *commitmentItem, val []byte) {
 	d.updates.TouchStorage(c, val)
 }
 
-func (d *DomainCommitted) TouchCode(c *CommitmentItem, val []byte) {
+func (d *DomainCommitted) TouchCode(c *commitmentItem, val []byte) {
 	d.updates.TouchCode(c, val)
 }
 
-type CommitmentItem struct {
+type commitmentItem struct {
 	plainKey  []byte
 	hashedKey []byte
 	update    commitment.Update
 }
 
-func (ci *CommitmentItem) PlainKey() []byte {
-	return ci.plainKey
-}
-
-func (ci *CommitmentItem) HashedKey() []byte {
-	return ci.hashedKey
-}
-
-func (ci *CommitmentItem) Update() commitment.Update {
-	return ci.update
-}
-
-func commitmentItemLess(i, j *CommitmentItem) bool {
+func commitmentItemLess(i, j *commitmentItem) bool {
 	return bytes.Compare(i.hashedKey, j.hashedKey) < 0
 }
 
@@ -404,14 +391,8 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 		return err
 	}
 
-	//var dbuf [8]byte
-	//binary.BigEndian.PutUint64(dbuf[:], d.txNum)
-
-	mw := md5.New()
-	mw.Write(encoded)
-
 	if d.trace {
-		fmt.Printf("commitment put %d rh %x vh %x\n\n", d.txNum, rh, mw.Sum(nil))
+		fmt.Printf("commitment put %d rh %x\n\n", d.txNum, rh)
 	}
 	if err := d.Domain.PutWithPrev(keyCommitmentState, nil, encoded, d.prevState); err != nil {
 		return err
@@ -800,16 +781,16 @@ func (d *DomainCommitted) SeekCommitment(sinceTx uint64) (blockNum, txNum uint64
 	defer ctx.Close()
 
 	var latestState []byte
-	d.defaultDc.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) {
+	err = d.defaultDc.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) {
 		txn := binary.BigEndian.Uint64(value)
 		if txn == sinceTx {
 			latestState = value
 		}
-		mw := md5.New()
-		mw.Write(value)
-
-		fmt.Printf("[commitment] GET txn=%d %x hash %x value: %x\n", txn, key, mw.Sum(nil), value[:])
+		fmt.Printf("[commitment] GET txn=%d %x value: %x\n", txn, key, value)
 	})
+	if err != nil {
+		return 0, 0, err
+	}
 	return d.Restore(latestState)
 }
 
