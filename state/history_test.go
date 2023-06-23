@@ -53,7 +53,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (strin
 			settingsTable: kv.TableCfgItem{},
 		}
 	}).MustOpen()
-	h, err := NewHistory(path, path, 16, "hist", keysTable, indexTable, valsTable, false, nil, false, logger)
+	h, err := NewHistory(path, path, 16, "hist", keysTable, indexTable, valsTable, false, nil, largeValues, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(db.Close)
 	tb.Cleanup(h.Close)

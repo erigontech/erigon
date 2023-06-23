@@ -1379,6 +1379,7 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 		} else {
 			vv, err := valsCDup.SeekBothRange(seek, nil)
 			if err != nil {
+				panic(err)
 				return err
 			}
 			if f != nil {
@@ -1468,6 +1469,7 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 		} else {
 			vv, err := valsCDup.SeekBothRange(seek, nil)
 			if err != nil {
+				panic(err)
 				return err
 			}
 			fmt.Printf("del buffered value %x v %x\n", k, vv)
