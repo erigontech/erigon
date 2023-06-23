@@ -813,7 +813,8 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
-	cfg.CapellaForkEpoch = math.MaxUint64
+	cfg.CapellaForkEpoch = 648704
+	cfg.CapellaForkVersion = 0x03000064
 	cfg.DenebForkEpoch = math.MaxUint64
 	cfg.InitializeForkSchedule()
 	return cfg

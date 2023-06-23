@@ -410,7 +410,7 @@ func initialState1() error {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, true)
+	})
 	if err != nil {
 		return err
 	}
