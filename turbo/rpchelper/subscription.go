@@ -2,7 +2,6 @@ package rpchelper
 
 import (
 	"sync"
-	"sync/atomic"
 )
 
 // a simple interface for subscriptions for rpc helper
@@ -13,7 +12,8 @@ type Sub[T any] interface {
 
 type chan_sub[T any] struct {
 	ch     chan T
-	closed atomic.Bool
+	closed bool
+	lock   sync.Mutex
 }
 
 // buffered channel
@@ -27,19 +27,23 @@ func newChanSub[T any](size int) *chan_sub[T] {
 	return o
 }
 func (s *chan_sub[T]) Send(x T) {
-	if s.closed.Load() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if s.closed {
 		return
 	}
-
 	select {
 	case s.ch <- x:
 	default: // the sub is overloaded, dispose message
 	}
 }
 func (s *chan_sub[T]) Close() {
-	if swapped := s.closed.CompareAndSwap(false, true); !swapped {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if s.closed {
 		return
 	}
+	s.closed = true
 	close(s.ch)
 }
 
