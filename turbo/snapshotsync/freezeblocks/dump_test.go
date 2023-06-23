@@ -173,7 +173,7 @@ func createDumpTestKV(t *testing.T, chainSize int) *stages.MockSentry {
 			t.Fatalf("failed to create tx: %v", txErr)
 		}
 		b.AddTx(tx)
-	}, false)
+	})
 	if err != nil {
 		t.Error(err)
 	}

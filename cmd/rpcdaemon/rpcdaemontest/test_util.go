@@ -91,7 +91,7 @@ func CreateTestSentry(t *testing.T) (*stages.MockSentry, *core.ChainPack, []*cor
 
 	// Generate empty chain to have some orphaned blocks for tests
 	orphanedChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
-	}, true)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func generateChain(
 			block.AddTx(txn)
 		}
 		contractBackend.Commit()
-	}, true)
+	})
 }
 
 type IsMiningMock struct{}
@@ -422,7 +422,7 @@ func CreateTestSentryForTraces(t *testing.T) *stages.MockSentry {
 		tx, _ := types.SignTx(types.NewTransaction(0, a2,
 			u256.Num0, 50000, u256.Num1, []byte{0x01, 0x00, 0x01, 0x00}), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -528,7 +528,7 @@ func CreateTestSentryForTracesCollision(t *testing.T) *stages.MockSentry {
 		tx, _ = types.SignTx(types.NewTransaction(2, bb,
 			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}

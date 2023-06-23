@@ -113,7 +113,7 @@ func newTestBackend(t *testing.T) *testBackend {
 			t.Fatalf("failed to create tx: %v", txErr)
 		}
 		b.AddTx(tx)
-	}, false)
+	})
 	if err != nil {
 		t.Error(err)
 	}
