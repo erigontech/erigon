@@ -601,7 +601,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 				hash := checkpoint.Hash()
 				ctx := context.Background()
 
-				tx, err := c.ChainDB.BeginRw(ctx)
+				tx, err := c.ChainDB.BeginRo(ctx)
 				if err != nil {
 					return nil, err
 				}
