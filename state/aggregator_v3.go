@@ -747,7 +747,7 @@ func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 	}
 
 	log.Info("[stat] aggregation is finished",
-		"range", fmt.Sprintf("%.2fM-%.2fM", float64(txFrom)/10e5, float64(txTo)/10e5),
+		"step", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(a.aggregationStep), float64(txTo)/float64(a.aggregationStep)),
 		"took", time.Since(stepStartedAt))
 
 	//mxStepTook.UpdateDuration(stepStartedAt)
