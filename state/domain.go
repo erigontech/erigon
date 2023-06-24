@@ -549,6 +549,7 @@ func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := h.values.Load(tx, h.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	h.kvsize.Store(0)
 	return nil
 }
 
