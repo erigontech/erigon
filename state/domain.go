@@ -1396,7 +1396,6 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
-	var pos uint64
 	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
 		select {
 		case <-ctx.Done():
@@ -1405,7 +1404,6 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 			d.logger.Info("[snapshots] prune domain", "name", d.filenameBase,
 				"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)))
 		default:
-			pos++
 		}
 
 		if !bytes.Equal(v, stepBytes) {
