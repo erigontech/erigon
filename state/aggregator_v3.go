@@ -1046,6 +1046,7 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
+	a.domains.estSize.Store(0)
 	return nil
 }
 
