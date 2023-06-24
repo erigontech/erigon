@@ -810,6 +810,7 @@ Loop:
 						if err != nil {
 							return err
 						}
+						agg.StartWrites()
 						applyWorker.ResetTx(applyTx)
 						agg.SetTx(applyTx)
 						doms.SetTx(applyTx)
