@@ -593,7 +593,7 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 		if err := h.d.tx.Put(h.d.keysTable, fullkey[kl:], fullkey[:kl]); err != nil {
 			return err
 		}
-		if err := h.d.tx.Put(h.d.valsTable, fullkey, value); err != nil {
+		if err := h.d.tx.Put(h.d.valsTable, fullkey[:kl], common.Append(fullkey[kl:], value)); err != nil {
 			return err
 		}
 		return nil
@@ -1332,12 +1332,12 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 					return err
 				}
 			}
-			dups, err := valsCDup.CountDuplicates()
-			if err != nil {
-				return err
-			}
-
-			fmt.Printf("rm %d dupes %x v %x\n", dups, seek, vv)
+			//dups, err := valsCDup.CountDuplicates()
+			//if err != nil {
+			//	return err
+			//}
+			//
+			//fmt.Printf("rm %d dupes %x v %x\n", dups, seek, vv)
 			if err = valsCDup.DeleteCurrentDuplicates(); err != nil {
 				return err
 			}
