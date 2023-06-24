@@ -43,7 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -195,9 +194,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 
 	var stateWriter state.StateWriter
 	if ethconfig.EnableHistoryV4InTest {
-		agg := tx.(*temporal.Tx).Agg()
 		stateWriter = state.NewWriterV4(tx.(kv.TemporalTx))
-		defer agg.StartUnbufferedWrites().FinishWrites()
 	} else {
 		for addr, account := range g.Alloc {
 			if len(account.Code) > 0 || len(account.Storage) > 0 {

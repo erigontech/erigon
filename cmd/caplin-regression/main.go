@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cmd/caplin-regression/regression"
 	"github.com/ledgerwatch/log/v3"
-	//nolint:gosec
 )
 
 var nameTestsMap = map[string]func(*forkchoice.ForkChoiceStore, *cltypes.SignedBeaconBlock) error{

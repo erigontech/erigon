@@ -322,8 +322,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	if ethconfig.EnableHistoryV4InTest {
 		agg := tx.(*temporal.Tx).Agg()
 		sd := agg.SharedDomains()
-		defer agg.StartUnbufferedWrites().FinishWrites()
-		agg.SetTx(tx)
 		stateWriter, stateReader = state.WrapStateIO(sd)
 		sd.SetTx(tx)
 		defer agg.CloseSharedDomains()
