@@ -1396,11 +1396,6 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
-	totalKeys, err := keysCursor.CountDuplicates()
-	if err != nil {
-		return err
-	}
-
 	var pos uint64
 	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
 		select {
@@ -1408,8 +1403,7 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 			return ctx.Err()
 		case <-logEvery.C:
 			d.logger.Info("[snapshots] prune domain", "name", d.filenameBase,
-				"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
-				"progress", fmt.Sprintf("%.2f%%", (float64(pos)/float64(totalKeys))*100))
+				"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)))
 		default:
 			pos++
 		}
