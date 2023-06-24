@@ -88,7 +88,7 @@ func NewUpdateTree() *UpdateTree {
 	}
 }
 
-func (t *UpdateTree) Get(key []byte) (*commitmentItem, bool) {
+func (t *UpdateTree) get(key []byte) (*commitmentItem, bool) {
 	c := &commitmentItem{plainKey: common.Copy(key),
 		hashedKey: t.hashAndNibblizeKey(key),
 		update:    commitment.Update{}}
@@ -99,7 +99,7 @@ func (t *UpdateTree) Get(key []byte) (*commitmentItem, bool) {
 	return c, false
 }
 
-func (t *UpdateTree) GetWithDomain(key []byte, domain *SharedDomains) (*commitmentItem, bool) {
+func (t *UpdateTree) getWithDomain(key []byte, domain *SharedDomains) (*commitmentItem, bool) {
 	c := &commitmentItem{plainKey: common.Copy(key), hashedKey: t.hashAndNibblizeKey(key)}
 	if t.tree.Has(c) {
 		return t.tree.Get(c)
@@ -163,7 +163,7 @@ func (t *UpdateTree) GetWithDomain(key []byte, domain *SharedDomains) (*commitme
 }
 
 func (t *UpdateTree) TouchUpdate(key []byte, update commitment.Update) {
-	item, _ := t.Get(key)
+	item, _ := t.get(key)
 	item.update.Merge(&update)
 	t.tree.ReplaceOrInsert(item)
 }
@@ -171,13 +171,13 @@ func (t *UpdateTree) TouchUpdate(key []byte, update commitment.Update) {
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, val []byte)) {
-	item, _ := t.Get(key)
+	item, _ := t.get(key)
 	fn(item, val)
 	t.tree.ReplaceOrInsert(item)
 }
 
 func (t *UpdateTree) TouchPlainKeyDom(d *SharedDomains, key, val []byte, fn func(c *commitmentItem, val []byte)) {
-	item, _ := t.GetWithDomain(key, d)
+	item, _ := t.getWithDomain(key, d)
 	fn(item, val)
 	t.tree.ReplaceOrInsert(item)
 }
@@ -309,6 +309,7 @@ type DomainCommitted struct {
 
 	comKeys uint64
 	comTook time.Duration
+	discard bool
 }
 
 func (d *DomainCommitted) PatriciaState() ([]byte, error) {
@@ -345,6 +346,7 @@ func NewCommittedDomain(d *Domain, mode CommitmentMode, trieVariant commitment.T
 		mode:         mode,
 		trace:        true,
 		updates:      NewUpdateTree(),
+		discard:      dbg.DiscardCommitment(),
 		patriciaTrie: commitment.InitializeTrie(trieVariant),
 		branchMerger: commitment.NewHexBranchMerger(8192),
 	}
@@ -355,6 +357,9 @@ func (d *DomainCommitted) SetCommitmentMode(m CommitmentMode) { d.mode = m }
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (d *DomainCommitted) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, val []byte)) {
+	if d.discard {
+		return
+	}
 	d.updates.TouchPlainKey(key, val, fn)
 }
 
@@ -727,7 +732,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 // Evaluates commitment for processed state.
 func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
 	if dbg.DiscardCommitment() {
-		d.updates.tree.Clear(true)
+		d.updates.List(true)
 		return nil, nil, nil
 	}
 
