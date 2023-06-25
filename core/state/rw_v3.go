@@ -26,8 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
-const CodeSizeTable = "CodeSize"
-
 var ExecTxsDone = metrics.NewCounter(`exec_txs_done`)
 
 type StateV3 struct {
@@ -392,12 +390,7 @@ func (rs *StateV3) SizeEstimate() (r uint64) {
 }
 
 func (rs *StateV3) ReadsValid(readLists map[string]*libstate.KvList) bool {
-	for table, list := range readLists {
-		if !rs.domains.ReadsValidBtree(kv.Domain(table), list) {
-			return false
-		}
-	}
-	return true
+	return rs.domains.ReadsValid(readLists)
 }
 
 // StateWriterBufferedV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
@@ -607,7 +600,7 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 	var sizebuf [8]byte
 	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 	if !r.discardReadList {
-		r.readLists[CodeSizeTable].Push(string(address[:]), sizebuf[:])
+		r.readLists[libstate.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
 	}
 	size := len(enc)
 	if r.trace {
@@ -647,10 +640,10 @@ func returnWriteList(v map[string]*libstate.KvList) {
 var readListPool = sync.Pool{
 	New: func() any {
 		return map[string]*libstate.KvList{
-			string(kv.AccountsDomain): {},
-			string(kv.CodeDomain):     {},
-			CodeSizeTable:             {},
-			string(kv.StorageDomain):  {},
+			string(kv.AccountsDomain):  {},
+			string(kv.CodeDomain):      {},
+			libstate.CodeSizeTableFake: {},
+			string(kv.StorageDomain):   {},
 		}
 	},
 }
