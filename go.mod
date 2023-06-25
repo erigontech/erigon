@@ -3,12 +3,12 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230625040202-54e113d78d08
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230625082520-961f698d0362
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230622075030-1d69651854c2
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.1.0 // indirect
-	github.com/torquem-ch/mdbx-go v0.27.10
+	github.com/torquem-ch/mdbx-go v0.31.0
 )
 
 require (
