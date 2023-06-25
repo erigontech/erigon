@@ -64,8 +64,8 @@ type SharedDomains struct {
 	estSize  atomic.Uint64
 
 	muMaps     sync.RWMutex
-	account    *btree2.Map[string, []byte]
-	code       *btree2.Map[string, []byte]
+	account    map[string][]byte
+	code       map[string][]byte
 	storage    *btree2.Map[string, []byte]
 	commitment *btree2.Map[string, []byte]
 	Account    *Domain
@@ -81,9 +81,9 @@ type SharedDomains struct {
 func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 	sd := &SharedDomains{
 		Account:    a,
-		account:    btree2.NewMap[string, []byte](128),
+		account:    map[string][]byte{},
 		Code:       c,
-		code:       btree2.NewMap[string, []byte](128),
+		code:       map[string][]byte{},
 		Storage:    s,
 		storage:    btree2.NewMap[string, []byte](128),
 		Commitment: comm,
@@ -139,8 +139,8 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, step uint64, 
 func (sd *SharedDomains) clear() {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
-	sd.account.Clear()
-	sd.code.Clear()
+	sd.account = map[string][]byte{}
+	sd.code = map[string][]byte{}
 	sd.commitment.Clear()
 
 	sd.Commitment.updates.List(true)
@@ -158,17 +158,19 @@ func (sd *SharedDomains) put(table kv.Domain, key, val []byte) {
 func (sd *SharedDomains) puts(table kv.Domain, key string, val []byte) {
 	switch table {
 	case kv.AccountsDomain:
-		if old, ok := sd.account.Set(key, val); ok {
+		if old, ok := sd.account[key]; ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
+		sd.account[key] = val
 	case kv.CodeDomain:
-		if old, ok := sd.code.Set(key, val); ok {
+		if old, ok := sd.code[key]; ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
+		sd.code[key] = val
 	case kv.StorageDomain:
 		if old, ok := sd.storage.Set(key, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
@@ -198,9 +200,9 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	keyS := hex.EncodeToString(key)
 	switch table {
 	case kv.AccountsDomain:
-		v, ok = sd.account.Get(keyS)
+		v, ok = sd.account[keyS]
 	case kv.CodeDomain:
-		v, ok = sd.code.Get(keyS)
+		v, ok = sd.code[keyS]
 	case kv.StorageDomain:
 		v, ok = sd.storage.Get(keyS)
 	case kv.CommitmentDomain:
@@ -251,29 +253,55 @@ func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
 	return v, nil
 }
 
-func (sd *SharedDomains) ReadsValidBtree(table kv.Domain, list *KvList) bool {
+const CodeSizeTableFake = "CodeSize"
+
+func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 	sd.muMaps.RLock()
 	defer sd.muMaps.RUnlock()
 
-	var m *btree2.Map[string, []byte]
-	switch table {
-	case kv.AccountsDomain:
-		m = sd.account
-	case kv.CodeDomain:
-		m = sd.code
-	case kv.StorageDomain:
-		m = sd.storage
-	default:
-		panic(table)
-	}
-
-	for i, key := range list.Keys {
-		if val, ok := m.Get(key); ok {
-			if !bytes.Equal(list.Vals[i], val) {
-				return false
+	for table, list := range readLists {
+		switch table {
+		case string(kv.AccountsDomain):
+			m := sd.account
+			for i, key := range list.Keys {
+				if val, ok := m[key]; ok {
+					if !bytes.Equal(list.Vals[i], val) {
+						return false
+					}
+				}
 			}
+		case string(kv.CodeDomain):
+			m := sd.code
+			for i, key := range list.Keys {
+				if val, ok := m[key]; ok {
+					if !bytes.Equal(list.Vals[i], val) {
+						return false
+					}
+				}
+			}
+		case string(kv.StorageDomain):
+			m := sd.storage
+			for i, key := range list.Keys {
+				if val, ok := m.Get(key); ok {
+					if !bytes.Equal(list.Vals[i], val) {
+						return false
+					}
+				}
+			}
+		case CodeSizeTableFake:
+			m := sd.code
+			for i, key := range list.Keys {
+				if val, ok := m[key]; ok {
+					if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val)) {
+						return false
+					}
+				}
+			}
+		default:
+			panic(table)
 		}
 	}
+
 	return true
 }
 
@@ -619,8 +647,8 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 
 func (sd *SharedDomains) Close() {
 	sd.aggCtx.Close()
-	sd.account.Clear()
-	sd.code.Clear()
+	sd.account = nil
+	sd.code = nil
 	sd.storage.Clear()
 	sd.commitment.Clear()
 	sd.Account.Close()
