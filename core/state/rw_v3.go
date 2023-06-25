@@ -68,15 +68,6 @@ func (rs *StateV3) resetTxTask(txTask *exec22.TxTask) {
 	txTask.Logs = nil
 	txTask.TraceFroms = nil
 	txTask.TraceTos = nil
-
-	/*
-		txTask.ReadLists = nil
-		txTask.WriteLists = nil
-		txTask.AccountPrevs = nil
-		txTask.AccountDels = nil
-		txTask.StoragePrevs = nil
-		txTask.CodePrevs = nil
-	*/
 }
 
 func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
