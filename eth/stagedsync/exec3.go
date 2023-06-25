@@ -770,7 +770,7 @@ Loop:
 					break
 				}
 
-				var t1, t2, t3, t31, t4, t5, t6 time.Duration
+				var t1, t2, t3, t32, t4, t5, t6 time.Duration
 				commitStart := time.Now()
 				if err := func() error {
 					_, err := agg.ComputeCommitment(true, false)
@@ -801,7 +801,7 @@ Loop:
 
 					tt = time.Now()
 					applyTx.CollectMetrics()
-					t31 = time.Since(tt)
+					t32 = time.Since(tt)
 					if !useExternalTx {
 						tt = time.Now()
 						if err = applyTx.Commit(); err != nil {
