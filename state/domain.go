@@ -1409,7 +1409,6 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 		default:
 		}
 
-		fmt.Printf("stepBytes, v: %x, %x\n", stepBytes, v)
 		if !bytes.Equal(v, stepBytes) {
 			continue
 		}

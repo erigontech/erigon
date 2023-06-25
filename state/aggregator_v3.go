@@ -158,6 +158,9 @@ func (a *AggregatorV3) OpenFolder() error {
 	if err = a.code.OpenFolder(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
+	if err = a.commitment.OpenFolder(); err != nil {
+		return fmt.Errorf("OpenFolder: %w", err)
+	}
 	if err = a.logAddrs.OpenFolder(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
@@ -230,6 +233,8 @@ func (a *AggregatorV3) CleanDir() {
 	a.accounts.deleteGarbageFiles()
 	a.storage.deleteGarbageFiles()
 	a.code.deleteGarbageFiles()
+	a.code.deleteGarbageFiles()
+	a.commitment.deleteGarbageFiles()
 	a.logAddrs.deleteGarbageFiles()
 	a.logTopics.deleteGarbageFiles()
 	a.tracesFrom.deleteGarbageFiles()
@@ -240,6 +245,7 @@ func (a *AggregatorV3) CleanDir() {
 	ac.a.accounts.cleanAfterFreeze(ac.accounts.frozenTo())
 	ac.a.storage.cleanAfterFreeze(ac.storage.frozenTo())
 	ac.a.code.cleanAfterFreeze(ac.code.frozenTo())
+	ac.a.commitment.cleanAfterFreeze(ac.code.frozenTo())
 	ac.a.logAddrs.cleanAfterFreeze(ac.logAddrs.frozenTo())
 	ac.a.logTopics.cleanAfterFreeze(ac.logTopics.frozenTo())
 	ac.a.tracesFrom.cleanAfterFreeze(ac.tracesFrom.frozenTo())
@@ -1054,8 +1060,8 @@ func (a *AggregatorV3) CanPrune(tx kv.Tx) bool {
 	return a.CanPruneFrom(tx) < a.minimaxTxNumInFiles.Load()
 }
 func (a *AggregatorV3) CanPruneFrom(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, kv.TblTracesToKeys)
-	fst2, _ := kv.FirstKey(tx, kv.TblStorageHistoryKeys)
+	fst, _ := kv.FirstKey(tx, a.tracesTo.indexKeysTable)
+	fst2, _ := kv.FirstKey(tx, a.storage.History.indexKeysTable)
 	if len(fst) > 0 && len(fst2) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
 		fstInDb2 := binary.BigEndian.Uint64(fst2)
@@ -1078,6 +1084,10 @@ func (a *AggregatorV3) Prune(ctx context.Context, limit uint64) error {
 	if dbg.NoPrune() {
 		return nil
 	}
+	to := a.minimaxTxNumInFiles.Load()
+	if to == 0 {
+		return nil
+	}
 
 	//if limit/a.aggregationStep > StepsInBiggestFile {
 	//	ctx, cancel := context.WithCancel(ctx)
@@ -1089,10 +1099,7 @@ func (a *AggregatorV3) Prune(ctx context.Context, limit uint64) error {
 	//		_ = a.Warmup(ctx, 0, cmp.Max(a.aggregationStep, limit)) // warmup is asyn and moving faster than data deletion
 	//	}()
 	//}
-	to := a.minimaxTxNumInFiles.Load()
-	if to == 0 {
-		return nil
-	}
+
 	return a.prune(ctx, 0, to, limit)
 }
 
@@ -1187,7 +1194,7 @@ func (a *AggregatorV3) recalcMaxTxNum() {
 	if txNum := a.code.endTxNumMinimax(); txNum < min {
 		min = txNum
 	}
-	if txNum := a.commitment.endTxNumMinimax(); txNum < min && !dbg.DiscardCommitment() {
+	if txNum := a.commitment.endTxNumMinimax(); txNum < min {
 		min = txNum
 	}
 	if txNum := a.logAddrs.endTxNumMinimax(); txNum < min {
