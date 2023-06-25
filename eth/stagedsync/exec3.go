@@ -807,7 +807,7 @@ Loop:
 						if err = applyTx.Commit(); err != nil {
 							return err
 						}
-						t3 = time.Since(tt)
+						t4 = time.Since(tt)
 						applyTx, err = cfg.db.BeginRw(context.Background())
 						if err != nil {
 							return err
