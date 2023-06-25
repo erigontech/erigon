@@ -1143,7 +1143,6 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 		//TODO: build .kvi
 		fitem := item
 		g.Go(func() error {
-			fmt.Printf("idx1: %s, %s\n", fitem.decompressor.FilePath(), fitem.decompressor.FileName())
 			idxPath := fitem.decompressor.FilePath()
 			idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
 
