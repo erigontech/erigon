@@ -770,7 +770,7 @@ Loop:
 					break
 				}
 
-				var t1, t2, t3, t4 time.Duration
+				var t1, t2, t3, t4, t5, t6 time.Duration
 				commitStart := time.Now()
 				if err := func() error {
 					_, err := agg.ComputeCommitment(true, false)
@@ -814,18 +814,32 @@ Loop:
 						applyWorker.ResetTx(applyTx)
 						agg.SetTx(applyTx)
 						doms.SetTx(applyTx)
+						if blocksFreezeCfg.Produce {
+							//agg.BuildFilesInBackground(outputTxNum.Load())
+							tt = time.Now()
+							agg.AggregateFilesInBackground()
+							t5 = time.Since(tt)
+							tt = time.Now()
+							if agg.CanPrune(applyTx) {
+								if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
+									return err
+								}
+							}
+							t6 = time.Since(tt)
+						}
 					}
 
 					return nil
 				}(); err != nil {
 					return err
 				}
-				logger.Info("Committed", "time", time.Since(commitStart), "commitment", t1, "agg.prune", t2, "agg.flush", t3, "tx.commit", t4)
+				logger.Info("Committed", "time", time.Since(commitStart),
+					"commitment", t1, "prune", t2, "flush", t3, "tx.commit", t4, "aggregate", t5, "prune2", t6)
 			default:
 			}
 		}
 
-		if blocksFreezeCfg.Produce {
+		if parallel && blocksFreezeCfg.Produce {
 			//agg.BuildFilesInBackground(outputTxNum.Load())
 			agg.AggregateFilesInBackground()
 		}
