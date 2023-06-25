@@ -637,7 +637,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		p = ps.AddNew(btFileName, uint64(keyCount*2))
 		defer ps.Delete(p)
 		btPath := filepath.Join(d.dir, btFileName)
-		err = BuildBtreeIndexWithDecompressor(btPath, valuesIn.decompressor, p, d.logger)
+		err = BuildBtreeIndexWithDecompressor(btPath, valuesIn.decompressor, p, d.tmpdir, d.logger)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}

@@ -1089,7 +1089,11 @@ func (a *AggregatorV3) Prune(ctx context.Context, limit uint64) error {
 	//		_ = a.Warmup(ctx, 0, cmp.Max(a.aggregationStep, limit)) // warmup is asyn and moving faster than data deletion
 	//	}()
 	//}
-	return a.prune(ctx, 0, a.minimaxTxNumInFiles.Load(), limit)
+	to := a.minimaxTxNumInFiles.Load()
+	if to == 0 {
+		return nil
+	}
+	return a.prune(ctx, 0, to, limit)
 }
 
 func (a *AggregatorV3) prune(ctx context.Context, txFrom, txTo, limit uint64) error {
@@ -1183,7 +1187,7 @@ func (a *AggregatorV3) recalcMaxTxNum() {
 	if txNum := a.code.endTxNumMinimax(); txNum < min {
 		min = txNum
 	}
-	if txNum := a.commitment.endTxNumMinimax(); txNum < min {
+	if txNum := a.commitment.endTxNumMinimax(); txNum < min && !dbg.DiscardCommitment() {
 		min = txNum
 	}
 	if txNum := a.logAddrs.endTxNumMinimax(); txNum < min {
