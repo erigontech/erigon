@@ -839,7 +839,7 @@ Loop:
 			}
 		}
 
-		if parallel && blocksFreezeCfg.Produce {
+		if parallel && blocksFreezeCfg.Produce { // sequential exec - does aggregate right after commit
 			//agg.BuildFilesInBackground(outputTxNum.Load())
 			agg.AggregateFilesInBackground()
 		}
