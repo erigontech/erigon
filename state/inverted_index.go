@@ -465,8 +465,8 @@ func (ii *invertedIndexWAL) close() {
 	}
 }
 
-// 3 history + 4 indices = 10 etl collectors, 10*256Mb/8 = 512mb - for all indices buffers
-var WALCollectorRAM = 2 * (etl.BufferOptimalSize / 8)
+// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
+var WALCollectorRAM = etl.BufferOptimalSize / 8
 
 func init() {
 	v, _ := os.LookupEnv("ERIGON_WAL_COLLETOR_RAM")

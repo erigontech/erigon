@@ -535,10 +535,6 @@ func (h *domainWAL) close() {
 	}
 }
 
-func (h *domainWAL) size() uint64 {
-	return h.kvsize.Load()
-}
-
 func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if h.discard || !h.buffered {
 		return nil
@@ -549,7 +545,6 @@ func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := h.values.Load(tx, h.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	h.kvsize.Store(0)
 	return nil
 }
 
@@ -568,11 +563,9 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 
 	if h.largeValues {
 		if !h.buffered {
-			//fmt.Printf("put key: %s, %x, %x\n", h.d.filenameBase, fullkey[:kl], fullkey[kl:])
 			if err := h.d.tx.Put(h.d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
 				return err
 			}
-			//fmt.Printf("put val: %s, %x, %x\n", h.d.filenameBase, fullkey, value)
 			if err := h.d.tx.Put(h.d.valsTable, fullkey, value); err != nil {
 				return err
 			}
@@ -585,7 +578,6 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 		if err := h.values.Collect(fullkey, value); err != nil {
 			return err
 		}
-		h.kvsize.Add(uint64(len(value)) + uint64(len(fullkey)*2))
 
 		return nil
 	}
@@ -605,7 +597,6 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 	if err := h.values.Collect(fullkey[:kl], common.Append(fullkey[kl:], value)); err != nil {
 		return err
 	}
-	h.kvsize.Add(uint64(len(value)) + uint64(len(fullkey)*2))
 	return nil
 }
 
