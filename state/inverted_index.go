@@ -1119,6 +1119,11 @@ func (ic *InvertedIndexContext) IterateChangedKeys(startTxNum, endTxNum uint64, 
 }
 
 func (ii *InvertedIndex) collate(ctx context.Context, txFrom, txTo uint64, roTx kv.Tx) (map[string]*roaring64.Bitmap, error) {
+	mxRunningCollations.Inc()
+	start := time.Now()
+	defer mxRunningCollations.Dec()
+	defer mxCollateTook.UpdateDuration(start)
+
 	keysCursor, err := roTx.CursorDupSort(ii.indexKeysTable)
 	if err != nil {
 		return nil, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
@@ -1168,6 +1173,9 @@ func (sf InvertedFiles) Close() {
 }
 
 func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps map[string]*roaring64.Bitmap, ps *background.ProgressSet) (InvertedFiles, error) {
+	start := time.Now()
+	defer mxBuildTook.UpdateDuration(start)
+
 	var decomp *compress.Decompressor
 	var index *recsplit.Index
 	var comp *compress.Compressor

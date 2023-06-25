@@ -489,7 +489,6 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 
 	keyCount, M := 120000, 1024
 	dataPath := generateCompressedKV(t, tmp, 52, 180 /*val size*/, keyCount, logger)
-	defer os.RemoveAll(tmp)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
 	err := BuildBtreeIndex(dataPath, indexPath, logger)
@@ -622,7 +621,6 @@ func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCoun
 func Test_InitBtreeIndex(t *testing.T) {
 	logger := log.New()
 	tmp := t.TempDir()
-	defer os.RemoveAll(tmp)
 
 	keyCount, M := 100, uint64(4)
 	compPath := generateCompressedKV(t, tmp, 52, 300, keyCount, logger)
@@ -630,10 +628,10 @@ func Test_InitBtreeIndex(t *testing.T) {
 	require.NoError(t, err)
 	defer decomp.Close()
 
-	err = BuildBtreeIndexWithDecompressor(tmp+".bt", decomp, &background.Progress{}, logger)
+	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, &background.Progress{}, tmp, logger)
 	require.NoError(t, err)
 
-	bt, err := OpenBtreeIndexWithDecompressor(tmp+".bt", M, decomp)
+	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, decomp)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	bt.Close()

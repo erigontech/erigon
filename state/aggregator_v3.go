@@ -634,8 +634,6 @@ func (sf AggV3StaticFiles) Close() {
 func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 	var (
 		logEvery      = time.NewTicker(time.Second * 30)
-		wg            sync.WaitGroup
-		errCh         = make(chan error, 8)
 		txFrom        = step * a.aggregationStep
 		txTo          = (step + 1) * a.aggregationStep
 		stepStartedAt = time.Now()
@@ -646,126 +644,108 @@ func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcMaxTxNum()
 
+	g, ctx := errgroup.WithContext(ctx)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
-		wg.Add(1)
+		d := d
+		g.Go(func() error {
+			var collation Collation
+			if err := a.db.View(ctx, func(roTx kv.Tx) (err error) {
+				collation, err = d.collateStream(ctx, step, txFrom, txTo, roTx)
+				if err != nil {
+					collation.Close() // TODO: it must be handled inside collateStream func - by defer
+					return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
+				}
+				return nil
+			}); err != nil {
+				return fmt.Errorf("domain collation %q oops: %w", d.filenameBase, err)
+			}
+			mxCollationSize.Set(uint64(collation.valuesComp.Count()))
+			mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 
-		mxRunningCollations.Inc()
-		start := time.Now()
-		//roTx, err := a.db.BeginRo(ctx)
-		//if err != nil {
-		//	return fmt.Errorf("domain collation %q oops: %w", d.filenameBase, err)
-		//}
-		collation, err := d.collateStream(ctx, step, txFrom, txTo, d.tx)
-		if err != nil {
-			return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
-		}
-		mxRunningCollations.Dec()
-		mxCollateTook.UpdateDuration(start)
-
-		mxCollationSize.Set(uint64(collation.valuesComp.Count()))
-		mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
-
-		if err != nil {
-			collation.Close()
-			return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
-		}
-
-		go func(wg *sync.WaitGroup, d *Domain, collation Collation) {
-			defer wg.Done()
 			mxRunningMerges.Inc()
 
-			start := time.Now()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			collation.Close()
-
 			if err != nil {
-				errCh <- err
-
 				sf.Close()
-				mxRunningMerges.Dec()
-				return
+				return err
 			}
 
-			mxRunningMerges.Dec()
-
+			//can use agg.integrateFiles ???
+			a.filesMutationLock.Lock()
+			defer a.filesMutationLock.Unlock()
+			defer a.needSaveFilesListInDB.Store(true)
+			defer a.recalcMaxTxNum()
 			d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
-			d.stats.LastFileBuildingTook = time.Since(start)
-		}(&wg, d, collation)
-
-		mxPruneTook.Update(d.stats.LastPruneTook.Seconds())
-		mxPruneHistTook.Update(d.stats.LastPruneHistTook.Seconds())
+			return nil
+		})
 	}
 
 	// indices are built concurrently
 	for _, d := range []*InvertedIndex{a.logTopics, a.logAddrs, a.tracesFrom, a.tracesTo} {
-		wg.Add(1)
-
-		mxRunningCollations.Inc()
-		start := time.Now()
-		collation, err := d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, d.tx)
-		mxRunningCollations.Dec()
-		mxCollateTook.UpdateDuration(start)
-
-		if err != nil {
-			return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
-		}
-
-		go func(wg *sync.WaitGroup, d *InvertedIndex, tx kv.Tx) {
-			defer wg.Done()
-
-			mxRunningMerges.Inc()
-			start := time.Now()
+		d := d
+		g.Go(func() error {
+			var collation map[string]*roaring64.Bitmap
+			if err := a.db.View(ctx, func(roTx kv.Tx) (err error) {
+				collation, err = d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, roTx)
+				if err != nil {
+					return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
+				}
+				return nil
+			}); err != nil {
+				return fmt.Errorf("domain collation %q oops: %w", d.filenameBase, err)
+			}
 
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
-				errCh <- err
 				sf.Close()
-				return
+				return err
 			}
 
-			mxRunningMerges.Dec()
-			mxBuildTook.UpdateDuration(start)
-
+			a.filesMutationLock.Lock()
+			defer a.filesMutationLock.Unlock()
+			defer a.needSaveFilesListInDB.Store(true)
+			defer a.recalcMaxTxNum()
 			d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
-
-			mxRunningMerges.Inc()
-		}(&wg, d, d.tx)
+			return nil
+		})
 	}
 
-	// when domain files are build and db is pruned, we can merge them
-	wg.Add(1)
-	go func(wg *sync.WaitGroup) {
-		defer wg.Done()
-
-		if err := a.mergeDomainSteps(ctx); err != nil {
-			errCh <- err
-		}
-	}(&wg)
-
-	go func() {
-		wg.Wait()
-		close(errCh)
-	}()
-
-	for err := range errCh {
+	if err := g.Wait(); err != nil {
 		log.Warn("domain collate-buildFiles failed", "err", err)
 		return fmt.Errorf("domain collate-build failed: %w", err)
 	}
-
 	log.Info("[stat] aggregation is finished",
 		"step", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(a.aggregationStep), float64(txTo)/float64(a.aggregationStep)),
 		"took", time.Since(stepStartedAt))
+
+	if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
+		return nil
+	}
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		defer a.mergeingFiles.Store(false)
+		if err := a.mergeDomainSteps(a.ctx, 1); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			log.Warn("[snapshots] merge", "err", err)
+		}
+
+		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
+	}()
 
 	//mxStepTook.UpdateDuration(stepStartedAt)
 
 	return nil
 }
 
-func (a *AggregatorV3) mergeDomainSteps(ctx context.Context) error {
+func (a *AggregatorV3) mergeDomainSteps(ctx context.Context, workers int) error {
 	mergeStartedAt := time.Now()
 	var upmerges int
 	for {
-		somethingMerged, err := a.mergeLoopStep(ctx, 8)
+		somethingMerged, err := a.mergeLoopStep(ctx, workers)
 		if err != nil {
 			return err
 		}
@@ -1547,11 +1527,6 @@ func (a *AggregatorV3) AggregateFilesInBackground() {
 		log.Warn("ComputeCommitment before aggregation has failed", "err", err)
 		return
 	}
-
-	if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
-		return
-	}
-	defer a.mergeingFiles.Store(false)
 
 	if err := a.buildFilesInBackground(a.ctx, step); err != nil {
 		if errors.Is(err, context.Canceled) {
