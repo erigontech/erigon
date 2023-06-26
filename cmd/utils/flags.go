@@ -614,6 +614,14 @@ var (
 		Usage: "Metrics HTTP server listening port",
 		Value: metrics.DefaultConfig.Port,
 	}
+
+	// Opencollector endpoint for telemetry
+	OpenCollectorEndpointFlag = cli.StringFlag{
+		Name:  "metrics.opencollector-endpoint",
+		Usage: "OpenCollector Endpoint (host:port) for telemetry",
+		Value: metrics.DefaultConfig.OpenCollectorEndpoint,
+	}
+
 	HistoryV3Flag = cli.BoolFlag{
 		Name:  "experimental.history.v3",
 		Usage: "(also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
@@ -1343,6 +1351,10 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.HeimdallgRPCAddress = ctx.String(HeimdallgRPCAddressFlag.Name)
 }
 
+func setMetrics(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.Metrics.OpenCollectorEndpoint = ctx.String(OpenCollectorEndpointFlag.Name)
+}
+
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	cfg.Enabled = ctx.IsSet(MiningEnabledFlag.Name)
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
@@ -1494,6 +1506,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg)
+	setMetrics(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0

@@ -248,6 +248,9 @@ type Config struct {
 	OverrideShanghaiTime *big.Int `toml:",omitempty"`
 
 	DropUselessPeers bool
+
+	// Metrics config
+	Metrics Metrics
 }
 
 type Sync struct {
@@ -259,6 +262,10 @@ type Sync struct {
 
 	BodyCacheLimit             datasize.ByteSize
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
+}
+
+type Metrics struct {
+	OpenCollectorEndpoint string
 }
 
 // Chains where snapshots are enabled by default

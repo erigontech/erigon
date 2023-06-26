@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 
@@ -743,6 +744,14 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 			return err
 		}
 	}
+
+	// Open telemetry setup
+	if config.Metrics.OpenCollectorEndpoint != "" {
+		go metrics.SetupOpenCollector(ctx, config.Metrics.OpenCollectorEndpoint)
+	} else {
+		fmt.Println("empty...")
+	}
+
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
 	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, ethBackendRPC,
