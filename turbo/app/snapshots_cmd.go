@@ -512,7 +512,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}); err != nil {
 		return err
 	}
-
 	logger.Info("Prune state history")
 	for i := 0; i < 1024; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {

@@ -28,7 +28,7 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize)
 		Label(label).
 		RoTxsLimiter(semaphore.NewWeighted(ThreadsHardLimit)).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
-		Flags(func(flags uint) uint { return flags | mdbx.Readonly | mdbx.Accede }).
+		Flags(func(flags uint) uint { return flags | mdbx.Accede }).
 		MustOpen()
 	if targetPageSize <= 0 {
 		targetPageSize = datasize.ByteSize(src.PageSize())
