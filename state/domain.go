@@ -960,32 +960,32 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			return Collation{}, err
 		}
 		pos++
+
+		if v, err = keysCursor.LastDup(); err != nil {
+			return Collation{}, fmt.Errorf("find last %s key for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+		}
+		if ^binary.BigEndian.Uint64(v) != step {
+			continue
+		}
+		keySuffix := make([]byte, len(k)+8)
+		copy(keySuffix, k)
+		copy(keySuffix[len(k):], v)
+		v, err := roTx.GetOne(d.valsTable, keySuffix)
+		if err != nil {
+			return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+		}
+		if err = valuesComp.AddUncompressedWord(k); err != nil {
+			return Collation{}, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
+		}
+		valuesCount++ // Only counting keys, not values
+		if err = valuesComp.AddUncompressedWord(v); err != nil {
+			return Collation{}, fmt.Errorf("add %s values val [%x]=>[%x]: %w", d.filenameBase, k, v, err)
+		}
 		select {
 		case <-ctx.Done():
 			d.logger.Warn("[snapshots] collate domain cancelled", "name", d.filenameBase, "err", ctx.Err())
 			return Collation{}, ctx.Err()
 		default:
-		}
-
-		if v, err = keysCursor.LastDup(); err != nil {
-			return Collation{}, fmt.Errorf("find last %s key for aggregation step k=[%x]: %w", d.filenameBase, k, err)
-		}
-		s := ^binary.BigEndian.Uint64(v)
-		if s == step {
-			keySuffix := make([]byte, len(k)+8)
-			copy(keySuffix, k)
-			copy(keySuffix[len(k):], v)
-			v, err := roTx.GetOne(d.valsTable, keySuffix)
-			if err != nil {
-				return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
-			}
-			if err = valuesComp.AddUncompressedWord(k); err != nil {
-				return Collation{}, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
-			}
-			valuesCount++ // Only counting keys, not values
-			if err = valuesComp.AddUncompressedWord(v); err != nil {
-				return Collation{}, fmt.Errorf("add %s values val [%x]=>[%x]: %w", d.filenameBase, k, v, err)
-			}
 		}
 	}
 	if err != nil {
