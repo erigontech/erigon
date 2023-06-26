@@ -316,6 +316,7 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 	}()
 }
 
+// Useless
 func (ac *AggregatorV3Context) BuildOptionalMissedIndices(ctx context.Context, workers int) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
@@ -631,7 +632,7 @@ func (sf AggV3StaticFiles) Close() {
 	sf.tracesTo.Close()
 }
 
-func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
+func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) error {
 	var (
 		logEvery      = time.NewTicker(time.Second * 30)
 		txFrom        = step * a.aggregationStep
@@ -719,22 +720,22 @@ func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 		"step", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(a.aggregationStep), float64(txTo)/float64(a.aggregationStep)),
 		"took", time.Since(stepStartedAt))
 
-	if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
-		return nil
-	}
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-		defer a.mergeingFiles.Store(false)
-		if err := a.mergeDomainSteps(a.ctx, 1); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return
-			}
-			log.Warn("[snapshots] merge", "err", err)
-		}
-
-		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
-	}()
+	//if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
+	//	return nil
+	//}
+	//a.wg.Add(1)
+	//go func() {
+	//	defer a.wg.Done()
+	//	defer a.mergeingFiles.Store(false)
+	//	if err := a.mergeDomainSteps(a.ctx, 1); err != nil {
+	//		if errors.Is(err, context.Canceled) {
+	//			return
+	//		}
+	//		log.Warn("[snapshots] merge", "err", err)
+	//	}
+	//
+	//	a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
+	//}()
 
 	//mxStepTook.UpdateDuration(stepStartedAt)
 
@@ -771,7 +772,7 @@ func (a *AggregatorV3) BuildFiles(toTxNum uint64) (err error) {
 		return err
 	}
 
-	a.BuildFilesInBackground(toTxNum)
+	finished := a.BuildFilesInBackground(toTxNum)
 	if !(a.buildingFiles.Load() || a.mergeingFiles.Load() || a.buildingOptionalIndices.Load()) {
 		return nil
 	}
@@ -783,6 +784,8 @@ Loop:
 		select {
 		case <-a.ctx.Done():
 			return a.ctx.Err()
+		case <-finished:
+			break Loop
 		case <-logEvery.C:
 			if !(a.buildingFiles.Load() || a.mergeingFiles.Load() || a.buildingOptionalIndices.Load()) {
 				break Loop
@@ -794,40 +797,6 @@ Loop:
 	}
 
 	return nil
-}
-
-func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) (err error) {
-	return a.aggregate(ctx, step)
-}
-
-func (a *AggregatorV3) FinishTx(rwTx kv.RwTx) (rootHash []byte, err error) {
-	txn := a.txNum.Load()
-	if a.keepInDB > txn+1 && (txn+1)%a.aggregationStep == 0 {
-		return nil, nil
-	}
-
-	mxRunningMerges.Inc()
-	defer mxRunningMerges.Dec()
-
-	rootHash, err = a.ComputeCommitment(true, false)
-	if err != nil {
-		return nil, err
-	}
-
-	step := txn / a.aggregationStep
-	mxStepCurrent.Set(step)
-
-	step -= a.keepInDB / a.aggregationStep
-
-	ctx := context.Background()
-	if err := a.Flush(ctx, rwTx); err != nil {
-		return nil, err
-	}
-
-	if err := a.aggregate(ctx, step); err != nil {
-		return nil, err
-	}
-	return rootHash, nil
 }
 
 func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {
@@ -1523,7 +1492,7 @@ func (a *AggregatorV3) AggregateFilesInBackground() {
 	}
 	defer a.buildingFiles.Store(false)
 
-	if _, err := a.ComputeCommitment(true, false); err != nil {
+	if _, err := a.SharedDomains().Commit(true, false); err != nil {
 		log.Warn("ComputeCommitment before aggregation has failed", "err", err)
 		return
 	}
@@ -1542,13 +1511,20 @@ func (a *AggregatorV3) AggregateFilesInBackground() {
 	}
 }
 
-func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) {
+// Returns channel which is closed when aggregation is done
+func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
+	fin := make(chan struct{})
+
 	if (txNum + 1) <= a.minimaxTxNumInFiles.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
-		return
+		return fin
 	}
 
+	if _, err := a.SharedDomains().Commit(true, false); err != nil {
+		log.Warn("ComputeCommitment before aggregation has failed", "err", err)
+		return fin
+	}
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
-		return
+		return fin
 	}
 
 	step := a.minimaxTxNumInFiles.Load() / a.aggregationStep
@@ -1561,14 +1537,10 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) {
 		defer a.buildingFiles.Store(false)
 
 		// check if db has enough data (maybe we didn't commit them yet)
-		lastInDB := lastIdInDB(a.db, a.accounts.keysTable)
+		lastInDB := lastIdInDB(a.db, a.accounts.indexKeysTable)
 		hasData = lastInDB >= toTxNum
 		if !hasData {
-			return
-		}
-
-		if _, err := a.ComputeCommitment(true, false); err != nil {
-			log.Warn("ComputeCommitment before aggregation has failed", "err", err)
+			close(fin)
 			return
 		}
 
@@ -1579,6 +1551,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) {
 		for step < lastIdInDB(a.db, a.accounts.indexKeysTable)/a.aggregationStep {
 			if err := a.buildFilesInBackground(a.ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) {
+					close(fin)
 					return
 				}
 				log.Warn("[snapshots] buildFilesInBackground", "err", err)
@@ -1588,12 +1561,14 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) {
 		}
 
 		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
+			close(fin)
 			return
 		}
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
 			defer a.mergeingFiles.Store(false)
+			defer func() { close(fin) }()
 			if err := a.MergeLoop(a.ctx, 1); err != nil {
 				if errors.Is(err, context.Canceled) {
 					return
@@ -1604,6 +1579,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) {
 			a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 		}()
 	}()
+	return fin
 }
 
 func (a *AggregatorV3) BatchHistoryWriteStart() *AggregatorV3 {
@@ -1993,6 +1969,7 @@ func (br *BackgroundResult) GetAndReset() (bool, error) {
 	return has, err
 }
 
+// Inverted index tables only
 func lastIdInDB(db kv.RoDB, table string) (lstInDb uint64) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		lst, _ := kv.LastKey(tx, table)

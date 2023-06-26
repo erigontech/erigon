@@ -40,65 +40,29 @@ func testDbAndAggregator(t *testing.T, aggStep uint64) (string, kv.RwDB, *Aggreg
 	return path, db, agg
 }
 
-func TestAggregator_WinAccess(t *testing.T) {
-	_, db, agg := testDbAndAggregator(t, 100)
+func TestAggregatorV3_Merge(t *testing.T) {
+	_, db, agg := testDbAndAggregatorv3(t, 1000)
 	defer agg.Close()
 
-	tx, err := db.BeginRwNosync(context.Background())
+	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
-		if tx != nil {
-			tx.Rollback()
+		if rwTx != nil {
+			rwTx.Rollback()
 		}
 	}()
-	agg.SetTx(tx)
-
+	agg.SetTx(rwTx)
 	agg.StartWrites()
+	domains := agg.SharedDomains()
+	domCtx := agg.MakeContext()
 
+	txs := uint64(100000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
-	for txNum := uint64(1); txNum <= 100; txNum++ {
-		agg.SetTxNum(txNum)
 
-		addr := make([]byte, length.Addr)
-		n, err := rnd.Read(addr)
-		require.NoError(t, err)
-		require.EqualValues(t, length.Addr, n)
-
-		buf := EncodeAccountBytes(1, uint256.NewInt(uint64(rand.Intn(10e9))), nil, 0)
-		err = agg.UpdateAccountData(addr, buf)
-		require.NoError(t, err)
-
-		var v [8]byte
-		binary.BigEndian.PutUint64(v[:], txNum)
-		require.NoError(t, err)
-		require.NoError(t, agg.FinishTx())
-	}
-	agg.FinishWrites()
-
-	require.NoError(t, err)
-	err = tx.Commit()
-	require.NoError(t, err)
-	tx = nil
-}
-
-func TestAggregator_Merge(t *testing.T) {
-	t.Skip("FIXME: migrate me to AggV3")
-	_, db, agg := testDbAndAggregator(t, 1000)
-	defer agg.Close()
-
-	tx, err := db.BeginRwNosync(context.Background())
-	require.NoError(t, err)
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
-	agg.SetTx(tx)
-
-	agg.StartWrites()
-
-	txs := uint64(10000)
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	var (
+		commKey1 = []byte("someCommKey")
+		commKey2 = []byte("otherCommKey")
+	)
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
@@ -115,32 +79,40 @@ func TestAggregator_Merge(t *testing.T) {
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
 		require.EqualValues(t, length.Hash, n)
-		//keys[txNum-1] = append(addr, loc...)
 
 		buf := EncodeAccountBytes(1, uint256.NewInt(0), nil, 0)
-		err = agg.UpdateAccountData(addr, buf)
+		err = domains.UpdateAccountData(addr, buf, nil)
 		require.NoError(t, err)
 
-		err = agg.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]})
+		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, nil)
 		require.NoError(t, err)
 
 		var v [8]byte
 		binary.BigEndian.PutUint64(v[:], txNum)
 		if txNum%135 == 0 {
-			err = agg.UpdateCommitmentData([]byte("otherroothash"), v[:])
+			pv, _, err := domCtx.CommitmentLatest(commKey2, rwTx)
+			require.NoError(t, err)
+
+			err = domains.UpdateCommitmentData(commKey2, v[:], pv)
 			otherMaxWrite = txNum
 		} else {
-			err = agg.UpdateCommitmentData([]byte("roothash"), v[:])
+			pv, _, err := domCtx.CommitmentLatest(commKey1, rwTx)
+			require.NoError(t, err)
+
+			err = domains.UpdateCommitmentData(commKey1, v[:], pv)
 			maxWrite = txNum
 		}
 		require.NoError(t, err)
-		require.NoError(t, agg.FinishTx())
+
 	}
+	err = agg.Flush(context.Background(), rwTx)
+	require.NoError(t, err)
 	agg.FinishWrites()
+
 	require.NoError(t, err)
-	err = tx.Commit()
+	err = rwTx.Commit()
 	require.NoError(t, err)
-	tx = nil
+	rwTx = nil
 
 	// Check the history
 	roTx, err := db.BeginRo(context.Background())
@@ -149,13 +121,15 @@ func TestAggregator_Merge(t *testing.T) {
 
 	dc := agg.MakeContext()
 
-	v, err := dc.ReadCommitment([]byte("roothash"), roTx)
+	v, ex, err := dc.CommitmentLatest(commKey1, roTx)
 	require.NoError(t, err)
+	require.Truef(t, ex, "key %x not found", commKey1)
 
 	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 
-	v, err = dc.ReadCommitment([]byte("otherroothash"), roTx)
+	v, ex, err = dc.CommitmentLatest(commKey2, roTx)
 	require.NoError(t, err)
+	require.Truef(t, ex, "key %x not found", commKey2)
 	dc.Close()
 
 	require.EqualValues(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
@@ -166,12 +140,10 @@ func TestAggregator_Merge(t *testing.T) {
 // Expected that:
 // - we could close first aggregator and open another with previous data still available
 // - new aggregator SeekCommitment must return txNum equal to amount of total txns
-func TestAggregator_RestartOnDatadir(t *testing.T) {
-	t.Skip("FIXME: migrate me to AggV3")
-
+func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 	logger := log.New()
 	aggStep := uint64(50)
-	path, db, agg := testDbAndAggregator(t, aggStep)
+	path, db, agg := testDbAndAggregatorv3(t, aggStep)
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -182,22 +154,23 @@ func TestAggregator_RestartOnDatadir(t *testing.T) {
 	}()
 	agg.SetTx(tx)
 	agg.StartWrites()
+	domains := agg.SharedDomains()
 
 	var latestCommitTxNum uint64
-
 	rnd := rand.New(rand.NewSource(time.Now().Unix()))
 
+	someKey := []byte("somekey")
 	txs := (aggStep / 2) * 19
 	t.Logf("step=%d tx_count=%d", aggStep, txs)
 	var aux [8]byte
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	var maxWrite uint64
+	addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		agg.SetTxNum(txNum)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
-		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 		n, err := rnd.Read(addr)
 		require.NoError(t, err)
 		require.EqualValues(t, length.Addr, n)
@@ -207,30 +180,36 @@ func TestAggregator_RestartOnDatadir(t *testing.T) {
 		require.EqualValues(t, length.Hash, n)
 		//keys[txNum-1] = append(addr, loc...)
 
-		buf := EncodeAccountBytes(1, uint256.NewInt(0), nil, 0)
-		err = agg.UpdateAccountData(addr, buf)
+		buf := EncodeAccountBytes(1, uint256.NewInt(rnd.Uint64()), nil, 0)
+		err = domains.UpdateAccountData(addr, buf, nil)
 		require.NoError(t, err)
 
-		err = agg.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]})
+		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, nil)
 		require.NoError(t, err)
 
-		err = agg.UpdateCommitmentData([]byte("key"), aux[:])
+		err = domains.UpdateCommitmentData(someKey, aux[:], nil)
 		require.NoError(t, err)
 		maxWrite = txNum
-
-		require.NoError(t, agg.FinishTx())
 	}
-	agg.FinishWrites()
-	agg.Close()
+	_, err = domains.Commit(true, false)
+	require.NoError(t, err)
 
+	err = agg.Flush(context.Background(), tx)
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 	tx = nil
 
-	// Start another aggregator on same datadir
-	anotherAgg, err := NewAggregator(filepath.Join(path, "e4"), filepath.Join(path, "e4tmp"), aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie, logger)
+	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
-	require.NoError(t, anotherAgg.ReopenFolder())
+
+	agg.FinishWrites()
+	agg.Close()
+
+	// Start another aggregator on same datadir
+	anotherAgg, err := NewAggregatorV3(context.Background(), filepath.Join(path, "e4"), filepath.Join(path, "e4", "tmp2"), aggStep, db, logger)
+	require.NoError(t, err)
+	require.NoError(t, anotherAgg.OpenFolder())
 
 	defer anotherAgg.Close()
 
@@ -244,7 +223,10 @@ func TestAggregator_RestartOnDatadir(t *testing.T) {
 
 	anotherAgg.SetTx(rwTx)
 	startTx := anotherAgg.EndTxNumMinimax()
-	_, sstartTx, err := anotherAgg.SeekCommitment()
+	dom2 := anotherAgg.SharedDomains()
+
+	_, sstartTx, err := dom2.SeekCommitment()
+
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, sstartTx, startTx)
 	require.GreaterOrEqual(t, sstartTx, latestCommitTxNum)
@@ -258,19 +240,20 @@ func TestAggregator_RestartOnDatadir(t *testing.T) {
 	defer roTx.Rollback()
 
 	dc := anotherAgg.MakeContext()
-	v, err := dc.ReadCommitment([]byte("key"), roTx)
+	v, ex, err := dc.CommitmentLatest(someKey, roTx)
 	require.NoError(t, err)
+	require.True(t, ex)
 	dc.Close()
 
 	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
-func TestAggregator_RestartOnFiles(t *testing.T) {
-	t.Skip("FIXME: migrate me to AggV3")
+func TestAggregatorV3_RestartOnFiles(t *testing.T) {
+	t.Skip("TODO: finish to fix this test")
 	logger := log.New()
 	aggStep := uint64(100)
 
-	path, db, agg := testDbAndAggregator(t, aggStep)
+	path, db, agg := testDbAndAggregatorv3(t, aggStep)
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -281,6 +264,7 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 	}()
 	agg.SetTx(tx)
 	agg.StartWrites()
+	domains := agg.SharedDomains()
 
 	txs := aggStep * 5
 	t.Logf("step=%d tx_count=%d\n", aggStep, txs)
@@ -301,17 +285,19 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 		require.EqualValues(t, length.Hash, n)
 
 		buf := EncodeAccountBytes(txNum, uint256.NewInt(1000000000000), nil, 0)
-		err = agg.UpdateAccountData(addr, buf[:])
+		err = domains.UpdateAccountData(addr, buf[:], nil)
 		require.NoError(t, err)
 
-		err = agg.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]})
+		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, nil)
 		require.NoError(t, err)
 
 		keys[txNum-1] = append(addr, loc...)
-
-		err = agg.FinishTx()
-		require.NoError(t, err)
 	}
+	err = agg.Flush(context.Background(), tx)
+	require.NoError(t, err)
+
+	agg.AggregateFilesInBackground()
+	require.NoError(t, err)
 	agg.FinishWrites()
 
 	err = tx.Commit()
@@ -332,24 +318,27 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer newTx.Rollback()
 
-	newAgg, err := NewAggregator(path, path, aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie, logger)
+	newAgg, err := NewAggregatorV3(context.Background(), filepath.Join(path, "e4"), filepath.Join(path, "e4", "tmp"), aggStep, newDb, logger)
 	require.NoError(t, err)
-	require.NoError(t, newAgg.ReopenFolder())
+	require.NoError(t, newAgg.OpenFolder())
 
 	newAgg.SetTx(newTx)
-	newAgg.StartWrites()
+	defer newAgg.StartWrites().FinishWrites()
 
-	_, latestTx, err := newAgg.SeekCommitment()
+	newDoms := newAgg.SharedDomains()
+	defer newDoms.Close()
+
+	_, latestTx, err := newDoms.SeekCommitment()
 	require.NoError(t, err)
 	t.Logf("seek to latest_tx=%d", latestTx)
 
-	ctx := newAgg.defaultCtx
+	ctx := newAgg.MakeContext()
 	miss := uint64(0)
 	for i, key := range keys {
 		if uint64(i+1) >= txs-aggStep {
 			continue // finishtx always stores last agg step in db which we deleted, so missing  values which were not aggregated is expected
 		}
-		stored, err := ctx.ReadAccountData(key[:length.Addr], newTx)
+		stored, _, err := ctx.AccountLatest(key[:length.Addr], newTx)
 		require.NoError(t, err)
 		if len(stored) == 0 {
 			miss++
@@ -360,13 +349,11 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 		nonce, _, _ := DecodeAccountBytes(stored)
 		require.EqualValues(t, i+1, nonce)
 
-		storedV, err := ctx.ReadAccountStorage(key[:length.Addr], key[length.Addr:], newTx)
+		storedV, _, err := ctx.StorageLatest(key[:length.Addr], key[length.Addr:], newTx)
 		require.NoError(t, err)
 		require.EqualValues(t, key[0], storedV[0])
 		require.EqualValues(t, key[length.Addr], storedV[1])
 	}
-	newAgg.FinishWrites()
-	ctx.Close()
 	newAgg.Close()
 
 	require.NoError(t, err)
@@ -650,7 +637,14 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (string, kv.RwDB, *Aggr
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	t.Cleanup(db.Close)
-	agg, err := NewAggregatorV3(context.Background(), filepath.Join(path, "e4"), filepath.Join(path, "e4tmp"), aggStep, db, logger)
+
+	dir := filepath.Join(path, "e4")
+	err := os.Mkdir(dir, 0740)
+	require.NoError(t, err)
+
+	agg, err := NewAggregatorV3(context.Background(), dir, filepath.Join(path, "e4", "tmp"), aggStep, db, logger)
+	require.NoError(t, err)
+	err = agg.OpenFolder()
 	require.NoError(t, err)
 	return path, db, agg
 }

@@ -535,6 +535,11 @@ func (h *domainWAL) close() {
 	}
 }
 
+func loadPrintFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	fmt.Printf("load: %x -> %x\n", k, v)
+	return next(k, k, v)
+}
+
 func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if h.discard || !h.buffered {
 		return nil
