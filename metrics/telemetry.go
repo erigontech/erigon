@@ -2,7 +2,6 @@ package metrics
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/urfave/cli/v2"
 
@@ -22,8 +21,6 @@ var OpenCollectorEndpointFlag = cli.StringFlag{
 }
 
 func SetupOpenCollector(ctx context.Context, openCollectorEndpoint string) {
-	fmt.Println("Hellooooo...", "opencollector", openCollectorEndpoint)
-	log.Info("Log works here......")
 	// setup open collector tracer
 	res, err := resource.New(ctx,
 		resource.WithAttributes(

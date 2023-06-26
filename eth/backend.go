@@ -754,8 +754,6 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	// Open telemetry setup
 	if config.Metrics.OpenCollectorEndpoint != "" {
 		go metrics.SetupOpenCollector(ctx, config.Metrics.OpenCollectorEndpoint)
-	} else {
-		fmt.Println("empty...")
 	}
 
 	// start HTTP API
