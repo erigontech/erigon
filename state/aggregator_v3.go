@@ -1086,18 +1086,22 @@ func (a *AggregatorV3) Prune(ctx context.Context, limit uint64) error {
 func (a *AggregatorV3) prune(ctx context.Context, txFrom, txTo, limit uint64) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	step := txTo / a.aggregationStep
-	if err := a.accounts.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
-		return err
-	}
-	if err := a.storage.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
-		return err
-	}
-	if err := a.code.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
-		return err
-	}
-	if err := a.commitment.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
-		return err
+	stepFrom := txFrom / a.aggregationStep
+	stepTo := txTo / a.aggregationStep
+	//TODO: Domain.prune - can delete only 1 exact step. But agg.Prune may accept larger range
+	for step := stepFrom; step <= stepTo; step++ {
+		if err := a.accounts.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
+			return err
+		}
+		if err := a.storage.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
+			return err
+		}
+		if err := a.code.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
+			return err
+		}
+		if err := a.commitment.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
+			return err
+		}
 	}
 	if err := a.logAddrs.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
 		return err
