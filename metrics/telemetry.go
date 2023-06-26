@@ -59,7 +59,7 @@ func SetupOpenCollector(ctx context.Context, openCollectorEndpoint string) {
 
 	defer func() {
 		log.Info("Stopping open collector tracer")
-		if err := tracerProvider.Shutdown(context.Background()); err != nil {
+		if err := tracerProvider.Shutdown(ctx); err != nil {
 			log.Error("Failed to shutdown open telemetry tracer")
 		}
 	}()
