@@ -18,7 +18,7 @@ type BorAPI interface {
 	GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	GetCurrentProposer() (common.Address, error)
 	GetCurrentValidators() ([]*valset.Validator, error)
-	GetSnapshotProposerSequence(number *rpc.BlockNumber) (BlockSigners, error)
+	GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOrHash) (BlockSigners, error)
 	GetRootHash(start uint64, end uint64) (string, error)
 }
 
