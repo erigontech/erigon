@@ -5,8 +5,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -15,8 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
 )
 
 func TestDump(t *testing.T) {
@@ -35,7 +37,7 @@ func TestDump(t *testing.T) {
 			if v == nil {
 				systemTxs++
 			} else {
-				if _, err := parseCtx.ParseTransaction(v[1+20:], 0, &slot, sender[:], false /* hasEnvelope */, nil); err != nil {
+				if _, err := parseCtx.ParseTransaction(v[1+20:], 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
 					return err
 				}
 				nonceList = append(nonceList, slot.Nonce)
@@ -60,7 +62,7 @@ func TestDump(t *testing.T) {
 			if v == nil {
 				systemTxs++
 			} else {
-				if _, err := parseCtx.ParseTransaction(v[1+20:], 0, &slot, sender[:], false /* hasEnvelope */, nil); err != nil {
+				if _, err := parseCtx.ParseTransaction(v[1+20:], 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
 					return err
 				}
 				nonceList = append(nonceList, slot.Nonce)
@@ -173,7 +175,7 @@ func createDumpTestKV(t *testing.T, chainSize int) *stages.MockSentry {
 			t.Fatalf("failed to create tx: %v", txErr)
 		}
 		b.AddTx(tx)
-	}, false)
+	})
 	if err != nil {
 		t.Error(err)
 	}

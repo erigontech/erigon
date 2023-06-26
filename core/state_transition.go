@@ -100,10 +100,9 @@ type Message interface {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	UsedGas     uint64 // Total used gas but include the refunded gas
-	UsedDataGas uint64 // Total data gas used
-	Err         error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	ReturnData  []byte // Returned data from evm(function result or data supplied with revert opcode)
+	UsedGas    uint64 // Total used gas but include the refunded gas
+	Err        error  // Any error encountered during the execution(listed in core/vm/errors.go)
+	ReturnData []byte // Returned data from evm(function result or data supplied with revert opcode)
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -204,7 +203,6 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	// compute data fee for eip-4844 data blobs if any
 	dgval := new(uint256.Int)
-	var dataGasUsed uint64
 	if st.evm.ChainRules().IsCancun {
 		if st.evm.Context().ExcessDataGas == nil {
 			return fmt.Errorf("%w: Cancun is active but ExcessDataGas is nil", ErrInternalFailure)
@@ -213,9 +211,12 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		if err != nil {
 			return err
 		}
-		_, overflow = dgval.MulOverflow(dataGasPrice, new(uint256.Int).SetUint64(st.dataGasUsed()))
+		_, overflow = dgval.MulOverflow(dataGasPrice, new(uint256.Int).SetUint64(st.msg.DataGas()))
 		if overflow {
 			return fmt.Errorf("%w: overflow converting datagas: %v", ErrInsufficientFunds, dgval)
+		}
+		if err := st.gp.SubDataGas(st.msg.DataGas()); err != nil {
+			return err
 		}
 	}
 
@@ -250,10 +251,6 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	}
 	st.gas += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
-
-	if err := st.gp.SubDataGas(dataGasUsed); err != nil {
-		return err
-	}
 
 	if subBalance {
 		st.state.SubBalance(st.msg.From(), mgval)
@@ -309,7 +306,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
-	if st.dataGasUsed() > 0 && st.evm.ChainRules().IsCancun {
+	if st.msg.DataGas() > 0 && st.evm.ChainRules().IsCancun {
 		if st.evm.Context().ExcessDataGas == nil {
 			return fmt.Errorf("%w: Cancun is active but ExcessDataGas is nil", ErrInternalFailure)
 		}
@@ -467,10 +464,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 
 	return &ExecutionResult{
-		UsedGas:     st.gasUsed(),
-		UsedDataGas: st.dataGasUsed(),
-		Err:         vmerr,
-		ReturnData:  ret,
+		UsedGas:    st.gasUsed(),
+		Err:        vmerr,
+		ReturnData: ret,
 	}, nil
 }
 
@@ -494,8 +490,4 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gas
-}
-
-func (st *StateTransition) dataGasUsed() uint64 {
-	return misc.GetDataGasUsed(len(st.msg.DataHashes()))
 }

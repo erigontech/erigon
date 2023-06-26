@@ -172,10 +172,6 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if config.IsCancun(header.Time) {
-		dataGasUsed := uint64(misc.CountBlobs(txs)) * params.DataGasPerBlob
-		header.DataGasUsed = &dataGasUsed
-	}
 	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, nil
 }
 

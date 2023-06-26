@@ -3,8 +3,8 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230620035725-0610e2e32317
-	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230605042354-196538d42475
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230623085938-bfe9cca68e8f
+	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230622075030-1d69651854c2
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.1.0 // indirect
@@ -47,15 +47,14 @@ require (
 	github.com/gorilla/websocket v1.5.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d
-	github.com/hashicorp/golang-lru/arc/v2 v2.0.3
-	github.com/hashicorp/golang-lru/v2 v2.0.3
+	github.com/hashicorp/golang-lru/arc/v2 v2.0.4
+	github.com/hashicorp/golang-lru/v2 v2.0.4
 	github.com/holiman/uint256 v1.2.2
 	github.com/huandu/xstrings v1.4.0
 	github.com/huin/goupnp v1.2.0
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
-	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/libp2p/go-libp2p v0.28.0
 	github.com/libp2p/go-libp2p-pubsub v0.9.3
 	github.com/maticnetwork/crand v1.0.2
@@ -82,13 +81,14 @@ require (
 	github.com/tidwall/btree v1.6.0
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
-	github.com/urfave/cli/v2 v2.25.6
+	github.com/urfave/cli/v2 v2.25.7
 	github.com/valyala/fastjson v1.6.4
 	github.com/vektah/gqlparser/v2 v2.5.3
 	github.com/xsleonard/go-merkle v1.1.0
 	go.opentelemetry.io/otel v1.8.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.8.0
 	go.opentelemetry.io/otel/sdk v1.8.0
+	go.opentelemetry.io/otel/trace v1.8.0
 	go.uber.org/zap v1.24.0
 	golang.org/x/crypto v0.10.0
 	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
@@ -96,7 +96,7 @@ require (
 	golang.org/x/sync v0.3.0
 	golang.org/x/sys v0.9.0
 	golang.org/x/time v0.3.0
-	google.golang.org/grpc v1.56.0
+	google.golang.org/grpc v1.56.1
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
 	google.golang.org/protobuf v1.30.0
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
@@ -252,7 +252,6 @@ require (
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/internal/retry v1.8.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.8.0 // indirect
-	go.opentelemetry.io/otel/trace v1.8.0 // indirect
 	go.opentelemetry.io/proto/otlp v0.18.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/dig v1.17.0 // indirect
