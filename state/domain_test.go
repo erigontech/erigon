@@ -262,10 +262,11 @@ func TestAfterPrune(t *testing.T) {
 
 func filledDomain(t *testing.T, logger log.Logger) (string, kv.RwDB, *Domain, uint64) {
 	t.Helper()
+	require := require.New(t)
 	path, db, d := testDbAndDomain(t, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 	d.SetTx(tx)
 	d.StartWrites()
@@ -284,23 +285,24 @@ func filledDomain(t *testing.T, logger log.Logger) (string, kv.RwDB, *Domain, ui
 				binary.BigEndian.PutUint64(k[:], keyNum)
 				binary.BigEndian.PutUint64(v[:], valNum)
 				err = d.Put(k[:], nil, v[:])
-				require.NoError(t, err)
+				require.NoError(err)
 			}
 		}
 		if txNum%10 == 0 {
 			err = d.Rotate().Flush(ctx, tx)
-			require.NoError(t, err)
+			require.NoError(err)
 		}
 	}
 	err = d.Rotate().Flush(ctx, tx)
-	require.NoError(t, err)
+	require.NoError(err)
 	err = tx.Commit()
-	require.NoError(t, err)
+	require.NoError(err)
 	return path, db, d, txs
 }
 
 func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	t.Helper()
+	require := require.New(t)
 	ctx := context.Background()
 	var err error
 	// Check the history
@@ -312,7 +314,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			// Create roTx obnly for the last several txNum, because all history before that
 			// we should be able to read without any DB access
 			roTx, err = db.BeginRo(ctx)
-			require.NoError(t, err)
+			require.NoError(err)
 			defer roTx.Rollback()
 		}
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
@@ -323,16 +325,16 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
 			val, err := dc.GetBeforeTxNum(k[:], txNum+1, roTx)
-			require.NoError(t, err, label)
+			require.NoError(err, label)
 			if txNum >= keyNum {
-				require.Equal(t, v[:], val, label)
+				require.Equal(v[:], val, label)
 			} else {
-				require.Nil(t, val, label)
+				require.Nil(val, label)
 			}
 			if txNum == txs {
 				val, err := dc.Get(k[:], nil, roTx)
-				require.NoError(t, err)
-				require.EqualValues(t, v[:], val)
+				require.NoError(err)
+				require.EqualValues(v[:], val)
 			}
 		}
 	}

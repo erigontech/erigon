@@ -1408,7 +1408,7 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 		default:
 		}
 
-		if binary.BigEndian.Uint64(v) >= step {
+		if ^binary.BigEndian.Uint64(v) > step {
 			continue
 		}
 
