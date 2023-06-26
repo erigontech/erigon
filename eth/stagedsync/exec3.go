@@ -727,7 +727,7 @@ Loop:
 					return fmt.Errorf("wrong trie root")
 				}
 				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, blockNum, rh, header.Root.Bytes(), header.Hash()))
-
+				doms.Close()
 				if err := agg.Flush(ctx, applyTx); err != nil {
 					panic(err)
 				}
@@ -790,6 +790,7 @@ Loop:
 					t2 = time.Since(tt)
 
 					tt = time.Now()
+					doms.ClearRam()
 					if err := agg.Flush(ctx, applyTx); err != nil {
 						return err
 					}
