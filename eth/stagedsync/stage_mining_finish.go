@@ -5,8 +5,10 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common/tracing"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -40,8 +42,16 @@ func StageMiningFinishCfg(
 }
 
 func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit <-chan struct{}, logger log.Logger) error {
+	_, span := tracing.StartSpan(cfg.miningState.MiningConfig.Ctx, "FinishMineStage")
+	defer tracing.EndSpan(span)
+
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
+
+	tracing.SetAttributes(
+		span,
+		attribute.Int64("number", current.Header.Number.Int64()),
+	)
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
 	//if w.chain.HasBlock(block.Hash(), block.NumberU64()) {

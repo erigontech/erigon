@@ -18,7 +18,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
+	"github.com/ledgerwatch/erigon/common/tracing"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -80,12 +83,20 @@ func StageMiningExecCfg(
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-chan struct{}, logger log.Logger) error {
+	ctx, span := tracing.StartSpan(cfg.miningState.MiningConfig.Ctx, "ExecuteBlockStage")
+	defer tracing.EndSpan(span)
+
 	cfg.vmConfig.NoReceipts = false
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
 	txs := current.PreparedTxs
 	noempty := true
+
+	tracing.SetAttributes(
+		span,
+		attribute.Int64("number", current.Header.Number.Int64()),
+	)
 
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
@@ -108,46 +119,61 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
-		if txs != nil && !txs.Empty() {
-			logs, _, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txs, cfg.miningState.MiningConfig.Etherbase, ibs, quit, cfg.interrupt, cfg.payloadId, logger)
-			if err != nil {
-				return err
-			}
-			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
-		} else {
-
-			yielded := mapset.NewSet[[32]byte]()
-			simulationTx := memdb.NewMemoryBatch(tx, cfg.tmpdir)
-			defer simulationTx.Rollback()
-			executionAt, err := s.ExecutionAt(tx)
-			if err != nil {
-				return err
-			}
-
-			for {
-				txs, y, err := getNextTransactions(cfg, chainID, current.Header, 50, executionAt, simulationTx, yielded, logger)
-				if err != nil {
-					return err
-				}
-
-				if !txs.Empty() {
-					logs, stop, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txs, cfg.miningState.MiningConfig.Etherbase, ibs, quit, cfg.interrupt, cfg.payloadId, logger)
+		var rootErr error
+		tracing.Exec(
+			ctx,
+			"",
+			"miner.FetchAndexecuteTransactions",
+			func(ctx context.Context, span trace.Span) {
+				if txs != nil && !txs.Empty() {
+					logs, _, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txs, cfg.miningState.MiningConfig.Etherbase, ibs, quit, cfg.interrupt, cfg.payloadId, logger)
 					if err != nil {
-						return err
+						rootErr = err
+						return
 					}
 					NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
-					if stop {
-						break
-					}
 				} else {
-					break
-				}
 
-				// if we yielded less than the count we wanted, assume the txpool has run dry now and stop to save another loop
-				if y < 50 {
-					break
+					yielded := mapset.NewSet[[32]byte]()
+					simulationTx := memdb.NewMemoryBatch(tx, cfg.tmpdir)
+					defer simulationTx.Rollback()
+					executionAt, err := s.ExecutionAt(tx)
+					if err != nil {
+						rootErr = err
+						return
+					}
+
+					for {
+						txs, y, err := getNextTransactions(cfg, chainID, current.Header, 50, executionAt, simulationTx, yielded, logger)
+						if err != nil {
+							rootErr = err
+							return
+						}
+
+						if !txs.Empty() {
+							logs, stop, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txs, cfg.miningState.MiningConfig.Etherbase, ibs, quit, cfg.interrupt, cfg.payloadId, logger)
+							if err != nil {
+								rootErr = err
+								return
+							}
+							NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+							if stop {
+								break
+							}
+						} else {
+							break
+						}
+
+						// if we yielded less than the count we wanted, assume the txpool has run dry now and stop to save another loop
+						if y < 50 {
+							break
+						}
+					}
 				}
-			}
+			},
+		)
+		if rootErr != nil {
+			return rootErr
 		}
 	}
 
@@ -163,7 +189,14 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	}
 
 	var err error
-	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, true)
+	tracing.Exec(
+		ctx,
+		"",
+		"miner.FinalizeBlockExecution",
+		func(ctx context.Context, s trace.Span) {
+			_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, true)
+		},
+	)
 	if err != nil {
 		return err
 	}

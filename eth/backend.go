@@ -40,6 +40,8 @@ import (
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -68,6 +70,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/common/tracing"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -506,6 +509,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.pendingBlocks = make(chan *types.Block, 1)
 	backend.minedBlocks = make(chan *types.Block, 1)
 
+	// Set the global context for miner for open tracing
+	minerCtx := tracing.WithTracer(context.Background(), otel.GetTracerProvider().Tracer("Miner"))
+
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
@@ -691,7 +697,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 	}()
 
-	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir); err != nil {
+	if err := backend.StartMining(context.Background(), minerCtx, backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir); err != nil {
 		return nil, err
 	}
 
@@ -834,7 +840,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string) error {
+func (s *Ethereum) StartMining(ctx context.Context, minerCtx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -902,6 +908,11 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		hasWork := true // Start mining immediately
 		errc := make(chan error, 1)
 
+		var (
+			subCtx context.Context
+			span   trace.Span
+		)
+
 		for {
 			// Only check for case if you're already mining (i.e. works = true) and
 			// waiting for error or you don't have any work yet (i.e. hasWork = false).
@@ -922,6 +933,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 				case err := <-errc:
 					works = false
 					hasWork = false
+					tracing.EndSpan(span)
 					if errors.Is(err, libcommon.ErrStopped) {
 						return
 					}
@@ -937,6 +949,8 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 				works = true
 				hasWork = false
 				mineEvery.Reset(cfg.Recommit)
+				subCtx, span = tracing.StartSpan(minerCtx, "StartMine")
+				cfg.Ctx = subCtx
 				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir) }()
 			}
 		}

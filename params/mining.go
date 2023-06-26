@@ -1,6 +1,7 @@
 package params
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"math/big"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 // MiningConfig is the configuration parameters of mining.
 type MiningConfig struct {
+	Ctx        context.Context
 	Enabled    bool
 	EnabledPOS bool
 	Noverify   bool              // Disable remote mining solution verification(only useful in ethash).

@@ -12,9 +12,11 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/common/tracing"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -90,6 +92,9 @@ var maxTransactions uint16 = 1000
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
+	_, span := tracing.StartSpan(cfg.miner.MiningConfig.Ctx, "CreateBlockStage")
+	defer tracing.EndSpan(span)
+
 	current := cfg.miner.MiningBlock
 	txPoolLocals := []libcommon.Address{} //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := cfg.miner.MiningConfig.Etherbase
@@ -283,6 +288,12 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	current.Header = header
 	current.Uncles = makeUncles(env.uncles)
 	current.Withdrawals = nil
+
+	tracing.SetAttributes(
+		span,
+		attribute.Int64("number", header.Number.Int64()),
+	)
+
 	return nil
 }
 
