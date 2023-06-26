@@ -214,7 +214,7 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 }
 
 func (sd *SharedDomains) SizeEstimate() uint64 {
-	return sd.estSize.Load()
+	return sd.estSize.Load() * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
 }
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, error) {
