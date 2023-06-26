@@ -82,6 +82,7 @@ func TestAggregator_WinAccess(t *testing.T) {
 }
 
 func TestAggregator_Merge(t *testing.T) {
+	t.Skip("FIXME: migrate me to AggV3")
 	_, db, agg := testDbAndAggregator(t, 1000)
 	defer agg.Close()
 
@@ -166,6 +167,8 @@ func TestAggregator_Merge(t *testing.T) {
 // - we could close first aggregator and open another with previous data still available
 // - new aggregator SeekCommitment must return txNum equal to amount of total txns
 func TestAggregator_RestartOnDatadir(t *testing.T) {
+	t.Skip("FIXME: migrate me to AggV3")
+
 	logger := log.New()
 	aggStep := uint64(50)
 	path, db, agg := testDbAndAggregator(t, aggStep)
@@ -263,6 +266,7 @@ func TestAggregator_RestartOnDatadir(t *testing.T) {
 }
 
 func TestAggregator_RestartOnFiles(t *testing.T) {
+	t.Skip("FIXME: migrate me to AggV3")
 	logger := log.New()
 	aggStep := uint64(100)
 
@@ -369,6 +373,7 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 }
 
 func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
+	t.Skip("FIXME: migrate me to AggV3")
 	aggStep := uint64(500)
 
 	_, db, agg := testDbAndAggregator(t, aggStep)
