@@ -867,33 +867,28 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 
 	for k, _, err = keysCursor.First(); err == nil && k != nil; k, _, err = keysCursor.NextNoDup() {
 		pos++
+		if v, err = keysCursor.LastDup(); err != nil {
+			return Collation{}, fmt.Errorf("find last %s key for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+		}
+		if !bytes.Equal(v, stepBytes) {
+			continue
+		}
+		copy(keySuffix, k)
+		copy(keySuffix[len(k):], v)
+		ks := len(k) + len(v)
+
+		v, err := roTx.GetOne(d.valsTable, keySuffix[:ks])
+		if err != nil {
+			return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+		}
+
 		select {
 		case <-ctx.Done():
 			return Collation{}, ctx.Err()
 		default:
 		}
 
-		if v, err = keysCursor.LastDup(); err != nil {
-			return Collation{}, fmt.Errorf("find last %s key for aggregation step k=[%x]: %w", d.filenameBase, k, err)
-		}
-		if bytes.Equal(v, stepBytes) {
-			copy(keySuffix, k)
-			copy(keySuffix[len(k):], v)
-			ks := len(k) + len(v)
-
-			v, err := roTx.GetOne(d.valsTable, keySuffix[:ks])
-			if err != nil {
-				return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
-			}
-
-			select {
-			case <-ctx.Done():
-				return Collation{}, ctx.Err()
-			default:
-			}
-
-			pairs <- kvpair{k: k, v: v}
-		}
+		pairs <- kvpair{k: k, v: v}
 	}
 	close(pairs)
 	if err != nil {
