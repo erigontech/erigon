@@ -38,7 +38,7 @@ func TestHeaderVerification(t *testing.T) {
 	)
 	m := stages.MockWithGenesisEngine(t, gspec, engine, false)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil, false /* intermediateHashes */)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 	)
 	m := stages.MockWithGenesisEngine(t, gspec, engine, false)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil, false /* intermediateHashes */)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}

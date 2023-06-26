@@ -32,7 +32,7 @@ func TestHeaderStep(t *testing.T) {
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 100, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	require.NoError(err)
 	{ // Do 1 step to start txPool
 
@@ -107,7 +107,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), libcommon.Address{1}, uint256.NewInt(10_000), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(err)
 		gen.AddTx(tx)
-	}, false /* intermediateHashes */)
+	})
 	require.NoError(err)
 
 	// Send NewBlock message
@@ -133,7 +133,7 @@ func TestReorg(t *testing.T) {
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -172,20 +172,20 @@ func TestReorg(t *testing.T) {
 	// Now generate three competing branches, one short and two longer ones
 	short, err := core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 2, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
 	long1, err := core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{2}) // Need to make headers different from short branch
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
 	// Second long chain needs to be slightly shorter than the first long chain
 	long2, err := core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 9, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{3}) // Need to make headers different from short branch and another long branch
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestReorg(t *testing.T) {
 	// Now generate three competing branches, one short and two longer ones
 	short2, err := core.GenerateChain(m.ChainConfig, long1.TopBlock, m.Engine, m.DB, 2, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
@@ -308,14 +308,14 @@ func TestAnchorReplace(t *testing.T) {
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
 	short, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 11, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestAnchorReplace(t *testing.T) {
 		} else {
 			b.SetCoinbase(libcommon.Address{2})
 		}
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -403,14 +403,14 @@ func TestAnchorReplace2(t *testing.T) {
 	m := stages.Mock(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
 	short, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestAnchorReplace2(t *testing.T) {
 		} else {
 			b.SetCoinbase(libcommon.Address{2})
 		}
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -570,9 +570,9 @@ func TestBogusForkchoice(t *testing.T) {
 func TestPoSDownloader(t *testing.T) {
 	m := stages.MockWithZeroTTD(t, true)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2 /* n */, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	require.NoError(t, err)
 
 	// Send a payload whose parent isn't downloaded yet
@@ -632,9 +632,9 @@ func TestPoSDownloader(t *testing.T) {
 func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	m := stages.MockWithZeroTTD(t, true)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3 /* n */, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	require.NoError(t, err)
 
 	lastValidHeader := chain.Headers[0]
@@ -701,7 +701,7 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	// One empty block
 	chain0, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *core.BlockGen) {
 		gen.SetDifficulty(big.NewInt(0))
-	}, false /* intermediateHashes */)
+	})
 	require.NoError(err)
 
 	// One empty block, one block with transaction for 10k wei
@@ -714,7 +714,7 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 			require.NoError(err)
 			gen.AddTx(tx)
 		}
-	}, false /* intermediateHashes */)
+	})
 	require.NoError(err)
 
 	// One empty block, one block with transaction for 20k wei
@@ -727,13 +727,13 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 			require.NoError(err)
 			gen.AddTx(tx)
 		}
-	}, false /* intermediateHashes */)
+	})
 	require.NoError(err)
 
 	// 3 empty blocks
 	chain3, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, gen *core.BlockGen) {
 		gen.SetDifficulty(big.NewInt(0))
-	}, false /* intermediateHashes */)
+	})
 	require.NoError(err)
 
 	//------------------------------------------

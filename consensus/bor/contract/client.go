@@ -74,7 +74,7 @@ func (gc *GenesisContractsClient) CommitState(event *clerk.EventRecordWithTime, 
 		return err
 	}
 
-	gc.logger.Debug("→ committing new state", "eventRecord", event.String())
+	gc.logger.Info("→ committing new state", "eventRecord", event.String())
 	_, err = syscall(libcommon.HexToAddress(gc.StateReceiverContract), data)
 
 	return err
