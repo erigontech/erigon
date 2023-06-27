@@ -783,11 +783,11 @@ Loop:
 					// prune befor flush, to speedup flush
 					tt := time.Now()
 					//TODO: bronen, uncomment after fix tests
-					if agg.CanPrune(applyTx) {
-						if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
-							return err
-						}
-					}
+					//if agg.CanPrune(applyTx) {
+					//	if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
+					//		return err
+					//	}
+					//}
 					t2 = time.Since(tt)
 
 					tt = time.Now()
@@ -880,7 +880,7 @@ Loop:
 		}
 	}
 
-	if blocksFreezeCfg.Produce {
+	if parallel && blocksFreezeCfg.Produce {
 		//agg.BuildFilesInBackground(outputTxNum.Load())
 		agg.AggregateFilesInBackground()
 	}
