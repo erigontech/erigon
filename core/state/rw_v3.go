@@ -129,7 +129,7 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 					kb, _ := hex.DecodeString(key)
 					prev, err := domains.LatestAccount(kb)
 					if err != nil {
-						return fmt.Errorf("latest account %x: %w", key, err)
+						return fmt.Errorf("latest account %x: %w", kb, err)
 					}
 					if list.Vals[k] == nil {
 						if Assert {
