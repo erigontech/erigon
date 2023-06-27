@@ -145,12 +145,12 @@ func (sd *SharedDomains) SeekCommitment() (bn, txn uint64, err error) {
 		return 0, 0, err
 	}
 
-	//rv, _, err := cmcx.GetLatest(keyCommitmentState, nil, sd.roTx)
-	//if err != nil {
-	//	return 0, 0, err
-	//}
+	rv, _, err := cmcx.GetLatest(keyCommitmentState, nil, sd.roTx)
+	if err != nil {
+		return 0, 0, err
+	}
 
-	bn, txn, err = sd.Commitment.Restore(topValue)
+	bn, txn, err = sd.Commitment.Restore(rv)
 	fmt.Printf("restored domains to block %d, txn %d\n", bn, txn)
 	if txn != 0 {
 		sd.SetTxNum(txn)

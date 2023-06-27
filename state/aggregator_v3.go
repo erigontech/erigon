@@ -645,13 +645,20 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcMaxTxNum()
 	var static AggV3StaticFiles
+	fmt.Printf("step %d: collating...\n", step)
+
+	roTx, err := a.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer roTx.Rollback()
 
 	g, ctx := errgroup.WithContext(ctx)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
 		d := d
 		var collation Collation
 		var err error
-		collation, err = d.collate(ctx, step, txFrom, txTo, d.tx)
+		collation, err = d.collateStream(ctx, step, txFrom, txTo, roTx)
 		if err != nil {
 			collation.Close() // TODO: it must be handled inside collateStream func - by defer
 			return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
@@ -697,7 +704,7 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 		d := d
 		var collation map[string]*roaring64.Bitmap
 		var err error
-		collation, err = d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, d.tx)
+		collation, err = d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, roTx)
 		if err != nil {
 			return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
 		}
@@ -746,9 +753,6 @@ func (a *AggregatorV3) BuildFiles(toTxNum uint64) (err error) {
 	txn := a.txNum.Load() + 1
 	if txn <= a.minimaxTxNumInFiles.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
 		return nil
-	}
-	if _, err = a.ComputeCommitment(true, false); err != nil {
-		return err
 	}
 
 	finished := a.BuildFilesInBackground(toTxNum)
@@ -1468,16 +1472,16 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		return fin
 	}
 
-	if _, err := a.SharedDomains().Commit(true, false); err != nil {
-		log.Warn("ComputeCommitment before aggregation has failed", "err", err)
-		return fin
-	}
+	//if _, err := a.SharedDomains().Commit(true, false); err != nil {
+	//	log.Warn("ComputeCommitment before aggregation has failed", "err", err)
+	//	return fin
+	//}
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return fin
 	}
 
 	step := a.minimaxTxNumInFiles.Load() / a.aggregationStep
-	toTxNum := (step + 1) * a.aggregationStep
+	//toTxNum := (step + 1) * a.aggregationStep
 	hasData := false
 
 	a.wg.Add(1)
@@ -1485,9 +1489,9 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		defer a.wg.Done()
 		defer a.buildingFiles.Store(false)
 
-		// check if db has enough data (maybe we didn't commit them yet)
-		lastInDB := lastIdInDB(a.db, a.accounts.indexKeysTable)
-		hasData = lastInDB >= toTxNum
+		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
+		lastInDB := lastIdInDB(a.db, a.accounts.valsTable)
+		hasData = lastInDB >= step
 		if !hasData {
 			close(fin)
 			return
@@ -1497,7 +1501,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
-		for step < lastIdInDB(a.db, a.accounts.indexKeysTable)/a.aggregationStep {
+		for step < lastIdInDB(a.db, a.accounts.valsTable) {
 			if err := a.buildFilesInBackground(a.ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) {
 					close(fin)
@@ -1923,7 +1927,7 @@ func lastIdInDB(db kv.RoDB, table string) (lstInDb uint64) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		lst, _ := kv.LastKey(tx, table)
 		if len(lst) > 0 {
-			lstInDb = binary.BigEndian.Uint64(lst)
+			lstInDb = ^binary.BigEndian.Uint64(lst[len(lst)-8:])
 		}
 		return nil
 	}); err != nil {

@@ -200,6 +200,16 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 	require.NoError(t, err)
 	tx = nil
 
+	tx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+
+	ac := agg.MakeContext()
+	ac.IterateAccounts(tx, []byte{}, func(addr, val []byte) {
+		fmt.Printf("addr=%x val=%x\n", addr, val)
+	})
+	ac.Close()
+	tx.Rollback()
+
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
@@ -293,21 +303,26 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 		keys[txNum-1] = append(addr, loc...)
 	}
+
+	// flush and build files
 	err = agg.Flush(context.Background(), tx)
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(txs)
+	err = tx.Commit()
 	require.NoError(t, err)
 	agg.FinishWrites()
 
-	err = tx.Commit()
+	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
-	tx = nil
-	db.Close()
-	agg.Close()
 
+	tx = nil
+	agg.Close()
+	db.Close()
+
+	// remove database files
 	require.NoError(t, os.RemoveAll(filepath.Join(path, "db4")))
 
+	// open new db and aggregator instances
 	newDb, err := mdbx.NewMDBX(logger).InMem(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).Open()
@@ -333,6 +348,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	t.Logf("seek to latest_tx=%d", latestTx)
 
 	ctx := newAgg.MakeContext()
+	defer ctx.Close()
+
 	miss := uint64(0)
 	for i, key := range keys {
 		if uint64(i+1) >= txs-aggStep {
