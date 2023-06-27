@@ -158,6 +158,19 @@ func (sd *SharedDomains) SeekCommitment() (bn, txn uint64, err error) {
 	return bn, txn, err
 }
 
+func (sd *SharedDomains) ClearRam() {
+	sd.muMaps.Lock()
+	defer sd.muMaps.Unlock()
+	sd.account = map[string][]byte{}
+	sd.code = map[string][]byte{}
+	sd.commitment.Clear()
+
+	sd.Commitment.updates.List(true)
+	sd.Commitment.patriciaTrie.Reset()
+	sd.storage.Clear()
+	sd.estSize.Store(0)
+}
+
 func (sd *SharedDomains) clear() {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
