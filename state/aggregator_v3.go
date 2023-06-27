@@ -648,18 +648,14 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 	g, ctx := errgroup.WithContext(ctx)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
 		d := d
+		var collation Collation
+		var err error
+		collation, err = d.collate(ctx, step, txFrom, txTo, d.tx)
+		if err != nil {
+			collation.Close() // TODO: it must be handled inside collateStream func - by defer
+			return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
+		}
 		g.Go(func() error {
-			var collation Collation
-			if err := a.db.View(ctx, func(roTx kv.Tx) (err error) {
-				collation, err = d.collate(ctx, step, txFrom, txTo, roTx)
-				if err != nil {
-					collation.Close() // TODO: it must be handled inside collateStream func - by defer
-					return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
-				}
-				return nil
-			}); err != nil {
-				return fmt.Errorf("domain collation %q oops: %w", d.filenameBase, err)
-			}
 			mxCollationSize.Set(uint64(collation.valuesComp.Count()))
 			mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 
@@ -685,18 +681,13 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 	// indices are built concurrently
 	for _, d := range []*InvertedIndex{a.logTopics, a.logAddrs, a.tracesFrom, a.tracesTo} {
 		d := d
+		var collation map[string]*roaring64.Bitmap
+		var err error
+		collation, err = d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, d.tx)
+		if err != nil {
+			return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
+		}
 		g.Go(func() error {
-			var collation map[string]*roaring64.Bitmap
-			if err := a.db.View(ctx, func(roTx kv.Tx) (err error) {
-				collation, err = d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, roTx)
-				if err != nil {
-					return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
-				}
-				return nil
-			}); err != nil {
-				return fmt.Errorf("domain collation %q oops: %w", d.filenameBase, err)
-			}
-
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
 				sf.Close()
