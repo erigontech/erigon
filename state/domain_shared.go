@@ -186,7 +186,7 @@ func (sd *SharedDomains) clear() {
 func (sd *SharedDomains) put(table kv.Domain, key, val []byte) {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
-	//sd.puts(table, hex.EncodeToString(key), val)
+	sd.puts(table, hex.EncodeToString(key), val)
 }
 
 func (sd *SharedDomains) puts(table kv.Domain, key string, val []byte) {
