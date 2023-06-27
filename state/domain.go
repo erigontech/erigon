@@ -1435,10 +1435,6 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 			//}
 			continue
 		}
-		if d.filenameBase == "accounts" {
-			log.Warn("[dbg] prune del", "stepInDb", ^binary.BigEndian.Uint64(v), "step", step)
-		}
-
 		seek := common.Append(k, v)
 		kk, _, err := valsC.SeekExact(seek)
 		if err != nil {
