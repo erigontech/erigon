@@ -246,7 +246,7 @@ func ExecV3(ctx context.Context,
 
 	// MA setio
 	doms := cfg.agg.SharedDomains()
-	defer doms.Close()
+	defer cfg.agg.CloseSharedDomains()
 	rs := state.NewStateV3(doms, logger)
 
 	//TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
