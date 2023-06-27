@@ -940,6 +940,9 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	defer func() {
 		d.stats.LastCollationTook = time.Since(started)
 	}()
+	if d.filenameBase == "accounts" {
+		log.Warn("[dbg] collate", "step", step)
+	}
 
 	hCollation, err := d.History.collate(step, txFrom, txTo, roTx)
 	if err != nil {
