@@ -790,7 +790,7 @@ func (d *Domain) writeCollationPair(valuesComp *compress.Compressor, pairs chan 
 func (d *Domain) aggregate(ctx context.Context, step uint64, txFrom, txTo uint64, tx kv.Tx, ps *background.ProgressSet) (err error) {
 	mxRunningCollations.Inc()
 	start := time.Now()
-	collation, err := d.collateStream(ctx, step, txFrom, txTo, tx)
+	collation, err := d.collate(ctx, step, txFrom, txTo, tx)
 	mxRunningCollations.Dec()
 	mxCollateTook.UpdateDuration(start)
 
@@ -861,7 +861,6 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 	defer keysCursor.Close()
 
 	var (
-		k, v     []byte
 		pos      uint64
 		valCount int
 		pairs    = make(chan kvpair, 1024)
@@ -879,21 +878,31 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 	)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
-	for k, _, err = keysCursor.First(); err == nil && k != nil; k, _, err = keysCursor.NextNoDup() {
+	if !d.largeValues {
+		panic("implement me")
+	}
+	for k, stepInDB, err := keysCursor.First(); k != nil; k, stepInDB, err = keysCursor.NextNoDup() {
 		pos++
-		if v, err = keysCursor.LastDup(); err != nil {
+		if err != nil {
 			return Collation{}, fmt.Errorf("find last %s key for aggregation step k=[%x]: %w", d.filenameBase, k, err)
 		}
-		if !bytes.Equal(v, stepBytes) {
-			continue
-		}
-		copy(keySuffix, k)
-		copy(keySuffix[len(k):], v)
-		ks := len(k) + len(v)
-
-		v, err := roTx.GetOne(d.valsTable, keySuffix[:ks])
-		if err != nil {
-			return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+		for ; stepInDB != nil; k, stepInDB, err = keysCursor.NextDup() {
+			if err != nil {
+				return Collation{}, fmt.Errorf("find last %s key for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+			}
+			if ^binary.BigEndian.Uint64(stepInDB) > step {
+				continue
+			} else if ^binary.BigEndian.Uint64(stepInDB) < step {
+				break
+			}
+			copy(keySuffix, k)
+			copy(keySuffix[len(k):], stepInDB)
+			v, err := roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
+			if err != nil {
+				return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+			}
+			pairs <- kvpair{k: k, v: v}
+			break
 		}
 
 		select {
@@ -901,8 +910,6 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 			return Collation{}, ctx.Err()
 		default:
 		}
-
-		pairs <- kvpair{k: k, v: v}
 	}
 	close(pairs)
 	if err != nil {
@@ -928,7 +935,7 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 // collate gathers domain changes over the specified step, using read-only transaction,
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
-func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx, logEvery *time.Ticker) (Collation, error) {
+func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (Collation, error) {
 	started := time.Now()
 	defer func() {
 		d.stats.LastCollationTook = time.Since(started)
@@ -952,49 +959,52 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	if valuesComp, err = compress.NewCompressor(context.Background(), "collate values", valuesPath, d.tmpdir, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
-	keysCursor, err := roTx.CursorDupSort(d.keysTable)
+	keysC, err := roTx.CursorDupSort(d.keysTable)
 	if err != nil {
 		return Collation{}, fmt.Errorf("create %s keys cursor: %w", d.filenameBase, err)
 	}
-	defer keysCursor.Close()
+	defer keysC.Close()
 
 	var (
-		k, v        []byte
-		pos         uint64
 		valuesCount uint
+		keySuffix   = make([]byte, 256+8)
 	)
 
+	if !d.largeValues {
+		panic("implement me")
+	}
 	//TODO: use prorgesSet
-	//totalKeys, err := keysCursor.Count()
-	//if err != nil {
-	//	return Collation{}, fmt.Errorf("failed to obtain keys count for domain %q", d.filenameBase)
-	//}
-	for k, _, err = keysCursor.First(); err == nil && k != nil; k, _, err = keysCursor.NextNoDup() {
+	for k, stepInDB, err := keysC.First(); k != nil; k, stepInDB, err = keysC.NextNoDup() {
 		if err != nil {
 			return Collation{}, err
 		}
-		pos++
 
-		if v, err = keysCursor.LastDup(); err != nil {
-			return Collation{}, fmt.Errorf("find last %s key for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+		//TODO: maybe can replace by SeekBothRange
+		for ; stepInDB != nil; k, stepInDB, err = keysC.NextDup() {
+			if err != nil {
+				return Collation{}, err
+			}
+			if ^binary.BigEndian.Uint64(stepInDB) > step {
+				continue
+			} else if ^binary.BigEndian.Uint64(stepInDB) < step {
+				break
+			}
+			copy(keySuffix, k)
+			copy(keySuffix[len(k):], stepInDB)
+			v, err := roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
+			if err != nil {
+				return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+			}
+			if err = valuesComp.AddUncompressedWord(k); err != nil {
+				return Collation{}, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
+			}
+			valuesCount++ // Only counting keys, not values
+			if err = valuesComp.AddUncompressedWord(v); err != nil {
+				return Collation{}, fmt.Errorf("add %s values val [%x]=>[%x]: %w", d.filenameBase, k, v, err)
+			}
+			break
 		}
-		if ^binary.BigEndian.Uint64(v) != step {
-			continue
-		}
-		keySuffix := make([]byte, len(k)+8)
-		copy(keySuffix, k)
-		copy(keySuffix[len(k):], v)
-		v, err := roTx.GetOne(d.valsTable, keySuffix)
-		if err != nil {
-			return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
-		}
-		if err = valuesComp.AddUncompressedWord(k); err != nil {
-			return Collation{}, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
-		}
-		valuesCount++ // Only counting keys, not values
-		if err = valuesComp.AddUncompressedWord(v); err != nil {
-			return Collation{}, fmt.Errorf("add %s values val [%x]=>[%x]: %w", d.filenameBase, k, v, err)
-		}
+
 		select {
 		case <-ctx.Done():
 			d.logger.Warn("[snapshots] collate domain cancelled", "name", d.filenameBase, "err", ctx.Err())
@@ -1059,6 +1069,9 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		d.stats.LastFileBuildingTook = time.Since(start)
 	}()
 
+	if d.filenameBase == "accounts" {
+		log.Warn("[dbg] buildFiles", "step", step)
+	}
 	hStaticFiles, err := d.History.buildFiles(ctx, step, HistoryCollation{
 		historyPath:  collation.historyPath,
 		historyComp:  collation.historyComp,
@@ -1115,6 +1128,9 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values bt idx: %w", d.filenameBase, err)
 		}
+	}
+	if d.filenameBase == "accounts" {
+
 	}
 
 	closeComp = false
@@ -1377,7 +1393,9 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 // history prunes keys in range [txFrom; txTo), domain prunes whole step.
 func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
 	mxPruneTook.Update(d.stats.LastPruneTook.Seconds())
-
+	if d.filenameBase == "accounts" {
+		log.Warn("[dbg] prune", "step", step)
+	}
 	keysCursor, err := d.tx.RwCursorDupSort(d.keysTable)
 	if err != nil {
 		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
@@ -1409,15 +1427,13 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 
 	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
 		if ^binary.BigEndian.Uint64(v) > step {
+			//if d.filenameBase == "accounts" {
+			//	log.Warn("[dbg] prune skip", "stepInDb", ^binary.BigEndian.Uint64(v), "step", step)
+			//}
 			continue
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			d.logger.Info("[snapshots] prune domain", "name", d.filenameBase, "step", step)
-			//"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)))
-		default:
+		if d.filenameBase == "accounts" {
+			log.Warn("[dbg] prune del", "stepInDb", ^binary.BigEndian.Uint64(v), "step", step)
 		}
 
 		seek := common.Append(k, v)
@@ -1435,6 +1451,15 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if err = keysCursor.DeleteCurrent(); err != nil {
 			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			d.logger.Info("[snapshots] prune domain", "name", d.filenameBase, "step", step)
+			//"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)))
+		default:
 		}
 	}
 	if err != nil {

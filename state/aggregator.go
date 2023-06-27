@@ -440,7 +440,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 
 		mxRunningCollations.Inc()
 		start := time.Now()
-		collation, err := d.collateStream(ctx, step, txFrom, txTo, d.tx)
+		collation, err := d.collate(ctx, step, txFrom, txTo, d.tx)
 		mxRunningCollations.Dec()
 		mxCollateTook.UpdateDuration(start)
 

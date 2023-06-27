@@ -474,7 +474,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step, txFrom, txTo uint64
 	//	defer wg.Done()
 	var err error
 	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.accounts, err = a.accounts.collateStream(ctx, step, txFrom, txTo, tx)
+		ac.accounts, err = a.accounts.collate(ctx, step, txFrom, txTo, tx)
 		return err
 	}); err != nil {
 		return sf, err
@@ -491,7 +491,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step, txFrom, txTo uint64
 	//	defer wg.Done()
 	//	var err error
 	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.storage, err = a.storage.collateStream(ctx, step, txFrom, txTo, tx)
+		ac.storage, err = a.storage.collate(ctx, step, txFrom, txTo, tx)
 		return err
 	}); err != nil {
 		return sf, err
@@ -507,7 +507,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step, txFrom, txTo uint64
 	//	defer wg.Done()
 	//	var err error
 	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.code, err = a.code.collateStream(ctx, step, txFrom, txTo, tx)
+		ac.code, err = a.code.collate(ctx, step, txFrom, txTo, tx)
 		return err
 	}); err != nil {
 		return sf, err
@@ -521,7 +521,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step, txFrom, txTo uint64
 	//}()
 
 	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.commitment, err = a.commitment.collateStream(ctx, step, txFrom, txTo, tx)
+		ac.commitment, err = a.commitment.collate(ctx, step, txFrom, txTo, tx)
 		return err
 	}); err != nil {
 		return sf, err
@@ -651,7 +651,7 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 		g.Go(func() error {
 			var collation Collation
 			if err := a.db.View(ctx, func(roTx kv.Tx) (err error) {
-				collation, err = d.collateStream(ctx, step, txFrom, txTo, roTx)
+				collation, err = d.collate(ctx, step, txFrom, txTo, roTx)
 				if err != nil {
 					collation.Close() // TODO: it must be handled inside collateStream func - by defer
 					return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
@@ -1051,10 +1051,14 @@ func (a *AggregatorV3) Prune(ctx context.Context, limit uint64) error {
 	return a.prune(ctx, 0, to, limit)
 }
 
+// [from, to)
 func (a *AggregatorV3) prune(ctx context.Context, txFrom, txTo, limit uint64) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	step := txTo / a.aggregationStep
+	step := uint64(0)
+	if txTo > 0 {
+		step = (txTo - 1) / a.aggregationStep
+	}
 	if err := a.accounts.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
@@ -1157,6 +1161,7 @@ func (a *AggregatorV3) recalcMaxTxNum() {
 	if txNum := a.tracesTo.endTxNumMinimax(); txNum < min {
 		min = txNum
 	}
+	log.Warn("[dbg] minimaxTxNumInFiles", "n", min)
 	a.minimaxTxNumInFiles.Store(min)
 }
 
