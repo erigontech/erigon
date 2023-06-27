@@ -296,7 +296,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	err = agg.Flush(context.Background(), tx)
 	require.NoError(t, err)
 
-	agg.AggregateFilesInBackground()
+	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 	agg.FinishWrites()
 

@@ -1144,7 +1144,11 @@ func (a *Aggregator) MakeContext() *AggregatorContext {
 }
 
 func (ac *AggregatorContext) ReadAccountData(addr []byte, roTx kv.Tx) ([]byte, error) {
-	return ac.accounts.Get(addr, nil, roTx)
+	v, _, err := ac.accounts.GetLatest(addr, nil, roTx)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 func (ac *AggregatorContext) ReadAccountDataBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
@@ -1153,7 +1157,11 @@ func (ac *AggregatorContext) ReadAccountDataBeforeTxNum(addr []byte, txNum uint6
 }
 
 func (ac *AggregatorContext) ReadAccountStorage(addr []byte, loc []byte, roTx kv.Tx) ([]byte, error) {
-	return ac.storage.Get(addr, loc, roTx)
+	v, _, err := ac.storage.GetLatest(addr, loc, roTx)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 func (ac *AggregatorContext) ReadAccountStorageBeforeTxNum(addr []byte, loc []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
@@ -1169,11 +1177,19 @@ func (ac *AggregatorContext) ReadAccountStorageBeforeTxNum(addr []byte, loc []by
 }
 
 func (ac *AggregatorContext) ReadAccountCode(addr []byte, roTx kv.Tx) ([]byte, error) {
-	return ac.code.Get(addr, nil, roTx)
+	v, _, err := ac.code.GetLatest(addr, nil, roTx)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 func (ac *AggregatorContext) ReadCommitment(addr []byte, roTx kv.Tx) ([]byte, error) {
-	return ac.commitment.Get(addr, nil, roTx)
+	v, _, err := ac.commitment.GetLatest(addr, nil, roTx)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 func (ac *AggregatorContext) ReadCommitmentBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
@@ -1187,7 +1203,7 @@ func (ac *AggregatorContext) ReadAccountCodeBeforeTxNum(addr []byte, txNum uint6
 }
 
 func (ac *AggregatorContext) ReadAccountCodeSize(addr []byte, roTx kv.Tx) (int, error) {
-	code, err := ac.code.Get(addr, nil, roTx)
+	code, _, err := ac.code.GetLatest(addr, nil, roTx)
 	if err != nil {
 		return 0, err
 	}

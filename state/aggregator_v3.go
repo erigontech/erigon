@@ -644,6 +644,7 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcMaxTxNum()
+	var static AggV3StaticFiles
 
 	g, ctx := errgroup.WithContext(ctx)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
@@ -668,12 +669,25 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 				return err
 			}
 
+			switch kv.Domain(d.valsTable) {
+			case kv.TblAccountVals:
+				static.accounts = sf
+			case kv.TblStorageVals:
+				static.storage = sf
+			case kv.TblCodeVals:
+				static.code = sf
+			case kv.TblCommitmentVals:
+				static.commitment = sf
+			default:
+				panic("unknown domain " + d.valsTable)
+			}
+
 			//can use agg.integrateFiles ???
-			a.filesMutationLock.Lock()
-			defer a.filesMutationLock.Unlock()
-			defer a.needSaveFilesListInDB.Store(true)
-			defer a.recalcMaxTxNum()
-			d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
+			//a.filesMutationLock.Lock()
+			//defer a.filesMutationLock.Unlock()
+			//defer a.needSaveFilesListInDB.Store(true)
+			//defer a.recalcMaxTxNum()
+			//d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
 			return nil
 		})
 	}
@@ -694,11 +708,23 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 				return err
 			}
 
-			a.filesMutationLock.Lock()
-			defer a.filesMutationLock.Unlock()
-			defer a.needSaveFilesListInDB.Store(true)
-			defer a.recalcMaxTxNum()
-			d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
+			switch kv.Domain(d.indexKeysTable) {
+			case kv.TblLogTopicsKeys:
+				static.logTopics = sf
+			case kv.TblLogAddressKeys:
+				static.logAddrs = sf
+			case kv.TblTracesFromKeys:
+				static.tracesFrom = sf
+			case kv.TblTracesToKeys:
+				static.tracesTo = sf
+			default:
+				panic("unknown index " + d.indexKeysTable)
+			}
+			//a.filesMutationLock.Lock()
+			//defer a.filesMutationLock.Unlock()
+			//defer a.needSaveFilesListInDB.Store(true)
+			//defer a.recalcMaxTxNum()
+			//d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
 			return nil
 		})
 	}
@@ -711,46 +737,8 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 		"step", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(a.aggregationStep), float64(txTo)/float64(a.aggregationStep)),
 		"took", time.Since(stepStartedAt))
 
-	//if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
-	//	return nil
-	//}
-	//a.wg.Add(1)
-	//go func() {
-	//	defer a.wg.Done()
-	//	defer a.mergeingFiles.Store(false)
-	//	if err := a.mergeDomainSteps(a.ctx, 1); err != nil {
-	//		if errors.Is(err, context.Canceled) {
-	//			return
-	//		}
-	//		log.Warn("[snapshots] merge", "err", err)
-	//	}
-	//
-	//	a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
-	//}()
-
-	//mxStepTook.UpdateDuration(stepStartedAt)
-
-	return nil
-}
-
-func (a *AggregatorV3) mergeDomainSteps(ctx context.Context, workers int) error {
-	mergeStartedAt := time.Now()
-	var upmerges int
-	for {
-		somethingMerged, err := a.mergeLoopStep(ctx, workers)
-		if err != nil {
-			return err
-		}
-
-		if !somethingMerged {
-			break
-		}
-		upmerges++
-	}
-
-	if upmerges > 1 {
-		log.Info("[stat] aggregation merged", "merge_took", time.Since(mergeStartedAt), "merges_count", upmerges)
-	}
+	mxStepTook.UpdateDuration(stepStartedAt)
+	a.integrateFiles(static, txFrom, txTo)
 	return nil
 }
 
@@ -1471,39 +1459,6 @@ func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
 // KeepInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
 // we can set it to 0, because no re-org on this blocks are possible
 func (a *AggregatorV3) KeepInDB(v uint64) { a.keepInDB = v }
-
-func (a *AggregatorV3) AggregateFilesInBackground() {
-	if a.domains != nil {
-		a.txNum.Store(a.domains.txNum.Load())
-	}
-	if (a.txNum.Load() + 1) <= a.minimaxTxNumInFiles.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
-		return
-	}
-
-	step := a.minimaxTxNumInFiles.Load() / a.aggregationStep
-	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
-		return
-	}
-	defer a.buildingFiles.Store(false)
-
-	if _, err := a.SharedDomains().Commit(true, false); err != nil {
-		log.Warn("ComputeCommitment before aggregation has failed", "err", err)
-		return
-	}
-
-	if err := a.buildFilesInBackground(a.ctx, step); err != nil {
-		if errors.Is(err, context.Canceled) {
-			return
-		}
-		log.Warn("buildFilesInBackground", "err", err)
-	}
-	if err := a.BuildMissedIndices(a.ctx, 1); err != nil {
-		if errors.Is(err, context.Canceled) {
-			return
-		}
-		log.Warn("BuildMissedIndices", "err", err)
-	}
-}
 
 // Returns channel which is closed when aggregation is done
 func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {

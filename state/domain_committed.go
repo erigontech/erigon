@@ -397,7 +397,7 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 	}
 
 	if d.trace {
-		fmt.Printf("commitment put %d rh %x\n\n", d.txNum, rh)
+		fmt.Printf("commitment put tx %d rh %x\n\n", d.txNum, rh)
 	}
 	if err := d.Domain.PutWithPrev(keyCommitmentState, nil, encoded, d.prevState); err != nil {
 		return err
