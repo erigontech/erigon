@@ -493,6 +493,21 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
 
+	t.Run("seek beyond the last key", func(t *testing.T) {
+		_, _, err := bt.dataLookup(bt.keyCount + 1)
+		require.Error(t, err)
+
+		_, _, err = bt.dataLookup(bt.keyCount) // TODO: it must be error or not??
+		require.Error(t, err)
+
+		_, _, err = bt.dataLookup(bt.keyCount - 1)
+		require.NoError(t, err)
+
+		cur, err := bt.Seek(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
+		require.NoError(t, err)
+		require.Nil(t, cur)
+	})
+
 	for i := 0; i < len(keys); i++ {
 		cur, err := bt.Seek(keys[i])
 		require.NoErrorf(t, err, "i=%d", i)

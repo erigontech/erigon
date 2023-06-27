@@ -494,7 +494,7 @@ func (a *btAlloc) Seek(ik []byte) (*Cursor, error) {
 			if a.trace {
 				fmt.Printf("found nil key %x pos_range[%d-%d] naccess_ram=%d\n", l, lm, rm, a.naccess)
 			}
-			panic(fmt.Errorf("bt index nil node at level %d", l))
+			return nil, fmt.Errorf("bt index nil node at level %d", l)
 		}
 
 		switch bytes.Compare(ln.key, ik) {
