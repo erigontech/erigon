@@ -994,8 +994,6 @@ func (a *AggregatorV3) rotate() []flusher {
 	}
 }
 func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
-	a.domains.ClearRam()
-
 	flushers := a.rotate()
 	defer func(t time.Time) { log.Debug("[snapshots] history flush", "took", time.Since(t)) }(time.Now())
 	for _, f := range flushers {
