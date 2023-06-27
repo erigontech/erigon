@@ -828,6 +828,16 @@ Loop:
 								if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
 									return err
 								}
+								if err = applyTx.Commit(); err != nil {
+									return err
+								}
+								applyTx, err = cfg.db.BeginRw(context.Background())
+								if err != nil {
+									return err
+								}
+								agg.StartWrites()
+								applyWorker.ResetTx(applyTx)
+								agg.SetTx(applyTx)
 							}
 							t6 = time.Since(tt)
 						}
