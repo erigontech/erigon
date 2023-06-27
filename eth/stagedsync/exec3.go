@@ -798,6 +798,18 @@ Loop:
 					}
 					t3 = time.Since(tt)
 
+					if blocksFreezeCfg.Produce {
+						tt = time.Now()
+						agg.AggregateFilesInBackground()
+						t5 = time.Since(tt)
+						tt = time.Now()
+						if agg.CanPrune(applyTx) {
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
+								return err
+							}
+						}
+					}
+
 					if err = execStage.Update(applyTx, outputBlockNum.Get()); err != nil {
 						return err
 					}
@@ -818,29 +830,7 @@ Loop:
 						agg.StartWrites()
 						applyWorker.ResetTx(applyTx)
 						agg.SetTx(applyTx)
-						if blocksFreezeCfg.Produce {
-							//agg.BuildFilesInBackground(outputTxNum.Load())
-							tt = time.Now()
-							agg.AggregateFilesInBackground()
-							t5 = time.Since(tt)
-							tt = time.Now()
-							if agg.CanPrune(applyTx) {
-								if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
-									return err
-								}
-								if err = applyTx.Commit(); err != nil {
-									return err
-								}
-								applyTx, err = cfg.db.BeginRw(context.Background())
-								if err != nil {
-									return err
-								}
-								agg.StartWrites()
-								applyWorker.ResetTx(applyTx)
-								agg.SetTx(applyTx)
-							}
-							t6 = time.Since(tt)
-						}
+
 						doms.SetContext(applyTx.(*temporal.Tx).AggCtx())
 						doms.SetTx(applyTx)
 					}
