@@ -430,7 +430,7 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (*Cursor, error) {
 	}
 	k, v, err := a.dataLookup(l)
 	if err != nil {
-		return nil, fmt.Errorf("key >= %x was not found at pos %d", x, l)
+		return nil, fmt.Errorf("key >= %x was not found. %w", x, err)
 	}
 	return a.newCursor(context.TODO(), k, v, l), nil
 }
@@ -994,12 +994,12 @@ func OpenBtreeIndex(indexPath, dataPath string, M uint64) (*BtIndex, error) {
 
 func (b *BtIndex) dataLookup(di uint64) ([]byte, []byte, error) {
 	if b.keyCount < di {
-		return nil, nil, fmt.Errorf("ki is greater than key count in index")
+		return nil, nil, fmt.Errorf("keyCount=%d, but item %d requested. file: %s", b.keyCount, di, b.FileName())
 	}
 
 	p := b.dataoffset + di*uint64(b.bytesPerRec)
 	if uint64(len(b.data)) < p+uint64(b.bytesPerRec) {
-		return nil, nil, fmt.Errorf("data lookup gone too far (%d after %d)", p+uint64(b.bytesPerRec)-uint64(len(b.data)), len(b.data))
+		return nil, nil, fmt.Errorf("data lookup gone too far (%d after %d). keyCount=%d, requesed item %d. file: %s", p+uint64(b.bytesPerRec)-uint64(len(b.data)), len(b.data), b.keyCount, di, b.FileName())
 	}
 
 	offt := b.data[p : p+uint64(b.bytesPerRec)]
@@ -1009,13 +1009,13 @@ func (b *BtIndex) dataLookup(di uint64) ([]byte, []byte, error) {
 	offset := binary.BigEndian.Uint64(aux[:])
 	b.getter.Reset(offset)
 	if !b.getter.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d not found", di)
+		return nil, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
 	}
 
 	key, kp := b.getter.Next(nil)
 
 	if !b.getter.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d not found", di)
+		return nil, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
 	}
 	val, vp := b.getter.Next(nil)
 	_, _ = kp, vp

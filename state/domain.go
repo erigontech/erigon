@@ -1428,11 +1428,12 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
+	if d.filenameBase == "accounts" {
+		fmt.Printf("--- prune step: %d\n", step)
+	}
+
 	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
 		if ^binary.BigEndian.Uint64(v) > step {
-			//if d.filenameBase == "accounts" {
-			//	log.Warn("[dbg] prune skip", "stepInDb", ^binary.BigEndian.Uint64(v), "step", step)
-			//}
 			continue
 		}
 		seek := common.Append(k, v)
@@ -1446,7 +1447,9 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 			}
 			mxPruneSize.Inc()
 		}
-
+		if d.filenameBase == "accounts" {
+			fmt.Printf("prune keys: %x, %x\n", k, v)
+		}
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if err = keysCursor.DeleteCurrent(); err != nil {
 			return err
@@ -1556,24 +1559,26 @@ func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err er
 	return nil
 }
 
-func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte, bool) {
+func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte, bool, error) {
 	var val []byte
 	var found bool
 
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		if dc.files[i].endTxNum < fromTxNum {
-			break
-		}
+		//if dc.files[i].endTxNum < fromTxNum {
+		//	break
+		//}
 		reader := dc.statelessBtree(i)
 		if reader.Empty() {
+			fmt.Printf("info1 %s, %s\n", dc.files[i].src.decompressor.FileName(), reader.FileName())
 			continue
 		}
 		cur, err := reader.Seek(filekey)
 		if err != nil {
-			//dc.d.logger.Warn("failed to read from file", "file", reader.FileName(), "err", err)
-			continue
+			fmt.Printf("info2 %s, %s\n", dc.files[i].src.decompressor.FileName(), err)
+			return nil, false, err
 		}
 
+		fmt.Printf("info99 %s, %x, %x\n", dc.files[i].src.decompressor.FileName(), cur.Key(), filekey)
 		if bytes.Equal(cur.Key(), filekey) {
 			val = cur.Value()
 			found = true
@@ -1594,10 +1599,11 @@ func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte
 				}
 
 			}
+			fmt.Printf("info3 %s\n", dc.files[i].src.decompressor.FileName())
 			break
 		}
 	}
-	return val, found
+	return val, found, nil
 }
 
 // historyBeforeTxNum searches history for a value of specified key before txNum
@@ -1731,8 +1737,22 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 		return nil, false, err
 	}
 	if len(foundInvStep) == 0 {
+		if dc.d.filenameBase == "accounts" {
+			fmt.Printf("what i found?? %x , %d, %x -> %x\n", key, fromTxNum/dc.d.aggregationStep, invertedStep, foundInvStep)
+			for kk, vv, _ := keyCursor.First(); kk != nil; kk, vv, _ = keyCursor.Next() {
+				fmt.Printf("dump keys: %x, %x\n", kk, vv)
+			}
+			vC, _ := roTx.CursorDupSort(dc.d.valsTable)
+			for kk, vv, _ := vC.First(); kk != nil; kk, vv, _ = vC.Next() {
+				fmt.Printf("dump vals: %x, %x\n", kk, vv)
+			}
+		}
+
 		dc.d.stats.FilesQueries.Add(1)
-		v, found := dc.readFromFiles(key, fromTxNum)
+		v, found, err := dc.readFromFiles(key, fromTxNum)
+		if err != nil {
+			return nil, false, err
+		}
 		return v, found, nil
 	}
 	copy(dc.keyBuf[:], key)
