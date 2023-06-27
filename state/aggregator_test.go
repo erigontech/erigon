@@ -249,7 +249,7 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 }
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
-	t.Skip("TODO: finish to fix this test")
+	//t.Skip("TODO: finish to fix this test")
 	logger := log.New()
 	aggStep := uint64(100)
 

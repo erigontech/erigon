@@ -281,10 +281,12 @@ func TestAfterPrune(t *testing.T) {
 	var v []byte
 	dc := d.MakeContext()
 	defer dc.Close()
-	v, err = dc.Get([]byte("key1"), nil, tx)
+	v, found, err := dc.GetLatest([]byte("key1"), nil, tx)
+	require.Truef(t, found, "key1 not found")
 	require.NoError(t, err)
 	require.Equal(t, []byte("value1.3"), v)
-	v, err = dc.Get([]byte("key2"), nil, tx)
+	v, found, err = dc.GetLatest([]byte("key2"), nil, tx)
+	require.Truef(t, found, "key2 not found")
 	require.NoError(t, err)
 	require.Equal(t, []byte("value2.2"), v)
 
@@ -295,11 +297,14 @@ func TestAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, isEmpty)
 
-	v, err = dc.Get([]byte("key1"), nil, tx)
+	v, found, err = dc.GetLatest([]byte("key1"), nil, tx)
 	require.NoError(t, err)
+	require.Truef(t, found, "key1 not found")
 	require.Equal(t, []byte("value1.3"), v)
-	v, err = dc.Get([]byte("key2"), nil, tx)
+
+	v, found, err = dc.GetLatest([]byte("key2"), nil, tx)
 	require.NoError(t, err)
+	require.Truef(t, found, "key2 not found")
 	require.Equal(t, []byte("value2.2"), v)
 }
 
@@ -375,7 +380,8 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 				require.Nil(val, label)
 			}
 			if txNum == txs {
-				val, err := dc.Get(k[:], nil, roTx)
+				val, found, err := dc.GetLatest(k[:], nil, roTx)
+				require.Truef(found, "txNum=%d, keyNum=%d", txNum, keyNum)
 				require.NoError(err)
 				require.EqualValues(v[:], val)
 			}
@@ -632,7 +638,7 @@ func TestDelete(t *testing.T) {
 	defer dc.Close()
 	for txNum := uint64(0); txNum < 1000; txNum++ {
 		label := fmt.Sprintf("txNum=%d", txNum)
-		//val, ok, err := dc.GetBeforeTxNum([]byte("key1"), txNum+1, tx)
+		//val, ok, err := dc.GetLatestBeforeTxNum([]byte("key1"), txNum+1, tx)
 		//require.NoError(err)
 		//require.True(ok)
 		//if txNum%2 == 0 {
@@ -742,7 +748,8 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount, keyNum)
 		binary.BigEndian.PutUint64(k[:], keyNum)
 
-		storedV, err := dc.Get(k[:], nil, roTx)
+		storedV, found, err := dc.GetLatest(k[:], nil, roTx)
+		require.Truef(t, found, label)
 		require.NoError(t, err, label)
 		require.EqualValues(t, v[:], storedV, label)
 	}
@@ -838,8 +845,9 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount, keyNum)
 		binary.BigEndian.PutUint64(k[:], keyNum)
 
-		storedV, err := dc.Get(k[:], nil, tx)
-		require.NoError(t, err, label)
+		storedV, found, err := dc.GetLatest(k[:], nil, tx)
+		require.Truef(t, found, label)
+		require.NoErrorf(t, err, label)
 		require.EqualValues(t, v[:], storedV, label)
 	}
 }
