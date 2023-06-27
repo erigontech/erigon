@@ -672,6 +672,9 @@ func (s *EthBackendServer) EngineForkChoiceUpdated(ctx context.Context, req *rem
 		if status.CriticalError != nil {
 			return nil, status.CriticalError
 		}
+		if s.stageLoopIsBusy() {
+			status.Status = remote.EngineStatus_SYNCING
+		}
 	}
 
 	// No need for payload building
