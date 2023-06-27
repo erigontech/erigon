@@ -163,11 +163,10 @@ func (sd *SharedDomains) ClearRam() {
 	defer sd.muMaps.Unlock()
 	sd.account = map[string][]byte{}
 	sd.code = map[string][]byte{}
-	sd.commitment.Clear()
-
+	sd.commitment = btree2.NewMap[string, []byte](128)
 	sd.Commitment.updates.List(true)
 	sd.Commitment.patriciaTrie.Reset()
-	sd.storage.Clear()
+	sd.storage = btree2.NewMap[string, []byte](128)
 	sd.estSize.Store(0)
 }
 
@@ -187,7 +186,7 @@ func (sd *SharedDomains) clear() {
 func (sd *SharedDomains) put(table kv.Domain, key, val []byte) {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
-	sd.puts(table, hex.EncodeToString(key), val)
+	//sd.puts(table, hex.EncodeToString(key), val)
 }
 
 func (sd *SharedDomains) puts(table kv.Domain, key string, val []byte) {
