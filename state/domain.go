@@ -1564,9 +1564,9 @@ func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte
 	var found bool
 
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		//if dc.files[i].endTxNum < fromTxNum {
-		//	break
-		//}
+		if dc.files[i].startTxNum > fromTxNum {
+			continue
+		}
 		reader := dc.statelessBtree(i)
 		if reader.Empty() {
 			fmt.Printf("info1 %s, %s\n", dc.files[i].src.decompressor.FileName(), reader.FileName())
@@ -1739,13 +1739,6 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 	if len(foundInvStep) == 0 {
 		if dc.d.filenameBase == "accounts" {
 			fmt.Printf("what i found?? %x , %d, %x -> %x\n", key, fromTxNum/dc.d.aggregationStep, invertedStep, foundInvStep)
-			for kk, vv, _ := keyCursor.First(); kk != nil; kk, vv, _ = keyCursor.Next() {
-				fmt.Printf("dump keys: %x, %x\n", kk, vv)
-			}
-			vC, _ := roTx.CursorDupSort(dc.d.valsTable)
-			for kk, vv, _ := vC.First(); kk != nil; kk, vv, _ = vC.Next() {
-				fmt.Printf("dump vals: %x, %x\n", kk, vv)
-			}
 		}
 
 		dc.d.stats.FilesQueries.Add(1)
