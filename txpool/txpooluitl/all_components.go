@@ -1,5 +1,5 @@
 /*
-   Copyright 2021 Erigon contributors
+   Copyright 2021 The Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/log/v3"
 	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 
@@ -33,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/types"
 )
 
@@ -123,8 +123,9 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 	if cfg.OverrideShanghaiTime != nil {
 		shanghaiTime = cfg.OverrideShanghaiTime
 	}
+	cancunTime := chainConfig.CancunTime
 
-	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, logger)
+	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, cancunTime, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
