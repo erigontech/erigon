@@ -3,6 +3,7 @@ package devnetutils
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -18,6 +19,8 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/log/v3"
 )
+
+var ErrInvalidEnodeString = errors.New("invalid enode string")
 
 // ClearDevDB cleans up the dev folder used for the operations
 func ClearDevDB(dataDir string, logger log.Logger) error {
@@ -56,7 +59,7 @@ func HexToInt(hexStr string) uint64 {
 // UniqueIDFromEnode returns the unique ID from a node's enode, removing the `?discport=0` part
 func UniqueIDFromEnode(enode string) (string, error) {
 	if len(enode) == 0 {
-		return "", fmt.Errorf("invalid enode string")
+		return "", ErrInvalidEnodeString
 	}
 
 	// iterate through characters in the string until we reach '?'
@@ -73,14 +76,14 @@ func UniqueIDFromEnode(enode string) (string, error) {
 	}
 
 	if ati == 0 {
-		return "", fmt.Errorf("invalid enode string")
+		return "", ErrInvalidEnodeString
 	}
 
 	if _, apiPort, err := net.SplitHostPort(enode[ati+1 : i]); err != nil {
-		return "", fmt.Errorf("invalid enode string")
+		return "", ErrInvalidEnodeString
 	} else {
 		if _, err := strconv.Atoi(apiPort); err != nil {
-			return "", fmt.Errorf("invalid enode string")
+			return "", ErrInvalidEnodeString
 		}
 	}
 

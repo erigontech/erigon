@@ -29,6 +29,7 @@ type Network struct {
 	Logger             log.Logger
 	BasePrivateApiAddr string
 	BaseRPCAddr        string
+	Snapshots          bool
 	Nodes              []Node
 	wg                 sync.WaitGroup
 	peers              []string
@@ -88,14 +89,23 @@ func (nw *Network) Start(ctx *cli.Context) error {
 
 			// get the enode of the node
 			// - note this has the side effect of waiting for the node to start
-			if enode, err := getEnode(node); err == nil {
-				nw.peers = append(nw.peers, enode)
-				baseNode.StaticPeers = strings.Join(nw.peers, ",")
+			enode, err := getEnode(node)
 
-				// TODO do we need to call AddPeer to the nodes to make them aware of this one
-				// the current model only works for an appending node network where the peers gossip
-				// connections - not sure if this is the case ?
+			if err != nil {
+				if errors.Is(err, devnetutils.ErrInvalidEnodeString) {
+					continue
+				}
+
+				nw.Stop()
+				return err
 			}
+
+			nw.peers = append(nw.peers, enode)
+			baseNode.StaticPeers = strings.Join(nw.peers, ",")
+
+			// TODO do we need to call AddPeer to the nodes to make them aware of this one
+			// the current model only works for an appending node network where the peers gossip
+			// connections - not sure if this is the case ?
 		}
 	}
 
@@ -138,17 +148,14 @@ func (nw *Network) startNode(nodeAddr string, cfg interface{}, nodeNumber int) (
 		app := erigonapp.MakeApp(fmt.Sprintf("node-%d", nodeNumber), node.run, erigoncli.DefaultFlags)
 
 		if err := app.Run(args); err != nil {
-			_, printErr := fmt.Fprintln(os.Stderr, err)
-			if printErr != nil {
-				nw.Logger.Warn("Error writing app run error to stderr", "err", printErr)
-			}
+			nw.Logger.Warn("App run returned error", "node", fmt.Sprintf("node-%d", nodeNumber), "err", err)
 		}
 	}()
 
-	return node, nil
+	return &node, nil
 }
 
-// getEnode returns the enode of the mining node
+// getEnode returns the enode of the netowrk node
 func getEnode(n Node) (string, error) {
 	reqCount := 0
 
@@ -156,6 +163,12 @@ func getEnode(n Node) (string, error) {
 		nodeInfo, err := n.AdminNodeInfo()
 
 		if err != nil {
+			if r, ok := n.(*node); ok {
+				if !r.running() {
+					return "", err
+				}
+			}
+
 			if reqCount < 10 {
 				var urlErr *url.Error
 				if errors.As(err, &urlErr) {
@@ -193,14 +206,17 @@ func (nw *Network) Run(ctx go_context.Context, scenario scenarios.Scenario) erro
 func (nw *Network) Stop() {
 	type stoppable interface {
 		Stop()
+		running() bool
 	}
 
-	for _, n := range nw.Nodes {
-		if stoppable, ok := n.(stoppable); ok {
-			stoppable.Stop()
+	for i, n := range nw.Nodes {
+		if stoppable, ok := n.(stoppable); ok && stoppable.running() {
+			nw.Logger.Info("Stopping", "node", i)
+			go stoppable.Stop()
 		}
 	}
 
+	nw.Logger.Info("Waiting for nodes to stop")
 	nw.Wait()
 }
 
