@@ -1737,9 +1737,9 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 		return nil, false, err
 	}
 	if len(foundInvStep) == 0 {
-		if dc.d.filenameBase == "accounts" {
-			fmt.Printf("what i found?? %x , %d, %x -> %x\n", key, fromTxNum/dc.d.aggregationStep, invertedStep, foundInvStep)
-		}
+		//if dc.d.filenameBase == "accounts" {
+		//	fmt.Printf("what i found?? %x , %d, %x -> %x\n", key, fromTxNum/dc.d.aggregationStep, invertedStep, foundInvStep)
+		//}
 
 		dc.d.stats.FilesQueries.Add(1)
 		v, found, err := dc.readFromFiles(key, fromTxNum)
