@@ -456,14 +456,11 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 		if !bytes.HasPrefix(k, addr) {
 			return
 		}
-		sd.put(kv.StorageDomain, k, nil)
-		sd.Commitment.TouchPlainKey(k, nil, sd.Commitment.TouchStorage)
-		err = sd.Storage.DeleteWithPrev(k, nil, v)
-
 		tombs = append(tombs, pair{k, v})
 	})
 
 	for _, tomb := range tombs {
+		sd.put(kv.StorageDomain, tomb.k, nil)
 		sd.Commitment.TouchPlainKey(tomb.k, nil, sd.Commitment.TouchStorage)
 		err = sd.Storage.DeleteWithPrev(tomb.k, nil, tomb.v)
 	}
