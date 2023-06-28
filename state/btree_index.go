@@ -933,11 +933,13 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 
 	idx.getter = kv.MakeGetter()
 
-	idx.alloc = newBtAlloc(idx.keyCount, M, false)
-	idx.alloc.dataLookup = idx.dataLookup
 	idx.dataoffset = uint64(pos)
-	idx.alloc.traverseDfs()
-	idx.alloc.fillSearchMx()
+	idx.alloc = newBtAlloc(idx.keyCount, M, false)
+	if idx.alloc != nil {
+		idx.alloc.dataLookup = idx.dataLookup
+		idx.alloc.traverseDfs()
+		idx.alloc.fillSearchMx()
+	}
 	return idx, nil
 }
 
@@ -1004,6 +1006,12 @@ func (b *BtIndex) dataLookup(di uint64) ([]byte, []byte, error) {
 	}
 
 	offt := b.data[p : p+uint64(b.bytesPerRec)]
+	if len(offt) > 8 {
+		fmt.Printf("alex1: %d, %d\n", len(offt), b.bytesPerRec)
+	}
+	if len(offt) == 0 {
+		fmt.Printf("alex2: %d, %d\n", len(offt), b.bytesPerRec)
+	}
 	var aux [8]byte
 	copy(aux[8-len(offt):], offt)
 
@@ -1054,18 +1062,21 @@ func (b *BtIndex) Close() error {
 }
 
 func (b *BtIndex) Seek(x []byte) (*Cursor, error) {
-	if b.alloc != nil {
-		cursor, err := b.alloc.Seek(x)
-		if err != nil {
-			return nil, fmt.Errorf("seek key %x: %w", x, err)
-		}
-		return cursor, nil
+	if b.alloc == nil {
+		return nil, nil
 	}
-	return nil, fmt.Errorf("seek has been failed")
+	cursor, err := b.alloc.Seek(x)
+	if err != nil {
+		return nil, fmt.Errorf("seek key %x: %w", x, err)
+	}
+	return cursor, nil
 }
 
 // deprecated
 func (b *BtIndex) Lookup(key []byte) uint64 {
+	if b.alloc == nil {
+		return 0
+	}
 	cursor, err := b.alloc.Seek(key)
 	if err != nil {
 		panic(err)
@@ -1074,6 +1085,9 @@ func (b *BtIndex) Lookup(key []byte) uint64 {
 }
 
 func (b *BtIndex) OrdinalLookup(i uint64) *Cursor {
+	if b.alloc == nil {
+		return nil
+	}
 	if i > b.alloc.K {
 		return nil
 	}
