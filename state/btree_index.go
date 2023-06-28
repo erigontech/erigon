@@ -11,12 +11,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -923,8 +921,6 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 		return nil, err
 	}
 	idx.data = idx.m[:idx.size]
-	fmt.Printf("alex0: %s, %d, %d\n", idx.FileName(), len(idx.m), idx.size)
-	_ = idx.data[len(idx.data)-1] // check for segfault
 
 	// Read number of keys and bytes per record
 	pos := 8
@@ -1005,42 +1001,16 @@ func OpenBtreeIndex(indexPath, dataPath string, M uint64) (*BtIndex, error) {
 	return idx, nil
 }
 
-func (b *BtIndex) test() {
-	_ = b.data[:len(b.data)-1]
-	d := make([]byte, 2)
-	_ = d
-}
 func (b *BtIndex) dataLookup(di uint64) ([]byte, []byte, error) {
-	b.test()
 	if b.keyCount < di {
 		return nil, nil, fmt.Errorf("keyCount=%d, but item %d requested. file: %s", b.keyCount, di, b.FileName())
-	}
-	if b.bytesPerRec == 2 {
-		d := make([]byte, 2)
-		_ = d
 	}
 	p := int(b.dataoffset) + int(di)*b.bytesPerRec
 	if len(b.data) < p+b.bytesPerRec {
 		return nil, nil, fmt.Errorf("data lookup gone too far (%d after %d). keyCount=%d, requesed item %d. file: %s", p+b.bytesPerRec-len(b.data), len(b.data), b.keyCount, di, b.FileName())
 	}
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	fmt.Printf("alex: %s\n", common.ByteCount(m.Alloc))
-
-	fmt.Printf("alex2: %s, %d, %d, %d, %d\n", b.FileName(), b.bytesPerRec, len(b.data), p+b.bytesPerRec)
-	//_ = b.data[:len(b.data)-1]
-	if b.bytesPerRec == 2 {
-		d := make([]byte, 2)
-
-		copy(d, b.data[p:p+b.bytesPerRec])
-
-		c := make([]byte, b.bytesPerRec)
-		copy(c, b.data[p:p+b.bytesPerRec])
-	}
-
 	var aux [8]byte
-	common.Copy(aux[8-b.bytesPerRec:])
 	dst := aux[8-b.bytesPerRec:]
 	copy(dst, b.data[p:p+b.bytesPerRec])
 
