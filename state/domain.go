@@ -828,7 +828,7 @@ func (d *Domain) aggregate(ctx context.Context, step uint64, txFrom, txTo uint64
 // collate gathers domain changes over the specified step, using read-only transaction,
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
-func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (Collation, error) {
+func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (Collation, error) {
 	started := time.Now()
 	defer func() {
 		d.stats.LastCollationTook = time.Since(started)
@@ -928,104 +928,6 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 		valuesPath:   valuesPath,
 		valuesComp:   valuesComp,
 		valuesCount:  valCount,
-		historyPath:  hCollation.historyPath,
-		historyComp:  hCollation.historyComp,
-		historyCount: hCollation.historyCount,
-		indexBitmaps: hCollation.indexBitmaps,
-	}, nil
-}
-
-// collate gathers domain changes over the specified step, using read-only transaction,
-// and returns compressors, elias fano, and bitmaps
-// [txFrom; txTo)
-func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (Collation, error) {
-	started := time.Now()
-	defer func() {
-		d.stats.LastCollationTook = time.Since(started)
-	}()
-	if d.filenameBase == "accounts" {
-		log.Warn("[dbg] collate", "step", step)
-	}
-
-	hCollation, err := d.History.collate(step, txFrom, txTo, roTx)
-	if err != nil {
-		return Collation{}, err
-	}
-	var valuesComp *compress.Compressor
-	closeComp := true
-	defer func() {
-		if closeComp {
-			hCollation.Close()
-			if valuesComp != nil {
-				valuesComp.Close()
-			}
-		}
-	}()
-	valuesPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, step, step+1))
-	if valuesComp, err = compress.NewCompressor(context.Background(), "collate values", valuesPath, d.tmpdir, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
-		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
-	}
-	keysC, err := roTx.CursorDupSort(d.keysTable)
-	if err != nil {
-		return Collation{}, fmt.Errorf("create %s keys cursor: %w", d.filenameBase, err)
-	}
-	defer keysC.Close()
-
-	var (
-		valuesCount uint
-		keySuffix   = make([]byte, 256+8)
-	)
-
-	if !d.largeValues {
-		panic("implement me")
-	}
-	//TODO: use prorgesSet
-	for k, stepInDB, err := keysC.First(); k != nil; k, stepInDB, err = keysC.NextNoDup() {
-		if err != nil {
-			return Collation{}, err
-		}
-
-		//TODO: maybe can replace by SeekBothRange
-		for ; stepInDB != nil; k, stepInDB, err = keysC.NextDup() {
-			if err != nil {
-				return Collation{}, err
-			}
-			if ^binary.BigEndian.Uint64(stepInDB) > step {
-				continue
-			} else if ^binary.BigEndian.Uint64(stepInDB) < step {
-				break
-			}
-			copy(keySuffix, k)
-			copy(keySuffix[len(k):], stepInDB)
-			v, err := roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
-			if err != nil {
-				return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
-			}
-			if err = valuesComp.AddUncompressedWord(k); err != nil {
-				return Collation{}, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
-			}
-			valuesCount++ // Only counting keys, not values
-			if err = valuesComp.AddUncompressedWord(v); err != nil {
-				return Collation{}, fmt.Errorf("add %s values val [%x]=>[%x]: %w", d.filenameBase, k, v, err)
-			}
-			break
-		}
-
-		select {
-		case <-ctx.Done():
-			d.logger.Warn("[snapshots] collate domain cancelled", "name", d.filenameBase, "err", ctx.Err())
-			return Collation{}, ctx.Err()
-		default:
-		}
-	}
-	if err != nil {
-		return Collation{}, fmt.Errorf("iterate over %s keys cursor: %w", d.filenameBase, err)
-	}
-	closeComp = false
-	return Collation{
-		valuesPath:   valuesPath,
-		valuesComp:   valuesComp,
-		valuesCount:  int(valuesCount),
 		historyPath:  hCollation.historyPath,
 		historyComp:  hCollation.historyComp,
 		historyCount: hCollation.historyCount,

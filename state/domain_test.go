@@ -109,7 +109,7 @@ func TestCollationBuild(t *testing.T) {
 	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 	{
-		c, err := d.collateStream(ctx, 0, 0, 7, tx)
+		c, err := d.collate(ctx, 0, 0, 7, tx)
 
 		require.NoError(t, err)
 		require.True(t, strings.HasSuffix(c.valuesPath, "base.0-1.kv"))

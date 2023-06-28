@@ -658,7 +658,7 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 		d := d
 		var collation Collation
 		var err error
-		collation, err = d.collateStream(ctx, step, txFrom, txTo, roTx)
+		collation, err = d.collate(ctx, step, txFrom, txTo, roTx)
 		if err != nil {
 			collation.Close() // TODO: it must be handled inside collateStream func - by defer
 			return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
