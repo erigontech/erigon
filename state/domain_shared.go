@@ -682,8 +682,8 @@ func (sd *SharedDomains) Close() {
 	sd.code = nil
 	sd.storage.Clear()
 	sd.commitment.Clear()
-	sd.Account.Close()
-	sd.Storage.Close()
-	sd.Code.Close()
-	sd.Commitment.Close()
+	//sd.Account.Close()
+	//sd.Storage.Close()
+	//sd.Code.Close()
+	//sd.Commitment.Close()
 }

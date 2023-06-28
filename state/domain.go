@@ -1570,17 +1570,14 @@ func (dc *DomainContext) readFromFiles(filekey []byte) ([]byte, bool, error) {
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		reader := dc.statelessBtree(i)
 		if reader.Empty() {
-			fmt.Printf("info1 %s, %s\n", dc.files[i].src.decompressor.FileName(), reader.FileName())
 			continue
 		}
 		cur, err := reader.Seek(filekey)
 		if err != nil {
-			fmt.Printf("info2 %s, %s\n", dc.files[i].src.decompressor.FileName(), err)
-			return nil, false, nil
+			return nil, false, nil //TODO: uncomment me
 			//return nil, false, err
 		}
 
-		fmt.Printf("info99 %s, %x, %x\n", dc.files[i].src.decompressor.FileName(), cur.Key(), filekey)
 		if bytes.Equal(cur.Key(), filekey) {
 			val = cur.Value()
 			found = true
@@ -1601,7 +1598,6 @@ func (dc *DomainContext) readFromFiles(filekey []byte) ([]byte, bool, error) {
 				}
 
 			}
-			fmt.Printf("info3 %s\n", dc.files[i].src.decompressor.FileName())
 			break
 		}
 	}
