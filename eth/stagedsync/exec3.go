@@ -16,10 +16,11 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -422,12 +423,9 @@ func ExecV3(ctx context.Context,
 
 						t1 = time.Since(commitStart)
 						tt := time.Now()
-						//if err := rs.Flush(ctx, tx, logPrefix, logEvery); err != nil {
-						//	return err
-						//}
 						t2 = time.Since(tt)
-
 						tt = time.Now()
+
 						if err := agg.Flush(ctx, tx); err != nil {
 							return err
 						}
@@ -465,9 +463,6 @@ func ExecV3(ctx context.Context,
 					logger.Info("Committed", "time", time.Since(commitStart), "drain", t0, "drain_and_lock", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				}
 			}
-			//if err = rs.Flush(ctx, tx, logPrefix, logEvery); err != nil {
-			//	return err
-			//}
 			if err = agg.Flush(ctx, tx); err != nil {
 				return err
 			}
@@ -858,10 +853,6 @@ Loop:
 		}
 		waitWorkers()
 	} else {
-		//if err = rs.Flush(ctx, applyTx, logPrefix, logEvery); err != nil {
-		//	return err
-		//}
-
 		if err = agg.Flush(ctx, applyTx); err != nil {
 			return err
 		}
