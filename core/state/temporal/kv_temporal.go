@@ -231,18 +231,7 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 }
 
 func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, err error) {
-	switch name {
-	case kv.AccountsDomain:
-		return tx.aggCtx.AccountLatest(key, tx.MdbxTx)
-	case kv.StorageDomain:
-		return tx.aggCtx.StorageLatest(key, key2, tx.MdbxTx)
-	case kv.CodeDomain:
-		return tx.aggCtx.CodeLatest(key, tx.MdbxTx)
-	case kv.CommitmentDomain:
-		return tx.aggCtx.CommitmentLatest(key, tx.MdbxTx)
-	default:
-		panic(fmt.Sprintf("unexpected: %s", name))
-	}
+	return tx.aggCtx.DomainGet(tx.MdbxTx, name, key, key2)
 }
 func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
