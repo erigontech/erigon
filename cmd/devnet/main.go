@@ -175,7 +175,7 @@ func action(ctx *cli.Context) error {
 			network.Stop()
 
 		case syscall.SIGINT:
-			log.Info("Terminating network")
+			logger.Info("Terminating network")
 			os.Exit(-int(syscall.SIGINT))
 		}
 	}()

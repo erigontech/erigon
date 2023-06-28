@@ -4,6 +4,7 @@ import (
 	go_context "context"
 	"sync"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/params"
@@ -42,6 +43,14 @@ func (n *node) Stop() {
 		toClose.Close()
 	}
 
+	n.done()
+}
+
+func (n *node) running() bool {
+	return n.ethNode != nil
+}
+
+func (n *node) done() {
 	if n.wg != nil {
 		wg := n.wg
 		n.wg = nil
@@ -59,6 +68,8 @@ func (n *node) run(ctx *cli.Context) error {
 	var logger log.Logger
 	var err error
 
+	defer n.done()
+
 	if logger, err = debug.Setup(ctx, false /* rootLogger */); err != nil {
 		return err
 	}
@@ -67,6 +78,8 @@ func (n *node) run(ctx *cli.Context) error {
 
 	nodeCfg := enode.NewNodConfigUrfave(ctx, logger)
 	ethCfg := enode.NewEthConfigUrfave(ctx, nodeCfg, logger)
+
+	nodeCfg.MdbxDBSizeLimit = 512 * datasize.MB
 
 	n.ethNode, err = enode.New(nodeCfg, ethCfg, logger)
 
