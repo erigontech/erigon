@@ -1430,10 +1430,6 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
-	if d.filenameBase == "accounts" {
-		fmt.Printf("--- prune step: %d\n", step)
-	}
-
 	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
 		if ^binary.BigEndian.Uint64(v) > step {
 			continue
@@ -1449,9 +1445,6 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 			}
 			mxPruneSize.Inc()
 		}
-		//if d.filenameBase == "accounts" {
-		//	fmt.Printf("prune keys: %x, %x\n", k, v)
-		//}
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if err = keysCursor.DeleteCurrent(); err != nil {
 			return err
