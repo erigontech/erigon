@@ -247,7 +247,7 @@ func (d *Domain) openList(fNames []string) error {
 	d.closeWhatNotInList(fNames)
 	d.garbageFiles = d.scanStateFiles(fNames)
 	if err := d.openFiles(); err != nil {
-		return fmt.Errorf("History.OpenList: %s, %w", d.filenameBase, err)
+		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
 	return nil
 }
@@ -355,22 +355,23 @@ func (d *Domain) openFiles() (err error) {
 				return false
 			}
 
-			if item.index != nil {
-				continue
-			}
-			idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
-			if dir.FileExist(idxPath) {
-				if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-					d.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
-					return false
+			if item.index == nil {
+				idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
+				if dir.FileExist(idxPath) {
+					if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
+						d.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
+						return false
+					}
+					totalKeys += item.index.KeyCount()
 				}
-				totalKeys += item.index.KeyCount()
 			}
 			if item.bindex == nil {
 				bidxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
-				if item.bindex, err = OpenBtreeIndexWithDecompressor(bidxPath, 2048, item.decompressor); err != nil {
-					d.logger.Debug("InvertedIndex.openFiles: %w, %s", err, bidxPath)
-					return false
+				if dir.FileExist(bidxPath) {
+					if item.bindex, err = OpenBtreeIndexWithDecompressor(bidxPath, 2048, item.decompressor); err != nil {
+						d.logger.Debug("InvertedIndex.openFiles: %w, %s", err, bidxPath)
+						return false
+					}
 				}
 				//totalKeys += item.bindex.KeyCount()
 			}
@@ -1793,9 +1794,9 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	//		log.Info("read", "d", dc.d.valsTable, "key", fmt.Sprintf("%x", key1), "v", fmt.Sprintf("%x", v))
 	//	}()
 	//}
-	v, b, err := dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
+	//v, b, err := dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
 	// TODO chekc
-	//v, b, err := dc.get(dc.keyBuf[:len(key1)+len(key2)], math.MaxUint64, roTx)
+	v, b, err := dc.get(dc.keyBuf[:len(key1)+len(key2)], math.MaxUint64, roTx)
 	return v, b, err
 }
 
