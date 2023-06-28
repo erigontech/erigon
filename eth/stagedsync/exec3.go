@@ -537,7 +537,7 @@ func ExecV3(ctx context.Context,
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
 		var clean func()
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4)
+		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
 		defer clean()
 	}
 
@@ -898,90 +898,6 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 		defer tx.Rollback()
 	}
 	return blockReader.BlockByNumber(context.Background(), tx, blockNum)
-}
-
-func blocksReadAheadV3(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (chan uint64, context.CancelFunc) {
-	const readAheadBlocks = 100
-	readAhead := make(chan uint64, readAheadBlocks)
-	g, gCtx := errgroup.WithContext(ctx)
-	for workerNum := 0; workerNum < workers; workerNum++ {
-		g.Go(func() (err error) {
-			var bn uint64
-			var ok bool
-			var tx kv.Tx
-			defer func() {
-				if tx != nil {
-					tx.Rollback()
-				}
-			}()
-
-			for i := 0; ; i++ {
-				select {
-				case bn, ok = <-readAhead:
-					if !ok {
-						return
-					}
-				case <-gCtx.Done():
-					return gCtx.Err()
-				}
-
-				if i%100 == 0 {
-					if tx != nil {
-						tx.Rollback()
-					}
-					tx, err = cfg.db.BeginRo(ctx)
-					if err != nil {
-						return err
-					}
-				}
-
-				if err := blocksReadAheadFunc(gCtx, tx, cfg, bn+readAheadBlocks); err != nil {
-					return err
-				}
-			}
-		})
-	}
-	return readAhead, func() {
-		close(readAhead)
-		_ = g.Wait()
-	}
-}
-func blocksReadAheadFuncV3(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, blockNum uint64) error {
-	block, err := cfg.blockReader.BlockByNumber(ctx, tx, blockNum)
-	if err != nil {
-		return err
-	}
-	if block == nil {
-		return nil
-	}
-	senders := block.Body().SendersFromTxs()             //TODO: BlockByNumber can return senders
-	stateReader := state.NewReaderV4(tx.(kv.TemporalTx)) //TODO: can do on batch! if make batch thread-safe
-	for _, sender := range senders {
-		a, _ := stateReader.ReadAccountData(sender)
-		if a == nil || a.Incarnation == 0 {
-			continue
-		}
-		if code, _ := stateReader.ReadAccountCode(sender, a.Incarnation, a.CodeHash); len(code) > 0 {
-			_, _ = code[0], code[len(code)-1]
-		}
-	}
-
-	for _, txn := range block.Transactions() {
-		to := txn.GetTo()
-		if to == nil {
-			continue
-		}
-		a, _ := stateReader.ReadAccountData(*to)
-		if a == nil || a.Incarnation == 0 {
-			continue
-		}
-		if code, _ := stateReader.ReadAccountCode(*to, a.Incarnation, a.CodeHash); len(code) > 0 {
-			_, _ = code[0], code[len(code)-1]
-		}
-	}
-	_, _ = stateReader.ReadAccountData(block.Coinbase())
-	_, _ = block, senders
-	return nil
 }
 
 func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {

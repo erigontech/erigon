@@ -451,7 +451,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
 		var clean func()
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4)
+		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, false)
 		defer clean()
 	}
 
@@ -562,7 +562,7 @@ Loop:
 	return stoppedErr
 }
 
-func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (chan uint64, context.CancelFunc) {
+func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int, histV3 bool) (chan uint64, context.CancelFunc) {
 	const readAheadBlocks = 100
 	readAhead := make(chan uint64, readAheadBlocks)
 	g, gCtx := errgroup.WithContext(ctx)
@@ -597,7 +597,7 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (ch
 					}
 				}
 
-				if err := blocksReadAheadFunc(gCtx, tx, cfg, bn+readAheadBlocks); err != nil {
+				if err := blocksReadAheadFunc(gCtx, tx, cfg, bn+readAheadBlocks, false); err != nil {
 					return err
 				}
 			}
@@ -608,12 +608,15 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int) (ch
 		_ = g.Wait()
 	}
 }
-func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, blockNum uint64) error {
+func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, blockNum uint64, histV3 bool) error {
 	block, err := cfg.blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
 	if block == nil {
+		return nil
+	}
+	if histV3 {
 		return nil
 	}
 	senders := block.Body().SendersFromTxs()     //TODO: BlockByNumber can return senders
