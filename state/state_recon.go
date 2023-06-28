@@ -43,8 +43,8 @@ func (rh ReconHeap) Len() int {
 	return len(rh)
 }
 
-// Less (part of heap.Interface) compares two links. For persisted links, those with the lower block heights get evicted first. This means that more recently persisted links are preferred.
-// For non-persisted links, those with the highest block heights get evicted first. This is to prevent "holes" in the block heights that may cause inability to
+// Less (part of heap.Interface) compares two links. For persisted links, those with the lower block heights getBeforeTxNum evicted first. This means that more recently persisted links are preferred.
+// For non-persisted links, those with the highest block heights getBeforeTxNum evicted first. This is to prevent "holes" in the block heights that may cause inability to
 // insert headers in the ascending order of their block heights.
 func (rh ReconHeap) Less(i, j int) bool {
 	c := bytes.Compare(rh[i].key, rh[j].key)

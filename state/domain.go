@@ -495,7 +495,7 @@ func (d *Domain) Put(key1, key2, val []byte) error {
 // Deprecated
 func (d *Domain) Delete(key1, key2 []byte) error {
 	key := common.Append(key1, key2)
-	original, found, err := d.defaultDc.get(key, d.txNum, d.tx)
+	original, found, err := d.defaultDc.getLatest(key, d.tx)
 	if err != nil {
 		return err
 	}
@@ -1457,7 +1457,38 @@ func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err er
 	return nil
 }
 
-func (dc *DomainContext) readFromFiles(filekey []byte) ([]byte, bool, error) {
+func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint64) ([]byte, bool, error) {
+	dc.d.stats.FilesQueries.Add(1)
+
+	var val []byte
+	var found bool
+
+	for i := len(dc.files) - 1; i >= 0; i-- {
+		if dc.files[i].endTxNum < fromTxNum {
+			break
+		}
+		reader := dc.statelessBtree(i)
+		if reader == nil {
+			continue
+		}
+		if reader.Empty() {
+			continue
+		}
+		cur, err := reader.Seek(filekey)
+		if err != nil {
+			//return nil, false, nil //TODO: uncomment me
+			return nil, false, err
+		}
+
+		if bytes.Equal(cur.Key(), filekey) {
+			val = cur.Value()
+			found = true
+			break
+		}
+	}
+	return val, found, nil
+}
+func (dc *DomainContext) getLatestFromFiles(filekey []byte) ([]byte, bool, error) {
 	dc.d.stats.FilesQueries.Add(1)
 
 	var val []byte
@@ -1465,6 +1496,9 @@ func (dc *DomainContext) readFromFiles(filekey []byte) ([]byte, bool, error) {
 
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		reader := dc.statelessBtree(i)
+		if reader == nil {
+			continue
+		}
 		if reader.Empty() {
 			continue
 		}
@@ -1569,7 +1603,7 @@ func (dc *DomainContext) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([
 		}
 		return v, nil
 	}
-	if v, _, err = dc.get(key, txNum, roTx); err != nil {
+	if v, _, err = dc.getBeforeTxNum(key, txNum, roTx); err != nil {
 		return nil, err
 	}
 	return v, nil
@@ -1616,8 +1650,7 @@ func (dc *DomainContext) statelessBtree(i int) *BtIndex {
 	return r
 }
 
-// deprecated
-func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+func (dc *DomainContext) getBeforeTxNum(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	dc.d.stats.TotalQueries.Add(1)
 
 	invertedStep := dc.numBuf
@@ -1632,7 +1665,7 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 		return nil, false, err
 	}
 	if len(foundInvStep) == 0 {
-		v, found, err := dc.readFromFiles(key)
+		v, found, err := dc.getBeforeTxNumFromFiles(key, fromTxNum)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1666,7 +1699,7 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 		return nil, false, err
 	}
 	if foundInvStep == nil {
-		v, found, err := dc.readFromFiles(key)
+		v, found, err := dc.getLatestFromFiles(key)
 		if err != nil {
 			return nil, false, err
 		}

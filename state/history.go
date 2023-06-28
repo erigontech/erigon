@@ -753,7 +753,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 			if h.largeValues {
 				val, err := roTx.GetOne(h.historyValsTable, keyBuf)
 				if err != nil {
-					return HistoryCollation{}, fmt.Errorf("get %s history val [%x]: %w", h.filenameBase, k, err)
+					return HistoryCollation{}, fmt.Errorf("getBeforeTxNum %s history val [%x]: %w", h.filenameBase, k, err)
 				}
 				if len(val) == 0 {
 					val = nil
