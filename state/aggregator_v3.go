@@ -663,7 +663,9 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 			collation.Close() // TODO: it must be handled inside collateStream func - by defer
 			return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
 		}
+		a.wg.Add(1)
 		g.Go(func() error {
+			defer a.wg.Done()
 			mxCollationSize.Set(uint64(collation.valuesComp.Count()))
 			mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 
@@ -708,7 +710,9 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 		if err != nil {
 			return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
 		}
+		a.wg.Add(1)
 		g.Go(func() error {
+			defer a.wg.Done()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
 				sf.Close()
@@ -1469,7 +1473,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
 
 	if (txNum + 1) <= a.minimaxTxNumInFiles.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
-		log.Warn("[dbg] BuildFilesInBackground1")
+		log.Warn("[dbg] BuildFilesInBackground1", "req", (txNum + 1), "has", a.minimaxTxNumInFiles.Load()+a.aggregationStep+a.keepInDB)
 		return fin
 	}
 	log.Warn("[dbg] BuildFilesInBackground1.1")
@@ -1508,7 +1512,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for step < lastIdInDB(a.db, a.accounts.valsTable) {
-			log.Warn("[dbg] BuildFilesInBackground5")
+			log.Warn("[dbg] BuildFilesInBackground4")
 			if err := a.buildFilesInBackground(a.ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) {
 					close(fin)
@@ -1519,12 +1523,14 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 			}
 			step++
 		}
+		log.Warn("[dbg] BuildFilesInBackground4.1", "lastIdInDB(a.db, a.accounts.valsTable)", lastIdInDB(a.db, a.accounts.valsTable), "step", step)
 
 		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
-			log.Warn("[dbg] BuildFilesInBackground4")
+			log.Warn("[dbg] BuildFilesInBackground5")
 			close(fin)
 			return
 		}
+		log.Warn("[dbg] BuildFilesInBackground5.1")
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
@@ -1872,22 +1878,20 @@ func (ac *AggregatorV3Context) IterateAccounts(tx kv.Tx, pref []byte, fn func(ke
 }
 
 func (ac *AggregatorV3Context) DomainGet(tx kv.Tx, domain kv.Domain, k, k2 []byte) (v []byte, ok bool, err error) {
-	panic(1)
-	/*
-		switch domain {
-		case temporal.AccountsDomain:
-			return ac.accounts.GetLatest(k, k2, tx)
-		case temporal.StorageDomain:
-			return ac.storage.GetLatest(k, k2, tx)
-		case temporal.CodeDomain:
-			return ac.code.GetLatest(k, k2, tx)
-		case temporal.CommitmentDomain:
-			return ac.commitment.GetLatest(k, k2, tx)
-		default:
-			panic(fmt.Sprintf("unexpected: %s", domain))
-		}
-	*/
+	switch domain {
+	case kv.AccountsDomain:
+		return ac.accounts.GetLatest(k, k2, tx)
+	case kv.StorageDomain:
+		return ac.storage.GetLatest(k, k2, tx)
+	case kv.CodeDomain:
+		return ac.code.GetLatest(k, k2, tx)
+	case kv.CommitmentDomain:
+		return ac.commitment.GetLatest(k, k2, tx)
+	default:
+		panic(fmt.Sprintf("unexpected: %s", domain))
+	}
 }
+
 func (ac *AggregatorV3Context) AccountLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
 	return ac.accounts.GetLatest(addr, nil, roTx)
 }

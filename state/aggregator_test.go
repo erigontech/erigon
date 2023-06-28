@@ -495,8 +495,18 @@ func Test_EncodeCommitmentState(t *testing.T) {
 func Test_BtreeIndex_Seek(t *testing.T) {
 	tmp := t.TempDir()
 	logger := log.New()
-
 	keyCount, M := 120000, 1024
+
+	t.Run("empty index", func(t *testing.T) {
+		dataPath := generateCompressedKV(t, tmp, 52, 180 /*val size*/, 0, logger)
+		indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
+		err := BuildBtreeIndex(dataPath, indexPath, logger)
+		require.NoError(t, err)
+
+		bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M))
+		require.NoError(t, err)
+		require.EqualValues(t, 0, bt.KeyCount())
+	})
 	dataPath := generateCompressedKV(t, tmp, 52, 180 /*val size*/, keyCount, logger)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")

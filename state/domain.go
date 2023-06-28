@@ -1561,16 +1561,13 @@ func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err er
 	return nil
 }
 
-func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte, bool, error) {
+func (dc *DomainContext) readFromFiles(filekey []byte) ([]byte, bool, error) {
 	dc.d.stats.FilesQueries.Add(1)
 
 	var val []byte
 	var found bool
 
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		if dc.files[i].startTxNum > fromTxNum {
-			continue
-		}
 		reader := dc.statelessBtree(i)
 		if reader.Empty() {
 			fmt.Printf("info1 %s, %s\n", dc.files[i].src.decompressor.FileName(), reader.FileName())
@@ -1579,7 +1576,8 @@ func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte
 		cur, err := reader.Seek(filekey)
 		if err != nil {
 			fmt.Printf("info2 %s, %s\n", dc.files[i].src.decompressor.FileName(), err)
-			return nil, false, err
+			return nil, false, nil
+			//return nil, false, err
 		}
 
 		fmt.Printf("info99 %s, %x, %x\n", dc.files[i].src.decompressor.FileName(), cur.Key(), filekey)
@@ -1696,9 +1694,9 @@ func (dc *DomainContext) Close() {
 			item.src.closeFilesAndRemove()
 		}
 	}
-	for _, r := range dc.readers {
-		r.Close()
-	}
+	//for _, r := range dc.readers {
+	//	r.Close()
+	//}
 	dc.hc.Close()
 }
 
@@ -1745,7 +1743,7 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 		//	fmt.Printf("what i found?? %x , %d, %x -> %x\n", key, fromTxNum/dc.d.aggregationStep, invertedStep, foundInvStep)
 		//}
 
-		v, found, err := dc.readFromFiles(key, fromTxNum)
+		v, found, err := dc.readFromFiles(key)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1775,12 +1773,12 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 	if err != nil {
 		return nil, false, err
 	}
-	if !bytes.Equal(key, foundKey) || len(foundInvStep) == 0 {
+	if len(foundInvStep) == 0 || !bytes.Equal(key, foundKey) {
 		//if dc.d.filenameBase == "accounts" {
 		//	fmt.Printf("what i found?? %x , %d, %x -> %x\n", key, fromTxNum/dc.d.aggregationStep, invertedStep, foundInvStep)
 		//}
 
-		v, found, err := dc.readFromFiles(key, math.MaxUint64)
+		v, found, err := dc.readFromFiles(key)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1806,9 +1804,9 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	//		log.Info("read", "d", dc.d.valsTable, "key", fmt.Sprintf("%x", key1), "v", fmt.Sprintf("%x", v))
 	//	}()
 	//}
-	//v, b, err := dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
+	v, b, err := dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
 	// TODO chekc
-	v, b, err := dc.get(dc.keyBuf[:len(key1)+len(key2)], math.MaxUint64, roTx)
+	//v, b, err := dc.get(dc.keyBuf[:len(key1)+len(key2)], math.MaxUint64, roTx)
 	return v, b, err
 }
 
