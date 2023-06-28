@@ -789,42 +789,6 @@ func (d *Domain) writeCollationPair(valuesComp *compress.Compressor, pairs chan 
 	return count, nil
 }
 
-// nolint
-func (d *Domain) aggregate(ctx context.Context, step uint64, txFrom, txTo uint64, tx kv.Tx, ps *background.ProgressSet) (err error) {
-	mxRunningCollations.Inc()
-	start := time.Now()
-	collation, err := d.collate(ctx, step, txFrom, txTo, tx)
-	mxRunningCollations.Dec()
-	mxCollateTook.UpdateDuration(start)
-
-	mxCollationSize.Set(uint64(collation.valuesComp.Count()))
-	mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
-
-	if err != nil {
-		collation.Close()
-		//return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
-		return err
-	}
-
-	mxRunningMerges.Inc()
-
-	start = time.Now()
-	sf, err := d.buildFiles(ctx, step, collation, ps)
-	collation.Close()
-	defer sf.Close()
-	if err != nil {
-		sf.Close()
-		mxRunningMerges.Dec()
-		return
-	}
-
-	mxRunningMerges.Dec()
-
-	d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
-	d.stats.LastFileBuildingTook = time.Since(start)
-	return nil
-}
-
 // collate gathers domain changes over the specified step, using read-only transaction,
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
@@ -1683,17 +1647,6 @@ func (dc *DomainContext) getBeforeTxNum(key []byte, fromTxNum uint64, roTx kv.Tx
 func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
 	dc.d.stats.TotalQueries.Add(1)
 
-	/*
-		keyCursor, err := roTx.CursorDupSort(dc.d.keysTable)
-		if err != nil {
-			return nil, false, err
-		}
-		defer keyCursor.Close()
-		_, foundInvStep, err := keyCursor.SeekExact(key)
-		if err != nil {
-			return nil, false, err
-		}
-	*/
 	foundInvStep, err := roTx.GetOne(dc.d.keysTable, key) // reads first DupSort value
 	if err != nil {
 		return nil, false, err
@@ -1718,8 +1671,6 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 }
 
 func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
-	dc.d.stats.TotalQueries.Add(1)
-
 	copy(dc.keyBuf[:], key1)
 	copy(dc.keyBuf[len(key1):], key2)
 	return dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)

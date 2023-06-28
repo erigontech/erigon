@@ -510,7 +510,7 @@ func (a *btAlloc) Seek(ik []byte) (*Cursor, error) {
 			return a.newCursor(context.TODO(), common.Copy(ln.key), common.Copy(ln.val), ln.d), nil
 		}
 
-		if rm-lm == 1 {
+		if rm-lm >= 1 {
 			break
 		}
 		if lm >= 0 {
@@ -998,6 +998,7 @@ func OpenBtreeIndex(indexPath, dataPath string, M uint64) (*BtIndex, error) {
 	return idx, nil
 }
 
+// dataLookup fetches key and value from data file by di (data index)
 func (b *BtIndex) dataLookup(di uint64) ([]byte, []byte, error) {
 	if b.keyCount < di {
 		return nil, nil, fmt.Errorf("keyCount=%d, but item %d requested. file: %s", b.keyCount, di, b.FileName())

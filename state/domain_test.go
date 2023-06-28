@@ -29,13 +29,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
-
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -67,7 +67,7 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (string, kv.RwDB, *Domain)
 	return path, db, d
 }
 
-func TestCollationBuild(t *testing.T) {
+func TestDomain_CollationBuild(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -179,7 +179,7 @@ func TestCollationBuild(t *testing.T) {
 	}
 }
 
-func TestIterationBasic(t *testing.T) {
+func TestDomain_IterationBasic(t *testing.T) {
 	logger := log.New()
 	_, db, d := testDbAndDomain(t, logger)
 	ctx := context.Background()
@@ -234,7 +234,7 @@ func TestIterationBasic(t *testing.T) {
 	}
 }
 
-func TestAfterPrune(t *testing.T) {
+func TestDomain_AfterPrune(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -586,7 +586,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	}
 }
 
-func TestMergeFiles(t *testing.T) {
+func TestDomain_MergeFiles(t *testing.T) {
 	logger := log.New()
 	_, db, d, txs := filledDomain(t, logger)
 
@@ -594,7 +594,7 @@ func TestMergeFiles(t *testing.T) {
 	checkHistory(t, db, d, txs)
 }
 
-func TestScanFiles(t *testing.T) {
+func TestDomain_ScanFiles(t *testing.T) {
 	logger := log.New()
 	path, db, d, txs := filledDomain(t, logger)
 	_ = path
@@ -609,7 +609,7 @@ func TestScanFiles(t *testing.T) {
 	checkHistory(t, db, d, txs)
 }
 
-func TestDelete(t *testing.T) {
+func TestDomain_Delete(t *testing.T) {
 	logger := log.New()
 	_, db, d := testDbAndDomain(t, logger)
 	ctx, require := context.Background(), require.New(t)
@@ -877,7 +877,7 @@ func TestScanStaticFilesD(t *testing.T) {
 	require.Equal(t, 6, len(found))
 }
 
-func TestCollationBuildInMem(t *testing.T) {
+func TestDomain_CollationBuildInMem(t *testing.T) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	_, db, d := testDbAndDomain(t, log.New())
@@ -1041,7 +1041,101 @@ func TestDomainContext_IteratePrefix(t *testing.T) {
 	}
 }
 
-func TestDomainUnwind(t *testing.T) {
+func TestDomainContext_getFromFiles(t *testing.T) {
+	_, db, d := testDbAndDomain(t, log.New())
+	defer db.Close()
+	defer d.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.SetTx(tx)
+	d.StartUnbufferedWrites()
+	d.aggregationStep = 20
+
+	keys, vals := generateInputData(t, 8, 16, 100)
+	keys = keys[:20]
+
+	var i int
+	values := make(map[string][][]byte)
+
+	mc := d.MakeContext()
+
+	for i = 0; i < len(vals); i++ {
+		d.SetTxNum(uint64(i))
+
+		for j := 0; j < len(keys); j++ {
+			buf := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
+			prev, _, err := mc.GetLatest(keys[j], nil, tx)
+			require.NoError(t, err)
+
+			err = d.PutWithPrev(keys[j], nil, buf, prev)
+			require.NoError(t, err)
+
+			if i > 0 && i%int(d.aggregationStep) == 0 {
+				values[hex.EncodeToString(keys[j])] = append(values[hex.EncodeToString(keys[j])], buf)
+			}
+		}
+	}
+	d.FinishWrites()
+	defer mc.Close()
+
+	ctx := context.Background()
+	ps := background.NewProgressSet()
+	for step := uint64(0); step < uint64(len(vals))/d.aggregationStep; step++ {
+		dctx := d.MakeContext()
+
+		txFrom := step * d.aggregationStep
+		txTo := (step + 1) * d.aggregationStep
+
+		fmt.Printf("Step %d [%d,%d)\n", step, txFrom, txTo)
+
+		collation, err := d.collate(ctx, step, txFrom, txTo, d.tx)
+		require.NoError(t, err)
+
+		sf, err := d.buildFiles(ctx, step, collation, ps)
+		require.NoError(t, err)
+
+		d.integrateFiles(sf, txFrom, txTo)
+		collation.Close()
+		sf.Close()
+		logEvery := time.NewTicker(time.Second * 30)
+
+		err = d.prune(ctx, step, txFrom, txTo, math.MaxUint64, logEvery)
+		require.NoError(t, err)
+
+		ranges := d.findMergeRange(txFrom, txTo)
+		vl, il, hl, _ := dctx.staticFilesInRange(ranges)
+
+		dv, di, dh, err := d.mergeFiles(ctx, vl, il, hl, ranges, 1, ps)
+		require.NoError(t, err)
+
+		d.integrateMergedFiles(vl, il, hl, dv, di, dh)
+
+		logEvery.Stop()
+
+		dctx.Close()
+	}
+
+	mc = d.MakeContext()
+	defer mc.Close()
+
+	for key, bufs := range values {
+		var i int
+
+		beforeTx := d.aggregationStep
+		for i = 0; i < len(bufs); i++ {
+			ks, _ := hex.DecodeString(key)
+			val, err := mc.GetBeforeTxNum(ks, beforeTx, tx)
+			require.NoError(t, err)
+			require.EqualValues(t, bufs[i], val)
+			beforeTx += d.aggregationStep
+		}
+	}
+}
+
+func TestDomain_Unwind(t *testing.T) {
 	_, db, d := testDbAndDomain(t, log.New())
 	ctx := context.Background()
 	defer d.Close()

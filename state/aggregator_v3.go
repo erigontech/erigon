@@ -453,164 +453,6 @@ func (c AggV3Collation) Close() {
 	}
 }
 
-func (a *AggregatorV3) buildFiles(ctx context.Context, step, txFrom, txTo uint64) (AggV3StaticFiles, error) {
-	//logEvery := time.NewTicker(60 * time.Second)
-	//defer logEvery.Stop()
-	//defer func(t time.Time) {
-	//	log.Info(fmt.Sprintf("[snapshot] build %d-%d", step, step+1), "took", time.Since(t))
-	//}(time.Now())
-	var sf AggV3StaticFiles
-	var ac AggV3Collation
-	closeColl := true
-	defer func() {
-		if closeColl {
-			ac.Close()
-		}
-	}()
-	//var wg sync.WaitGroup
-	//wg.Add(8)
-	//errCh := make(chan error, 8)
-	//go func() {
-	//	defer wg.Done()
-	var err error
-	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.accounts, err = a.accounts.collate(ctx, step, txFrom, txTo, tx)
-		return err
-	}); err != nil {
-		return sf, err
-		//errCh <- err
-	}
-
-	if sf.accounts, err = a.accounts.buildFiles(ctx, step, ac.accounts, a.ps); err != nil {
-		return sf, err
-		//errCh <- err
-	}
-	//}()
-	//
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
-	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.storage, err = a.storage.collate(ctx, step, txFrom, txTo, tx)
-		return err
-	}); err != nil {
-		return sf, err
-		//errCh <- err
-	}
-
-	if sf.storage, err = a.storage.buildFiles(ctx, step, ac.storage, a.ps); err != nil {
-		return sf, err
-		//errCh <- err
-	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
-	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.code, err = a.code.collate(ctx, step, txFrom, txTo, tx)
-		return err
-	}); err != nil {
-		return sf, err
-		//errCh <- err
-	}
-
-	if sf.code, err = a.code.buildFiles(ctx, step, ac.code, a.ps); err != nil {
-		return sf, err
-		//errCh <- err
-	}
-	//}()
-
-	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.commitment, err = a.commitment.collate(ctx, step, txFrom, txTo, tx)
-		return err
-	}); err != nil {
-		return sf, err
-	}
-
-	if sf.commitment, err = a.commitment.buildFiles(ctx, step, ac.commitment, a.ps); err != nil {
-		return sf, err
-	}
-
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
-	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.logAddrs, err = a.logAddrs.collate(ctx, txFrom, txTo, tx)
-		return err
-	}); err != nil {
-		return sf, err
-		//errCh <- err
-	}
-
-	if sf.logAddrs, err = a.logAddrs.buildFiles(ctx, step, ac.logAddrs, a.ps); err != nil {
-		return sf, err
-		//errCh <- err
-	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
-	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.logTopics, err = a.logTopics.collate(ctx, txFrom, txTo, tx)
-		return err
-	}); err != nil {
-		return sf, err
-		//errCh <- err
-	}
-
-	if sf.logTopics, err = a.logTopics.buildFiles(ctx, step, ac.logTopics, a.ps); err != nil {
-		return sf, err
-		//errCh <- err
-	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
-	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.tracesFrom, err = a.tracesFrom.collate(ctx, txFrom, txTo, tx)
-		return err
-	}); err != nil {
-		return sf, err
-		//errCh <- err
-	}
-
-	if sf.tracesFrom, err = a.tracesFrom.buildFiles(ctx, step, ac.tracesFrom, a.ps); err != nil {
-		return sf, err
-		//errCh <- err
-	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
-	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.tracesTo, err = a.tracesTo.collate(ctx, txFrom, txTo, tx)
-		return err
-	}); err != nil {
-		return sf, err
-		//errCh <- err
-	}
-
-	if sf.tracesTo, err = a.tracesTo.buildFiles(ctx, step, ac.tracesTo, a.ps); err != nil {
-		return sf, err
-		//		errCh <- err
-	}
-	//}()
-	//go func() {
-	//	wg.Wait()
-	//close(errCh)
-	//}()
-	//var lastError error
-	//for err := range errCh {
-	//	if err != nil {
-	//		lastError = err
-	//	}
-	//}
-	//if lastError == nil {
-	closeColl = false
-	//}
-	return sf, nil
-}
-
 type AggV3StaticFiles struct {
 	accounts   StaticFiles
 	storage    StaticFiles
@@ -632,7 +474,7 @@ func (sf AggV3StaticFiles) Close() {
 	sf.tracesTo.Close()
 }
 
-func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) error {
+func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	var (
 		logEvery      = time.NewTicker(time.Second * 30)
 		txFrom        = step * a.aggregationStep
@@ -1496,7 +1338,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for step <= lastIdInDB(a.db, a.accounts.valsTable) {
-			if err := a.buildFilesInBackground(a.ctx, step); err != nil {
+			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) {
 					close(fin)
 					return

@@ -26,8 +26,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/common/background"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -340,10 +341,6 @@ func (dc *DomainContext) staticFilesInRange(r DomainRanges) (valuesFiles, indexF
 	return
 }
 
-// nolint
-func (d *Domain) staticFilesInRange(r DomainRanges, dc *DomainContext) (valuesFiles, indexFiles, historyFiles []*filesItem, startJ int) {
-	panic("deprecated: use DomainContext.staticFilesInRange")
-}
 func (ic *InvertedIndexContext) staticFilesInRange(startTxNum, endTxNum uint64) ([]*filesItem, int) {
 	files := make([]*filesItem, 0, len(ic.files))
 	var startJ int
