@@ -88,7 +88,7 @@ func (li *LocalityIndex) OpenList(fNames []string) error {
 	li.closeWhatNotInList(fNames)
 	_ = li.scanStateFiles(fNames)
 	if err := li.openFiles(); err != nil {
-		return fmt.Errorf("NewHistory.openFiles: %s, %w", li.filenameBase, err)
+		return fmt.Errorf("LocalityIndex.openFiles: %s, %w", li.filenameBase, err)
 	}
 	return nil
 }

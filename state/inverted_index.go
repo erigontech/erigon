@@ -134,7 +134,7 @@ func (ii *InvertedIndex) OpenList(fNames []string) error {
 	ii.closeWhatNotInList(fNames)
 	ii.garbageFiles = ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {
-		return fmt.Errorf("NewHistory.openFiles: %s, %w", ii.filenameBase, err)
+		return fmt.Errorf("InvertedIndex.openFiles: %s, %w", ii.filenameBase, err)
 	}
 	return nil
 }
