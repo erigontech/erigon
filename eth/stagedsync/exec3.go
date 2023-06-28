@@ -800,7 +800,7 @@ Loop:
 
 					if blocksFreezeCfg.Produce {
 						tt = time.Now()
-						agg.AggregateFilesInBackground()
+						agg.BuildFilesInBackground(outputTxNum.Load())
 						t5 = time.Since(tt)
 						tt = time.Now()
 						if agg.CanPrune(applyTx) {
@@ -846,8 +846,7 @@ Loop:
 		}
 
 		if parallel && blocksFreezeCfg.Produce { // sequential exec - does aggregate right after commit
-			//agg.BuildFilesInBackground(outputTxNum.Load())
-			agg.AggregateFilesInBackground()
+			agg.BuildFilesInBackground(outputTxNum.Load())
 		}
 		select {
 		case <-ctx.Done():
@@ -883,8 +882,7 @@ Loop:
 	}
 
 	if parallel && blocksFreezeCfg.Produce {
-		//agg.BuildFilesInBackground(outputTxNum.Load())
-		agg.AggregateFilesInBackground()
+		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
 	if !useExternalTx && applyTx != nil {
