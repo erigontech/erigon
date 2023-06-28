@@ -1794,9 +1794,9 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	//		log.Info("read", "d", dc.d.valsTable, "key", fmt.Sprintf("%x", key1), "v", fmt.Sprintf("%x", v))
 	//	}()
 	//}
-	//v, b, err := dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
+	v, b, err := dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
 	// TODO chekc
-	v, b, err := dc.get(dc.keyBuf[:len(key1)+len(key2)], math.MaxUint64, roTx)
+	//v, b, err := dc.get(dc.keyBuf[:len(key1)+len(key2)], math.MaxUint64, roTx)
 	return v, b, err
 }
 

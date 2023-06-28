@@ -256,7 +256,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, error) {
 	if ok {
 		return v0, nil
 	}
-	v, _, err := sd.aggCtx.CommitmentLatest(prefix, sd.roTx)
+	v, _, err := sd.aggCtx.GetLatest(kv.CommitmentDomain, prefix, nil, sd.roTx)
 	if err != nil {
 		return nil, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
@@ -268,7 +268,7 @@ func (sd *SharedDomains) LatestCode(addr []byte) ([]byte, error) {
 	if ok {
 		return v0, nil
 	}
-	v, _, err := sd.aggCtx.CodeLatest(addr, sd.roTx)
+	v, _, err := sd.aggCtx.GetLatest(kv.CodeDomain, addr, nil, sd.roTx)
 	if err != nil {
 		return nil, fmt.Errorf("code %x read error: %w", addr, err)
 	}
@@ -280,7 +280,7 @@ func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
 	if ok {
 		return v0, nil
 	}
-	v, _, err := sd.aggCtx.AccountLatest(addr, sd.roTx)
+	v, _, err := sd.aggCtx.GetLatest(kv.AccountsDomain, addr, nil, sd.roTx)
 	if err != nil {
 		return nil, fmt.Errorf("account %x read error: %w", addr, err)
 	}
@@ -344,7 +344,7 @@ func (sd *SharedDomains) LatestStorage(addr, loc []byte) ([]byte, error) {
 	if ok {
 		return v0, nil
 	}
-	v, _, err := sd.aggCtx.StorageLatest(addr, loc, sd.roTx)
+	v, _, err := sd.aggCtx.GetLatest(kv.StorageDomain, addr, loc, sd.roTx)
 	if err != nil {
 		return nil, fmt.Errorf("storage %x|%x read error: %w", addr, loc, err)
 	}

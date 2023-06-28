@@ -1866,8 +1866,25 @@ func (ac *AggregatorV3Context) DomainRangeLatest(tx kv.Tx, domain kv.Domain, fro
 func (ac *AggregatorV3Context) IterateAccounts(tx kv.Tx, pref []byte, fn func(key, value []byte)) error {
 	return ac.accounts.IteratePrefix(tx, pref, fn)
 }
-
-func (ac *AggregatorV3Context) DomainGet(tx kv.Tx, domain kv.Domain, k, k2 []byte) (v []byte, ok bool, err error) {
+func (ac *AggregatorV3Context) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	switch name {
+	case kv.AccountsDomain:
+		v, err := ac.accounts.GetBeforeTxNum(key, ts, tx)
+		return v, v != nil, err
+	case kv.StorageDomain:
+		v, err := ac.storage.GetBeforeTxNum(key, ts, tx)
+		return v, v != nil, err
+	case kv.CodeDomain:
+		v, err := ac.code.GetBeforeTxNum(key, ts, tx)
+		return v, v != nil, err
+	case kv.CommitmentDomain:
+		v, err := ac.commitment.GetBeforeTxNum(key, ts, tx)
+		return v, v != nil, err
+	default:
+		panic(fmt.Sprintf("unexpected: %s", name))
+	}
+}
+func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, ok bool, err error) {
 	switch domain {
 	case kv.AccountsDomain:
 		return ac.accounts.GetLatest(k, k2, tx)
@@ -1880,19 +1897,6 @@ func (ac *AggregatorV3Context) DomainGet(tx kv.Tx, domain kv.Domain, k, k2 []byt
 	default:
 		panic(fmt.Sprintf("unexpected: %s", domain))
 	}
-}
-
-func (ac *AggregatorV3Context) AccountLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
-	return ac.accounts.GetLatest(addr, nil, roTx)
-}
-func (ac *AggregatorV3Context) StorageLatest(addr []byte, loc []byte, roTx kv.Tx) ([]byte, bool, error) {
-	return ac.storage.GetLatest(addr, loc, roTx)
-}
-func (ac *AggregatorV3Context) CodeLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
-	return ac.code.GetLatest(addr, nil, roTx)
-}
-func (ac *AggregatorV3Context) CommitmentLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
-	return ac.commitment.GetLatest(addr, nil, roTx)
 }
 
 // --- Domain part END ---
