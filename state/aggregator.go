@@ -1151,29 +1151,12 @@ func (ac *AggregatorContext) ReadAccountData(addr []byte, roTx kv.Tx) ([]byte, e
 	return v, nil
 }
 
-func (ac *AggregatorContext) ReadAccountDataBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	v, err := ac.accounts.GetBeforeTxNum(addr, txNum, roTx)
-	return v, err
-}
-
 func (ac *AggregatorContext) ReadAccountStorage(addr []byte, loc []byte, roTx kv.Tx) ([]byte, error) {
 	v, _, err := ac.storage.GetLatest(addr, loc, roTx)
 	if err != nil {
 		return nil, err
 	}
 	return v, nil
-}
-
-func (ac *AggregatorContext) ReadAccountStorageBeforeTxNum(addr []byte, loc []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	if cap(ac.keyBuf) < len(addr)+len(loc) {
-		ac.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(ac.keyBuf) != len(addr)+len(loc) {
-		ac.keyBuf = ac.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(ac.keyBuf, addr)
-	copy(ac.keyBuf[len(addr):], loc)
-	v, err := ac.storage.GetBeforeTxNum(ac.keyBuf, txNum, roTx)
-	return v, err
 }
 
 func (ac *AggregatorContext) ReadAccountCode(addr []byte, roTx kv.Tx) ([]byte, error) {
@@ -1192,26 +1175,8 @@ func (ac *AggregatorContext) ReadCommitment(addr []byte, roTx kv.Tx) ([]byte, er
 	return v, nil
 }
 
-func (ac *AggregatorContext) ReadCommitmentBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	v, err := ac.commitment.GetBeforeTxNum(addr, txNum, roTx)
-	return v, err
-}
-
-func (ac *AggregatorContext) ReadAccountCodeBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	v, err := ac.code.GetBeforeTxNum(addr, txNum, roTx)
-	return v, err
-}
-
 func (ac *AggregatorContext) ReadAccountCodeSize(addr []byte, roTx kv.Tx) (int, error) {
 	code, _, err := ac.code.GetLatest(addr, nil, roTx)
-	if err != nil {
-		return 0, err
-	}
-	return len(code), nil
-}
-
-func (ac *AggregatorContext) ReadAccountCodeSizeBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) (int, error) {
-	code, err := ac.code.GetBeforeTxNum(addr, txNum, roTx)
 	if err != nil {
 		return 0, err
 	}

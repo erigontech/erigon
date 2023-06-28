@@ -1538,19 +1538,6 @@ func (a *AggregatorV3) BatchHistoryWriteEnd() {
 	a.walLock.RUnlock()
 }
 
-func (a *AggregatorV3) AddAccountPrev(addr []byte, prev []byte) error {
-	return a.accounts.AddPrevValue(addr, nil, prev)
-}
-
-func (a *AggregatorV3) AddStoragePrev(addr []byte, loc []byte, prev []byte) error {
-	return a.storage.AddPrevValue(addr, loc, prev)
-}
-
-// AddCodePrev - addr+inc => code
-func (a *AggregatorV3) AddCodePrev(addr []byte, prev []byte) error {
-	return a.code.AddPrevValue(addr, nil, prev)
-}
-
 func (a *AggregatorV3) PutIdx(idx kv.InvertedIdx, key []byte) error {
 	switch idx {
 	case kv.TblTracesFromIdx:
@@ -1564,52 +1551,6 @@ func (a *AggregatorV3) PutIdx(idx kv.InvertedIdx, key []byte) error {
 	default:
 		panic(idx)
 	}
-}
-
-func (a *AggregatorV3) UpdateAccount(addr []byte, data, prevData []byte) error {
-	return a.domains.UpdateAccountData(addr, data, prevData)
-	//a.commitment.TouchPlainKey(addr, data, a.commitment.TouchAccount)
-	//return a.accounts.PutWithPrev(addr, nil, data, prevData)
-}
-
-func (a *AggregatorV3) UpdateCode(addr []byte, code, prevCode []byte) error {
-	return a.domains.UpdateAccountCode(addr, code, prevCode)
-	//a.commitment.TouchPlainKey(addr, code, a.commitment.TouchCode)
-	//if len(code) == 0 {
-	//	return a.code.DeleteWithPrev(addr, nil, prevCode)
-	//}
-	//return a.code.PutWithPrev(addr, nil, code, prevCode)
-}
-
-func (a *AggregatorV3) DeleteAccount(addr, prev []byte) error {
-	return a.domains.DeleteAccount(addr, prev)
-	//a.commitment.TouchPlainKey(addr, nil, a.commitment.TouchAccount)
-	//
-	//if err := a.accounts.DeleteWithPrev(addr, nil, prev); err != nil {
-	//	return err
-	//}
-	//if err := a.code.Delete(addr, nil); err != nil {
-	//	return err
-	//}
-	//var e error
-	//if err := a.storage.defaultDc.IteratePrefix(addr, func(k, v []byte) {
-	//	a.commitment.TouchPlainKey(k, nil, a.commitment.TouchStorage)
-	//	if e == nil {
-	//		e = a.storage.DeleteWithPrev(k, nil, v)
-	//	}
-	//}); err != nil {
-	//	return err
-	//}
-	//return e
-}
-
-func (a *AggregatorV3) UpdateStorage(addr, loc []byte, value, preVal []byte) error {
-	return a.domains.WriteAccountStorage(addr, loc, value, preVal)
-	//a.commitment.TouchPlainKey(common2.Append(addr, loc), value, a.commitment.TouchStorage)
-	//if len(value) == 0 {
-	//	return a.storage.DeleteWithPrev(addr, loc, preVal)
-	//}
-	//return a.storage.PutWithPrev(addr, loc, value, preVal)
 }
 
 // ComputeCommitment evaluates commitment for processed state.
@@ -1691,16 +1632,8 @@ func (ac *AggregatorV3Context) IndexRange(name kv.InvertedIdx, k []byte, fromTs,
 
 // -- range end
 
-func (ac *AggregatorV3Context) ReadAccountData(addr []byte, txNum uint64, tx kv.Tx) ([]byte, error) {
-	return ac.accounts.GetBeforeTxNum(addr, txNum, tx)
-}
-
 func (ac *AggregatorV3Context) ReadAccountDataNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	return ac.accounts.hc.GetNoStateWithRecent(addr, txNum, tx)
-}
-
-func (ac *AggregatorV3Context) ReadAccountDataNoState(addr []byte, txNum uint64) ([]byte, bool, error) {
-	return ac.accounts.hc.GetNoState(addr, txNum)
 }
 
 func (ac *AggregatorV3Context) ReadAccountStorageNoStateWithRecent(addr []byte, loc []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
@@ -1717,46 +1650,9 @@ func (ac *AggregatorV3Context) ReadAccountStorageNoStateWithRecent2(key []byte, 
 	return ac.storage.hc.GetNoStateWithRecent(key, txNum, tx)
 }
 
-func (ac *AggregatorV3Context) ReadAccountStorage(key []byte, txNum uint64, tx kv.Tx) ([]byte, error) {
-	return ac.storage.GetBeforeTxNum(key, txNum, tx)
-}
-
-func (ac *AggregatorV3Context) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, error) {
-	if cap(ac.keyBuf) < len(addr)+len(loc) {
-		ac.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(ac.keyBuf) != len(addr)+len(loc) {
-		ac.keyBuf = ac.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(ac.keyBuf, addr)
-	copy(ac.keyBuf[len(addr):], loc)
-	return ac.storage.hc.GetNoState(ac.keyBuf, txNum)
-}
-
-func (ac *AggregatorV3Context) ReadAccountCode(addr []byte, txNum uint64, tx kv.Tx) ([]byte, error) {
-	return ac.code.GetBeforeTxNum(addr, txNum, tx)
-}
 func (ac *AggregatorV3Context) ReadAccountCodeNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	return ac.code.hc.GetNoStateWithRecent(addr, txNum, tx)
 }
-func (ac *AggregatorV3Context) ReadAccountCodeNoState(addr []byte, txNum uint64) ([]byte, bool, error) {
-	return ac.code.hc.GetNoState(addr, txNum)
-}
-
-func (ac *AggregatorV3Context) ReadAccountCodeSizeNoStateWithRecent(addr []byte, txNum uint64, tx kv.Tx) (int, bool, error) {
-	code, noState, err := ac.code.hc.GetNoStateWithRecent(addr, txNum, tx)
-	if err != nil {
-		return 0, false, err
-	}
-	return len(code), noState, nil
-}
-func (ac *AggregatorV3Context) ReadAccountCodeSizeNoState(addr []byte, txNum uint64) (int, bool, error) {
-	code, noState, err := ac.code.hc.GetNoState(addr, txNum)
-	if err != nil {
-		return 0, false, err
-	}
-	return len(code), noState, nil
-}
-
 func (ac *AggregatorV3Context) AccountHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
 	return ac.accounts.hc.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
 }
@@ -1769,26 +1665,12 @@ func (ac *AggregatorV3Context) CodeHistoryRange(startTxNum, endTxNum int, asc or
 	return ac.code.hc.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
 }
 
-func (ac *AggregatorV3Context) AccountHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) (iter.KV, error) {
-	return ac.accounts.hc.WalkAsOf(startTxNum, from, to, tx, limit)
-}
-
-func (ac *AggregatorV3Context) StorageHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) (iter.KV, error) {
-	return ac.storage.hc.WalkAsOf(startTxNum, from, to, tx, limit)
-}
-
-func (ac *AggregatorV3Context) CodeHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) (iter.KV, error) {
-	return ac.code.hc.WalkAsOf(startTxNum, from, to, tx, limit)
-}
-
 type FilesStats22 struct{}
 
 func (a *AggregatorV3) Stats() FilesStats22 {
 	var fs FilesStats22
 	return fs
 }
-
-func (a *AggregatorV3) Commitment() *History { return a.commitment.History }
 
 type AggregatorV3Context struct {
 	a          *AggregatorV3
