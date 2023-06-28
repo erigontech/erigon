@@ -1469,16 +1469,20 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
 
 	if (txNum + 1) <= a.minimaxTxNumInFiles.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
+		log.Warn("[dbg] BuildFilesInBackground1")
 		return fin
 	}
+	log.Warn("[dbg] BuildFilesInBackground1.1")
 
 	//if _, err := a.SharedDomains().Commit(true, false); err != nil {
 	//	log.Warn("ComputeCommitment before aggregation has failed", "err", err)
 	//	return fin
 	//}
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
+		log.Warn("[dbg] BuildFilesInBackground2")
 		return fin
 	}
+	log.Warn("[dbg] BuildFilesInBackground2.1")
 
 	step := a.minimaxTxNumInFiles.Load() / a.aggregationStep
 	//toTxNum := (step + 1) * a.aggregationStep
@@ -1493,15 +1497,18 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		lastInDB := lastIdInDB(a.db, a.accounts.valsTable)
 		hasData = lastInDB >= step
 		if !hasData {
+			log.Warn("[dbg] BuildFilesInBackground3")
 			close(fin)
 			return
 		}
+		log.Warn("[dbg] BuildFilesInBackground3.1")
 
 		// trying to create as much small-step-files as possible:
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for step < lastIdInDB(a.db, a.accounts.valsTable) {
+			log.Warn("[dbg] BuildFilesInBackground5")
 			if err := a.buildFilesInBackground(a.ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) {
 					close(fin)
@@ -1514,6 +1521,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		}
 
 		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
+			log.Warn("[dbg] BuildFilesInBackground4")
 			close(fin)
 			return
 		}
