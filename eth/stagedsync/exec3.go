@@ -783,12 +783,11 @@ Loop:
 
 					// prune befor flush, to speedup flush
 					tt := time.Now()
-					//TODO: bronen, uncomment after fix tests
-					//if agg.CanPrune(applyTx) {
-					//	if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
-					//		return err
-					//	}
-					//}
+					if agg.CanPrune(applyTx) {
+						if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
+							return err
+						}
+					}
 					t2 = time.Since(tt)
 
 					tt = time.Now()
@@ -797,18 +796,6 @@ Loop:
 						return err
 					}
 					t3 = time.Since(tt)
-
-					if blocksFreezeCfg.Produce {
-						tt = time.Now()
-						agg.BuildFilesInBackground(outputTxNum.Load())
-						t5 = time.Since(tt)
-						tt = time.Now()
-						if agg.CanPrune(applyTx) {
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
-								return err
-							}
-						}
-					}
 
 					if err = execStage.Update(applyTx, outputBlockNum.Get()); err != nil {
 						return err
@@ -822,7 +809,16 @@ Loop:
 						if err = applyTx.Commit(); err != nil {
 							return err
 						}
+						doms.SetContext(nil)
+						doms.SetTx(nil)
+
 						t4 = time.Since(tt)
+						tt = time.Now()
+						if blocksFreezeCfg.Produce {
+							tt = time.Now()
+							agg.BuildFilesInBackground(outputTxNum.Load())
+						}
+						t5 = time.Since(tt)
 						applyTx, err = cfg.db.BeginRw(context.Background())
 						if err != nil {
 							return err
