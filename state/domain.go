@@ -478,7 +478,7 @@ func (d *Domain) put(key, val []byte) error {
 // Deprecated
 func (d *Domain) Put(key1, key2, val []byte) error {
 	key := common.Append(key1, key2)
-	original, _, err := d.defaultDc.get(key, d.txNum, d.tx)
+	original, _, err := d.defaultDc.getLatest(key, d.tx)
 	if err != nil {
 		return err
 	}
@@ -1568,8 +1568,8 @@ func (dc *DomainContext) readFromFiles(filekey []byte) ([]byte, bool, error) {
 		}
 		cur, err := reader.Seek(filekey)
 		if err != nil {
-			return nil, false, nil //TODO: uncomment me
-			//return nil, false, err
+			//return nil, false, nil //TODO: uncomment me
+			return nil, false, err
 		}
 
 		if bytes.Equal(cur.Key(), filekey) {
@@ -1714,6 +1714,7 @@ func (dc *DomainContext) statelessBtree(i int) *BtIndex {
 	return r
 }
 
+// deprecated
 func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	dc.d.stats.TotalQueries.Add(1)
 
@@ -1729,10 +1730,6 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 		return nil, false, err
 	}
 	if len(foundInvStep) == 0 {
-		//if dc.d.filenameBase == "accounts" {
-		//	fmt.Printf("what i found?? %x , %d, %x -> %x\n", key, fromTxNum/dc.d.aggregationStep, invertedStep, foundInvStep)
-		//}
-
 		v, found, err := dc.readFromFiles(key)
 		if err != nil {
 			return nil, false, err
@@ -1748,31 +1745,33 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 	return v, true, nil
 }
 
-// TODO use or remove
 func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
 	dc.d.stats.TotalQueries.Add(1)
 
-	//invertedStep := dc.numBuf
-	//binary.BigEndian.PutUint64(invertedStep[:], ^(fromTxNum / dc.d.aggregationStep))
-	keyCursor, err := roTx.CursorDupSort(dc.d.keysTable)
+	/*
+		keyCursor, err := roTx.CursorDupSort(dc.d.keysTable)
+		if err != nil {
+			return nil, false, err
+		}
+		defer keyCursor.Close()
+		_, foundInvStep, err := keyCursor.SeekExact(key)
+		if err != nil {
+			return nil, false, err
+		}
+	*/
+	foundInvStep, err := roTx.GetOne(dc.d.keysTable, key) // reads first DupSort value
 	if err != nil {
 		return nil, false, err
 	}
-	defer keyCursor.Close()
-	foundKey, foundInvStep, err := keyCursor.SeekExact(key)
-	if err != nil {
-		return nil, false, err
-	}
-	if len(foundInvStep) == 0 || !bytes.Equal(key, foundKey) {
-		//if dc.d.filenameBase == "accounts" {
-		//	fmt.Printf("what i found?? %x , %d, %x -> %x\n", key, fromTxNum/dc.d.aggregationStep, invertedStep, foundInvStep)
-		//}
-
+	if foundInvStep == nil {
 		v, found, err := dc.readFromFiles(key)
 		if err != nil {
 			return nil, false, err
 		}
 		return v, found, nil
+	}
+	if !dc.d.largeValues {
+		panic("implement me")
 	}
 	copy(dc.keyBuf[:], key)
 	copy(dc.keyBuf[len(key):], foundInvStep)
@@ -1788,16 +1787,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 
 	copy(dc.keyBuf[:], key1)
 	copy(dc.keyBuf[len(key1):], key2)
-	//var v []byte
-	//if _, ok := lookup[fmt.Sprintf("%x", key1)]; ok {
-	//	defer func() {
-	//		log.Info("read", "d", dc.d.valsTable, "key", fmt.Sprintf("%x", key1), "v", fmt.Sprintf("%x", v))
-	//	}()
-	//}
-	v, b, err := dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
-	// TODO chekc
-	//v, b, err := dc.get(dc.keyBuf[:len(key1)+len(key2)], math.MaxUint64, roTx)
-	return v, b, err
+	return dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
 }
 
 func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v []byte)) error {

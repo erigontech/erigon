@@ -645,13 +645,13 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcMaxTxNum()
 	var static AggV3StaticFiles
-	fmt.Printf("step %d: collating...\n", step)
 
 	roTx, err := a.db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer roTx.Rollback()
+	log.Warn("[dbg] collate", "step", step)
 
 	g, ctx := errgroup.WithContext(ctx)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
@@ -691,12 +691,6 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 				panic("unknown domain " + d.valsTable)
 			}
 
-			//can use agg.integrateFiles ???
-			//a.filesMutationLock.Lock()
-			//defer a.filesMutationLock.Unlock()
-			//defer a.needSaveFilesListInDB.Store(true)
-			//defer a.recalcMaxTxNum()
-			//d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
 			return nil
 		})
 	}
@@ -731,11 +725,6 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 			default:
 				panic("unknown index " + d.indexKeysTable)
 			}
-			//a.filesMutationLock.Lock()
-			//defer a.filesMutationLock.Unlock()
-			//defer a.needSaveFilesListInDB.Store(true)
-			//defer a.recalcMaxTxNum()
-			//d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
 			return nil
 		})
 	}
@@ -1489,7 +1478,6 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	step := a.minimaxTxNumInFiles.Load() / a.aggregationStep
 	//toTxNum := (step + 1) * a.aggregationStep
 	hasData := false
-
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -1498,7 +1486,6 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		lastInDB := lastIdInDB(a.db, a.accounts.valsTable)
 		hasData = lastInDB >= step
-		log.Warn("[dbg] BuildFilesInBackground3", "step", step, "lastInDB", lastInDB)
 		if !hasData {
 			close(fin)
 			return
@@ -1509,7 +1496,6 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for step <= lastIdInDB(a.db, a.accounts.valsTable) {
-			log.Warn("[dbg] BuildFilesInBackground4")
 			if err := a.buildFilesInBackground(a.ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) {
 					close(fin)
@@ -1521,26 +1507,25 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 			step++
 		}
 
-		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
-			log.Warn("[dbg] BuildFilesInBackground5")
-			close(fin)
-			return
-		}
-		log.Warn("[dbg] BuildFilesInBackground5.1")
-		a.wg.Add(1)
-		go func() {
-			defer a.wg.Done()
-			defer a.mergeingFiles.Store(false)
-			defer func() { close(fin) }()
-			if err := a.MergeLoop(a.ctx, 1); err != nil {
-				if errors.Is(err, context.Canceled) {
-					return
-				}
-				log.Warn("[snapshots] merge", "err", err)
-			}
-
-			a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
-		}()
+		//TODO: disabling merge until sepolia/mainnet execution works
+		//if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
+		//	close(fin)
+		//	return
+		//}
+		//a.wg.Add(1)
+		//go func() {
+		//	defer a.wg.Done()
+		//	defer a.mergeingFiles.Store(false)
+		//	defer func() { close(fin) }()
+		//	if err := a.MergeLoop(a.ctx, 1); err != nil {
+		//		if errors.Is(err, context.Canceled) {
+		//			return
+		//		}
+		//		log.Warn("[snapshots] merge", "err", err)
+		//	}
+		//
+		//	a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
+		//}()
 	}()
 	return fin
 }
