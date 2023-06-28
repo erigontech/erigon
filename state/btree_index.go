@@ -714,9 +714,6 @@ func (btw *BtIndexWriter) Build() error {
 	defer btw.indexF.Sync()
 	btw.indexW = bufio.NewWriterSize(btw.indexF, etl.BufIOSize)
 	defer btw.indexW.Flush()
-	defer func() {
-		log.Warn("dbuild idx done", "file", btw.indexFile)
-	}()
 
 	// Write number of keys
 	binary.BigEndian.PutUint64(btw.numBuf[:], btw.keyCount)
