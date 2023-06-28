@@ -64,13 +64,6 @@ type EthBackendServer struct {
 	blockReader services.FullBlockReader
 	config      *chain.Config
 
-	// Block proposing for proof-of-stake
-	payloadId      uint64
-	lastParameters *core.BlockBuilderParameters
-	builders       map[uint64]*builder.BlockBuilder
-	builderFunc    builder.BlockBuilderFunc
-	proposing      bool
-
 	lock       sync.Mutex // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
 	logsFilter *LogsFilterAggregator
 	hd         *headerdownload.HeaderDownload
