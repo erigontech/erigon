@@ -99,69 +99,6 @@ func (t *UpdateTree) get(key []byte) (*commitmentItem, bool) {
 	return c, false
 }
 
-func (t *UpdateTree) getWithDomain(key []byte, domain *SharedDomains) (*commitmentItem, bool) {
-	c := &commitmentItem{plainKey: common.Copy(key), hashedKey: t.hashAndNibblizeKey(key)}
-	if t.tree.Has(c) {
-		return t.tree.Get(c)
-	}
-
-	switch len(key) {
-	case length.Addr:
-		enc, err := domain.LatestAccount(key)
-		if err != nil {
-			return nil, false
-		}
-		//nonce, balance, chash := DecodeAccountBytes(enc)
-		if len(enc) == 0 {
-			c.update.Flags = commitment.DeleteUpdate
-			return c, true
-		}
-
-		nonce, balance, chash := DecodeAccountBytes(enc)
-		if c.update.Nonce != nonce {
-			c.update.Nonce = nonce
-			c.update.Flags |= commitment.NonceUpdate
-		}
-		if !c.update.Balance.Eq(balance) {
-			c.update.Balance.Set(balance)
-			c.update.Flags |= commitment.BalanceUpdate
-		}
-		if !bytes.Equal(chash, c.update.CodeHashOrStorage[:]) {
-			if len(chash) == 0 {
-				copy(c.update.CodeHashOrStorage[:], commitment.EmptyCodeHash)
-				c.update.ValLength = length.Hash
-				c.update.CodeValue = nil
-			} else {
-				copy(c.update.CodeHashOrStorage[:], chash)
-				c.update.ValLength = length.Hash
-				//if !bytes.Equal(chash, commitment.Empty {
-				//c.update.Flags |= commitment.CodeUpdate
-				//}
-				code, err := domain.LatestCode(key)
-				if err != nil {
-					return nil, false
-				}
-				if len(code) > 0 {
-					c.update.ValLength = length.Hash
-					c.update.CodeValue = common.Copy(code)
-				}
-			}
-		}
-		return c, true
-	case length.Addr + length.Hash:
-		enc, err := domain.LatestStorage(key[:length.Addr], key[length.Addr:])
-		if err != nil {
-			return nil, false
-		}
-		c.update.ValLength = len(enc)
-		copy(c.update.CodeHashOrStorage[:], enc)
-		return c, true
-	default:
-		panic("unk")
-	}
-	return c, false
-}
-
 func (t *UpdateTree) TouchUpdate(key []byte, update commitment.Update) {
 	item, _ := t.get(key)
 	item.update.Merge(&update)
@@ -172,12 +109,6 @@ func (t *UpdateTree) TouchUpdate(key []byte, update commitment.Update) {
 // (different behaviour for Code, Account and Storage key modifications).
 func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, val []byte)) {
 	item, _ := t.get(key)
-	fn(item, val)
-	t.tree.ReplaceOrInsert(item)
-}
-
-func (t *UpdateTree) TouchPlainKeyDom(d *SharedDomains, key, val []byte, fn func(c *commitmentItem, val []byte)) {
-	item, _ := t.getWithDomain(key, d)
 	fn(item, val)
 	t.tree.ReplaceOrInsert(item)
 }

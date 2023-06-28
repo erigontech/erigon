@@ -1126,7 +1126,6 @@ type AggregatorContext struct {
 	logTopics  *InvertedIndexContext
 	tracesFrom *InvertedIndexContext
 	tracesTo   *InvertedIndexContext
-	keyBuf     []byte
 }
 
 func (a *Aggregator) MakeContext() *AggregatorContext {

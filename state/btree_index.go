@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/bits"
@@ -417,6 +418,9 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (*Cursor, error) {
 		cmp := bytes.Compare(mk, x)
 		switch {
 		case err != nil:
+			if errors.Is(err, ErrBtIndexLookupBounds) {
+				return nil, nil
+			}
 			return nil, err
 		case cmp == 0:
 			return a.newCursor(context.TODO(), mk, value, di), nil
@@ -431,6 +435,9 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (*Cursor, error) {
 	}
 	k, v, err := a.dataLookup(l)
 	if err != nil {
+		if errors.Is(err, ErrBtIndexLookupBounds) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("key >= %x was not found. %w", x, err)
 	}
 	return a.newCursor(context.TODO(), k, v, l), nil
@@ -998,10 +1005,13 @@ func OpenBtreeIndex(indexPath, dataPath string, M uint64) (*BtIndex, error) {
 	return idx, nil
 }
 
+var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
+
 // dataLookup fetches key and value from data file by di (data index)
+// di starts from 0 so di is never >= keyCount
 func (b *BtIndex) dataLookup(di uint64) ([]byte, []byte, error) {
-	if b.keyCount < di {
-		return nil, nil, fmt.Errorf("keyCount=%d, but item %d requested. file: %s", b.keyCount, di, b.FileName())
+	if di >= b.keyCount {
+		return nil, nil, fmt.Errorf("%w: keyCount=%d, item %d requested. file: %s", ErrBtIndexLookupBounds, b.keyCount, di+1, b.FileName())
 	}
 	p := int(b.dataoffset) + int(di)*b.bytesPerRec
 	if len(b.data) < p+b.bytesPerRec {
@@ -1066,6 +1076,7 @@ func (b *BtIndex) Seek(x []byte) (*Cursor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("seek key %x: %w", x, err)
 	}
+	// cursor could be nil along with err if nothing found
 	return cursor, nil
 }
 

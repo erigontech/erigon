@@ -174,8 +174,6 @@ type Domain struct {
 	valsTable string // key + invertedStep -> values
 	stats     DomainStats
 	wal       *domainWAL
-	values    *btree2.Map[string, []byte]
-	estSize   atomic.Uint64
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 	logger       log.Logger
@@ -187,7 +185,6 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	d := &Domain{
 		keysTable: keysTable,
 		valsTable: valsTable,
-		values:    btree2.NewMap[string, []byte](128),
 		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:     DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 		logger:    logger,
@@ -527,7 +524,6 @@ type domainWAL struct {
 	d           *Domain
 	keys        *etl.Collector
 	values      *etl.Collector
-	kvsize      atomic.Uint64
 	aux         []byte
 	tmpdir      string
 	buffered    bool
@@ -545,11 +541,6 @@ func (h *domainWAL) close() {
 	if h.values != nil {
 		h.values.Close()
 	}
-}
-
-func loadPrintFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	fmt.Printf("load: %x -> %x\n", k, v)
-	return next(k, k, v)
 }
 
 func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
@@ -777,6 +768,7 @@ type kvpair struct {
 
 func (d *Domain) writeCollationPair(valuesComp *compress.Compressor, pairs chan kvpair) (count int, err error) {
 	for kv := range pairs {
+		fmt.Printf("collated %x %x\n", kv.k, kv.v)
 		if err = valuesComp.AddUncompressedWord(kv.k); err != nil {
 			return count, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
 		}
@@ -1002,7 +994,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		}
 	}
 	if d.filenameBase == "accounts" {
-
+		log.Warn("[dbg] buildFiles index", "step", step)
 	}
 
 	closeComp = false
@@ -1468,8 +1460,10 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) ([]byte, bool, error
 		}
 		cur, err := reader.Seek(filekey)
 		if err != nil {
-			//return nil, false, nil //TODO: uncomment me
 			return nil, false, err
+		}
+		if cur == nil {
+			return nil, false, nil
 		}
 
 		if bytes.Equal(cur.Key(), filekey) {
@@ -1537,8 +1531,7 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 				dc.d.logger.Warn("failed to read history before from file", "key", key, "err", err)
 				continue
 			}
-
-			if bytes.Equal(cur.Key(), key) {
+			if cur != nil && bytes.Equal(cur.Key(), key) {
 				val = cur.Value()
 				break
 			}

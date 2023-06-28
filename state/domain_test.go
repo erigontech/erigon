@@ -888,7 +888,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites()
+	d.StartUnbufferedWrites()
 	defer d.FinishWrites()
 
 	var preval1, preval2, preval3 []byte
@@ -987,7 +987,7 @@ func TestDomainContext_IteratePrefix(t *testing.T) {
 	d.SetTx(tx)
 
 	d.largeValues = true
-	d.StartWrites()
+	d.StartUnbufferedWrites()
 	defer d.FinishWrites()
 
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))

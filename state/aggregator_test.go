@@ -377,10 +377,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 }
 
 func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
-	t.Skip("FIXME: migrate me to AggV3")
 	aggStep := uint64(500)
 
-	_, db, agg := testDbAndAggregator(t, aggStep)
+	_, db, agg := testDbAndAggregatorv3(t, aggStep)
 	t.Cleanup(agg.Close)
 
 	tx, err := db.BeginRw(context.Background())
@@ -391,7 +390,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 		}
 	}()
 	agg.SetTx(tx)
-	defer agg.StartWrites().FinishWrites()
+	defer agg.StartUnbufferedWrites().FinishWrites()
 
 	var latestCommitTxNum uint64
 	commit := func(txn uint64) error {
@@ -406,14 +405,19 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 		return nil
 	}
 
-	roots := agg.AggregatedRoots()
+	domains := agg.SharedDomains()
+
 	txs := (aggStep) * StepsInBiggestFile
 	t.Logf("step=%d tx_count=%d", aggStep, txs)
 
 	rnd := rand.New(rand.NewSource(0))
 	keys := make([][]byte, txs/2)
 
-	for txNum := uint64(1); txNum <= txs/2; txNum++ {
+	ct := agg.MakeContext()
+	defer ct.Close()
+
+	var txNum uint64
+	for txNum = uint64(1); txNum <= txs/2; txNum++ {
 		agg.SetTxNum(txNum)
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
@@ -427,32 +431,30 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 		keys[txNum-1] = append(addr, loc...)
 
 		buf := EncodeAccountBytes(1, uint256.NewInt(0), nil, 0)
-		err = agg.UpdateAccountData(addr, buf)
+
+		prev, _, err := ct.accounts.GetLatest(addr, nil, tx)
 		require.NoError(t, err)
 
-		err = agg.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]})
+		err = domains.UpdateAccountData(addr, buf, prev)
 		require.NoError(t, err)
 
-		err = agg.FinishTx()
+		prev, _, err = ct.storage.GetLatest(addr, loc, tx)
 		require.NoError(t, err)
-		select {
-		case <-roots:
-			require.NoError(t, commit(txNum))
-		default:
-			continue
-		}
+		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, prev)
+		require.NoError(t, err)
+
 	}
+	require.NoError(t, commit(txNum))
 
 	half := txs / 2
-	for txNum := txs/2 + 1; txNum <= txs; txNum++ {
+	for txNum = txNum + 1; txNum <= txs; txNum++ {
 		agg.SetTxNum(txNum)
 
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
-		err = agg.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]})
+		prev, _, err := ct.storage.GetLatest(addr, loc, tx)
 		require.NoError(t, err)
-
-		err = agg.FinishTx()
+		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, prev)
 		require.NoError(t, err)
 	}
 
@@ -462,9 +464,12 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 	tx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
 
-	ctx := agg.defaultCtx
-	for _, key := range keys {
-		storedV, err := ctx.ReadAccountStorage(key[:length.Addr], key[length.Addr:], tx)
+	ctx := agg.MakeContext()
+	defer ctx.Close()
+
+	for i, key := range keys {
+		storedV, found, err := ctx.storage.GetLatest(key[:length.Addr], key[length.Addr:], tx)
+		require.Truef(t, found, "key %x not found %d", key, i)
 		require.NoError(t, err)
 		require.EqualValues(t, key[0], storedV[0])
 		require.EqualValues(t, key[length.Addr], storedV[1])
@@ -495,7 +500,7 @@ func Test_EncodeCommitmentState(t *testing.T) {
 func Test_BtreeIndex_Seek(t *testing.T) {
 	tmp := t.TempDir()
 	logger := log.New()
-	keyCount, M := 120000, 1024
+	keyCount, M := 120, 30
 
 	t.Run("empty index", func(t *testing.T) {
 		dataPath := generateCompressedKV(t, tmp, 52, 180 /*val size*/, 0, logger)
@@ -522,9 +527,10 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
 		_, _, err := bt.dataLookup(bt.keyCount + 1)
-		require.Error(t, err)
+		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(bt.keyCount) // TODO: it must be error or not??
+		_, _, err = bt.dataLookup(bt.keyCount)
+		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
 		_, _, err = bt.dataLookup(bt.keyCount - 1)

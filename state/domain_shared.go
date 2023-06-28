@@ -132,18 +132,19 @@ func (sd *SharedDomains) SeekCommitment() (bn, txn uint64, err error) {
 	cmcx := sd.Commitment.MakeContext()
 	defer cmcx.Close()
 
-	topTxn, topValue := uint64(0), make([]byte, 0)
-	err = cmcx.IteratePrefix(sd.roTx, keyCommitmentState, func(key []byte, value []byte) {
-		fmt.Printf("iter %x value %x\n", key, value[:8])
-		txn := binary.BigEndian.Uint64(value)
-		if txn > topTxn {
-			topTxn = txn
-			topValue = append(topValue[:0], value...)
-		}
-	})
-	if err != nil {
-		return 0, 0, err
-	}
+	//topTxn, topValue := uint64(0), make([]byte, 0)
+	//err = cmcx.IteratePrefix(sd.roTx, keyCommitmentState, func(key []byte, value []byte) {
+	//	fmt.Printf("iter %x value %x\n", key, value[:8])
+	//	txn := binary.BigEndian.Uint64(value)
+	//	if txn > topTxn {
+	//		topTxn = txn
+	//		topValue = append(topValue[:0], value...)
+	//	}
+	//})
+	//cmcx.GetLatest(keyCommitmentState, nil, sd.roTx)
+	//if err != nil {
+	//	return 0, 0, err
+	//}
 
 	rv, _, err := cmcx.GetLatest(keyCommitmentState, nil, sd.roTx)
 	if err != nil {
