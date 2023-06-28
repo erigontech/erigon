@@ -231,22 +231,13 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 }
 
 func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, err error) {
-	return tx.aggCtx.DomainGet(tx.MdbxTx, name, key, key2)
+	return tx.aggCtx.GetLatest(name, key, key2, tx.MdbxTx)
 }
 func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	switch name {
-	case kv.AccountsDomain:
-		v, err := tx.aggCtx.ReadAccountData(key, ts, tx.MdbxTx)
-		return v, v != nil, err
-	case kv.StorageDomain:
-		v, err := tx.aggCtx.ReadAccountStorage(append(common.Copy(key), key2...), ts, tx.MdbxTx)
-		return v, v != nil, err
-	case kv.CodeDomain:
-		v, err := tx.aggCtx.ReadAccountCode(key, ts, tx.MdbxTx)
-		return v, v != nil, err
-	default:
-		panic(fmt.Sprintf("unexpected: %s", name))
+	if key2 != nil {
+		key = append(common.Copy(key), key2...)
 	}
+	return tx.aggCtx.DomainGetAsOf(tx.MdbxTx, name, key, ts)
 }
 
 func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
