@@ -1449,9 +1449,9 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 			}
 			mxPruneSize.Inc()
 		}
-		if d.filenameBase == "accounts" {
-			fmt.Printf("prune keys: %x, %x\n", k, v)
-		}
+		//if d.filenameBase == "accounts" {
+		//	fmt.Printf("prune keys: %x, %x\n", k, v)
+		//}
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if err = keysCursor.DeleteCurrent(); err != nil {
 			return err
