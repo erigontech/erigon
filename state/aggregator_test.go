@@ -94,12 +94,14 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			require.NoError(t, err)
 
 			err = domains.UpdateCommitmentData(commKey2, v[:], pv)
+			require.NoError(t, err)
 			otherMaxWrite = txNum
 		} else {
 			pv, _, err := domCtx.GetLatest(kv.CommitmentDomain, commKey1, nil, rwTx)
 			require.NoError(t, err)
 
 			err = domains.UpdateCommitmentData(commKey1, v[:], pv)
+			require.NoError(t, err)
 			maxWrite = txNum
 		}
 		require.NoError(t, err)
