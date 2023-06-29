@@ -324,21 +324,3 @@ func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 
 	return peers, nil
 }
-
-// func (back *RemoteBackend) PendingBlock(ctx context.Context) (*types.Block, error) {
-// 	blockRlp, err := back.remoteEthBackend.PendingBlock(ctx, &emptypb.Empty{})
-// 	if err != nil {
-// 		return nil, fmt.Errorf("ETHBACKENDClient.PendingBlock() error: %w", err)
-// 	}
-// 	if blockRlp == nil {
-// 		return nil, nil
-// 	}
-
-// 	var block types.Block
-// 	err = rlp.Decode(bytes.NewReader(blockRlp.BlockRlp), &block)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("decoding block from %x: %w", blockRlp.BlockRlp, err)
-// 	}
-
-// 	return &block, nil
-// }
