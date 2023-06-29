@@ -258,13 +258,11 @@ func (a *AggregatorV3) CloseSharedDomains() {
 		a.domains = nil
 	}
 }
-func (a *AggregatorV3) SharedDomains() *SharedDomains {
+func (a *AggregatorV3) SharedDomains(ac *AggregatorV3Context) *SharedDomains {
 	if a.domains == nil {
 		a.domains = NewSharedDomains(a.accounts, a.code, a.storage, a.commitment)
 	}
-	if a.domains.aggCtx == nil {
-		a.domains.aggCtx = a.MakeContext()
-	}
+	a.domains.aggCtx = ac
 	a.domains.roTx = a.rwTx
 	return a.domains
 }
