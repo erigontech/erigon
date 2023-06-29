@@ -1159,7 +1159,7 @@ type InvertedFiles struct {
 	index  *recsplit.Index
 }
 
-func (sf InvertedFiles) Close() {
+func (sf InvertedFiles) CleanupOnError() {
 	if sf.decomp != nil {
 		sf.decomp.Close()
 	}

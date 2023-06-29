@@ -464,14 +464,15 @@ type AggV3StaticFiles struct {
 	tracesTo   InvertedFiles
 }
 
-func (sf AggV3StaticFiles) Close() {
-	sf.accounts.Close()
-	sf.storage.Close()
-	sf.code.Close()
-	sf.logAddrs.Close()
-	sf.logTopics.Close()
-	sf.tracesFrom.Close()
-	sf.tracesTo.Close()
+// CleanupOnError - call it on collation fail. It closing all files
+func (sf AggV3StaticFiles) CleanupOnError() {
+	sf.accounts.CleanupOnError()
+	sf.storage.CleanupOnError()
+	sf.code.CleanupOnError()
+	sf.logAddrs.CleanupOnError()
+	sf.logTopics.CleanupOnError()
+	sf.tracesFrom.CleanupOnError()
+	sf.tracesTo.CleanupOnError()
 }
 
 func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
@@ -516,7 +517,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			collation.Close()
 			if err != nil {
-				sf.Close()
+				sf.CleanupOnError()
 				return err
 			}
 
@@ -551,7 +552,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			defer a.wg.Done()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
-				sf.Close()
+				sf.CleanupOnError()
 				return err
 			}
 
@@ -572,6 +573,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	}
 
 	if err := g.Wait(); err != nil {
+		static.CleanupOnError()
 		log.Warn("domain collate-buildFiles failed", "err", err)
 		return fmt.Errorf("domain collate-build failed: %w", err)
 	}

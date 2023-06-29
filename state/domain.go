@@ -888,7 +888,8 @@ type StaticFiles struct {
 	efHistoryIdx    *recsplit.Index
 }
 
-func (sf StaticFiles) Close() {
+// CleanupOnError - call it on collation fail. It closing all files
+func (sf StaticFiles) CleanupOnError() {
 	if sf.valuesDecomp != nil {
 		sf.valuesDecomp.Close()
 	}

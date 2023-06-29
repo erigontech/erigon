@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-const FileCloseLogLevel = log.LvlTrace
+const FileCloseLogLevel = log.LvlWarn
 
 // LeakDetector - use it to find which resource was created but not closed (leaked)
 // periodically does print in logs resources which living longer than 1min with their creation stack trace

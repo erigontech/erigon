@@ -697,6 +697,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	for _, item := range files {
 		g := item.decompressor.MakeGetter()
 		g.Reset(0)
+		fmt.Printf("a: %s,%d,%d\n", item.decompressor.FileName(), item.decompressor.Count(), item.decompressor.Size())
 		if g.HasNext() {
 			key, _ := g.Next(nil)
 			val, _ := g.Next(nil)
