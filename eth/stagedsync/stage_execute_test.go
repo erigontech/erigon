@@ -30,7 +30,11 @@ func TestExec(t *testing.T) {
 		t.Skip()
 	}
 	logger := log.New()
-	ctx, db1, db2 := context.Background(), memdb.NewTestDB(t), memdb.NewTestDB(t)
+	tmp := t.TempDir()
+	_, db1, _ := temporal.NewTestDB(t, datadir.New(tmp), nil)
+	_, db2, _ := temporal.NewTestDB(t, datadir.New(tmp), nil)
+
+	ctx := context.Background()
 	cfg := ExecuteBlockCfg{}
 
 	t.Run("UnwindExecutionStagePlainStatic", func(t *testing.T) {
@@ -137,7 +141,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlo
 	agg.SetTx(tx)
 	agg.StartWrites()
 
-	rs := state.NewStateV3(agg.SharedDomains(), logger)
+	rs := state.NewStateV3(agg.SharedDomains(tx.(*temporal.Tx).AggCtx()), logger)
 	stateWriter := state.NewStateWriterBufferedV3(rs)
 	return func(n, from, numberOfBlocks uint64) {
 			stateWriter.SetTxNum(n)

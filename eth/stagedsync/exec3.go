@@ -247,9 +247,10 @@ func ExecV3(ctx context.Context,
 	var lock sync.RWMutex
 
 	// MA setio
-	doms := cfg.agg.SharedDomains()
+	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 	defer cfg.agg.CloseSharedDomains()
 	rs := state.NewStateV3(doms, logger)
+	doms.ClearRam()
 
 	//TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -364,7 +365,7 @@ func ExecV3(ctx context.Context,
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
 						if agg.CanPrune(tx) {
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
+							if err = agg.Prune(ctx, 10); err != nil { // prune part of retired data, before commit
 								return err
 							}
 						} else {
@@ -491,8 +492,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if block < cfg.blockReader.FrozenBlocks() {
-		agg.KeepInDB(0)
-		defer agg.KeepInDB(ethconfig.HistoryV3AggregationStep)
+		defer agg.KeepStepsInDB(0).KeepStepsInDB(1)
 	}
 
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
@@ -713,7 +713,7 @@ Loop:
 			inputTxNum++
 		}
 
-		if !parallel && !dbg.DiscardCommitment() {
+		if !parallel && !dbg.DiscardCommitment() && blockNum&100 == 0 {
 
 			rh, err := agg.ComputeCommitment(true, false)
 			if err != nil {
@@ -779,7 +779,7 @@ Loop:
 					// prune befor flush, to speedup flush
 					tt := time.Now()
 					if agg.CanPrune(applyTx) {
-						if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
+						if err = agg.Prune(ctx, 10); err != nil { // prune part of retired data, before commit
 							return err
 						}
 					}
@@ -822,7 +822,7 @@ Loop:
 						applyWorker.ResetTx(applyTx)
 						agg.SetTx(applyTx)
 
-						doms.SetContext(applyTx.(*temporal.Tx).AggCtx())
+						doms = agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 						doms.SetTx(applyTx)
 					}
 

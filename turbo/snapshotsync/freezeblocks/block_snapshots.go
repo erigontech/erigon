@@ -1332,7 +1332,7 @@ func hasIdxFile(sn *snaptype.FileInfo, logger log.Logger) bool {
 			logger.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
 			result = false
 		}
-		_ = idx.Close()
+		idx.Close()
 	case snaptype.Bodies:
 		idx, err := recsplit.OpenIndex(path.Join(dir, fName))
 		if err != nil {
@@ -1343,7 +1343,7 @@ func hasIdxFile(sn *snaptype.FileInfo, logger log.Logger) bool {
 			logger.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
 			result = false
 		}
-		_ = idx.Close()
+		idx.Close()
 	case snaptype.Transactions:
 		idx, err := recsplit.OpenIndex(path.Join(dir, fName))
 		if err != nil {
@@ -1354,7 +1354,7 @@ func hasIdxFile(sn *snaptype.FileInfo, logger log.Logger) bool {
 			log.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
 			result = false
 		}
-		_ = idx.Close()
+		idx.Close()
 
 		fName = snaptype.IdxFileName(sn.From, sn.To, snaptype.Transactions2Block.String())
 		idx, err = recsplit.OpenIndex(path.Join(dir, fName))
@@ -1366,7 +1366,7 @@ func hasIdxFile(sn *snaptype.FileInfo, logger log.Logger) bool {
 			logger.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
 			result = false
 		}
-		_ = idx.Close()
+		idx.Close()
 	}
 	return result
 }
