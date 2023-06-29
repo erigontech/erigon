@@ -1046,7 +1046,7 @@ func (b *BtIndex) FilePath() string { return b.filePath }
 
 func (b *BtIndex) FileName() string { return path.Base(b.filePath) }
 
-func (b *BtIndex) Empty() bool { return b.keyCount == 0 }
+func (b *BtIndex) Empty() bool { return b == nil || b.keyCount == 0 }
 
 func (b *BtIndex) KeyCount() uint64 { return b.keyCount }
 

@@ -1424,9 +1424,6 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 			break
 		}
 		reader := dc.statelessBtree(i)
-		if reader == nil {
-			continue
-		}
 		if reader.Empty() {
 			continue
 		}
@@ -1452,9 +1449,6 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) ([]byte, bool, error
 
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		reader := dc.statelessBtree(i)
-		if reader == nil {
-			continue
-		}
 		if reader.Empty() {
 			continue
 		}
@@ -1707,7 +1701,7 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 
 		cursor, err := bg.Seek(prefix)
 		if err != nil {
-			continue
+			return err
 		}
 
 		key := cursor.Key()
