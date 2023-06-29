@@ -363,7 +363,7 @@ func ExecV3(ctx context.Context,
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
 						if agg.CanPrune(tx) {
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
+							if err = agg.Prune(ctx, 10); err != nil { // prune part of retired data, before commit
 								return err
 							}
 						} else {
@@ -496,8 +496,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if block < cfg.blockReader.FrozenBlocks() {
-		agg.KeepInDB(0)
-		defer agg.KeepInDB(ethconfig.HistoryV3AggregationStep)
+		defer agg.KeepStepsInDB(0).KeepStepsInDB(1)
 	}
 
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
@@ -784,7 +783,7 @@ Loop:
 					// prune befor flush, to speedup flush
 					tt := time.Now()
 					if agg.CanPrune(applyTx) {
-						if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil { // prune part of retired data, before commit
+						if err = agg.Prune(ctx, 10); err != nil { // prune part of retired data, before commit
 							return err
 						}
 					}
