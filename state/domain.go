@@ -768,7 +768,6 @@ type kvpair struct {
 
 func (d *Domain) writeCollationPair(valuesComp *compress.Compressor, pairs chan kvpair) (count int, err error) {
 	for kv := range pairs {
-		fmt.Printf("collated %x %x\n", kv.k, kv.v)
 		if err = valuesComp.AddUncompressedWord(kv.k); err != nil {
 			return count, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
 		}
