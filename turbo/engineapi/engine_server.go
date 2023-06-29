@@ -467,7 +467,7 @@ func (s *EngineServer) EngineGetPayload(ctx context.Context, req *engine.EngineG
 	return &engine.EngineGetPayloadResponse{
 		ExecutionPayload: payload,
 		BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
-		// BlobsBundle:      blobsBundle, TODO(Giulio2002): fix later.
+		BlobsBundle:      blobsBundle,
 	}, nil
 }
 
