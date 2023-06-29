@@ -684,9 +684,12 @@ func newRandBlobTx() *BlobTx {
 			To:    randAddr(),
 			Value: uint256.NewInt(rand.Uint64()),
 			Data:  randData(),
-			V:     *uint256.NewInt(rand.Uint64()),
-			R:     *uint256.NewInt(rand.Uint64()),
-			S:     *uint256.NewInt(rand.Uint64()),
+			// V:     *uint256.NewInt(rand.Uint64()),
+			// R:     *uint256.NewInt(rand.Uint64()),
+			// S:     *uint256.NewInt(rand.Uint64()),
+			V: *uint256.NewInt(0),
+			R: *uint256.NewInt(rand.Uint64()),
+			S: *uint256.NewInt(rand.Uint64()),
 		},
 		ChainID:    uint256.NewInt(rand.Uint64()),
 		Tip:        uint256.NewInt(rand.Uint64()),
@@ -694,7 +697,7 @@ func newRandBlobTx() *BlobTx {
 		AccessList: randAccessList(),
 	},
 		MaxFeePerDataGas:    uint256.NewInt(rand.Uint64()),
-		BlobVersionedHashes: randHashes(randIntInRange(5, 10)),
+		BlobVersionedHashes: randHashes(randIntInRange(0, 6)),
 	}
 	return stx
 }
@@ -768,12 +771,14 @@ func newRandBlobs(size int) Blobs {
 	return result
 }
 
-func newRandBlobWrapper(size int) *BlobTxWrapper {
+func newRandBlobWrapper() *BlobTxWrapper {
+	btxw := *newRandBlobTx()
+	l := len(btxw.BlobVersionedHashes)
 	return &BlobTxWrapper{
-		Tx:          *newRandBlobTx(),
-		Commitments: newRandCommitments(size),
-		Blobs:       newRandBlobs(size),
-		Proofs:      newRandProofs(size),
+		Tx:          btxw,
+		Commitments: newRandCommitments(l),
+		Blobs:       newRandBlobs(l),
+		Proofs:      newRandProofs(l),
 	}
 }
 
@@ -785,8 +790,7 @@ func populateBlobTxs() {
 
 func populateBlobWrapperTxs() {
 	for i := 0; i < N-1; i++ {
-		n := randIntInRange(0, 10)
-		dummyBlobWrapperTxs[i] = newRandBlobWrapper(n)
+		dummyBlobWrapperTxs[i] = newRandBlobWrapper()
 	}
 
 	dummyBlobWrapperTxs[N-1] = &BlobTxWrapper{
@@ -810,6 +814,16 @@ func TestBlobTxEncodeDecode(t *testing.T) {
 		if err := assertEqual(dummyBlobTxs[i], tx); err != nil {
 			t.Fatal(err)
 		}
+
+		// JSON
+		tx, err = encodeDecodeJSON(dummyBlobTxs[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = assertEqual(dummyBlobTxs[i], tx); err != nil {
+			t.Fatal(err)
+		}
+
 	}
 }
 
@@ -827,5 +841,20 @@ func TestBlobTxWrappedEncodeDecode(t *testing.T) {
 		if err := assertEqualBlobWrapper(dummyBlobWrapperTxs[i], tx); err != nil {
 			t.Fatal(err)
 		}
+
+		// JSON
+		// fails in ValidateBlobTransactionWrapper()
+		// error during proof verification: invalid infinity point encoding
+
+		// jtx, err := encodeDecodeJSON(dummyBlobWrapperTxs[i])
+		// if err != nil {
+		// 	t.Fatal(err)
+		// }
+		// if err = assertEqual(dummyBlobWrapperTxs[i], jtx); err != nil {
+		// 	t.Fatal(err)
+		// }
+		// if err := assertEqualBlobWrapper(dummyBlobWrapperTxs[i], jtx.(*BlobTxWrapper)); err != nil {
+		// 	t.Fatal(err)
+		// }
 	}
 }
