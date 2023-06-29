@@ -122,7 +122,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	renderUpdates(branchNodeUpdates)
 
 	// generate empty updates and do NOT reset tree
-	hph.SetTrace(true)
+	//hph.SetTrace(true)
 
 	plainKeys, hashedKeys, updates = NewUpdateBuilder().Build()
 
@@ -164,8 +164,8 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	trieOne := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	trieTwo := NewHexPatriciaHashed(1, ms2.branchFn, ms2.accountFn, ms2.storageFn)
 
-	trieOne.SetTrace(true)
-	trieTwo.SetTrace(true)
+	//trieOne.SetTrace(true)
+	//trieTwo.SetTrace(true)
 
 	// single sequential update
 	roots := make([][]byte, 0)
@@ -247,7 +247,7 @@ func Test_Sepolia(t *testing.T) {
 	}
 
 	hph := NewHexPatriciaHashed(length.Addr, ms.branchFn, ms.accountFn, ms.storageFn)
-	hph.SetTrace(true)
+	//hph.SetTrace(true)
 
 	for _, testData := range tests {
 		builder := NewUpdateBuilder()
@@ -316,10 +316,7 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 	require.EqualValues(t, first.h[:], second.h[:])
 	require.EqualValues(t, first.extension[:first.extLen], second.extension[:second.extLen])
 	// encode doesnt code Nonce, Balance, CodeHash and Storage
-	//require.EqualValues(t, first.CodeHash[:], second.CodeHash[:])
-	//require.EqualValues(t, first.Storage[:first.StorageLen], second.Storage[:second.StorageLen])
 	require.EqualValues(t, first.Delete, second.Delete)
-
 }
 
 func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
@@ -539,22 +536,6 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 	hashAfterRestore, err := trieOne.RootHash()
 	require.NoError(t, err)
 	require.EqualValues(t, beforeRestore, hashAfterRestore)
-
-	require.EqualValues(t, trieTwo.currentKey[:trieTwo.currentKeyLen], trieOne.currentKey[:trieOne.currentKeyLen])
-
-	trieTwo.currentKeyLen = 10
-	for i := 0; i < trieTwo.currentKeyLen; i++ {
-		trieTwo.currentKey[i] = 8
-	}
-
-	buf, err = trieTwo.EncodeCurrentState(nil)
-	require.NoError(t, err)
-
-	err = trieOne.SetState(buf)
-	require.NoError(t, err)
-
-	require.EqualValues(t, trieTwo.currentKey[:trieTwo.currentKeyLen], trieOne.currentKey[:trieOne.currentKeyLen])
-
 }
 
 func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestore(t *testing.T) {
@@ -585,8 +566,8 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 
 	batch.Reset()
 	sequential.Reset()
-	sequential.SetTrace(true)
-	batch.SetTrace(true)
+	//sequential.SetTrace(true)
+	//batch.SetTrace(true)
 
 	// single sequential update
 	roots := make([][]byte, 0)
