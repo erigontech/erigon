@@ -718,7 +718,7 @@ Loop:
 			inputTxNum++
 		}
 
-		if !parallel && !dbg.DiscardCommitment() {
+		if !parallel && !dbg.DiscardCommitment() && blockNum&100 == 0 {
 
 			rh, err := agg.ComputeCommitment(true, false)
 			if err != nil {
@@ -827,7 +827,7 @@ Loop:
 						applyWorker.ResetTx(applyTx)
 						agg.SetTx(applyTx)
 
-						doms.SetContext(applyTx.(*temporal.Tx).AggCtx())
+						doms = agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 						doms.SetTx(applyTx)
 					}
 
