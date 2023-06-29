@@ -6,7 +6,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
@@ -526,7 +526,7 @@ func TestForkchoiceToGenesis(t *testing.T) {
 	assert.Equal(t, m.Genesis.Hash(), rawdb.ReadHeadBlockHash(tx))
 
 	payloadStatus := m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus.Status)
+	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus.Status)
 }
 
 func TestBogusForkchoice(t *testing.T) {
@@ -549,7 +549,7 @@ func TestBogusForkchoice(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 
 	payloadStatus := m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_SYNCING, payloadStatus.Status)
+	assert.Equal(t, engine.EngineStatus_SYNCING, payloadStatus.Status)
 
 	// Now send a correct forkChoice
 	forkChoiceMessage = engine_helpers.ForkChoiceMessage{
@@ -564,7 +564,7 @@ func TestBogusForkchoice(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 
 	payloadStatus = m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus.Status)
+	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus.Status)
 }
 
 func TestPoSDownloader(t *testing.T) {
@@ -587,7 +587,7 @@ func TestPoSDownloader(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 
 	payloadStatus := m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_SYNCING, payloadStatus.Status)
+	assert.Equal(t, engine.EngineStatus_SYNCING, payloadStatus.Status)
 
 	// Send the missing header
 	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
@@ -624,7 +624,7 @@ func TestPoSDownloader(t *testing.T) {
 	assert.Equal(t, chain.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 
 	payloadStatus = m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus.Status)
+	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus.Status)
 	assert.Equal(t, chain.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 }
 
@@ -658,7 +658,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 
 	payloadStatus1 := m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_SYNCING, payloadStatus1.Status)
+	assert.Equal(t, engine.EngineStatus_SYNCING, payloadStatus1.Status)
 
 	// Send the missing headers
 	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
@@ -748,7 +748,7 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 
 	payloadStatus0 := m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus0.Status)
+	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus0.Status)
 	forkChoiceMessage := engine_helpers.ForkChoiceMessage{
 		HeadBlockHash:      chain0.TopBlock.Hash(),
 		SafeBlockHash:      chain0.TopBlock.Hash(),
@@ -760,7 +760,7 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	assert.Equal(t, chain0.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 	payloadStatus0 = m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus0.Status)
+	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus0.Status)
 	assert.Equal(t, chain0.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 
 	//------------------------------------------
@@ -769,7 +769,7 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	payloadStatus1 := m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus1.Status)
+	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus1.Status)
 	forkChoiceMessage = engine_helpers.ForkChoiceMessage{
 		HeadBlockHash:      chain1.TopBlock.Hash(),
 		SafeBlockHash:      chain1.TopBlock.Hash(),
@@ -781,7 +781,7 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	assert.Equal(t, chain1.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 	payloadStatus1 = m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus1.Status)
+	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus1.Status)
 	assert.Equal(t, chain1.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 
 	//------------------------------------------
@@ -790,7 +790,7 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	payloadStatus2 := m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus2.Status)
+	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus2.Status)
 	forkChoiceMessage = engine_helpers.ForkChoiceMessage{
 		HeadBlockHash:      chain2.TopBlock.Hash(),
 		SafeBlockHash:      chain2.TopBlock.Hash(),
@@ -802,7 +802,7 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	assert.Equal(t, chain2.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 	payloadStatus2 = m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus2.Status)
+	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus2.Status)
 	assert.Equal(t, chain2.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 
 	//------------------------------------------
@@ -812,13 +812,13 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	payloadStatus3 := m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus3.Status)
+	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus3.Status)
 	m.SendPayloadRequest(chain3.TopBlock)
 	err = stages.StageLoopStep(m.Ctx, m.DB, tx, m.Sync, initialCycle, m.Log, m.BlockReader, nil)
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	payloadStatus3 = m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus3.Status)
+	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus3.Status)
 	forkChoiceMessage = engine_helpers.ForkChoiceMessage{
 		HeadBlockHash:      chain3.TopBlock.Hash(),
 		SafeBlockHash:      chain3.TopBlock.Hash(),
@@ -830,6 +830,6 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	assert.Equal(t, chain3.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 	payloadStatus3 = m.ReceivePayloadStatus()
-	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus3.Status)
+	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus3.Status)
 	assert.Equal(t, chain3.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 }

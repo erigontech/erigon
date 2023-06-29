@@ -1,4 +1,4 @@
-package privateapi
+package engineapi
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
-	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -97,8 +95,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	makeTestDb(ctx, db)
 	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil, logger)
 	hd.SetPOSSync(true)
-	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false, logger)
+	backend := NewEngineServer(ctx, logger, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, db, nil, hd, false)
 
 	var err error
 	var reply *engine.EnginePayloadStatus
@@ -125,7 +122,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	<-done
 	// Same result as before
 	require.NoError(err)
-	require.Equal(reply.Status, remote.EngineStatus_SYNCING)
+	require.Equal(reply.Status, engine.EngineStatus_SYNCING)
 	require.Nil(reply.LatestValidHash)
 
 	// However if we simulate that we finish reverse downloading the chain by updating the head, we just execute 1:1
@@ -142,7 +139,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	<-done
 
 	require.NoError(err)
-	require.Equal(reply.Status, remote.EngineStatus_SYNCING)
+	require.Equal(reply.Status, engine.EngineStatus_SYNCING)
 	require.Nil(reply.LatestValidHash)
 }
 
@@ -157,11 +154,10 @@ func TestMockValidExecution(t *testing.T) {
 	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil, logger)
 	hd.SetPOSSync(true)
 
-	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false, logger)
+	backend := NewEngineServer(ctx, logger, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, db, nil, hd, false)
 
 	var err error
-	var reply *remote.EnginePayloadStatus
+	var reply *engine.EnginePayloadStatus
 	done := make(chan bool)
 
 	go func() {
@@ -172,13 +168,13 @@ func TestMockValidExecution(t *testing.T) {
 	hd.BeaconRequestList.WaitForRequest(true, false)
 
 	hd.PayloadStatusCh <- engine_helpers.PayloadStatus{
-		Status:          remote.EngineStatus_VALID,
+		Status:          engine.EngineStatus_VALID,
 		LatestValidHash: payload3Hash,
 	}
 	<-done
 
 	require.NoError(err)
-	require.Equal(reply.Status, remote.EngineStatus_VALID)
+	require.Equal(reply.Status, engine.EngineStatus_VALID)
 	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
 	require.Equal(replyHash[:], payload3Hash[:])
 }
@@ -194,11 +190,10 @@ func TestMockInvalidExecution(t *testing.T) {
 	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil, logger)
 	hd.SetPOSSync(true)
 
-	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false, logger)
+	backend := NewEngineServer(ctx, logger, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, db, nil, hd, false)
 
 	var err error
-	var reply *remote.EnginePayloadStatus
+	var reply *engine.EnginePayloadStatus
 	done := make(chan bool)
 
 	go func() {
@@ -209,13 +204,13 @@ func TestMockInvalidExecution(t *testing.T) {
 	hd.BeaconRequestList.WaitForRequest(true, false)
 	// Simulate invalid status
 	hd.PayloadStatusCh <- engine_helpers.PayloadStatus{
-		Status:          remote.EngineStatus_INVALID,
+		Status:          engine.EngineStatus_INVALID,
 		LatestValidHash: startingHeadHash,
 	}
 	<-done
 
 	require.NoError(err)
-	require.Equal(reply.Status, remote.EngineStatus_INVALID)
+	require.Equal(reply.Status, engine.EngineStatus_INVALID)
 	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
 	require.Equal(replyHash[:], startingHeadHash[:])
 }
@@ -230,8 +225,7 @@ func TestNoTTD(t *testing.T) {
 
 	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil, logger)
 
-	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{}, nil, hd, false, logger)
+	backend := NewEngineServer(ctx, logger, &chain.Config{}, nil, db, nil, hd, false)
 
 	var err error
 

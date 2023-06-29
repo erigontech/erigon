@@ -41,7 +41,7 @@ func TestEthSubscribe(t *testing.T) {
 
 	ctx := context.Background()
 	logger := log.New()
-	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events, m.BlockReader, nil, nil, nil, false, logger)
+	backendServer := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events, m.BlockReader, logger)
 	backendClient := direct.NewEthBackendClientDirect(backendServer)
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
 	ff := rpchelper.New(ctx, backend, nil, nil, func() {}, m.Log)
