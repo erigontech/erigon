@@ -341,14 +341,16 @@ func (d *Decompressor) ModTime() time.Time {
 	return d.modTime
 }
 
-func (d *Decompressor) Close() error {
-	if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
-		log.Trace("unmap", "err", err, "file", d.FileName())
+func (d *Decompressor) Close() {
+	if d.f != nil {
+		if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
+			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
+		}
+		if err := d.f.Close(); err != nil {
+			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", d.FileName(), "stack", dbg.Stack())
+		}
+		d.f = nil
 	}
-	if err := d.f.Close(); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (d *Decompressor) FilePath() string { return d.filePath }
