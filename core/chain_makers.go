@@ -321,7 +321,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	var stateWriter state.StateWriter
 	if ethconfig.EnableHistoryV4InTest {
 		agg := tx.(*temporal.Tx).Agg()
-		sd := agg.SharedDomains()
+		sd := agg.SharedDomains(tx.(*temporal.Tx).AggCtx())
 		stateWriter, stateReader = state.WrapStateIO(sd)
 		sd.SetTx(tx)
 		defer agg.CloseSharedDomains()
@@ -375,6 +375,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		}
 		txNumIncrement()
 		if b.engine != nil {
+			fmt.Printf("fin: %d\n", b.Number().Uint64())
 			// Finalize and seal the block
 			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)

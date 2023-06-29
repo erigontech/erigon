@@ -19,7 +19,7 @@ type WriterV4 struct {
 }
 
 func NewWriterV4(tx kv.TemporalTx) *WriterV4 {
-	return &WriterV4{tx: tx, domains: tx.(*temporal.Tx).Agg().SharedDomains()}
+	return &WriterV4{tx: tx, domains: tx.(*temporal.Tx).Agg().SharedDomains(tx.(*temporal.Tx).AggCtx())}
 }
 
 func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {

@@ -137,7 +137,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlo
 	agg.SetTx(tx)
 	agg.StartWrites()
 
-	rs := state.NewStateV3(agg.SharedDomains(), logger)
+	rs := state.NewStateV3(agg.SharedDomains(tx.(*temporal.Tx).AggCtx()), logger)
 	stateWriter := state.NewStateWriterBufferedV3(rs)
 	return func(n, from, numberOfBlocks uint64) {
 			stateWriter.SetTxNum(n)

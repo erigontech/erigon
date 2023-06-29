@@ -209,6 +209,7 @@ func (tx *Tx) autoClose() {
 	if !tx.MdbxTx.IsRo() {
 		tx.db.agg.FinishWrites()
 		tx.db.agg.SetTx(nil)
+		tx.db.agg.CloseSharedDomains()
 	}
 	if tx.aggCtx != nil {
 		tx.aggCtx.Close()
