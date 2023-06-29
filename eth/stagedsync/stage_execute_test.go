@@ -30,7 +30,11 @@ func TestExec(t *testing.T) {
 		t.Skip()
 	}
 	logger := log.New()
-	ctx, db1, db2 := context.Background(), memdb.NewTestDB(t), memdb.NewTestDB(t)
+	tmp := t.TempDir()
+	_, db1, _ := temporal.NewTestDB(t, datadir.New(tmp), nil)
+	_, db2, _ := temporal.NewTestDB(t, datadir.New(tmp), nil)
+
+	ctx := context.Background()
 	cfg := ExecuteBlockCfg{}
 
 	t.Run("UnwindExecutionStagePlainStatic", func(t *testing.T) {

@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -331,16 +330,10 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	stateChanges := etl.NewCollector("", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), rs.logger)
 	defer stateChanges.Close()
 
-	var actx *libstate.AggregatorV3Context
-	switch ttx := tx.(type) {
-	case *temporal.Tx:
-		actx = ttx.AggCtx()
-	default:
-		actx = agg.MakeContext()
-	}
+	ttx := tx.(kv.TemporalTx)
 
 	{
-		iter, err := actx.AccountHistoryRange(int(txUnwindTo), -1, order.Asc, -1, tx)
+		iter, err := ttx.HistoryRange(kv.AccountsHistory, int(txUnwindTo), -1, order.Asc, -1)
 		if err != nil {
 			return err
 		}
@@ -355,7 +348,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 		}
 	}
 	{
-		iter, err := actx.StorageHistoryRange(int(txUnwindTo), -1, order.Asc, -1, tx)
+		iter, err := ttx.HistoryRange(kv.StorageHistory, int(txUnwindTo), -1, order.Asc, -1)
 		if err != nil {
 			return err
 		}
