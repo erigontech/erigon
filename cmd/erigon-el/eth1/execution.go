@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -88,7 +88,7 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 			body.BlockNumber, &types.RawBody{
 				Transactions: body.Transactions,
 				Uncles:       uncles,
-				Withdrawals:  privateapi.ConvertWithdrawalsFromRpc(body.Withdrawals),
+				Withdrawals:  engineapi.ConvertWithdrawalsFromRpc(body.Withdrawals),
 			}); err != nil {
 			return nil, err
 		}
@@ -269,7 +269,7 @@ func (e *Eth1Execution) GetBody(ctx context.Context, req *execution.GetSegmentRe
 	if err != nil {
 		return nil, err
 	}
-	rpcWithdrawals := privateapi.ConvertWithdrawalsToRpc(body.Withdrawals)
+	rpcWithdrawals := engineapi.ConvertWithdrawalsToRpc(body.Withdrawals)
 	unclesRpc := make([]*execution.Header, 0, len(body.Uncles))
 	for _, uncle := range body.Uncles {
 		unclesRpc = append(unclesRpc, HeaderToHeaderRPC(uncle))

@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
@@ -40,7 +40,7 @@ func NewStagedSync(
 	notifications *shards.Notifications,
 	snapDownloader proto_downloader.DownloaderClient,
 	agg *state.AggregatorV3,
-	forkValidator *engineapi.ForkValidator,
+	forkValidator *engine_helpers.ForkValidator,
 	logger log.Logger,
 	blockReader services.FullBlockReader,
 	blockWriter *blockio.BlockWriter,

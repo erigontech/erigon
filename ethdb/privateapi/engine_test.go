@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -14,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -100,7 +101,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false, logger)
 
 	var err error
-	var reply *remote.EnginePayloadStatus
+	var reply *engine.EnginePayloadStatus
 	done := make(chan bool)
 
 	go func() {
@@ -109,10 +110,10 @@ func TestMockDownloadRequest(t *testing.T) {
 	}()
 
 	hd.BeaconRequestList.WaitForRequest(true, false)
-	hd.PayloadStatusCh <- engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+	hd.PayloadStatusCh <- engine_helpers.PayloadStatus{Status: engine.EngineStatus_SYNCING}
 	<-done
 	require.NoError(err)
-	require.Equal(reply.Status, remote.EngineStatus_SYNCING)
+	require.Equal(reply.Status, engine.EngineStatus_SYNCING)
 	require.Nil(reply.LatestValidHash)
 
 	// If we get another request we don't need to process it with processDownloadCh and ignore it and return Syncing status
@@ -170,7 +171,7 @@ func TestMockValidExecution(t *testing.T) {
 
 	hd.BeaconRequestList.WaitForRequest(true, false)
 
-	hd.PayloadStatusCh <- engineapi.PayloadStatus{
+	hd.PayloadStatusCh <- engine_helpers.PayloadStatus{
 		Status:          remote.EngineStatus_VALID,
 		LatestValidHash: payload3Hash,
 	}
@@ -207,7 +208,7 @@ func TestMockInvalidExecution(t *testing.T) {
 
 	hd.BeaconRequestList.WaitForRequest(true, false)
 	// Simulate invalid status
-	hd.PayloadStatusCh <- engineapi.PayloadStatus{
+	hd.PayloadStatusCh <- engine_helpers.PayloadStatus{
 		Status:          remote.EngineStatus_INVALID,
 		LatestValidHash: startingHeadHash,
 	}
