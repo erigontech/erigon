@@ -718,7 +718,7 @@ Loop:
 			inputTxNum++
 		}
 
-		if !parallel && !dbg.DiscardCommitment() && blockNum&100 == 0 {
+		if !parallel && !dbg.DiscardCommitment() {
 
 			rh, err := agg.ComputeCommitment(true, false)
 			if err != nil {
