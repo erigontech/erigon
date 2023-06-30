@@ -132,8 +132,9 @@ func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
 			if key == ks {
 				return true
 			}
-			t.TouchPlainKey(common.FromHex(key), nil, t.TouchStorage)
-			//t.tree.Delete(&commitmentItem{plainKey: common.FromHex(key), hashedKey: t.hashAndNibblizeKey(common.FromHex(key))})
+			//t.TouchPlainKey(common.FromHex(key), nil, t.TouchStorage)
+			fmt.Printf("drop update for %s\n", key)
+			t.tree.Delete(&commitmentItem{plainKey: common.FromHex(key), hashedKey: t.hashAndNibblizeKey(common.FromHex(key))})
 			t.plainKeys.Delete(key) // we already marked those keys as deleted
 			return true
 		})
@@ -193,18 +194,6 @@ func (t *UpdateTree) TouchCode(c *commitmentItem, val []byte) {
 	c.update.Flags |= commitment.CodeUpdate
 }
 
-func (t *UpdateTree) ListItems() []commitmentItem {
-	updates := make([]commitmentItem, t.tree.Len())
-
-	j := 0
-	t.tree.Ascend(func(item *commitmentItem) bool {
-		updates[j] = *item
-		j++
-		return true
-	})
-	return updates
-}
-
 // Returns list of both plain and hashed keys. If .mode is CommitmentModeUpdate, updates also returned.
 func (t *UpdateTree) List(clear bool) ([][]byte, [][]byte, []commitment.Update) {
 	plainKeys := make([][]byte, 0, t.tree.Len())
@@ -212,21 +201,13 @@ func (t *UpdateTree) List(clear bool) ([][]byte, [][]byte, []commitment.Update) 
 	updates := make([]commitment.Update, 0, t.tree.Len())
 
 	//j := 0
-	//var delPref []byte
 	t.tree.Ascend(func(item *commitmentItem) bool {
-		//if delPref != nil && bytes.HasPrefix(item.plainKey, delPref) {
-		//	return true
-		//}
-		//delPref = nil
 		plainKeys = append(plainKeys, item.plainKey)
 		hashedKeys = append(hashedKeys, item.hashedKey)
 		updates = append(updates, item.update)
 		//plainKeys[j] = item.plainKey
 		//hashedKeys[j] = item.hashedKey
 		//updates[j] = item.update
-		//if item.update.Flags&commitment.DeleteUpdate != 0 {
-		//	delPref = common.Copy(item.plainKey)
-		//}
 		//j++
 		return true
 	})

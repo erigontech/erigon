@@ -379,6 +379,9 @@ func (cell *Cell) setStorage(value []byte) {
 }
 
 func (cell *Cell) setAccountFields(codeHash []byte, balance *uint256.Int, nonce uint64) {
+	if len(codeHash) == 0 {
+		codeHash = common.Copy(EmptyCodeHash[:])
+	}
 	copy(cell.CodeHash[:], codeHash)
 
 	cell.Balance.SetBytes(balance.Bytes())
@@ -1191,6 +1194,7 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 	cell.Nonce = 0
 }
 
+// fetches cell by key and set touch/after maps
 func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte) *Cell {
 	var cell *Cell
 	var col, depth int
@@ -1222,6 +1226,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte) *Cell {
 	if len(hashedKey) == 2*length.Hash { // set account key
 		cell.apl = len(plainKey)
 		copy(cell.apk[:], plainKey)
+		copy(cell.CodeHash[:], EmptyCodeHash)
 	} else { // set storage key
 		cell.spl = len(plainKey)
 		copy(cell.spk[:], plainKey)
@@ -1603,7 +1608,6 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 // buf expected to be encoded hph state. Decode state and set up hph to that state.
 func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	if buf == nil {
-		fmt.Printf("reset commitment trie since empty buffer")
 		// reset state to 'empty'
 		hph.currentKeyLen = 0
 		hph.rootChecked = false
@@ -1749,18 +1753,12 @@ func commonPrefixLen(b1, b2 []byte) int {
 }
 
 func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
-	hph.SetTrace(true)
 	branchNodeUpdates = make(map[string]BranchData)
-	for i, plainKey := range plainKeys {
-		if hph.trace {
-			fmt.Printf("plainKey=[%x], currentKey=[%x] %s\n", plainKey, hph.currentKey[:hph.currentKeyLen], updates[i].String())
-		}
-	}
 
 	for i, plainKey := range plainKeys {
 		hashedKey := hashedKeys[i]
 		if hph.trace {
-			fmt.Printf("plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+			fmt.Printf("plainKey=[%x] %s, hashedKey=[%x], currentKey=[%x]\n", plainKey, updates[i].String(), hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
@@ -1826,12 +1824,6 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 			branchNodeUpdates[string(updateKey)] = branchData
 		}
 	}
-
-	//if branchData, err := hph.foldRoot(); err != nil {
-	//	return nil, nil, fmt.Errorf("foldRoot: %w", err)
-	//} else if branchData != nil {
-	//	branchNodeUpdates[string(hexToCompact([]byte{}))] = branchData
-	//}
 
 	rootHash, err = hph.RootHash()
 	if err != nil {
