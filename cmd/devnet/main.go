@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+
 	dbg "runtime/debug"
 	"syscall"
 	"time"
@@ -234,6 +235,7 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 				Logger:             logger,
 				BasePrivateApiAddr: "localhost:10090",
 				BaseRPCAddr:        "localhost:8545",
+				//Snapshots:          true,
 				Nodes: []devnet.Node{
 					args.Miner{
 						Node: args.Node{

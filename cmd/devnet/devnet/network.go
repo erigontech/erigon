@@ -59,6 +59,7 @@ func (nw *Network) Start(ctx *cli.Context) error {
 		Chain:          nw.Chain,
 		HttpPort:       apiPortNo,
 		PrivateApiAddr: nw.BasePrivateApiAddr,
+		Snapshots:      nw.Snapshots,
 	}
 
 	metricsEnabled := ctx.Bool("metrics")
@@ -124,9 +125,11 @@ func (nw *Network) startNode(nodeAddr string, cfg interface{}, nodeNumber int) (
 	nw.wg.Add(1)
 
 	node := node{
+		sync.Mutex{},
 		requests.NewRequestGenerator(nodeAddr, nw.Logger),
 		cfg,
 		&nw.wg,
+		make(chan error),
 		nil,
 	}
 
@@ -151,6 +154,10 @@ func (nw *Network) startNode(nodeAddr string, cfg interface{}, nodeNumber int) (
 			nw.Logger.Warn("App run returned error", "node", fmt.Sprintf("node-%d", nodeNumber), "err", err)
 		}
 	}()
+
+	if err = <-node.startErr; err != nil {
+		return nil, err
+	}
 
 	return &node, nil
 }
