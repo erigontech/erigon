@@ -718,50 +718,13 @@ Loop:
 			inputTxNum++
 		}
 
-		if !parallel && !dbg.DiscardCommitment() {
-
-			rh, err := agg.ComputeCommitment(true, false)
-			if err != nil {
-				return fmt.Errorf("StateV3.Apply: %w", err)
-			}
-			if !bytes.Equal(rh, header.Root.Bytes()) {
-				if cfg.badBlockHalt {
-					return fmt.Errorf("wrong trie root")
-				}
-				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, blockNum, rh, header.Root.Bytes(), header.Hash()))
-
-				if err := agg.Flush(ctx, applyTx); err != nil {
-					panic(err)
-				}
-				if cfg.hd != nil {
-					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
-				}
-				if maxBlockNum > execStage.BlockNumber {
-					unwindTo := (maxBlockNum + execStage.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
-					//unwindTo := blockNum - 1
-
-					logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-					u.UnwindTo(unwindTo, header.Hash())
-				}
-
-				/* uncomment it if need debug state-root missmatch
-				if err := agg.Flush(ctx, applyTx); err != nil {
-					panic(err)
-				}
-				oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
-				if err != nil {
-					panic(err)
-				}
-				if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
-					log.Error(fmt.Sprintf("block hash mismatch - but new-algorithm hash is bad! (means latest state is correct): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum))
-				} else {
-					log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum))
-				}
-				*/
+		if !parallel {
+			if ok, err := checkCommitmentV3(b.HeaderNoCopy(), agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+				return err
+			} else if !ok {
 				break Loop
 			}
-		}
-		if !parallel {
+
 			outputBlockNum.Set(blockNum)
 			// MA commitment
 			select {
@@ -876,17 +839,63 @@ Loop:
 			return err
 		}
 	}
+	if _, err := checkCommitmentV3(b.HeaderNoCopy(), agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+		return err
+	}
 
 	if parallel && blocksFreezeCfg.Produce {
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
-
 	if !useExternalTx && applyTx != nil {
 		if err = applyTx.Commit(); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func checkCommitmentV3(header *types.Header, agg *state2.AggregatorV3, badBlockHalt bool, hd headerDownloader, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
+	if dbg.DiscardCommitment() {
+		return true, nil
+	}
+	rh, err := agg.ComputeCommitment(true, false)
+	if err != nil {
+		return false, fmt.Errorf("StateV3.Apply: %w", err)
+	}
+	if bytes.Equal(rh, header.Root.Bytes()) {
+		return true, nil
+	}
+	if badBlockHalt {
+		return false, fmt.Errorf("wrong trie root")
+	}
+	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+	if hd != nil {
+		hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
+	}
+	minBlockNum := e.BlockNumber
+	if maxBlockNum > minBlockNum {
+		unwindTo := (maxBlockNum + minBlockNum) / 2 // Binary search for the correct block, biased to the lower numbers
+		//unwindTo := blockNum - 1
+
+		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
+		u.UnwindTo(unwindTo, header.Hash())
+	}
+	return false, nil
+
+	/* uncomment it if need debug state-root missmatch
+	if err := agg.Flush(ctx, applyTx); err != nil {
+		panic(err)
+	}
+	oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
+	if err != nil {
+		panic(err)
+	}
+	if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
+		log.Error(fmt.Sprintf("block hash mismatch - but new-algorithm hash is bad! (means latest state is correct): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum))
+	} else {
+		log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum))
+	}
+	*/
 }
 
 func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
