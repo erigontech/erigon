@@ -183,7 +183,7 @@ func getEnode(n Node) (string, error) {
 					if errors.As(urlErr.Err, &opErr) {
 						var callErr *os.SyscallError
 						if errors.As(opErr.Err, &callErr) {
-							if callErr.Syscall == "connectex" {
+							if strings.HasPrefix(callErr.Syscall, "connect") {
 								reqCount++
 								time.Sleep(time.Duration(devnetutils.RandomInt(5)) * time.Second)
 								continue

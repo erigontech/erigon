@@ -39,11 +39,16 @@ type node struct {
 }
 
 func (n *node) Stop() {
+	var toClose *enode.ErigonNode
+
 	n.Lock()
-	defer n.Unlock()
 	if n.ethNode != nil {
-		toClose := n.ethNode
+		toClose = n.ethNode
 		n.ethNode = nil
+	}
+	n.Unlock()
+
+	if toClose != nil {
 		toClose.Close()
 	}
 
@@ -66,7 +71,7 @@ func (n *node) done() {
 	}
 }
 
-func (n node) IsMiner() bool {
+func (n *node) IsMiner() bool {
 	_, isMiner := n.args.(args.Miner)
 	return isMiner
 }
