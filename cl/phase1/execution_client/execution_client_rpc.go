@@ -43,6 +43,10 @@ func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string) (
 }
 
 func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
+	if payload == nil {
+		return nil
+	}
+
 	ctx, cancel := context.WithTimeout(cc.context, 8*time.Second)
 	defer cancel()
 
@@ -66,8 +70,9 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
 
 	if payload.Version() >= 2 {
 		engineMethod = rpc_helper.EngineNewPayloadV2
-		withdrawals := make([]*types.Withdrawal, len(payload.Body().Withdrawals))
-		for i, withdrawal := range payload.Body().Withdrawals {
+		withdrawals := make([]*types.Withdrawal, payload.Withdrawals.Len())
+		for i := 0; i < payload.Withdrawals.Len(); i++ {
+			withdrawal := payload.Withdrawals.Get(i)
 			withdrawals[i] = &types.Withdrawal{
 				Index:          withdrawal.Index,
 				ValidatorIndex: withdrawal.Validator,
