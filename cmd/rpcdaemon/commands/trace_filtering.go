@@ -219,6 +219,21 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		out = append(out, tr)
 	}
 
+	if len(rewards) == 0 {
+		var tr ParityTrace
+		var rewardAction = &RewardTraceAction{}
+		rewardAction.Author = block.Coinbase()
+		rewardAction.RewardType = "block" // nolint: goconst
+		tr.Action = rewardAction
+		tr.BlockHash = &common.Hash{}
+		copy(tr.BlockHash[:], block.Hash().Bytes())
+		tr.BlockNumber = new(uint64)
+		*tr.BlockNumber = block.NumberU64()
+		tr.Type = "reward" // nolint: goconst
+		tr.TraceAddress = []int{}
+		out = append(out, tr)
+	}
+
 	return out, err
 }
 
