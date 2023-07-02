@@ -113,6 +113,14 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		}
 		defer cc.Close()
 		engine = execution_client.NewExecutionEnginePhase1FromClient(ctx, remote.NewETHBACKENDClient(cc))
+	} else if cfg.RunEngineAPI {
+		jwtSecret := []byte(cfg.JwtSecret)
+		cc, err := execution_client.NewExecutionClientRPC(ctx, jwtSecret, cfg.EngineAPIAddr)
+		if err != nil {
+			log.Error("could not start engine api", "err", err)
+		}
+		log.Info("Started Engine API RPC Client", "addr", cfg.EngineAPIAddr)
+		engine = cc
 	}
 
 	if !cfg.NoBeaconApi {

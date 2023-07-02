@@ -42,6 +42,9 @@ type ConsensusClientCliCfg struct {
 	BeaconProtocol        string                      `json:"beaconProtocol"`
 	RecordMode            bool                        `json:"recordMode"`
 	RecordDir             string                      `json:"recordDir"`
+	RunEngineAPI          bool                        `json:"run_engine_api"`
+	EngineAPIAddr         string                      `json:"engine_api_addr"`
+	JwtSecret             string                      `json:"jwt_secret"`
 
 	InitalState *state.BeaconState
 }
@@ -86,6 +89,10 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg.BeaconProtocol = "tcp"
 	cfg.RecordMode = ctx.Bool(flags.RecordModeFlag.Name)
 	cfg.RecordDir = ctx.String(flags.RecordModeDir.Name)
+
+	cfg.RunEngineAPI = ctx.Bool(flags.RunEngineAPI.Name)
+	cfg.EngineAPIAddr = fmt.Sprintf("%s:%d", ctx.String(flags.EngineApiHostFlag.Name), ctx.Int(flags.EngineApiPortFlag.Name))
+	cfg.JwtSecret = ctx.String(flags.JwtSecret.Name)
 
 	cfg.Port = uint(ctx.Int(flags.SentinelDiscoveryPort.Name))
 	cfg.Addr = ctx.String(flags.SentinelDiscoveryAddr.Name)
