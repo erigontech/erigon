@@ -84,11 +84,12 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
 		execPayload.Withdrawals = withdrawals
 	}
 
-	if payload.Version() >= 3 {
-		engineMethod = rpc_helper.EngineNewPayloadV3
-		execPayload.ExcessDataGas = &payload.ExcessDataGas
-		execPayload.DataGasUsed = &payload.DataGasUsed
-	}
+	// after Deneb
+	// if payload.Version() >= 3 {
+	// 	engineMethod = rpc_helper.EngineNewPayloadV3
+	// 	execPayload.ExcessDataGas = &payload.ExcessDataGas
+	// 	execPayload.DataGasUsed = &payload.DataGasUsed
+	// }
 
 	payloadStatus := &remote.EnginePayloadStatus{}
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
