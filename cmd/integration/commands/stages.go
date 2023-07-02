@@ -1618,6 +1618,6 @@ func initConsensusEngine(cc *chain2.Config, dir string, db kv.RwDB, logger log.L
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
+	return ethconsensusconfig.CreateConsensusEngine(&nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
 		HeimdallgRPCAddress, HeimdallURL, config.WithoutHeimdall, db.ReadOnly(), logger)
 }

@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 )
 
-func CreateConsensusEngine(nodeConfig nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
+func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
 	heimdallGrpcAddress string, heimdallUrl string, withoutHeimdall bool, readonly bool,
 	logger log.Logger,
 ) consensus.Engine {
@@ -70,7 +70,7 @@ func CreateConsensusEngine(nodeConfig nodecfg.Config, chainConfig *chain.Config,
 			var err error
 			var db kv.RwDB
 
-			db, err = node.OpenDatabase(&nodeConfig, kv.ConsensusDB, "clique", readonly, logger)
+			db, err = node.OpenDatabase(nodeConfig, kv.ConsensusDB, "clique", readonly, logger)
 
 			if err != nil {
 				panic(err)
@@ -83,7 +83,7 @@ func CreateConsensusEngine(nodeConfig nodecfg.Config, chainConfig *chain.Config,
 			var err error
 			var db kv.RwDB
 
-			db, err = node.OpenDatabase(&nodeConfig, kv.ConsensusDB, "aura", readonly, logger)
+			db, err = node.OpenDatabase(nodeConfig, kv.ConsensusDB, "aura", readonly, logger)
 
 			if err != nil {
 				panic(err)
@@ -105,7 +105,7 @@ func CreateConsensusEngine(nodeConfig nodecfg.Config, chainConfig *chain.Config,
 			var err error
 			var db kv.RwDB
 
-			db, err = node.OpenDatabase(&nodeConfig, kv.ConsensusDB, "bor", readonly, logger)
+			db, err = node.OpenDatabase(nodeConfig, kv.ConsensusDB, "bor", readonly, logger)
 
 			if err != nil {
 				panic(err)
@@ -151,6 +151,6 @@ func CreateConsensusEngineBareBones(chainConfig *chain.Config, logger log.Logger
 		consensusConfig = &ethashCfg
 	}
 
-	return CreateConsensusEngine(nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
+	return CreateConsensusEngine(&nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
 		"" /* heimdallGrpcAddress */, "" /* heimdallUrl */, true /* withoutHeimdall */, false /* readonly */, logger)
 }
