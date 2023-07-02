@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/common"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/urfave/cli/v2"
@@ -44,7 +48,7 @@ type ConsensusClientCliCfg struct {
 	RecordDir             string                      `json:"recordDir"`
 	RunEngineAPI          bool                        `json:"run_engine_api"`
 	EngineAPIAddr         string                      `json:"engine_api_addr"`
-	JwtSecret             string                      `json:"jwt_secret"`
+	JwtSecret             []byte                      `json:"jwt_secret"`
 
 	InitalState *state.BeaconState
 }
@@ -92,7 +96,15 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 
 	cfg.RunEngineAPI = ctx.Bool(flags.RunEngineAPI.Name)
 	cfg.EngineAPIAddr = fmt.Sprintf("%s:%d", ctx.String(flags.EngineApiHostFlag.Name), ctx.Int(flags.EngineApiPortFlag.Name))
-	cfg.JwtSecret = ctx.String(flags.JwtSecret.Name)
+	if cfg.RunEngineAPI {
+		secret, err := ObtainJwtSecret(ctx)
+		if err != nil {
+			log.Error("Failed to obtain jwt secret", "err", err)
+			cfg.RunEngineAPI = false
+		} else {
+			cfg.JwtSecret = secret
+		}
+	}
 
 	cfg.Port = uint(ctx.Int(flags.SentinelDiscoveryPort.Name))
 	cfg.Addr = ctx.String(flags.SentinelDiscoveryAddr.Name)
@@ -122,4 +134,22 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg.TransitionChain = ctx.Bool(flags.TransitionChainFlag.Name)
 	cfg.InitialSync = ctx.Bool(flags.InitSyncFlag.Name)
 	return cfg, nil
+}
+
+func ObtainJwtSecret(ctx *cli.Context) ([]byte, error) {
+	path := ctx.String(flags.JwtSecret.Name)
+	if len(strings.TrimSpace(path)) == 0 {
+		return nil, errors.New("Missing jwt secret path")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	jwtSecret := common.FromHex(strings.TrimSpace(string(data)))
+	if len(jwtSecret) == 32 {
+		return jwtSecret, nil
+	}
+
+	return nil, errors.New(fmt.Sprintf("Invalid JWT secret", "path", path, "length", len(jwtSecret)))
 }

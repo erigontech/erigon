@@ -3,16 +3,17 @@ package execution_client
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const DefaultRPCHTTPTimeout = time.Second * 30
@@ -28,7 +29,7 @@ func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string) (
 	roundTripper := rpc_helper.NewJWTRoundTripper(jwtSecret)
 	client := &http.Client{Timeout: DefaultRPCHTTPTimeout, Transport: roundTripper}
 
-	rpcClient, err := rpc.DialHTTPWithClient(addr, client, nil)
+	rpcClient, err := rpc.DialHTTPWithClient("http://"+addr, client, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -41,27 +42,51 @@ func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string) (
 	}, nil
 }
 
-func (cc *ExecutionClientRpc) NewRequest(method, engineMethod string, bodyReader io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest(method, "http://"+cc.addr+"/"+engineMethod, bodyReader)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	return req, nil
-}
-
 func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
 	ctx, cancel := context.WithTimeout(cc.context, 8*time.Second)
 	defer cancel()
 
 	engineMethod := rpc_helper.EngineNewPayloadV1
-	if payload.Withdrawals != nil {
+	execPayload := types.ExecutionPayload{
+		Version:       uint32(payload.Version()),
+		ParentHash:    gointerfaces.ConvertHashToH256(payload.ParentHash),
+		StateRoot:     gointerfaces.ConvertHashToH256(payload.StateRoot),
+		ReceiptRoot:   gointerfaces.ConvertHashToH256(payload.ReceiptsRoot),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(payload.LogsBloom[:]),
+		PrevRandao:    gointerfaces.ConvertHashToH256(payload.PrevRandao),
+		BlockNumber:   payload.BlockNumber,
+		GasLimit:      payload.GasLimit,
+		GasUsed:       payload.GasUsed,
+		Timestamp:     payload.Time,
+		ExtraData:     payload.Extra.Bytes(),
+		BaseFeePerGas: gointerfaces.ConvertHashToH256(payload.BaseFeePerGas),
+		BlockHash:     gointerfaces.ConvertHashToH256(payload.BlockHash),
+		Transactions:  payload.Body().Transactions,
+	}
+
+	if payload.Version() >= 2 {
 		engineMethod = rpc_helper.EngineNewPayloadV2
+		withdrawals := make([]*types.Withdrawal, len(payload.Body().Withdrawals))
+		for i, withdrawal := range payload.Body().Withdrawals {
+			withdrawals[i] = &types.Withdrawal{
+				Index:          withdrawal.Index,
+				ValidatorIndex: withdrawal.Validator,
+				Address:        gointerfaces.ConvertAddressToH160(withdrawal.Address),
+				Amount:         withdrawal.Amount,
+			}
+		}
+
+		execPayload.Withdrawals = withdrawals
+	}
+
+	if payload.Version() >= 3 {
+		engineMethod = rpc_helper.EngineNewPayloadV3
+		execPayload.ExcessDataGas = &payload.ExcessDataGas
+		execPayload.DataGasUsed = &payload.DataGasUsed
 	}
 
 	payloadStatus := &remote.EnginePayloadStatus{}
-
+	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
 	err := cc.client.CallContext(ctx, payloadStatus, engineMethod, payload)
 	if err != nil {
 		if err.Error() == errContextExceeded {
@@ -71,7 +96,7 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
 	}
 
 	if err != nil {
-		return fmt.Errorf("Execution Client RPC failed to decode the NewPayload status response, err: %w", err)
+		return fmt.Errorf("Execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
 	}
 	if payloadStatus.Status == remote.EngineStatus_INVALID {
 		return fmt.Errorf("invalid block")
@@ -94,6 +119,7 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(finalized libcommon.Hash, head li
 		},
 	}
 	forkChoiceResp := &remote.EngineForkChoiceUpdatedResponse{}
+	log.Debug("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
 
 	err := cc.client.CallContext(ctx, forkChoiceResp, rpc_helper.ForkChoiceUpdatedV1, forkChoiceRequest)
 	if err != nil {

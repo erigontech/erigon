@@ -116,8 +116,8 @@ var (
 		Value: "localhost",
 	}
 	JwtSecret = cli.StringFlag{
-		Name:  "jwt-secret",
-		Usage: "Sets the engine api jwt secret for authentication",
+		Name:  "engine.api.jwtsecret",
+		Usage: "Path to the token that ensures safe connection between CL and EL",
 		Value: "",
 	}
 	SentinelStaticPeersFlag = cli.StringFlag{

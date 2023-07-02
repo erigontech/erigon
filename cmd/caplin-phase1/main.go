@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -114,8 +115,8 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		defer cc.Close()
 		engine = execution_client.NewExecutionEnginePhase1FromClient(ctx, remote.NewETHBACKENDClient(cc))
 	} else if cfg.RunEngineAPI {
-		jwtSecret := []byte(cfg.JwtSecret)
-		cc, err := execution_client.NewExecutionClientRPC(ctx, jwtSecret, cfg.EngineAPIAddr)
+		log.Info("JWT-Secret loaded", "secret", hexutility.Encode(cfg.JwtSecret))
+		cc, err := execution_client.NewExecutionClientRPC(ctx, cfg.JwtSecret, cfg.EngineAPIAddr)
 		if err != nil {
 			log.Error("could not start engine api", "err", err)
 		}
