@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -159,4 +160,17 @@ func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*valset.Val
 func author(api *BorImpl, tx kv.Tx, header *types.Header) (common.Address, error) {
 	config, _ := api.chainConfig(tx)
 	return ecrecover(header, config.Bor)
+}
+
+func rankMapDifficulties(values map[common.Address]uint64) []difficultiesKV {
+	ss := make([]difficultiesKV, 0, len(values))
+	for k, v := range values {
+		ss = append(ss, difficultiesKV{k, v})
+	}
+
+	sort.Slice(ss, func(i, j int) bool {
+		return ss[i].Difficulty > ss[j].Difficulty
+	})
+
+	return ss
 }
