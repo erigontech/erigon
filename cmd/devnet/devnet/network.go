@@ -59,6 +59,7 @@ func (nw *Network) Start(ctx *cli.Context) error {
 		Chain:          nw.Chain,
 		HttpPort:       apiPortNo,
 		PrivateApiAddr: nw.BasePrivateApiAddr,
+		Snapshots:      nw.Snapshots,
 	}
 
 	metricsEnabled := ctx.Bool("metrics")
@@ -124,9 +125,11 @@ func (nw *Network) startNode(nodeAddr string, cfg interface{}, nodeNumber int) (
 	nw.wg.Add(1)
 
 	node := node{
+		sync.Mutex{},
 		requests.NewRequestGenerator(nodeAddr, nw.Logger),
 		cfg,
 		&nw.wg,
+		make(chan error),
 		nil,
 	}
 
@@ -152,6 +155,10 @@ func (nw *Network) startNode(nodeAddr string, cfg interface{}, nodeNumber int) (
 		}
 	}()
 
+	if err = <-node.startErr; err != nil {
+		return nil, err
+	}
+
 	return &node, nil
 }
 
@@ -176,7 +183,7 @@ func getEnode(n Node) (string, error) {
 					if errors.As(urlErr.Err, &opErr) {
 						var callErr *os.SyscallError
 						if errors.As(opErr.Err, &callErr) {
-							if callErr.Syscall == "connectex" {
+							if strings.HasPrefix(callErr.Syscall, "connect") {
 								reqCount++
 								time.Sleep(time.Duration(devnetutils.RandomInt(5)) * time.Second)
 								continue
