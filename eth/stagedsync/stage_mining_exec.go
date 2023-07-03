@@ -10,6 +10,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 
@@ -26,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
@@ -87,7 +87,13 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	txs := current.PreparedTxs
 	noempty := true
 
-	stateReader := state.NewPlainStateReader(tx)
+	histV3, _ := kvcfg.HistoryV3.Enabled(tx)
+	var stateReader state.StateReader
+	if histV3 {
+		stateReader = state.NewReaderV4(tx.(kv.TemporalTx))
+	} else {
+		stateReader = state.NewPlainStateReader(tx)
+	}
 	ibs := state.New(stateReader)
 	stateWriter := state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
 	if cfg.chainConfig.DAOForkBlock != nil && cfg.chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
@@ -124,8 +130,15 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 				return err
 			}
 
+			var simStateReader state.StateReader
+			if histV3 {
+				panic("implement me")
+				//simStateReader = state.NewReaderV4(simulationTx)
+			} else {
+				simStateReader = state.NewPlainStateReader(tx)
+			}
 			for {
-				txs, y, err := getNextTransactions(cfg, chainID, current.Header, 50, executionAt, simulationTx, yielded, logger)
+				txs, y, err := getNextTransactions(cfg, chainID, current.Header, 50, executionAt, simulationTx, yielded, simStateReader, logger)
 				if err != nil {
 					return err
 				}
@@ -184,6 +197,7 @@ func getNextTransactions(
 	executionAt uint64,
 	simulationTx *memdb.MemoryMutation,
 	alreadyYielded mapset.Set[[32]byte],
+	simStateReader state.StateReader,
 	logger log.Logger,
 ) (types.TransactionsStream, int, error) {
 	txSlots := types2.TxsRlp{}
@@ -231,7 +245,7 @@ func getNextTransactions(
 	}
 
 	blockNum := executionAt + 1
-	txs, err := filterBadTransactions(txs, cfg.chainConfig, blockNum, header.BaseFee, simulationTx, logger)
+	txs, err := filterBadTransactions(txs, cfg.chainConfig, blockNum, header.BaseFee, simulationTx, simStateReader, logger)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -239,7 +253,7 @@ func getNextTransactions(
 	return types.NewTransactionsFixedOrder(txs), count, nil
 }
 
-func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, baseFee *big.Int, simulationTx *memdb.MemoryMutation, logger log.Logger) ([]types.Transaction, error) {
+func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, baseFee *big.Int, simulationTx *memdb.MemoryMutation, simStateReader state.StateReader, logger log.Logger) ([]types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	gasBailout := false
@@ -260,12 +274,11 @@ func filterBadTransactions(transactions []types.Transaction, config chain.Config
 			noSenderCnt++
 			continue
 		}
-		var account accounts.Account
-		ok, err := rawdb.ReadAccount(simulationTx, sender, &account)
+		account, err := simStateReader.ReadAccountData(sender)
 		if err != nil {
 			return nil, err
 		}
-		if !ok {
+		if account == nil {
 			transactions = transactions[1:]
 			noAccountCnt++
 			continue
