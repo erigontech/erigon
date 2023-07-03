@@ -162,7 +162,7 @@ type Config struct {
 
 	MdbxPageSize    datasize.ByteSize
 	MdbxDBSizeLimit datasize.ByteSize
-
+	MdbxGrowthStep  datasize.ByteSize
 	// HealthCheck enables standard grpc health check
 	HealthCheck bool
 
