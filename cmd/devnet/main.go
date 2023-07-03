@@ -175,7 +175,7 @@ func action(ctx *cli.Context) error {
 			network.Stop()
 
 		case syscall.SIGINT:
-			log.Info("Terminating network")
+			logger.Info("Terminating network")
 			os.Exit(-int(syscall.SIGINT))
 		}
 	}()
@@ -234,6 +234,7 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 				Logger:             logger,
 				BasePrivateApiAddr: "localhost:10090",
 				BaseRPCAddr:        "localhost:8545",
+				//Snapshots:          true,
 				Nodes: []devnet.Node{
 					args.Miner{
 						Node: args.Node{

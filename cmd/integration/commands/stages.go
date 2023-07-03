@@ -12,6 +12,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
@@ -1605,7 +1606,7 @@ func overrideStorageMode(db kv.RwDB, logger log.Logger) error {
 	})
 }
 
-func initConsensusEngine(cc *chain2.Config, datadir string, db kv.RwDB, logger log.Logger) (engine consensus.Engine) {
+func initConsensusEngine(cc *chain2.Config, dir string, db kv.RwDB, logger log.Logger) (engine consensus.Engine) {
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}
@@ -1619,6 +1620,6 @@ func initConsensusEngine(cc *chain2.Config, datadir string, db kv.RwDB, logger l
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
-		HeimdallgRPCAddress, HeimdallURL, config.WithoutHeimdall, datadir, db.ReadOnly(), logger)
+	return ethconsensusconfig.CreateConsensusEngine(&nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
+		HeimdallgRPCAddress, HeimdallURL, config.WithoutHeimdall, db.ReadOnly(), logger)
 }
