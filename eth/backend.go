@@ -931,7 +931,6 @@ func (s *Ethereum) StartMining(ctx context.Context, minerCtx context.Context, db
 				case err := <-errc:
 					works = false
 					hasWork = false
-					tracing.EndSpan(span)
 					if errors.Is(err, libcommon.ErrStopped) {
 						return
 					}
@@ -947,8 +946,11 @@ func (s *Ethereum) StartMining(ctx context.Context, minerCtx context.Context, db
 				works = true
 				hasWork = false
 				mineEvery.Reset(cfg.Recommit)
+
+				tracing.EndSpan(span) // total mining time + some overhead will be calculated
 				subCtx, span = tracing.StartSpan(minerCtx, "StartMine")
 				cfg.Ctx = subCtx
+
 				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir) }()
 			}
 		}
