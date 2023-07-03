@@ -1,5 +1,5 @@
 /*
-   Copyright 2022 Erigon contributors
+   Copyright 2022 The Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -38,7 +39,6 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -55,6 +55,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/types"
 )
 
@@ -213,12 +214,14 @@ type TxPool struct {
 	started                 atomic.Bool
 	pendingBaseFee          atomic.Uint64
 	blockGasLimit           atomic.Uint64
-	shanghaiTime            *big.Int
+	shanghaiTime            *uint64
 	isPostShanghai          atomic.Bool
+	cancunTime              *uint64
+	isPostCancun            atomic.Bool
 	logger                  log.Logger
 }
 
-func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int, logger log.Logger) (*TxPool, error) {
+func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime, cancunTime *big.Int, logger log.Logger) (*TxPool, error) {
 	var err error
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
@@ -238,7 +241,8 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 	for _, sender := range cfg.TracedSenders {
 		tracedSenders[common.BytesToAddress([]byte(sender))] = struct{}{}
 	}
-	return &TxPool{
+
+	res := &TxPool{
 		lock:                    &sync.Mutex{},
 		byHash:                  map[string]*metaTx{},
 		isLocalLRU:              localsHistory,
@@ -256,9 +260,25 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		chainID:                 chainID,
 		unprocessedRemoteTxs:    &types.TxSlots{},
 		unprocessedRemoteByHash: map[string]int{},
-		shanghaiTime:            shanghaiTime,
 		logger:                  logger,
-	}, nil
+	}
+
+	if shanghaiTime != nil {
+		if !shanghaiTime.IsUint64() {
+			return nil, errors.New("shanghaiTime overflow")
+		}
+		shanghaiTimeU64 := shanghaiTime.Uint64()
+		res.shanghaiTime = &shanghaiTimeU64
+	}
+	if cancunTime != nil {
+		if !cancunTime.IsUint64() {
+			return nil, errors.New("cancunTime overflow")
+		}
+		cancunTimeU64 := cancunTime.Uint64()
+		res.cancunTime = &cancunTimeU64
+	}
+
+	return res, nil
 }
 
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error {
@@ -623,6 +643,17 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 			return txpoolcfg.InitCodeTooLarge
 		}
 	}
+	if txn.Type == types.BlobTxType {
+		if !p.isCancun() {
+			return txpoolcfg.TypeNotActivated
+		}
+		if txn.Creation {
+			return txpoolcfg.CreateBlobTxn
+		}
+		if txn.BlobCount == 0 {
+			return txpoolcfg.NoBlobs
+		}
+	}
 
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !isLocal && uint256.NewInt(p.cfg.MinFeeCap).Cmp(&txn.FeeCap) == 1 {
@@ -663,9 +694,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		return txpoolcfg.NonceTooLow
 	}
 	// Transactor should have enough funds to cover the costs
-	total := uint256.NewInt(txn.Gas)
-	total.Mul(total, &txn.FeeCap)
-	total.Add(total, &txn.Value)
+	total := requiredBalance(txn)
 	if senderBalance.Cmp(total) < 0 {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx insufficient funds idHash=%x balance in state=%d, txn.gas*txn.tip=%d", txn.IDHash, senderBalance, total))
@@ -673,6 +702,38 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		return txpoolcfg.InsufficientFunds
 	}
 	return txpoolcfg.Success
+}
+
+var maxUint256 = new(uint256.Int).SetAllOne()
+
+// Sender should have enough balance for: gasLimit x feeCap + dataGas x dataFeeCap + transferred_value
+// See YP, Eq (61) in Section 6.2 "Execution"
+func requiredBalance(txn *types.TxSlot) *uint256.Int {
+	// See https://github.com/ethereum/EIPs/pull/3594
+	total := uint256.NewInt(txn.Gas)
+	_, overflow := total.MulOverflow(total, &txn.FeeCap)
+	if overflow {
+		return maxUint256
+	}
+	// and https://eips.ethereum.org/EIPS/eip-4844#gas-accounting
+	if txn.BlobCount != 0 {
+		maxDataGasCost := uint256.NewInt(chain.DataGasPerBlob)
+		maxDataGasCost.Mul(maxDataGasCost, uint256.NewInt(txn.BlobCount))
+		_, overflow = maxDataGasCost.MulOverflow(maxDataGasCost, &txn.DataFeeCap)
+		if overflow {
+			return maxUint256
+		}
+		_, overflow = total.AddOverflow(total, maxDataGasCost)
+		if overflow {
+			return maxUint256
+		}
+	}
+
+	_, overflow = total.AddOverflow(total, &txn.Value)
+	if overflow {
+		return maxUint256
+	}
+	return total
 }
 
 func (p *TxPool) isShanghai() bool {
@@ -684,20 +745,45 @@ func (p *TxPool) isShanghai() bool {
 	if p.shanghaiTime == nil {
 		return false
 	}
-	shanghaiTime := p.shanghaiTime.Uint64()
+	shanghaiTime := *p.shanghaiTime
 
-	// a zero here means shanghai is always active
+	// a zero here means Shanghai is always active
 	if shanghaiTime == 0 {
 		p.isPostShanghai.Swap(true)
 		return true
 	}
 
-	now := big.NewInt(time.Now().Unix())
-	is := now.Uint64() >= shanghaiTime
-	if is {
+	now := time.Now().Unix()
+	activated := uint64(now) >= shanghaiTime
+	if activated {
 		p.isPostShanghai.Swap(true)
 	}
-	return is
+	return activated
+}
+
+func (p *TxPool) isCancun() bool {
+	// once this flag has been set for the first time we no longer need to check the timestamp
+	set := p.isPostCancun.Load()
+	if set {
+		return true
+	}
+	if p.cancunTime == nil {
+		return false
+	}
+	cancunTime := *p.cancunTime
+
+	// a zero here means Cancun is always active
+	if cancunTime == 0 {
+		p.isPostCancun.Swap(true)
+		return true
+	}
+
+	now := time.Now().Unix()
+	activated := uint64(now) >= cancunTime
+	if activated {
+		p.isPostCancun.Swap(true)
+	}
+	return activated
 }
 
 func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
@@ -999,6 +1085,9 @@ func (p *TxPool) setBaseFee(baseFee uint64) (uint64, bool) {
 	return p.pendingBaseFee.Load(), changed
 }
 
+// TODO(eip-4844) logic similar to base fee for data gasprice
+// DataFeeCap must be >= data gasprice
+
 func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoolcfg.DiscardReason {
 	// Insert to pending pool, if pool doesn't have txn with same Nonce and bigger Tip
 	found := p.all.get(mt.Tx.SenderID, mt.Tx.Nonce)
@@ -1170,10 +1259,7 @@ func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint
 			mt.nonceDistance = mt.Tx.Nonce - senderNonce
 		}
 
-		// Sender has enough balance for: gasLimit x feeCap + transferred_value
-		needBalance := uint256.NewInt(mt.Tx.Gas)
-		needBalance.Mul(needBalance, &mt.Tx.FeeCap)
-		needBalance.Add(needBalance, &mt.Tx.Value)
+		needBalance := requiredBalance(mt.Tx)
 		// 1. Minimum fee requirement. Set to 1 if feeCap of the transaction is no less than in-protocol
 		// parameter of minimal base fee. Set to 0 if feeCap is less than minimum base fee, which means
 		// this transaction will never be included into this particular chain.
