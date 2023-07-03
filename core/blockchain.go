@@ -209,9 +209,6 @@ func rlpHash(x interface{}) (h libcommon.Hash) {
 }
 
 func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.EngineReader, constCall bool) (result []byte, err error) {
-	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
 	msg := types.NewMessage(
 		state.SystemAddress,
 		&contract,
@@ -253,9 +250,6 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
 func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config, ibs *state.IntraBlockState, header *types.Header) (result []byte, err error) {
-	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
 	msg := types.NewMessage(
 		contract,
 		nil, // to
@@ -281,35 +275,6 @@ func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config
 		contract,
 	)
 	return ret, err
-}
-
-func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
-	gp := new(GasPool)
-	gp.AddGas(50_000_000)
-	var gasUsed uint64
-	var gasDataUsed uint64
-	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
-	noop := state.NewNoopWriter()
-	tx, err := CallContractTx(contract, data, ibs)
-	if err != nil {
-		return nil, fmt.Errorf("SysCallContract: %w ", err)
-	}
-	vmConfig := vm.Config{NoReceipts: true}
-	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, &gasDataUsed, vmConfig)
-	if err != nil {
-		return result, fmt.Errorf("SysCallContract: %w ", err)
-	}
-	return result, nil
-}
-
-// from the null sender, with 50M gas.
-func CallContractTx(contract libcommon.Address, data []byte, ibs *state.IntraBlockState) (tx types.Transaction, err error) {
-	from := libcommon.Address{}
-	nonce := ibs.GetNonce(from)
-	tx = types.NewTransaction(nonce, contract, u256.Num0, 50_000_000, u256.Num0, data)
-	return tx.FakeSign(from)
 }
 
 func FinalizeBlockExecution(
