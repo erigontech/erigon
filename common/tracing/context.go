@@ -23,14 +23,19 @@ func FromContext(ctx context.Context) trace.Tracer {
 	return tr
 }
 
-func StartSpan(ctx context.Context, snapName string) (context.Context, trace.Span) {
+func StartSpan(ctx context.Context, spanName string) (context.Context, trace.Span) {
+	// Handle panic just in case it tries to fetch something from a nil-context.
+	if ctx == nil {
+		return nil, nil
+	}
+
 	tr := FromContext(ctx)
 
 	if tr == nil {
 		return ctx, nil
 	}
 
-	ctx, span := tr.Start(ctx, snapName)
+	ctx, span := tr.Start(ctx, spanName)
 	ctx = WithTracer(ctx, tr)
 
 	return ctx, span
