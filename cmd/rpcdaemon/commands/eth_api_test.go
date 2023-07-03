@@ -120,7 +120,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	offChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, block *core.BlockGen) {
-	}, true)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t 
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	offChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, block *core.BlockGen) {
-	}, true)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

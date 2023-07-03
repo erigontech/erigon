@@ -24,7 +24,7 @@ func TestEthSubscribe(t *testing.T) {
 	m, require := stages.Mock(t), require.New(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 7, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	require.NoError(err)
 
 	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
@@ -53,7 +53,7 @@ func TestEthSubscribe(t *testing.T) {
 	highestSeenHeader := chain.TopBlock.NumberU64()
 
 	hook := stages.NewHook(m.Ctx, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, m.UpdateHead)
-	if err := stages.StageLoopStep(m.Ctx, m.DB, nil, m.Sync, initialCycle, logger, m.BlockReader, hook); err != nil {
+	if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, m.Sync, initialCycle, logger, m.BlockReader, hook); err != nil {
 		t.Fatal(err)
 	}
 

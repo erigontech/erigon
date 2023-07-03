@@ -148,7 +148,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) (log.Logger, error) {
 
 	if metricsEnabled && metricsAddr != "" {
 		address := fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
-		exp.Setup(address)
+		exp.Setup(address, logger)
 	}
 
 	withMetrics := metricsEnabled && metricsAddr == ""
@@ -189,7 +189,7 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
 	if metricsEnabled && (!pprofEnabled || metricsAddr != "") {
 		metricsPort := ctx.Int(metricsPortFlag.Name)
 		address := fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
-		exp.Setup(address)
+		exp.Setup(address, logger)
 		diagnostics.SetupLogsAccess(ctx)
 		diagnostics.SetupDbAccess(ctx)
 		diagnostics.SetupCmdLineAccess()

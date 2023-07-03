@@ -272,7 +272,7 @@ The first entry has a non-empty value. This is the sender of 0.001 ETH.
 As history bucket records the value of this account *before* the change, we should
 expect the same value here as this account had at the Genesis.
 The other two records contain empty values, which means these account were non-existent previously. 
-These are the account of the recepient of 0.001 ETH (`0x0100000000000000000000000000000000000000`), 
+These are the account of the recipient of 0.001 ETH (`0x0100000000000000000000000000000000000000`), 
 and the miner account `0x0000000000000000000000000000000000000000`.
 The keys of all three records have the common suffix of `0x21` instead of `0x20`, which is 
 simply encoding of the block number 1 instead of block number 0.

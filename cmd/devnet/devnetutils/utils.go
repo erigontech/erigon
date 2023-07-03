@@ -3,6 +3,7 @@ package devnetutils
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -19,29 +20,28 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+var ErrInvalidEnodeString = errors.New("invalid enode string")
+
 // ClearDevDB cleans up the dev folder used for the operations
 func ClearDevDB(dataDir string, logger log.Logger) error {
 	logger.Info("Deleting nodes' data folders")
 
-	nodeNumber := 0
-	for {
+	for nodeNumber := 0; nodeNumber < 100; nodeNumber++ { // Arbitrary number
 		nodeDataDir := filepath.Join(dataDir, fmt.Sprintf("%d", nodeNumber))
 		fileInfo, err := os.Stat(nodeDataDir)
 		if err != nil {
 			if os.IsNotExist(err) {
-				break
+				continue
 			}
 			return err
 		}
-		if fileInfo.IsDir() {
-			if err := os.RemoveAll(nodeDataDir); err != nil {
-				return err
-			}
-			logger.Info("SUCCESS => Deleted", "datadir", nodeDataDir)
-		} else {
-			break
+		if !fileInfo.IsDir() {
+			continue
 		}
-		nodeNumber++
+		if err := os.RemoveAll(nodeDataDir); err != nil {
+			return err
+		}
+		logger.Info("SUCCESS => Deleted", "datadir", nodeDataDir)
 	}
 	return nil
 }
@@ -56,7 +56,7 @@ func HexToInt(hexStr string) uint64 {
 // UniqueIDFromEnode returns the unique ID from a node's enode, removing the `?discport=0` part
 func UniqueIDFromEnode(enode string) (string, error) {
 	if len(enode) == 0 {
-		return "", fmt.Errorf("invalid enode string")
+		return "", ErrInvalidEnodeString
 	}
 
 	// iterate through characters in the string until we reach '?'
@@ -73,14 +73,14 @@ func UniqueIDFromEnode(enode string) (string, error) {
 	}
 
 	if ati == 0 {
-		return "", fmt.Errorf("invalid enode string")
+		return "", ErrInvalidEnodeString
 	}
 
 	if _, apiPort, err := net.SplitHostPort(enode[ati+1 : i]); err != nil {
-		return "", fmt.Errorf("invalid enode string")
+		return "", ErrInvalidEnodeString
 	} else {
 		if _, err := strconv.Atoi(apiPort); err != nil {
-			return "", fmt.Errorf("invalid enode string")
+			return "", ErrInvalidEnodeString
 		}
 	}
 

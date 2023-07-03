@@ -125,7 +125,7 @@ func TestCreate2Revive(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -493,7 +493,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -516,7 +516,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackendLonger.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate long blocks")
 	}
@@ -635,7 +635,7 @@ func TestReorgOverStateChange(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -657,7 +657,7 @@ func TestReorgOverStateChange(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackendLonger.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
@@ -784,7 +784,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -918,7 +918,7 @@ func TestEip2200Gas(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -1006,7 +1006,7 @@ func TestWrongIncarnation(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -1124,7 +1124,7 @@ func TestWrongIncarnation2(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -1154,7 +1154,7 @@ func TestWrongIncarnation2(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackendLonger.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
@@ -1408,7 +1408,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err1 != nil {
 		t.Fatalf("generate blocks: %v", err1)
 	}
@@ -1466,7 +1466,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackendLonger.Commit()
-	}, false /* intermediateHashes */)
+	})
 	if err1 != nil {
 		t.Fatalf("generate longer blocks: %v", err1)
 	}
@@ -1563,12 +1563,12 @@ func TestTxLookupUnwind(t *testing.T) {
 			}
 			block.AddTx(tx)
 		}
-	}, false)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	chain2, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
-	}, false)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
