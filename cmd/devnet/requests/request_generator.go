@@ -175,7 +175,7 @@ func (req *requestGenerator) PingErigonRpc() CallResult {
 func NewRequestGenerator(target string, logger log.Logger) RequestGenerator {
 	return &requestGenerator{
 		client: &http.Client{
-			Timeout: time.Second * 600,
+			Timeout: time.Second * 10,
 		},
 		reqID:  1,
 		logger: logger,
