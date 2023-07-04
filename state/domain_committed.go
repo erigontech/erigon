@@ -120,7 +120,6 @@ func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, v
 }
 
 func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
-	fmt.Printf("TouchAccount: %x %x\n", c.plainKey, val)
 	if len(val) == 0 {
 		c.update.Reset()
 		c.update.Flags = commitment.DeleteUpdate
@@ -133,7 +132,6 @@ func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
 				return true
 			}
 			//t.TouchPlainKey(common.FromHex(key), nil, t.TouchStorage)
-			fmt.Printf("drop update for %s\n", key)
 			t.tree.Delete(&commitmentItem{plainKey: common.FromHex(key), hashedKey: t.hashAndNibblizeKey(common.FromHex(key))})
 			t.plainKeys.Delete(key) // we already marked those keys as deleted
 			return true
