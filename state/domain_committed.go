@@ -386,6 +386,9 @@ func (d *DomainCommitted) replaceKeyWithReference(fullKey, shortKey []byte, type
 		if err != nil {
 			continue
 		}
+		if cur == nil {
+			continue
+		}
 		step := uint16(item.endTxNum / d.aggregationStep)
 		binary.BigEndian.PutUint16(numBuf[:], step)
 

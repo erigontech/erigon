@@ -1834,6 +1834,9 @@ func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
 		if err != nil {
 			return err
 		}
+		if btCursor == nil {
+			continue
+		}
 
 		key := btCursor.Key()
 		if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
