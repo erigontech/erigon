@@ -287,7 +287,7 @@ func NewCommittedDomain(d *Domain, mode CommitmentMode, trieVariant commitment.T
 	return &DomainCommitted{
 		Domain:       d,
 		mode:         mode,
-		trace:        true,
+		trace:        false,
 		updates:      NewUpdateTree(),
 		discard:      dbg.DiscardCommitment(),
 		patriciaTrie: commitment.InitializeTrie(trieVariant),
