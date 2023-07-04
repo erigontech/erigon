@@ -25,18 +25,17 @@ import (
 )
 
 type Worker struct {
-	lock           sync.Locker
-	chainDb        kv.RoDB
-	chainTx        kv.Tx
-	background     bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
-	blockReader    services.FullBlockReader
-	in             *exec22.QueueWithRetry
-	rs             *state.StateV3
-	bufferedWriter *state.StateWriterBufferedV3
-	stateWriter    state.StateWriter
-	stateReader    *state.StateReaderV3
-	chainConfig    *chain.Config
-	getHeader      func(hash libcommon.Hash, number uint64) *types.Header
+	lock        sync.Locker
+	chainDb     kv.RoDB
+	chainTx     kv.Tx
+	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
+	blockReader services.FullBlockReader
+	in          *exec22.QueueWithRetry
+	rs          *state.StateV3
+	stateWriter *state.StateWriterBufferedV3
+	stateReader *state.StateReaderV3
+	chainConfig *chain.Config
+	getHeader   func(hash libcommon.Hash, number uint64) *types.Header
 
 	ctx      context.Context
 	engine   consensus.Engine
@@ -53,15 +52,15 @@ type Worker struct {
 
 func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec22.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec22.ResultsQueue, engine consensus.Engine) *Worker {
 	w := &Worker{
-		lock:           lock,
-		chainDb:        chainDb,
-		in:             in,
-		rs:             rs,
-		background:     background,
-		blockReader:    blockReader,
-		bufferedWriter: state.NewStateWriterBufferedV3(rs),
-		stateReader:    state.NewStateReaderV3(rs),
-		chainConfig:    chainConfig,
+		lock:        lock,
+		chainDb:     chainDb,
+		in:          in,
+		rs:          rs,
+		background:  background,
+		blockReader: blockReader,
+		stateWriter: state.NewStateWriterBufferedV3(rs),
+		stateReader: state.NewStateReaderV3(rs),
+		chainConfig: chainConfig,
 
 		ctx:      ctx,
 		genesis:  genesis,
@@ -72,8 +71,6 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
 	}
-	//w4, _ := state.WrapStateIO(rs.Domains())
-	w.stateWriter = state.NewMultiStateWriter( /*w4,*/ w.bufferedWriter)
 
 	w.getHeader = func(hash libcommon.Hash, number uint64) *types.Header {
 		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
@@ -98,6 +95,7 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	if chainTx != nil {
 		rw.chainTx = chainTx
 		rw.stateReader.SetTx(rw.chainTx)
+		rw.stateWriter.SetTx(rw.chainTx)
 		rw.chain = ChainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
 	}
 }
@@ -130,9 +128,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	txTask.Error = nil
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
-	rw.bufferedWriter.SetTxNum(txTask.TxNum)
+	rw.stateWriter.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
-	rw.bufferedWriter.ResetWriteSet()
+	rw.stateWriter.ResetWriteSet()
 
 	rw.ibs.Reset()
 	ibs := rw.ibs
@@ -243,8 +241,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			panic(err)
 		}
 		txTask.ReadLists = rw.stateReader.ReadSet()
-		txTask.WriteLists = rw.bufferedWriter.WriteSet()
-		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.bufferedWriter.PrevAndDels()
+		txTask.WriteLists = rw.stateWriter.WriteSet()
+		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
 	}
 }
 
