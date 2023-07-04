@@ -320,11 +320,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	var stateReader state.StateReader
 	var stateWriter state.StateWriter
 	if ethconfig.EnableHistoryV4InTest {
+		stateWriter = state.NewWriterV4(tx.(*temporal.Tx))
+		stateReader = state.NewReaderV4(tx.(*temporal.Tx))
 		agg := tx.(*temporal.Tx).Agg()
-		sd := agg.SharedDomains(tx.(*temporal.Tx).AggCtx())
-		stateWriter, stateReader = state.WrapStateIO(sd)
-		sd.SetTx(tx)
-		defer agg.CloseSharedDomains()
 		oldTxNum := agg.GetTxNum()
 		defer func() {
 			agg.SetTxNum(oldTxNum)
@@ -333,8 +331,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	txNum := -1
 	setBlockNum := func(blockNum uint64) {
 		if ethconfig.EnableHistoryV4InTest {
-			stateReader.(*state.StateReaderV4).SetBlockNum(blockNum)
-			stateWriter.(*state.StateWriterV4).SetBlockNum(blockNum)
+			tx.(*temporal.Tx).Agg().SharedDomains(tx.(*temporal.Tx).AggCtx()).SetBlockNum(blockNum)
 		} else {
 			stateReader = state.NewPlainStateReader(tx)
 			stateWriter = state.NewPlainStateWriter(tx, nil, parent.NumberU64()+blockNum+1)
@@ -344,8 +341,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		txNum++
 		if ethconfig.EnableHistoryV4InTest {
 			tx.(*temporal.Tx).Agg().SetTxNum(uint64(txNum))
-			stateReader.(*state.StateReaderV4).SetTxNum(uint64(txNum))
-			stateWriter.(*state.StateWriterV4).SetTxNum(uint64(txNum))
 		}
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
