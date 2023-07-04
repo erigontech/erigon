@@ -599,6 +599,9 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 		if err != nil {
 			return err
 		}
+		if cursor == nil {
+			continue
+		}
 
 		g := sctx.statelessGetter(i)
 		key := cursor.Key()
