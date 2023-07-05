@@ -827,29 +827,25 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	if !d.largeValues {
 		panic("implement me")
 	}
-	for k, stepInDB, err := keysCursor.First(); k != nil; k, stepInDB, err = keysCursor.NextNoDup() {
-		pos++
+	for k, stepInDB, err := keysCursor.First(); k != nil; k, stepInDB, err = keysCursor.Next() {
 		if err != nil {
-			return Collation{}, fmt.Errorf("find last %s key for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+			return Collation{}, err
 		}
-		for ; stepInDB != nil; k, stepInDB, err = keysCursor.NextDup() {
-			if err != nil {
-				return Collation{}, fmt.Errorf("find last %s key for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+		pos++
+		if ^binary.BigEndian.Uint64(stepInDB) != step {
+			if d.filenameBase == "accounts" && bytes.HasPrefix(k, common.FromHex("b111")) {
+				fmt.Printf("collate skip: %x, %d\n", k, ^binary.BigEndian.Uint64(stepInDB))
 			}
-			if ^binary.BigEndian.Uint64(stepInDB) > step {
-				continue
-			} else if ^binary.BigEndian.Uint64(stepInDB) < step {
-				break
-			}
-			copy(keySuffix, k)
-			copy(keySuffix[len(k):], stepInDB)
-			v, err := roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
-			if err != nil {
-				return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
-			}
-			pairs <- kvpair{k: k, v: v}
-			break
+			continue
 		}
+
+		copy(keySuffix, k)
+		copy(keySuffix[len(k):], stepInDB)
+		v, err := roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
+		if err != nil {
+			return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+		}
+		pairs <- kvpair{k: k, v: v}
 
 		select {
 		case <-ctx.Done():
@@ -1115,6 +1111,11 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f func(step uint64, k, v []byte) error) error {
+	keysCursorForDeletes, err := d.tx.RwCursorDupSort(d.keysTable)
+	if err != nil {
+		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
+	}
+	defer keysCursorForDeletes.Close()
 	keysCursor, err := d.tx.RwCursorDupSort(d.keysTable)
 	if err != nil {
 		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
@@ -1220,7 +1221,10 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 		}
 
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if err = keysCursor.DeleteCurrent(); err != nil {
+		if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
+			return err
+		}
+		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
@@ -1247,6 +1251,11 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 	if d.filenameBase == "accounts" {
 		log.Warn("[dbg] prune", "step", step)
 	}
+	keysCursorForDeletes, err := d.tx.RwCursorDupSort(d.keysTable)
+	if err != nil {
+		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
+	}
+	defer keysCursorForDeletes.Close()
 	keysCursor, err := d.tx.RwCursorDupSort(d.keysTable)
 	if err != nil {
 		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
@@ -1276,23 +1285,24 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
-	for k, v, err = keysCursor.First(); err == nil && k != nil; k, v, err = keysCursor.Next() {
+	for k, v, err = keysCursor.First(); k != nil; k, v, err = keysCursor.Next() {
+		if err != nil {
+			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
+		}
 		if ^binary.BigEndian.Uint64(v) > step {
 			continue
 		}
-		seek := common.Append(k, v)
-		kk, _, err := valsC.SeekExact(seek)
+		//fmt.Printf("prune: %x, %d,%d\n", k, ^binary.BigEndian.Uint64(v), step)
+		err = d.tx.Delete(d.valsTable, common.Append(k, v))
 		if err != nil {
 			return err
 		}
-		if kk != nil {
-			if err = valsC.DeleteCurrent(); err != nil {
-				return err
-			}
-			mxPruneSize.Inc()
-		}
+		mxPruneSize.Inc()
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if err = keysCursor.DeleteCurrent(); err != nil {
+		if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
+			return err
+		}
+		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
 			return err
 		}
 
@@ -1304,9 +1314,6 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 			//"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)))
 		default:
 		}
-	}
-	if err != nil {
-		return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
 	}
 
 	if err := d.History.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
@@ -1513,9 +1520,12 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 			cur, err := reader.Seek(key)
 			if err != nil {
 				dc.d.logger.Warn("failed to read history before from file", "key", key, "err", err)
+				return nil, false, err
+			}
+			if cur == nil {
 				continue
 			}
-			if cur != nil && bytes.Equal(cur.Key(), key) {
+			if bytes.Equal(cur.Key(), key) {
 				val = cur.Value()
 				break
 			}
