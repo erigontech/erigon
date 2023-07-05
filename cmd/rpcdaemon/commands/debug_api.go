@@ -323,7 +323,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 		result.Nonce = hexutil.Uint64(a.Nonce)
 		result.CodeHash = a.CodeHash
 
-		code, _, err := ttx.DomainGetAsOf(kv.CodeDomain, address[:], a.CodeHash[:], minTxNum+txIndex)
+		code, _, err := ttx.DomainGetAsOf(kv.CodeDomain, address[:], nil, minTxNum+txIndex)
 		if err != nil {
 			return nil, err
 		}
