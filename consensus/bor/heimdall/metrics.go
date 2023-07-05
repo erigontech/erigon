@@ -37,31 +37,31 @@ var (
 	requestMeters = map[requestType]meter{
 		stateSyncRequest: {
 			request: map[bool]*metrics.Counter{
-				true:  metrics.GetOrCreateCounter("client/requests/statesync/valid"),
-				false: metrics.GetOrCreateCounter("client/requests/statesync/invalid"),
+				true:  metrics.GetOrCreateCounter("client_requests_statesync_valid"),
+				false: metrics.GetOrCreateCounter("client_requests_statesync_invalid"),
 			},
-			timer: *metrics.GetOrCreateSummary("client/requests/statesync/duration"),
+			timer: *metrics.GetOrCreateSummary("client_requests_statesync_duration"),
 		},
 		spanRequest: {
 			request: map[bool]*metrics.Counter{
-				true:  metrics.GetOrCreateCounter("client/requests/span/valid"),
-				false: metrics.GetOrCreateCounter("client/requests/span/invalid"),
+				true:  metrics.GetOrCreateCounter("client_requests_span_valid"),
+				false: metrics.GetOrCreateCounter("client_requests_span_invalid"),
 			},
-			timer: *metrics.GetOrCreateSummary("client/requests/span/duration"),
+			timer: *metrics.GetOrCreateSummary("client_requests_span_duration"),
 		},
 		checkpointRequest: {
 			request: map[bool]*metrics.Counter{
-				true:  metrics.GetOrCreateCounter("client/requests/checkpoint/valid"),
-				false: metrics.GetOrCreateCounter("client/requests/checkpoint/invalid"),
+				true:  metrics.GetOrCreateCounter("client_requests_checkpoint_valid"),
+				false: metrics.GetOrCreateCounter("client_requests_checkpoint_invalid"),
 			},
-			timer: *metrics.GetOrCreateSummary("client/requests/checkpoint/duration"),
+			timer: *metrics.GetOrCreateSummary("client_requests_checkpoint_duration"),
 		},
 		checkpointCountRequest: {
 			request: map[bool]*metrics.Counter{
-				true:  metrics.GetOrCreateCounter("client/requests/checkpointcount/valid"),
-				false: metrics.GetOrCreateCounter("client/requests/checkpointcount/invalid"),
+				true:  metrics.GetOrCreateCounter("client_requests_checkpointcount_valid"),
+				false: metrics.GetOrCreateCounter("client_requests_checkpointcount_invalid"),
 			},
-			timer: *metrics.GetOrCreateSummary("client/requests/checkpointcount/duration"),
+			timer: *metrics.GetOrCreateSummary("client_requests_checkpointcount_duration"),
 		},
 	}
 )
