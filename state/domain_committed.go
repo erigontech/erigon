@@ -187,7 +187,9 @@ func (t *UpdateTree) TouchCode(c *commitmentItem, val []byte) {
 	t.keccak.Write(val)
 	copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
 	c.update.ValLength = length.Hash
-	c.update.Flags |= commitment.CodeUpdate
+	if len(val) != 0 {
+		c.update.Flags |= commitment.CodeUpdate
+	}
 }
 
 // Returns list of both plain and hashed keys. If .mode is CommitmentModeUpdate, updates also returned.
