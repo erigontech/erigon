@@ -714,14 +714,13 @@ Loop:
 		}
 
 		if !parallel {
-			if ok, err := checkCommitmentV3(b.HeaderNoCopy(), agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+			if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
 				return err
 			} else if !ok {
 				break Loop
 			}
 
 			outputBlockNum.Set(blockNum)
-			// MA commitment
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
@@ -819,18 +818,11 @@ Loop:
 		if err = agg.Flush(ctx, applyTx); err != nil {
 			return err
 		}
-		//rh, err := rs.Commitment(inputTxNum, agg)
-		//if err != nil {
-		//	return err
-		//}
-		//if !bytes.Equal(rh, header.Root.Bytes()) {
-		//	return fmt.Errorf("root hash mismatch: %x != %x, bn=%d", rh, header.Root.Bytes(), blockNum)
-		//}
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
 			return err
 		}
 	}
-	if _, err := checkCommitmentV3(b.HeaderNoCopy(), agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+	if _, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
 		return err
 	}
 
@@ -845,7 +837,8 @@ Loop:
 	return nil
 }
 
-func checkCommitmentV3(header *types.Header, agg *state2.AggregatorV3, badBlockHalt bool, hd headerDownloader, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
+// applyTx is required only for debugging
+func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.AggregatorV3, badBlockHalt bool, hd headerDownloader, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder) (bool, error) {
 	if dbg.DiscardCommitment() {
 		return true, nil
 	}
@@ -856,6 +849,20 @@ func checkCommitmentV3(header *types.Header, agg *state2.AggregatorV3, badBlockH
 	if bytes.Equal(rh, header.Root.Bytes()) {
 		return true, nil
 	}
+	/* uncomment it when need to debug state-root missmatch
+	if err := agg.Flush(context.Background(), applyTx); err != nil {
+		panic(err)
+	}
+	oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
+	if err != nil {
+		panic(err)
+	}
+	if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
+		log.Error(fmt.Sprintf("block hash mismatch - but new-algorithm hash is bad! (means latest state is correct): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, maxBlockNum))
+	} else {
+		log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, maxBlockNum))
+	}
+	*/
 	if badBlockHalt {
 		return false, fmt.Errorf("wrong trie root")
 	}
@@ -872,21 +879,6 @@ func checkCommitmentV3(header *types.Header, agg *state2.AggregatorV3, badBlockH
 		u.UnwindTo(unwindTo, header.Hash())
 	}
 	return false, nil
-
-	/* uncomment it if need debug state-root missmatch
-	if err := agg.Flush(ctx, applyTx); err != nil {
-		panic(err)
-	}
-	oldAlogNonIncrementalHahs, err := core.CalcHashRootForTests(applyTx, header, true)
-	if err != nil {
-		panic(err)
-	}
-	if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
-		log.Error(fmt.Sprintf("block hash mismatch - but new-algorithm hash is bad! (means latest state is correct): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum))
-	} else {
-		log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, blockNum))
-	}
-	*/
 }
 
 func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {

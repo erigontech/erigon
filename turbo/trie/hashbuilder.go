@@ -7,9 +7,10 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	length2 "github.com/ledgerwatch/erigon-lib/common/length"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -139,7 +140,9 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializab
 	if err != nil {
 		return err
 	}
-	//fmt.Printf("leafHashWithKeyVal [%x]=>[%x]\nHash [%x]\n", key, val, hb.hashBuf[:])
+	if hb.trace {
+		fmt.Printf("leafHashWithKeyVal [%x]=>[%x]\nHash [%x]\n", key, val, hb.hashBuf[:])
+	}
 
 	hb.hashStack = append(hb.hashStack, hb.hashBuf[:]...)
 	if len(hb.hashStack) > hashStackStride*len(hb.nodeStack) {
@@ -356,7 +359,9 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 		hb.hashStack = hb.hashStack[:len(hb.hashStack)-popped*hashStackStride]
 		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-popped]
 	}
-	//fmt.Printf("accountLeafHashWithKey [%x]=>[%x]\nHash [%x]\n", key, val, hb.hashBuf[:])
+	if hb.trace {
+		fmt.Printf("accountLeafHashWithKey [%x]=>[%x]\nHash [%x]\n", key, val, hb.hashBuf[:])
+	}
 	hb.hashStack = append(hb.hashStack, hb.hashBuf[:]...)
 	hb.nodeStack = append(hb.nodeStack, nil)
 	if hb.trace {
@@ -451,7 +456,10 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		}
 		ni += 2
 	}
-	//capture := common.CopyBytes(branchHash[:length2.Hash+1])
+	var capture []byte //nolint: used for tracing
+	if hb.trace {
+		capture = common.CopyBytes(branchHash[:length2.Hash+1])
+	}
 	if _, err := writer.Write(branchHash[:length2.Hash+1]); err != nil {
 		return err
 	}
@@ -461,7 +469,9 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	}
 
 	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + length2.Hash
-	//fmt.Printf("extensionHash [%x]=>[%x]\nHash [%x]\n", key, capture, hb.hashStack[len(hb.hashStack)-hashStackStride:len(hb.hashStack)])
+	if hb.trace {
+		fmt.Printf("extensionHash [%x]=>[%x]\nHash [%x]\n", key, capture, hb.hashStack[len(hb.hashStack)-hashStackStride:len(hb.hashStack)])
+	}
 	if _, ok := hb.nodeStack[len(hb.nodeStack)-1].(*fullNode); ok {
 		return fmt.Errorf("extensionHash cannot be emitted when a node is on top of the stack")
 	}
@@ -542,7 +552,9 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	}
 	// Output hasState hashes or embedded RLPs
 	i = 0
-	//fmt.Printf("branchHash {\n")
+	if hb.trace {
+		fmt.Printf("branchHash {\n")
+	}
 	hb.b[0] = rlp.EmptyStringCode
 	for digit := uint(0); digit < 17; digit++ {
 		if ((1 << digit) & set) != 0 {
@@ -550,21 +562,27 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 				if _, err := writer.Write(hashes[hashStackStride*i : hashStackStride*i+hashStackStride]); err != nil {
 					return err
 				}
-				//fmt.Printf("%x: [%x]\n", digit, hashes[hashStackStride*i:hashStackStride*i+hashStackStride])
+				if hb.trace {
+					fmt.Printf("%x: [%x]\n", digit, hashes[hashStackStride*i:hashStackStride*i+hashStackStride])
+				}
 			} else {
 				// Embedded node
 				size := int(hashes[hashStackStride*i]) - rlp.EmptyListCode
 				if _, err := writer.Write(hashes[hashStackStride*i : hashStackStride*i+size+1]); err != nil {
 					return err
 				}
-				//fmt.Printf("%x: embedded [%x]\n", digit, hashes[hashStackStride*i:hashStackStride*i+size+1])
+				if hb.trace {
+					fmt.Printf("%x: embedded [%x]\n", digit, hashes[hashStackStride*i:hashStackStride*i+size+1])
+				}
 			}
 			i++
 		} else {
 			if _, err := writer.Write(hb.b[:]); err != nil {
 				return err
 			}
-			//fmt.Printf("%x: empty\n", digit)
+			if hb.trace {
+				fmt.Printf("%x: empty\n", digit)
+			}
 		}
 	}
 	hb.hashStack = hb.hashStack[:len(hb.hashStack)-hashStackStride*digits+hashStackStride]
@@ -573,7 +591,9 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 		return err
 	}
 
-	//fmt.Printf("} [%x]\n", hb.hashStack[len(hb.hashStack)-hashStackStride:])
+	if hb.trace {
+		fmt.Printf("} [%x]\n", hb.hashStack[len(hb.hashStack)-hashStackStride:])
+	}
 
 	if hashStackStride*len(hb.nodeStack) > len(hb.hashStack) {
 		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-digits+1]

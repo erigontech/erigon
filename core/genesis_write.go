@@ -17,6 +17,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/binary"
@@ -36,7 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -224,6 +224,15 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 			if err := csw.WriteHistory(); err != nil {
 				return nil, statedb, fmt.Errorf("cannot write history: %w", err)
 			}
+		}
+	}
+	if ethconfig.EnableHistoryV4InTest {
+		rh, err := stateWriter.(*state.WriterV4).Commitment(true, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !bytes.Equal(rh, block.Root().Bytes()) {
+			fmt.Printf("invalid genesis root hash: %x, expected %x\n", rh, block.Root().Bytes())
 		}
 	}
 	return block, statedb, nil

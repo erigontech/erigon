@@ -8,11 +8,12 @@ import (
 	"math/bits"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	length2 "github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -131,9 +132,9 @@ type RootHashAggregator struct {
 	cutoff        bool
 }
 
-func NewRootHashAggregator() *RootHashAggregator {
+func NewRootHashAggregator(trace bool) *RootHashAggregator {
 	return &RootHashAggregator{
-		hb: NewHashBuilder(false),
+		hb: NewHashBuilder(trace),
 	}
 }
 
@@ -145,7 +146,7 @@ func NewFlatDBTrieLoader(logPrefix string, rd RetainDeciderWithMarker, hc HashCo
 	return &FlatDBTrieLoader{
 		logPrefix: logPrefix,
 		receiver: &RootHashAggregator{
-			hb:    NewHashBuilder(false),
+			hb:    NewHashBuilder(trace),
 			hc:    hc,
 			shc:   shc,
 			trace: trace,
@@ -245,9 +246,6 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcomm
 			}
 			if err = l.accountValue.DecodeForStorage(v); err != nil {
 				return EmptyRoot, fmt.Errorf("fail DecodeForStorage: %w", err)
-			}
-			if l.trace {
-				fmt.Printf("account %x nonce: %d balance %d ch %x\n", k, l.accountValue.Nonce, l.accountValue.Balance.Uint64(), l.accountValue.CodeHash)
 			}
 
 			if err = l.receiver.Receive(AccountStreamItem, kHex, nil, &l.accountValue, nil, nil, false, 0); err != nil {
@@ -370,6 +368,9 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 		if len(r.currAccK) == 0 {
 			r.currAccK = append(r.currAccK[:0], accountKey...)
 		}
+		if r.trace {
+			fmt.Printf("storage: %x => %x\n", storageKey, storageValue)
+		}
 		r.advanceKeysStorage(storageKey, true /* terminator */)
 		if r.currStorage.Len() > 0 {
 			if err := r.genStructStorage(); err != nil {
@@ -392,6 +393,9 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 			if err := r.genStructStorage(); err != nil {
 				return err
 			}
+		}
+		if r.trace {
+			fmt.Printf("storageHashedBranch: %x => %x\n", storageKey, storageValue)
 		}
 		r.saveValueStorage(true, hasTree, storageValue, hash)
 	case AccountStreamItem:
@@ -419,6 +423,9 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 			if err := r.genStructAccount(); err != nil {
 				return err
 			}
+		}
+		if r.trace {
+			fmt.Printf("account %x =>b %d n %d ch %x\n", accountKey, accountValue.Balance.Uint64(), accountValue.Nonce, accountValue.CodeHash)
 		}
 		if err := r.saveValueAccount(false, hasTree, accountValue, hash); err != nil {
 			return err
@@ -449,10 +456,14 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				return err
 			}
 		}
+		if r.trace {
+			fmt.Printf("accountHashedBranch %x =>b %d n %d\n", accountKey, accountValue.Balance.Uint64(), accountValue.Nonce)
+		}
 		if err := r.saveValueAccount(true, hasTree, accountValue, hash); err != nil {
 			return err
 		}
 	case CutoffStreamItem:
+		// make storage subtree pretend it's an extension node
 		if r.trace {
 			fmt.Printf("storage cuttoff %d\n", cutoff)
 		}
