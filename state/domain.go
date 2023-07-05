@@ -914,9 +914,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		d.stats.LastFileBuildingTook = time.Since(start)
 	}()
 
-	if d.filenameBase == "accounts" {
-		log.Warn("[dbg] buildFiles", "step", step)
-	}
 	hStaticFiles, err := d.History.buildFiles(ctx, step, HistoryCollation{
 		historyPath:  collation.historyPath,
 		historyComp:  collation.historyComp,
