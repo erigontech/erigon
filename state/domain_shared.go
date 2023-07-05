@@ -444,13 +444,20 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 		return err
 	}
 
-	sd.put(kv.CodeDomain, addr, nil)
 	// commitment delete already has been applied via account
-	if err := sd.Code.Delete(addr, nil); err != nil {
+	pc, err := sd.LatestCode(addr)
+	if err != nil {
 		return err
 	}
+	fmt.Printf("delete account %x code: %x\n", addr, pc)
+	if len(pc) > 0 {
+		sd.Commitment.TouchPlainKey(addr, nil, sd.Commitment.TouchCode)
+		sd.put(kv.CodeDomain, addr, nil)
+		if err := sd.Code.DeleteWithPrev(addr, nil, pc); err != nil {
+			return err
+		}
+	}
 
-	var err error
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
 	err = sd.IterateStoragePrefix(sd.roTx, addr, func(k, v []byte) {

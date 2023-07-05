@@ -1188,10 +1188,12 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 			}
 		}
 	}
-	cell.extLen = 0
-	cell.Balance.Clear()
-	copy(cell.CodeHash[:], EmptyCodeHash)
-	cell.Nonce = 0
+	cell.reset()
+	//cell.extLen = 0
+	//cell.Balance.Clear()
+	//copy(cell.CodeHash[:], EmptyCodeHash)
+	//cell.StorageLen = 0
+	//cell.Nonce = 0
 }
 
 // fetches cell by key and set touch/after maps
@@ -1921,13 +1923,11 @@ func (u *Update) Merge(b *Update) {
 		u.Flags |= CodeUpdate
 		copy(u.CodeHashOrStorage[:], b.CodeHashOrStorage[:])
 		u.ValLength = b.ValLength
-		u.CodeValue = b.CodeValue
 	}
 	if b.Flags&StorageUpdate != 0 {
 		u.Flags |= StorageUpdate
 		copy(u.CodeHashOrStorage[:], b.CodeHashOrStorage[:])
 		u.ValLength = b.ValLength
-		u.CodeValue = common.Copy(b.CodeValue)
 	}
 }
 
@@ -2007,8 +2007,6 @@ func (u *Update) Encode(buf []byte, numBuf []byte) []byte {
 	}
 	if u.Flags&CodeUpdate != 0 {
 		buf = append(buf, u.CodeHashOrStorage[:]...)
-		n := binary.PutUvarint(numBuf, uint64(u.ValLength))
-		buf = append(buf, numBuf[:n]...)
 	}
 	if u.Flags&StorageUpdate != 0 {
 		n := binary.PutUvarint(numBuf, uint64(u.ValLength))
@@ -2050,25 +2048,12 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 		pos += n
 	}
 	if u.Flags&CodeUpdate != 0 {
-		if len(buf) < pos+32 {
+		if len(buf) < pos+length.Hash {
 			return 0, fmt.Errorf("decode Update: buffer too small for codeHash")
 		}
 		copy(u.CodeHashOrStorage[:], buf[pos:pos+32])
-		pos += 32
-		l, n := binary.Uvarint(buf[pos:])
-		if n == 0 {
-			return 0, fmt.Errorf("decode Update: buffer too small for code len")
-		}
-		if n < 0 {
-			return 0, fmt.Errorf("decode Update: code len pos overflow")
-		}
-		pos += n
-		if len(buf) < pos+int(l) {
-			return 0, fmt.Errorf("decode Update: buffer too small for code value")
-		}
-		u.ValLength = int(l)
-		u.CodeValue = common.Copy(buf[pos : pos+int(l)])
-		pos += int(l)
+		pos += length.Hash
+		u.ValLength = length.Hash
 	}
 	if u.Flags&StorageUpdate != 0 {
 		l, n := binary.Uvarint(buf[pos:])

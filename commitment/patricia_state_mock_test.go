@@ -52,7 +52,7 @@ func (ms MockState) accountFn(plainKey []byte, cell *Cell) error {
 		return nil
 	}
 	if pos != len(exBytes) {
-		ms.t.Fatalf("accountFn key [%x] leftover bytes in [%x], comsumed %x", plainKey, exBytes, pos)
+		ms.t.Fatalf("accountFn key [%x] leftover %d bytes in [%x], comsumed %x", plainKey, len(exBytes)-pos, exBytes, pos)
 		return nil
 	}
 	if ex.Flags&StorageUpdate != 0 {

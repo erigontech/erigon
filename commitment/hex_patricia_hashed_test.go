@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 )
 
@@ -136,6 +137,103 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	fmt.Println("2. Empty updates applied without state reset")
 
 	require.EqualValues(t, hashBeforeEmptyUpdate, hashAfterEmptyUpdate)
+}
+
+func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
+	ms := NewMockState(t)
+	ms2 := NewMockState(t)
+
+	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+		Balance("71562b71999873db5b286df957af199ec94617f7", 999860099).
+		Nonce("71562b71999873db5b286df957af199ec94617f7", 3).
+		Balance("3a220f351252089d385b29beca14e27f204c296a", 900234).
+		Balance("0000000000000000000000000000000000000000", 2000000000000138901).
+		//Balance("0000000000000000000000000000000000000000", 4000000000000138901).
+		Build()
+
+	trieOne := NewHexPatriciaHashed(20, ms.branchFn, ms.accountFn, ms.storageFn)
+	trieTwo := NewHexPatriciaHashed(20, ms2.branchFn, ms2.accountFn, ms2.storageFn)
+
+	//trieOne.SetTrace(true)
+	//trieTwo.SetTrace(true)
+
+	// single sequential update
+	roots := make([][]byte, 0)
+	fmt.Printf("1. Trie sequential update generated following branch updates\n")
+
+	ra, rb := []byte{}, []byte{}
+	{
+		if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
+			t.Fatal(err)
+		}
+
+		rh, branchNodeUpdates, err := trieOne.ReviewKeys(plainKeys, hashedKeys)
+		require.NoError(t, err)
+		ms.applyBranchNodeUpdates(branchNodeUpdates)
+		renderUpdates(branchNodeUpdates)
+
+		ra = common.Copy(rh)
+	}
+	{
+		err := ms2.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
+
+		fmt.Printf("\n2. Trie batch update generated following branch updates\n")
+		// batch update
+		rh, branchNodeUpdatesTwo, err := trieTwo.ReviewKeys(plainKeys, hashedKeys)
+		require.NoError(t, err)
+		ms2.applyBranchNodeUpdates(branchNodeUpdatesTwo)
+		renderUpdates(branchNodeUpdatesTwo)
+
+		rb = common.Copy(rh)
+	}
+	require.EqualValues(t, ra, rb)
+
+	plainKeys, hashedKeys, updates = NewUpdateBuilder().
+		//Balance("71562b71999873db5b286df957af199ec94617f7", 999860099).
+		//Nonce("71562b71999873db5b286df957af199ec94617f7", 3).
+		//Balance("3a220f351252089d385b29beca14e27f204c296a", 900234).
+		//Balance("0000000000000000000000000000000000000000", 2000000000000138901).
+		Balance("0000000000000000000000000000000000000000", 4000000000000138901).
+		Build()
+
+	if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
+		t.Fatal(err)
+	}
+
+	sequentialRoot, branchNodeUpdates, err := trieOne.ReviewKeys(plainKeys, hashedKeys)
+	require.NoError(t, err)
+	roots = append(roots, sequentialRoot)
+	ms.applyBranchNodeUpdates(branchNodeUpdates)
+	renderUpdates(branchNodeUpdates)
+
+	plainKeys, hashedKeys, updates = NewUpdateBuilder().
+		Balance("71562b71999873db5b286df957af199ec94617f7", 999860099).
+		Nonce("71562b71999873db5b286df957af199ec94617f7", 3).
+		Balance("3a220f351252089d385b29beca14e27f204c296a", 900234).
+		//Balance("0000000000000000000000000000000000000000", 2000000000000138901).
+		Balance("0000000000000000000000000000000000000000", 4000000000000138901).
+		Build()
+
+	err = ms2.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	fmt.Printf("\n2. Trie batch update generated following branch updates\n")
+	// batch update
+	batchRoot, branchNodeUpdatesTwo, err := trieTwo.ReviewKeys(plainKeys, hashedKeys)
+	require.NoError(t, err)
+	renderUpdates(branchNodeUpdatesTwo)
+
+	fmt.Printf("\n sequential roots:\n")
+	for i, rh := range roots {
+		fmt.Printf("%2d %+v\n", i, hex.EncodeToString(rh))
+	}
+
+	ms2.applyBranchNodeUpdates(branchNodeUpdatesTwo)
+
+	require.EqualValues(t, batchRoot, roots[len(roots)-1],
+		"expected equal roots, got sequential [%v] != batch [%v]", hex.EncodeToString(roots[len(roots)-1]), hex.EncodeToString(batchRoot))
+	require.Lenf(t, batchRoot, 32, "root hash length should be equal to 32 bytes")
 }
 
 func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
