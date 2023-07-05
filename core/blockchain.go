@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -86,8 +85,9 @@ func ExecuteBlockEphemerally(
 	header := block.Header()
 
 	usedGas := new(uint64)
+	usedDataGas := new(uint64)
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
+	gp.AddGas(block.GasLimit()).AddDataGas(chain.MaxDataGasPerBlock)
 
 	var (
 		rejectedTxs []*RejectedTx
@@ -117,7 +117,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, usedDataGas, *vmConfig)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -145,6 +145,10 @@ func ExecuteBlockEphemerally(
 
 	if !vmConfig.StatelessExec && *usedGas != header.GasUsed {
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+	}
+
+	if header.DataGasUsed != nil && *usedDataGas != *header.DataGasUsed {
+		return nil, fmt.Errorf("data gas used by execution: %d, in header: %d", *usedDataGas, *header.DataGasUsed)
 	}
 
 	var bloom types.Bloom
@@ -172,130 +176,26 @@ func ExecuteBlockEphemerally(
 		Rejected:    rejectedTxs,
 	}
 
-	return execRs, nil
-}
-
-// ExecuteBlockEphemerallyBor runs a block from provided stateReader and
-// writes the result to the provided stateWriter
-func ExecuteBlockEphemerallyBor(
-	chainConfig *chain.Config, vmConfig *vm.Config,
-	blockHashFunc func(n uint64) libcommon.Hash,
-	engine consensus.Engine, block *types.Block,
-	stateReader state.StateReader, stateWriter state.WriterWithChangeSets,
-	chainReader consensus.ChainHeaderReader, getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
-) (*EphemeralExecResult, error) {
-
-	defer BlockExecutionTimer.UpdateDuration(time.Now())
-	block.Uncles()
-	ibs := state.New(stateReader)
-	header := block.Header()
-
-	usedGas := new(uint64)
-	gp := new(GasPool)
-	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
-
-	var (
-		rejectedTxs []*RejectedTx
-		includedTxs types.Transactions
-		receipts    types.Receipts
-	)
-
-	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, chainReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
-			return nil, err
-		}
-	}
-
-	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
-	noop := state.NewNoopWriter()
-	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
-	for i, tx := range block.Transactions() {
-		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
-		writeTrace := false
-		if vmConfig.Debug && vmConfig.Tracer == nil {
-			tracer, err := getTracer(i, tx.Hash())
-			if err != nil {
-				return nil, fmt.Errorf("could not obtain tracer: %w", err)
-			}
-			vmConfig.Tracer = tracer
-			writeTrace = true
+	if chainConfig.Bor != nil {
+		var logs []*types.Log
+		for _, receipt := range receipts {
+			logs = append(logs, receipt.Logs...)
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig)
-		if writeTrace {
-			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
-				ftracer.Flush(tx)
-			}
+		stateSyncReceipt := &types.Receipt{}
+		if chainConfig.Consensus == chain.BorConsensus && len(blockLogs) > 0 {
+			slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
 
-			vmConfig.Tracer = nil
-		}
-		if err != nil {
-			if !vmConfig.StatelessExec {
-				return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
-			}
-			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
-		} else {
-			includedTxs = append(includedTxs, tx)
-			if !vmConfig.NoReceipts {
-				receipts = append(receipts, receipt)
+			if len(blockLogs) > len(logs) {
+				stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
+
+				// fill the state sync with the correct information
+				types.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
+				stateSyncReceipt.Status = types.ReceiptStatusSuccessful
 			}
 		}
-	}
 
-	receiptSha := types.DeriveSha(receipts)
-	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
-		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
-	}
-
-	if !vmConfig.StatelessExec && *usedGas != header.GasUsed {
-		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
-	}
-
-	var bloom types.Bloom
-	if !vmConfig.NoReceipts {
-		bloom = types.CreateBloom(receipts)
-		if !vmConfig.StatelessExec && bloom != header.Bloom {
-			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
-		}
-	}
-	if !vmConfig.ReadOnly {
-		txs := block.Transactions()
-		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false); err != nil {
-			return nil, err
-		}
-	}
-
-	var logs []*types.Log
-	for _, receipt := range receipts {
-		logs = append(logs, receipt.Logs...)
-	}
-
-	blockLogs := ibs.Logs()
-	stateSyncReceipt := &types.Receipt{}
-	if chainConfig.Consensus == chain.BorConsensus && len(blockLogs) > 0 {
-		slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
-
-		if len(blockLogs) > len(logs) {
-			stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
-
-			// fill the state sync with the correct information
-			types.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
-			stateSyncReceipt.Status = types.ReceiptStatusSuccessful
-		}
-	}
-
-	execRs := &EphemeralExecResult{
-		TxRoot:           types.DeriveSha(includedTxs),
-		ReceiptRoot:      receiptSha,
-		Bloom:            bloom,
-		LogsHash:         rlpHash(blockLogs),
-		Receipts:         receipts,
-		Difficulty:       (*math.HexOrDecimal256)(header.Difficulty),
-		GasUsed:          math.HexOrDecimal64(*usedGas),
-		Rejected:         rejectedTxs,
-		StateSyncReceipt: stateSyncReceipt,
+		execRs.StateSyncReceipt = stateSyncReceipt
 	}
 
 	return execRs, nil
@@ -387,6 +287,7 @@ func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Con
 	gp := new(GasPool)
 	gp.AddGas(50_000_000)
 	var gasUsed uint64
+	var gasDataUsed uint64
 	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
@@ -396,7 +297,7 @@ func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Con
 		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
 	vmConfig := vm.Config{NoReceipts: true}
-	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig)
+	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, &gasDataUsed, vmConfig)
 	if err != nil {
 		return result, fmt.Errorf("SysCallContract: %w ", err)
 	}

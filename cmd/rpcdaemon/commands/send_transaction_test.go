@@ -40,7 +40,7 @@ func TestSendRawTransaction(t *testing.T) {
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-	}, false /* intermediateHashes */)
+	})
 	require.NoError(err)
 	{ // Do 1 step to start txPool
 
@@ -64,10 +64,10 @@ func TestSendRawTransaction(t *testing.T) {
 		for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
 			require.NoError(err)
 		}
-		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
+		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 		initialCycle := stages.MockInsertAsInitialCycle
-		if err := stages.StageLoopStep(m.Ctx, m.DB, nil, m.Sync, initialCycle, logger, m.BlockReader, nil); err != nil {
+		if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, m.Sync, initialCycle, logger, m.BlockReader, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -51,7 +51,8 @@ func StartHTTPEndpoint(endpoint string, timeouts rpccfg.HTTPTimeouts, handler ht
 	}
 	go func() {
 		serveErr := httpSrv.Serve(listener)
-		if serveErr != nil && !errors.Is(serveErr, context.Canceled) && !errors.Is(serveErr, libcommon.ErrStopped) {
+		if serveErr != nil &&
+			!(errors.Is(serveErr, context.Canceled) || errors.Is(serveErr, libcommon.ErrStopped) || errors.Is(serveErr, http.ErrServerClosed)) {
 			log.Warn("Failed to serve http endpoint", "err", serveErr)
 		}
 	}()

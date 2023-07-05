@@ -16,7 +16,11 @@
 
 package params
 
-import "math/big"
+import (
+	"math/big"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
+)
 
 const (
 	GasLimitBoundDivisor uint64 = 1024               // The bound divisor of the gas limit, used in update calculations.
@@ -163,13 +167,10 @@ const (
 	RefundQuotientEIP3529 uint64 = 5
 
 	// stuff from EIP-4844
-	FieldElementsPerBlob              = 4096 // each field element is 32 bytes
-	MaxDataGasPerBlock         uint64 = 0xC0000
-	TargetDataGasPerBlock      uint64 = 0x60000
-	DataGasPerBlob             uint64 = 0x20000
-	MinDataGasPrice                   = 1
-	DataGasPriceUpdateFraction        = 3338477
-	MaxBlobsPerBlock                  = MaxDataGasPerBlock / DataGasPerBlob
+	FieldElementsPerBlob       = 4096 // each field element is 32 bytes
+	MinDataGasPrice            = 1
+	DataGasPriceUpdateFraction = 3338477
+	MaxBlobsPerBlock           = chain.MaxDataGasPerBlock / chain.DataGasPerBlob
 
 	BlobVerificationGas      uint64 = 1800000
 	BlobCommitmentVersionKZG uint8  = 0x01

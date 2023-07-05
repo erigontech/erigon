@@ -87,7 +87,7 @@ func TestGenerateChain(t *testing.T) {
 			b3.Extra = []byte("foo")
 			gen.AddUncle(b3)
 		}
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		fmt.Printf("generate chain: %v\n", err)
 	}
