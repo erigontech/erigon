@@ -832,13 +832,6 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			return Collation{}, err
 		}
 		pos++
-		if ^binary.BigEndian.Uint64(stepInDB) != step {
-			if d.filenameBase == "accounts" && bytes.HasPrefix(k, common.FromHex("b111")) {
-				fmt.Printf("collate skip: %x, %d\n", k, ^binary.BigEndian.Uint64(stepInDB))
-			}
-			continue
-		}
-
 		copy(keySuffix, k)
 		copy(keySuffix[len(k):], stepInDB)
 		v, err := roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
