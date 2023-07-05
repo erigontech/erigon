@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/bor"
@@ -16,15 +17,16 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/consensus/clique"
-	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/consensus/merge"
+	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 )
 
-func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
-	heimdallGrpcAddress string, heimdallUrl string, withoutHeimdall bool, dataDir string, readonly bool,
+func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
+	heimdallGrpcAddress string, heimdallUrl string, withoutHeimdall bool, readonly bool,
 	logger log.Logger,
 ) consensus.Engine {
 	var eng consensus.Engine
@@ -53,16 +55,41 @@ func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify
 		}
 	case *params.ConsensusSnapshotConfig:
 		if chainConfig.Clique != nil {
-			if consensusCfg.DBPath == "" {
-				consensusCfg.DBPath = filepath.Join(dataDir, "clique", "db")
+			if consensusCfg.InMemory {
+				nodeConfig.Dirs.DataDir = ""
+			} else {
+				if consensusCfg.DBPath != "" {
+					if filepath.Base(consensusCfg.DBPath) == "clique" {
+						nodeConfig.Dirs.DataDir = filepath.Dir(consensusCfg.DBPath)
+					} else {
+						nodeConfig.Dirs.DataDir = consensusCfg.DBPath
+					}
+				}
 			}
-			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory, readonly), logger)
+
+			var err error
+			var db kv.RwDB
+
+			db, err = node.OpenDatabase(nodeConfig, kv.ConsensusDB, "clique", readonly, logger)
+
+			if err != nil {
+				panic(err)
+			}
+
+			eng = clique.New(chainConfig, consensusCfg, db, logger)
 		}
 	case *chain.AuRaConfig:
 		if chainConfig.Aura != nil {
-			dbPath := filepath.Join(dataDir, "aura")
 			var err error
-			eng, err = aura.NewAuRa(chainConfig.Aura, db.OpenDatabase(dbPath, false, readonly))
+			var db kv.RwDB
+
+			db, err = node.OpenDatabase(nodeConfig, kv.ConsensusDB, "aura", readonly, logger)
+
+			if err != nil {
+				panic(err)
+			}
+
+			eng, err = aura.NewAuRa(chainConfig.Aura, db)
 			if err != nil {
 				panic(err)
 			}
@@ -74,8 +101,15 @@ func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify
 		if chainConfig.Bor != nil && chainConfig.Bor.ValidatorContract != "" {
 			genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, chainConfig.Bor.ValidatorContract, chainConfig.Bor.StateReceiverContract, logger)
 			spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig, logger)
-			borDbPath := filepath.Join(dataDir, "bor") // bor consensus path: datadir/bor
-			db := db.OpenDatabase(borDbPath, false, readonly)
+
+			var err error
+			var db kv.RwDB
+
+			db, err = node.OpenDatabase(nodeConfig, kv.ConsensusDB, "bor", readonly, logger)
+
+			if err != nil {
+				panic(err)
+			}
 
 			var heimdallClient bor.IHeimdallClient
 			if withoutHeimdall {
@@ -117,6 +151,6 @@ func CreateConsensusEngineBareBones(chainConfig *chain.Config, logger log.Logger
 		consensusConfig = &ethashCfg
 	}
 
-	return CreateConsensusEngine(chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
-		"" /* heimdallGrpcAddress */, "" /* heimdallUrl */, true /* withoutHeimdall */, "" /*dataDir*/, false /* readonly */, logger)
+	return CreateConsensusEngine(&nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
+		"" /* heimdallGrpcAddress */, "" /* heimdallUrl */, true /* withoutHeimdall */, false /* readonly */, logger)
 }

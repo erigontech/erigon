@@ -779,8 +779,7 @@ Loop3:
 		s.Txs.segments[i] = nil
 	}
 	var i int
-	for i = 0; i < len(s.Headers.segments) && s.Headers.segments[i] != nil && s.Headers.segments[i].seg != nil; i++ {
-	}
+
 	tail := s.Headers.segments[i:]
 	s.Headers.segments = s.Headers.segments[:i]
 	for i = 0; i < len(tail); i++ {
@@ -790,8 +789,6 @@ Loop3:
 		}
 	}
 
-	for i = 0; i < len(s.Bodies.segments) && s.Bodies.segments[i] != nil && s.Bodies.segments[i].seg != nil; i++ {
-	}
 	tailB := s.Bodies.segments[i:]
 	s.Bodies.segments = s.Bodies.segments[:i]
 	for i = 0; i < len(tailB); i++ {
@@ -801,8 +798,6 @@ Loop3:
 		}
 	}
 
-	for i = 0; i < len(s.Txs.segments) && s.Txs.segments[i] != nil && s.Txs.segments[i].Seg != nil; i++ {
-	}
 	tailC := s.Txs.segments[i:]
 	s.Txs.segments = s.Txs.segments[:i]
 	for i = 0; i < len(tailC); i++ {
