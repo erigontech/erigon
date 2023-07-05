@@ -23,6 +23,7 @@ func NewFileBasedMockBlockSource() BlockSource {
 			1: "./tests_data/blocks_1-3",
 			4: "./tests_data/blocks_4",
 			5: "./tests_data/blocks_5",
+			6: "./tests_data/blocks_6",
 		},
 	}
 }
