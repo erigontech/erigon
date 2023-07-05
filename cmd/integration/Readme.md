@@ -79,7 +79,8 @@ make all
 
 ```
 1. Stop Erigon
-2. Start erigon again with option --datadir /path/to/copy-to/
+2. Create new db, by starting erigon in new directory: with option --datadir /path/to/copy-to/
+(set new --db.pagesize option if need)
 3. Stop Erigon again after about 1 minute (Steps 2 and 3 create a new empty db in /path/to/copy-to/chaindata )
 4. Build integration: cd erigon; make integration
 5. Run: ./build/bin/integration mdbx_to_mdbx --chaindata /existing/erigon/path/chaindata/ --chaindata.to /path/to/copy-to/chaindata/
