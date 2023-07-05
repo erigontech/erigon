@@ -1282,7 +1282,7 @@ func (hph *HexPatriciaHashed) ReviewKeys(plainKeys, hashedKeys [][]byte) (rootHa
 				cell.setAccountFields(stagedCell.CodeHash[:], &stagedCell.Balance, stagedCell.Nonce)
 
 				if hph.trace {
-					fmt.Printf("accountFn update key %x => balance=%v nonce=%v codeHash=%x\n", cell.apk, cell.Balance.Uint64(), cell.Nonce, cell.CodeHash)
+					fmt.Printf("accountFn update key %x => balance=%d nonce=%v codeHash=%x\n", cell.apk, &cell.Balance, cell.Nonce, cell.CodeHash)
 				}
 			}
 		} else {

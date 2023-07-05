@@ -459,13 +459,19 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 		}
 		tombs = append(tombs, pair{k, v})
 	})
+	if err != nil {
+		return err
+	}
 
 	for _, tomb := range tombs {
 		sd.put(kv.StorageDomain, tomb.k, nil)
 		sd.Commitment.TouchPlainKey(tomb.k, nil, sd.Commitment.TouchStorage)
 		err = sd.Storage.DeleteWithPrev(tomb.k, nil, tomb.v)
+		if err != nil {
+			return err
+		}
 	}
-	return err
+	return nil
 }
 
 func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value, preVal []byte) error {
