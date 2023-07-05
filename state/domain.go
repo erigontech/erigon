@@ -1159,7 +1159,7 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 		}
 		switch len(edgeRecords) {
 		case 1: // its value should be nil, actual value is in domain, BUT if txNum exactly match, need to restore
-			fmt.Printf("recent %x txn %d '%x'\n", k, edgeRecords[0].TxNum, edgeRecords[0].Value)
+			//fmt.Printf("recent %x txn %d '%x'\n", k, edgeRecords[0].TxNum, edgeRecords[0].Value)
 			if edgeRecords[0].TxNum == txFrom && edgeRecords[0].Value != nil {
 				d.SetTxNum(edgeRecords[0].TxNum)
 				if err := restore.addValue(k, nil, edgeRecords[0].Value); err != nil {
@@ -1193,7 +1193,7 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 				}
 			}
 			if kk != nil {
-				fmt.Printf("rm large value %x v %x\n", kk, vv)
+				//fmt.Printf("rm large value %x v %x\n", kk, vv)
 				if err = valsC.DeleteCurrent(); err != nil {
 					return err
 				}
