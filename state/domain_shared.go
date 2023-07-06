@@ -449,7 +449,7 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("delete account %x code: %x\n", addr, pc)
+	//fmt.Printf("delete account %x code: %x\n", addr, pc)
 	if len(pc) > 0 {
 		sd.Commitment.TouchPlainKey(addr, nil, sd.Commitment.TouchCode)
 		sd.put(kv.CodeDomain, addr, nil)
