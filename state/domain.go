@@ -368,7 +368,7 @@ func (d *Domain) openFiles() (err error) {
 			if item.bindex == nil {
 				bidxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 				if dir.FileExist(bidxPath) {
-					if item.bindex, err = OpenBtreeIndexWithDecompressor(bidxPath, 2048, item.decompressor); err != nil {
+					if item.bindex, err = OpenBtreeIndexWithDecompressor(bidxPath, DefaultBtreeM, item.decompressor); err != nil {
 						d.logger.Debug("InvertedIndex.openFiles: %w, %s", err, bidxPath)
 						return false
 					}

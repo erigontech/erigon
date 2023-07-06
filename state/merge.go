@@ -639,7 +639,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 
-		bt, err := OpenBtreeIndexWithDecompressor(btPath, 2048, valuesIn.decompressor)
+		bt, err := OpenBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex2 [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}

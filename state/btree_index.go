@@ -546,6 +546,9 @@ func (a *btAlloc) Seek(ik []byte) (*Cursor, error) {
 	}
 
 	a.naccess = 0 // reset count before actually go to disk
+	//if maxD-minD > 17_000 {
+	//	log.Warn("too big binary search", "minD", minD, "maxD", maxD, "keysCount", a.K)
+	//}
 	cursor, err := a.bsKey(ik, minD, maxD)
 	if err != nil {
 		if a.trace {
