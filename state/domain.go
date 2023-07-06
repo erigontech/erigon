@@ -193,6 +193,15 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	return d, nil
 }
 
+// LastStepInDB - return the latest available step in db (at-least 1 value in such step)
+func (d *Domain) LastStepInDB(tx kv.Tx) (lstInDb uint64) {
+	lst, _ := kv.FirstKey(tx, d.valsTable)
+	if len(lst) > 0 {
+		lstInDb = ^binary.BigEndian.Uint64(lst[len(lst)-8:])
+	}
+	return lstInDb
+}
+
 func (d *Domain) DiscardHistory() {
 	d.History.DiscardHistory()
 	d.defaultDc = d.MakeContext()

@@ -1319,7 +1319,6 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return fin
 	}
-	log.Warn("[dbg] BuildFilesInBackground2")
 
 	step := a.minimaxTxNumInFiles.Load() / a.aggregationStep
 	//toTxNum := (step + 1) * a.aggregationStep
@@ -1330,7 +1329,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		defer a.buildingFiles.Store(false)
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
-		lastInDB := lastIdInDB(a.db, a.accounts.valsTable)
+		lastInDB := lastIdInDB(a.db, a.accounts)
 		hasData = lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
 			close(fin)
@@ -1341,7 +1340,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
-		for ; step < lastIdInDB(a.db, a.accounts.valsTable); step++ { //`step` must be fully-written - means `step+1` records must be visible
+		for ; step < lastIdInDB(a.db, a.accounts); step++ { //`step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) {
 					close(fin)
@@ -1647,12 +1646,9 @@ func (br *BackgroundResult) GetAndReset() (bool, error) {
 }
 
 // Inverted index tables only
-func lastIdInDB(db kv.RoDB, table string) (lstInDb uint64) {
+func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb uint64) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		lst, _ := kv.LastKey(tx, table)
-		if len(lst) > 0 {
-			lstInDb = ^binary.BigEndian.Uint64(lst[len(lst)-8:])
-		}
+		lstInDb = domain.LastStepInDB(tx)
 		return nil
 	}); err != nil {
 		log.Warn("[snapshots] lastIdInDB", "err", err)
