@@ -1308,7 +1308,6 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
 
 	if (txNum + 1) <= a.minimaxTxNumInFiles.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
-		log.Warn("[dbg] BuildFilesInBackground1")
 		return fin
 	}
 
@@ -1351,25 +1350,24 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 			}
 		}
 
-		//TODO: disabling merge until sepolia/mainnet execution works
-		//if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
-		//	close(fin)
-		//	return
-		//}
-		//a.wg.Add(1)
-		//go func() {
-		//	defer a.wg.Done()
-		//	defer a.mergeingFiles.Store(false)
-		//	defer func() { close(fin) }()
-		//	if err := a.MergeLoop(a.ctx, 1); err != nil {
-		//		if errors.Is(err, context.Canceled) {
-		//			return
-		//		}
-		//		log.Warn("[snapshots] merge", "err", err)
-		//	}
-		//
-		//	a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
-		//}()
+		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
+			close(fin)
+			return
+		}
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			defer a.mergeingFiles.Store(false)
+			defer func() { close(fin) }()
+			if err := a.MergeLoop(a.ctx, 1); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				log.Warn("[snapshots] merge", "err", err)
+			}
+
+			a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
+		}()
 	}()
 	return fin
 }
