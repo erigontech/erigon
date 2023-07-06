@@ -1070,20 +1070,20 @@ func (b *BtIndex) Close() {
 	}
 }
 
-// Get - returns exact match of key. `k == nil` - means not found
-func (b *BtIndex) Get(x []byte) (k, v []byte, err error) {
+// Get - exact match of key. `k == nil` - means not found
+func (b *BtIndex) Get(lookup []byte) (k, v []byte, err error) {
 	// TODO: optimize by don't creating cursor and don't compare bytes (idx can existance)
 	if b.Empty() {
 		return nil, nil, nil
 	}
-	cur, err := b.Seek(x)
+	cur, err := b.Seek(lookup)
 	if err != nil {
 		return nil, nil, err
 	}
 	if cur == nil {
 		return nil, nil, nil
 	}
-	if !bytes.Equal(cur.Key(), x) {
+	if !bytes.Equal(cur.Key(), lookup) {
 		return nil, nil, nil
 	}
 	return cur.Key(), cur.Value(), nil
