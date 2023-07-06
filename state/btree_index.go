@@ -1070,8 +1070,9 @@ func (b *BtIndex) Close() {
 	}
 }
 
-// TODO: optimize by don't creating cursor and don't compare bytes (idx can existance)
+// Get - returns exact match of key. `k == nil` - means not found
 func (b *BtIndex) Get(x []byte) (k, v []byte, err error) {
+	// TODO: optimize by don't creating cursor and don't compare bytes (idx can existance)
 	if b.Empty() {
 		return nil, nil, nil
 	}
