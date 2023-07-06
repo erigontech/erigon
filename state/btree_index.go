@@ -1070,7 +1070,28 @@ func (b *BtIndex) Close() {
 	}
 }
 
+// TODO: optimize by don't creating cursor and don't compare bytes (idx can existance)
+func (b *BtIndex) Get(x []byte) (k, v []byte, err error) {
+	if b.Empty() {
+		return nil, nil, nil
+	}
+	cur, err := b.Seek(x)
+	if err != nil {
+		return nil, nil, err
+	}
+	if cur == nil {
+		return nil, nil, nil
+	}
+	if !bytes.Equal(cur.Key(), x) {
+		return nil, nil, nil
+	}
+	return cur.Key(), cur.Value(), nil
+}
+
 func (b *BtIndex) Seek(x []byte) (*Cursor, error) {
+	if b.Empty() {
+		return nil, nil
+	}
 	if b.alloc == nil {
 		return nil, nil
 	}

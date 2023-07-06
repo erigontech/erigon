@@ -1401,93 +1401,72 @@ func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err er
 	return nil
 }
 
-func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint64) ([]byte, bool, error) {
+func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint64) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
-
-	var val []byte
-	var found bool
-
+	var k []byte
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		if dc.files[i].endTxNum < fromTxNum {
 			break
 		}
-		reader := dc.statelessBtree(i)
-		if reader.Empty() {
-			continue
-		}
-		cur, err := reader.Seek(filekey)
+		k, v, err = dc.statelessBtree(i).Get(filekey)
 		if err != nil {
-			//return nil, false, nil //TODO: uncomment me
 			return nil, false, err
 		}
-		if cur == nil {
+		if k == nil {
 			continue
 		}
-
-		if bytes.Equal(cur.Key(), filekey) {
-			val = cur.Value()
-			found = true
-			break
-		}
+		found = true
+		break
 	}
-	return val, found, nil
+	return v, found, nil
 }
-func (dc *DomainContext) getLatestFromFiles(filekey []byte) ([]byte, bool, error) {
+func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 
-	var val []byte
-	var found bool
-
+	var k []byte
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		reader := dc.statelessBtree(i)
-		if reader.Empty() {
-			continue
-		}
-		cur, err := reader.Seek(filekey)
+		k, v, err = dc.statelessBtree(i).Get(filekey)
 		if err != nil {
 			return nil, false, err
 		}
-		if cur == nil {
+		if k == nil {
 			continue
 		}
+		found = true
 
-		if bytes.Equal(cur.Key(), filekey) {
-			val = cur.Value()
-			found = true
-
-			if COMPARE_INDEXES {
-				rd := recsplit.NewIndexReader(dc.files[i].src.index)
-				oft := rd.Lookup(filekey)
-				gt := dc.statelessGetter(i)
-				gt.Reset(oft)
-				var k, v []byte
-				if gt.HasNext() {
-					k, _ = gt.Next(nil)
-					v, _ = gt.Next(nil)
-				}
-				fmt.Printf("key: %x, val: %x\n", k, v)
-				if !bytes.Equal(v, val) {
-					panic("not equal")
-				}
-
+		if COMPARE_INDEXES {
+			rd := recsplit.NewIndexReader(dc.files[i].src.index)
+			oft := rd.Lookup(filekey)
+			gt := dc.statelessGetter(i)
+			gt.Reset(oft)
+			var kk, vv []byte
+			if gt.HasNext() {
+				kk, _ = gt.Next(nil)
+				vv, _ = gt.Next(nil)
 			}
-			break
+			fmt.Printf("key: %x, val: %x\n", kk, vv)
+			if !bytes.Equal(vv, v) {
+				panic("not equal")
+			}
 		}
+		break
 	}
-	return val, found, nil
+	return v, found, nil
 }
 
 // historyBeforeTxNum searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
-func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 
-	v, found, err := dc.hc.GetNoState(key, txNum)
-	if err != nil {
-		return nil, false, err
-	}
-	if found {
-		return v, true, nil
+	{
+		v, found, err = dc.hc.GetNoState(key, txNum)
+		if err != nil {
+			return nil, false, err
+		}
+		if found {
+			return v, true, nil
+		}
 	}
 
 	var anyItem bool
@@ -1502,29 +1481,22 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 	}
 	if anyItem {
 		// If there were no changes but there were history files, the value can be obtained from value files
-		var val []byte
+		var k []byte
 		for i := len(dc.files) - 1; i >= 0; i-- {
 			if dc.files[i].startTxNum > topState.startTxNum {
 				continue
 			}
-			reader := dc.statelessBtree(i)
-			if reader.Empty() {
-				continue
-			}
-			cur, err := reader.Seek(key)
+			k, v, err = dc.statelessBtree(i).Get(key)
 			if err != nil {
-				dc.d.logger.Warn("failed to read history before from file", "key", key, "err", err)
 				return nil, false, err
 			}
-			if cur == nil {
+			if k == nil {
 				continue
 			}
-			if bytes.Equal(cur.Key(), key) {
-				val = cur.Value()
-				break
-			}
+			found = true
+			break
 		}
-		return val, true, nil
+		return v, found, nil
 	}
 	// Value not found in history files, look in the recent history
 	if roTx == nil {
@@ -1686,18 +1658,15 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 	}
 
 	for i, item := range dc.files {
-		bg := dc.statelessBtree(i)
-		if bg.Empty() {
+		cursor, err := dc.statelessBtree(i).Seek(prefix)
+		if err != nil {
+			return err
+		}
+		if cursor == nil {
 			continue
 		}
 
 		dc.d.stats.FilesQueries.Add(1)
-
-		cursor, err := bg.Seek(prefix)
-		if err != nil {
-			return err
-		}
-
 		key := cursor.Key()
 		if key != nil && bytes.HasPrefix(key, prefix) {
 			val := cursor.Value()
@@ -1829,12 +1798,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
 	}
 
 	for i, item := range dc.files {
-		bg := dc.statelessBtree(i)
-		if bg.Empty() {
-			continue
-		}
-
-		btCursor, err := bg.Seek(hi.from)
+		btCursor, err := dc.statelessBtree(i).Seek(hi.from)
 		if err != nil {
 			return err
 		}

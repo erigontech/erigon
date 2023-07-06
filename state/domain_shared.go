@@ -603,12 +603,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 
 	sctx := sd.aggCtx.storage
 	for i, item := range sctx.files {
-		bg := sctx.statelessBtree(i)
-		if bg.Empty() {
-			continue
-		}
-
-		cursor, err := bg.Seek(prefix)
+		cursor, err := sctx.statelessBtree(i).Seek(prefix)
 		if err != nil {
 			return err
 		}
