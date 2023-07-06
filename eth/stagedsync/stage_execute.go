@@ -794,8 +794,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 		if err != nil {
 			return err
 		}
-		err = c.DeleteCurrentDuplicates()
-		if err != nil {
+		if err = tx.Delete(kv.CallTraceSet, k); err != nil {
 			return err
 		}
 	}

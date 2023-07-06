@@ -1371,7 +1371,7 @@ func PruneTableDupSort(tx kv.RwTx, table string, logPrefix string, pruneTo uint6
 			return common2.ErrStopped
 		default:
 		}
-		if err = c.DeleteCurrentDuplicates(); err != nil {
+		if err = tx.Delete(table, k); err != nil {
 			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
 	}
