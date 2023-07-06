@@ -533,14 +533,14 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
-		_, _, err := bt.dataLookup(bt.keyCount + 1)
+		_, _, err := bt.dataLookup(nil, nil, bt.keyCount+1)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(bt.keyCount)
+		_, _, err = bt.dataLookup(nil, nil, bt.keyCount)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
-		_, _, err = bt.dataLookup(bt.keyCount - 1)
+		_, _, err = bt.dataLookup(nil, nil, bt.keyCount-1)
 		require.NoError(t, err)
 
 		cur, err := bt.Seek(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
