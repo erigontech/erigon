@@ -504,9 +504,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	//if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
-	//	return err
-	//}
+	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
+		return err
+	}
 	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteSnapshots(tx, snapshots.Files(), agg.Files())
 	}); err != nil {
