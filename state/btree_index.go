@@ -409,14 +409,14 @@ func (a *btAlloc) traverseDfs() {
 }
 
 func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err error) {
-	i := 0
+	//i := 0
 	for l <= r {
 		di = (l + r) >> 1
 
 		k, v, err = a.dataLookup(k[:0], v[:0], di)
 		a.naccess++
 
-		i++
+		//i++
 		cmp := bytes.Compare(k, x)
 		switch {
 		case err != nil:
@@ -435,9 +435,9 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err erro
 			break
 		}
 	}
-	if i > 12 {
-		log.Warn("bsKey", "dataLookups", i)
-	}
+	//if i > 12 {
+	//	log.Warn("bsKey", "dataLookups", i)
+	//}
 	k, v, err = a.dataLookup(k[:0], v[:0], l)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
@@ -568,9 +568,9 @@ func (a *btAlloc) seek(ik []byte) (k, v []byte, di uint64, err error) {
 	}
 
 	a.naccess = 0 // reset count before actually go to disk
-	if maxD-minD > 3_000 {
-		log.Warn("too big binary search", "minD", minD, "maxD", maxD, "keysCount", a.K)
-	}
+	//if maxD-minD > 3_000 {
+	//	log.Warn("too big binary search", "minD", minD, "maxD", maxD, "keysCount", a.K)
+	//}
 	k, v, di, err = a.bsKey(ik, minD, maxD)
 	if err != nil {
 		if a.trace {
