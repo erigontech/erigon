@@ -1280,7 +1280,10 @@ func (ii *InvertedIndex) warmup(ctx context.Context, txFrom, limit uint64, tx kv
 	if limit != math.MaxUint64 && limit != 0 {
 		txTo = txFrom + limit
 	}
-	for ; err == nil && k != nil; k, v, err = keysCursor.Next() {
+	for ; k != nil; k, v, err = keysCursor.Next() {
+		if err != nil {
+			return fmt.Errorf("iterate over %s keys: %w", ii.filenameBase, err)
+		}
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
 			break
@@ -1292,9 +1295,6 @@ func (ii *InvertedIndex) warmup(ctx context.Context, txFrom, limit uint64, tx kv
 			return ctx.Err()
 		default:
 		}
-	}
-	if err != nil {
-		return fmt.Errorf("iterate over %s keys: %w", ii.filenameBase, err)
 	}
 	return nil
 }
