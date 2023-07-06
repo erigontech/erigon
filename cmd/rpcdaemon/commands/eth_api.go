@@ -318,6 +318,7 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 type APIImpl struct {
 	*BaseAPI
 	ethBackend      rpchelper.ApiBackend
+	engineBackend   rpchelper.EngineBackend // TODO(Giulio2002): Remove
 	txPool          txpool.TxpoolClient
 	mining          txpool.MiningClient
 	gasCache        *GasPriceCache
@@ -328,13 +329,14 @@ type APIImpl struct {
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, returnDataLimit int, logger log.Logger) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, engineBackend rpchelper.EngineBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, returnDataLimit int, logger log.Logger) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
 
 	return &APIImpl{
 		BaseAPI:         base,
+		engineBackend:   engineBackend,
 		db:              db,
 		ethBackend:      eth,
 		txPool:          txPool,

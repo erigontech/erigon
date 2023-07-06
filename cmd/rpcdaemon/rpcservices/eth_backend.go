@@ -1,7 +1,6 @@
 package rpcservices
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
@@ -247,28 +245,6 @@ func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, bl
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
 }
 
-func (back *RemoteBackend) EngineNewPayload(ctx context.Context, payload *types2.ExecutionPayload) (res *remote.EnginePayloadStatus, err error) {
-	return back.remoteEthBackend.EngineNewPayload(ctx, payload)
-}
-
-func (back *RemoteBackend) EngineForkchoiceUpdated(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedResponse, error) {
-	return back.remoteEthBackend.EngineForkChoiceUpdated(ctx, request)
-}
-
-func (back *RemoteBackend) EngineGetPayload(ctx context.Context, payloadId uint64) (res *remote.EngineGetPayloadResponse, err error) {
-	return back.remoteEthBackend.EngineGetPayload(ctx, &remote.EngineGetPayloadRequest{
-		PayloadId: payloadId,
-	})
-}
-
-func (back *RemoteBackend) EngineGetPayloadBodiesByHashV1(ctx context.Context, request *remote.EngineGetPayloadBodiesByHashV1Request) (*remote.EngineGetPayloadBodiesV1Response, error) {
-	return back.remoteEthBackend.EngineGetPayloadBodiesByHashV1(ctx, request)
-}
-
-func (back *RemoteBackend) EngineGetPayloadBodiesByRangeV1(ctx context.Context, request *remote.EngineGetPayloadBodiesByRangeV1Request) (*remote.EngineGetPayloadBodiesV1Response, error) {
-	return back.remoteEthBackend.EngineGetPayloadBodiesByRangeV1(ctx, request)
-}
-
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {
 	nodes, err := back.remoteEthBackend.NodeInfo(ctx, &remote.NodesInfoRequest{Limit: limit})
 	if err != nil {
@@ -347,22 +323,4 @@ func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	}
 
 	return peers, nil
-}
-
-func (back *RemoteBackend) PendingBlock(ctx context.Context) (*types.Block, error) {
-	blockRlp, err := back.remoteEthBackend.PendingBlock(ctx, &emptypb.Empty{})
-	if err != nil {
-		return nil, fmt.Errorf("ETHBACKENDClient.PendingBlock() error: %w", err)
-	}
-	if blockRlp == nil {
-		return nil, nil
-	}
-
-	var block types.Block
-	err = rlp.Decode(bytes.NewReader(blockRlp.BlockRlp), &block)
-	if err != nil {
-		return nil, fmt.Errorf("decoding block from %x: %w", blockRlp.BlockRlp, err)
-	}
-
-	return &block, nil
 }

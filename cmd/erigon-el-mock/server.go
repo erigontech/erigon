@@ -14,11 +14,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 )
 
 type Eth1Execution struct {
@@ -197,7 +197,7 @@ func (e *Eth1Execution) GetBody(ctx context.Context, req *execution.GetSegmentRe
 	if err != nil {
 		return nil, err
 	}
-	rpcWithdrawals := privateapi.ConvertWithdrawalsToRpc(body.Withdrawals)
+	rpcWithdrawals := engineapi.ConvertWithdrawalsToRpc(body.Withdrawals)
 	unclesRpc := make([]*execution.Header, 0, len(body.Uncles))
 	for _, uncle := range body.Uncles {
 		unclesRpc = append(unclesRpc, HeaderToHeaderRPC(uncle))

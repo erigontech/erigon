@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"google.golang.org/grpc"
@@ -105,14 +105,15 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
 		return err
 	}
-	var engine execution_client.ExecutionEngine
+	var executionEngine execution_client.ExecutionEngine
 	if cfg.ErigonPrivateApi != "" {
 		cc, err := grpc.Dial(cfg.ErigonPrivateApi, grpc.WithInsecure())
 		if err != nil {
 			log.Error("could not connect to erigon private api", "err", err)
 		}
 		defer cc.Close()
-		engine = execution_client.NewExecutionEnginePhase1FromClient(ctx, remote.NewETHBACKENDClient(cc))
+
+		executionEngine = execution_client.NewExecutionEnginePhase1FromClient(ctx, engine.NewEngineClient(cc))
 	}
 
 	if !cfg.NoBeaconApi {
@@ -134,5 +135,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		}
 	}
 
-	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, engine, state, caplinFreezer)
+	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, executionEngine, state, caplinFreezer)
 }

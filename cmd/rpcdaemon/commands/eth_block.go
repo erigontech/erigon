@@ -379,7 +379,7 @@ func (api *APIImpl) blockByNumber(ctx context.Context, number rpc.BlockNumber, t
 		return block, nil
 	}
 
-	block, err := api.ethBackend.PendingBlock(ctx)
+	block, err := api.engineBackend.PendingBlock(ctx)
 	if err != nil {
 		return nil, err
 	}
