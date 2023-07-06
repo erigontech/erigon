@@ -620,7 +620,6 @@ func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCoun
 func Test_InitBtreeIndex(t *testing.T) {
 	logger := log.New()
 	tmp := t.TempDir()
-	defer os.RemoveAll(tmp)
 
 	keyCount, M := 100, uint64(4)
 	compPath := generateCompressedKV(t, tmp, 52, 300, keyCount, logger)
@@ -628,7 +627,7 @@ func Test_InitBtreeIndex(t *testing.T) {
 	require.NoError(t, err)
 	defer decomp.Close()
 
-	err = BuildBtreeIndexWithDecompressor(tmp+".bt", decomp, &background.Progress{}, logger)
+	err = BuildBtreeIndexWithDecompressor(tmp+".bt", decomp, &background.Progress{}, tmp, logger)
 	require.NoError(t, err)
 
 	bt, err := OpenBtreeIndexWithDecompressor(tmp+".bt", M, decomp)

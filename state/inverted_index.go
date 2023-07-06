@@ -440,7 +440,7 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 }
 
 func (ii *invertedIndexWAL) Flush(ctx context.Context, tx kv.RwTx) error {
-	if ii.discard {
+	if ii.discard || !ii.buffered {
 		return nil
 	}
 	if err := ii.index.Load(tx, ii.ii.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -1322,6 +1322,11 @@ func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, 
 	collector := etl.NewCollector("snapshots", ii.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
 	defer collector.Close()
 
+	idxCForDeletes, err := ii.tx.RwCursorDupSort(ii.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxCForDeletes.Close()
 	idxC, err := ii.tx.RwCursorDupSort(ii.indexTable)
 	if err != nil {
 		return err
@@ -1330,19 +1335,25 @@ func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, 
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-	for ; err == nil && k != nil; k, v, err = keysCursor.NextNoDup() {
+	for ; k != nil; k, v, err = keysCursor.NextNoDup() {
+		if err != nil {
+			return err
+		}
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
 			break
 		}
-		for ; err == nil && k != nil; k, v, err = keysCursor.NextDup() {
+		for ; v != nil; _, v, err = keysCursor.NextDup() {
+			if err != nil {
+				return err
+			}
 			if err := collector.Collect(v, nil); err != nil {
 				return err
 			}
 		}
 
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
+		if err = ii.tx.Delete(ii.indexKeysTable, k); err != nil {
 			return err
 		}
 		select {
@@ -1364,7 +1375,11 @@ func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, 
 			if txNum >= txTo {
 				break
 			}
-			if err = idxC.DeleteCurrent(); err != nil {
+
+			if _, _, err = idxCForDeletes.SeekBothExact(key, v); err != nil {
+				return err
+			}
+			if err = idxCForDeletes.DeleteCurrent(); err != nil {
 				return err
 			}
 

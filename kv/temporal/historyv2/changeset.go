@@ -187,7 +187,9 @@ func Truncate(tx kv.RwTx, from uint64) error {
 			if err != nil {
 				return err
 			}
-			err = c.DeleteCurrentDuplicates()
+			if err = tx.Delete(kv.AccountChangeSet, k); err != nil {
+				return err
+			}
 			if err != nil {
 				return err
 			}
@@ -203,8 +205,7 @@ func Truncate(tx kv.RwTx, from uint64) error {
 			if err != nil {
 				return err
 			}
-			err = c.DeleteCurrentDuplicates()
-			if err != nil {
+			if err = tx.Delete(kv.StorageChangeSet, k); err != nil {
 				return err
 			}
 		}

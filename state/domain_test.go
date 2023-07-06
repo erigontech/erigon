@@ -500,7 +500,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	}
 }
 
-func TestMergeFiles(t *testing.T) {
+func TestDomain_MergeFiles(t *testing.T) {
 	logger := log.New()
 	_, db, d, txs := filledDomain(t, logger)
 
@@ -508,7 +508,7 @@ func TestMergeFiles(t *testing.T) {
 	checkHistory(t, db, d, txs)
 }
 
-func TestScanFiles(t *testing.T) {
+func TestDomain_ScanFiles(t *testing.T) {
 	logger := log.New()
 	path, db, d, txs := filledDomain(t, logger)
 	_ = path
@@ -523,7 +523,7 @@ func TestScanFiles(t *testing.T) {
 	checkHistory(t, db, d, txs)
 }
 
-func TestDelete(t *testing.T) {
+func TestDomain_Delete(t *testing.T) {
 	logger := log.New()
 	_, db, d := testDbAndDomain(t, logger)
 	ctx, require := context.Background(), require.New(t)

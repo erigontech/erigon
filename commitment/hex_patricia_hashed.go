@@ -780,10 +780,9 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
 		if cell.hl == 0 {
 			// cell is empty, no need to unfold further
 			return 0
-		} else {
-			// unfold branch node
-			return 1
 		}
+		// unfold branch node
+		return 1
 	}
 	cpl := commonPrefixLen(hashedKey[depth:], cell.downHashedKey[:cell.downHashedLen-1])
 	if hph.trace {

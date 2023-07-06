@@ -339,7 +339,7 @@ func (m *memoryMutationCursor) Delete(k []byte) error {
 func (m *memoryMutationCursor) DeleteCurrent() error {
 	panic("DeleteCurrent Not implemented")
 }
-func (m *memoryMutationCursor) DeleteExact(k1, k2 []byte) error {
+func (m *memoryMutationCursor) DeleteExact(_, _ []byte) error {
 	panic("DeleteExact Not implemented")
 }
 
