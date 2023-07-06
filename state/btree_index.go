@@ -410,12 +410,14 @@ func (a *btAlloc) traverseDfs() {
 }
 
 func (a *btAlloc) bsKey(x []byte, l, r uint64) (*Cursor, error) {
+	i := 0
 	for l <= r {
 		di := (l + r) >> 1
 
 		mk, value, err := a.dataLookup(di)
 		a.naccess++
 
+		i++
 		cmp := bytes.Compare(mk, x)
 		switch {
 		case err != nil:
@@ -433,6 +435,9 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (*Cursor, error) {
 		if l == r {
 			break
 		}
+	}
+	if i > 12 {
+		log.Warn("bsKey", "dataLookups", i)
 	}
 	k, v, err := a.dataLookup(l)
 	if err != nil {
@@ -452,7 +457,6 @@ func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) 
 
 		n = a.nodes[i][m]
 		a.naccess++
-
 		cmp := bytes.Compare(n.key, x)
 		switch {
 		case cmp == 0:
@@ -505,8 +509,9 @@ func (a *btAlloc) Seek(ik []byte) (*Cursor, error) {
 			}
 			return nil, fmt.Errorf("bt index nil node at level %d", l)
 		}
-
-		switch bytes.Compare(ln.key, ik) {
+		//fmt.Printf("b: %x, %x\n", ik, ln.key)
+		cmp := bytes.Compare(ln.key, ik)
+		switch cmp {
 		case 1: // key > ik
 			maxD = ln.d
 		case -1: // key < ik
@@ -519,8 +524,15 @@ func (a *btAlloc) Seek(ik []byte) (*Cursor, error) {
 		}
 
 		if rm-lm >= 1 {
+			if lm >= 0 {
+				minD = a.nodes[l][lm].d
+			}
+			if rm >= 0 {
+				maxD = a.nodes[l][rm].d
+			}
 			break
 		}
+
 		if lm >= 0 {
 			minD = a.nodes[l][lm].d
 			L = level[lm].fc
@@ -546,9 +558,9 @@ func (a *btAlloc) Seek(ik []byte) (*Cursor, error) {
 	}
 
 	a.naccess = 0 // reset count before actually go to disk
-	//if maxD-minD > 17_000 {
-	//	log.Warn("too big binary search", "minD", minD, "maxD", maxD, "keysCount", a.K)
-	//}
+	if maxD-minD > 3_000 {
+		log.Warn("too big binary search", "minD", minD, "maxD", maxD, "keysCount", a.K)
+	}
 	cursor, err := a.bsKey(ik, minD, maxD)
 	if err != nil {
 		if a.trace {
