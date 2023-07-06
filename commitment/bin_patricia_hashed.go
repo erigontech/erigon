@@ -58,7 +58,7 @@ func binToCompact(bin []byte) []byte {
 	binary.BigEndian.PutUint16(compact, uint16(len(bin)))
 	for i := 0; i < len(bin); i++ {
 		if bin[i] != 0 {
-			compact[2+i/8] |= (byte(1) << (i % 8))
+			compact[2+i/8] |= byte(1) << (i % 8)
 		}
 	}
 	return compact
@@ -804,10 +804,9 @@ func (bph *BinPatriciaHashed) needUnfolding(hashedKey []byte) int {
 		if cell.hl == 0 {
 			// cell is empty, no need to unfold further
 			return 0
-		} else {
-			// unfold branch node
-			return 1
 		}
+		// unfold branch node
+		return 1
 	}
 	cpl := commonPrefixLen(hashedKey[depth:], cell.downHashedKey[:cell.downHashedLen-1])
 	if bph.trace {
@@ -1028,11 +1027,11 @@ func (bph *BinPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 			} else if upDepth == halfKeySize {
 				// Special case - all storage items of an account have been deleted, but it does not automatically delete the account, just makes it empty storage
 				// Therefore we are not propagating deletion upwards, but turn it into a modification
-				bph.touchMap[row-1] |= (uint16(1) << col)
+				bph.touchMap[row-1] |= uint16(1) << col
 			} else {
 				// Deletion is propagated upwards
-				bph.touchMap[row-1] |= (uint16(1) << col)
-				bph.afterMap[row-1] &^= (uint16(1) << col)
+				bph.touchMap[row-1] |= uint16(1) << col
+				bph.afterMap[row-1] &^= uint16(1) << col
 			}
 		}
 		upBinaryCell.hl = 0
@@ -1060,7 +1059,7 @@ func (bph *BinPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 				bph.rootTouched = true
 			} else {
 				// Modifiction is propagated upwards
-				bph.touchMap[row-1] |= (uint16(1) << col)
+				bph.touchMap[row-1] |= uint16(1) << col
 			}
 		}
 		nibble := bits.TrailingZeros16(bph.afterMap[row])
@@ -1089,7 +1088,7 @@ func (bph *BinPatriciaHashed) fold() (branchData BranchData, updateKey []byte, e
 				bph.rootTouched = true
 			} else {
 				// Modifiction is propagated upwards
-				bph.touchMap[row-1] |= (uint16(1) << col)
+				bph.touchMap[row-1] |= uint16(1) << col
 			}
 		}
 		bitmap := bph.touchMap[row] & bph.afterMap[row]
@@ -1212,8 +1211,8 @@ func (bph *BinPatriciaHashed) deleteBinaryCell(hashedKey []byte) {
 		cell = &bph.grid[row][col]
 		if bph.afterMap[row]&(uint16(1)<<col) != 0 {
 			// Prevent "spurios deletions", i.e. deletion of absent items
-			bph.touchMap[row] |= (uint16(1) << col)
-			bph.afterMap[row] &^= (uint16(1) << col)
+			bph.touchMap[row] |= uint16(1) << col
+			bph.afterMap[row] &^= uint16(1) << col
 			if bph.trace {
 				fmt.Printf("deleteBinaryCell setting (%d, %x)\n", row, col)
 			}
@@ -1240,8 +1239,8 @@ func (bph *BinPatriciaHashed) updateBinaryCell(plainKey, hashedKey []byte) *Bina
 		depth = bph.depths[row]
 		col = int(hashedKey[bph.currentKeyLen])
 		cell = &bph.grid[row][col]
-		bph.touchMap[row] |= (uint16(1) << col)
-		bph.afterMap[row] |= (uint16(1) << col)
+		bph.touchMap[row] |= uint16(1) << col
+		bph.afterMap[row] |= uint16(1) << col
 		if bph.trace {
 			fmt.Printf("updateBinaryCell setting (%d, %x), depth=%d\n", row, col, depth)
 		}
