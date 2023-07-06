@@ -5,7 +5,6 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"math"
 	"sync"
@@ -187,7 +186,7 @@ func (sd *SharedDomains) clear() {
 func (sd *SharedDomains) put(table kv.Domain, key, val []byte) {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
-	sd.puts(table, hex.EncodeToString(key), val)
+	sd.puts(table, string(key), val)
 }
 
 func (sd *SharedDomains) puts(table kv.Domain, key string, val []byte) {
@@ -232,7 +231,7 @@ func (sd *SharedDomains) Get(table kv.Domain, key []byte) (v []byte, ok bool) {
 
 func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	//keyS := *(*string)(unsafe.Pointer(&key))
-	keyS := hex.EncodeToString(key)
+	keyS := string(key)
 	switch table {
 	case kv.AccountsDomain:
 		v, ok = sd.account[keyS]
@@ -574,7 +573,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 	if iter.Seek(string(prefix)) {
 		kx := iter.Key()
 		v = iter.Value()
-		k, _ = hex.DecodeString(kx)
+		k = []byte(kx)
 
 		if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
 			heap.Push(&cp, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), iter: iter, endTxNum: sd.txNum.Load(), reverse: true})
@@ -628,7 +627,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 			switch ci1.t {
 			case RAM_CURSOR:
 				if ci1.iter.Next() {
-					k, _ = hex.DecodeString(ci1.iter.Key())
+					k = []byte(ci1.iter.Key())
 					if k != nil && bytes.HasPrefix(k, prefix) {
 						ci1.key = common.Copy(k)
 						ci1.val = common.Copy(ci1.iter.Value())
