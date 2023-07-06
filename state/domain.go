@@ -1364,7 +1364,10 @@ func (d *Domain) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) err
 	if limit != math.MaxUint64 && limit != 0 {
 		txTo = txFrom + limit
 	}
-	for ; err == nil && k != nil; k, v, err = domainKeysCursor.Next() {
+	for ; k != nil; k, v, err = domainKeysCursor.Next() {
+		if err != nil {
+			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
+		}
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
 			break
@@ -1377,9 +1380,6 @@ func (d *Domain) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) err
 			return ctx.Err()
 		default:
 		}
-	}
-	if err != nil {
-		return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
 	}
 
 	return d.History.warmup(ctx, txFrom, limit, tx)

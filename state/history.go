@@ -1014,9 +1014,9 @@ func (h *History) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) er
 		txTo = txFrom + limit
 	}
 	keyBuf := make([]byte, 256)
-	for ; err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
+	for ; k != nil; k, v, err = historyKeysCursor.Next() {
 		if err != nil {
-			return err
+			return fmt.Errorf("iterate over %s history keys: %w", h.filenameBase, err)
 		}
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
@@ -1032,10 +1032,6 @@ func (h *History) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) er
 		default:
 		}
 	}
-	if err != nil {
-		return fmt.Errorf("iterate over %s history keys: %w", h.filenameBase, err)
-	}
-
 	return nil
 }
 
