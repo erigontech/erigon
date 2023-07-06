@@ -1448,7 +1448,7 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) ([]byte, bool, error
 			return nil, false, err
 		}
 		if cur == nil {
-			return nil, false, nil
+			continue
 		}
 
 		if bytes.Equal(cur.Key(), filekey) {
