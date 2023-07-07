@@ -3,10 +3,10 @@ package execution_client
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"net/http"
 	"time"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -19,6 +19,14 @@ import (
 )
 
 const DefaultRPCHTTPTimeout = time.Second * 30
+
+const (
+	ValidStatus            = "VALID"
+	InvalidStatus          = "INVALID"
+	SyncingStatus          = "SYNCING"
+	AcceptedStatus         = "ACCEPTED"
+	InvalidBlockHashStatus = "INVALID_BLOCK_HASH"
+)
 
 type ExecutionClientRpc struct {
 	client    *rpc.Client
@@ -49,8 +57,11 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
 		return nil
 	}
 
-	baseFeePerGasBig := new(uint256.Int).SetBytes(payload.BaseFeePerGas[:]).ToBig()
-
+	reversedBaseFeePerGas := libcommon.Copy(payload.BaseFeePerGas[:])
+	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
+		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
+	}
+	baseFee := new(big.Int).SetBytes(reversedBaseFeePerGas)
 	var engineMethod string
 	// determine the engine method
 	switch payload.Version() {
@@ -68,7 +79,7 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
 		ParentHash:   payload.ParentHash,
 		FeeRecipient: payload.FeeRecipient,
 		StateRoot:    payload.StateRoot,
-		ReceiptsRoot: payload.StateRoot,
+		ReceiptsRoot: payload.ReceiptsRoot,
 		LogsBloom:    payload.LogsBloom[:],
 		PrevRandao:   payload.PrevRandao,
 		BlockNumber:  hexutil.Uint64(payload.BlockNumber),
@@ -80,11 +91,11 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
 	}
 
 	request.BaseFeePerGas = new(hexutil.Big)
-	*request.BaseFeePerGas = hexutil.Big(*baseFeePerGasBig)
-
+	*request.BaseFeePerGas = hexutil.Big(*baseFee)
 	payloadBody := payload.Body()
 	// Setup transactionbody
 	request.Withdrawals = payloadBody.Withdrawals
+
 	for _, bytesTransaction := range payloadBody.Transactions {
 		request.Transactions = append(request.Transactions, bytesTransaction)
 	}
@@ -96,9 +107,9 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
 		*request.ExcessDataGas = hexutil.Uint64(payload.ExcessDataGas)
 	}
 
-	payloadStatus := &engine.EnginePayloadStatus{}
+	payloadStatus := make(map[string]interface{}) // As it is done in the rpcdaemon
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
-	err := cc.client.CallContext(cc.ctx, payloadStatus, engineMethod, payload)
+	err := cc.client.CallContext(cc.ctx, &payloadStatus, engineMethod, request)
 	if err != nil {
 		if err.Error() == errContextExceeded {
 			return nil
@@ -109,10 +120,16 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
 	if err != nil {
 		return fmt.Errorf("execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
 	}
-	if payloadStatus.Status == engine.EngineStatus_INVALID {
+	var status string
+	var ok bool
+	if status, ok = payloadStatus["status"].(string); !ok {
+		return fmt.Errorf("invalid response received from NewPayload")
+
+	}
+	if status == InvalidStatus {
 		return fmt.Errorf("invalid block")
 	}
-	if payloadStatus.Status == engine.EngineStatus_INVALID_BLOCK_HASH {
+	if status == InvalidBlockHashStatus {
 		return fmt.Errorf("invalid block hash")
 	}
 	return err
