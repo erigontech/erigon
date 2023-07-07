@@ -119,65 +119,60 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 	//return nil
 	var acc accounts.Account
 
-	if txTask.WriteLists != nil {
-		for table, list := range txTask.WriteLists {
-			switch kv.Domain(table) {
-			case kv.AccountsDomain:
-				for k, key := range list.Keys {
-					kb := []byte(key)
-					prev, err := domains.LatestAccount(kb)
-					if err != nil {
-						return fmt.Errorf("latest account %x: %w", kb, err)
-					}
-					if list.Vals[k] == nil {
-						if Assert {
-							original := txTask.AccountDels[key]
-							var originalBytes []byte
-							if original != nil {
-								originalBytes = accounts.SerialiseV3(original)
-							}
-							if !bytes.Equal(prev, originalBytes) {
-								panic(fmt.Sprintf("different prev value %x, %x, %x, %t, %t\n", kb, prev, originalBytes, prev == nil, originalBytes == nil))
-							}
+	for table, list := range txTask.WriteLists {
+		switch kv.Domain(table) {
+		case kv.AccountsDomain:
+			for i, key := range list.Keys {
+				kb := []byte(key)
+				prev, err := domains.LatestAccount(kb)
+				if err != nil {
+					return fmt.Errorf("latest account %x: %w", kb, err)
+				}
+				if list.Vals[i] == nil {
+					if Assert {
+						original := txTask.AccountDels[key]
+						var originalBytes []byte
+						if original != nil {
+							originalBytes = accounts.SerialiseV3(original)
 						}
+						if !bytes.Equal(prev, originalBytes) {
+							panic(fmt.Sprintf("different prev value %x, %x, %x, %t, %t\n", kb, prev, originalBytes, prev == nil, originalBytes == nil))
+						}
+					}
 
-						if err := domains.DeleteAccount(kb, prev); err != nil {
-							return err
-						}
-						//fmt.Printf("applied %x DELETE\n", kb)
-					} else {
-						if err := domains.UpdateAccountData(kb, list.Vals[k], prev); err != nil {
-							return err
-						}
-						//acc.Reset()
-						//accounts.DeserialiseV3(&acc, list.Vals[k])
-						//fmt.Printf("applied %x b=%d n=%d c=%x\n", kb, &acc.Balance, acc.Nonce, acc.CodeHash)
-					}
-				}
-			case kv.CodeDomain:
-				for k, key := range list.Keys {
-					kb := []byte(key)
-					//fmt.Printf("applied %x c=%x\n", kb, list.Vals[k])
-					if err := domains.UpdateAccountCode(kb, list.Vals[k], nil); err != nil {
+					if err := domains.DeleteAccount(kb, prev); err != nil {
 						return err
 					}
-				}
-			case kv.StorageDomain:
-				for k, key := range list.Keys {
-					hkey := []byte(key)
-					addr, loc := hkey[:20], hkey[20:]
-					prev, err := domains.LatestStorage(hkey)
-					if err != nil {
-						return fmt.Errorf("latest account %x: %w", key, err)
-					}
-					//fmt.Printf("applied %x s=%x\n", hkey, list.Vals[k])
-					if err := domains.WriteAccountStorage(addr, loc, list.Vals[k], prev); err != nil {
+					//fmt.Printf("applied %x DELETE\n", kb)
+				} else {
+					if err := domains.UpdateAccountData(kb, list.Vals[i], prev); err != nil {
 						return err
 					}
+					//acc.Reset()
+					//accounts.DeserialiseV3(&acc, list.Vals[k])
+					//fmt.Printf("applied %x b=%d n=%d c=%x\n", kb, &acc.Balance, acc.Nonce, acc.CodeHash)
 				}
-			default:
-				continue
 			}
+		case kv.CodeDomain:
+			for i, key := range list.Keys {
+				if err := domains.UpdateAccountCode([]byte(key), list.Vals[i], nil); err != nil {
+					return err
+				}
+			}
+		case kv.StorageDomain:
+			for k, key := range list.Keys {
+				hkey := []byte(key)
+				prev, err := domains.LatestStorage(hkey)
+				if err != nil {
+					return fmt.Errorf("latest account %x: %w", key, err)
+				}
+				//fmt.Printf("applied %x s=%x\n", hkey, list.Vals[k])
+				if err := domains.WriteAccountStorage(hkey, list.Vals[k], prev); err != nil {
+					return err
+				}
+			}
+		default:
+			continue
 		}
 	}
 

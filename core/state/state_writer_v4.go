@@ -41,7 +41,7 @@ func (w *WriterV4) DeleteAccount(address libcommon.Address, original *accounts.A
 
 func (w *WriterV4) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	w.domains.SetTx(w.tx.(kv.RwTx))
-	return w.domains.WriteAccountStorage(address.Bytes(), key.Bytes(), value.Bytes(), original.Bytes())
+	return w.domains.WriteAccountStorage(append(address.Bytes(), key.Bytes()...), value.Bytes(), original.Bytes())
 }
 
 func (w *WriterV4) CreateContract(address libcommon.Address) (err error) {
@@ -50,7 +50,7 @@ func (w *WriterV4) CreateContract(address libcommon.Address) (err error) {
 		if err != nil {
 			return
 		}
-		err = w.domains.WriteAccountStorage(k, nil, nil, v)
+		err = w.domains.WriteAccountStorage(k, nil, v)
 	})
 	if err != nil {
 		return err
