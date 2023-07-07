@@ -413,6 +413,7 @@ func (a *btAlloc) traverseDfs() {
 var cnt = [20]int{}
 
 func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err error) {
+	fmt.Printf("bsKey \n")
 	i := 0
 	for l <= r {
 		di = (l + r) >> 1
@@ -444,6 +445,8 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err erro
 		log.Warn("bsKey", "dataLookups", fmt.Sprintf("%d", cnt))
 	}
 	k, v, err = a.dataLookup(k[:0], v[:0], l)
+	fmt.Printf("bsKey end\n")
+	panic(1)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil, 0, nil
@@ -1051,6 +1054,7 @@ func (b *BtIndex) dataLookup(kBuf, vBuf []byte, di uint64) ([]byte, []byte, erro
 	copy(dst, b.data[p:p+b.bytesPerRec])
 
 	offset := binary.BigEndian.Uint64(aux[:])
+	fmt.Printf("offset: %d\n", offset)
 	b.getter.Reset(offset)
 	if !b.getter.HasNext() {
 		return nil, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
