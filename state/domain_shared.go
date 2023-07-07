@@ -339,14 +339,15 @@ func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 	return true
 }
 
-func (sd *SharedDomains) LatestStorage(addr, loc []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.StorageDomain, common.Append(addr, loc))
+func (sd *SharedDomains) LatestStorage(addrLoc []byte) ([]byte, error) {
+	//a := make([]byte, 0, len(addr)+len(loc))
+	v0, ok := sd.Get(kv.StorageDomain, addrLoc)
 	if ok {
 		return v0, nil
 	}
-	v, _, err := sd.aggCtx.GetLatest(kv.StorageDomain, addr, loc, sd.roTx)
+	v, _, err := sd.aggCtx.GetLatest(kv.StorageDomain, addrLoc, nil, sd.roTx)
 	if err != nil {
-		return nil, fmt.Errorf("storage %x|%x read error: %w", addr, loc, err)
+		return nil, fmt.Errorf("storage %x read error: %w", addrLoc, err)
 	}
 	return v, nil
 }
@@ -399,8 +400,8 @@ func (sd *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error
 
 func (sd *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error {
 	// Look in the summary table first
-	addr, loc := splitKey(plainKey)
-	enc, err := sd.LatestStorage(addr, loc)
+	//addr, loc := splitKey(plainKey)
+	enc, err := sd.LatestStorage(plainKey)
 	if err != nil {
 		return err
 	}
