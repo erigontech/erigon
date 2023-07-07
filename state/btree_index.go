@@ -440,7 +440,7 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err erro
 		}
 	}
 	cnt[i]++
-	if cnt[11]%10 == 0 {
+	if cnt[11]%1000 == 0 {
 		log.Warn("bsKey", "dataLookups", fmt.Sprintf("%d", cnt))
 	}
 	k, v, err = a.dataLookup(k[:0], v[:0], l)
