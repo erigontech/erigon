@@ -13,15 +13,16 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
@@ -112,23 +113,23 @@ type EngineAPI interface {
 type EngineImpl struct {
 	*BaseAPI
 	db         kv.RoDB
-	api        rpchelper.ApiBackend
+	api        rpchelper.EngineBackend
 	internalCL bool
 }
 
-func convertPayloadStatus(ctx context.Context, db kv.RoDB, x *remote.EnginePayloadStatus) (map[string]interface{}, error) {
+func convertPayloadStatus(ctx context.Context, db kv.RoDB, x *engine.EnginePayloadStatus) (map[string]interface{}, error) {
 	json := map[string]interface{}{
 		"status": x.Status.String(),
 	}
 	if x.ValidationError != "" {
 		json["validationError"] = x.ValidationError
 	}
-	if x.LatestValidHash == nil || (x.Status != remote.EngineStatus_VALID && x.Status != remote.EngineStatus_INVALID) {
+	if x.LatestValidHash == nil || (x.Status != engine.EngineStatus_VALID && x.Status != engine.EngineStatus_INVALID) {
 		return json, nil
 	}
 
 	latestValidHash := common.Hash(gointerfaces.ConvertH256ToHash(x.LatestValidHash))
-	if latestValidHash == (common.Hash{}) || x.Status == remote.EngineStatus_VALID {
+	if latestValidHash == (common.Hash{}) || x.Status == engine.EngineStatus_VALID {
 		json["latestValidHash"] = latestValidHash
 		return json, nil
 	}
@@ -199,9 +200,9 @@ func (e *EngineImpl) forkchoiceUpdated(version uint32, ctx context.Context, fork
 			"withdrawals", withdrawalValues(payloadAttributes.Withdrawals))
 	}
 
-	var attributes *remote.EnginePayloadAttributes
+	var attributes *engine.EnginePayloadAttributes
 	if payloadAttributes != nil {
-		attributes = &remote.EnginePayloadAttributes{
+		attributes = &engine.EnginePayloadAttributes{
 			Version:               1,
 			Timestamp:             uint64(payloadAttributes.Timestamp),
 			PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
@@ -209,11 +210,11 @@ func (e *EngineImpl) forkchoiceUpdated(version uint32, ctx context.Context, fork
 		}
 		if version >= 2 && payloadAttributes.Withdrawals != nil {
 			attributes.Version = 2
-			attributes.Withdrawals = privateapi.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
+			attributes.Withdrawals = engineapi.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
 		}
 	}
-	reply, err := e.api.EngineForkchoiceUpdated(ctx, &remote.EngineForkChoiceUpdatedRequest{
-		ForkchoiceState: &remote.EngineForkChoiceState{
+	reply, err := e.api.EngineForkchoiceUpdated(ctx, &engine.EngineForkChoiceUpdatedRequest{
+		ForkchoiceState: &engine.EngineForkChoiceState{
 			HeadBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.HeadHash),
 			SafeBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.SafeBlockHash),
 			FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkChoiceState.FinalizedBlockHash),
@@ -291,7 +292,7 @@ func (e *EngineImpl) newPayload(version uint32, ctx context.Context, payload *Ex
 	}
 	if version >= 2 && payload.Withdrawals != nil {
 		ep.Version = 2
-		ep.Withdrawals = privateapi.ConvertWithdrawalsToRpc(payload.Withdrawals)
+		ep.Withdrawals = engineapi.ConvertWithdrawalsToRpc(payload.Withdrawals)
 	}
 	if version >= 3 && payload.DataGasUsed != nil && payload.ExcessDataGas != nil {
 		ep.Version = 3
@@ -336,7 +337,7 @@ func convertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 		Transactions:  transactions,
 	}
 	if payload.Version >= 2 {
-		res.Withdrawals = privateapi.ConvertWithdrawalsFromRpc(payload.Withdrawals)
+		res.Withdrawals = engineapi.ConvertWithdrawalsFromRpc(payload.Withdrawals)
 	}
 	if payload.Version >= 3 {
 		dataGasUsed := *payload.DataGasUsed
@@ -466,7 +467,7 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 
 func (e *EngineImpl) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*ExecutionPayloadBodyV1, error) {
 	if len(hashes) > 1024 {
-		return nil, &privateapi.TooLargeRequestErr
+		return nil, &engine_helpers.TooLargeRequestErr
 	}
 
 	h := make([]*types2.H256, len(hashes))
@@ -474,7 +475,7 @@ func (e *EngineImpl) GetPayloadBodiesByHashV1(ctx context.Context, hashes []comm
 		h[i] = gointerfaces.ConvertHashToH256(hash)
 	}
 
-	apiRes, err := e.api.EngineGetPayloadBodiesByHashV1(ctx, &remote.EngineGetPayloadBodiesByHashV1Request{Hashes: h})
+	apiRes, err := e.api.EngineGetPayloadBodiesByHashV1(ctx, &engine.EngineGetPayloadBodiesByHashV1Request{Hashes: h})
 	if err != nil {
 		return nil, err
 	}
@@ -487,10 +488,10 @@ func (e *EngineImpl) GetPayloadBodiesByRangeV1(ctx context.Context, start, count
 		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
 	}
 	if count > 1024 {
-		return nil, &privateapi.TooLargeRequestErr
+		return nil, &engine_helpers.TooLargeRequestErr
 	}
 
-	apiRes, err := e.api.EngineGetPayloadBodiesByRangeV1(ctx, &remote.EngineGetPayloadBodiesByRangeV1Request{Start: uint64(start), Count: uint64(count)})
+	apiRes, err := e.api.EngineGetPayloadBodiesByRangeV1(ctx, &engine.EngineGetPayloadBodiesByRangeV1Request{Start: uint64(start), Count: uint64(count)})
 	if err != nil {
 		return nil, err
 	}
@@ -541,7 +542,7 @@ func compareCapabilities(from []string, to []string) []string {
 	return result
 }
 
-func convertExecutionPayloadV1(response *remote.EngineGetPayloadBodiesV1Response) []*ExecutionPayloadBodyV1 {
+func convertExecutionPayloadV1(response *engine.EngineGetPayloadBodiesV1Response) []*ExecutionPayloadBodyV1 {
 	result := make([]*ExecutionPayloadBodyV1, len(response.Bodies))
 	for idx, body := range response.Bodies {
 		if body == nil {
@@ -549,7 +550,7 @@ func convertExecutionPayloadV1(response *remote.EngineGetPayloadBodiesV1Response
 		} else {
 			pl := &ExecutionPayloadBodyV1{
 				Transactions: make([]hexutility.Bytes, len(body.Transactions)),
-				Withdrawals:  privateapi.ConvertWithdrawalsFromRpc(body.Withdrawals),
+				Withdrawals:  engineapi.ConvertWithdrawalsFromRpc(body.Withdrawals),
 			}
 			for i := range body.Transactions {
 				pl.Transactions[i] = body.Transactions[i]
@@ -562,7 +563,7 @@ func convertExecutionPayloadV1(response *remote.EngineGetPayloadBodiesV1Response
 }
 
 // NewEngineAPI returns EngineImpl instance
-func NewEngineAPI(base *BaseAPI, db kv.RoDB, api rpchelper.ApiBackend, internalCL bool) *EngineImpl {
+func NewEngineAPI(base *BaseAPI, db kv.RoDB, api rpchelper.EngineBackend, internalCL bool) *EngineImpl {
 	return &EngineImpl{
 		BaseAPI:    base,
 		db:         db,

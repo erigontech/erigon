@@ -32,7 +32,10 @@ integration stage_history --unwind=N
 # Run stage prune to block N
 integration stage_exec --prune.to=N     
 integration stage_history --prune.to=N
-... 
+
+# Exec blocks, but don't commit changes (loose them)
+integration stage_exec --no-commit
+...
 
 # Run tx replay with domains [requires 6th stage to be done before run]
 integration state_domains --chain goerli --last-step=4 # stop replay when 4th step is merged
@@ -73,4 +76,15 @@ make all
 ./build/bin/integration stage_hash_state --datadir=<datadir> --reset
 ./build/bin/integration stage_trie --datadir=<datadir> --reset
 # Then run TurobGeth as usually. It will take 2-3 hours to re-calculate dropped db tables
+```
+
+## Copy data to another db
+
+```
+1. Stop Erigon
+2. Create new db, by starting erigon in new directory: with option --datadir /path/to/copy-to/
+(set new --db.pagesize option if need)
+3. Stop Erigon again after about 1 minute (Steps 2 and 3 create a new empty db in /path/to/copy-to/chaindata )
+4. Build integration: cd erigon; make integration
+5. Run: ./build/bin/integration mdbx_to_mdbx --chaindata /existing/erigon/path/chaindata/ --chaindata.to /path/to/copy-to/chaindata/
 ```

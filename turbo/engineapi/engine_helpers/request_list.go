@@ -1,4 +1,4 @@
-package engineapi
+package engine_helpers
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"github.com/emirpasic/gods/maps/treemap"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -17,7 +17,7 @@ import (
 // Hash: Block hash
 // Status: block's status
 type PayloadStatus struct {
-	Status          remote.EngineStatus
+	Status          engine.EngineStatus
 	LatestValidHash libcommon.Hash
 	ValidationError error
 	CriticalError   error

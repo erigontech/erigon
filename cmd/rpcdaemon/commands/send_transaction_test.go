@@ -79,7 +79,7 @@ func TestSendRawTransaction(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := rpchelper.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {}, m.Log)
-	api := commands.NewEthAPI(newBaseApiForTest(m), m.DB, nil, txPool, nil, 5000000, 100_000, logger)
+	api := commands.NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, txPool, nil, 5000000, 100_000, logger)
 
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
