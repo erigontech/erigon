@@ -162,12 +162,13 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 		case kv.StorageDomain:
 			for k, key := range list.Keys {
 				hkey := []byte(key)
+				addr, loc := hkey[:20], hkey[20:]
 				prev, err := domains.LatestStorage(hkey)
 				if err != nil {
 					return fmt.Errorf("latest account %x: %w", key, err)
 				}
 				//fmt.Printf("applied %x s=%x\n", hkey, list.Vals[k])
-				if err := domains.WriteAccountStorage(hkey, list.Vals[k], prev); err != nil {
+				if err := domains.WriteAccountStorage(addr, loc, list.Vals[k], prev); err != nil {
 					return err
 				}
 			}
