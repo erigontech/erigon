@@ -131,7 +131,7 @@ func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
 				return true
 			}
 			//t.TouchPlainKey(common.FromHex(key), nil, t.TouchStorage)
-			t.tree.Delete(&commitmentItem{plainKey: common.FromHex(key), hashedKey: t.hashAndNibblizeKey(common.FromHex(key))})
+			t.tree.Delete(&commitmentItem{plainKey: []byte(key), hashedKey: t.hashAndNibblizeKey([]byte(key))})
 			t.plainKeys.Delete(key) // we already marked those keys as deleted
 			return true
 		})
