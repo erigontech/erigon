@@ -458,7 +458,7 @@ func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) 
 		m = (l + r) >> 1
 
 		a.naccess++
-		cmp := bytes.Compare(n.key, x)
+		cmp := bytes.Compare(a.nodes[i][m].key, x)
 		switch {
 		case cmp == 0:
 			return a.nodes[i][m], int64(m), int64(m)
