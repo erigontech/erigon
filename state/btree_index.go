@@ -111,6 +111,7 @@ type btAlloc struct {
 	trace   bool
 
 	dataLookup func(kBuf, vBuf []byte, di uint64) ([]byte, []byte, error)
+	keyCmp     func(k, kBuf []byte, di uint64) (int, error)
 }
 
 func newBtAlloc(k, M uint64, trace bool) *btAlloc {
@@ -415,11 +416,12 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err erro
 	for l <= r {
 		di = (l + r) >> 1
 
-		k, v, err = a.dataLookup(k[:0], v[:0], di)
+		cmp, err := a.keyCmp(k[:0], x, di)
+		//k, v, err = a.dataLookup(k[:0], v[:0], di)
 		a.naccess++
 
 		//i++
-		cmp := bytes.Compare(k, x)
+		//cmp := bytes.Compare(k, x)
 		switch {
 		case err != nil:
 			if errors.Is(err, ErrBtIndexLookupBounds) {
@@ -427,7 +429,11 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err erro
 			}
 			return nil, nil, 0, err
 		case cmp == 0:
-			return k, v, di, nil
+			k, v, err = a.dataLookup(k[:0], v[:0], di)
+			if errors.Is(err, ErrBtIndexLookupBounds) {
+				return nil, nil, 0, nil
+			}
+			return k, v, di, err
 		case cmp == -1:
 			l = di + 1
 		default:
@@ -969,6 +975,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 	idx.alloc = newBtAlloc(idx.keyCount, M, false)
 	if idx.alloc != nil {
 		idx.alloc.dataLookup = idx.dataLookup
+		idx.alloc.keyCmp = idx.keyCmp
 		idx.alloc.traverseDfs()
 		idx.alloc.fillSearchMx()
 	}
@@ -1024,6 +1031,7 @@ func OpenBtreeIndex(indexPath, dataPath string, M uint64) (*BtIndex, error) {
 	idx.alloc = newBtAlloc(idx.keyCount, M, false)
 	if idx.alloc != nil {
 		idx.alloc.dataLookup = idx.dataLookup
+		idx.alloc.keyCmp = idx.keyCmp
 		idx.alloc.traverseDfs()
 		idx.alloc.fillSearchMx()
 	}
@@ -1061,6 +1069,30 @@ func (b *BtIndex) dataLookup(kBuf, vBuf []byte, di uint64) ([]byte, []byte, erro
 	val, vp := b.getter.Next(vBuf[:0])
 	_, _ = kp, vp
 	return key, val, nil
+}
+
+func (b *BtIndex) keyCmp(kBuf, k []byte, di uint64) (int, error) {
+	if di >= b.keyCount {
+		return 0, fmt.Errorf("%w: keyCount=%d, item %d requested. file: %s", ErrBtIndexLookupBounds, b.keyCount, di+1, b.FileName())
+	}
+	p := int(b.dataoffset) + int(di)*b.bytesPerRec
+	if len(b.data) < p+b.bytesPerRec {
+		return 0, fmt.Errorf("data lookup gone too far (%d after %d). keyCount=%d, requesed item %d. file: %s", p+b.bytesPerRec-len(b.data), len(b.data), b.keyCount, di, b.FileName())
+	}
+
+	var aux [8]byte
+	dst := aux[8-b.bytesPerRec:]
+	copy(dst, b.data[p:p+b.bytesPerRec])
+
+	offset := binary.BigEndian.Uint64(aux[:])
+	b.getter.Reset(offset)
+	if !b.getter.HasNext() {
+		return 0, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
+	}
+
+	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
+	kBuf, _ = b.getter.Next(kBuf[:0])
+	return bytes.Compare(kBuf, k), nil
 }
 
 func (b *BtIndex) Size() int64 { return b.size }
