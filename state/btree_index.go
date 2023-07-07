@@ -39,17 +39,19 @@ func min64(a, b uint64) uint64 {
 }
 
 type markupCursor struct {
-	l, p, di, si uint64
-	//l - level
-	//p - pos inside level
-	//si - current, actual son index
-	//di - data array index
+	l  uint64 //l - level
+	p  uint64 //p - pos inside level
+	di uint64 //di - data array index
+	si uint64 //si - current, actual son index
 }
 
 type node struct {
-	p, d, s, fc uint64
-	key         []byte
-	val         []byte
+	p   uint64 // pos inside level
+	d   uint64
+	s   uint64 // sons pos inside level
+	fc  uint64
+	key []byte
+	val []byte
 }
 
 type Cursor struct {
@@ -449,7 +451,7 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err erro
 }
 
 func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) {
-	n, lm, rm = node{}, -1, -1
+	lm, rm = -1, -1
 
 	for l < r {
 		m := (l + r) >> 1
@@ -533,16 +535,6 @@ func (a *btAlloc) seek(ik []byte) (k, v []byte, di uint64, err error) {
 			return common.Copy(ln.key), common.Copy(ln.val), ln.d, nil
 		}
 
-		if rm-lm >= 1 {
-			if lm >= 0 {
-				minD = a.nodes[l][lm].d
-			}
-			if rm >= 0 {
-				maxD = a.nodes[l][rm].d
-			}
-			break
-		}
-
 		if lm >= 0 {
 			minD = a.nodes[l][lm].d
 			L = level[lm].fc
@@ -562,15 +554,19 @@ func (a *btAlloc) seek(ik []byte) (k, v []byte, di uint64, err error) {
 			}
 		}
 
+		if maxD-minD <= a.M+2 {
+			break
+		}
+
 		if a.trace {
 			fmt.Printf("range={%x d=%d p=%d} (%d, %d) L=%d naccess_ram=%d\n", ln.key, ln.d, ln.p, minD, maxD, l, a.naccess)
 		}
 	}
 
 	a.naccess = 0 // reset count before actually go to disk
-	//if maxD-minD > 3_000 {
-	//	log.Warn("too big binary search", "minD", minD, "maxD", maxD, "keysCount", a.K)
-	//}
+	if maxD-minD > a.M+2 {
+		return nil, nil, 0, fmt.Errorf("too big binary search: minD=%d, maxD=%d, keysCount=%d, key=%x", minD, maxD, a.K, ik)
+	}
 	k, v, di, err = a.bsKey(ik, minD, maxD)
 	if err != nil {
 		if a.trace {
