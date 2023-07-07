@@ -1071,6 +1071,7 @@ func (b *BtIndex) dataLookup(kBuf, vBuf []byte, di uint64) ([]byte, []byte, erro
 	return key, val, nil
 }
 
+// comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
 func (b *BtIndex) keyCmp(kBuf, k []byte, di uint64) (int, error) {
 	if di >= b.keyCount {
 		return 0, fmt.Errorf("%w: keyCount=%d, item %d requested. file: %s", ErrBtIndexLookupBounds, b.keyCount, di+1, b.FileName())
