@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -94,6 +95,20 @@ var snapshotCommand = cli.Command{
 			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}, debug.Flags, logging.Flags),
 		},
 		{
+			Name:   "bt_search",
+			Action: doBtSearch,
+			Flags: joinFlags([]cli.Flag{
+				&cli.PathFlag{
+					Name:     "src",
+					Required: true,
+				},
+				&cli.StringFlag{
+					Name:     "key",
+					Required: true,
+				},
+			}, debug.Flags, logging.Flags),
+		},
+		{
 			Name:   "diff",
 			Action: doDiff,
 			Flags: joinFlags([]cli.Flag{
@@ -142,6 +157,27 @@ func preloadFileAsync(name string) {
 		ff, _ := os.Open(name)
 		_, _ = io.CopyBuffer(io.Discard, bufio.NewReaderSize(ff, 64*1024*1024), make([]byte, 64*1024*1024))
 	}()
+}
+
+func doBtSearch(cliCtx *cli.Context) error {
+	srcF := cliCtx.String("src")
+	idx, err := libstate.OpenBtreeIndex(srcF, strings.TrimRight(srcF, ".bt")+".kv", libstate.DefaultBtreeM)
+	if err != nil {
+		return err
+	}
+	defer idx.Close()
+	seek := common.FromHex(cliCtx.String("key"))
+
+	cur, err := idx.Seek(seek)
+	if err != nil {
+		return err
+	}
+	if cur != nil {
+		fmt.Printf("seek: %x, -> %x, %x\n", seek, cur.Key(), cur.Value())
+	} else {
+		fmt.Printf("seek: %x, -> nil\n", seek)
+	}
+	return nil
 }
 
 func doDiff(cliCtx *cli.Context) error {
