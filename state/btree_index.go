@@ -452,16 +452,16 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err erro
 
 func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) {
 	lm, rm = -1, -1
+	var m uint64
 
 	for l < r {
-		m := (l + r) >> 1
+		m = (l + r) >> 1
 
-		n = a.nodes[i][m]
 		a.naccess++
 		cmp := bytes.Compare(n.key, x)
 		switch {
 		case cmp == 0:
-			return n, int64(m), int64(m)
+			return a.nodes[i][m], int64(m), int64(m)
 		case cmp > 0:
 			r = m
 			rm = int64(m)
@@ -472,7 +472,7 @@ func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) 
 			panic(fmt.Errorf("compare error %d, %x ? %x", cmp, n.key, x))
 		}
 	}
-	return n, lm, rm
+	return a.nodes[i][m], lm, rm
 }
 
 // find position of key with node.di <= d at level lvl
