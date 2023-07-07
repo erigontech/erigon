@@ -151,5 +151,5 @@ func ObtainJwtSecret(ctx *cli.Context) ([]byte, error) {
 		return jwtSecret, nil
 	}
 
-	return nil, errors.New(fmt.Sprintf("Invalid JWT secret", "path", path, "length", len(jwtSecret)))
+	return nil, fmt.Errorf("Invalid JWT secret at %s, invalid size", path)
 }

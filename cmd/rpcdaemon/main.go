@@ -24,7 +24,7 @@ func main() {
 			logger.Error("Setting up", "error", err)
 			return err
 		}
-		db, borDb, backend, txPool, mining, stateCache, blockReader, ff, agg, err := cli.RemoteServices(ctx, *cfg, logger, rootCancel)
+		db, borDb, backend, engineBackend, txPool, mining, stateCache, blockReader, ff, agg, err := cli.RemoteServices(ctx, *cfg, logger, rootCancel)
 		if err != nil {
 			logger.Error("Could not connect to DB", "err", err)
 			return nil
@@ -36,7 +36,7 @@ func main() {
 
 		// TODO: Replace with correct consensus Engine
 		engine := ethash.NewFaker()
-		apiList := commands.APIList(db, borDb, backend, txPool, mining, ff, stateCache, blockReader, agg, *cfg, engine, logger)
+		apiList := commands.APIList(db, borDb, backend, engineBackend, txPool, mining, ff, stateCache, blockReader, agg, *cfg, engine, logger)
 		if err := cli.StartRpcServer(ctx, *cfg, apiList, nil, logger); err != nil {
 			logger.Error(err.Error())
 			return nil

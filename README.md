@@ -111,7 +111,7 @@ Running `make help` will list and describe the convenience commands available in
 ### Datadir structure
 
 - chaindata: recent blocks, state, recent state history. low-latency disk recommended.
-- snapshots: old blocks, old state history. can symlink/mount it to cheaper disk. mostly immutable.
+- snapshots: old blocks, old state history. can symlink/mount it to cheaper disk. mostly immutable. must have ~100gb free space (for merge recent files to bigger one).
 - temp: can grow to ~100gb, but usually empty. can symlink/mount it to cheaper disk.
 - txpool: pending transactions. safe to remove.
 - nodes:  p2p peers. safe to remove.

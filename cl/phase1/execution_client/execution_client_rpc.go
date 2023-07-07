@@ -8,7 +8,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
@@ -91,7 +91,7 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
 	// 	execPayload.DataGasUsed = &payload.DataGasUsed
 	// }
 
-	payloadStatus := &remote.EnginePayloadStatus{}
+	payloadStatus := &engine.EnginePayloadStatus{}
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
 	err := cc.client.CallContext(ctx, payloadStatus, engineMethod, payload)
 	if err != nil {
@@ -104,10 +104,10 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
 	if err != nil {
 		return fmt.Errorf("Execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
 	}
-	if payloadStatus.Status == remote.EngineStatus_INVALID {
+	if payloadStatus.Status == engine.EngineStatus_INVALID {
 		return fmt.Errorf("invalid block")
 	}
-	if payloadStatus.Status == remote.EngineStatus_INVALID_BLOCK_HASH {
+	if payloadStatus.Status == engine.EngineStatus_INVALID_BLOCK_HASH {
 		return fmt.Errorf("invalid block hash")
 	}
 	return err
@@ -117,14 +117,14 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(finalized libcommon.Hash, head li
 	ctx, cancel := context.WithTimeout(cc.context, 8*time.Second)
 	defer cancel()
 
-	forkChoiceRequest := &remote.EngineForkChoiceUpdatedRequest{
-		ForkchoiceState: &remote.EngineForkChoiceState{
+	forkChoiceRequest := &engine.EngineForkChoiceUpdatedRequest{
+		ForkchoiceState: &engine.EngineForkChoiceState{
 			HeadBlockHash:      gointerfaces.ConvertHashToH256(head),
 			SafeBlockHash:      gointerfaces.ConvertHashToH256(head),
 			FinalizedBlockHash: gointerfaces.ConvertHashToH256(finalized),
 		},
 	}
-	forkChoiceResp := &remote.EngineForkChoiceUpdatedResponse{}
+	forkChoiceResp := &engine.EngineForkChoiceUpdatedResponse{}
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
 
 	err := cc.client.CallContext(ctx, forkChoiceResp, rpc_helper.ForkChoiceUpdatedV1, forkChoiceRequest)

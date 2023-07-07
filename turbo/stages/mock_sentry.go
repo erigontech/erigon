@@ -50,7 +50,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -340,7 +340,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		}
 		return nil
 	}
-	forkValidator := engineapi.NewForkValidator(1, inMemoryExecution, dirs.Tmp, mock.BlockReader)
+	forkValidator := engine_helpers.NewForkValidator(1, inMemoryExecution, dirs.Tmp, mock.BlockReader)
 	networkID := uint64(1)
 	mock.sentriesClient, err = sentry.NewMultiClient(
 		mock.DB,
@@ -373,7 +373,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx,
 			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs, blockRetire, snapshotsDownloader, mock.BlockReader, mock.Notifications.Events, mock.HistoryV3, mock.agg),
-			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, mock.BlockReader, blockWriter, dirs.Tmp, mock.Notifications, engineapi.NewForkValidatorMock(1)),
+			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, mock.BlockReader, blockWriter, dirs.Tmp, mock.Notifications, engine_helpers.NewForkValidatorMock(1)),
 			stagedsync.StageCumulativeIndexCfg(mock.DB, mock.BlockReader),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig, blockWriter),
 			stagedsync.StageBodiesCfg(mock.DB, mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, *mock.ChainConfig, mock.BlockReader, cfg.HistoryV3, blockWriter),
@@ -618,7 +618,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 	SendPayloadStatus(ms.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	ms.ReceivePayloadStatus()
 
-	fc := engineapi.ForkChoiceMessage{
+	fc := engine_helpers.ForkChoiceMessage{
 		HeadBlockHash:      chain.TopBlock.Hash(),
 		SafeBlockHash:      chain.TopBlock.Hash(),
 		FinalizedBlockHash: chain.TopBlock.Hash(),
@@ -694,11 +694,11 @@ func (ms *MockSentry) SendPayloadRequest(message *types.Block) {
 	ms.sentriesClient.Hd.BeaconRequestList.AddPayloadRequest(message)
 }
 
-func (ms *MockSentry) SendForkChoiceRequest(message *engineapi.ForkChoiceMessage) {
+func (ms *MockSentry) SendForkChoiceRequest(message *engine_helpers.ForkChoiceMessage) {
 	ms.sentriesClient.Hd.BeaconRequestList.AddForkChoiceRequest(message)
 }
 
-func (ms *MockSentry) ReceivePayloadStatus() engineapi.PayloadStatus {
+func (ms *MockSentry) ReceivePayloadStatus() engine_helpers.PayloadStatus {
 	return <-ms.sentriesClient.Hd.PayloadStatusCh
 }
 

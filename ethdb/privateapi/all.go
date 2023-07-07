@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/log/v3"
@@ -15,7 +17,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
-func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txPoolServer txpool_proto.TxpoolServer,
+func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, engineBackendSrv engine.EngineServer, txPoolServer txpool_proto.TxpoolServer,
 	miningServer txpool_proto.MiningServer, addr string, rateLimit uint32, creds credentials.TransportCredentials,
 	healthCheck bool, logger log.Logger) (*grpc.Server, error) {
 	logger.Info("Starting private RPC server", "on", addr)
@@ -31,6 +33,9 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 	}
 	if miningServer != nil {
 		txpool_proto.RegisterMiningServer(grpcServer, miningServer)
+	}
+	if engineBackendSrv != nil {
+		engine.RegisterEngineServer(grpcServer, engineBackendSrv)
 	}
 	remote.RegisterKVServer(grpcServer, kv)
 	var healthServer *health.Server

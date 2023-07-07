@@ -11,7 +11,7 @@
    limitations under the License.
 */
 
-package engineapi
+package engine_helpers
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"sync"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -143,18 +143,18 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 // if the payload extend the canonical chain, then we stack it in extendingFork without any unwind.
 // if the payload is a fork then we unwind to the point where the fork meet the canonical chain and we check if it is valid or not from there.
 // if for any reasons none of the action above can be performed due to lack of information, we accept the payload and avoid validation.
-func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, extendCanonical bool) (status remote.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
+func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, extendCanonical bool) (status engine.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.validatePayload == nil {
-		status = remote.EngineStatus_ACCEPTED
+		status = engine.EngineStatus_ACCEPTED
 		return
 	}
 	defer fv.clean()
 
 	// If the block is stored within the side fork it means it was already validated.
 	if _, ok := fv.sideForksBlock[header.Hash()]; ok {
-		status = remote.EngineStatus_VALID
+		status = engine.EngineStatus_VALID
 		latestValidHash = header.Hash()
 		return
 	}
@@ -177,7 +177,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 
 	// if the block is not in range of maxForkDepth from head then we do not validate it.
 	if math.AbsoluteDifference(fv.currentHeight, header.Number.Uint64()) > maxForkDepth {
-		status = remote.EngineStatus_ACCEPTED
+		status = engine.EngineStatus_ACCEPTED
 		return
 	}
 	// Let's assemble the side fork backwards
@@ -196,7 +196,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		var ok bool
 		if sb, ok = fv.sideForksBlock[currentHash]; !ok {
 			// We miss some components so we did not check validity.
-			status = remote.EngineStatus_ACCEPTED
+			status = engine.EngineStatus_ACCEPTED
 			return
 		}
 		headersChain = append([]*types.Header{sb.Header}, headersChain...)
@@ -208,7 +208,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}
 		// MakesBodyCanonical do not support PoS.
 		if has {
-			status = remote.EngineStatus_ACCEPTED
+			status = engine.EngineStatus_ACCEPTED
 			return
 		}
 		currentHash = sb.Header.ParentHash
@@ -270,12 +270,12 @@ func (fv *ForkValidator) ClearWithUnwind(tx kv.RwTx, accumulator *shards.Accumul
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
 func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
-	notifications *shards.Notifications) (status remote.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
+	notifications *shards.Notifications) (status engine.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
 	validationError = fv.validatePayload(tx, header, body, unwindPoint, headersChain, bodiesChain, notifications)
 	latestValidHash = header.Hash()
 	if validationError != nil {
 		latestValidHash = header.ParentHash
-		status = remote.EngineStatus_INVALID
+		status = engine.EngineStatus_INVALID
 		if fv.extendingFork != nil {
 			fv.extendingFork.Rollback()
 			fv.extendingFork = nil
@@ -298,7 +298,7 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 	} else {
 		fv.sideForksBlock[header.Hash()] = types.RawBlock{Header: header, Body: body}
 	}
-	status = remote.EngineStatus_VALID
+	status = engine.EngineStatus_VALID
 	return
 }
 
