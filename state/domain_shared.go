@@ -478,13 +478,15 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	return nil
 }
 
-func (sd *SharedDomains) WriteAccountStorage(addrLoc []byte, value, preVal []byte) error {
-	sd.Commitment.TouchPlainKey(addrLoc, value, sd.Commitment.TouchStorage)
-	sd.put(kv.StorageDomain, addrLoc, value)
+func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value, preVal []byte) error {
+	composite := common.Append(addr, loc)
+
+	sd.Commitment.TouchPlainKey(composite, value, sd.Commitment.TouchStorage)
+	sd.put(kv.StorageDomain, composite, value)
 	if len(value) == 0 {
-		return sd.Storage.DeleteWithPrev(addrLoc, nil, preVal)
+		return sd.Storage.DeleteWithPrev(addr, loc, preVal)
 	}
-	return sd.Storage.PutWithPrev(addrLoc, nil, value, preVal)
+	return sd.Storage.PutWithPrev(addr, loc, value, preVal)
 }
 
 func (sd *SharedDomains) SetContext(ctx *AggregatorV3Context) {

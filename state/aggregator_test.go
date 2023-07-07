@@ -85,8 +85,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		err = domains.UpdateAccountData(addr, buf, nil)
 		require.NoError(t, err)
 
-		addrLoc := common.Append(addr, loc)
-		err = domains.WriteAccountStorage(addrLoc, []byte{addr[0], loc[0]}, nil)
+		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, nil)
 		require.NoError(t, err)
 
 		var v [8]byte
@@ -190,8 +189,7 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 		err = domains.UpdateAccountData(addr, buf, nil)
 		require.NoError(t, err)
 
-		addrLoc := common.Append(addr, loc)
-		err = domains.WriteAccountStorage(addrLoc, []byte{addr[0], loc[0]}, nil)
+		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, nil)
 		require.NoError(t, err)
 
 		err = domains.UpdateCommitmentData(someKey, aux[:], nil)
@@ -309,8 +307,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		err = domains.UpdateAccountData(addr, buf[:], nil)
 		require.NoError(t, err)
 
-		addrLoc := common.Append(addr, loc)
-		err = domains.WriteAccountStorage(addrLoc, []byte{addr[0], loc[0]}, nil)
+		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, nil)
 		require.NoError(t, err)
 
 		keys[txNum-1] = append(addr, loc...)
@@ -450,8 +447,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 
 		prev, _, err = ct.storage.GetLatest(addr, loc, tx)
 		require.NoError(t, err)
-		addrLoc := common.Append(addr, loc)
-		err = domains.WriteAccountStorage(addrLoc, []byte{addr[0], loc[0]}, prev)
+		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, prev)
 		require.NoError(t, err)
 
 	}
@@ -465,8 +461,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 
 		prev, _, err := ct.storage.GetLatest(addr, loc, tx)
 		require.NoError(t, err)
-		addrLoc := common.Append(addr, loc)
-		err = domains.WriteAccountStorage(addrLoc, []byte{addr[0], loc[0]}, prev)
+		err = domains.WriteAccountStorage(addr, loc, []byte{addr[0], loc[0]}, prev)
 		require.NoError(t, err)
 	}
 
