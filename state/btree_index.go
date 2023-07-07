@@ -477,8 +477,8 @@ func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) 
 
 // find position of key with node.di <= d at level lvl
 func (a *btAlloc) seekLeast(lvl, d uint64) uint64 {
-	for i, node := range a.nodes[lvl] {
-		if node.d >= d {
+	for i := range a.nodes[lvl] {
+		if a.nodes[lvl][i].d >= d {
 			return uint64(i)
 		}
 	}
