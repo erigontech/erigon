@@ -166,7 +166,7 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 				for k, key := range list.Keys {
 					hkey := []byte(key)
 					addr, loc := hkey[:20], hkey[20:]
-					prev, err := domains.LatestStorage(addr, loc)
+					prev, err := domains.LatestStorage(hkey)
 					if err != nil {
 						return fmt.Errorf("latest account %x: %w", key, err)
 					}
@@ -549,20 +549,20 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 }
 
 func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	enc, err := r.rs.domains.LatestStorage(address.Bytes(), key.Bytes())
+	addrLoc := append(address.Bytes(), key.Bytes()...)
+	enc, err := r.rs.domains.LatestStorage(addrLoc)
 	if err != nil {
 		return nil, err
 	}
 
-	composite := common.Append(address.Bytes(), key.Bytes())
 	if !r.discardReadList {
-		r.readLists[string(kv.StorageDomain)].Push(string(composite), enc)
+		r.readLists[string(kv.StorageDomain)].Push(string(addrLoc), enc)
 	}
 	if r.trace {
 		if enc == nil {
-			fmt.Printf("ReadAccountStorage [%x] [%x] => [empty], txNum: %d\n", address, key.Bytes(), r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", addrLoc, r.txNum)
 		} else {
-			fmt.Printf("ReadAccountStorage [%x] [%x] => [%x], txNum: %d\n", address, key.Bytes(), enc, r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", addrLoc, enc, r.txNum)
 		}
 	}
 	return enc, nil
@@ -585,14 +585,15 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 }
 
 func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	enc, err := r.rs.domains.LatestCode(address.Bytes())
+	addr := address.Bytes()
+	enc, err := r.rs.domains.LatestCode(addr)
 	if err != nil {
 		return 0, err
 	}
 	var sizebuf [8]byte
 	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 	if !r.discardReadList {
-		r.readLists[libstate.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
+		r.readLists[libstate.CodeSizeTableFake].Push(string(addr), sizebuf[:])
 	}
 	size := len(enc)
 	if r.trace {
