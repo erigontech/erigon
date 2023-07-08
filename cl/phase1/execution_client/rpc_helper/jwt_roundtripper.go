@@ -22,7 +22,7 @@ func (t *JWTRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 		"iat": time.Now().Unix(),
 	})
 
-	tokenString, err := token.SignedString(t.jwtSecret[:])
+	tokenString, err := token.SignedString(t.jwtSecret)
 	if err != nil {
 		return nil, fmt.Errorf("JwtRoundTripper failed to produce a JWT token, err: %w", err)
 	}
