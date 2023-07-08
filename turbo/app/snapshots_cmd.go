@@ -466,6 +466,14 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 	agg.CleanDir()
+	db.View(ctx, func(tx kv.Tx) error {
+		snapshots.LogStat()
+		agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+			_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+			return histBlockNumProgress
+		})
+		return nil
+	})
 
 	if to == 0 {
 		var forwardProgress uint64
