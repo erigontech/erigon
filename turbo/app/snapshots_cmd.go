@@ -504,17 +504,17 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Prune state history")
-	for i := 0; i < 100; i++ {
-		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			agg.SetTx(tx)
-			if err = agg.Prune(ctx, 1); err != nil {
-				return err
-			}
-			return err
-		}); err != nil {
-			return err
-		}
-	}
+	//for i := 0; i < 100; i++ {
+	//	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+	//		agg.SetTx(tx)
+	//		if err = agg.Prune(ctx, 1); err != nil {
+	//			return err
+	//		}
+	//		return err
+	//	}); err != nil {
+	//		return err
+	//	}
+	//}
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
