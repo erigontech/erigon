@@ -113,7 +113,7 @@ var (
 	EngineApiHostFlag = cli.StringFlag{
 		Name:  "engine.api.host",
 		Usage: "Sets the engine API host",
-		Value: "localhost",
+		Value: "http://localhost",
 	}
 	JwtSecret = cli.StringFlag{
 		Name:  "engine.api.jwtsecret",

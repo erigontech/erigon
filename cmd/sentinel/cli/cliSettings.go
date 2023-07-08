@@ -22,33 +22,34 @@ import (
 )
 
 type ConsensusClientCliCfg struct {
-	GenesisCfg            *clparams.GenesisConfig     `json:"genesisCfg"`
-	BeaconCfg             *clparams.BeaconChainConfig `json:"beaconCfg"`
-	NetworkCfg            *clparams.NetworkConfig     `json:"networkCfg"`
-	BeaconDataCfg         *rawdb.BeaconDataConfig     `json:"beaconDataConfig"`
-	Port                  uint                        `json:"port"`
-	Addr                  string                      `json:"address"`
-	ServerAddr            string                      `json:"serverAddr"`
-	ServerProtocol        string                      `json:"serverProtocol"`
-	ServerTcpPort         uint                        `json:"serverTcpPort"`
-	LogLvl                uint                        `json:"logLevel"`
-	NoDiscovery           bool                        `json:"noDiscovery"`
-	CheckpointUri         string                      `json:"checkpointUri"`
-	Chaindata             string                      `json:"chaindata"`
-	ErigonPrivateApi      string                      `json:"erigonPrivateApi"`
-	TransitionChain       bool                        `json:"transitionChain"`
-	NetworkType           clparams.NetworkType        `json:"networkType"`
-	InitialSync           bool                        `json:"initialSync"`
-	NoBeaconApi           bool                        `json:"noBeaconApi"`
-	BeaconApiReadTimeout  time.Duration               `json:"beaconApiReadTimeout"`
-	BeaconApiWriteTimeout time.Duration               `json:"beaconApiWriteTimeout"`
-	BeaconAddr            string                      `json:"beaconAddr"`
-	BeaconProtocol        string                      `json:"beaconProtocol"`
-	RecordMode            bool                        `json:"recordMode"`
-	RecordDir             string                      `json:"recordDir"`
-	RunEngineAPI          bool                        `json:"run_engine_api"`
-	EngineAPIAddr         string                      `json:"engine_api_addr"`
-	JwtSecret             []byte                      `json:"jwt_secret"`
+	GenesisCfg            *clparams.GenesisConfig
+	BeaconCfg             *clparams.BeaconChainConfig
+	NetworkCfg            *clparams.NetworkConfig
+	BeaconDataCfg         *rawdb.BeaconDataConfig
+	Port                  uint   `json:"port"`
+	Addr                  string `json:"address"`
+	ServerAddr            string `json:"serverAddr"`
+	ServerProtocol        string `json:"serverProtocol"`
+	ServerTcpPort         uint   `json:"serverTcpPort"`
+	LogLvl                uint   `json:"logLevel"`
+	NoDiscovery           bool   `json:"noDiscovery"`
+	CheckpointUri         string `json:"checkpointUri"`
+	Chaindata             string `json:"chaindata"`
+	ErigonPrivateApi      string `json:"erigonPrivateApi"`
+	TransitionChain       bool   `json:"transitionChain"`
+	NetworkType           clparams.NetworkType
+	InitialSync           bool          `json:"initialSync"`
+	NoBeaconApi           bool          `json:"noBeaconApi"`
+	BeaconApiReadTimeout  time.Duration `json:"beaconApiReadTimeout"`
+	BeaconApiWriteTimeout time.Duration `json:"beaconApiWriteTimeout"`
+	BeaconAddr            string        `json:"beaconAddr"`
+	BeaconProtocol        string        `json:"beaconProtocol"`
+	RecordMode            bool          `json:"recordMode"`
+	RecordDir             string        `json:"recordDir"`
+	RunEngineAPI          bool          `json:"run_engine_api"`
+	EngineAPIAddr         string        `json:"engine_api_addr"`
+	EngineAPIPort         int           `json:"engine_api_port"`
+	JwtSecret             []byte
 
 	InitalState *state.BeaconState
 }
@@ -95,7 +96,8 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg.RecordDir = ctx.String(flags.RecordModeDir.Name)
 
 	cfg.RunEngineAPI = ctx.Bool(flags.RunEngineAPI.Name)
-	cfg.EngineAPIAddr = fmt.Sprintf("%s:%d", ctx.String(flags.EngineApiHostFlag.Name), ctx.Int(flags.EngineApiPortFlag.Name))
+	cfg.EngineAPIAddr = ctx.String(flags.EngineApiHostFlag.Name)
+	cfg.EngineAPIPort = ctx.Int(flags.EngineApiPortFlag.Name)
 	if cfg.RunEngineAPI {
 		secret, err := ObtainJwtSecret(ctx)
 		if err != nil {

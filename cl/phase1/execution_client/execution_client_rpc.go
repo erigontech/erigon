@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -35,11 +36,19 @@ type ExecutionClientRpc struct {
 	jwtSecret []byte
 }
 
-func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string) (*ExecutionClientRpc, error) {
+func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string, port int) (*ExecutionClientRpc, error) {
 	roundTripper := rpc_helper.NewJWTRoundTripper(jwtSecret)
 	client := &http.Client{Timeout: DefaultRPCHTTPTimeout, Transport: roundTripper}
 
-	rpcClient, err := rpc.DialHTTPWithClient("http://"+addr, client, nil)
+	isHTTPpecified := strings.HasPrefix(addr, "http")
+	isHTTPSpecified := strings.HasPrefix(addr, "https")
+	protocol := ""
+	if isHTTPSpecified {
+		protocol = "https://"
+	} else if !isHTTPpecified {
+		protocol = "http://"
+	}
+	rpcClient, err := rpc.DialHTTPWithClient(fmt.Sprintf("%s%s:%d", protocol, addr, port), client, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -52,9 +61,9 @@ func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string) (
 	}, nil
 }
 
-func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
+func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) (invalid bool, err error) {
 	if payload == nil {
-		return nil
+		return
 	}
 
 	reversedBaseFeePerGas := libcommon.Copy(payload.BaseFeePerGas[:])
@@ -72,7 +81,8 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
 	case clparams.DenebVersion:
 		engineMethod = rpc_helper.EngineNewPayloadV3
 	default:
-		return fmt.Errorf("invalid payload version")
+		err = fmt.Errorf("invalid payload version")
+		return
 	}
 
 	request := commands.ExecutionPayload{
@@ -109,30 +119,25 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) error {
 
 	payloadStatus := make(map[string]interface{}) // As it is done in the rpcdaemon
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
-	err := cc.client.CallContext(cc.ctx, &payloadStatus, engineMethod, request)
+	err = cc.client.CallContext(cc.ctx, &payloadStatus, engineMethod, request)
 	if err != nil {
-		if err.Error() == errContextExceeded {
-			return nil
-		}
-		return err
+		return
 	}
 
 	if err != nil {
-		return fmt.Errorf("execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
+		err = fmt.Errorf("execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
+		return
 	}
 	var status string
 	var ok bool
 	if status, ok = payloadStatus["status"].(string); !ok {
-		return fmt.Errorf("invalid response received from NewPayload")
+		err = fmt.Errorf("invalid response received from NewPayload")
+		return
 
 	}
-	if status == InvalidStatus {
-		return fmt.Errorf("invalid block")
-	}
-	if status == InvalidBlockHashStatus {
-		return fmt.Errorf("invalid block hash")
-	}
-	return err
+	invalid = status == InvalidStatus || status == InvalidBlockHashStatus
+
+	return
 }
 
 func (cc *ExecutionClientRpc) ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error {

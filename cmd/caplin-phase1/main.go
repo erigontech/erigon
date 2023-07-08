@@ -25,11 +25,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
-	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
@@ -64,7 +61,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Phase1]", "chain", cliCtx.String(flags.Chain.Name))
-	log.Info("[Phase1] Running Caplin", "cfg", cfg)
+	log.Info("[Phase1] Running Caplin")
 	// Either start from genesis or a checkpoint
 	var state *state.BeaconState
 	if cfg.InitialSync {
@@ -107,16 +104,9 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		return err
 	}
 	var executionEngine execution_client.ExecutionEngine
-	if cfg.ErigonPrivateApi != "" {
-		cc, err := grpc.Dial(cfg.ErigonPrivateApi, grpc.WithInsecure())
-		if err != nil {
-			log.Error("could not connect to erigon private api", "err", err)
-		}
-		defer cc.Close()
-		executionEngine = execution_client.NewExecutionEnginePhase1FromClient(ctx, engine.NewEngineClient(cc))
-	} else if cfg.RunEngineAPI {
-		log.Info("JWT-Secret loaded", "secret", hexutility.Encode(cfg.JwtSecret))
-		cc, err := execution_client.NewExecutionClientRPC(ctx, cfg.JwtSecret, cfg.EngineAPIAddr)
+	if cfg.RunEngineAPI {
+		fmt.Println(cfg.EngineAPIAddr)
+		cc, err := execution_client.NewExecutionClientRPC(ctx, cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
 		if err != nil {
 			log.Error("could not start engine api", "err", err)
 		}
