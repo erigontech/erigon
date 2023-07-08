@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
@@ -35,11 +36,12 @@ var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 3, Patch: 0}
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
-	ctx         context.Context
-	eth         EthBackend
-	events      *shards.Events
-	db          kv.RoDB
-	blockReader services.FullBlockReader
+	ctx                   context.Context
+	eth                   EthBackend
+	events                *shards.Events
+	db                    kv.RoDB
+	blockReader           services.FullBlockReader
+	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 
 	logsFilter *LogsFilterAggregator
 	logger     log.Logger
@@ -54,11 +56,12 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.FullBlockReader,
-	logger log.Logger,
+	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore,
 ) *EthBackendServer {
 	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader,
-		logsFilter: NewLogsFilterAggregator(events),
-		logger:     logger,
+		logsFilter:            NewLogsFilterAggregator(events),
+		logger:                logger,
+		latestBlockBuiltStore: latestBlockBuiltStore,
 	}
 
 	ch, clean := s.events.AddLogsSubscription()
@@ -90,6 +93,20 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
 	return EthBackendAPIVersion, nil
+}
+
+func (s *EthBackendServer) PendingBlock(_ context.Context, _ *emptypb.Empty) (*remote.PendingBlockReply, error) {
+	pendingBlock := s.latestBlockBuiltStore.BlockBuilt()
+	if pendingBlock == nil {
+		return nil, nil
+	}
+
+	blockRlp, err := rlp.EncodeToBytes(pendingBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	return &remote.PendingBlockReply{BlockRlp: blockRlp}, nil
 }
 
 func (s *EthBackendServer) Etherbase(_ context.Context, _ *remote.EtherbaseRequest) (*remote.EtherbaseReply, error) {
