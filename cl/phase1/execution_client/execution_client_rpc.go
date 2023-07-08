@@ -13,9 +13,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -85,7 +85,7 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) (invalid bo
 		return
 	}
 
-	request := commands.ExecutionPayload{
+	request := jsonrpc.ExecutionPayload{
 		ParentHash:   payload.ParentHash,
 		FeeRecipient: payload.FeeRecipient,
 		StateRoot:    payload.StateRoot,
@@ -141,7 +141,7 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) (invalid bo
 }
 
 func (cc *ExecutionClientRpc) ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error {
-	forkChoiceRequest := &commands.ForkChoiceState{
+	forkChoiceRequest := jsonrpc.ForkChoiceState{
 		HeadHash:           head,
 		SafeBlockHash:      head,
 		FinalizedBlockHash: finalized,
