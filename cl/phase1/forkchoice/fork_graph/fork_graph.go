@@ -291,6 +291,10 @@ func (f *ForkGraph) GetFinalizedCheckpoint(blockRoot libcommon.Hash) (solid.Chec
 	return obj, has
 }
 
+func (f *ForkGraph) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
+	f.badBlocks[blockRoot] = struct{}{}
+}
+
 func (f *ForkGraph) removeOldData() (err error) {
 	pruneSlot := f.nextReferenceState.Slot() - f.beaconCfg.SlotsPerEpoch
 	oldRoots := make([]libcommon.Hash, 0, len(f.blocks))
