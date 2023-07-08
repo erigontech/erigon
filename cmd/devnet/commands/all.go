@@ -1,4 +1,4 @@
-package commands
+package jsonrpc
 
 import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"

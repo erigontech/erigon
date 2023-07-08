@@ -34,6 +34,15 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+// Configure network related parameters for the config.
+type EngineServerConfig struct {
+	// Authentication
+	JwtSecret []byte
+	// Network related
+	Address string
+	Port    int
+}
+
 type EngineServer struct {
 	hd     *headerdownload.HeaderDownload
 	config *chain.Config
