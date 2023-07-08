@@ -515,7 +515,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	for i := 0; i < 1; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
-			if err = agg.Prune(ctx, 4); err != nil {
+			if err = agg.Prune(ctx, 100); err != nil {
 				return err
 			}
 			return err
