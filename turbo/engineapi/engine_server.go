@@ -3,6 +3,7 @@ package engineapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -175,6 +176,8 @@ func (s *EngineServer) EngineNewPayload(ctx context.Context, req *types2.Executi
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 	if header.Hash() != blockHash {
+		d, _ := json.Marshal(header)
+		fmt.Println(string(d))
 		s.logger.Error("[NewPayload] invalid block hash", "stated", libcommon.Hash(blockHash), "actual", header.Hash())
 		return &engine.EnginePayloadStatus{
 			Status:          engine.EngineStatus_INVALID,

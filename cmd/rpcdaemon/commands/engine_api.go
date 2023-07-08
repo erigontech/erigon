@@ -112,9 +112,8 @@ type EngineAPI interface {
 // EngineImpl is implementation of the EngineAPI interface
 type EngineImpl struct {
 	*BaseAPI
-	db         kv.RoDB
-	api        rpchelper.EngineBackend
-	internalCL bool
+	db  kv.RoDB
+	api rpchelper.EngineBackend
 }
 
 func convertPayloadStatus(ctx context.Context, db kv.RoDB, x *engine.EnginePayloadStatus) (map[string]interface{}, error) {
@@ -187,9 +186,7 @@ func withdrawalValues(ptrs []*types.Withdrawal) []types.Withdrawal {
 var errEmbedeedConsensus = errors.New("engine api should not be used, restart without --internalcl")
 
 func (e *EngineImpl) forkchoiceUpdated(version uint32, ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
-	if e.internalCL {
-		return nil, errEmbedeedConsensus
-	}
+
 	if payloadAttributes == nil {
 		log.Debug("Received ForkchoiceUpdated", "version", version,
 			"head", forkChoiceState.HeadHash, "safe", forkChoiceState.SafeBlockHash, "finalized", forkChoiceState.FinalizedBlockHash)
@@ -257,9 +254,6 @@ func (e *EngineImpl) NewPayloadV3(ctx context.Context, payload *ExecutionPayload
 }
 
 func (e *EngineImpl) newPayload(version uint32, ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
-	if e.internalCL {
-		return nil, errEmbedeedConsensus
-	}
 	log.Debug("Received NewPayload", "version", version, "height", uint64(payload.BlockNumber), "hash", payload.BlockHash)
 
 	baseFee, overflow := uint256.FromBig((*big.Int)(payload.BaseFeePerGas))
@@ -349,9 +343,6 @@ func convertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 }
 
 func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutility.Bytes) (*ExecutionPayload, error) {
-	if e.internalCL {
-		return nil, errEmbedeedConsensus
-	}
 
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	log.Info("Received GetPayloadV1", "payloadId", decodedPayloadId)
@@ -365,10 +356,6 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutility.Byte
 }
 
 func (e *EngineImpl) GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*GetPayloadV2Response, error) {
-	if e.internalCL {
-		return nil, errEmbedeedConsensus
-	}
-
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	log.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
 
@@ -386,11 +373,6 @@ func (e *EngineImpl) GetPayloadV2(ctx context.Context, payloadID hexutility.Byte
 }
 
 func (e *EngineImpl) GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*GetPayloadV3Response, error) {
-	if e.internalCL {
-		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
-		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
-	}
-
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
 	log.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
 
@@ -433,10 +415,6 @@ func (e *EngineImpl) GetPayloadV3(ctx context.Context, payloadID hexutility.Byte
 // Can also be used to ping the execution layer (heartbeats).
 // See https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.1/src/engine/specification.md#engine_exchangetransitionconfigurationv1
 func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beaconConfig *TransitionConfiguration) (*TransitionConfiguration, error) {
-	if e.internalCL {
-		return nil, errEmbedeedConsensus
-	}
-
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -563,11 +541,10 @@ func convertExecutionPayloadV1(response *engine.EngineGetPayloadBodiesV1Response
 }
 
 // NewEngineAPI returns EngineImpl instance
-func NewEngineAPI(base *BaseAPI, db kv.RoDB, api rpchelper.EngineBackend, internalCL bool) *EngineImpl {
+func NewEngineAPI(base *BaseAPI, db kv.RoDB, api rpchelper.EngineBackend) *EngineImpl {
 	return &EngineImpl{
-		BaseAPI:    base,
-		db:         db,
-		api:        api,
-		internalCL: internalCL,
+		BaseAPI: base,
+		db:      db,
+		api:     api,
 	}
 }
