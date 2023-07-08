@@ -100,6 +100,26 @@ var (
 		Usage: "connect to existing erigon instance",
 		Value: "",
 	}
+	RunEngineAPI = cli.BoolFlag{
+		Name:  "engine.api",
+		Usage: "Turns on engine communication (Needed for none Erigon ELs)",
+		Value: false,
+	}
+	EngineApiPortFlag = cli.UintFlag{
+		Name:  "engine.api.port",
+		Usage: "Sets engine API port",
+		Value: 8551,
+	}
+	EngineApiHostFlag = cli.StringFlag{
+		Name:  "engine.api.host",
+		Usage: "Sets the engine API host",
+		Value: "http://localhost",
+	}
+	JwtSecret = cli.StringFlag{
+		Name:  "engine.api.jwtsecret",
+		Usage: "Path to the token that ensures safe connection between CL and EL",
+		Value: "",
+	}
 	SentinelStaticPeersFlag = cli.StringFlag{
 		Name:  "sentinel.staticpeers",
 		Usage: "connect to comma-separated Consensus static peers",
