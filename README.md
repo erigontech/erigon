@@ -640,47 +640,12 @@ Getting in touch
 
 ### Erigon Discord Server
 
-The main discussions are happening on our Discord server. To get an invite, send an email to `tg [at] torquem.ch` with
+The main discussions are happening on our Discord server. To get an invite, send an email to `bloxster [at] proton.me` with
 your name, occupation, a brief explanation of why you want to join the Discord, and how you heard about Erigon.
 
 ### Reporting security issues/concerns
 
 Send an email to `security [at] torquem.ch`.
-
-### Team
-
-Core contributors (in alphabetical order of first names):
-
-* Alex Sharov ([AskAlexSharov](https://twitter.com/AskAlexSharov))
-
-* Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
-
-* Andrea Lanfranchi([@AndreaLanfranchi](https://github.com/AndreaLanfranchi))
-
-* Andrew Ashikhmin ([yperbasis](https://github.com/yperbasis))
-
-* Artem Vorotnikov ([vorot93](https://github.com/vorot93))
-
-* Boris Petrov ([b00ris](https://github.com/b00ris))
-
-* Eugene Danilenko ([JekaMas](https://github.com/JekaMas))
-
-* Igor Mandrigin ([@mandrigin](https://twitter.com/mandrigin))
-
-* Giulio Rebuffo ([Giulio2002](https://github.com/Giulio2002))
-
-* Thomas Jay Rush ([@tjayrush](https://twitter.com/tjayrush))
-
-Thanks to:
-
-* All contributors of Erigon
-
-* All contributors of Go-Ethereum
-
-* Our special respect and gratitude is to the core team of [Go-Ethereum](https://github.com/ethereum/go-ethereum). Keep
-  up the great job!
-
-Happy testing! 🥤
 
 Known issues
 ============
