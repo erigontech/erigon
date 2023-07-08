@@ -978,7 +978,6 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 		idx.alloc.keyCmp = idx.keyCmp
 		idx.alloc.traverseDfs()
 		defer idx.decompressor.EnableReadAhead().DisableReadAhead()
-		defer func(t time.Time) { fmt.Printf("btree_index.go:981: %s, %s\n", time.Since(t), idx.FileName()) }(time.Now())
 		idx.alloc.fillSearchMx()
 	}
 	return idx, nil
