@@ -977,6 +977,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 		idx.alloc.dataLookup = idx.dataLookup
 		idx.alloc.keyCmp = idx.keyCmp
 		idx.alloc.traverseDfs()
+		defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 		idx.alloc.fillSearchMx()
 	}
 	return idx, nil
@@ -1033,6 +1034,7 @@ func OpenBtreeIndex(indexPath, dataPath string, M uint64) (*BtIndex, error) {
 		idx.alloc.dataLookup = idx.dataLookup
 		idx.alloc.keyCmp = idx.keyCmp
 		idx.alloc.traverseDfs()
+		defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 		idx.alloc.fillSearchMx()
 	}
 	return idx, nil
