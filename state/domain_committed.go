@@ -21,7 +21,6 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"hash"
 	"path/filepath"
@@ -116,15 +115,15 @@ func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, v
 	item, _ := t.get(key)
 	fn(item, val)
 	t.tree.ReplaceOrInsert(item)
-	t.plainKeys.ReplaceOrInsert(hex.EncodeToString(key))
+	t.plainKeys.ReplaceOrInsert(string(key))
 }
 
 func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
 	if len(val) == 0 {
 		c.update.Reset()
 		c.update.Flags = commitment.DeleteUpdate
-		ks := hex.EncodeToString(c.plainKey)
-		t.plainKeys.AscendGreaterOrEqual(hex.EncodeToString(c.plainKey), func(key string) bool {
+		ks := string(c.plainKey)
+		t.plainKeys.AscendGreaterOrEqual(string(c.plainKey), func(key string) bool {
 			if !strings.HasPrefix(key, ks) {
 				return false
 			}
@@ -132,7 +131,7 @@ func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
 				return true
 			}
 			//t.TouchPlainKey(common.FromHex(key), nil, t.TouchStorage)
-			t.tree.Delete(&commitmentItem{plainKey: common.FromHex(key), hashedKey: t.hashAndNibblizeKey(common.FromHex(key))})
+			t.tree.Delete(&commitmentItem{plainKey: []byte(key), hashedKey: t.hashAndNibblizeKey([]byte(key))})
 			t.plainKeys.Delete(key) // we already marked those keys as deleted
 			return true
 		})

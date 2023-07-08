@@ -5,7 +5,6 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"math"
 	"sync"
@@ -187,7 +186,7 @@ func (sd *SharedDomains) clear() {
 func (sd *SharedDomains) put(table kv.Domain, key, val []byte) {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
-	sd.puts(table, hex.EncodeToString(key), val)
+	sd.puts(table, string(key), val)
 }
 
 func (sd *SharedDomains) puts(table kv.Domain, key string, val []byte) {
@@ -232,7 +231,7 @@ func (sd *SharedDomains) Get(table kv.Domain, key []byte) (v []byte, ok bool) {
 
 func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	//keyS := *(*string)(unsafe.Pointer(&key))
-	keyS := hex.EncodeToString(key)
+	keyS := string(key)
 	switch table {
 	case kv.AccountsDomain:
 		v, ok = sd.account[keyS]
@@ -340,14 +339,15 @@ func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 	return true
 }
 
-func (sd *SharedDomains) LatestStorage(addr, loc []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.StorageDomain, common.Append(addr, loc))
+func (sd *SharedDomains) LatestStorage(addrLoc []byte) ([]byte, error) {
+	//a := make([]byte, 0, len(addr)+len(loc))
+	v0, ok := sd.Get(kv.StorageDomain, addrLoc)
 	if ok {
 		return v0, nil
 	}
-	v, _, err := sd.aggCtx.GetLatest(kv.StorageDomain, addr, loc, sd.roTx)
+	v, _, err := sd.aggCtx.GetLatest(kv.StorageDomain, addrLoc, nil, sd.roTx)
 	if err != nil {
-		return nil, fmt.Errorf("storage %x|%x read error: %w", addr, loc, err)
+		return nil, fmt.Errorf("storage %x read error: %w", addrLoc, err)
 	}
 	return v, nil
 }
@@ -400,8 +400,8 @@ func (sd *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error
 
 func (sd *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error {
 	// Look in the summary table first
-	addr, loc := splitKey(plainKey)
-	enc, err := sd.LatestStorage(addr, loc)
+	//addr, loc := splitKey(plainKey)
+	enc, err := sd.LatestStorage(plainKey)
 	if err != nil {
 		return err
 	}
@@ -461,9 +461,6 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 	type pair struct{ k, v []byte }
 	tombs := make([]pair, 0, 8)
 	err = sd.IterateStoragePrefix(sd.roTx, addr, func(k, v []byte) {
-		if !bytes.HasPrefix(k, addr) {
-			return
-		}
 		tombs = append(tombs, pair{k, v})
 	})
 	if err != nil {
@@ -574,7 +571,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 	if iter.Seek(string(prefix)) {
 		kx := iter.Key()
 		v = iter.Value()
-		k, _ = hex.DecodeString(kx)
+		k = []byte(kx)
 
 		if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
 			heap.Push(&cp, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), iter: iter, endTxNum: sd.txNum.Load(), reverse: true})
@@ -628,7 +625,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 			switch ci1.t {
 			case RAM_CURSOR:
 				if ci1.iter.Next() {
-					k, _ = hex.DecodeString(ci1.iter.Key())
+					k = []byte(ci1.iter.Key())
 					if k != nil && bytes.HasPrefix(k, prefix) {
 						ci1.key = common.Copy(k)
 						ci1.val = common.Copy(ci1.iter.Value())

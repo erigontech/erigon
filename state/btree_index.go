@@ -111,6 +111,7 @@ type btAlloc struct {
 	trace   bool
 
 	dataLookup func(kBuf, vBuf []byte, di uint64) ([]byte, []byte, error)
+	keyCmp     func(k, kBuf []byte, di uint64) (int, error)
 }
 
 func newBtAlloc(k, M uint64, trace bool) *btAlloc {
@@ -415,11 +416,12 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err erro
 	for l <= r {
 		di = (l + r) >> 1
 
-		k, v, err = a.dataLookup(k[:0], v[:0], di)
+		cmp, err := a.keyCmp(k[:0], x, di)
+		//k, v, err = a.dataLookup(k[:0], v[:0], di)
 		a.naccess++
 
 		//i++
-		cmp := bytes.Compare(k, x)
+		//cmp := bytes.Compare(k, x)
 		switch {
 		case err != nil:
 			if errors.Is(err, ErrBtIndexLookupBounds) {
@@ -427,7 +429,11 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err erro
 			}
 			return nil, nil, 0, err
 		case cmp == 0:
-			return k, v, di, nil
+			k, v, err = a.dataLookup(k[:0], v[:0], di)
+			if errors.Is(err, ErrBtIndexLookupBounds) {
+				return nil, nil, 0, nil
+			}
+			return k, v, di, err
 		case cmp == -1:
 			l = di + 1
 		default:
@@ -452,16 +458,16 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err erro
 
 func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) {
 	lm, rm = -1, -1
+	var m uint64
 
 	for l < r {
-		m := (l + r) >> 1
+		m = (l + r) >> 1
 
-		n = a.nodes[i][m]
 		a.naccess++
-		cmp := bytes.Compare(n.key, x)
+		cmp := bytes.Compare(a.nodes[i][m].key, x)
 		switch {
 		case cmp == 0:
-			return n, int64(m), int64(m)
+			return a.nodes[i][m], int64(m), int64(m)
 		case cmp > 0:
 			r = m
 			rm = int64(m)
@@ -472,13 +478,13 @@ func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) 
 			panic(fmt.Errorf("compare error %d, %x ? %x", cmp, n.key, x))
 		}
 	}
-	return n, lm, rm
+	return a.nodes[i][m], lm, rm
 }
 
 // find position of key with node.di <= d at level lvl
 func (a *btAlloc) seekLeast(lvl, d uint64) uint64 {
-	for i, node := range a.nodes[lvl] {
-		if node.d >= d {
+	for i := range a.nodes[lvl] {
+		if a.nodes[lvl][i].d >= d {
 			return uint64(i)
 		}
 	}
@@ -565,7 +571,8 @@ func (a *btAlloc) seek(ik []byte) (k, v []byte, di uint64, err error) {
 
 	a.naccess = 0 // reset count before actually go to disk
 	if maxD-minD > a.M+2 {
-		return nil, nil, 0, fmt.Errorf("too big binary search: minD=%d, maxD=%d, keysCount=%d, key=%x", minD, maxD, a.K, ik)
+		log.Warn("too big binary search", "minD", minD, "maxD", maxD, "keysCount", a.K, "key", fmt.Sprintf("%x", ik))
+		//return nil, nil, 0, fmt.Errorf("too big binary search: minD=%d, maxD=%d, keysCount=%d, key=%x", minD, maxD, a.K, ik)
 	}
 	k, v, di, err = a.bsKey(ik, minD, maxD)
 	if err != nil {
@@ -968,7 +975,9 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 	idx.alloc = newBtAlloc(idx.keyCount, M, false)
 	if idx.alloc != nil {
 		idx.alloc.dataLookup = idx.dataLookup
+		idx.alloc.keyCmp = idx.keyCmp
 		idx.alloc.traverseDfs()
+		defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 		idx.alloc.fillSearchMx()
 	}
 	return idx, nil
@@ -1023,7 +1032,9 @@ func OpenBtreeIndex(indexPath, dataPath string, M uint64) (*BtIndex, error) {
 	idx.alloc = newBtAlloc(idx.keyCount, M, false)
 	if idx.alloc != nil {
 		idx.alloc.dataLookup = idx.dataLookup
+		idx.alloc.keyCmp = idx.keyCmp
 		idx.alloc.traverseDfs()
+		defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 		idx.alloc.fillSearchMx()
 	}
 	return idx, nil
@@ -1060,6 +1071,31 @@ func (b *BtIndex) dataLookup(kBuf, vBuf []byte, di uint64) ([]byte, []byte, erro
 	val, vp := b.getter.Next(vBuf[:0])
 	_, _ = kp, vp
 	return key, val, nil
+}
+
+// comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
+func (b *BtIndex) keyCmp(kBuf, k []byte, di uint64) (int, error) {
+	if di >= b.keyCount {
+		return 0, fmt.Errorf("%w: keyCount=%d, item %d requested. file: %s", ErrBtIndexLookupBounds, b.keyCount, di+1, b.FileName())
+	}
+	p := int(b.dataoffset) + int(di)*b.bytesPerRec
+	if len(b.data) < p+b.bytesPerRec {
+		return 0, fmt.Errorf("data lookup gone too far (%d after %d). keyCount=%d, requesed item %d. file: %s", p+b.bytesPerRec-len(b.data), len(b.data), b.keyCount, di, b.FileName())
+	}
+
+	var aux [8]byte
+	dst := aux[8-b.bytesPerRec:]
+	copy(dst, b.data[p:p+b.bytesPerRec])
+
+	offset := binary.BigEndian.Uint64(aux[:])
+	b.getter.Reset(offset)
+	if !b.getter.HasNext() {
+		return 0, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
+	}
+
+	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
+	kBuf, _ = b.getter.Next(kBuf[:0])
+	return bytes.Compare(kBuf, k), nil
 }
 
 func (b *BtIndex) Size() int64 { return b.size }
