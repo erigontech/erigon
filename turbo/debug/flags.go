@@ -88,10 +88,11 @@ var Flags = []cli.Flag{
 }
 
 // SetupCobra sets up logging, profiling and tracing for cobra commands
-func SetupCobra(cmd *cobra.Command, filePrefix string) (log.Logger, error) {
+func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 	// ensure we've read in config file details before setting up metrics etc.
 	if err := SetCobraFlagsFromConfigFile(cmd); err != nil {
 		log.Warn("failed setting config flags from yaml/toml file", "err", err)
+		panic(err)
 	}
 	RaiseFdLimit()
 	flags := cmd.Flags()
@@ -100,50 +101,58 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) (log.Logger, error) {
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
-		return logger, err
+		log.Error("failed setting config flags from yaml/toml file", "err", err)
+		panic(err)
 	}
 	cpuFile, err := flags.GetString(cpuprofileFlag.Name)
 	if err != nil {
-		return logger, err
+		log.Error("failed setting config flags from yaml/toml file", "err", err)
+		panic(err)
 	}
 
 	// profiling, tracing
 	if traceFile != "" {
 		if err2 := Handler.StartGoTrace(traceFile); err2 != nil {
-			return logger, err2
+			return logger
 		}
 	}
 	if cpuFile != "" {
 		if err2 := Handler.StartCPUProfile(cpuFile); err2 != nil {
-			return logger, err2
+			return logger
 		}
 	}
 
 	go ListenSignals(nil)
 	pprof, err := flags.GetBool(pprofFlag.Name)
 	if err != nil {
-		return logger, err
+		log.Error("failed setting config flags from yaml/toml file", "err", err)
+		panic(err)
 	}
 	pprofAddr, err := flags.GetString(pprofAddrFlag.Name)
 	if err != nil {
-		return logger, err
+		log.Error("failed setting config flags from yaml/toml file", "err", err)
+		panic(err)
 	}
 	pprofPort, err := flags.GetInt(pprofPortFlag.Name)
 	if err != nil {
-		return logger, err
+		log.Error("failed setting config flags from yaml/toml file", "err", err)
+		panic(err)
 	}
 
 	metricsEnabled, err := flags.GetBool(metricsEnabledFlag.Name)
 	if err != nil {
-		return logger, err
+		log.Error("failed setting config flags from yaml/toml file", "err", err)
+		panic(err)
 	}
 	metricsAddr, err := flags.GetString(metricsAddrFlag.Name)
 	if err != nil {
-		return logger, err
+		log.Error("failed setting config flags from yaml/toml file", "err", err)
+		panic(err)
 	}
 	metricsPort, err := flags.GetInt(metricsPortFlag.Name)
 	if err != nil {
-		return logger, err
+		log.Error("failed setting config flags from yaml/toml file", "err", err)
+		panic(err)
 	}
 
 	if metricsEnabled && metricsAddr != "" {
@@ -156,7 +165,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) (log.Logger, error) {
 		// metrics and pprof server
 		StartPProf(fmt.Sprintf("%s:%d", pprofAddr, pprofPort), withMetrics)
 	}
-	return logger, nil
+	return logger
 }
 
 // Setup initializes profiling and logging based on the CLI flags.
