@@ -726,6 +726,11 @@ Loop:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
+					if agg.CanPrune(applyTx) {
+						if err = agg.Prune(ctx, 10); err != nil { // prune part of retired data, before commit
+							return err
+						}
+					}
 					break
 				}
 
