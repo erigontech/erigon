@@ -22,9 +22,9 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize) (kv.RoDB, kv.RwDB) {
+func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize, logger log.Logger) (kv.RoDB, kv.RwDB) {
 	const ThreadsHardLimit = 9_000
-	src := mdbx2.NewMDBX(log.New()).Path(from).
+	src := mdbx2.NewMDBX(logger).Path(from).
 		Label(label).
 		RoTxsLimiter(semaphore.NewWeighted(ThreadsHardLimit)).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
@@ -37,7 +37,7 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize)
 	if err != nil {
 		panic(err)
 	}
-	dst := mdbx2.NewMDBX(log.New()).Path(to).
+	dst := mdbx2.NewMDBX(logger).Path(to).
 		Label(label).
 		PageSize(targetPageSize.Bytes()).
 		MapSize(datasize.ByteSize(info.Geo.Upper)).

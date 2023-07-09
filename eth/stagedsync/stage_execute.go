@@ -238,7 +238,7 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if !initialCycle {
 		workersCount = 1
 	}
-	cfg.agg.SetWorkers(estimate.CompressSnapshot.WorkersQuarter())
+	cfg.agg.SetCompressWorkers(estimate.CompressSnapshot.WorkersQuarter())
 
 	if initialCycle {
 		reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)

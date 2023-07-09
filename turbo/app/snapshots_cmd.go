@@ -17,6 +17,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -152,21 +153,29 @@ var (
 	}
 )
 
-func preloadFileAsync(name string) {
-	go func() {
-		ff, _ := os.Open(name)
-		_, _ = io.CopyBuffer(io.Discard, bufio.NewReaderSize(ff, 64*1024*1024), make([]byte, 64*1024*1024))
-	}()
-}
-
 func doBtSearch(cliCtx *cli.Context) error {
+	logger, err := debug.Setup(cliCtx, true /* root logger */)
+	if err != nil {
+		return err
+	}
+
 	srcF := cliCtx.String("src")
 	dataFilePath := strings.TrimRight(srcF, ".bt") + ".kv"
-	idx, err := libstate.OpenBtreeIndex(srcF, dataFilePath, libstate.DefaultBtreeM, true)
+
+	runtime.GC()
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	logger.Info("before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	idx, err := libstate.OpenBtreeIndex(srcF, dataFilePath, libstate.DefaultBtreeM, false)
 	if err != nil {
 		return err
 	}
 	defer idx.Close()
+
+	runtime.GC()
+	dbg.ReadMemStats(&m)
+	logger.Info("after open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
 	seek := common.FromHex(cliCtx.String("key"))
 
 	cur, err := idx.Seek(seek)
@@ -179,23 +188,6 @@ func doBtSearch(cliCtx *cli.Context) error {
 		fmt.Printf("seek: %x, -> nil\n", seek)
 	}
 
-	idx.Close()
-
-	idx, err = libstate.OpenBtreeIndex(srcF, dataFilePath, libstate.DefaultBtreeM/2, true)
-	if err != nil {
-		return err
-	}
-	defer idx.Close()
-
-	cur, err = idx.Seek(seek)
-	if err != nil {
-		return err
-	}
-	if cur != nil {
-		fmt.Printf("seek: %x, -> %x, %x\n", seek, cur.Key(), cur.Value())
-	} else {
-		fmt.Printf("seek: %x, -> nil\n", seek)
-	}
 	return nil
 }
 
@@ -240,8 +232,6 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		return fmt.Errorf("expecting .seg file path")
 	}
 	f := args.First()
-
-	preloadFileAsync(f)
 
 	decompressor, err := compress.NewDecompressor(f)
 	if err != nil {
@@ -360,13 +350,13 @@ func doUncompress(cliCtx *cli.Context) error {
 	}
 	f := args.First()
 
-	preloadFileAsync(f)
-
 	decompressor, err := compress.NewDecompressor(f)
 	if err != nil {
 		return err
 	}
 	defer decompressor.Close()
+	defer decompressor.EnableReadAhead().DisableReadAhead()
+
 	wr := bufio.NewWriterSize(os.Stdout, int(128*datasize.MB))
 	defer wr.Flush()
 	logEvery := time.NewTicker(30 * time.Second)
@@ -374,7 +364,6 @@ func doUncompress(cliCtx *cli.Context) error {
 
 	var i uint
 	var numBuf [binary.MaxVarintLen64]byte
-	defer decompressor.EnableReadAhead().DisableReadAhead()
 
 	g := decompressor.MakeGetter()
 	buf := make([]byte, 0, 1*datasize.MB)
@@ -483,7 +472,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	agg.SetWorkers(estimate.CompressSnapshot.Workers())
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.CleanDir()
 	db.View(ctx, func(tx kv.Tx) error {
 		snapshots.LogStat()

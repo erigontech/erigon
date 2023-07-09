@@ -16,6 +16,7 @@ import (
 	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/turbo/backup"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -95,9 +96,13 @@ var cmdMdbxToMdbx = &cobra.Command{
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
+		logger, err := debug.SetupCobra(cmd, "integration")
+		if err != nil {
+			panic(err)
+		}
 
-		from, to := backup.OpenPair(chaindata, toChaindata, kv.ChainDB, 0)
-		err := backup.Kv2kv(ctx, from, to, nil, backup.ReadAheadThreads)
+		from, to := backup.OpenPair(chaindata, toChaindata, kv.ChainDB, 0, logger)
+		err = backup.Kv2kv(ctx, from, to, nil, backup.ReadAheadThreads)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			if !errors.Is(err, context.Canceled) {
 				log.Error(err.Error())
