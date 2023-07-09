@@ -26,7 +26,7 @@ func GetBalance(ctx context.Context, addr string, blockNum requests.BlockNumber,
 	logger.Info("Getting balance", "addeess", addr)
 
 	address := libcommon.HexToAddress(addr)
-	bal, err := devnet.SelectMiner(ctx).GetBalance(address, blockNum)
+	bal, err := devnet.SelectBlockProducer(ctx).GetBalance(address, blockNum)
 
 	if err != nil {
 		logger.Error("FAILURE", "error", err)

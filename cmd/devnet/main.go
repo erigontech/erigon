@@ -236,7 +236,7 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 				BaseRPCAddr:        "localhost:8545",
 				//Snapshots:          true,
 				Nodes: []devnet.Node{
-					args.Miner{
+					args.BlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
@@ -244,7 +244,7 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 						},
 						AccountSlots: 200,
 					},
-					args.NonMiner{
+					args.NonBlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
@@ -261,21 +261,21 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 				BasePrivateApiAddr: "localhost:10090",
 				BaseRPCAddr:        "localhost:8545",
 				Nodes: []devnet.Node{
-					args.Miner{
+					args.BlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
 						},
 						AccountSlots: 200,
 					},
-					args.Miner{
+					args.BlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
 						},
 						AccountSlots: 200,
 					},
-					args.NonMiner{
+					args.NonBlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
@@ -293,14 +293,14 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 			BasePrivateApiAddr: "localhost:10090",
 			BaseRPCAddr:        "localhost:8545",
 			Nodes: []devnet.Node{
-				args.Miner{
+				args.BlockProducer{
 					Node: args.Node{
 						ConsoleVerbosity: "0",
 						DirVerbosity:     "5",
 					},
 					AccountSlots: 200,
 				},
-				args.NonMiner{
+				args.NonBlockProducer{
 					Node: args.Node{
 						ConsoleVerbosity: "0",
 						DirVerbosity:     "5",

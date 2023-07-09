@@ -252,26 +252,26 @@ func (nw *Network) SelectNode(ctx go_context.Context, selector interface{}) Node
 	return nil
 }
 
-func (nw *Network) Miners() []Node {
-	var miners []Node
+func (nw *Network) BlockProducers() []Node {
+	var blockProducers []Node
 
 	for _, node := range nw.Nodes {
-		if node.IsMiner() {
-			miners = append(miners, node)
+		if node.IsBlockProducer() {
+			blockProducers = append(blockProducers, node)
 		}
 	}
 
-	return miners
+	return blockProducers
 }
 
-func (nw *Network) NonMiners() []Node {
-	var nonMiners []Node
+func (nw *Network) NonBlockProducers() []Node {
+	var nonBlockProducers []Node
 
 	for _, node := range nw.Nodes {
-		if !node.IsMiner() {
-			nonMiners = append(nonMiners, node)
+		if !node.IsBlockProducer() {
+			nonBlockProducers = append(nonBlockProducers, node)
 		}
 	}
 
-	return nonMiners
+	return nonBlockProducers
 }
