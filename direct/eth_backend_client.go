@@ -46,26 +46,6 @@ func (s *EthBackendClientDirect) NetPeerCount(ctx context.Context, in *remote.Ne
 	return s.server.NetPeerCount(ctx, in)
 }
 
-func (s *EthBackendClientDirect) EngineNewPayload(ctx context.Context, in *types.ExecutionPayload, opts ...grpc.CallOption) (*remote.EnginePayloadStatus, error) {
-	return s.server.EngineNewPayload(ctx, in)
-}
-
-func (s *EthBackendClientDirect) EngineForkChoiceUpdated(ctx context.Context, in *remote.EngineForkChoiceUpdatedRequest, opts ...grpc.CallOption) (*remote.EngineForkChoiceUpdatedResponse, error) {
-	return s.server.EngineForkChoiceUpdated(ctx, in)
-}
-
-func (s *EthBackendClientDirect) EngineGetPayload(ctx context.Context, in *remote.EngineGetPayloadRequest, opts ...grpc.CallOption) (*remote.EngineGetPayloadResponse, error) {
-	return s.server.EngineGetPayload(ctx, in)
-}
-
-func (s *EthBackendClientDirect) EngineGetPayloadBodiesByHashV1(ctx context.Context, in *remote.EngineGetPayloadBodiesByHashV1Request, opts ...grpc.CallOption) (*remote.EngineGetPayloadBodiesV1Response, error) {
-	return s.server.EngineGetPayloadBodiesByHashV1(ctx, in)
-}
-
-func (s *EthBackendClientDirect) EngineGetPayloadBodiesByRangeV1(ctx context.Context, in *remote.EngineGetPayloadBodiesByRangeV1Request, opts ...grpc.CallOption) (*remote.EngineGetPayloadBodiesV1Response, error) {
-	return s.server.EngineGetPayloadBodiesByRangeV1(ctx, in)
-}
-
 func (s *EthBackendClientDirect) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
 	return s.server.Version(ctx, in)
 }
@@ -225,8 +205,4 @@ func (s *EthBackendClientDirect) NodeInfo(ctx context.Context, in *remote.NodesI
 
 func (s *EthBackendClientDirect) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.PeersReply, error) {
 	return s.server.Peers(ctx, in)
-}
-
-func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.PendingBlockReply, error) {
-	return s.server.PendingBlock(ctx, in)
 }
