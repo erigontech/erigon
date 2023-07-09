@@ -91,12 +91,7 @@ var readDomains = &cobra.Command{
 	ValidArgs: []string{"account", "storage", "code", "commitment"},
 	Args:      cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		ctx, _ := libcommon.RootContext()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
@@ -226,12 +221,7 @@ var stateDomains = &cobra.Command{
 	Short:   `Run block execution and commitment with Domains.`,
 	Example: "go run ./cmd/integration state_domains --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "integration"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		ctx, _ := libcommon.RootContext()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
