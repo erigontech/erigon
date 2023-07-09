@@ -104,7 +104,7 @@ var cmdMdbxToMdbx = &cobra.Command{
 		err := backup.Kv2kv(ctx, from, to, nil, backup.ReadAheadThreads, logger)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -120,7 +120,7 @@ var cmdFToMdbx = &cobra.Command{
 		err := fToMdbx(ctx, logger, toChaindata)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -414,7 +414,7 @@ MainLoop:
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-commitEvery.C:
-				log.Info("Progress", "bucket", bucket, "key", fmt.Sprintf("%x", k))
+				logger.Info("Progress", "bucket", bucket, "key", fmt.Sprintf("%x", k))
 			}
 		}
 		err = fileScanner.Err()

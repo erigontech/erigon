@@ -67,7 +67,7 @@ var cmdStageSnapshots = &cobra.Command{
 
 		if err := stageSnapshots(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -88,7 +88,7 @@ var cmdStageHeaders = &cobra.Command{
 
 		if err := stageHeaders(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -109,7 +109,7 @@ var cmdStageBodies = &cobra.Command{
 
 		if err := stageBodies(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -130,7 +130,7 @@ var cmdStageSenders = &cobra.Command{
 
 		if err := stageSenders(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -153,7 +153,7 @@ var cmdStageExec = &cobra.Command{
 
 		if err := stageExec(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -174,7 +174,7 @@ var cmdStageTrie = &cobra.Command{
 
 		if err := stageTrie(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -195,7 +195,7 @@ var cmdStageHashState = &cobra.Command{
 
 		if err := stageHashState(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -216,7 +216,7 @@ var cmdStageHistory = &cobra.Command{
 
 		if err := stageHistory(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -237,7 +237,7 @@ var cmdLogIndex = &cobra.Command{
 
 		if err := stageLogIndex(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -258,7 +258,7 @@ var cmdCallTraces = &cobra.Command{
 
 		if err := stageCallTraces(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -279,7 +279,7 @@ var cmdStageTxLookup = &cobra.Command{
 
 		if err := stageTxLookup(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -299,7 +299,7 @@ var cmdPrintStages = &cobra.Command{
 
 		if err := printAllStages(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -319,7 +319,7 @@ var cmdPrintMigrations = &cobra.Command{
 		defer db.Close()
 		if err := printAppliedMigrations(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -339,7 +339,7 @@ var cmdRemoveMigration = &cobra.Command{
 		defer db.Close()
 		if err := removeMigration(db, cmd.Context()); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -374,7 +374,7 @@ var cmdSetPrune = &cobra.Command{
 		defer db.Close()
 		if err := overrideStorageMode(db, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -400,7 +400,7 @@ var cmdSetSnap = &cobra.Command{
 			return snap.ForceSetFlags(tx, sn.Cfg())
 		}); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -422,7 +422,7 @@ var cmdForceSetHistoryV3 = &cobra.Command{
 			return kvcfg.HistoryV3.ForceWrite(tx, _forceSetHistoryV3)
 		}); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}

@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
@@ -42,14 +41,14 @@ var cmdResetState = &cobra.Command{
 
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
 
 		if err = reset2.ResetState(db, ctx, chain, ""); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -58,7 +57,7 @@ var cmdResetState = &cobra.Command{
 		fmt.Printf("After reset: \n")
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
