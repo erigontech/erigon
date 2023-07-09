@@ -45,10 +45,11 @@ var cmdWarmup = &cobra.Command{
 	Use: "warmup",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
-		err := doWarmup(ctx, chaindata, bucket)
+		logger := debug.SetupCobra(cmd, "integration")
+		err := doWarmup(ctx, chaindata, bucket, logger)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -60,13 +61,14 @@ var cmdCompareBucket = &cobra.Command{
 	Short: "compare bucket to the same bucket in '--chaindata.reference'",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
+		logger := debug.SetupCobra(cmd, "integration")
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
 		err := compareBucketBetweenDatabases(ctx, chaindata, referenceChaindata, bucket)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -78,13 +80,14 @@ var cmdCompareStates = &cobra.Command{
 	Short: "compare state buckets to buckets in '--chaindata.reference'",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
+		logger := debug.SetupCobra(cmd, "integration")
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
 		err := compareStates(ctx, chaindata, referenceChaindata)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Error(err.Error())
+				logger.Error(err.Error())
 			}
 			return
 		}
@@ -113,7 +116,7 @@ var cmdFToMdbx = &cobra.Command{
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
-		logger := log.New()
+		logger := debug.SetupCobra(cmd, "integration")
 		err := fToMdbx(ctx, logger, toChaindata)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			if !errors.Is(err, context.Canceled) {
@@ -155,7 +158,7 @@ func init() {
 	rootCmd.AddCommand(cmdFToMdbx)
 }
 
-func doWarmup(ctx context.Context, chaindata string, bucket string) error {
+func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
 	db := mdbx2.NewMDBX(log.New()).Path(chaindata).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).Readonly().MustOpen()
 	defer db.Close()
@@ -195,7 +198,8 @@ func doWarmup(ctx context.Context, chaindata string, bucket string) error {
 
 						select {
 						case <-logEvery.C:
-							log.Info(fmt.Sprintf("Progress: %.2f%%", 100*float64(progress.Load())/float64(total)))
+
+							logger.Info(fmt.Sprintf("Progress: %.2f%%", 100*float64(progress.Load())/float64(total)))
 						default:
 						}
 					}
