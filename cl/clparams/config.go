@@ -262,8 +262,8 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://prater-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 	},
 	SepoliaNetwork: {
-		"https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+		"https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 	GnosisNetwork: {
 		"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",

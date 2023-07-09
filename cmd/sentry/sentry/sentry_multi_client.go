@@ -37,7 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -251,7 +251,7 @@ type MultiClient struct {
 	Hd                                *headerdownload.HeaderDownload
 	Bd                                *bodydownload.BodyDownload
 	IsMock                            bool
-	forkValidator                     *engineapi.ForkValidator
+	forkValidator                     *engine_helpers.ForkValidator
 	nodeName                          string
 	sentries                          []direct.SentryClient
 	headHeight                        uint64
@@ -285,7 +285,7 @@ func NewMultiClient(
 	syncCfg ethconfig.Sync,
 	blockReader services.FullBlockReader,
 	logPeerInfo bool,
-	forkValidator *engineapi.ForkValidator,
+	forkValidator *engine_helpers.ForkValidator,
 	dropUselessPeers bool,
 	logger log.Logger,
 ) (*MultiClient, error) {

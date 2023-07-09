@@ -1570,7 +1570,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(InternalConsensusFlag.Name) && clparams.EmbeddedEnabledByDefault(cfg.NetworkID) {
 		cfg.InternalCL = ctx.Bool(InternalConsensusFlag.Name)
 	}
-	nodeConfig.Http.InternalCL = cfg.InternalCL
 
 	if ctx.IsSet(SentryDropUselessPeers.Name) {
 		cfg.DropUselessPeers = ctx.Bool(SentryDropUselessPeers.Name)

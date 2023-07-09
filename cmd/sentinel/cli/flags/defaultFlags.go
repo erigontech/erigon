@@ -26,4 +26,8 @@ var CLDefaultFlags = []cli.Flag{
 	&InitSyncFlag,
 	&RecordModeDir,
 	&RecordModeFlag,
+	&RunEngineAPI,
+	&EngineApiHostFlag,
+	&EngineApiPortFlag,
+	&JwtSecret,
 }

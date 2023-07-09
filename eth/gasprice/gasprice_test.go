@@ -27,9 +27,9 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -151,7 +151,7 @@ func TestSuggestPrice(t *testing.T) {
 		Default:    big.NewInt(params.GWei),
 	}
 	backend := newTestBackend(t)
-	cache := commands.NewGasPriceCache()
+	cache := jsonrpc.NewGasPriceCache()
 	oracle := gasprice.NewOracle(backend, config, cache)
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G

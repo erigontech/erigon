@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -52,6 +51,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -364,7 +364,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	}
 
 	// Now, read the transaction itself
-	var txJson commands.RPCTransaction
+	var txJson jsonrpc.RPCTransaction
 
 	if err := json.Unmarshal(input, &txJson); err != nil {
 		return err
@@ -379,7 +379,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-func getTransaction(txJson commands.RPCTransaction) (types.Transaction, error) {
+func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
 	var overflow bool
 	var chainId *uint256.Int

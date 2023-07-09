@@ -15,10 +15,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -30,8 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -40,22 +40,22 @@ import (
 func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash libcommon.Hash, err error) {
 	if pendingPayloadStatus := hd.GetPendingPayloadStatus(); pendingPayloadStatus != nil {
 		if err != nil {
-			hd.PayloadStatusCh <- engineapi.PayloadStatus{CriticalError: err}
+			hd.PayloadStatusCh <- engine_helpers.PayloadStatus{CriticalError: err}
 		} else {
 			hd.PayloadStatusCh <- *pendingPayloadStatus
 		}
 	} else if pendingPayloadHash := hd.GetPendingPayloadHash(); pendingPayloadHash != (libcommon.Hash{}) {
 		if err != nil {
-			hd.PayloadStatusCh <- engineapi.PayloadStatus{CriticalError: err}
+			hd.PayloadStatusCh <- engine_helpers.PayloadStatus{CriticalError: err}
 		} else {
-			var status remote.EngineStatus
+			var status engine.EngineStatus
 			if headBlockHash == pendingPayloadHash {
-				status = remote.EngineStatus_VALID
+				status = engine.EngineStatus_VALID
 			} else {
 				log.Warn("Failed to execute pending payload", "pendingPayload", pendingPayloadHash, "headBlock", headBlockHash)
-				status = remote.EngineStatus_INVALID
+				status = engine.EngineStatus_INVALID
 			}
-			hd.PayloadStatusCh <- engineapi.PayloadStatus{
+			hd.PayloadStatusCh <- engine_helpers.PayloadStatus{
 				Status:          status,
 				LatestValidHash: headBlockHash,
 			}
@@ -429,7 +429,7 @@ func NewDefaultStages(ctx context.Context,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
 	agg *state.AggregatorV3,
-	forkValidator *engineapi.ForkValidator,
+	forkValidator *engine_helpers.ForkValidator,
 	logger log.Logger,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
