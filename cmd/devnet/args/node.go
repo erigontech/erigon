@@ -76,7 +76,7 @@ func (node *Node) configure(base Node, nodeNumber int) error {
 	return nil
 }
 
-type Miner struct {
+type BlockProducer struct {
 	Node
 	Mine            bool   `arg:"--mine" flag:"true" json:"mine"`
 	DevPeriod       int    `arg:"--dev.period" json:"dev.period"`
@@ -86,7 +86,7 @@ type Miner struct {
 	AccountSlots    int    `arg:"--txpool.accountslots" default:"16" json:"txpool.accountslots"`
 }
 
-func (m Miner) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
+func (m BlockProducer) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
 	err := m.configure(baseNode, nodeNumber)
 
 	if err != nil {
@@ -103,18 +103,18 @@ func (m Miner) Configure(baseNode Node, nodeNumber int) (int, interface{}, error
 	return m.HttpPort, m, nil
 }
 
-func (n Miner) IsMiner() bool {
+func (n BlockProducer) IsBlockProducer() bool {
 	return true
 }
 
-type NonMiner struct {
+type NonBlockProducer struct {
 	Node
 	HttpApi     string `arg:"--http.api" default:"admin,eth,debug,net,trace,web3,erigon,txpool" json:"http.api"`
 	TorrentPort string `arg:"--torrent.port" default:"42070" json:"torrent.port"`
 	NoDiscover  string `arg:"--nodiscover" flag:"" default:"true" json:"nodiscover"`
 }
 
-func (n NonMiner) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
+func (n NonBlockProducer) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
 	err := n.configure(baseNode, nodeNumber)
 
 	if err != nil {
@@ -124,7 +124,7 @@ func (n NonMiner) Configure(baseNode Node, nodeNumber int) (int, interface{}, er
 	return n.HttpPort, n, nil
 }
 
-func (n NonMiner) IsMiner() bool {
+func (n NonBlockProducer) IsBlockProducer() bool {
 	return false
 }
 

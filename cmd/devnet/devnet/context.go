@@ -93,17 +93,17 @@ func SelectNode(ctx go_context.Context, selector ...interface{}) Node {
 	return nil
 }
 
-func SelectMiner(ctx go_context.Context, selector ...interface{}) Node {
+func SelectBlockProducer(ctx go_context.Context, selector ...interface{}) Node {
 	if network, ok := ctx.Value(ckNetwork).(*Network); ok {
 		if len(selector) > 0 {
-			miners := network.Miners()
+			blockProducers := network.BlockProducers()
 			switch selector := selector[0].(type) {
 			case int:
-				if selector < len(miners) {
-					return miners[selector]
+				if selector < len(blockProducers) {
+					return blockProducers[selector]
 				}
 			case NodeSelector:
-				for _, node := range miners {
+				for _, node := range blockProducers {
 					if selector.Test(ctx, node) {
 						return node
 					}
@@ -111,29 +111,29 @@ func SelectMiner(ctx go_context.Context, selector ...interface{}) Node {
 			}
 		}
 
-		if current := CurrentNode(ctx); current != nil && current.IsMiner() {
+		if current := CurrentNode(ctx); current != nil && current.IsBlockProducer() {
 			return current
 		}
 
-		if miners := network.Miners(); len(miners) > 0 {
-			return miners[devnetutils.RandomInt(len(miners)-1)]
+		if blockProducers := network.BlockProducers(); len(blockProducers) > 0 {
+			return blockProducers[devnetutils.RandomInt(len(blockProducers)-1)]
 		}
 	}
 
 	return nil
 }
 
-func SelectNonMiner(ctx go_context.Context, selector ...interface{}) Node {
+func SelectNonBlockProducer(ctx go_context.Context, selector ...interface{}) Node {
 	if network, ok := ctx.Value(ckNetwork).(*Network); ok {
 		if len(selector) > 0 {
-			nonMiners := network.NonMiners()
+			nonBlockProducers := network.NonBlockProducers()
 			switch selector := selector[0].(type) {
 			case int:
-				if selector < len(nonMiners) {
-					return nonMiners[selector]
+				if selector < len(nonBlockProducers) {
+					return nonBlockProducers[selector]
 				}
 			case NodeSelector:
-				for _, node := range nonMiners {
+				for _, node := range nonBlockProducers {
 					if selector.Test(ctx, node) {
 						return node
 					}
@@ -141,12 +141,12 @@ func SelectNonMiner(ctx go_context.Context, selector ...interface{}) Node {
 			}
 		}
 
-		if current := CurrentNode(ctx); current != nil && !current.IsMiner() {
+		if current := CurrentNode(ctx); current != nil && !current.IsBlockProducer() {
 			return current
 		}
 
-		if nonMiners := network.NonMiners(); len(nonMiners) > 0 {
-			return nonMiners[devnetutils.RandomInt(len(nonMiners)-1)]
+		if nonBlockProducers := network.NonBlockProducers(); len(nonBlockProducers) > 0 {
+			return nonBlockProducers[devnetutils.RandomInt(len(nonBlockProducers)-1)]
 		}
 	}
 
