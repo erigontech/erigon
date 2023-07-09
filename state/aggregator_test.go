@@ -515,7 +515,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		err := BuildBtreeIndex(dataPath, indexPath, logger)
 		require.NoError(t, err)
 
-		bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M))
+		bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), false)
 		require.NoError(t, err)
 		require.EqualValues(t, 0, bt.KeyCount())
 	})
@@ -525,7 +525,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	err := BuildBtreeIndex(dataPath, indexPath, logger)
 	require.NoError(t, err)
 
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M))
+	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 

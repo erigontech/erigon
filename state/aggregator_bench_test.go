@@ -116,7 +116,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	require.NoError(b, err)
 
 	M := 1024
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M))
+	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), false)
 
 	require.NoError(b, err)
 

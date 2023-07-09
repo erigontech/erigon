@@ -825,6 +825,9 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 func (a *AggregatorV3) CanPrune(tx kv.Tx) bool {
 	return a.CanPruneFrom(tx) < a.minimaxTxNumInFiles.Load()
 }
+func (a *AggregatorV3) MinimaxTxNumInFiles() uint64 {
+	return a.minimaxTxNumInFiles.Load()
+}
 func (a *AggregatorV3) CanPruneFrom(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, a.tracesTo.indexKeysTable)
 	fst2, _ := kv.FirstKey(tx, a.storage.History.indexKeysTable)
