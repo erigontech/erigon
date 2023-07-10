@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type ExecutionClientDirect struct {
@@ -71,8 +70,4 @@ func (s *ExecutionClientDirect) IsCanonicalHash(ctx context.Context, in *types.H
 
 func (s *ExecutionClientDirect) GetHeaderHashNumber(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*execution.GetHeaderHashNumberResponse, error) {
 	return s.server.GetHeaderHashNumber(ctx, in)
-}
-
-func (s *ExecutionClientDirect) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*execution.PendingBlockReply, error) {
-	return s.server.PendingBlock(ctx, in)
 }

@@ -6,7 +6,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type EngineClient struct {
@@ -39,8 +38,4 @@ func (s *EngineClient) EngineGetPayloadBodiesByRangeV1(ctx context.Context, in *
 
 func (s *EngineClient) EngineGetBlobsBundleV1(ctx context.Context, in *engine.EngineGetBlobsBundleRequest, opts ...grpc.CallOption) (*types.BlobsBundleV1, error) {
 	return s.server.EngineGetBlobsBundleV1(ctx, in)
-}
-
-func (s *EngineClient) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*engine.PendingBlockReply, error) {
-	return s.server.PendingBlock(ctx, in)
 }
