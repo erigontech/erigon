@@ -122,7 +122,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 		}
 	}
 
-	go ListenSignals(nil)
+	go ListenSignals(nil, logger)
 	pprof, err := flags.GetBool(pprofFlag.Name)
 	if err != nil {
 		log.Error("failed setting config flags from yaml/toml file", "err", err)

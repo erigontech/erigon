@@ -3,7 +3,6 @@ package devnet
 import (
 	go_context "context"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 )
@@ -87,7 +86,7 @@ func SelectNode(ctx go_context.Context, selector ...interface{}) Node {
 			return current
 		}
 
-		return network.AnyNode(ctx)
+		return network.FirstNode()
 	}
 
 	return nil
@@ -116,7 +115,7 @@ func SelectBlockProducer(ctx go_context.Context, selector ...interface{}) Node {
 		}
 
 		if blockProducers := network.BlockProducers(); len(blockProducers) > 0 {
-			return blockProducers[devnetutils.RandomInt(len(blockProducers)-1)]
+			return blockProducers[0]
 		}
 	}
 
@@ -146,7 +145,7 @@ func SelectNonBlockProducer(ctx go_context.Context, selector ...interface{}) Nod
 		}
 
 		if nonBlockProducers := network.NonBlockProducers(); len(nonBlockProducers) > 0 {
-			return nonBlockProducers[devnetutils.RandomInt(len(nonBlockProducers)-1)]
+			return nonBlockProducers[0]
 		}
 	}
 

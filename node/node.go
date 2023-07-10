@@ -390,5 +390,5 @@ func StartNode(stack *Node) {
 		utils.Fatalf("Error starting protocol stack: %v", err)
 	}
 
-	go debug.ListenSignals(stack)
+	go debug.ListenSignals(stack, stack.logger)
 }
