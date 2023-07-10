@@ -170,6 +170,6 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 		})
 	}
 	logger := log.New()
-	_, db, d, txs := filledDomain(t, logger)
+	db, d, txs := filledDomain(t, logger)
 	test(t, d, db, txs)
 }

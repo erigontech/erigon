@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +40,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 )
 
-func testDbAndDomain(t *testing.T, logger log.Logger) (string, kv.RwDB, *Domain) {
+func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
+	return testDbAndDomainOfStep(t, 16, logger)
+}
+func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	path := t.TempDir()
 	keysTable := "Keys"
@@ -61,17 +63,17 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (string, kv.RwDB, *Domain)
 		}
 	}).MustOpen()
 	t.Cleanup(db.Close)
-	d, err := NewDomain(path, path, 16, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, true, AccDomainLargeValues, logger)
+	d, err := NewDomain(path, path, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, true, AccDomainLargeValues, logger)
 	require.NoError(t, err)
 	t.Cleanup(d.Close)
-	return path, db, d
+	return db, d
 }
 
 func TestDomain_CollationBuild(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	_, db, d := testDbAndDomain(t, logger)
+	db, d := testDbAndDomain(t, logger)
 	ctx := context.Background()
 	defer d.Close()
 
@@ -179,7 +181,7 @@ func TestDomain_CollationBuild(t *testing.T) {
 
 func TestDomain_IterationBasic(t *testing.T) {
 	logger := log.New()
-	_, db, d := testDbAndDomain(t, logger)
+	db, d := testDbAndDomain(t, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -236,7 +238,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	_, db, d := testDbAndDomain(t, logger)
+	db, d := testDbAndDomain(t, logger)
 	ctx := context.Background()
 
 	tx, err := db.BeginRw(ctx)
@@ -306,10 +308,10 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.Equal(t, []byte("value2.2"), v)
 }
 
-func filledDomain(t *testing.T, logger log.Logger) (string, kv.RwDB, *Domain, uint64) {
+func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	t.Helper()
 	require := require.New(t)
-	path, db, d := testDbAndDomain(t, logger)
+	db, d := testDbAndDomain(t, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
@@ -343,7 +345,7 @@ func filledDomain(t *testing.T, logger log.Logger) (string, kv.RwDB, *Domain, ui
 	require.NoError(err)
 	err = tx.Commit()
 	require.NoError(err)
-	return path, db, d, txs
+	return db, d, txs
 }
 
 func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
@@ -391,7 +393,7 @@ func TestHistory(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	_, db, d, txs := filledDomain(t, logger)
+	db, d, txs := filledDomain(t, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -420,7 +422,7 @@ func TestIterationMultistep(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	_, db, d := testDbAndDomain(t, logger)
+	db, d := testDbAndDomain(t, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -586,7 +588,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 
 func TestDomain_MergeFiles(t *testing.T) {
 	logger := log.New()
-	_, db, d, txs := filledDomain(t, logger)
+	db, d, txs := filledDomain(t, logger)
 
 	collateAndMerge(t, db, nil, d, txs)
 	checkHistory(t, db, d, txs)
@@ -594,8 +596,7 @@ func TestDomain_MergeFiles(t *testing.T) {
 
 func TestDomain_ScanFiles(t *testing.T) {
 	logger := log.New()
-	path, db, d, txs := filledDomain(t, logger)
-	_ = path
+	db, d, txs := filledDomain(t, logger)
 	collateAndMerge(t, db, nil, d, txs)
 	// Recreate domain and re-scan the files
 	txNum := d.txNum
@@ -609,7 +610,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 
 func TestDomain_Delete(t *testing.T) {
 	logger := log.New()
-	_, db, d := testDbAndDomain(t, logger)
+	db, d := testDbAndDomain(t, logger)
 	ctx, require := context.Background(), require.New(t)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
@@ -653,9 +654,9 @@ func TestDomain_Delete(t *testing.T) {
 	}
 }
 
-func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64, logger log.Logger) (string, kv.RwDB, *Domain, map[string][]bool) {
+func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain, map[string][]bool) {
 	t.Helper()
-	path, db, d := testDbAndDomain(t, logger)
+	db, d := testDbAndDomainOfStep(t, aggStep, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -678,6 +679,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64, logger log.L
 			var v [8]byte
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
+			//v[0] = 3 // value marker
 			err = d.Put(k[:], nil, v[:])
 			require.NoError(t, err)
 
@@ -693,7 +695,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64, logger log.L
 	}
 	err = tx.Commit()
 	require.NoError(t, err)
-	return path, db, d, dat
+	return db, d, dat
 }
 
 // firstly we write all the data to domain
@@ -703,7 +705,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64, logger log.L
 func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	logger := log.New()
 	keyCount, txCount := uint64(4), uint64(64)
-	_, db, dom, data := filledDomainFixedSize(t, keyCount, txCount, logger)
+	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
 
 	collateAndMerge(t, db, nil, dom, txCount)
 
@@ -757,9 +759,8 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	logger := log.New()
 	keysCount, txCount := uint64(16), uint64(64)
 
-	path, db, d := testDbAndDomain(t, logger)
+	db, d := testDbAndDomain(t, logger)
 	ctx := context.Background()
-	defer os.Remove(path)
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -878,7 +879,7 @@ func TestScanStaticFilesD(t *testing.T) {
 func TestDomain_CollationBuildInMem(t *testing.T) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	_, db, d := testDbAndDomain(t, log.New())
+	db, d := testDbAndDomain(t, log.New())
 	ctx := context.Background()
 	defer d.Close()
 
@@ -973,7 +974,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 }
 
 func TestDomainContext_IteratePrefix(t *testing.T) {
-	_, db, d := testDbAndDomain(t, log.New())
+	db, d := testDbAndDomain(t, log.New())
 	defer db.Close()
 	defer d.Close()
 
@@ -1039,7 +1040,7 @@ func TestDomainContext_IteratePrefix(t *testing.T) {
 }
 
 func TestDomainContext_getFromFiles(t *testing.T) {
-	_, db, d := testDbAndDomain(t, log.New())
+	db, d := testDbAndDomain(t, log.New())
 	defer db.Close()
 	defer d.Close()
 
@@ -1133,7 +1134,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 }
 
 func TestDomain_Unwind(t *testing.T) {
-	_, db, d := testDbAndDomain(t, log.New())
+	db, d := testDbAndDomain(t, log.New())
 	ctx := context.Background()
 	defer d.Close()
 

@@ -544,7 +544,7 @@ func (ic *InvertedIndexContext) Close() {
 		r.Close()
 	}
 
-	ic.loc.Close(ic.ii.logger)
+	ic.loc.Close()
 }
 
 type InvertedIndexContext struct {

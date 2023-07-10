@@ -822,28 +822,28 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (a *AggregatorV3Context) maxTxNumInFiles() uint64 {
+func (a *AggregatorV3Context) maxTxNumInFiles(frozen bool) uint64 {
 	return cmp.Min(
 		cmp.Min(
 			cmp.Min(
-				a.accounts.maxTxNumInFiles(),
-				a.code.maxTxNumInFiles()),
+				a.accounts.maxTxNumInFiles(frozen),
+				a.code.maxTxNumInFiles(frozen)),
 			cmp.Min(
-				a.storage.maxTxNumInFiles(),
-				a.commitment.maxTxNumInFiles()),
+				a.storage.maxTxNumInFiles(frozen),
+				a.commitment.maxTxNumInFiles(frozen)),
 		),
 		cmp.Min(
 			cmp.Min(
-				a.logAddrs.maxTxNumInFiles(),
-				a.logTopics.maxTxNumInFiles()),
+				a.logAddrs.maxTxNumInFiles(frozen),
+				a.logTopics.maxTxNumInFiles(frozen)),
 			cmp.Min(
-				a.tracesFrom.maxTxNumInFiles(),
-				a.tracesTo.maxTxNumInFiles()),
+				a.tracesFrom.maxTxNumInFiles(frozen),
+				a.tracesTo.maxTxNumInFiles(frozen)),
 		),
 	)
 }
 func (a *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
-	return a.CanPruneFrom(tx) < a.maxTxNumInFiles()
+	return a.CanPruneFrom(tx) < a.maxTxNumInFiles(false)
 }
 func (a *AggregatorV3) MinimaxTxNumInFiles() uint64 {
 	return a.minimaxTxNumInFiles.Load()
@@ -1373,24 +1373,24 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 			}
 		}
 
-		//if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
-		//	close(fin)
-		//	return
-		//}
-		//a.wg.Add(1)
-		//go func() {
-		//	defer a.wg.Done()
-		//	defer a.mergeingFiles.Store(false)
-		//	defer func() { close(fin) }()
-		//	if err := a.MergeLoop(a.ctx, 1); err != nil {
-		//		if errors.Is(err, context.Canceled) {
-		//			return
-		//		}
-		//		log.Warn("[snapshots] merge", "err", err)
-		//	}
-		//
-		//	a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
-		//}()
+		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
+			close(fin)
+			return
+		}
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			defer a.mergeingFiles.Store(false)
+			defer func() { close(fin) }()
+			if err := a.MergeLoop(a.ctx, 1); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				log.Warn("[snapshots] merge", "err", err)
+			}
+
+			a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
+		}()
 	}()
 	return fin
 }
