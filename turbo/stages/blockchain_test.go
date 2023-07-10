@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"os"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -1211,8 +1210,6 @@ func TestLargeReorgTrieGC(t *testing.T) {
 //   - https://github.com/ethereum/go-ethereum/issues/18977
 //   - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 	// Generate a canonical chain to act as the main dataset
 	m := stages.Mock(t)
 
