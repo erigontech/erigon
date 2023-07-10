@@ -205,7 +205,7 @@ func action(ctx *cli.Context) error {
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
 				{Text: "PingErigonRpc"},
 				{Text: "CheckTxPoolContent", Args: []any{0, 0, 0}},
-				//{Text: "SendTxWithDynamicFee", Args: []any{recipientAddress, services.DevAddress, sendValue}},
+				{Text: "SendTxWithDynamicFee", Args: []any{recipientAddress, services.DevAddress, sendValue}},
 				{Text: "AwaitBlocks", Args: []any{2 * time.Second}},
 			},
 		})
