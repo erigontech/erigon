@@ -276,6 +276,9 @@ func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	}
 	return td
 }
+func (cr ChainReader) FrozenBlocks() uint64 {
+	return cr.blockReader.FrozenBlocks()
+}
 
 func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec22.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *exec22.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
