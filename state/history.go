@@ -304,11 +304,6 @@ func (h *History) missedIdxFiles() (l []*filesItem) {
 	return l
 }
 
-// BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (hc *HistoryContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	return hc.h.localityIndex.BuildMissedIndices(ctx, hc.ic)
-}
-
 func (h *History) buildVi(ctx context.Context, item *filesItem, p *background.Progress) (err error) {
 	search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
 	iiItem, ok := h.InvertedIndex.files.Get(search)

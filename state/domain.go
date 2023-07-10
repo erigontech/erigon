@@ -171,6 +171,8 @@ type Domain struct {
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 	logger       log.Logger
+
+	domainLocalityIndex *LocalityIndex
 }
 
 func NewDomain(dir, tmpdir string, aggregationStep uint64,
@@ -190,6 +192,13 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 		return nil, err
 	}
 
+	if d.withLocalityIndex {
+		var err error
+		d.domainLocalityIndex, err = NewLocalityIndex(d.dir, d.tmpdir, d.aggregationStep, d.filenameBase+"_kv", d.logger)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return d, nil
 }
 
@@ -689,6 +698,8 @@ type DomainContext struct {
 	hc      *HistoryContext
 	keyBuf  [60]byte // 52b key and 8b for inverted step
 	numBuf  [8]byte
+
+	loc *ctxLocalityIdx
 }
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
@@ -729,13 +740,13 @@ func (d *Domain) MakeContext() *DomainContext {
 		d:     d,
 		hc:    d.History.MakeContext(),
 		files: *d.roFiles.Load(),
+		loc:   d.domainLocalityIndex.MakeContext(),
 	}
 	for _, item := range dc.files {
 		if !item.src.frozen {
 			item.src.refcount.Add(1)
 		}
 	}
-
 	return dc
 }
 
@@ -1405,11 +1416,6 @@ func (d *Domain) Rotate() flusher {
 
 var COMPARE_INDEXES = false // if true, will compare values from Btree and INvertedIndex
 
-func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	//return dc.d.BuildOptionalMissedIndices(ctx)
-	return nil
-}
-
 func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint64) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 	var k []byte
@@ -1550,6 +1556,7 @@ func (dc *DomainContext) Close() {
 	//	r.Close()
 	//}
 	dc.hc.Close()
+	dc.loc.Close()
 }
 
 func (dc *DomainContext) statelessGetter(i int) *compress.Getter {

@@ -304,29 +304,95 @@ func (h *History) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
 	return r
 }
 
-func (dc *DomainContext) maxTxNumInFiles() uint64 {
+func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
+	return nil //TODO: un-comment when index is ready
+	if err := dc.hc.ic.BuildOptionalMissedIndices(ctx); err != nil {
+		return err
+	}
+
+	if !dc.d.withLocalityIndex || dc.d.domainLocalityIndex == nil {
+		return
+	}
+	to := dc.maxFrozenStep()
+	if to == 0 || dc.d.domainLocalityIndex.exists(to) {
+		return nil
+	}
+	defer dc.d.EnableMadvNormalReadAhead().DisableReadAhead()
+	return dc.d.domainLocalityIndex.BuildMissedIndices(ctx, to, func() *LocalityIterator { return dc.iterateKeysLocality(to * dc.d.aggregationStep) })
+}
+
+func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
+	if !ic.ii.withLocalityIndex || ic.ii.localityIndex == nil {
+		return
+	}
+	to := ic.maxFrozenStep()
+	if to == 0 || ic.ii.localityIndex.exists(to) {
+		return nil
+	}
+	defer ic.ii.EnableMadvNormalReadAhead().DisableReadAhead()
+	return ic.ii.localityIndex.BuildMissedIndices(ctx, to, func() *LocalityIterator { return ic.iterateKeysLocality(to * ic.ii.aggregationStep) })
+}
+
+func (dc *DomainContext) maxFrozenStep() uint64 {
+	return dc.maxTxNumInFiles(true) / dc.d.aggregationStep
+}
+func (hc *HistoryContext) maxFrozenStep() uint64 {
+	return hc.maxTxNumInFiles(true) / hc.h.aggregationStep
+}
+func (ic *InvertedIndexContext) maxFrozenStep() uint64 {
+	return ic.maxTxNumInFiles(true) / ic.ii.aggregationStep
+}
+func (dc *DomainContext) maxTxNumInFiles(frozen bool) uint64 {
 	if len(dc.files) == 0 {
 		return 0
 	}
-	return cmp.Min(
-		dc.files[len(dc.files)-1].endTxNum,
-		dc.hc.maxTxNumInFiles(),
-	)
+	var max uint64
+	if frozen {
+		for i := len(dc.files) - 1; i >= 0; i-- {
+			if !dc.files[i].src.frozen {
+				continue
+			}
+			max = dc.files[i].endTxNum
+			break
+		}
+	} else {
+		max = dc.files[len(dc.files)-1].endTxNum
+	}
+	return cmp.Min(max, dc.hc.maxTxNumInFiles(frozen))
 }
-func (hc *HistoryContext) maxTxNumInFiles() uint64 {
+
+func (hc *HistoryContext) maxTxNumInFiles(frozen bool) uint64 {
 	if len(hc.files) == 0 {
 		return 0
 	}
-	return cmp.Min(
-		hc.files[len(hc.files)-1].endTxNum,
-		hc.ic.maxTxNumInFiles(),
-	)
+	var max uint64
+	if frozen {
+		for i := len(hc.files) - 1; i >= 0; i-- {
+			if !hc.files[i].src.frozen {
+				continue
+			}
+			max = hc.files[i].endTxNum
+			break
+		}
+	} else {
+		max = hc.files[len(hc.files)-1].endTxNum
+	}
+	return cmp.Min(max, hc.ic.maxTxNumInFiles(frozen))
 }
-func (ic *InvertedIndexContext) maxTxNumInFiles() uint64 {
+func (ic *InvertedIndexContext) maxTxNumInFiles(frozen bool) uint64 {
 	if len(ic.files) == 0 {
 		return 0
 	}
-	return ic.files[len(ic.files)-1].endTxNum
+	if !frozen {
+		return ic.files[len(ic.files)-1].endTxNum
+	}
+	for i := len(ic.files) - 1; i >= 0; i-- {
+		if !ic.files[i].src.frozen {
+			continue
+		}
+		return ic.files[i].endTxNum
+	}
+	return 0
 }
 
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)

@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/assert"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -37,7 +38,7 @@ import (
 
 const LocalityIndexUint64Limit = 64 //bitmap spend 1 bit per file, stored as uint64
 
-// LocalityIndex - has info in which .ef files exists given key
+// LocalityIndex - has info in which .ef or .kv files exists given key
 // Format: key -> bitmap(step_number_list)
 // step_number_list is list of .ef files where exists given key
 type LocalityIndex struct {
@@ -212,27 +213,27 @@ func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
 	return x
 }
 
-func (out *ctxLocalityIdx) Close(logger log.Logger) {
+func (out *ctxLocalityIdx) Close() {
 	if out == nil || out.file == nil || out.file.src == nil {
 		return
 	}
 	refCnt := out.file.src.refcount.Add(-1)
 	if refCnt == 0 && out.file.src.canDelete.Load() {
-		closeLocalityIndexFilesAndRemove(out, logger)
+		closeLocalityIndexFilesAndRemove(out)
 	}
 }
 
-func closeLocalityIndexFilesAndRemove(i *ctxLocalityIdx, logger log.Logger) {
+func closeLocalityIndexFilesAndRemove(i *ctxLocalityIdx) {
 	if i.file.src != nil {
 		i.file.src.closeFilesAndRemove()
 		i.file.src = nil
 	}
 	if i.bm != nil {
 		if err := i.bm.Close(); err != nil {
-			logger.Trace("close", "err", err, "file", i.bm.FileName())
+			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", i.bm.FileName(), "stack", dbg.Stack())
 		}
 		if err := os.Remove(i.bm.FilePath()); err != nil {
-			logger.Trace("os.Remove", "err", err, "file", i.bm.FileName())
+			log.Log(dbg.FileCloseLogLevel, "os.Remove", "err", err, "file", i.bm.FileName(), "stack", dbg.Stack())
 		}
 		i.bm = nil
 	}
@@ -272,7 +273,10 @@ func (li *LocalityIndex) lookupIdxFiles(loc *ctxLocalityIdx, key []byte, fromTxN
 	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, loc.file.endTxNum, ok1, ok2
 }
 
-func (li *LocalityIndex) missedIdxFiles(ii *InvertedIndexContext) (toStep uint64, idxExists bool) {
+func (li *LocalityIndex) exists(step uint64) bool {
+	return dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li", li.filenameBase, 0, step)))
+}
+func (li *LocalityIndex) missedIdxFiles(ii *HistoryContext) (toStep uint64, idxExists bool) {
 	if len(ii.files) == 0 {
 		return 0, true
 	}
@@ -289,15 +293,13 @@ func (li *LocalityIndex) missedIdxFiles(ii *InvertedIndexContext) (toStep uint64
 	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, 0, toStep)
 	return toStep, dir.FileExist(filepath.Join(li.dir, fName))
 }
-func (li *LocalityIndex) buildFiles(ctx context.Context, ic *InvertedIndexContext, toStep uint64) (files *LocalityIndexFiles, err error) {
-	defer ic.ii.EnableMadvNormalReadAhead().DisableReadAhead()
-
+func (li *LocalityIndex) buildFiles(ctx context.Context, toStep uint64, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
 	fromStep := uint64(0)
 	count := 0
-	it := ic.iterateKeysLocality(toStep * li.aggregationStep)
+	it := makeIter()
 	for it.HasNext() {
 		_, _ = it.Next()
 		count++
@@ -329,7 +331,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, ic *InvertedIndexContex
 		}
 		defer dense.Close()
 
-		it = ic.iterateKeysLocality(toStep * li.aggregationStep)
+		it = makeIter()
 		for it.HasNext() {
 			k, inFiles := it.Next()
 			if err := dense.AddArray(i, inFiles); err != nil {
@@ -390,16 +392,9 @@ func (li *LocalityIndex) integrateFiles(sf LocalityIndexFiles, txNumFrom, txNumT
 	li.reCalcRoFiles()
 }
 
-func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, ii *InvertedIndexContext) error {
-	if li == nil {
-		return nil
-	}
-	toStep, idxExists := li.missedIdxFiles(ii)
-	if idxExists || toStep == 0 {
-		return nil
-	}
+func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, toStep uint64, makeIter func() *LocalityIterator) error {
 	fromStep := uint64(0)
-	f, err := li.buildFiles(ctx, ii, toStep)
+	f, err := li.buildFiles(ctx, toStep, makeIter)
 	if err != nil {
 		return err
 	}
@@ -422,7 +417,8 @@ func (sf LocalityIndexFiles) Close() {
 }
 
 type LocalityIterator struct {
-	hc               *InvertedIndexContext
+	aggStep          uint64
+	compressVals     bool
 	h                ReconHeapOlderFirst
 	files, nextFiles []uint64
 	key, nextKey     []byte
@@ -436,10 +432,15 @@ func (si *LocalityIterator) advance() {
 	for si.h.Len() > 0 {
 		top := heap.Pop(&si.h).(*ReconItem)
 		key := top.key
-		_, offset := top.g.NextUncompressed()
+		var offset uint64
+		if si.compressVals {
+			offset = top.g.Skip()
+		} else {
+			offset = top.g.SkipUncompressed()
+		}
 		si.progress += offset - top.lastOffset
 		top.lastOffset = offset
-		inStep := uint32(top.startTxNum / si.hc.ii.aggregationStep)
+		inStep := uint32(top.startTxNum / si.aggStep)
 		if top.g.HasNext() {
 			top.key, _ = top.g.NextUncompressed()
 			heap.Push(&si.h, top)
@@ -453,7 +454,6 @@ func (si *LocalityIterator) advance() {
 				si.files = append(si.files, uint64(inFile))
 				continue
 			}
-
 			si.nextFiles, si.files = si.files, si.nextFiles[:0]
 			si.nextKey = si.key
 
@@ -476,18 +476,19 @@ func (si *LocalityIterator) Progress() float64 {
 func (si *LocalityIterator) FilesAmount() uint64 { return si.filesAmount }
 
 func (si *LocalityIterator) Next() ([]byte, []uint64) {
+	k, v := si.nextKey, si.nextFiles
 	si.advance()
-	return si.nextKey, si.nextFiles
+	return k, v
 }
 
 func (ic *InvertedIndexContext) iterateKeysLocality(uptoTxNum uint64) *LocalityIterator {
-	si := &LocalityIterator{hc: ic}
+	si := &LocalityIterator{aggStep: ic.ii.aggregationStep, compressVals: false}
 	for _, item := range ic.files {
 		if !item.src.frozen || item.startTxNum > uptoTxNum {
 			continue
 		}
 		if assert.Enable {
-			if (item.endTxNum-item.startTxNum)/ic.ii.aggregationStep != StepsInBiggestFile {
+			if (item.endTxNum-item.startTxNum)/si.aggStep != StepsInBiggestFile {
 				panic(fmt.Errorf("frozen file of small size: %s", item.src.decompressor.FileName()))
 			}
 		}
@@ -495,6 +496,30 @@ func (ic *InvertedIndexContext) iterateKeysLocality(uptoTxNum uint64) *LocalityI
 		if g.HasNext() {
 			key, offset := g.NextUncompressed()
 
+			heapItem := &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key, startOffset: offset, lastOffset: offset}
+			heap.Push(&si.h, heapItem)
+		}
+		si.totalOffsets += uint64(g.Size())
+		si.filesAmount++
+	}
+	si.advance()
+	return si
+}
+
+func (dc *DomainContext) iterateKeysLocality(uptoTxNum uint64) *LocalityIterator {
+	si := &LocalityIterator{aggStep: dc.d.aggregationStep, compressVals: dc.d.compressVals}
+	for _, item := range dc.files {
+		if !item.src.frozen || item.startTxNum > uptoTxNum {
+			continue
+		}
+		if assert.Enable {
+			if (item.endTxNum-item.startTxNum)/si.aggStep != StepsInBiggestFile {
+				panic(fmt.Errorf("frozen file of small size: %s", item.src.decompressor.FileName()))
+			}
+		}
+		g := item.src.decompressor.MakeGetter()
+		if g.HasNext() {
+			key, offset := g.NextUncompressed()
 			heapItem := &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key, startOffset: offset, lastOffset: offset}
 			heap.Push(&si.h, heapItem)
 		}
