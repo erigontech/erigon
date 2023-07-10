@@ -256,6 +256,14 @@ type signer struct {
 	signFn SignerFn          // Signer function to authorize hashes with
 }
 
+func CalculateSprintCount(config *chain.BorConfig, from, to uint64) int {
+	return config.CalculateSprintCount(from, to)
+}
+
+func CalculateSprint(config *chain.BorConfig, number uint64) uint64 {
+	return config.CalculateSprint(number)
+}
+
 // New creates a Matic Bor consensus engine.
 func New(
 	chainConfig *chain.Config,
