@@ -822,15 +822,35 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (a *AggregatorV3) CanPrune(tx kv.Tx) bool {
-	return a.CanPruneFrom(tx) < a.minimaxTxNumInFiles.Load()
+func (a *AggregatorV3Context) maxTxNumInFiles() uint64 {
+	return cmp.Min(
+		cmp.Min(
+			cmp.Min(
+				a.accounts.maxTxNumInFiles(),
+				a.code.maxTxNumInFiles()),
+			cmp.Min(
+				a.storage.maxTxNumInFiles(),
+				a.commitment.maxTxNumInFiles()),
+		),
+		cmp.Min(
+			cmp.Min(
+				a.logAddrs.maxTxNumInFiles(),
+				a.logTopics.maxTxNumInFiles()),
+			cmp.Min(
+				a.tracesFrom.maxTxNumInFiles(),
+				a.tracesTo.maxTxNumInFiles()),
+		),
+	)
+}
+func (a *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
+	return a.CanPruneFrom(tx) < a.maxTxNumInFiles()
 }
 func (a *AggregatorV3) MinimaxTxNumInFiles() uint64 {
 	return a.minimaxTxNumInFiles.Load()
 }
-func (a *AggregatorV3) CanPruneFrom(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, a.tracesTo.indexKeysTable)
-	fst2, _ := kv.FirstKey(tx, a.storage.History.indexKeysTable)
+func (a *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
+	fst, _ := kv.FirstKey(tx, a.a.tracesTo.indexKeysTable)
+	fst2, _ := kv.FirstKey(tx, a.a.storage.History.indexKeysTable)
 	if len(fst) > 0 && len(fst2) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
 		fstInDb2 := binary.BigEndian.Uint64(fst2)
@@ -839,10 +859,10 @@ func (a *AggregatorV3) CanPruneFrom(tx kv.Tx) uint64 {
 	return math2.MaxUint64
 }
 
-func (a *AggregatorV3) PruneWithTiemout(ctx context.Context, timeout time.Duration) error {
+func (a *AggregatorV3Context) PruneWithTiemout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
 	t := time.Now()
-	for a.CanPrune(a.rwTx) && time.Since(t) < timeout {
-		if err := a.Prune(ctx, 0.01); err != nil { // prune part of retired data, before commit
+	for a.CanPrune(tx) && time.Since(t) < timeout {
+		if err := a.a.Prune(ctx, 0.01); err != nil { // prune part of retired data, before commit
 			return err
 		}
 	}
@@ -1353,24 +1373,24 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 			}
 		}
 
-		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
-			close(fin)
-			return
-		}
-		a.wg.Add(1)
-		go func() {
-			defer a.wg.Done()
-			defer a.mergeingFiles.Store(false)
-			defer func() { close(fin) }()
-			if err := a.MergeLoop(a.ctx, 1); err != nil {
-				if errors.Is(err, context.Canceled) {
-					return
-				}
-				log.Warn("[snapshots] merge", "err", err)
-			}
-
-			a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
-		}()
+		//if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
+		//	close(fin)
+		//	return
+		//}
+		//a.wg.Add(1)
+		//go func() {
+		//	defer a.wg.Done()
+		//	defer a.mergeingFiles.Store(false)
+		//	defer func() { close(fin) }()
+		//	if err := a.MergeLoop(a.ctx, 1); err != nil {
+		//		if errors.Is(err, context.Canceled) {
+		//			return
+		//		}
+		//		log.Warn("[snapshots] merge", "err", err)
+		//	}
+		//
+		//	a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
+		//}()
 	}()
 	return fin
 }

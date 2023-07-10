@@ -304,6 +304,31 @@ func (h *History) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
 	return r
 }
 
+func (dc *DomainContext) maxTxNumInFiles() uint64 {
+	if len(dc.files) == 0 {
+		return 0
+	}
+	return cmp.Min(
+		dc.files[len(dc.files)-1].endTxNum,
+		dc.hc.maxTxNumInFiles(),
+	)
+}
+func (hc *HistoryContext) maxTxNumInFiles() uint64 {
+	if len(hc.files) == 0 {
+		return 0
+	}
+	return cmp.Min(
+		hc.files[len(hc.files)-1].endTxNum,
+		hc.ic.maxTxNumInFiles(),
+	)
+}
+func (ic *InvertedIndexContext) maxTxNumInFiles() uint64 {
+	if len(ic.files) == 0 {
+		return 0
+	}
+	return ic.files[len(ic.files)-1].endTxNum
+}
+
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)
 // files are in the descending order of endTxNum
 func (dc *DomainContext) staticFilesInRange(r DomainRanges) (valuesFiles, indexFiles, historyFiles []*filesItem, startJ int) {
