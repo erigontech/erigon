@@ -364,7 +364,7 @@ func ExecV3(ctx context.Context,
 					}
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
-						if tx.(*temporal.Tx).AggCtx().CanPrune(tx) {
+						if agg.CanPrune(tx) {
 							if err = agg.Prune(ctx, 10); err != nil { // prune part of retired data, before commit
 								return err
 							}
@@ -745,7 +745,7 @@ Loop:
 
 					// prune befor flush, to speedup flush
 					tt := time.Now()
-					if applyTx.(*temporal.Tx).AggCtx().CanPrune(applyTx) {
+					if agg.CanPrune(applyTx) {
 						if err = agg.Prune(ctx, 10); err != nil { // prune part of retired data, before commit
 							return err
 						}
