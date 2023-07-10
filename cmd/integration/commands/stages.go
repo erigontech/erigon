@@ -13,6 +13,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
@@ -1474,13 +1475,14 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		<-ctx.Done()
 		close(miningCancel)
 	}()
+
 	miningSync := stagedsync.New(
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, dirs.Tmp, blockReader),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, nil, blockReader),
 			stagedsync.StageHashStateCfg(db, dirs, historyV3),
 			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, blockReader, nil, historyV3, agg),
-			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel, blockReader),
+			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel, blockReader, builder.NewLatestBlockBuiltStore()),
 		),
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,

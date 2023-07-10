@@ -25,13 +25,11 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Configure network related parameters for the config.
@@ -76,28 +74,6 @@ func NewEngineServer(ctx context.Context, logger log.Logger, config *chain.Confi
 		hd:          hd,
 		builders:    make(map[uint64]*builder.BlockBuilder),
 	}
-}
-
-func (s *EngineServer) PendingBlock(_ context.Context, _ *emptypb.Empty) (*engine.PendingBlockReply, error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	b := s.builders[s.payloadId]
-	if b == nil {
-		return nil, nil
-	}
-
-	pendingBlock := b.Block()
-	if pendingBlock == nil {
-		return nil, nil
-	}
-
-	blockRlp, err := rlp.EncodeToBytes(pendingBlock)
-	if err != nil {
-		return nil, err
-	}
-
-	return &engine.PendingBlockReply{BlockRlp: blockRlp}, nil
 }
 
 func convertPayloadStatus(payloadStatus *engine_helpers.PayloadStatus) *engine.EnginePayloadStatus {
