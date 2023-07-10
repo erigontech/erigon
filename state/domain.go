@@ -1406,8 +1406,7 @@ func (d *Domain) Rotate() flusher {
 var COMPARE_INDEXES = false // if true, will compare values from Btree and INvertedIndex
 
 func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	//return dc.d.BuildOptionalMissedIndices(ctx)
-	return nil
+	return dc.hc.BuildOptionalMissedIndices(ctx)
 }
 
 func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint64) (v []byte, found bool, err error) {
