@@ -305,6 +305,7 @@ func (h *History) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
 }
 
 func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
+	return nil //TODO: un-comment when index is ready
 	if err := dc.hc.ic.BuildOptionalMissedIndices(ctx); err != nil {
 		return err
 	}
