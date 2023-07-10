@@ -110,6 +110,11 @@ var snapshotCommand = cli.Command{
 			}, debug.Flags, logging.Flags),
 		},
 		{
+			Name:   "locality_idx",
+			Action: doLocalityIdx,
+			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag, &SnapshotRebuildFlag}, debug.Flags, logging.Flags),
+		},
+		{
 			Name:   "diff",
 			Action: doDiff,
 			Flags: joinFlags([]cli.Flag{
@@ -222,9 +227,8 @@ func doDiff(cliCtx *cli.Context) error {
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
-	var logger log.Logger
-	var err error
-	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
 		return err
 	}
 	args := cliCtx.Args()
@@ -288,9 +292,8 @@ func doRam(cliCtx *cli.Context) error {
 }
 
 func doIndicesCommand(cliCtx *cli.Context) error {
-	var err error
-	var logger log.Logger
-	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -329,6 +332,49 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	err = agg.BuildMissedIndices(ctx, indexWorkers)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func doLocalityIdx(cliCtx *cli.Context) error {
+	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+	ctx := cliCtx.Context
+
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
+	//from := cliCtx.Uint64(SnapshotFromFlag.Name)
+
+	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).Readonly().MustOpen()
+	defer chainDB.Close()
+
+	dir.MustExist(dirs.SnapHistory)
+	chainConfig := fromdb.ChainConfig(chainDB)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+
+	if rebuild {
+		panic("not implemented")
+	}
+	indexWorkers := estimate.IndexSnapshot.Workers()
+	if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, *chainID, indexWorkers, logger); err != nil {
+		return err
+	}
+	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	err = agg.OpenFolder()
+	if err != nil {
+		return err
+	}
+	aggCtx := agg.MakeContext()
+	defer aggCtx.Close()
+	err = aggCtx.BuildOptionalMissedIndices(ctx, indexWorkers)
 	if err != nil {
 		return err
 	}
