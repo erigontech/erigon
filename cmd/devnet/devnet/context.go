@@ -63,6 +63,10 @@ func WithCliContext(ctx go_context.Context, cliCtx *cli.Context) Context {
 	return &context{go_context.WithValue(ctx, ckCliContext, cliCtx)}
 }
 
+func CliContext(ctx go_context.Context) *cli.Context {
+	return ctx.Value(ckCliContext).(*cli.Context)
+}
+
 func CurrentNode(ctx go_context.Context) Node {
 	if cn, ok := ctx.Value(ckNode).(*cnode); ok {
 		if cn.node == nil {

@@ -79,7 +79,7 @@ func (n *node) IsMiner() bool {
 	return isMiner
 }
 
-func (n node) Account() *accounts.Account {
+func (n *node) Account() *accounts.Account {
 	if miner, ok := n.args.(args.Miner); ok {
 		return miner.Account()
 	}
@@ -87,7 +87,7 @@ func (n node) Account() *accounts.Account {
 	return nil
 }
 
-func (n node) Name() string {
+func (n *node) Name() string {
 	if named, ok := n.args.(interface{ Name() string }); ok {
 		return named.Name()
 	}

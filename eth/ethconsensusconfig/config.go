@@ -101,7 +101,7 @@ func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config
 		if chainConfig.Bor != nil && chainConfig.Bor.ValidatorContract != "" {
 			genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, chainConfig.Bor.ValidatorContract, chainConfig.Bor.StateReceiverContract, logger)
 
-			spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig, logger)
+			spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig, false, logger)
 
 			var err error
 			var db kv.RwDB

@@ -32,6 +32,10 @@ var accountsByAddress = map[libcommon.Address]*Account{}
 var accountsByName = map[string]*Account{}
 
 func NewAccount(name string) *Account {
+	if account, ok := accountsByName[name]; ok {
+		return account
+	}
+
 	sigKey, _ := crypto.GenerateKey()
 
 	account := &Account{
