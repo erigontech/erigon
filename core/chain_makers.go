@@ -651,3 +651,4 @@ func (cr *FakeChainReader) GetHeader(hash libcommon.Hash, number uint64) *types.
 func (cr *FakeChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block   { return nil }
 func (cr *FakeChainReader) HasBlock(hash libcommon.Hash, number uint64) bool           { return false }
 func (cr *FakeChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int          { return nil }
+func (cr *FakeChainReader) FrozenBlocks() uint64                                       { return 0 }
