@@ -40,6 +40,10 @@ import (
 )
 
 const (
+	logInterval = 20 * time.Second
+)
+
+const (
 	spanLength              = 6400 // Number of blocks in a span
 	zerothSpanEnd           = 255  // End block of 0th span
 	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
@@ -539,6 +543,8 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 
 // snapshot retrieves the authorization snapshot at a given point in time.
 func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash libcommon.Hash, parents []*types.Header) (*Snapshot, error) {
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 	// Search for a snapshot in memory or on disk for checkpoints
 	var snap *Snapshot
 
@@ -587,6 +593,11 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		if number <= chain.FrozenBlocks() {
 			break
 		}
+		select {
+		case <-logEvery.C:
+			log.Info("Gathering headers for validator proposer prorities (backwards)", "blockNum", number)
+		default:
+		}
 	}
 	if snap == nil && number <= chain.FrozenBlocks() {
 		// Special handling of the headers in the snapshot
@@ -606,7 +617,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			if err := snap.store(c.DB); err != nil {
 				return nil, err
 			}
-			c.logger.Info("Stored checkpoint snapshot to disk", "number", 0, "hash", hash)
+			c.logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
 			initialHeaders := make([]*types.Header, 0, 128)
 			for i := uint64(1); i <= number; i++ {
 				header := chain.GetHeaderByNumber(i)
@@ -616,6 +627,11 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 						return nil, err
 					}
 					initialHeaders = initialHeaders[:0]
+				}
+				select {
+				case <-logEvery.C:
+					log.Info("Computing validator proposer prorities (forward)", "blockNum", i)
+				default:
 				}
 			}
 			if snap, err = snap.apply(initialHeaders, c.logger); err != nil {
