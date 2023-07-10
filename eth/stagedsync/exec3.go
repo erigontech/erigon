@@ -364,7 +364,7 @@ func ExecV3(ctx context.Context,
 					}
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
-						if agg.CanPrune(tx) {
+						if tx.(*temporal.Tx).AggCtx().CanPrune(tx) {
 							if err = agg.Prune(ctx, 10); err != nil { // prune part of retired data, before commit
 								return err
 							}
@@ -726,11 +726,11 @@ Loop:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
-					if agg.CanPrune(applyTx) {
-						if err = agg.Prune(ctx, 10); err != nil { // prune part of retired data, before commit
-							return err
-						}
-					}
+					//if applyTx.(*temporal.Tx).AggCtx().CanPrune(applyTx) {
+					//	if err = agg.Prune(ctx, 10); err != nil { // prune part of retired data, before commit
+					//		return err
+					//	}
+					//}
 					break
 				}
 
@@ -745,7 +745,7 @@ Loop:
 
 					// prune befor flush, to speedup flush
 					tt := time.Now()
-					if agg.CanPrune(applyTx) {
+					if applyTx.(*temporal.Tx).AggCtx().CanPrune(applyTx) {
 						if err = agg.Prune(ctx, 10); err != nil { // prune part of retired data, before commit
 							return err
 						}
