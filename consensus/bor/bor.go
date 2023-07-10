@@ -564,37 +564,6 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			}
 		}
 
-		// If we're at the genesis, snapshot the initial state. Alternatively if we're
-		// at a checkpoint block without a parent (light client CHT), or we have piled
-		// up more headers than allowed to be reorged (chain reinit from a freezer),
-		// consider the checkpoint trusted and snapshot it.
-
-		// TODO fix this
-		// nolint:nestif
-		if number == 0 {
-			checkpoint := chain.GetHeaderByNumber(number)
-			if checkpoint != nil {
-				// get checkpoint data
-				hash := checkpoint.Hash()
-
-				// get validators and current span
-				validators, err := c.spanner.GetCurrentValidators(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
-				if err != nil {
-					return nil, err
-				}
-
-				// new snap shot
-				snap = newSnapshot(c.config, c.signatures, number, hash, validators, c.logger)
-				if err := snap.store(c.DB); err != nil {
-					return nil, err
-				}
-
-				c.logger.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
-
-				break
-			}
-		}
-
 		// No snapshot for this header, gather the header and move backward
 		var header *types.Header
 		if len(parents) > 0 {
@@ -639,7 +608,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			}
 			c.logger.Info("Stored checkpoint snapshot to disk", "number", 0, "hash", hash)
 			initialHeaders := make([]*types.Header, 0, 128)
-			for i := uint64(1); i <= chain.FrozenBlocks(); i++ {
+			for i := uint64(1); i <= number; i++ {
 				header := chain.GetHeaderByNumber(i)
 				initialHeaders = append(initialHeaders, header)
 				if len(initialHeaders) == cap(initialHeaders) {
