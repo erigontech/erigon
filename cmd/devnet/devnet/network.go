@@ -31,6 +31,7 @@ type Network struct {
 	BaseRPCAddr        string
 	Snapshots          bool
 	Nodes              []Node
+	Services           []Service
 	wg                 sync.WaitGroup
 	peers              []string
 	namedNodes         map[string]Node
@@ -53,6 +54,15 @@ func (nw *Network) Start(ctx *cli.Context) error {
 
 	if err != nil {
 		return err
+	}
+
+	serviceContext := WithCliContext(go_context.Background(), ctx)
+
+	for _, service := range nw.Services {
+		if err := service.Start(serviceContext); err != nil {
+			nw.Stop()
+			return err
+		}
 	}
 
 	baseNode := args.Node{
@@ -90,6 +100,10 @@ func (nw *Network) Start(ctx *cli.Context) error {
 
 			nw.Nodes[i] = node
 			nw.namedNodes[node.Name()] = node
+
+			for _, service := range nw.Services {
+				service.NodeStarted(node)
+			}
 
 			// get the enode of the node
 			// - note this has the side effect of waiting for the node to start
@@ -228,6 +242,13 @@ func (nw *Network) Stop() {
 
 	nw.Logger.Info("Waiting for nodes to stop")
 	nw.Wait()
+
+	nw.Logger.Info("Stopping services")
+	for _, service := range nw.Services {
+		service.Stop()
+	}
+
+	// TODO should we wait for services
 }
 
 func (nw *Network) Wait() {

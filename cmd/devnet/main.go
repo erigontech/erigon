@@ -12,6 +12,7 @@ import (
 	"time"
 
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/commands"
+	"github.com/ledgerwatch/erigon/cmd/devnet/services/bor"
 
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
@@ -48,6 +49,22 @@ var (
 	WithoutHeimdallFlag = cli.BoolFlag{
 		Name:  "bor.withoutheimdall",
 		Usage: "Run without Heimdall service",
+	}
+
+	LocalHeimdallFlag = cli.BoolFlag{
+		Name:  "bor.localheimdall",
+		Usage: "Run with a devnet local Heimdall service",
+	}
+
+	HeimdallgRPCAddressFlag = cli.StringFlag{
+		Name:  "bor.heimdallgRPC",
+		Usage: "Address of Heimdall gRPC service",
+		Value: "localhost:8540",
+	}
+
+	BorSprintSizeFlag = cli.IntFlag{
+		Name:  "bor.sprintsize",
+		Usage: "The bor sprint size to run",
 	}
 
 	MetricsEnabledFlag = cli.BoolFlag{
@@ -105,6 +122,9 @@ func main() {
 		&DataDirFlag,
 		&ChainFlag,
 		&WithoutHeimdallFlag,
+		&LocalHeimdallFlag,
+		&HeimdallgRPCAddressFlag,
+		&BorSprintSizeFlag,
 		&MetricsEnabledFlag,
 		&MetricsNodeFlag,
 		&MetricsPortFlag,
@@ -166,7 +186,6 @@ func action(ctx *cli.Context) error {
 		return fmt.Errorf("Network start failed: %w", err)
 	}
 
-<<<<<<< HEAD
 	go func() {
 		signalCh := make(chan os.Signal, 1)
 		signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
@@ -190,8 +209,6 @@ func action(ctx *cli.Context) error {
 		}()
 	}
 
-=======
->>>>>>> 89e335022 (fixes for testing dev networks (runs slowly in multi node mode))
 	runCtx := devnet.WithCliContext(context.Background(), ctx)
 
 	if ctx.String(ChainFlag.Name) == networkname.DevChainName {
@@ -258,12 +275,25 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 				},
 			}, nil
 		} else {
+			var services []devnet.Service
+
+			if ctx.Bool(LocalHeimdallFlag.Name) {
+				config := *params.BorDevnetChainConfig
+
+				if sprintSize := uint64(ctx.Int(BorSprintSizeFlag.Name)); sprintSize > 0 {
+					config.Bor.Sprint = map[string]uint64{"0": sprintSize}
+				}
+
+				services = append(services, bor.NewHeimdall(&config, logger))
+			}
+
 			return &devnet.Network{
 				DataDir:            dataDir,
 				Chain:              networkname.BorDevnetChainName,
 				Logger:             logger,
 				BasePrivateApiAddr: "localhost:10090",
 				BaseRPCAddr:        "localhost:8545",
+				Services:           services,
 				Nodes: []devnet.Node{
 					args.Miner{
 						Node: args.Node{
