@@ -59,6 +59,7 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (string, kv.RwDB, *Domain)
 	d, err := NewDomain(path, path, 16, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, true, false, logger)
 	require.NoError(t, err)
 	t.Cleanup(d.Close)
+	d.DisableFsync()
 	return path, db, d
 }
 

@@ -795,6 +795,9 @@ func (h *History) reCalcRoFiles() {
 // static files and their indices
 func (h *History) buildFiles(ctx context.Context, step uint64, collation HistoryCollation, ps *background.ProgressSet) (HistoryFiles, error) {
 	historyComp := collation.historyComp
+	if h.noFsync {
+		historyComp.DisableFsync()
+	}
 	var historyDecomp, efHistoryDecomp *compress.Decompressor
 	var historyIdx, efHistoryIdx *recsplit.Index
 	var efHistoryComp *compress.Compressor
@@ -863,6 +866,9 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		if err != nil {
 			return HistoryFiles{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
 		}
+		if h.noFsync {
+			efHistoryComp.DisableFsync()
+		}
 		var buf []byte
 		for _, key := range keys {
 			if err = efHistoryComp.AddUncompressedWord([]byte(key)); err != nil {
@@ -897,7 +903,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	efHistoryIdxPath := filepath.Join(h.dir, efHistoryIdxFileName)
 	p := ps.AddNew(efHistoryIdxFileName, uint64(len(keys)*2))
 	defer ps.Delete(p)
-	if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, efHistoryIdxPath, h.tmpdir, len(keys), false /* values */, p, h.logger); err != nil {
+	if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, efHistoryIdxPath, h.tmpdir, len(keys), false /* values */, p, h.logger, h.noFsync); err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
 	}
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -911,6 +917,9 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		return HistoryFiles{}, fmt.Errorf("create recsplit: %w", err)
 	}
 	rs.LogLvl(log.LvlTrace)
+	if h.noFsync {
+		rs.DisableFsync()
+	}
 	var historyKey []byte
 	var txKey [8]byte
 	var valOffset uint64

@@ -38,17 +38,19 @@ func min64(a, b uint64) uint64 {
 }
 
 type markupCursor struct {
-	l, p, di, si uint64
-	//l - level
-	//p - pos inside level
-	//si - current, actual son index
-	//di - data array index
+	l  uint64 //l - level
+	p  uint64 //p - pos inside level
+	di uint64 //di - data array index
+	si uint64 //si - current, actual son index
 }
 
 type node struct {
-	p, d, s, fc uint64
-	key         []byte
-	val         []byte
+	p   uint64 // pos inside level
+	d   uint64
+	s   uint64 // sons pos inside level
+	fc  uint64
+	key []byte
+	val []byte
 }
 
 type Cursor struct {
@@ -444,18 +446,17 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (*Cursor, error) {
 }
 
 func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) {
-	n, lm, rm = node{}, -1, -1
+	lm, rm = -1, -1
+	var m uint64
 
 	for l < r {
-		m := (l + r) >> 1
+		m = (l + r) >> 1
 
-		n = a.nodes[i][m]
 		a.naccess++
-
-		cmp := bytes.Compare(n.key, x)
+		cmp := bytes.Compare(a.nodes[i][m].key, x)
 		switch {
 		case cmp == 0:
-			return n, int64(m), int64(m)
+			return a.nodes[i][m], int64(m), int64(m)
 		case cmp > 0:
 			r = m
 			rm = int64(m)
@@ -466,13 +467,13 @@ func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) 
 			panic(fmt.Errorf("compare error %d, %x ? %x", cmp, n.key, x))
 		}
 	}
-	return n, lm, rm
+	return a.nodes[i][m], lm, rm
 }
 
 // find position of key with node.di <= d at level lvl
 func (a *btAlloc) seekLeast(lvl, d uint64) uint64 {
-	for i, node := range a.nodes[lvl] {
-		if node.d >= d {
+	for i := range a.nodes[lvl] {
+		if a.nodes[lvl][i].d >= d {
 			return uint64(i)
 		}
 	}
@@ -639,14 +640,17 @@ type BtIndexWriter struct {
 	indexW          *bufio.Writer
 	indexF          *os.File
 	bucketCollector *etl.Collector // Collector that sorts by buckets
-	indexFileName   string
-	indexFile       string
-	tmpDir          string
-	numBuf          [8]byte
-	keyCount        uint64
-	etlBufLimit     datasize.ByteSize
-	bytesPerRec     int
-	logger          log.Logger
+
+	indexFileName          string
+	indexFile, tmpFilePath string
+
+	tmpDir      string
+	numBuf      [8]byte
+	keyCount    uint64
+	etlBufLimit datasize.ByteSize
+	bytesPerRec int
+	logger      log.Logger
+	noFsync     bool // fsync is enabled by default, but tests can manually disable
 }
 
 type BtIndexWriterArgs struct {
@@ -666,6 +670,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 	btw := &BtIndexWriter{lvl: log.LvlDebug, logger: logger}
 	btw.tmpDir = args.TmpDir
 	btw.indexFile = args.IndexFile
+	btw.tmpFilePath = args.IndexFile + ".tmp"
 
 	_, fname := filepath.Split(btw.indexFile)
 	btw.indexFileName = fname
@@ -705,8 +710,6 @@ func (btw *BtIndexWriter) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, 
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file
 func (btw *BtIndexWriter) Build() error {
-	tmpIdxFilePath := btw.indexFile + ".tmp"
-
 	if btw.built {
 		return fmt.Errorf("already built")
 	}
@@ -714,13 +717,11 @@ func (btw *BtIndexWriter) Build() error {
 	//	return fmt.Errorf("expected keys %d, got %d", btw.keyCount, btw.keysAdded)
 	//}
 	var err error
-	if btw.indexF, err = os.Create(tmpIdxFilePath); err != nil {
+	if btw.indexF, err = os.Create(btw.tmpFilePath); err != nil {
 		return fmt.Errorf("create index file %s: %w", btw.indexFile, err)
 	}
 	defer btw.indexF.Close()
-	defer btw.indexF.Sync()
 	btw.indexW = bufio.NewWriterSize(btw.indexF, etl.BufIOSize)
-	defer btw.indexW.Flush()
 
 	// Write number of keys
 	binary.BigEndian.PutUint64(btw.numBuf[:], btw.keyCount)
@@ -742,10 +743,34 @@ func (btw *BtIndexWriter) Build() error {
 	btw.logger.Log(btw.lvl, "[index] write", "file", btw.indexFileName)
 	btw.built = true
 
-	_ = btw.indexW.Flush()
-	_ = btw.indexF.Sync()
-	_ = btw.indexF.Close()
-	_ = os.Rename(tmpIdxFilePath, btw.indexFile)
+	if err = btw.indexW.Flush(); err != nil {
+		return err
+	}
+	if err = btw.fsync(); err != nil {
+		return err
+	}
+	if err = btw.indexF.Close(); err != nil {
+		return err
+	}
+	if err = os.Rename(btw.tmpFilePath, btw.indexFile); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (btw *BtIndexWriter) DisableFsync() { btw.noFsync = true }
+
+// fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
+// To achieve it: write to .tmp file then `rename` when file is ready.
+// Machine may power-off right after `rename` - it means `fsync` must be before `rename`
+func (btw *BtIndexWriter) fsync() error {
+	if btw.noFsync {
+		return nil
+	}
+	if err := btw.indexF.Sync(); err != nil {
+		btw.logger.Warn("couldn't fsync", "err", err, "file", btw.tmpFilePath)
+		return err
+	}
 	return nil
 }
 
@@ -820,6 +845,8 @@ func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *
 }
 
 func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor, p *background.Progress, tmpdir string, logger log.Logger) error {
+	defer kv.EnableReadAhead().DisableReadAhead()
+
 	args := BtIndexWriterArgs{
 		IndexFile: indexPath,
 		TmpDir:    tmpdir,
@@ -836,11 +863,11 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	key := make([]byte, 0, 64)
 	ks := make(map[int]int)
 
-	var pos uint64
+	var pos, kp uint64
 	emptys := 0
 	for getter.HasNext() {
 		p.Processed.Add(1)
-		key, kp := getter.Next(key[:0])
+		key, kp = getter.Next(key[:0])
 		err = iw.AddKey(key, pos)
 		if err != nil {
 			return err
@@ -867,6 +894,9 @@ func BuildBtreeIndex(dataPath, indexPath string, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
+	defer decomp.Close()
+
+	defer decomp.EnableReadAhead().DisableReadAhead()
 
 	args := BtIndexWriterArgs{
 		IndexFile: indexPath,
@@ -877,6 +907,7 @@ func BuildBtreeIndex(dataPath, indexPath string, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
+	defer iw.Close()
 
 	getter := decomp.MakeGetter()
 	getter.Reset(0)
@@ -885,7 +916,7 @@ func BuildBtreeIndex(dataPath, indexPath string, logger log.Logger) error {
 
 	var pos uint64
 	for getter.HasNext() {
-		key, _ := getter.Next(key[:0])
+		key, _ = getter.Next(key[:0])
 		err = iw.AddKey(key, pos)
 		if err != nil {
 			return err
@@ -945,6 +976,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 	if idx.alloc != nil {
 		idx.alloc.dataLookup = idx.dataLookup
 		idx.alloc.traverseDfs()
+		defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 		idx.alloc.fillSearchMx()
 	}
 	return idx, nil
@@ -1000,6 +1032,7 @@ func OpenBtreeIndex(indexPath, dataPath string, M uint64) (*BtIndex, error) {
 	if idx.alloc != nil {
 		idx.alloc.dataLookup = idx.dataLookup
 		idx.alloc.traverseDfs()
+		defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 		idx.alloc.fillSearchMx()
 	}
 	return idx, nil
@@ -1050,25 +1083,23 @@ func (b *BtIndex) Empty() bool { return b == nil || b.keyCount == 0 }
 
 func (b *BtIndex) KeyCount() uint64 { return b.keyCount }
 
-func (b *BtIndex) Close() error {
+func (b *BtIndex) Close() {
 	if b == nil {
-		return nil
+		return
 	}
 	if b.file != nil {
 		if err := b.m.Unmap(); err != nil {
-			return err
+			_ = err
 		}
 		if err := b.file.Close(); err != nil {
-			return err
+			_ = err
 		}
 		b.file = nil
 	}
 	if b.decompressor != nil {
-		if err := b.decompressor.Close(); err != nil {
-			return err
-		}
+		b.decompressor.Close()
+		b.decompressor = nil
 	}
-	return nil
 }
 
 func (b *BtIndex) Seek(x []byte) (*Cursor, error) {

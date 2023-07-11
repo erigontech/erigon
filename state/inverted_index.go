@@ -75,6 +75,8 @@ type InvertedIndex struct {
 	txNumBytes [8]byte
 	wal        *invertedIndexWAL
 	logger     log.Logger
+
+	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
 func NewInvertedIndex(
@@ -273,7 +275,7 @@ func (ii *InvertedIndex) buildEfi(ctx context.Context, item *filesItem, p *backg
 	p.Name.Store(&fName)
 	p.Total.Store(uint64(item.decompressor.Count()))
 	//ii.logger.Info("[snapshots] build idx", "file", fName)
-	return buildIndex(ctx, item.decompressor, idxPath, ii.tmpdir, item.decompressor.Count()/2, false, p, ii.logger)
+	return buildIndex(ctx, item.decompressor, idxPath, ii.tmpdir, item.decompressor.Count()/2, false, p, ii.logger, ii.noFsync)
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
@@ -372,6 +374,9 @@ func (ii *InvertedIndex) Close() {
 	ii.closeWhatNotInList([]string{})
 	ii.reCalcRoFiles()
 }
+
+// DisableFsync - just for tests
+func (ii *InvertedIndex) DisableFsync() { ii.noFsync = true }
 
 func (ii *InvertedIndex) Files() (res []string) {
 	ii.files.Walk(func(items []*filesItem) bool {
@@ -1234,7 +1239,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 	idxPath := filepath.Join(ii.dir, idxFileName)
 	p := ps.AddNew(idxFileName, uint64(decomp.Count()*2))
 	defer ps.Delete(p)
-	if index, err = buildIndexThenOpen(ctx, decomp, idxPath, ii.tmpdir, len(keys), false /* values */, p, ii.logger); err != nil {
+	if index, err = buildIndexThenOpen(ctx, decomp, idxPath, ii.tmpdir, len(keys), false /* values */, p, ii.logger, ii.noFsync); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 	closeComp = false
@@ -1276,7 +1281,10 @@ func (ii *InvertedIndex) warmup(ctx context.Context, txFrom, limit uint64, tx kv
 	if limit != math.MaxUint64 && limit != 0 {
 		txTo = txFrom + limit
 	}
-	for ; err == nil && k != nil; k, v, err = keysCursor.Next() {
+	for ; k != nil; k, v, err = keysCursor.Next() {
+		if err != nil {
+			return fmt.Errorf("iterate over %s keys: %w", ii.filenameBase, err)
+		}
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
 			break
@@ -1288,9 +1296,6 @@ func (ii *InvertedIndex) warmup(ctx context.Context, txFrom, limit uint64, tx kv
 			return ctx.Err()
 		default:
 		}
-	}
-	if err != nil {
-		return fmt.Errorf("iterate over %s keys: %w", ii.filenameBase, err)
 	}
 	return nil
 }
@@ -1462,4 +1467,20 @@ func (ii *InvertedIndex) collectFilesStat() (filesCount, filesSize, idxSize uint
 		return true
 	})
 	return filesCount, filesSize, idxSize
+}
+
+func (ii *InvertedIndex) stepsRangeInDBAsStr(tx kv.Tx) string {
+	a1, a2 := ii.stepsRangeInDB(tx)
+	return fmt.Sprintf("%s: %.1f-%.1f", ii.filenameBase, a1, a2)
+}
+func (ii *InvertedIndex) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	fst, _ := kv.FirstKey(tx, ii.indexKeysTable)
+	if len(fst) > 0 {
+		from = float64(binary.BigEndian.Uint64(fst)) / float64(ii.aggregationStep)
+	}
+	lst, _ := kv.LastKey(tx, ii.indexKeysTable)
+	if len(lst) > 0 {
+		to = float64(binary.BigEndian.Uint64(lst)) / float64(ii.aggregationStep)
+	}
+	return from, to
 }

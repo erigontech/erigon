@@ -70,6 +70,7 @@ type Compressor struct {
 	lvl              log.Lvl
 	trace            bool
 	logger           log.Logger
+	noFsync          bool // fsync is enabled by default, but tests can manually disable
 }
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, minPatternScore uint64, workers int, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
@@ -124,9 +125,7 @@ func (c *Compressor) Close() {
 	c.suffixCollectors = nil
 }
 
-func (c *Compressor) SetTrace(trace bool) {
-	c.trace = trace
-}
+func (c *Compressor) SetTrace(trace bool) { c.trace = trace }
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }
 
@@ -200,14 +199,25 @@ func (c *Compressor) Compress() error {
 		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict", c.logPrefix), "took", time.Since(t))
 	}
 
-	t = time.Now()
-	if err := reducedict(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, c.uncompressedFile, c.workers, db, c.lvl, c.logger); err != nil {
+	cf, err := os.Create(c.tmpOutFilePath)
+	if err != nil {
 		return err
 	}
-
+	defer cf.Close()
+	t = time.Now()
+	if err := reducedict(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, c.workers, db, c.lvl, c.logger); err != nil {
+		return err
+	}
+	if err = c.fsync(cf); err != nil {
+		return err
+	}
+	if err = cf.Close(); err != nil {
+		return err
+	}
 	if err := os.Rename(c.tmpOutFilePath, c.outputFile); err != nil {
 		return fmt.Errorf("renaming: %w", err)
 	}
+
 	c.Ratio, err = Ratio(c.uncompressedFile.filePath, c.outputFile)
 	if err != nil {
 		return fmt.Errorf("ratio: %w", err)
@@ -216,6 +226,22 @@ func (c *Compressor) Compress() error {
 	_, fName := filepath.Split(c.outputFile)
 	if c.lvl < log.LvlTrace {
 		c.logger.Log(c.lvl, fmt.Sprintf("[%s] Compress", c.logPrefix), "took", time.Since(t), "ratio", c.Ratio, "file", fName)
+	}
+	return nil
+}
+
+func (c *Compressor) DisableFsync() { c.noFsync = true }
+
+// fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
+// To achieve it: write to .tmp file then `rename` when file is ready.
+// Machine may power-off right after `rename` - it means `fsync` must be before `rename`
+func (c *Compressor) fsync(f *os.File) error {
+	if c.noFsync {
+		return nil
+	}
+	if err := f.Sync(); err != nil {
+		c.logger.Warn("couldn't fsync", "err", err, "file", c.tmpOutFilePath)
+		return err
 	}
 	return nil
 }
@@ -771,7 +797,6 @@ func NewUncompressedFile(filePath string) (*DecompressedFile, error) {
 }
 func (f *DecompressedFile) Close() {
 	f.w.Flush()
-	//f.f.Sync()
 	f.f.Close()
 	os.Remove(f.filePath)
 }

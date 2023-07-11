@@ -108,9 +108,7 @@ func (i *filesItem) closeFilesAndRemove() {
 		i.index = nil
 	}
 	if i.bindex != nil {
-		if err := i.bindex.Close(); err != nil {
-			log.Trace("close", "err", err, "file", i.bindex.FileName())
-		}
+		i.bindex.Close()
 		if err := os.Remove(i.bindex.FilePath()); err != nil {
 			log.Trace("close", "err", err, "file", i.bindex.FileName())
 		}
@@ -147,6 +145,15 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 // Domain is a part of the state (examples are Accounts, Storage, Code)
 // Domain should not have any go routines or locks
 type Domain struct {
+	/*
+	   not large:
+	    	keys: key -> ^step
+	    	vals: key -> ^step+value (DupSort)
+	   large:
+	    	keys: key -> ^step
+	   	    vals: key + ^step -> value
+	*/
+
 	*History
 	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
@@ -180,6 +187,15 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	}
 
 	return d, nil
+}
+
+// LastStepInDB - return the latest available step in db (at-least 1 value in such step)
+func (d *Domain) LastStepInDB(tx kv.Tx) (lstInDb uint64) {
+	lst, _ := kv.FirstKey(tx, d.valsTable)
+	if len(lst) > 0 {
+		lstInDb = ^binary.BigEndian.Uint64(lst[len(lst)-8:])
+	}
+	return lstInDb
 }
 
 func (d *Domain) StartWrites() {
@@ -376,9 +392,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 			item.index = nil
 		}
 		if item.bindex != nil {
-			if err := item.bindex.Close(); err != nil {
-				d.logger.Trace("close", "err", err, "file", item.bindex.FileName())
-			}
+			item.bindex.Close()
 			item.bindex = nil
 		}
 		d.files.Delete(item)
@@ -997,6 +1011,9 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			}
 		}
 	}()
+	if d.noFsync {
+		valuesComp.DisableFsync()
+	}
 	if err = valuesComp.Compress(); err != nil {
 		return StaticFiles{}, fmt.Errorf("compress %s values: %w", d.filenameBase, err)
 	}
@@ -1011,7 +1028,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	{
 		p := ps.AddNew(valuesIdxFileName, uint64(valuesDecomp.Count()*2))
 		defer ps.Delete(p)
-		if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, valuesIdxPath, d.tmpdir, collation.valuesCount, false, p, d.logger); err != nil {
+		if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, valuesIdxPath, d.tmpdir, collation.valuesCount, false, p, d.logger, d.noFsync); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
 	}
@@ -1075,14 +1092,14 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 	return nil
 }
 
-func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool, p *background.Progress, logger log.Logger) (*recsplit.Index, error) {
-	if err := buildIndex(ctx, d, idxPath, tmpdir, count, values, p, logger); err != nil {
+func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool, p *background.Progress, logger log.Logger, noFsync bool) (*recsplit.Index, error) {
+	if err := buildIndex(ctx, d, idxPath, tmpdir, count, values, p, logger, noFsync); err != nil {
 		return nil, err
 	}
 	return recsplit.OpenIndex(idxPath)
 }
 
-func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool, p *background.Progress, logger log.Logger) error {
+func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool, p *background.Progress, logger log.Logger, noFsync bool) error {
 	var rs *recsplit.RecSplit
 	var err error
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -1097,6 +1114,9 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
+	if noFsync {
+		rs.DisableFsync()
+	}
 	defer d.EnableMadvNormal().DisableReadAhead()
 
 	word := make([]byte, 0, 256)

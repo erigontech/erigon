@@ -816,6 +816,18 @@ func (a *AggregatorV3) PruneWithTiemout(ctx context.Context, timeout time.Durati
 	return nil
 }
 
+func (a *AggregatorV3) StepsRangeInDBAsStr(tx kv.Tx) string {
+	return strings.Join([]string{
+		a.accounts.stepsRangeInDBAsStr(tx),
+		a.storage.stepsRangeInDBAsStr(tx),
+		a.code.stepsRangeInDBAsStr(tx),
+		a.logAddrs.stepsRangeInDBAsStr(tx),
+		a.logTopics.stepsRangeInDBAsStr(tx),
+		a.tracesFrom.stepsRangeInDBAsStr(tx),
+		a.tracesTo.stepsRangeInDBAsStr(tx),
+	}, ", ")
+}
+
 func (a *AggregatorV3) Prune(ctx context.Context, limit uint64) error {
 	//if limit/a.aggregationStep > StepsInBiggestFile {
 	//	ctx, cancel := context.WithCancel(ctx)
