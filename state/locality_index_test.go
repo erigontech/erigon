@@ -234,6 +234,7 @@ func TestLocalityDomain(t *testing.T) {
 		require.True(ok)
 		require.Equal(2*txsInFrozenFile-1, int(binary.BigEndian.Uint64(v)))
 
+		fmt.Printf("- go 2\n")
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(2))
 		require.NoError(err)
 		require.True(ok)

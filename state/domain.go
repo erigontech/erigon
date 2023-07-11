@@ -1431,16 +1431,17 @@ var COMPARE_INDEXES = false // if true, will compare values from Btree and INver
 
 func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint64) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
-	var k []byte
+	var ok bool
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		if dc.files[i].endTxNum < fromTxNum {
 			break
 		}
-		k, v, err = dc.statelessBtree(i).Get(filekey)
+
+		v, ok, err = dc.statelessBtree(i).Get(filekey)
 		if err != nil {
 			return nil, false, err
 		}
-		if k == nil {
+		if !ok {
 			continue
 		}
 		found = true
@@ -1451,14 +1452,21 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 
-	var k []byte
+	// cold data lookup
+	exactStep1, exactStep2, lastIndexedTxNum, foundExactShard1, foundExactShard2 := dc.d.domainLocalityIndex.lookupIdxFiles(dc.loc, filekey, 0)
+	fmt.Printf("indexed: %x -> %d, %d\n", filekey, lastIndexedTxNum/dc.d.aggregationStep, int(exactStep1/StepsInBiggestFile))
+
+	var ok bool
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		k, v, err = dc.statelessBtree(i).Get(filekey)
+		fmt.Printf("check: %s, %t\n", dc.files[i].src.decompressor.FileName(), dc.files[i].src.endTxNum <= lastIndexedTxNum)
+		if lastIndexedTxNum > 0 && dc.files[i].src.endTxNum <= lastIndexedTxNum {
+			break
+		}
+		v, ok, err = dc.statelessBtree(i).Get(filekey)
 		if err != nil {
 			return nil, false, err
 		}
-		fmt.Printf("get: %x -> %x, val: %x, f: %s\n", filekey, k, v, dc.files[i].src.decompressor.FileName())
-		if k == nil {
+		if !ok {
 			continue
 		}
 		found = true
@@ -1478,8 +1486,13 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 				panic("not equal")
 			}
 		}
-		break
+		return v, found, nil
 	}
+
+	if foundExactShard1 {
+		return dc.statelessBtree(int(exactStep1 / StepsInBiggestFile)).Get(filekey)
+	}
+	_, _, _ = exactStep2, foundExactShard1, foundExactShard2
 	return v, found, nil
 }
 
@@ -1510,16 +1523,16 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 	}
 	if anyItem {
 		// If there were no changes but there were history files, the value can be obtained from value files
-		var k []byte
+		var ok bool
 		for i := len(dc.files) - 1; i >= 0; i-- {
 			if dc.files[i].startTxNum > topState.startTxNum {
 				continue
 			}
-			k, v, err = dc.statelessBtree(i).Get(key)
+			v, ok, err = dc.statelessBtree(i).Get(key)
 			if err != nil {
 				return nil, false, err
 			}
-			if k == nil {
+			if !ok {
 				continue
 			}
 			found = true

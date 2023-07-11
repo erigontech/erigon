@@ -1161,29 +1161,27 @@ func (b *BtIndex) Close() {
 }
 
 // Get - exact match of key. `k == nil` - means not found
-func (b *BtIndex) Get(lookup []byte) (k, v []byte, err error) {
+func (b *BtIndex) Get(lookup []byte) (v []byte, ok bool, err error) {
 	// TODO: optimize by "push-down" - instead of using seek+compare, alloc can have method Get which will return nil if key doesn't exists
 	// alternativaly: can allocate cursor on-stack
 	// 	it := Iter{} // allocation on stack
 	//  it.Initialize(file)
 
 	if b.Empty() {
-		return nil, nil, nil
+		return nil, false, nil
 	}
 	if b.alloc == nil {
-		return nil, nil, err
+		return nil, false, err
 	}
+	var k []byte
 	k, v, _, err = b.alloc.seek(lookup)
 	if err != nil {
-		return nil, nil, err
+		return nil, false, err
 	}
 	if k == nil {
-		return nil, nil, nil
+		return nil, false, nil
 	}
-	if !bytes.Equal(k, lookup) {
-		return nil, nil, nil
-	}
-	return k, v, nil
+	return v, bytes.Equal(k, lookup), nil
 }
 
 func (b *BtIndex) Seek(x []byte) (*Cursor, error) {
