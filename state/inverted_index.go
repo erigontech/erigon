@@ -1462,3 +1462,19 @@ func (ii *InvertedIndex) collectFilesStat() (filesCount, filesSize, idxSize uint
 	})
 	return filesCount, filesSize, idxSize
 }
+
+func (ii *InvertedIndex) stepsRangeInDBAsStr(tx kv.Tx) string {
+	a1, a2 := ii.stepsRangeInDB(tx)
+	return fmt.Sprintf("%s: %.1f-%.1f", ii.filenameBase, a1, a2)
+}
+func (ii *InvertedIndex) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	fst, _ := kv.FirstKey(tx, ii.indexKeysTable)
+	if len(fst) > 0 {
+		from = float64(binary.BigEndian.Uint64(fst)) / float64(ii.aggregationStep)
+	}
+	lst, _ := kv.LastKey(tx, ii.indexKeysTable)
+	if len(lst) > 0 {
+		to = float64(binary.BigEndian.Uint64(lst)) / float64(ii.aggregationStep)
+	}
+	return from, to
+}

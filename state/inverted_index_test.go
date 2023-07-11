@@ -183,6 +183,10 @@ func TestInvIndexAfterPrune(t *testing.T) {
 
 	ii.integrateFiles(sf, 0, 16)
 
+	from, to := ii.stepsRangeInDB(tx)
+	require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
+	require.Equal(t, "0.4", fmt.Sprintf("%.1f", to))
+
 	err = ii.prune(ctx, 0, 16, math.MaxUint64, logEvery)
 	require.NoError(t, err)
 	err = tx.Commit()
@@ -201,6 +205,10 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, k, table)
 	}
+
+	from, to = ii.stepsRangeInDB(tx)
+	require.Equal(t, float64(0), from)
+	require.Equal(t, float64(0), to)
 }
 
 func filledInvIndex(tb testing.TB, logger log.Logger) (string, kv.RwDB, *InvertedIndex, uint64) {

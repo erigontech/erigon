@@ -1890,3 +1890,20 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 	}
 	return hi.kBackup, hi.vBackup, nil
 }
+
+func (d *Domain) stepsRangeInDBAsStr(tx kv.Tx) string {
+	a1, a2 := d.History.InvertedIndex.stepsRangeInDB(tx)
+	ad1, ad2 := d.stepsRangeInDB(tx)
+	return fmt.Sprintf("%s: %.1f-%.1f, %.1f-%.1f", d.filenameBase, ad1, ad2, a1, a2)
+}
+func (d *Domain) stepsRangeInDB(tx kv.Tx) (from, to float64) {
+	fst, _ := kv.FirstKey(tx, d.valsTable)
+	if len(fst) > 0 {
+		to = float64(^binary.BigEndian.Uint64(fst[len(fst)-8:]))
+	}
+	lst, _ := kv.LastKey(tx, d.valsTable)
+	if len(lst) > 0 {
+		from = float64(^binary.BigEndian.Uint64(lst[len(lst)-8:]))
+	}
+	return from, to
+}
