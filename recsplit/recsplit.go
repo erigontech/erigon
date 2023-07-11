@@ -108,6 +108,8 @@ type RecSplit struct {
 	built              bool // Flag indicating that the hash function has been built and no more keys can be added
 	trace              bool
 	logger             log.Logger
+
+	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
 type RecSplitArgs struct {
@@ -660,10 +662,24 @@ func (rs *RecSplit) Build() error {
 	}
 
 	_ = rs.indexW.Flush()
-	_ = rs.indexF.Sync()
+	rs.fsync()
 	_ = rs.indexF.Close()
 	_ = os.Rename(tmpIdxFilePath, rs.indexFile)
 	return nil
+}
+
+func (rs *RecSplit) DisableFsync() { rs.noFsync = true }
+
+// Fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
+// To achieve it: write to .tmp file then `rename` when file is ready.
+// Machine may power-off right after `rename` - it means `fsync` must be before `rename`
+func (rs *RecSplit) fsync() {
+	if rs.noFsync {
+		return
+	}
+	if err := rs.indexF.Sync(); err != nil {
+		rs.logger.Warn("couldn't fsync", "err", err, "file", rs.indexFile)
+	}
 }
 
 // Stats returns the size of golomb rice encoding and ellias fano encoding
