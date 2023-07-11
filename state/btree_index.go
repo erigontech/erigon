@@ -673,13 +673,15 @@ type BtIndexWriter struct {
 
 	indexFileName          string
 	indexFile, tmpFilePath string
-	tmpDir          string
-	numBuf          [8]byte
-	keyCount        uint64
-	etlBufLimit     datasize.ByteSize
-	bytesPerRec     int
-	logger          log.Logger
-	noFsync         bool // fsync is enabled by default, but tests can manually disable
+
+	tmpDir      string
+	numBuf      [8]byte
+	keyCount    uint64
+	etlBufLimit datasize.ByteSize
+	bytesPerRec int
+
+	logger  log.Logger
+	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
 type BtIndexWriterArgs struct {

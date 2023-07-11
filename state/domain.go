@@ -440,6 +440,12 @@ func (d *Domain) Close() {
 	d.closeWhatNotInList([]string{})
 	d.reCalcRoFiles()
 }
+func (d *Domain) DisableFsync() {
+	d.History.DisableFsync()
+	if d.domainLocalityIndex != nil {
+		d.domainLocalityIndex.noFsync = true
+	}
+}
 
 func (d *Domain) PutWithPrev(key1, key2, val, preval []byte) error {
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated

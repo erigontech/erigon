@@ -1433,7 +1433,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 }
 
 func (hs *HistoryStep) GetNoState(key []byte, txNum uint64) ([]byte, bool, uint64) {
-	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
+	//fmt.Printf("GetNoState [%x] %d\n", k, txNum)
 	if hs.indexFile.reader.Empty() {
 		return nil, false, txNum
 	}

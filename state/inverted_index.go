@@ -372,7 +372,12 @@ func (ii *InvertedIndex) Close() {
 }
 
 // DisableFsync - just for tests
-func (ii *InvertedIndex) DisableFsync() { ii.noFsync = true }
+func (ii *InvertedIndex) DisableFsync() {
+	ii.noFsync = true
+	if ii.localityIndex != nil {
+		ii.localityIndex.noFsync = true
+	}
+}
 
 func (ii *InvertedIndex) Files() (res []string) {
 	ii.files.Walk(func(items []*filesItem) bool {

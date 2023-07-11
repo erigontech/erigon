@@ -684,11 +684,12 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 				if keyNum != frozenFileNum {
 					continue
 				}
+				//fmt.Printf("put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
 			} else { //warm data
 				if keyNum == 0 || keyNum == txNum%d.aggregationStep {
 					continue
 				}
-				fmt.Printf("put: %d, step=%d\n", keyNum, step)
+				//fmt.Printf("put: %d, step=%d\n", keyNum, step)
 			}
 
 			binary.BigEndian.PutUint64(k[:], keyNum)

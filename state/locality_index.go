@@ -52,6 +52,8 @@ type LocalityIndex struct {
 	roFiles  atomic.Pointer[ctxItem]
 	roBmFile atomic.Pointer[bitmapdb.FixedSizeBitmaps]
 	logger   log.Logger
+
+	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
 func NewLocalityIndex(
@@ -266,6 +268,7 @@ func (li *LocalityIndex) lookupIdxFiles(loc *ctxLocalityIdx, key []byte, fromTxN
 	}
 
 	fromFileNum := fromTxNum / li.aggregationStep / StepsInBiggestFile
+	fmt.Printf("fromFileNum: %d, %d\n", loc.reader.Lookup(key), fromFileNum)
 	fn1, fn2, ok1, ok2, err := loc.bm.First2At(loc.reader.Lookup(key), fromFileNum)
 	if err != nil {
 		panic(err)
@@ -322,7 +325,9 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, toStep uint64, makeIter
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
-
+	if li.noFsync {
+		rs.DisableFsync()
+	}
 	i := uint64(0)
 	for {
 		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, int(it.FilesAmount()), uint64(count), li.logger)
@@ -330,6 +335,9 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, toStep uint64, makeIter
 			return nil, err
 		}
 		defer dense.Close()
+		if li.noFsync {
+			dense.DisableFsync()
+		}
 
 		it = makeIter()
 		for it.HasNext() {
@@ -417,18 +425,17 @@ func (sf LocalityIndexFiles) Close() {
 }
 
 type LocalityIterator struct {
-	aggStep          uint64
-	compressVals     bool
-	h                ReconHeapOlderFirst
-	files, nextFiles []uint64
-	key, nextKey     []byte
-	progress         uint64
+	aggStep           uint64
+	compressVals      bool
+	h                 ReconHeapOlderFirst
+	v, nextV, vBackup []uint64
+	k, nextK, kBackup []byte
+	progress          uint64
 
 	totalOffsets, filesAmount uint64
 }
 
 func (si *LocalityIterator) advance() {
-	fmt.Printf("advance()\n")
 	for si.h.Len() > 0 {
 		top := heap.Pop(&si.h).(*ReconItem)
 		key := top.key
@@ -443,45 +450,48 @@ func (si *LocalityIterator) advance() {
 		inStep := uint32(top.startTxNum / si.aggStep)
 		if top.g.HasNext() {
 			top.key, _ = top.g.NextUncompressed()
-			fmt.Printf("alex2: %x\n", top.key)
 			heap.Push(&si.h, top)
 		}
 
-		inFile := inStep / StepsInBiggestFile
+		inFile := uint64(inStep / StepsInBiggestFile)
 
-		if !bytes.Equal(key, si.key) {
-			if si.key == nil {
-				si.key = key
-				si.files = append(si.files, uint64(inFile))
-				fmt.Printf("alex4: %x\n", si.key)
-				continue
-			}
-			si.nextFiles, si.files = si.files, si.nextFiles[:0]
-			si.nextKey = si.key
+		if si.k == nil {
+			si.k = key
+			si.v = append(si.v, inFile)
+			continue
+		}
 
-			si.files = append(si.files, uint64(inFile))
-			si.key = key
-			fmt.Printf("alex5: %x, %x\n", si.key, si.nextKey)
+		if !bytes.Equal(key, si.k) {
+			si.nextV, si.v = si.v, si.nextV[:0]
+			si.nextK = si.k
+
+			si.v = append(si.v, inFile)
+			si.k = key
 			return
 		}
-		si.files = append(si.files, uint64(inFile))
+		si.v = append(si.v, inFile)
 	}
-	si.nextFiles, si.files = si.files, si.nextFiles[:0]
-	si.nextKey = si.key
-	si.key = nil
+	si.nextV, si.v = si.v, si.nextV[:0]
+	si.nextK = si.k
+	si.k = nil
 }
 
-func (si *LocalityIterator) HasNext() bool { return si.nextKey != nil }
+func (si *LocalityIterator) HasNext() bool { return si.nextK != nil }
 func (si *LocalityIterator) Progress() float64 {
 	return (float64(si.progress) / float64(si.totalOffsets)) * 100
 }
 func (si *LocalityIterator) FilesAmount() uint64 { return si.filesAmount }
 
 func (si *LocalityIterator) Next() ([]byte, []uint64) {
-	k, v := si.nextKey, si.nextFiles
+	//if hi.err != nil {
+	//	return nil, nil, hi.err
+	//}
+	//hi.limit--
+
+	// Satisfy iter.Dual Invariant 2
+	si.nextK, si.kBackup, si.nextV, si.vBackup = si.kBackup, si.nextK, si.vBackup, si.nextV
 	si.advance()
-	fmt.Printf("return: %x, %d\n", k, v)
-	return k, v
+	return si.kBackup, si.vBackup
 }
 
 func (ic *InvertedIndexContext) iterateKeysLocality(uptoTxNum uint64) *LocalityIterator {
@@ -523,7 +533,6 @@ func (dc *DomainContext) iterateKeysLocality(uptoTxNum uint64) *LocalityIterator
 		g := item.src.decompressor.MakeGetter()
 		if g.HasNext() {
 			key, offset := g.NextUncompressed()
-			fmt.Printf("alex1: %x\n", key)
 			heapItem := &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key, startOffset: offset, lastOffset: offset}
 			heap.Push(&si.h, heapItem)
 		}

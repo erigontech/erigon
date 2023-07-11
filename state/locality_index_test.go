@@ -159,7 +159,7 @@ func TestLocalityDomain(t *testing.T) {
 			last = key
 			fmt.Printf("key: %d, bitmap: %d\n", binary.BigEndian.Uint64(key), bm)
 		}
-		require.Equal(int(keyCount-1), int(binary.BigEndian.Uint64(last)))
+		require.Equal(frozenFiles, int(binary.BigEndian.Uint64(last)))
 	})
 
 	t.Run("locality index: getBeforeTxNum full bitamp", func(t *testing.T) {
@@ -167,10 +167,10 @@ func TestLocalityDomain(t *testing.T) {
 		defer dc.Close()
 		res, err := dc.loc.bm.At(0)
 		require.NoError(err)
-		require.Equal([]uint64{0, 1}, res)
+		require.Equal([]uint64{0}, res)
 		res, err = dc.loc.bm.At(1)
 		require.NoError(err)
-		require.Equal([]uint64{0, 1}, res)
+		require.Equal([]uint64{1}, res)
 		res, err = dc.loc.bm.At(keyCount) //too big, must error
 		require.Error(err)
 		require.Empty(res)
@@ -179,22 +179,37 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("locality index: search from given position", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		fst, snd, ok1, ok2, err := dc.loc.bm.First2At(0, 1)
+		fst, snd, ok1, ok2, err := dc.loc.bm.First2At(1, 1)
 		require.NoError(err)
 		require.True(ok1)
 		require.False(ok2)
 		require.Equal(uint64(1), fst)
 		require.Zero(snd)
+
+		fst, snd, ok1, ok2, err = dc.loc.bm.First2At(2, 1)
+		require.NoError(err)
+		require.True(ok1)
+		require.False(ok2)
+		require.Equal(uint64(2), fst)
+		require.Zero(snd)
+
+		fst, snd, ok1, ok2, err = dc.loc.bm.First2At(0, 1)
+		require.NoError(err)
+		require.False(ok1)
+		require.False(ok2)
 	})
 	t.Run("locality index: search from given position in future", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		fst, snd, ok1, ok2, err := dc.loc.bm.First2At(0, 2)
+		_, _, ok1, ok2, err := dc.loc.bm.First2At(0, 2)
 		require.NoError(err)
 		require.False(ok1)
 		require.False(ok2)
-		require.Zero(fst)
-		require.Zero(snd)
+
+		_, _, ok1, ok2, err = dc.loc.bm.First2At(2, 3)
+		require.NoError(err)
+		require.False(ok1)
+		require.False(ok2)
 	})
 	t.Run("locality index: lookup", func(t *testing.T) {
 		dc := dom.MakeContext()
