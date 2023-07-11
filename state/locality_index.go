@@ -323,7 +323,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, ic *InvertedIndexContex
 
 	i := uint64(0)
 	for {
-		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, int(it.FilesAmount()), uint64(count))
+		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, int(it.FilesAmount()), uint64(count), li.logger)
 		if err != nil {
 			return nil, err
 		}
