@@ -845,9 +845,6 @@ func (a *AggregatorV3Context) maxTxNumInFiles(frozen bool) uint64 {
 func (a *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
 	return a.CanPruneFrom(tx) < a.maxTxNumInFiles(false)
 }
-func (a *AggregatorV3) MinimaxTxNumInFiles() uint64 {
-	return a.minimaxTxNumInFiles.Load()
-}
 func (a *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, a.a.tracesTo.indexKeysTable)
 	fst2, _ := kv.FirstKey(tx, a.a.storage.History.indexKeysTable)
@@ -1355,8 +1352,6 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	}
 
 	step := a.minimaxTxNumInFiles.Load() / a.aggregationStep
-	//toTxNum := (step + 1) * a.aggregationStep
-	hasData := false
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -1364,7 +1359,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		lastInDB := lastIdInDB(a.db, a.accounts)
-		hasData = lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
+		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
 			close(fin)
 			return
@@ -1385,24 +1380,24 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 			}
 		}
 
-		//if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
-		//	close(fin)
-		//	return
-		//}
-		//a.wg.Add(1)
-		//go func() {
-		//	defer a.wg.Done()
-		//	defer a.mergeingFiles.Store(false)
-		//	defer func() { close(fin) }()
-		//	if err := a.MergeLoop(a.ctx, 1); err != nil {
-		//		if errors.Is(err, context.Canceled) {
-		//			return
-		//		}
-		//		log.Warn("[snapshots] merge", "err", err)
-		//	}
-		//
-		//	a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
-		//}()
+		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
+			close(fin)
+			return
+		}
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			defer a.mergeingFiles.Store(false)
+			defer func() { close(fin) }()
+			if err := a.MergeLoop(a.ctx, 1); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				log.Warn("[snapshots] merge", "err", err)
+			}
+
+			a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
+		}()
 	}()
 	return fin
 }
