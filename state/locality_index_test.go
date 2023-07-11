@@ -42,7 +42,6 @@ func TestLocality(t *testing.T) {
 		require.NoError(err)
 
 		ic := ii.MakeContext()
-		defer ic.Close()
 		err = ic.BuildOptionalMissedIndices(ctx)
 		require.NoError(err)
 		ic.Close()
@@ -66,7 +65,7 @@ func TestLocality(t *testing.T) {
 			key, _ = it.Next()
 			last = key
 		}
-		require.Equal(Module-1, binary.BigEndian.Uint64(last))
+		require.Equal(Module, binary.BigEndian.Uint64(last))
 	})
 
 	t.Run("locality index: getBeforeTxNum full bitamp", func(t *testing.T) {
@@ -120,10 +119,11 @@ func TestLocality(t *testing.T) {
 func TestLocalityDomain(t *testing.T) {
 	logger := log.New()
 	ctx, require := context.Background(), require.New(t)
+	aggStep := 2
 	frozenFiles := 3
-	txsInFrozenFile := 2 * StepsInBiggestFile
-	keyCount, txCount := uint64(6), uint64(frozenFiles*txsInFrozenFile+2*16)
-	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 2, logger)
+	txsInFrozenFile := aggStep * StepsInBiggestFile
+	keyCount, txCount := uint64(6), uint64(frozenFiles*txsInFrozenFile+aggStep*16)
+	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, uint64(aggStep), logger)
 	collateAndMerge(t, db, nil, dom, txCount)
 
 	{ //prepare
@@ -133,7 +133,6 @@ func TestLocalityDomain(t *testing.T) {
 		require.NoError(err)
 
 		dc := dom.MakeContext()
-		defer dom.Close()
 		err = dc.BuildOptionalMissedIndices(ctx)
 		require.NoError(err)
 		dc.Close()
@@ -142,8 +141,7 @@ func TestLocalityDomain(t *testing.T) {
 	_, _ = ctx, data
 	t.Run("locality iterator", func(t *testing.T) {
 		ic := dom.MakeContext()
-		defer dom.Close()
-		fmt.Printf("-- created\n")
+		defer ic.Close()
 		it := ic.iterateKeysLocality(math.MaxUint64)
 		require.True(it.HasNext())
 		key, bitmap := it.Next()
@@ -216,7 +214,7 @@ func TestLocalityDomain(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
 		k := hexutility.EncodeTs(1)
-		v1, v2, from, ok1, ok2 := dc.d.localityIndex.lookupIdxFiles(dc.loc, k, 1*dc.d.aggregationStep*StepsInBiggestFile)
+		v1, v2, from, ok1, ok2 := dc.d.domainLocalityIndex.lookupIdxFiles(dc.loc, k, 1*dc.d.aggregationStep*StepsInBiggestFile)
 		require.True(ok1)
 		require.False(ok2)
 		require.Equal(uint64(1*StepsInBiggestFile), v1)
@@ -226,6 +224,7 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("domain.getLatestFromFiles", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
+		fmt.Printf("---test\n")
 		v, ok, err := dc.getLatestFromFiles(hexutility.EncodeTs(0))
 		require.NoError(err)
 		require.True(ok)

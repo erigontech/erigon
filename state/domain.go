@@ -1457,6 +1457,7 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 		if err != nil {
 			return nil, false, err
 		}
+		fmt.Printf("get: %x -> %x, val: %x, f: %s\n", filekey, k, v, dc.files[i].src.decompressor.FileName())
 		if k == nil {
 			continue
 		}
