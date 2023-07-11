@@ -221,7 +221,7 @@ func TestLocalityDomain(t *testing.T) {
 		require.False(ok2)
 		require.Equal(uint64(1*StepsInBiggestFile), v1)
 		require.Equal(uint64(0*StepsInBiggestFile), v2)
-		require.Equal(2*dc.d.aggregationStep*StepsInBiggestFile, from)
+		require.Equal(txsInFrozenFile*frozenFiles, int(from))
 	})
 	t.Run("domain.getLatestFromFiles", func(t *testing.T) {
 		dc := dom.MakeContext()
@@ -234,6 +234,8 @@ func TestLocalityDomain(t *testing.T) {
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(1))
 		require.NoError(err)
 		require.True(ok)
+
+		// TODO: why key 1 and key 2 have same value?
 		require.Equal(220, int(binary.BigEndian.Uint64(v)))
 
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(2))
