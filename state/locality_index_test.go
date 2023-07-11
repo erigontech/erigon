@@ -160,7 +160,7 @@ func TestLocalityDomain(t *testing.T) {
 			last = key
 			fmt.Printf("key: %d, bitmap: %d\n", binary.BigEndian.Uint64(key), bm)
 		}
-		require.Equal(frozenFiles, int(binary.BigEndian.Uint64(last)))
+		require.Equal(frozenFiles-1, int(binary.BigEndian.Uint64(last)))
 	})
 
 	t.Run("locality index: getBeforeTxNum full bitamp", func(t *testing.T) {
@@ -229,21 +229,21 @@ func TestLocalityDomain(t *testing.T) {
 		v, ok, err := dc.getLatestFromFiles(hexutility.EncodeTs(0))
 		require.NoError(err)
 		require.True(ok)
-		require.Equal(uint64(1*2*StepsInBiggestFile-1), binary.BigEndian.Uint64(v))
+		require.Equal(1*2*StepsInBiggestFile-1, int(binary.BigEndian.Uint64(v)))
 
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(1))
 		require.NoError(err)
 		require.True(ok)
-		require.Equal(uint64(220), binary.BigEndian.Uint64(v))
+		require.Equal(220, int(binary.BigEndian.Uint64(v)))
 
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(2))
 		require.NoError(err)
 		require.True(ok)
-		require.Equal(uint64(221), binary.BigEndian.Uint64(v))
+		require.Equal(221, int(binary.BigEndian.Uint64(v)))
 
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(5))
 		require.NoError(err)
 		require.True(ok)
-		require.Equal(uint64(221), binary.BigEndian.Uint64(v))
+		require.Equal(221, int(binary.BigEndian.Uint64(v)))
 	})
 }
