@@ -266,7 +266,6 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 }
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
-	//t.Skip("TODO: finish to fix this test")
 	logger := log.New()
 	aggStep := uint64(100)
 
@@ -700,6 +699,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (string, kv.RwDB, *Aggr
 	agg, err := NewAggregatorV3(context.Background(), dir, filepath.Join(path, "e4", "tmp"), aggStep, db, logger)
 	require.NoError(t, err)
 	err = agg.OpenFolder()
+	agg.DisableFsync()
 	require.NoError(t, err)
 	return path, db, agg
 }
