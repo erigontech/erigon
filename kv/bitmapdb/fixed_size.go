@@ -168,11 +168,14 @@ type FixedSizeBitmapsWriter struct {
 	amount        uint64
 	size          int
 	bitsPerBitmap uint64
+
+	logger  log.Logger
+	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
 const MetaHeaderSize = 64
 
-func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, amount uint64) (*FixedSizeBitmapsWriter, error) {
+func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, amount uint64, logger log.Logger) (*FixedSizeBitmapsWriter, error) {
 	pageSize := os.Getpagesize()
 	//TODO: use math.SafeMul()
 	bytesAmount := MetaHeaderSize + (bitsPerBitmap*int(amount))/8
@@ -184,6 +187,7 @@ func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, amount uint6
 		size:           size,
 		amount:         amount,
 		version:        1,
+		logger:         logger,
 	}
 
 	_ = os.Remove(idx.tmpIdxFilePath)
@@ -267,7 +271,7 @@ func (w *FixedSizeBitmapsWriter) Build() error {
 	if err := w.m.Flush(); err != nil {
 		return err
 	}
-	if err := w.f.Sync(); err != nil {
+	if err := w.fsync(); err != nil {
 		return err
 	}
 
@@ -283,6 +287,22 @@ func (w *FixedSizeBitmapsWriter) Build() error {
 
 	_ = os.Remove(w.indexFile)
 	if err := os.Rename(w.tmpIdxFilePath, w.indexFile); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *FixedSizeBitmapsWriter) DisableFsync() { w.noFsync = true }
+
+// fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
+// To achieve it: write to .tmp file then `rename` when file is ready.
+// Machine may power-off right after `rename` - it means `fsync` must be before `rename`
+func (w *FixedSizeBitmapsWriter) fsync() error {
+	if w.noFsync {
+		return nil
+	}
+	if err := w.f.Sync(); err != nil {
+		w.logger.Warn("couldn't fsync", "err", err, "file", w.tmpIdxFilePath)
 		return err
 	}
 	return nil

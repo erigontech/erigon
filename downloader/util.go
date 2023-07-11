@@ -298,11 +298,11 @@ func createTorrentFileFromInfo(root string, info *metainfo.Info, mi *metainfo.Me
 	if err != nil {
 		return err
 	}
-	defer file.Sync()
 	defer file.Close()
 	if err := mi.Write(file); err != nil {
 		return err
 	}
+	file.Sync()
 	return nil
 }
 

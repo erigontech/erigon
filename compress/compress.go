@@ -208,7 +208,9 @@ func (c *Compressor) Compress() error {
 	if err := reducedict(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, c.workers, db, c.lvl, c.logger); err != nil {
 		return err
 	}
-	c.fsync(cf)
+	if err = c.fsync(cf); err != nil {
+		return err
+	}
 	if err = cf.Close(); err != nil {
 		return err
 	}
@@ -233,13 +235,15 @@ func (c *Compressor) DisableFsync() { c.noFsync = true }
 // fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
 // To achieve it: write to .tmp file then `rename` when file is ready.
 // Machine may power-off right after `rename` - it means `fsync` must be before `rename`
-func (c *Compressor) fsync(f *os.File) {
+func (c *Compressor) fsync(f *os.File) error {
 	if c.noFsync {
-		return
+		return nil
 	}
 	if err := f.Sync(); err != nil {
-		c.logger.Warn("couldn't fsync", "err", err, "file", c.outputFile)
+		c.logger.Warn("couldn't fsync", "err", err, "file", c.tmpOutFilePath)
+		return err
 	}
+	return nil
 }
 
 // superstringLimit limits how large can one "superstring" get before it is processed
