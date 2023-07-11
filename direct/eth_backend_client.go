@@ -206,3 +206,7 @@ func (s *EthBackendClientDirect) NodeInfo(ctx context.Context, in *remote.NodesI
 func (s *EthBackendClientDirect) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.PeersReply, error) {
 	return s.server.Peers(ctx, in)
 }
+
+func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.PendingBlockReply, error) {
+	return s.server.PendingBlock(ctx, in)
+}

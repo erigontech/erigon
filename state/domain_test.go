@@ -66,6 +66,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	d, err := NewDomain(path, path, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, true, AccDomainLargeValues, logger)
 	require.NoError(t, err)
 	t.Cleanup(d.Close)
+	d.DisableFsync()
 	return db, d
 }
 

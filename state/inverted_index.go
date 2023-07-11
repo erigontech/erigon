@@ -75,6 +75,8 @@ type InvertedIndex struct {
 	txNumBytes [8]byte
 	wal        *invertedIndexWAL
 	logger     log.Logger
+
+	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
 func NewInvertedIndex(
@@ -273,7 +275,7 @@ func (ii *InvertedIndex) buildEfi(ctx context.Context, item *filesItem, p *backg
 	p.Name.Store(&fName)
 	p.Total.Store(uint64(item.decompressor.Count()))
 	//ii.logger.Info("[snapshots] build idx", "file", fName)
-	return buildIndex(ctx, item.decompressor, idxPath, ii.tmpdir, item.decompressor.Count()/2, false, p, ii.logger)
+	return buildIndex(ctx, item.decompressor, idxPath, ii.tmpdir, item.decompressor.Count()/2, false, p, ii.logger, ii.noFsync)
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
@@ -368,6 +370,9 @@ func (ii *InvertedIndex) Close() {
 	ii.closeWhatNotInList([]string{})
 	ii.reCalcRoFiles()
 }
+
+// DisableFsync - just for tests
+func (ii *InvertedIndex) DisableFsync() { ii.noFsync = true }
 
 func (ii *InvertedIndex) Files() (res []string) {
 	ii.files.Walk(func(items []*filesItem) bool {
@@ -1238,7 +1243,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 	idxPath := filepath.Join(ii.dir, idxFileName)
 	p := ps.AddNew(idxFileName, uint64(decomp.Count()*2))
 	defer ps.Delete(p)
-	if index, err = buildIndexThenOpen(ctx, decomp, idxPath, ii.tmpdir, len(keys), false /* values */, p, ii.logger); err != nil {
+	if index, err = buildIndexThenOpen(ctx, decomp, idxPath, ii.tmpdir, len(keys), false /* values */, p, ii.logger, ii.noFsync); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 	closeComp = false

@@ -12,7 +12,6 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -27,7 +26,6 @@ const (
 	Engine_EngineGetPayloadBodiesByHashV1_FullMethodName  = "/engine.Engine/EngineGetPayloadBodiesByHashV1"
 	Engine_EngineGetPayloadBodiesByRangeV1_FullMethodName = "/engine.Engine/EngineGetPayloadBodiesByRangeV1"
 	Engine_EngineGetBlobsBundleV1_FullMethodName          = "/engine.Engine/EngineGetBlobsBundleV1"
-	Engine_PendingBlock_FullMethodName                    = "/engine.Engine/PendingBlock"
 )
 
 // EngineClient is the client API for Engine service.
@@ -44,8 +42,6 @@ type EngineClient interface {
 	EngineGetPayloadBodiesByRangeV1(ctx context.Context, in *EngineGetPayloadBodiesByRangeV1Request, opts ...grpc.CallOption) (*EngineGetPayloadBodiesV1Response, error)
 	// Fetch the blobs bundle using its ID.
 	EngineGetBlobsBundleV1(ctx context.Context, in *EngineGetBlobsBundleRequest, opts ...grpc.CallOption) (*types.BlobsBundleV1, error)
-	// Should be moved to execution.proto
-	PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingBlockReply, error)
 }
 
 type engineClient struct {
@@ -110,15 +106,6 @@ func (c *engineClient) EngineGetBlobsBundleV1(ctx context.Context, in *EngineGet
 	return out, nil
 }
 
-func (c *engineClient) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingBlockReply, error) {
-	out := new(PendingBlockReply)
-	err := c.cc.Invoke(ctx, Engine_PendingBlock_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // EngineServer is the server API for Engine service.
 // All implementations must embed UnimplementedEngineServer
 // for forward compatibility
@@ -133,8 +120,6 @@ type EngineServer interface {
 	EngineGetPayloadBodiesByRangeV1(context.Context, *EngineGetPayloadBodiesByRangeV1Request) (*EngineGetPayloadBodiesV1Response, error)
 	// Fetch the blobs bundle using its ID.
 	EngineGetBlobsBundleV1(context.Context, *EngineGetBlobsBundleRequest) (*types.BlobsBundleV1, error)
-	// Should be moved to execution.proto
-	PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error)
 	mustEmbedUnimplementedEngineServer()
 }
 
@@ -159,9 +144,6 @@ func (UnimplementedEngineServer) EngineGetPayloadBodiesByRangeV1(context.Context
 }
 func (UnimplementedEngineServer) EngineGetBlobsBundleV1(context.Context, *EngineGetBlobsBundleRequest) (*types.BlobsBundleV1, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EngineGetBlobsBundleV1 not implemented")
-}
-func (UnimplementedEngineServer) PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method PendingBlock not implemented")
 }
 func (UnimplementedEngineServer) mustEmbedUnimplementedEngineServer() {}
 
@@ -284,24 +266,6 @@ func _Engine_EngineGetBlobsBundleV1_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Engine_PendingBlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(emptypb.Empty)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(EngineServer).PendingBlock(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Engine_PendingBlock_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(EngineServer).PendingBlock(ctx, req.(*emptypb.Empty))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // Engine_ServiceDesc is the grpc.ServiceDesc for Engine service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -332,10 +296,6 @@ var Engine_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EngineGetBlobsBundleV1",
 			Handler:    _Engine_EngineGetBlobsBundleV1_Handler,
-		},
-		{
-			MethodName: "PendingBlock",
-			Handler:    _Engine_PendingBlock_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

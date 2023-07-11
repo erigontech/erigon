@@ -55,6 +55,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (strin
 	}).MustOpen()
 	h, err := NewHistory(path, path, 16, "hist", keysTable, indexTable, valsTable, false, nil, largeValues, logger)
 	require.NoError(tb, err)
+	h.DisableFsync()
 	tb.Cleanup(db.Close)
 	tb.Cleanup(h.Close)
 	return path, db, h
