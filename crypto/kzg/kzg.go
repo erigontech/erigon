@@ -11,16 +11,15 @@ import (
 )
 
 const (
-	BlobCommitmentVersionKZG uint8 = 0x01
-	PrecompileInputLength    int   = 192
+	PrecompileInputLength int = 192
 )
 
 var (
 	errInvalidInputLength = errors.New("invalid input length")
-)
 
-// The value that gets returned when the `verify_kzg_proof“ precompile is called
-var precompileReturnValue [64]byte
+	// The value that gets returned when the `verify_kzg_proof“ precompile is called
+	precompileReturnValue [64]byte
+)
 
 // InitializeCrypytoCtx initializes the global context object returned via CryptoCtx
 func init() {
