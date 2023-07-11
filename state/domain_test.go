@@ -65,6 +65,8 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Cleanup(db.Close)
 	d, err := NewDomain(path, path, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, true, AccDomainLargeValues, logger)
 	require.NoError(t, err)
+	d.DisableFsync()
+	d.compressWorkers = 1
 	t.Cleanup(d.Close)
 	return db, d
 }
@@ -513,7 +515,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 	var err error
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		tx, err = db.BeginRw(ctx)
+		tx, err = db.BeginRwNosync(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
 	}
@@ -669,14 +671,25 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	// each key changes value on every txNum which is multiple of the key
 	dat := make(map[string][]bool) // K:V is key -> list of bools. If list[i] == true, i'th txNum should persists
 
+	var k [8]byte
+	var v [8]byte
+	maxFrozenFiles := (txCount / d.aggregationStep) / 32
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
 		d.SetTxNum(txNum)
-		for keyNum := uint64(1); keyNum <= keysCount; keyNum++ {
-			if keyNum == txNum%d.aggregationStep {
-				continue
+		step := txNum / d.aggregationStep
+		frozenFileNum := step / 32
+		for keyNum := uint64(0); keyNum < keysCount; keyNum++ {
+			if frozenFileNum < maxFrozenFiles { // frozen data
+				if keyNum != frozenFileNum {
+					continue
+				}
+			} else { //warm data
+				if keyNum == 0 || keyNum == txNum%d.aggregationStep {
+					continue
+				}
+				fmt.Printf("put: %d, step=%d\n", keyNum, step)
 			}
-			var k [8]byte
-			var v [8]byte
+
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
 			//v[0] = 3 // value marker
@@ -853,6 +866,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	from, to := d.stepsRangeInDB(tx)
 	require.Equal(t, 3, int(from))
 	require.Equal(t, 4, int(to))
+
 }
 
 func TestScanStaticFilesD(t *testing.T) {

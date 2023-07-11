@@ -423,12 +423,12 @@ type LocalityIterator struct {
 	files, nextFiles []uint64
 	key, nextKey     []byte
 	progress         uint64
-	hasNext          bool
 
 	totalOffsets, filesAmount uint64
 }
 
 func (si *LocalityIterator) advance() {
+	fmt.Printf("advance()\n")
 	for si.h.Len() > 0 {
 		top := heap.Pop(&si.h).(*ReconItem)
 		key := top.key
@@ -443,6 +443,7 @@ func (si *LocalityIterator) advance() {
 		inStep := uint32(top.startTxNum / si.aggStep)
 		if top.g.HasNext() {
 			top.key, _ = top.g.NextUncompressed()
+			fmt.Printf("alex2: %x\n", top.key)
 			heap.Push(&si.h, top)
 		}
 
@@ -452,6 +453,7 @@ func (si *LocalityIterator) advance() {
 			if si.key == nil {
 				si.key = key
 				si.files = append(si.files, uint64(inFile))
+				fmt.Printf("alex4: %x\n", si.key)
 				continue
 			}
 			si.nextFiles, si.files = si.files, si.nextFiles[:0]
@@ -459,17 +461,17 @@ func (si *LocalityIterator) advance() {
 
 			si.files = append(si.files, uint64(inFile))
 			si.key = key
-			si.hasNext = true
+			fmt.Printf("alex5: %x, %x\n", si.key, si.nextKey)
 			return
 		}
 		si.files = append(si.files, uint64(inFile))
 	}
 	si.nextFiles, si.files = si.files, si.nextFiles[:0]
 	si.nextKey = si.key
-	si.hasNext = false
+	si.key = nil
 }
 
-func (si *LocalityIterator) HasNext() bool { return si.hasNext }
+func (si *LocalityIterator) HasNext() bool { return si.nextKey != nil }
 func (si *LocalityIterator) Progress() float64 {
 	return (float64(si.progress) / float64(si.totalOffsets)) * 100
 }
@@ -478,6 +480,7 @@ func (si *LocalityIterator) FilesAmount() uint64 { return si.filesAmount }
 func (si *LocalityIterator) Next() ([]byte, []uint64) {
 	k, v := si.nextKey, si.nextFiles
 	si.advance()
+	fmt.Printf("return: %x, %d\n", k, v)
 	return k, v
 }
 
@@ -520,6 +523,7 @@ func (dc *DomainContext) iterateKeysLocality(uptoTxNum uint64) *LocalityIterator
 		g := item.src.decompressor.MakeGetter()
 		if g.HasNext() {
 			key, offset := g.NextUncompressed()
+			fmt.Printf("alex1: %x\n", key)
 			heapItem := &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key, startOffset: offset, lastOffset: offset}
 			heap.Push(&si.h, heapItem)
 		}

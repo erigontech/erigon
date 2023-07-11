@@ -3,10 +3,12 @@ package state
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"sync/atomic"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
@@ -105,10 +107,8 @@ func TestLocality(t *testing.T) {
 	t.Run("locality index: lookup", func(t *testing.T) {
 		ic := ii.MakeContext()
 		defer ic.Close()
-
-		var k [8]byte
-		binary.BigEndian.PutUint64(k[:], 1)
-		v1, v2, from, ok1, ok2 := ic.ii.localityIndex.lookupIdxFiles(ic.loc, k[:], 1*ic.ii.aggregationStep*StepsInBiggestFile)
+		k := hexutility.EncodeTs(1)
+		v1, v2, from, ok1, ok2 := ic.ii.localityIndex.lookupIdxFiles(ic.loc, k, 1*ic.ii.aggregationStep*StepsInBiggestFile)
 		require.True(ok1)
 		require.False(ok2)
 		require.Equal(uint64(1*StepsInBiggestFile), v1)
@@ -120,8 +120,9 @@ func TestLocality(t *testing.T) {
 func TestLocalityDomain(t *testing.T) {
 	logger := log.New()
 	ctx, require := context.Background(), require.New(t)
-	keyCount, txCount := uint64(200), uint64(300)
-	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 4, logger)
+	frozenFiles := 2
+	keyCount, txCount := uint64(6), uint64(3*frozenFiles*StepsInBiggestFile+2*16)
+	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 2, logger)
 	collateAndMerge(t, db, nil, dom, txCount)
 
 	{ //prepare
@@ -141,20 +142,22 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("locality iterator", func(t *testing.T) {
 		ic := dom.MakeContext()
 		defer dom.Close()
+		fmt.Printf("-- created\n")
 		it := ic.iterateKeysLocality(math.MaxUint64)
 		require.True(it.HasNext())
 		key, bitmap := it.Next()
-		require.Equal(uint64(1), binary.BigEndian.Uint64(key))
-		require.Equal([]uint64{0, 1}, bitmap)
+		require.Equal(uint64(0), binary.BigEndian.Uint64(key))
+		require.Equal([]uint64{0}, bitmap)
 		require.True(it.HasNext())
 		key, bitmap = it.Next()
-		require.Equal(uint64(2), binary.BigEndian.Uint64(key))
-		require.Equal([]uint64{0, 1}, bitmap)
+		require.Equal(uint64(1), binary.BigEndian.Uint64(key))
+		require.Equal([]uint64{1}, bitmap)
 
 		var last []byte
 		for it.HasNext() {
-			key, _ := it.Next()
+			key, bm := it.Next()
 			last = key
+			fmt.Printf("key: %d, bitmap: %d\n", binary.BigEndian.Uint64(key), bm)
 		}
 		require.Equal(int(keyCount-1), int(binary.BigEndian.Uint64(last)))
 	})
@@ -196,13 +199,21 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("locality index: lookup", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		var k [8]byte
-		binary.BigEndian.PutUint64(k[:], 1)
-		v1, v2, from, ok1, ok2 := dc.d.localityIndex.lookupIdxFiles(dc.loc, k[:], 1*dc.d.aggregationStep*StepsInBiggestFile)
+		k := hexutility.EncodeTs(1)
+		v1, v2, from, ok1, ok2 := dc.d.localityIndex.lookupIdxFiles(dc.loc, k, 1*dc.d.aggregationStep*StepsInBiggestFile)
 		require.True(ok1)
 		require.False(ok2)
 		require.Equal(uint64(1*StepsInBiggestFile), v1)
 		require.Equal(uint64(0*StepsInBiggestFile), v2)
 		require.Equal(2*dc.d.aggregationStep*StepsInBiggestFile, from)
+	})
+	t.Run("domain.getLatestFromFiles", func(t *testing.T) {
+		dc := dom.MakeContext()
+		defer dc.Close()
+		k := hexutility.EncodeTs(1)
+		v, ok, err := dc.getLatestFromFiles(k)
+		require.NoError(err)
+		require.True(ok)
+		require.Equal(uint64(295), binary.BigEndian.Uint64(v))
 	})
 }

@@ -608,6 +608,9 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		if comp, err = compress.NewCompressor(ctx, "merge", datPath, d.tmpdir, compress.MinPatternScore, workers, log.LvlTrace, d.logger); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s history compressor: %w", d.filenameBase, err)
 		}
+		if d.noFsync {
+			comp.DisableFsync()
+		}
 		p := ps.AddNew("merege "+datFileName, 1)
 		defer ps.Delete(p)
 
@@ -716,7 +719,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		ps.Delete(p)
 
 		//		if valuesIn.index, err = buildIndex(valuesIn.decompressor, idxPath, d.dir, keyCount, false /* values */); err != nil {
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, idxPath, d.tmpdir, keyCount, false /* values */, p, d.logger); err != nil {
+		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, idxPath, d.tmpdir, keyCount, false /* values */, p, d.logger, d.noFsync); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 
@@ -777,6 +780,9 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	datPath := filepath.Join(ii.dir, datFileName)
 	if comp, err = compress.NewCompressor(ctx, "Snapshots merge", datPath, ii.tmpdir, compress.MinPatternScore, workers, log.LvlTrace, ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", ii.filenameBase, err)
+	}
+	if ii.noFsync {
+		comp.DisableFsync()
 	}
 	p := ps.AddNew("merge "+datFileName, 1)
 	defer ps.Delete(p)
@@ -870,7 +876,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	idxPath := filepath.Join(ii.dir, idxFileName)
 	p = ps.AddNew("merge "+idxFileName, uint64(outItem.decompressor.Count()*2))
 	defer ps.Delete(p)
-	if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, idxPath, ii.tmpdir, keyCount, false /* values */, p, ii.logger); err != nil {
+	if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, idxPath, ii.tmpdir, keyCount, false /* values */, p, ii.logger, ii.noFsync); err != nil {
 		return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", ii.filenameBase, startTxNum, endTxNum, err)
 	}
 	closeItem = false
@@ -936,6 +942,9 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 		idxPath := filepath.Join(h.dir, idxFileName)
 		if comp, err = compress.NewCompressor(ctx, "merge", datPath, h.tmpdir, compress.MinPatternScore, workers, log.LvlTrace, h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", h.filenameBase, err)
+		}
+		if h.noFsync {
+			comp.DisableFsync()
 		}
 		p := ps.AddNew("merge "+datFileName, 1)
 		defer ps.Delete(p)
@@ -1031,6 +1040,9 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 			return nil, nil, fmt.Errorf("create recsplit: %w", err)
 		}
 		rs.LogLvl(log.LvlTrace)
+		if h.noFsync {
+			rs.DisableFsync()
+		}
 		var historyKey []byte
 		var txKey [8]byte
 		var valOffset uint64

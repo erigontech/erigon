@@ -678,6 +678,7 @@ type BtIndexWriter struct {
 	etlBufLimit     datasize.ByteSize
 	bytesPerRec     int
 	logger          log.Logger
+	noFsync         bool // fsync is enabled by default, but tests can manually disable
 }
 
 type BtIndexWriterArgs struct {
@@ -774,10 +775,25 @@ func (btw *BtIndexWriter) Build() error {
 	btw.built = true
 
 	_ = btw.indexW.Flush()
-	_ = btw.indexF.Sync()
+	btw.fsync()
 	_ = btw.indexF.Close()
 	_ = os.Rename(tmpIdxFilePath, btw.indexFile)
 	return nil
+}
+
+func (btw *BtIndexWriter) DisableFsync() { btw.noFsync = true }
+
+// fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
+// To achieve it: write to .tmp file then `rename` when file is ready.
+// Machine may power-off right after `rename` - it means `fsync` must be before `rename`
+func (btw *BtIndexWriter) fsync() {
+	if btw.noFsync {
+		return
+	}
+	if err := btw.indexF.Sync(); err != nil {
+		btw.logger.Warn("couldn't fsync", "err", err, "file", btw.indexFile)
+		return
+	}
 }
 
 func (btw *BtIndexWriter) Close() {
