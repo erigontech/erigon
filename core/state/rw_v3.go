@@ -468,12 +468,11 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 	if *original == *value {
 		return nil
 	}
-	compositeS := common.Append(address.Bytes(), key.Bytes())
-	w.writeLists[string(kv.StorageDomain)].Push(string(compositeS), value.Bytes())
+	compositeS := string(append(address.Bytes(), key.Bytes()...))
+	w.writeLists[string(kv.StorageDomain)].Push(compositeS, value.Bytes())
 	if w.trace {
 		fmt.Printf("[v3_buff] storage [%x] [%x] => [%x]\n", address, key.Bytes(), value.Bytes())
 	}
-
 	//if w.storagePrevs == nil {
 	//	w.storagePrevs = map[string][]byte{}
 	//}
