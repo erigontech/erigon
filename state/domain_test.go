@@ -675,6 +675,10 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	var k [8]byte
 	var v [8]byte
 	maxFrozenFiles := (txCount / d.aggregationStep) / StepsInBiggestFile
+	// key 0: only in frozen file 0
+	// key 1: only in frozen file 1
+	// key 2: in frozen file 2 and in warm files
+	// other keys: only in warm files
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
 		d.SetTxNum(txNum)
 		step := txNum / d.aggregationStep
@@ -686,7 +690,10 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 				}
 				//fmt.Printf("put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
 			} else { //warm data
-				if keyNum == 0 || keyNum == txNum%d.aggregationStep {
+				if keyNum == 0 || keyNum == 1 {
+					continue
+				}
+				if keyNum == txNum%d.aggregationStep {
 					continue
 				}
 				//fmt.Printf("put: %d, step=%d\n", keyNum, step)
@@ -744,7 +751,10 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 				continue
 				//fmt.Printf("put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
 			} else { //warm data
-				if keyNum == 0 || keyNum == txNum%dom.aggregationStep {
+				if keyNum == 0 || keyNum == 1 {
+					continue
+				}
+				if keyNum == txNum%dom.aggregationStep {
 					continue
 				}
 				//fmt.Printf("put: %d, step=%d\n", keyNum, step)
@@ -769,9 +779,9 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 		}
 	}
 
+	//warm keys
 	binary.BigEndian.PutUint64(v[:], txCount)
-
-	for keyNum := uint64(1); keyNum < keyCount; keyNum++ {
+	for keyNum := uint64(2); keyNum < keyCount; keyNum++ {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount-1, keyNum)
 		binary.BigEndian.PutUint64(k[:], keyNum)
 

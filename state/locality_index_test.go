@@ -224,18 +224,15 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("domain.getLatestFromFiles", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		fmt.Printf("---test\n")
 		v, ok, err := dc.getLatestFromFiles(hexutility.EncodeTs(0))
 		require.NoError(err)
 		require.True(ok)
-		require.Equal(1*2*StepsInBiggestFile-1, int(binary.BigEndian.Uint64(v)))
+		require.Equal(1*txsInFrozenFile-1, int(binary.BigEndian.Uint64(v)))
 
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(1))
 		require.NoError(err)
 		require.True(ok)
-
-		// TODO: why key 1 and key 2 have same value?
-		require.Equal(220, int(binary.BigEndian.Uint64(v)))
+		require.Equal(2*txsInFrozenFile-1, int(binary.BigEndian.Uint64(v)))
 
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(2))
 		require.NoError(err)
