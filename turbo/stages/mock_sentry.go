@@ -202,20 +202,22 @@ func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*ptypes.NodeInf
 	return nil, nil
 }
 
+const blockBufferSize = 128
+
 func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool) *MockSentry {
-	return MockWithGenesisPruneMode(tb, gspec, key, prune.DefaultMode, withPosDownloader)
+	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.DefaultMode, withPosDownloader)
 }
 
 func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine consensus.Engine, withPosDownloader bool) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(tb, gspec, key, prune.DefaultMode, engine, false, withPosDownloader)
+	return MockWithEverything(tb, gspec, key, prune.DefaultMode, engine, blockBufferSize, false, withPosDownloader)
 }
 
-func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, withPosDownloader bool) *MockSentry {
-	return MockWithEverything(tb, gspec, key, prune, ethash.NewFaker(), false, withPosDownloader)
+func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, withPosDownloader bool) *MockSentry {
+	return MockWithEverything(tb, gspec, key, prune, ethash.NewFaker(), blockBufferSize, false, withPosDownloader)
 }
 
-func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool, withPosDownloader bool) *MockSentry {
+func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, blockBufferSize int, withTxPool bool, withPosDownloader bool) *MockSentry {
 	var tmpdir string
 	if tb != nil {
 		tmpdir = tb.TempDir()
@@ -352,6 +354,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		sentries,
 		cfg.Sync,
 		mock.BlockReader,
+		blockBufferSize,
 		false,
 		forkValidator,
 		cfg.DropUselessPeers,
@@ -479,7 +482,7 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 		},
 	}
 
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), true, false)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false)
 }
 
 func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
@@ -526,91 +529,75 @@ func (ms *MockSentry) numberOfPoWBlocks(chain *core.ChainPack) int {
 }
 
 func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack, tx kv.RwTx) error {
-	blockCount := ms.numberOfPoWBlocks(chain)
-	if blockCount == 0 {
+	n := ms.numberOfPoWBlocks(chain)
+	if n == 0 {
 		// No Proof-of-Work blocks
 		return nil
 	}
 
-	requestId := uint64(0)
-
-	// StageLoopStep stops in test mode after 128 blocks so it needs to
-	// be processed serveral times
-	start := 1
-	end := blockCount % 128
-
-	if end == 0 {
-		end = 128
+	// Send NewBlock message
+	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
+		Block: chain.Blocks[n-1],
+		TD:    big.NewInt(1), // This is ignored anyway
+	})
+	if err != nil {
+		return err
+	}
+	ms.ReceiveWg.Add(1)
+	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: ms.PeerId}) {
+		if err != nil {
+			return err
+		}
 	}
 
-	for ; end <= blockCount; start, end = end+1, end+128 {
-		// Send NewBlock message
-		b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-			Block: chain.Blocks[end-1],
-			TD:    big.NewInt(1), // This is ignored anyway
-		})
+	// Send all the headers
+	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          1,
+		BlockHeadersPacket: chain.Headers[0:n],
+	})
+	if err != nil {
+		return err
+	}
+	ms.ReceiveWg.Add(1)
+	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: ms.PeerId}) {
 		if err != nil {
 			return err
 		}
-		ms.ReceiveWg.Add(1)
-		for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: ms.PeerId}) {
-			if err != nil {
-				return err
-			}
-		}
+	}
 
-		// Send all the headers
-		requestId++
-
-		b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-			RequestId:          requestId,
-			BlockHeadersPacket: chain.Headers[start-1 : end],
-		})
+	// Send all the bodies
+	packet := make(eth.BlockBodiesPacket, n)
+	for i, block := range chain.Blocks[0:n] {
+		packet[i] = block.Body()
+	}
+	b, err = rlp.EncodeToBytes(&eth.BlockBodiesPacket66{
+		RequestId:         1,
+		BlockBodiesPacket: packet,
+	})
+	if err != nil {
+		return err
+	}
+	ms.ReceiveWg.Add(1)
+	for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_BLOCK_BODIES_66, Data: b, PeerId: ms.PeerId}) {
 		if err != nil {
 			return err
 		}
-		ms.ReceiveWg.Add(1)
-		for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: ms.PeerId}) {
-			if err != nil {
-				return err
-			}
-		}
+	}
+	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
-		// Send all the bodies
-		packet := make(eth.BlockBodiesPacket, end-start+1)
-		for i, block := range chain.Blocks[start-1 : end] {
-			packet[i] = block.Body()
-		}
-		b, err = rlp.EncodeToBytes(&eth.BlockBodiesPacket66{
-			RequestId:         requestId,
-			BlockBodiesPacket: packet,
-		})
-		if err != nil {
-			return err
-		}
+	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
-		for _, err = range ms.Send(&proto_sentry.InboundMessage{Id: proto_sentry.MessageId_BLOCK_BODIES_66, Data: b, PeerId: ms.PeerId}) {
-			if err != nil {
-				return err
-			}
-		}
-		ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
-
-		if ms.TxPool != nil {
-			ms.ReceiveWg.Add(1)
-		}
-		initialCycle := MockInsertAsInitialCycle
-		hook := NewHook(ms.Ctx, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
-		if err = StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook); err != nil {
-			return err
-		}
-		if ms.TxPool != nil {
-			ms.ReceiveWg.Wait() // Wait for TxPool notification
-		}
+	}
+	initialCycle := MockInsertAsInitialCycle
+	hook := NewHook(ms.Ctx, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
+	if err = StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook); err != nil {
+		return err
+	}
+	if ms.TxPool != nil {
+		ms.ReceiveWg.Wait() // Wait for TxPool notification
 	}
 
 	return nil
-
 }
 
 func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack, tx kv.RwTx) error {

@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -254,7 +255,8 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *s
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := stages.MockWithGenesis(t, gspec, key, false)
+
+	m := stages.MockWithGenesisPruneMode(t, gspec, key, chainSize, prune.DefaultMode, false)
 
 	// Generate testing blocks
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *core.BlockGen) {

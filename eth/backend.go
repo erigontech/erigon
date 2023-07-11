@@ -193,6 +193,8 @@ func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
 	return
 }
 
+const blockBufferSize = 128
+
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
@@ -477,6 +479,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		sentries,
 		config.Sync,
 		blockReader,
+		blockBufferSize,
 		stack.Config().SentryLogPeerInfo,
 		backend.forkValidator,
 		config.DropUselessPeers,

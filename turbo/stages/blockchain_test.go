@@ -733,7 +733,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
-	m := stages.MockWithGenesisPruneMode(t, gspec, key, pm, false)
+	m := stages.MockWithGenesisPruneMode(t, gspec, key, 128, pm, false)
 
 	head := uint64(4)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, int(head), func(i int, block *core.BlockGen) {
