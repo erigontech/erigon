@@ -40,6 +40,10 @@ import (
 )
 
 const (
+	logInterval = 20 * time.Second
+)
+
+const (
 	spanLength              = 6400 // Number of blocks in a span
 	zerothSpanEnd           = 255  // End block of 0th span
 	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
@@ -539,6 +543,8 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 
 // snapshot retrieves the authorization snapshot at a given point in time.
 func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash libcommon.Hash, parents []*types.Header) (*Snapshot, error) {
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 	// Search for a snapshot in memory or on disk for checkpoints
 	var snap *Snapshot
 
@@ -564,37 +570,6 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			}
 		}
 
-		// If we're at the genesis, snapshot the initial state. Alternatively if we're
-		// at a checkpoint block without a parent (light client CHT), or we have piled
-		// up more headers than allowed to be reorged (chain reinit from a freezer),
-		// consider the checkpoint trusted and snapshot it.
-
-		// TODO fix this
-		// nolint:nestif
-		if number == 0 {
-			checkpoint := chain.GetHeaderByNumber(number)
-			if checkpoint != nil {
-				// get checkpoint data
-				hash := checkpoint.Hash()
-
-				// get validators and current span
-				validators, err := c.spanner.GetCurrentValidators(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
-				if err != nil {
-					return nil, err
-				}
-
-				// new snap shot
-				snap = newSnapshot(c.config, c.signatures, number, hash, validators, c.logger)
-				if err := snap.store(c.DB); err != nil {
-					return nil, err
-				}
-
-				c.logger.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
-
-				break
-			}
-		}
-
 		// No snapshot for this header, gather the header and move backward
 		var header *types.Header
 		if len(parents) > 0 {
@@ -615,6 +590,54 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 
 		headers = append(headers, header)
 		number, hash = number-1, header.ParentHash
+		if number <= chain.FrozenBlocks() {
+			break
+		}
+		select {
+		case <-logEvery.C:
+			log.Info("Gathering headers for validator proposer prorities (backwards)", "blockNum", number)
+		default:
+		}
+	}
+	if snap == nil && number <= chain.FrozenBlocks() {
+		// Special handling of the headers in the snapshot
+		zeroHeader := chain.GetHeaderByNumber(0)
+		if zeroHeader != nil {
+			// get checkpoint data
+			hash := zeroHeader.Hash()
+
+			// get validators and current span
+			validators, err := c.spanner.GetCurrentValidators(1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
+			if err != nil {
+				return nil, err
+			}
+
+			// new snap shot
+			snap = newSnapshot(c.config, c.signatures, 0, hash, validators, c.logger)
+			if err := snap.store(c.DB); err != nil {
+				return nil, err
+			}
+			c.logger.Info("Stored proposer snapshot to disk", "number", 0, "hash", hash)
+			initialHeaders := make([]*types.Header, 0, 128)
+			for i := uint64(1); i <= number; i++ {
+				header := chain.GetHeaderByNumber(i)
+				initialHeaders = append(initialHeaders, header)
+				if len(initialHeaders) == cap(initialHeaders) {
+					if snap, err = snap.apply(initialHeaders, c.logger); err != nil {
+						return nil, err
+					}
+					initialHeaders = initialHeaders[:0]
+				}
+				select {
+				case <-logEvery.C:
+					log.Info("Computing validator proposer prorities (forward)", "blockNum", i)
+				default:
+				}
+			}
+			if snap, err = snap.apply(initialHeaders, c.logger); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// check if snapshot is nil
@@ -627,8 +650,8 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
 
-	snap, err := snap.apply(headers, c.logger)
-	if err != nil {
+	var err error
+	if snap, err = snap.apply(headers, c.logger); err != nil {
 		return nil, err
 	}
 

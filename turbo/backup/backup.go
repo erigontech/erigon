@@ -47,7 +47,7 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 	return src, dst
 }
 
-func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readAheadThreads int) error {
+func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readAheadThreads int, logger log.Logger) error {
 	srcTx, err1 := src.BeginRo(ctx)
 	if err1 != nil {
 		return err1
@@ -72,15 +72,15 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, readA
 		if b.IsDeprecated {
 			continue
 		}
-		if err := backupTable(ctx, src, srcTx, dst, name, readAheadThreads, logEvery); err != nil {
+		if err := backupTable(ctx, src, srcTx, dst, name, readAheadThreads, logEvery, logger); err != nil {
 			return err
 		}
 	}
-	log.Info("done")
+	logger.Info("done")
 	return nil
 }
 
-func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, table string, readAheadThreads int, logEvery *time.Ticker) error {
+func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, table string, readAheadThreads int, logEvery *time.Ticker, logger log.Logger) error {
 	var total uint64
 	wg := sync.WaitGroup{}
 	defer wg.Wait()
@@ -134,7 +134,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 		case <-logEvery.C:
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
-			log.Info("Progress", "table", table, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", hex.EncodeToString(k),
+			logger.Info("Progress", "table", table, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", hex.EncodeToString(k),
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		default:
 		}

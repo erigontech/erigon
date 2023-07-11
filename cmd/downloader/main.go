@@ -108,12 +108,7 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "downloader"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		if err := Downloader(cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
@@ -190,12 +185,7 @@ var printTorrentHashes = &cobra.Command{
 	Use:     "torrent_hashes",
 	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "downloader"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return err
-		}
+		logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
 		ctx := cmd.Context()
 

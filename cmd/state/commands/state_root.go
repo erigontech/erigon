@@ -42,12 +42,7 @@ var stateRootCmd = &cobra.Command{
 	Use:   "stateroot",
 	Short: "Exerimental command to re-execute blocks from beginning and compute state root",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var logger log.Logger
-		var err error
-		if logger, err = debug.SetupCobra(cmd, "stateroot"); err != nil {
-			logger.Error("Setting up", "error", err)
-			return err
-		}
+		logger := debug.SetupCobra(cmd, "stateroot")
 		return StateRoot(genesis, block, datadirCli, logger)
 	},
 }

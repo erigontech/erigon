@@ -76,12 +76,12 @@ CloudDrives (and ssd) have bad-latency and good-parallel-throughput - then havin
 )
 
 func doBackup(cliCtx *cli.Context) error {
-	logger, err := debug.Setup(cliCtx, true)
+	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	defer logger.Info("[backup] done")
+	defer logger.Info("backup done")
 
 	ctx := cliCtx.Context
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -139,7 +139,7 @@ func doBackup(cliCtx *cli.Context) error {
 		}
 		logger.Info("[backup] start", "label", label)
 		fromDB, toDB := backup.OpenPair(from, to, label, targetPageSize, logger)
-		if err := backup.Kv2kv(ctx, fromDB, toDB, nil, readAheadThreads); err != nil {
+		if err := backup.Kv2kv(ctx, fromDB, toDB, nil, readAheadThreads, logger); err != nil {
 			return err
 		}
 	}

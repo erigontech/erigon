@@ -74,3 +74,7 @@ func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	}
 	return td
 }
+
+func (cr ChainReaderImpl) FrozenBlocks() uint64 {
+	return cr.BlockReader.FrozenBlocks()
+}
