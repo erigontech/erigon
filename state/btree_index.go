@@ -670,8 +670,9 @@ type BtIndexWriter struct {
 	indexW          *bufio.Writer
 	indexF          *os.File
 	bucketCollector *etl.Collector // Collector that sorts by buckets
-	indexFileName   string
-	indexFile       string
+
+	indexFileName          string
+	indexFile, tmpFilePath string
 	tmpDir          string
 	numBuf          [8]byte
 	keyCount        uint64
@@ -698,6 +699,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 	btw := &BtIndexWriter{lvl: log.LvlDebug, logger: logger}
 	btw.tmpDir = args.TmpDir
 	btw.indexFile = args.IndexFile
+	btw.tmpFilePath = args.IndexFile + ".tmp"
 
 	_, fname := filepath.Split(btw.indexFile)
 	btw.indexFileName = fname
@@ -737,8 +739,6 @@ func (btw *BtIndexWriter) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, 
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file
 func (btw *BtIndexWriter) Build() error {
-	tmpIdxFilePath := btw.indexFile + ".tmp"
-
 	if btw.built {
 		return fmt.Errorf("already built")
 	}
@@ -746,13 +746,11 @@ func (btw *BtIndexWriter) Build() error {
 	//	return fmt.Errorf("expected keys %d, got %d", btw.keyCount, btw.keysAdded)
 	//}
 	var err error
-	if btw.indexF, err = os.Create(tmpIdxFilePath); err != nil {
+	if btw.indexF, err = os.Create(btw.tmpFilePath); err != nil {
 		return fmt.Errorf("create index file %s: %w", btw.indexFile, err)
 	}
 	defer btw.indexF.Close()
-	defer btw.indexF.Sync()
 	btw.indexW = bufio.NewWriterSize(btw.indexF, etl.BufIOSize)
-	defer btw.indexW.Flush()
 
 	// Write number of keys
 	binary.BigEndian.PutUint64(btw.numBuf[:], btw.keyCount)
@@ -774,10 +772,18 @@ func (btw *BtIndexWriter) Build() error {
 	btw.logger.Log(btw.lvl, "[index] write", "file", btw.indexFileName)
 	btw.built = true
 
-	_ = btw.indexW.Flush()
-	btw.fsync()
-	_ = btw.indexF.Close()
-	_ = os.Rename(tmpIdxFilePath, btw.indexFile)
+	if err = btw.indexW.Flush(); err != nil {
+		return err
+	}
+	if err = btw.fsync(); err != nil {
+		return err
+	}
+	if err = btw.indexF.Close(); err != nil {
+		return err
+	}
+	if err = os.Rename(btw.tmpFilePath, btw.indexFile); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -786,14 +792,15 @@ func (btw *BtIndexWriter) DisableFsync() { btw.noFsync = true }
 // fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
 // To achieve it: write to .tmp file then `rename` when file is ready.
 // Machine may power-off right after `rename` - it means `fsync` must be before `rename`
-func (btw *BtIndexWriter) fsync() {
+func (btw *BtIndexWriter) fsync() error {
 	if btw.noFsync {
-		return
+		return nil
 	}
 	if err := btw.indexF.Sync(); err != nil {
-		btw.logger.Warn("couldn't fsync", "err", err, "file", btw.indexFile)
-		return
+		btw.logger.Warn("couldn't fsync", "err", err, "file", btw.tmpFilePath)
+		return err
 	}
+	return nil
 }
 
 func (btw *BtIndexWriter) Close() {

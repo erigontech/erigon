@@ -68,6 +68,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	d.DisableFsync()
 	d.compressWorkers = 1
 	t.Cleanup(d.Close)
+	d.DisableFsync()
 	return db, d
 }
 

@@ -63,14 +63,16 @@ func remix(z uint64) uint64 {
 // Recsplit: Minimal perfect hashing via recursive splitting. In 2020 Proceedings of the Symposium on Algorithm Engineering and Experiments (ALENEX),
 // pages 175−185. SIAM, 2020.
 type RecSplit struct {
-	hasher            murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
-	offsetCollector   *etl.Collector  // Collector that sorts by offsets
-	indexW            *bufio.Writer
-	indexF            *os.File
-	offsetEf          *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
-	bucketCollector   *etl.Collector         // Collector that sorts by buckets
-	indexFileName     string
-	indexFile         string
+	hasher          murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
+	offsetCollector *etl.Collector  // Collector that sorts by offsets
+	indexW          *bufio.Writer
+	indexF          *os.File
+	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
+	bucketCollector *etl.Collector         // Collector that sorts by buckets
+
+	indexFileName          string
+	indexFile, tmpFilePath string
+
 	tmpDir            string
 	gr                GolombRice // Helper object to encode the tree of hash function salts using Golomb-Rice code.
 	bucketPosAcc      []uint64   // Accumulator for position of every bucket in the encoding of the hash function
@@ -152,6 +154,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.tmpDir = args.TmpDir
 	rs.indexFile = args.IndexFile
+	rs.tmpFilePath = args.IndexFile + ".tmp"
 	_, fname := filepath.Split(rs.indexFile)
 	rs.indexFileName = fname
 	rs.baseDataID = args.BaseDataID
@@ -532,7 +535,6 @@ func (rs *RecSplit) loadFuncOffset(k, _ []byte, _ etl.CurrentTableReader, _ etl.
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file
 func (rs *RecSplit) Build() error {
-	tmpIdxFilePath := rs.indexFile + ".tmp"
 
 	if rs.built {
 		return fmt.Errorf("already built")
@@ -541,13 +543,11 @@ func (rs *RecSplit) Build() error {
 		return fmt.Errorf("expected keys %d, got %d", rs.keyExpectedCount, rs.keysAdded)
 	}
 	var err error
-	if rs.indexF, err = os.Create(tmpIdxFilePath); err != nil {
+	if rs.indexF, err = os.Create(rs.tmpFilePath); err != nil {
 		return fmt.Errorf("create index file %s: %w", rs.indexFile, err)
 	}
-	defer rs.indexF.Sync()
 	defer rs.indexF.Close()
 	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
-	defer rs.indexW.Flush()
 	// Write minimal app-specific dataID in this index file
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
 	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
@@ -661,10 +661,34 @@ func (rs *RecSplit) Build() error {
 		return fmt.Errorf("writing elias fano: %w", err)
 	}
 
-	_ = rs.indexW.Flush()
-	rs.fsync()
-	_ = rs.indexF.Close()
-	_ = os.Rename(tmpIdxFilePath, rs.indexFile)
+	if err = rs.indexW.Flush(); err != nil {
+		return err
+	}
+	if err = rs.fsync(); err != nil {
+		return err
+	}
+	if err = rs.indexF.Close(); err != nil {
+		return err
+	}
+	if err = os.Rename(rs.tmpFilePath, rs.indexFile); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (rs *RecSplit) DisableFsync() { rs.noFsync = true }
+
+// Fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
+// To achieve it: write to .tmp file then `rename` when file is ready.
+// Machine may power-off right after `rename` - it means `fsync` must be before `rename`
+func (rs *RecSplit) fsync() error {
+	if rs.noFsync {
+		return nil
+	}
+	if err := rs.indexF.Sync(); err != nil {
+		rs.logger.Warn("couldn't fsync", "err", err, "file", rs.tmpFilePath)
+		return err
+	}
 	return nil
 }
 

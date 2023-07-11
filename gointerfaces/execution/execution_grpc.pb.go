@@ -12,7 +12,6 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -30,7 +29,6 @@ const (
 	Execution_GetBody_FullMethodName             = "/execution.Execution/GetBody"
 	Execution_IsCanonicalHash_FullMethodName     = "/execution.Execution/IsCanonicalHash"
 	Execution_GetHeaderHashNumber_FullMethodName = "/execution.Execution/GetHeaderHashNumber"
-	Execution_PendingBlock_FullMethodName        = "/execution.Execution/PendingBlock"
 )
 
 // ExecutionClient is the client API for Execution service.
@@ -49,8 +47,6 @@ type ExecutionClient interface {
 	GetBody(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*GetBodyResponse, error)
 	IsCanonicalHash(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*IsCanonicalResponse, error)
 	GetHeaderHashNumber(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*GetHeaderHashNumberResponse, error)
-	// TODO(Giulio2002) do it here.
-	PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingBlockReply, error)
 }
 
 type executionClient struct {
@@ -142,15 +138,6 @@ func (c *executionClient) GetHeaderHashNumber(ctx context.Context, in *types.H25
 	return out, nil
 }
 
-func (c *executionClient) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingBlockReply, error) {
-	out := new(PendingBlockReply)
-	err := c.cc.Invoke(ctx, Execution_PendingBlock_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // ExecutionServer is the server API for Execution service.
 // All implementations must embed UnimplementedExecutionServer
 // for forward compatibility
@@ -167,8 +154,6 @@ type ExecutionServer interface {
 	GetBody(context.Context, *GetSegmentRequest) (*GetBodyResponse, error)
 	IsCanonicalHash(context.Context, *types.H256) (*IsCanonicalResponse, error)
 	GetHeaderHashNumber(context.Context, *types.H256) (*GetHeaderHashNumberResponse, error)
-	// TODO(Giulio2002) do it here.
-	PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error)
 	mustEmbedUnimplementedExecutionServer()
 }
 
@@ -202,9 +187,6 @@ func (UnimplementedExecutionServer) IsCanonicalHash(context.Context, *types.H256
 }
 func (UnimplementedExecutionServer) GetHeaderHashNumber(context.Context, *types.H256) (*GetHeaderHashNumberResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetHeaderHashNumber not implemented")
-}
-func (UnimplementedExecutionServer) PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method PendingBlock not implemented")
 }
 func (UnimplementedExecutionServer) mustEmbedUnimplementedExecutionServer() {}
 
@@ -381,24 +363,6 @@ func _Execution_GetHeaderHashNumber_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Execution_PendingBlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(emptypb.Empty)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ExecutionServer).PendingBlock(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Execution_PendingBlock_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExecutionServer).PendingBlock(ctx, req.(*emptypb.Empty))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // Execution_ServiceDesc is the grpc.ServiceDesc for Execution service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -441,10 +405,6 @@ var Execution_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetHeaderHashNumber",
 			Handler:    _Execution_GetHeaderHashNumber_Handler,
-		},
-		{
-			MethodName: "PendingBlock",
-			Handler:    _Execution_PendingBlock_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
