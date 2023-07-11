@@ -162,13 +162,10 @@ const (
 	RefundQuotient        uint64 = 2
 	RefundQuotientEIP3529 uint64 = 5
 
-	// stuff from EIP-4844
-	MinDataGasPrice            = 1
-	DataGasPriceUpdateFraction = 3338477
-
-	BlobVerificationGas      uint64 = 1800000
-	BlobCommitmentVersionKZG uint8  = 0x01
-	PointEvaluationGas       uint64 = 50000
+	// EIP-4844: Shard Blob Transactions
+	MinDataGasPrice                   = 1
+	DataGasPriceUpdateFraction        = 3338477
+	PointEvaluationGas         uint64 = 50000
 )
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
