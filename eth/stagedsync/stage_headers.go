@@ -1166,6 +1166,10 @@ func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	return td
 }
 
+func (cr ChainReaderImpl) FrozenBlocks() uint64 {
+	return cr.blockReader.FrozenBlocks()
+}
+
 func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {

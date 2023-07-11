@@ -29,6 +29,7 @@ type ApiBackend interface {
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error)
 	NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error)
 	Peers(ctx context.Context) ([]*p2p.PeerInfo, error)
+	PendingBlock(ctx context.Context) (*types.Block, error)
 }
 
 type EngineBackend interface {
@@ -37,5 +38,4 @@ type EngineBackend interface {
 	EngineGetPayload(ctx context.Context, payloadId uint64) (*engine.EngineGetPayloadResponse, error)
 	EngineGetPayloadBodiesByHashV1(ctx context.Context, request *engine.EngineGetPayloadBodiesByHashV1Request) (*engine.EngineGetPayloadBodiesV1Response, error)
 	EngineGetPayloadBodiesByRangeV1(ctx context.Context, request *engine.EngineGetPayloadBodiesByRangeV1Request) (*engine.EngineGetPayloadBodiesV1Response, error)
-	PendingBlock(ctx context.Context) (*types.Block, error)
 }

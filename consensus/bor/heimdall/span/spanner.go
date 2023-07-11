@@ -14,6 +14,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+var devnetSigner = libcommon.HexToAddress("0x67b1d87101671b127f5f8714789c7192f7ad340e")
+
 type ChainSpanner struct {
 	validatorSet abi.ABI
 	chainConfig  *chain.Config
@@ -69,10 +71,11 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
 	// Use signer as validator in case of bor devent
 	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
+		c.logger.Info("Spanner returning pre-set validator set")
 		validators := []*valset.Validator{
 			{
 				ID:               1,
-				Address:          signer,
+				Address:          devnetSigner,
 				VotingPower:      1000,
 				ProposerPriority: 1,
 			},
@@ -95,7 +98,7 @@ func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.
 		validators := []*valset.Validator{
 			{
 				ID:               1,
-				Address:          signer,
+				Address:          devnetSigner,
 				VotingPower:      1000,
 				ProposerPriority: 1,
 			},

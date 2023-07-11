@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
@@ -13,12 +14,13 @@ import (
 )
 
 type MiningFinishCfg struct {
-	db          kv.RwDB
-	chainConfig chain.Config
-	engine      consensus.Engine
-	sealCancel  chan struct{}
-	miningState MiningState
-	blockReader services.FullBlockReader
+	db                    kv.RwDB
+	chainConfig           chain.Config
+	engine                consensus.Engine
+	sealCancel            chan struct{}
+	miningState           MiningState
+	blockReader           services.FullBlockReader
+	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 }
 
 func StageMiningFinishCfg(
@@ -28,14 +30,16 @@ func StageMiningFinishCfg(
 	miningState MiningState,
 	sealCancel chan struct{},
 	blockReader services.FullBlockReader,
+	latestBlockBuiltStore *builder.LatestBlockBuiltStore,
 ) MiningFinishCfg {
 	return MiningFinishCfg{
-		db:          db,
-		chainConfig: chainConfig,
-		engine:      engine,
-		miningState: miningState,
-		sealCancel:  sealCancel,
-		blockReader: blockReader,
+		db:                    db,
+		chainConfig:           chainConfig,
+		engine:                engine,
+		miningState:           miningState,
+		sealCancel:            sealCancel,
+		blockReader:           blockReader,
+		latestBlockBuiltStore: latestBlockBuiltStore,
 	}
 }
 
@@ -59,7 +63,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//	return nil
 	//}
 	//prev = sealHash
-
+	cfg.latestBlockBuiltStore.AddBlockBuilt(block)
 	if cfg.miningState.MiningResultPOSCh != nil {
 		cfg.miningState.MiningResultPOSCh <- blockWithReceipts
 		return nil

@@ -50,6 +50,9 @@ type ChainHeaderReader interface {
 
 	// GetTd retrieves the total difficulty from the database by hash and number.
 	GetTd(hash libcommon.Hash, number uint64) *big.Int
+
+	// Number of blocks frozen in the block snapshots
+	FrozenBlocks() uint64
 }
 
 // ChainReader defines a small collection of methods needed to access the local

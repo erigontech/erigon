@@ -387,8 +387,8 @@ func processChanges(origChanges []*Validator) (updates, removals []*Validator, e
 	var prevAddr libcommon.Address
 
 	// Scan changes by address and append valid validators to updates or removals lists.
-	for _, valUpdate := range changes {
-		if bytes.Equal(valUpdate.Address.Bytes(), prevAddr.Bytes()) {
+	for i, valUpdate := range changes {
+		if i > 0 && bytes.Equal(valUpdate.Address.Bytes(), prevAddr.Bytes()) {
 			err = fmt.Errorf("duplicate entry %v in %v", valUpdate, changes)
 			return nil, nil, err
 		}

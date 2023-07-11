@@ -1,15 +1,10 @@
 package rpcservices
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type EngineBackend struct {
@@ -40,22 +35,4 @@ func (back *EngineBackend) EngineGetPayloadBodiesByHashV1(ctx context.Context, r
 
 func (back *EngineBackend) EngineGetPayloadBodiesByRangeV1(ctx context.Context, request *engine.EngineGetPayloadBodiesByRangeV1Request) (*engine.EngineGetPayloadBodiesV1Response, error) {
 	return back.server.EngineGetPayloadBodiesByRangeV1(ctx, request)
-}
-
-func (back *EngineBackend) PendingBlock(ctx context.Context) (*types.Block, error) {
-	blockRlp, err := back.server.PendingBlock(ctx, &emptypb.Empty{})
-	if err != nil {
-		return nil, fmt.Errorf("ETHBACKENDClient.PendingBlock() error: %w", err)
-	}
-	if blockRlp == nil {
-		return nil, nil
-	}
-
-	var block types.Block
-	err = rlp.Decode(bytes.NewReader(blockRlp.BlockRlp), &block)
-	if err != nil {
-		return nil, fmt.Errorf("decoding block from %x: %w", blockRlp.BlockRlp, err)
-	}
-
-	return &block, nil
 }

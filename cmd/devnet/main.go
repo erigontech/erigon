@@ -233,23 +233,24 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 				Chain:              networkname.BorDevnetChainName,
 				Logger:             logger,
 				BasePrivateApiAddr: "localhost:10090",
-				BaseRPCAddr:        "localhost:8545",
+				BaseRPCHost:        "localhost",
+				BaseRPCPort:        8545,
 				//Snapshots:          true,
 				Nodes: []devnet.Node{
-					args.Miner{
+					args.NonBlockProducer{
+						Node: args.Node{
+							ConsoleVerbosity: "0",
+							DirVerbosity:     "5",
+							WithoutHeimdall:  true,
+						},
+					},
+					args.BlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
 							WithoutHeimdall:  true,
 						},
 						AccountSlots: 200,
-					},
-					args.NonMiner{
-						Node: args.Node{
-							ConsoleVerbosity: "0",
-							DirVerbosity:     "5",
-							WithoutHeimdall:  true,
-						},
 					},
 				},
 			}, nil
@@ -259,27 +260,28 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 				Chain:              networkname.BorDevnetChainName,
 				Logger:             logger,
 				BasePrivateApiAddr: "localhost:10090",
-				BaseRPCAddr:        "localhost:8545",
+				BaseRPCHost:        "localhost",
+				BaseRPCPort:        8545,
 				Nodes: []devnet.Node{
-					args.Miner{
+					args.NonBlockProducer{
+						Node: args.Node{
+							ConsoleVerbosity: "0",
+							DirVerbosity:     "5",
+						},
+					},
+					args.BlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
 						},
 						AccountSlots: 200,
 					},
-					args.Miner{
+					args.BlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
 						},
 						AccountSlots: 200,
-					},
-					args.NonMiner{
-						Node: args.Node{
-							ConsoleVerbosity: "0",
-							DirVerbosity:     "5",
-						},
 					},
 				},
 			}, nil
@@ -291,20 +293,21 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 			Chain:              networkname.DevChainName,
 			Logger:             logger,
 			BasePrivateApiAddr: "localhost:10090",
-			BaseRPCAddr:        "localhost:8545",
+			BaseRPCHost:        "localhost",
+			BaseRPCPort:        8545,
 			Nodes: []devnet.Node{
-				args.Miner{
+				args.NonBlockProducer{
+					Node: args.Node{
+						ConsoleVerbosity: "0",
+						DirVerbosity:     "5",
+					},
+				},
+				args.BlockProducer{
 					Node: args.Node{
 						ConsoleVerbosity: "0",
 						DirVerbosity:     "5",
 					},
 					AccountSlots: 200,
-				},
-				args.NonMiner{
-					Node: args.Node{
-						ConsoleVerbosity: "0",
-						DirVerbosity:     "5",
-					},
 				},
 			},
 		}, nil
