@@ -1454,11 +1454,10 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 
 	// cold data lookup
 	exactStep1, exactStep2, lastIndexedTxNum, foundExactShard1, foundExactShard2 := dc.d.domainLocalityIndex.lookupIdxFiles(dc.loc, filekey, 0)
-	fmt.Printf("indexed: %x -> %d, %d\n", filekey, lastIndexedTxNum/dc.d.aggregationStep, int(exactStep1/StepsInBiggestFile))
+	_ = lastIndexedTxNum
 
 	var ok bool
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		fmt.Printf("check: %s, %t\n", dc.files[i].src.decompressor.FileName(), dc.files[i].src.endTxNum <= lastIndexedTxNum)
 		if lastIndexedTxNum > 0 && dc.files[i].src.endTxNum <= lastIndexedTxNum {
 			break
 		}
@@ -1490,6 +1489,7 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 	}
 
 	if foundExactShard1 {
+		fmt.Printf("return from file: %s, %x, %d, %d\n", dc.files[exactStep1/StepsInBiggestFile].src.decompressor.FileName(), filekey, exactStep1, exactStep2)
 		return dc.statelessBtree(int(exactStep1 / StepsInBiggestFile)).Get(filekey)
 	}
 	_, _, _ = exactStep2, foundExactShard1, foundExactShard2
