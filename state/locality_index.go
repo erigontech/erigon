@@ -268,11 +268,12 @@ func (li *LocalityIndex) lookupIdxFiles(loc *ctxLocalityIdx, key []byte, fromTxN
 	}
 
 	fromFileNum := fromTxNum / li.aggregationStep / StepsInBiggestFile
-	fmt.Printf("fromFileNum: %d, %d\n", loc.reader.Lookup(key), fromFileNum)
+	fmt.Printf("fromFileNum: %x, %d, %d\n", key, loc.reader.Lookup(key), fromFileNum)
 	fn1, fn2, ok1, ok2, err := loc.bm.First2At(loc.reader.Lookup(key), fromFileNum)
 	if err != nil {
 		panic(err)
 	}
+	fmt.Printf("First2At: %x, %d, %d\n", key, fn1, fn2)
 	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, loc.file.endTxNum, ok1, ok2
 }
 
@@ -342,10 +343,11 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, toStep uint64, makeIter
 		it = makeIter()
 		for it.HasNext() {
 			k, inFiles := it.Next()
+			//fmt.Printf("buld: %x, %d, %d\n", k, i, inFiles)
 			if err := dense.AddArray(i, inFiles); err != nil {
 				return nil, err
 			}
-			if err = rs.AddKey(k, 0); err != nil {
+			if err = rs.AddKey(k, i); err != nil {
 				return nil, err
 			}
 			i++

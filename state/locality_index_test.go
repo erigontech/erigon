@@ -120,8 +120,9 @@ func TestLocality(t *testing.T) {
 func TestLocalityDomain(t *testing.T) {
 	logger := log.New()
 	ctx, require := context.Background(), require.New(t)
-	frozenFiles := 2
-	keyCount, txCount := uint64(6), uint64(3*frozenFiles*StepsInBiggestFile+2*16)
+	frozenFiles := 3
+	txsInFrozenFile := 2 * StepsInBiggestFile
+	keyCount, txCount := uint64(6), uint64(frozenFiles*txsInFrozenFile+2*16)
 	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 2, logger)
 	collateAndMerge(t, db, nil, dom, txCount)
 
@@ -225,10 +226,24 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("domain.getLatestFromFiles", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		k := hexutility.EncodeTs(1)
-		v, ok, err := dc.getLatestFromFiles(k)
+		v, ok, err := dc.getLatestFromFiles(hexutility.EncodeTs(0))
 		require.NoError(err)
 		require.True(ok)
-		require.Equal(uint64(295), binary.BigEndian.Uint64(v))
+		require.Equal(uint64(1*2*StepsInBiggestFile-1), binary.BigEndian.Uint64(v))
+
+		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(1))
+		require.NoError(err)
+		require.True(ok)
+		require.Equal(uint64(220), binary.BigEndian.Uint64(v))
+
+		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(2))
+		require.NoError(err)
+		require.True(ok)
+		require.Equal(uint64(221), binary.BigEndian.Uint64(v))
+
+		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(5))
+		require.NoError(err)
+		require.True(ok)
+		require.Equal(uint64(221), binary.BigEndian.Uint64(v))
 	})
 }
