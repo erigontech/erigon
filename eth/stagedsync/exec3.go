@@ -751,11 +751,11 @@ Loop:
 
 					// prune befor flush, to speedup flush
 					tt := time.Now()
-					//if applyTx.(*temporal.Tx).AggCtx().CanPrune(applyTx) {
-					if err = agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit
-						return err
+					if applyTx.(*temporal.Tx).AggCtx().CanPrune(applyTx) {
+						if err = agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit
+							return err
+						}
 					}
-					//}
 					t2 = time.Since(tt)
 
 					tt = time.Now()
