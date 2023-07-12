@@ -60,8 +60,7 @@ grpc: protoc-all
 		p2psentry/sentry.proto p2psentinel/sentinel.proto \
 		remote/kv.proto remote/ethbackend.proto \
 		downloader/downloader.proto execution/execution.proto \
-		txpool/txpool.proto txpool/mining.proto \
-		engine/engine.proto
+		txpool/txpool.proto txpool/mining.proto
 	rm -rf vendor
 
 $(GOBINREL)/moq: | $(GOBINREL)
