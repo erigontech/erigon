@@ -273,8 +273,26 @@ func (li *LocalityIndex) lookupIdxFiles(loc *ctxLocalityIdx, key []byte, fromTxN
 	if err != nil {
 		panic(err)
 	}
-	//fmt.Printf("First2At: %x, %d, %d\n", key, fn1, fn2)
+	fmt.Printf("First2At: %x, %d, %d\n", key, fn1, fn2)
+	last, _, _ := loc.bm.LastAt(loc.reader.Lookup(key))
+	fmt.Printf("At: %x, %d\n", key, last)
 	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, loc.file.endTxNum, ok1, ok2
+}
+
+// lookupLatest return latest file (step)
+// prevents searching key in many files
+func (li *LocalityIndex) lookupLatest(loc *ctxLocalityIdx, key []byte) (latestShard, lastIndexedTxNum uint64, ok bool) {
+	if li == nil || loc == nil || loc.bm == nil {
+		return 0, 0, false
+	}
+	if loc.reader == nil {
+		loc.reader = recsplit.NewIndexReader(loc.file.src.index)
+	}
+	fn1, ok1, err := loc.bm.LastAt(loc.reader.Lookup(key))
+	if err != nil {
+		panic(err)
+	}
+	return fn1 * StepsInBiggestFile, loc.file.endTxNum, ok1
 }
 
 func (li *LocalityIndex) exists(step uint64) bool {

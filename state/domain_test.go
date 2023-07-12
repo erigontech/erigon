@@ -676,7 +676,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	var v [8]byte
 	maxFrozenFiles := (txCount / d.aggregationStep) / StepsInBiggestFile
 	// key 0: only in frozen file 0
-	// key 1: only in frozen file 1
+	// key 1: only in frozen file 1 and file 2
 	// key 2: in frozen file 2 and in warm files
 	// other keys: only in warm files
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
@@ -685,7 +685,10 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 		frozenFileNum := step / 32
 		for keyNum := uint64(0); keyNum < keysCount; keyNum++ {
 			if frozenFileNum < maxFrozenFiles { // frozen data
-				if keyNum != frozenFileNum {
+				allowInsert := (keyNum == 0 && frozenFileNum == 0) ||
+					(keyNum == 1 && (frozenFileNum == 1 || frozenFileNum == 2)) ||
+					(keyNum == 2 && frozenFileNum == 2)
+				if !allowInsert {
 					continue
 				}
 				//fmt.Printf("put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)

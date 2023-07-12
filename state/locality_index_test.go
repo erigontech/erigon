@@ -150,7 +150,7 @@ func TestLocalityDomain(t *testing.T) {
 		require.True(it.HasNext())
 		key, bitmap = it.Next()
 		require.Equal(uint64(1), binary.BigEndian.Uint64(key))
-		require.Equal([]uint64{1}, bitmap)
+		require.Equal([]uint64{1, 2}, bitmap)
 
 		var last []byte
 		for it.HasNext() {
@@ -161,7 +161,7 @@ func TestLocalityDomain(t *testing.T) {
 		require.Equal(frozenFiles-1, int(binary.BigEndian.Uint64(last)))
 	})
 
-	t.Run("locality index: getBeforeTxNum full bitamp", func(t *testing.T) {
+	t.Run("locality index: bitmap all data check", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
 		res, err := dc.loc.bm.At(0)
@@ -169,7 +169,7 @@ func TestLocalityDomain(t *testing.T) {
 		require.Equal([]uint64{0}, res)
 		res, err = dc.loc.bm.At(1)
 		require.NoError(err)
-		require.Equal([]uint64{1}, res)
+		require.Equal([]uint64{1, 2}, res)
 		res, err = dc.loc.bm.At(keyCount) //too big, must error
 		require.Error(err)
 		require.Empty(res)
@@ -181,9 +181,16 @@ func TestLocalityDomain(t *testing.T) {
 		fst, snd, ok1, ok2, err := dc.loc.bm.First2At(1, 1)
 		require.NoError(err)
 		require.True(ok1)
+		require.True(ok2)
+		require.Equal(1, int(fst))
+		require.Equal(2, int(snd))
+
+		fst, snd, ok1, ok2, err = dc.loc.bm.First2At(1, 2)
+		require.NoError(err)
+		require.True(ok1)
 		require.False(ok2)
-		require.Equal(uint64(1), fst)
-		require.Zero(snd)
+		require.Equal(2, int(fst))
+		require.Equal(0, int(snd))
 
 		fst, snd, ok1, ok2, err = dc.loc.bm.First2At(2, 1)
 		require.NoError(err)
@@ -197,7 +204,7 @@ func TestLocalityDomain(t *testing.T) {
 		require.False(ok1)
 		require.False(ok2)
 	})
-	t.Run("locality index: search from given position in future", func(t *testing.T) {
+	t.Run("locality index: bitmap operations", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
 		_, _, ok1, ok2, err := dc.loc.bm.First2At(0, 2)
@@ -209,16 +216,35 @@ func TestLocalityDomain(t *testing.T) {
 		require.NoError(err)
 		require.False(ok1)
 		require.False(ok2)
+
+		v1, ok1, err := dc.loc.bm.LastAt(0)
+		require.NoError(err)
+		require.True(ok1)
+		require.Equal(0, int(v1))
+
+		v1, ok1, err = dc.loc.bm.LastAt(1)
+		require.NoError(err)
+		require.True(ok1)
+		require.Equal(2, int(v1))
+
+		_, ok1, err = dc.loc.bm.LastAt(3)
+		require.NoError(err)
+		require.False(ok1)
 	})
 	t.Run("locality index: lookup", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		k := hexutility.EncodeTs(1)
-		v1, v2, from, ok1, ok2 := dc.d.domainLocalityIndex.lookupIdxFiles(dc.loc, k, 1*dc.d.aggregationStep*StepsInBiggestFile)
+		v1, v2, from, ok1, ok2 := dc.d.domainLocalityIndex.lookupIdxFiles(dc.loc, hexutility.EncodeTs(0), 0)
 		require.True(ok1)
 		require.False(ok2)
+		require.Equal(uint64(0*StepsInBiggestFile), v1)
+		require.Equal(txsInFrozenFile*frozenFiles, int(from))
+
+		v1, v2, from, ok1, ok2 = dc.d.domainLocalityIndex.lookupIdxFiles(dc.loc, hexutility.EncodeTs(1), 0)
+		require.True(ok1)
+		require.True(ok2)
 		require.Equal(uint64(1*StepsInBiggestFile), v1)
-		require.Equal(uint64(0*StepsInBiggestFile), v2)
+		require.Equal(uint64(2*StepsInBiggestFile), v2)
 		require.Equal(txsInFrozenFile*frozenFiles, int(from))
 	})
 	t.Run("domain.getLatestFromFiles", func(t *testing.T) {
@@ -232,7 +258,7 @@ func TestLocalityDomain(t *testing.T) {
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(1))
 		require.NoError(err)
 		require.True(ok)
-		require.Equal(2*txsInFrozenFile-1, int(binary.BigEndian.Uint64(v)))
+		require.Equal(3*txsInFrozenFile-1, int(binary.BigEndian.Uint64(v)))
 
 		fmt.Printf("- go 2\n")
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(2))
