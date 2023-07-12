@@ -858,6 +858,9 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		if err != nil {
 			return Collation{}, err
 		}
+		if bytes.Equal(k, common.FromHex("c4f43c78a8a52fb34b485c2e926f90628b019281")) {
+			fmt.Printf("collate: %x, %d, %d\n", k, ^binary.BigEndian.Uint64(stepInDB), step)
+		}
 		pos++
 		if ^binary.BigEndian.Uint64(stepInDB) != step {
 			continue
@@ -1449,7 +1452,42 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 	}
 	return v, found, nil
 }
+
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
+	dc.d.stats.FilesQueries.Add(1)
+
+	var ok bool
+	for i := len(dc.files) - 1; i >= 0; i-- {
+		v, ok, err = dc.statelessBtree(i).Get(filekey)
+		if err != nil {
+			return nil, false, err
+		}
+		if !ok {
+			continue
+		}
+		found = true
+
+		if COMPARE_INDEXES {
+			rd := recsplit.NewIndexReader(dc.files[i].src.index)
+			oft := rd.Lookup(filekey)
+			gt := dc.statelessGetter(i)
+			gt.Reset(oft)
+			var kk, vv []byte
+			if gt.HasNext() {
+				kk, _ = gt.Next(nil)
+				vv, _ = gt.Next(nil)
+			}
+			fmt.Printf("key: %x, val: %x\n", kk, vv)
+			if !bytes.Equal(vv, v) {
+				panic("not equal")
+			}
+		}
+		break
+	}
+	return v, found, nil
+}
+
+func (dc *DomainContext) getLatestFromFiles2(filekey []byte) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 
 	// cold data lookup
@@ -1646,6 +1684,9 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 	foundInvStep, err := roTx.GetOne(dc.d.keysTable, key) // reads first DupSort value
 	if err != nil {
 		return nil, false, err
+	}
+	if bytes.Equal(key, common.FromHex("c4f43c78a8a52fb34b485c2e926f90628b019281")) {
+		fmt.Printf("getLatest: %x, %t\n", key, foundInvStep != nil)
 	}
 	if foundInvStep == nil {
 		v, found, err := dc.getLatestFromFiles(key)

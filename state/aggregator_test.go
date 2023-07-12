@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -224,9 +225,9 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 	// Start another aggregator on same datadir
 	anotherAgg, err := NewAggregatorV3(context.Background(), filepath.Join(path, "e4"), filepath.Join(path, "e4", "tmp2"), aggStep, db, logger)
 	require.NoError(t, err)
-	require.NoError(t, anotherAgg.OpenFolder())
-
 	defer anotherAgg.Close()
+
+	require.NoError(t, anotherAgg.OpenFolder())
 
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -303,6 +304,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.EqualValues(t, length.Hash, n)
 
 		buf := EncodeAccountBytes(txNum, uint256.NewInt(1000000000000), nil, 0)
+		if bytes.Equal(addr[:length.Addr], common.FromHex("c4f43c78a8a52fb34b485c2e926f90628b019281")) {
+			fmt.Printf("put: %x, %x, %d\n", addr, buf[:], txNum)
+		}
 		err = domains.UpdateAccountData(addr, buf[:], nil)
 		require.NoError(t, err)
 
@@ -331,10 +335,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, os.RemoveAll(filepath.Join(path, "db4")))
 
 	// open new db and aggregator instances
-	newDb, err := mdbx.NewMDBX(logger).InMem(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	newDb := mdbx.NewMDBX(logger).InMem(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
-	}).Open()
-	require.NoError(t, err)
+	}).MustOpen()
 	t.Cleanup(newDb.Close)
 
 	newTx, err := newDb.BeginRw(context.Background())
@@ -366,12 +369,15 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.NoError(t, err)
 		if len(stored) == 0 {
 			miss++
-			fmt.Printf("%x [%d/%d]", key, miss, i+1) // txnum starts from 1
+			//fmt.Printf("%x [%d/%d]", key, miss, i+1) // txnum starts from 1
 			continue
 		}
-
 		nonce, _, _ := DecodeAccountBytes(stored)
-		require.EqualValues(t, i+1, nonce)
+
+		if bytes.Equal(key[:length.Addr], common.FromHex("c4f43c78a8a52fb34b485c2e926f90628b019281")) {
+			fmt.Printf("get: %x, %x, %d\n", key[:length.Addr], stored, nonce)
+		}
+		require.EqualValues(t, i+1, int(nonce))
 
 		storedV, _, err := ac.GetLatest(kv.StorageDomain, key[:length.Addr], key[length.Addr:], newTx)
 		require.NoError(t, err)
