@@ -1434,45 +1434,11 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 	return v, found, nil
 }
 
-func (dc *DomainContext) getLatestFromFiles2(filekey []byte) (v []byte, found bool, err error) {
-	dc.d.stats.FilesQueries.Add(1)
-
-	var k []byte
-	for i := len(dc.files) - 1; i >= 0; i-- {
-		k, v, err = dc.statelessBtree(i).Get(filekey)
-		if err != nil {
-			return nil, false, err
-		}
-		if k == nil {
-			continue
-		}
-		found = true
-
-		if COMPARE_INDEXES {
-			rd := recsplit.NewIndexReader(dc.files[i].src.index)
-			oft := rd.Lookup(filekey)
-			gt := dc.statelessGetter(i)
-			gt.Reset(oft)
-			var kk, vv []byte
-			if gt.HasNext() {
-				kk, _ = gt.Next(nil)
-				vv, _ = gt.Next(nil)
-			}
-			fmt.Printf("key: %x, val: %x\n", kk, vv)
-			if !bytes.Equal(vv, v) {
-				panic("not equal")
-			}
-		}
-		break
-	}
-	return v, found, nil
-}
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 
 	// find what has LocalityIndex
 	lastIndexedTxNum := dc.hc.ic.loc.indexedTo()
-
 	// grind non-indexed files
 	var k []byte
 	for i := len(dc.files) - 1; i >= 0; i-- {
@@ -1507,20 +1473,19 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 		return v, found, nil
 	}
 
-	// if still not found, then use index
-	exactStep1, lastIndexedTxNum, foundExactShard1 := dc.hc.ic.loc.lookupLatest(filekey)
-	if foundExactShard1 {
-		k, v, err = dc.statelessBtree(int(exactStep1 / StepsInBiggestFile)).Get(filekey)
-		if err != nil {
-			return nil, false, err
-		}
-		if k == nil {
-			return nil, false, err
-		}
-		return v, true, nil
+	// still not found, search in indexed cold shards
+	exactColdShard, ok := dc.hc.ic.loc.lookupLatest(filekey)
+	if !ok {
+		return nil, false, nil
 	}
-	_ = foundExactShard1
-	return v, found, nil
+	k, v, err = dc.statelessBtree(int(exactColdShard / StepsInBiggestFile)).Get(filekey)
+	if err != nil {
+		return nil, false, err
+	}
+	if k == nil {
+		return nil, false, err
+	}
+	return v, true, nil
 }
 
 // historyBeforeTxNum searches history for a value of specified key before txNum

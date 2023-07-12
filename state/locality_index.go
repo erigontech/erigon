@@ -286,9 +286,9 @@ func (lc *ctxLocalityIdx) indexedTo() uint64 {
 
 // lookupLatest return latest file (step)
 // prevents searching key in many files
-func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard, lastIndexedTxNum uint64, ok bool) {
+func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool) {
 	if lc == nil || lc.bm == nil {
-		return 0, 0, false
+		return 0, false
 	}
 	if lc.reader == nil {
 		lc.reader = recsplit.NewIndexReader(lc.file.src.index)
@@ -297,7 +297,7 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard, lastIndexedTxNu
 	if err != nil {
 		panic(err)
 	}
-	return fn1 * StepsInBiggestFile, lc.file.endTxNum, ok1
+	return fn1 * StepsInBiggestFile, ok1
 }
 
 func (li *LocalityIndex) exists(step uint64) bool {
