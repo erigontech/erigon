@@ -125,12 +125,27 @@ func (bm *FixedSizeBitmaps) LastAt(item uint64) (last uint64, ok bool, err error
 	if item > bm.amount {
 		return 0, false, fmt.Errorf("too big item number: %d > %d", item, bm.amount)
 	}
-	res, err := bm.At(item)
-	if err != nil {
-		return 0, false, err
+
+	n := bm.bitsPerBitmap * int(item)
+	blkFrom, bitFrom := n/64, n%64
+	blkTo := (n+bm.bitsPerBitmap)/64 + 1
+	bitTo := 64
+
+	var j uint64
+	for i := blkFrom; i < blkTo; i++ { // TODO: optimize me. it's copy-paste of method `At`
+		if i == blkTo-1 {
+			bitTo = (n + bm.bitsPerBitmap) % 64
+		}
+		for bit := bitFrom; bit < bitTo; bit++ {
+			if bm.data[i]&(1<<bit) != 0 {
+				last = j
+			}
+			j++
+		}
+		bitFrom = 0
 	}
-	if len(res) > 0 {
-		return res[len(res)-1], true, nil
+	if j > 0 {
+		return last, true, nil
 	}
 	return 0, false, nil
 }
