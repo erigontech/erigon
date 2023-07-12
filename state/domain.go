@@ -1476,7 +1476,7 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 	// grind non-indexed files
 	var k []byte
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		if lastIndexedTxNum > 0 && dc.files[i].src.endTxNum <= lastIndexedTxNum {
+		if dc.files[i].src.endTxNum <= lastIndexedTxNum {
 			break
 		}
 
