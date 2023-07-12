@@ -398,7 +398,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 		if stop := func() bool {
 			hc := h.MakeContext()
 			defer hc.Close()
-			r = h.findMergeRange(maxEndTxNum, maxSpan)
+			r = hc.findMergeRange(maxEndTxNum, maxSpan)
 			if !r.any() {
 				return true
 			}

@@ -628,7 +628,7 @@ Loop:
 }
 
 func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {
-	ac := a.MakeContext() // this need, to ensure we do all operations on files in "transaction-style", maybe we will ensure it on type-level in future
+	ac := a.MakeContext()
 	defer ac.Close()
 
 	closeAll := true
@@ -1078,14 +1078,14 @@ func (r RangesV3) any() bool {
 
 func (ac *AggregatorV3Context) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	var r RangesV3
-	r.accounts = ac.a.accounts.findMergeRange(maxEndTxNum, maxSpan)
-	r.storage = ac.a.storage.findMergeRange(maxEndTxNum, maxSpan)
-	r.code = ac.a.code.findMergeRange(maxEndTxNum, maxSpan)
-	r.commitment = ac.a.commitment.findMergeRange(maxEndTxNum, maxSpan)
-	r.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum = ac.a.logAddrs.findMergeRange(maxEndTxNum, maxSpan)
-	r.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum = ac.a.logTopics.findMergeRange(maxEndTxNum, maxSpan)
-	r.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum = ac.a.tracesFrom.findMergeRange(maxEndTxNum, maxSpan)
-	r.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum = ac.a.tracesTo.findMergeRange(maxEndTxNum, maxSpan)
+	r.accounts = ac.accounts.findMergeRange(maxEndTxNum, maxSpan)
+	r.storage = ac.storage.findMergeRange(maxEndTxNum, maxSpan)
+	r.code = ac.code.findMergeRange(maxEndTxNum, maxSpan)
+	r.commitment = ac.commitment.findMergeRange(maxEndTxNum, maxSpan)
+	r.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum = ac.logAddrs.findMergeRange(maxEndTxNum, maxSpan)
+	r.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum = ac.logTopics.findMergeRange(maxEndTxNum, maxSpan)
+	r.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum = ac.tracesFrom.findMergeRange(maxEndTxNum, maxSpan)
+	r.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum = ac.tracesTo.findMergeRange(maxEndTxNum, maxSpan)
 	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/ac.a.aggregationStep, maxSpan/ac.a.aggregationStep, r))
 	return r
 }
@@ -1582,6 +1582,11 @@ func (a *AggregatorV3) Stats() FilesStats22 {
 	return fs
 }
 
+// AggregatorV3Context guarantee consistent View of files:
+//   - long-living consistent view of all files (no limitations)
+//   - hiding garbage and files overlaps
+//   - protecting useful files from removal
+//   - other will not see "partial writes" or "new files appearance"
 type AggregatorV3Context struct {
 	a          *AggregatorV3
 	accounts   *DomainContext

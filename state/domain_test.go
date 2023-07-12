@@ -539,7 +539,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		if stop := func() bool {
 			dc := d.MakeContext()
 			defer dc.Close()
-			r = d.findMergeRange(maxEndTxNum, maxSpan)
+			r = dc.findMergeRange(maxEndTxNum, maxSpan)
 			if !r.any() {
 				return true
 			}
@@ -575,11 +575,14 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	err = d.prune(ctx, step, txFrom, txTo, math.MaxUint64, logEvery)
 	require.NoError(t, err)
 
-	var r DomainRanges
 	maxEndTxNum := d.endTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInBiggestFile
-	for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
+	for {
 		dc := d.MakeContext()
+		r := dc.findMergeRange(maxEndTxNum, maxSpan)
+		if r.any() {
+			break
+		}
 		valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
 		valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1, background.NewProgressSet())
 		require.NoError(t, err)
@@ -1127,7 +1130,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	ctx := context.Background()
 	ps := background.NewProgressSet()
 	for step := uint64(0); step < uint64(len(vals))/d.aggregationStep; step++ {
-		dctx := d.MakeContext()
+		dc := d.MakeContext()
 
 		txFrom := step * d.aggregationStep
 		txTo := (step + 1) * d.aggregationStep
@@ -1148,8 +1151,8 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		err = d.prune(ctx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		require.NoError(t, err)
 
-		ranges := d.findMergeRange(txFrom, txTo)
-		vl, il, hl, _ := dctx.staticFilesInRange(ranges)
+		ranges := dc.findMergeRange(txFrom, txTo)
+		vl, il, hl, _ := dc.staticFilesInRange(ranges)
 
 		dv, di, dh, err := d.mergeFiles(ctx, vl, il, hl, ranges, 1, ps)
 		require.NoError(t, err)
@@ -1158,7 +1161,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 		logEvery.Stop()
 
-		dctx.Close()
+		dc.Close()
 	}
 
 	mc = d.MakeContext()
