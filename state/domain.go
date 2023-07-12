@@ -1419,6 +1419,9 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 			//return nil, false, nil //TODO: uncomment me
 			return nil, false, err
 		}
+		if cur == nil {
+			continue
+		}
 
 		if bytes.Equal(cur.Key(), filekey) {
 			val = cur.Value()
@@ -1830,6 +1833,9 @@ func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
 		btCursor, err := bg.Seek(hi.from)
 		if err != nil {
 			return err
+		}
+		if btCursor == nil {
+			continue
 		}
 
 		key := btCursor.Key()
