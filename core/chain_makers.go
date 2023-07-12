@@ -402,8 +402,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	for i := 0; i < n; i++ {
 		setBlockNum(uint64(i))
 		ibs := state.New(stateReader)
-		fmt.Println("generating block", i)
-		GenerateTrace = true
 		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)
@@ -531,7 +529,6 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRo
 			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
 		}
 		newK, err := hashKeyAndAddIncarnation(k, h)
-		fmt.Println("HK", k, newK)
 		if err != nil {
 			return hashRoot, fmt.Errorf("insert hashed key: %w", err)
 		}
