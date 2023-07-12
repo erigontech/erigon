@@ -131,6 +131,15 @@ func (bm *FixedSizeBitmaps) LastAt(item uint64) (last uint64, ok bool, err error
 	blkTo := (n+bm.bitsPerBitmap)/64 + 1
 	bitTo := 64
 
+	res, err := bm.At(item) //TODO: optimize me, same as First2At
+	if err != nil {
+		return 0, false, err
+	}
+	if len(res) > 0 {
+		return res[len(res)-1], true, nil
+	}
+	return 0, false, nil
+
 	var j uint64
 	for i := blkFrom; i < blkTo; i++ { // TODO: optimize me. it's copy-paste of method `At`
 		if i == blkTo-1 {
