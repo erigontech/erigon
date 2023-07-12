@@ -1438,7 +1438,7 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 	dc.d.stats.FilesQueries.Add(1)
 
 	// find what has LocalityIndex
-	lastIndexedTxNum := dc.hc.ic.loc.indexedTo()
+	lastIndexedTxNum := dc.hc.ic.coldLocality.indexedTo()
 	// grind non-indexed files
 	var k []byte
 	for i := len(dc.files) - 1; i >= 0; i-- {
@@ -1479,11 +1479,11 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 
 func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found bool, err error) {
 	var k []byte
-	exactColdShard, ok := dc.hc.ic.loc.lookupLatest(filekey)
+	exactColdShard, ok := dc.hc.ic.coldLocality.lookupLatest(filekey)
 	if !ok {
 		return nil, false, nil
 	}
-	k, v, err = dc.statelessBtree(int(exactColdShard / StepsInBiggestFile)).Get(filekey)
+	k, v, err = dc.statelessBtree(int(exactColdShard)).Get(filekey)
 	if err != nil {
 		return nil, false, err
 	}

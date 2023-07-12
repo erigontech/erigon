@@ -38,7 +38,7 @@ func TestLocality(t *testing.T) {
 	{ //prepare
 		ii.withLocalityIndex = true
 		var err error
-		ii.localityIndex, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
+		ii.coldLocalityIdx, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
 		require.NoError(err)
 
 		ic := ii.MakeContext()
@@ -72,13 +72,13 @@ func TestLocality(t *testing.T) {
 		ic := ii.MakeContext()
 		defer ic.Close()
 
-		res, err := ic.loc.bm.At(0)
+		res, err := ic.coldLocality.bm.At(0)
 		require.NoError(err)
 		require.Equal([]uint64{0, 1}, res)
-		res, err = ic.loc.bm.At(1)
+		res, err = ic.coldLocality.bm.At(1)
 		require.NoError(err)
 		require.Equal([]uint64{0, 1}, res)
-		res, err = ic.loc.bm.At(32) //too big, must error
+		res, err = ic.coldLocality.bm.At(32) //too big, must error
 		require.Error(err)
 		require.Empty(res)
 	})
@@ -86,7 +86,7 @@ func TestLocality(t *testing.T) {
 	t.Run("locality index: search from given position", func(t *testing.T) {
 		ic := ii.MakeContext()
 		defer ic.Close()
-		fst, snd, ok1, ok2, err := ic.loc.bm.First2At(0, 1)
+		fst, snd, ok1, ok2, err := ic.coldLocality.bm.First2At(0, 1)
 		require.NoError(err)
 		require.True(ok1)
 		require.False(ok2)
@@ -96,7 +96,7 @@ func TestLocality(t *testing.T) {
 	t.Run("locality index: search from given position in future", func(t *testing.T) {
 		ic := ii.MakeContext()
 		defer ic.Close()
-		fst, snd, ok1, ok2, err := ic.loc.bm.First2At(0, 2)
+		fst, snd, ok1, ok2, err := ic.coldLocality.bm.First2At(0, 2)
 		require.NoError(err)
 		require.False(ok1)
 		require.False(ok2)
@@ -107,7 +107,7 @@ func TestLocality(t *testing.T) {
 		ic := ii.MakeContext()
 		defer ic.Close()
 		k := hexutility.EncodeTs(1)
-		v1, v2, from, ok1, ok2 := ic.loc.lookupIdxFiles(k, 1*ic.ii.aggregationStep*StepsInBiggestFile)
+		v1, v2, from, ok1, ok2 := ic.coldLocality.lookupIdxFiles(k, 1*ic.ii.aggregationStep*StepsInBiggestFile)
 		require.True(ok1)
 		require.False(ok2)
 		require.Equal(uint64(1*StepsInBiggestFile), v1)
@@ -129,7 +129,7 @@ func TestLocalityDomain(t *testing.T) {
 	{ //prepare
 		dom.withLocalityIndex = true
 		var err error
-		dom.localityIndex, err = NewLocalityIndex(dom.dir, dom.tmpdir, dom.aggregationStep, dom.filenameBase, dom.logger)
+		dom.coldLocalityIdx, err = NewLocalityIndex(dom.dir, dom.tmpdir, dom.aggregationStep, dom.filenameBase, dom.logger)
 		require.NoError(err)
 
 		dc := dom.MakeContext()
@@ -164,13 +164,13 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("locality index: bitmap all data check", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		res, err := dc.hc.ic.loc.bm.At(0)
+		res, err := dc.hc.ic.coldLocality.bm.At(0)
 		require.NoError(err)
 		require.Equal([]uint64{0}, res)
-		res, err = dc.hc.ic.loc.bm.At(1)
+		res, err = dc.hc.ic.coldLocality.bm.At(1)
 		require.NoError(err)
 		require.Equal([]uint64{1, 2}, res)
-		res, err = dc.hc.ic.loc.bm.At(keyCount) //too big, must error
+		res, err = dc.hc.ic.coldLocality.bm.At(keyCount) //too big, must error
 		require.Error(err)
 		require.Empty(res)
 	})
@@ -178,28 +178,28 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("locality index: search from given position", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		fst, snd, ok1, ok2, err := dc.hc.ic.loc.bm.First2At(1, 1)
+		fst, snd, ok1, ok2, err := dc.hc.ic.coldLocality.bm.First2At(1, 1)
 		require.NoError(err)
 		require.True(ok1)
 		require.True(ok2)
 		require.Equal(1, int(fst))
 		require.Equal(2, int(snd))
 
-		fst, snd, ok1, ok2, err = dc.hc.ic.loc.bm.First2At(1, 2)
+		fst, snd, ok1, ok2, err = dc.hc.ic.coldLocality.bm.First2At(1, 2)
 		require.NoError(err)
 		require.True(ok1)
 		require.False(ok2)
 		require.Equal(2, int(fst))
 		require.Equal(0, int(snd))
 
-		fst, snd, ok1, ok2, err = dc.hc.ic.loc.bm.First2At(2, 1)
+		fst, snd, ok1, ok2, err = dc.hc.ic.coldLocality.bm.First2At(2, 1)
 		require.NoError(err)
 		require.True(ok1)
 		require.False(ok2)
 		require.Equal(uint64(2), fst)
 		require.Zero(snd)
 
-		fst, snd, ok1, ok2, err = dc.hc.ic.loc.bm.First2At(0, 1)
+		fst, snd, ok1, ok2, err = dc.hc.ic.coldLocality.bm.First2At(0, 1)
 		require.NoError(err)
 		require.False(ok1)
 		require.False(ok2)
@@ -207,27 +207,27 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("locality index: bitmap operations", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		_, _, ok1, ok2, err := dc.hc.ic.loc.bm.First2At(0, 2)
+		_, _, ok1, ok2, err := dc.hc.ic.coldLocality.bm.First2At(0, 2)
 		require.NoError(err)
 		require.False(ok1)
 		require.False(ok2)
 
-		_, _, ok1, ok2, err = dc.hc.ic.loc.bm.First2At(2, 3)
+		_, _, ok1, ok2, err = dc.hc.ic.coldLocality.bm.First2At(2, 3)
 		require.NoError(err)
 		require.False(ok1)
 		require.False(ok2)
 
-		v1, ok1, err := dc.hc.ic.loc.bm.LastAt(0)
+		v1, ok1, err := dc.hc.ic.coldLocality.bm.LastAt(0)
 		require.NoError(err)
 		require.True(ok1)
 		require.Equal(0, int(v1))
 
-		v1, ok1, err = dc.hc.ic.loc.bm.LastAt(1)
+		v1, ok1, err = dc.hc.ic.coldLocality.bm.LastAt(1)
 		require.NoError(err)
 		require.True(ok1)
 		require.Equal(2, int(v1))
 
-		_, ok1, err = dc.hc.ic.loc.bm.LastAt(3)
+		_, ok1, err = dc.hc.ic.coldLocality.bm.LastAt(3)
 		require.NoError(err)
 		require.False(ok1)
 	})
@@ -235,16 +235,16 @@ func TestLocalityDomain(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
 		fmt.Printf("--start\n")
-		to := dc.hc.ic.loc.indexedTo()
+		to := dc.hc.ic.coldLocality.indexedTo()
 		require.Equal(frozenFiles*txsInFrozenFile, int(to))
 
-		v1, v2, from, ok1, ok2 := dc.hc.ic.loc.lookupIdxFiles(hexutility.EncodeTs(0), 0)
+		v1, v2, from, ok1, ok2 := dc.hc.ic.coldLocality.lookupIdxFiles(hexutility.EncodeTs(0), 0)
 		require.True(ok1)
 		require.False(ok2)
 		require.Equal(uint64(0*StepsInBiggestFile), v1)
 		require.Equal(txsInFrozenFile*frozenFiles, int(from))
 
-		v1, v2, from, ok1, ok2 = dc.hc.ic.loc.lookupIdxFiles(hexutility.EncodeTs(1), 0)
+		v1, v2, from, ok1, ok2 = dc.hc.ic.coldLocality.lookupIdxFiles(hexutility.EncodeTs(1), 0)
 		require.True(ok1)
 		require.True(ok2)
 		require.Equal(uint64(1*StepsInBiggestFile), v1)

@@ -297,7 +297,7 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool)
 	if err != nil {
 		panic(err)
 	}
-	return fn1 * StepsInBiggestFile, ok1
+	return fn1, ok1
 }
 
 func (li *LocalityIndex) exists(step uint64) bool {

@@ -65,7 +65,8 @@ type InvertedIndex struct {
 
 	integrityFileExtensions []string
 	withLocalityIndex       bool
-	localityIndex           *LocalityIndex
+	warmLocalityIdx         *LocalityIndex
+	coldLocalityIdx         *LocalityIndex
 	tx                      kv.RwTx
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
@@ -106,7 +107,7 @@ func NewInvertedIndex(
 
 	if ii.withLocalityIndex {
 		var err error
-		ii.localityIndex, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
+		ii.coldLocalityIdx, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
 		if err != nil {
 			return nil, fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
 		}
@@ -130,7 +131,7 @@ func (ii *InvertedIndex) fileNamesOnDisk() ([]string, error) {
 }
 
 func (ii *InvertedIndex) OpenList(fNames []string) error {
-	if err := ii.localityIndex.OpenList(fNames); err != nil {
+	if err := ii.coldLocalityIdx.OpenList(fNames); err != nil {
 		return err
 	}
 	ii.closeWhatNotInList(fNames)
@@ -366,7 +367,7 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 }
 
 func (ii *InvertedIndex) Close() {
-	ii.localityIndex.Close()
+	ii.coldLocalityIdx.Close()
 	ii.closeWhatNotInList([]string{})
 	ii.reCalcRoFiles()
 }
@@ -524,7 +525,8 @@ func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 	var ic = InvertedIndexContext{
 		ii:    ii,
 		files: *ii.roFiles.Load(),
-		loc:   ii.localityIndex.MakeContext(),
+		//warmLocality: ii.warmLocalityIdx.MakeContext(),
+		coldLocality: ii.coldLocalityIdx.MakeContext(),
 	}
 	for _, item := range ic.files {
 		if !item.src.frozen {
@@ -549,7 +551,7 @@ func (ic *InvertedIndexContext) Close() {
 		r.Close()
 	}
 
-	ic.loc.Close()
+	ic.coldLocality.Close()
 }
 
 type InvertedIndexContext struct {
@@ -557,7 +559,9 @@ type InvertedIndexContext struct {
 	files   []ctxItem // have no garbage (overlaps, etc...)
 	getters []*compress.Getter
 	readers []*recsplit.IndexReader
-	loc     *ctxLocalityIdx
+
+	warmLocality *ctxLocalityIdx
+	coldLocality *ctxLocalityIdx
 }
 
 func (ic *InvertedIndexContext) statelessGetter(i int) *compress.Getter {

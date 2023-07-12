@@ -315,15 +315,15 @@ func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err er
 }
 
 func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	if !ic.ii.withLocalityIndex || ic.ii.localityIndex == nil {
+	if !ic.ii.withLocalityIndex || ic.ii.coldLocalityIdx == nil {
 		return
 	}
 	to := ic.maxFrozenStep()
-	if to == 0 || ic.ii.localityIndex.exists(to) {
+	if to == 0 || ic.ii.coldLocalityIdx.exists(to) {
 		return nil
 	}
 	defer ic.ii.EnableMadvNormalReadAhead().DisableReadAhead()
-	return ic.ii.localityIndex.BuildMissedIndices(ctx, to, func() *LocalityIterator { return ic.iterateKeysLocality(to * ic.ii.aggregationStep) })
+	return ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, to, func() *LocalityIterator { return ic.iterateKeysLocality(to * ic.ii.aggregationStep) })
 }
 
 func (dc *DomainContext) maxFrozenStep() uint64 {
