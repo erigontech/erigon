@@ -12,14 +12,14 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/common/background"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -483,11 +483,19 @@ func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) 
 
 // find position of key with node.di <= d at level lvl
 func (a *btAlloc) seekLeast(lvl, d uint64) uint64 {
+	x := uint64(sort.Search(len(a.nodes[lvl]), func(i int) bool {
+		return a.nodes[lvl][i].d >= d
+	}))
+	//fmt.Printf("a: %d, %d -> %d\n", lvl, d, x)
+	return x
+
 	for i := range a.nodes[lvl] {
 		if a.nodes[lvl][i].d >= d {
+			fmt.Printf("a: %d, %d -> %d\n", lvl, d, i)
 			return uint64(i)
 		}
 	}
+	fmt.Printf("a: %d, %d -> %d\n", lvl, d, uint64(len(a.nodes[lvl])))
 	return uint64(len(a.nodes[lvl]))
 }
 
