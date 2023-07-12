@@ -206,8 +206,9 @@ func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
 		return nil
 	}
 	x := &ctxLocalityIdx{
-		file: li.roFiles.Load(),
-		bm:   li.roBmFile.Load(),
+		file:            li.roFiles.Load(),
+		bm:              li.roBmFile.Load(),
+		aggregationStep: li.aggregationStep,
 	}
 	if x.file != nil && x.file.src != nil {
 		x.file.src.refcount.Add(1)
@@ -215,13 +216,13 @@ func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
 	return x
 }
 
-func (out *ctxLocalityIdx) Close() {
-	if out == nil || out.file == nil || out.file.src == nil {
+func (lc *ctxLocalityIdx) Close() {
+	if lc == nil || lc.file == nil || lc.file.src == nil {
 		return
 	}
-	refCnt := out.file.src.refcount.Add(-1)
-	if refCnt == 0 && out.file.src.canDelete.Load() {
-		closeLocalityIndexFilesAndRemove(out)
+	refCnt := lc.file.src.refcount.Add(-1)
+	if refCnt == 0 && lc.file.src.canDelete.Load() {
+		closeLocalityIndexFilesAndRemove(lc)
 	}
 }
 
@@ -255,44 +256,48 @@ func (li *LocalityIndex) NewIdxReader() *recsplit.IndexReader {
 
 // LocalityIndex return exactly 2 file (step)
 // prevents searching key in many files
-func (li *LocalityIndex) lookupIdxFiles(loc *ctxLocalityIdx, key []byte, fromTxNum uint64) (exactShard1, exactShard2 uint64, lastIndexedTxNum uint64, ok1, ok2 bool) {
-	if li == nil || loc == nil || loc.bm == nil {
+func (lc *ctxLocalityIdx) lookupIdxFiles(key []byte, fromTxNum uint64) (exactShard1, exactShard2 uint64, lastIndexedTxNum uint64, ok1, ok2 bool) {
+	if lc == nil || lc.bm == nil {
 		return 0, 0, 0, false, false
 	}
-	if loc.reader == nil {
-		loc.reader = recsplit.NewIndexReader(loc.file.src.index)
+	if lc.reader == nil {
+		lc.reader = recsplit.NewIndexReader(lc.file.src.index)
 	}
 
-	if fromTxNum >= loc.file.endTxNum {
+	if fromTxNum >= lc.file.endTxNum {
 		return 0, 0, fromTxNum, false, false
 	}
 
-	fromFileNum := fromTxNum / li.aggregationStep / StepsInBiggestFile
-	//fmt.Printf("fromFileNum: %x, %d, %d\n", key, loc.reader.Lookup(key), fromFileNum)
-	fn1, fn2, ok1, ok2, err := loc.bm.First2At(loc.reader.Lookup(key), fromFileNum)
+	fromFileNum := fromTxNum / lc.aggregationStep / StepsInBiggestFile
+	fn1, fn2, ok1, ok2, err := lc.bm.First2At(lc.reader.Lookup(key), fromFileNum)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("First2At: %x, %d, %d\n", key, fn1, fn2)
-	last, _, _ := loc.bm.LastAt(loc.reader.Lookup(key))
-	fmt.Printf("At: %x, %d\n", key, last)
-	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, loc.file.endTxNum, ok1, ok2
+	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, lc.file.endTxNum, ok1, ok2
+}
+
+// indexedTo - [from, to)
+func (lc *ctxLocalityIdx) indexedTo() uint64 {
+	if lc == nil || lc.bm == nil {
+		return 0
+	}
+	return lc.file.endTxNum
 }
 
 // lookupLatest return latest file (step)
 // prevents searching key in many files
-func (li *LocalityIndex) lookupLatest(loc *ctxLocalityIdx, key []byte) (latestShard, lastIndexedTxNum uint64, ok bool) {
-	if li == nil || loc == nil || loc.bm == nil {
+func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard, lastIndexedTxNum uint64, ok bool) {
+	if lc == nil || lc.bm == nil {
 		return 0, 0, false
 	}
-	if loc.reader == nil {
-		loc.reader = recsplit.NewIndexReader(loc.file.src.index)
+	if lc.reader == nil {
+		lc.reader = recsplit.NewIndexReader(lc.file.src.index)
 	}
-	fn1, ok1, err := loc.bm.LastAt(loc.reader.Lookup(key))
+	fn1, ok1, err := lc.bm.LastAt(lc.reader.Lookup(key))
 	if err != nil {
 		panic(err)
 	}
-	return fn1 * StepsInBiggestFile, loc.file.endTxNum, ok1
+	return fn1 * StepsInBiggestFile, lc.file.endTxNum, ok1
 }
 
 func (li *LocalityIndex) exists(step uint64) bool {

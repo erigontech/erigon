@@ -308,16 +308,7 @@ func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err er
 	if err := dc.hc.ic.BuildOptionalMissedIndices(ctx); err != nil {
 		return err
 	}
-
-	if !dc.d.withLocalityIndex || dc.d.domainLocalityIndex == nil {
-		return
-	}
-	to := dc.maxFrozenStep()
-	if to == 0 || dc.d.domainLocalityIndex.exists(to) {
-		return nil
-	}
-	defer dc.d.EnableMadvNormalReadAhead().DisableReadAhead()
-	return dc.d.domainLocalityIndex.BuildMissedIndices(ctx, to, func() *LocalityIterator { return dc.iterateKeysLocality(to * dc.d.aggregationStep) })
+	return nil
 }
 
 func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {

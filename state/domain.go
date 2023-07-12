@@ -171,9 +171,6 @@ type Domain struct {
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 	logger       log.Logger
-
-	domainLocalityIndex *LocalityIndex
-	noFsync             bool // fsync is enabled by default, but tests can manually disable
 }
 
 func NewDomain(dir, tmpdir string, aggregationStep uint64,
@@ -193,13 +190,6 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 		return nil, err
 	}
 
-	if d.withLocalityIndex {
-		var err error
-		d.domainLocalityIndex, err = NewLocalityIndex(d.dir, d.tmpdir, d.aggregationStep, d.filenameBase+"_kv", d.logger)
-		if err != nil {
-			return nil, err
-		}
-	}
 	return d, nil
 }
 
@@ -439,12 +429,6 @@ func (d *Domain) Close() {
 	d.History.Close()
 	d.closeWhatNotInList([]string{})
 	d.reCalcRoFiles()
-}
-func (d *Domain) DisableFsync() {
-	d.History.DisableFsync()
-	if d.domainLocalityIndex != nil {
-		d.domainLocalityIndex.noFsync = true
-	}
 }
 
 func (d *Domain) PutWithPrev(key1, key2, val, preval []byte) error {
@@ -691,9 +675,10 @@ type ctxItem struct {
 }
 
 type ctxLocalityIdx struct {
-	reader *recsplit.IndexReader
-	bm     *bitmapdb.FixedSizeBitmaps
-	file   *ctxItem
+	reader          *recsplit.IndexReader
+	bm              *bitmapdb.FixedSizeBitmaps
+	file            *ctxItem
+	aggregationStep uint64
 }
 
 // DomainContext allows accesing the same domain from multiple go-routines
@@ -706,7 +691,7 @@ type DomainContext struct {
 	keyBuf  [60]byte // 52b key and 8b for inverted step
 	numBuf  [8]byte
 
-	loc *ctxLocalityIdx
+	//loc *ctxLocalityIdx
 }
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
@@ -747,7 +732,7 @@ func (d *Domain) MakeContext() *DomainContext {
 		d:     d,
 		hc:    d.History.MakeContext(),
 		files: *d.roFiles.Load(),
-		loc:   d.domainLocalityIndex.MakeContext(),
+		//loc:   d.domainLocalityIndex.MakeContext(),
 	}
 	for _, item := range dc.files {
 		if !item.src.frozen {
@@ -1485,9 +1470,8 @@ func (dc *DomainContext) getLatestFromFiles2(filekey []byte) (v []byte, found bo
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 
-	// cold data lookup
-	exactStep1, lastIndexedTxNum, foundExactShard1 := dc.d.domainLocalityIndex.lookupLatest(dc.loc, filekey)
-	_ = lastIndexedTxNum
+	// find what has LocalityIndex
+	lastIndexedTxNum := dc.hc.ic.loc.indexedTo()
 
 	// grind non-indexed files
 	var k []byte
@@ -1495,6 +1479,7 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 		if lastIndexedTxNum > 0 && dc.files[i].src.endTxNum <= lastIndexedTxNum {
 			break
 		}
+
 		k, v, err = dc.statelessBtree(i).Get(filekey)
 		if err != nil {
 			return nil, false, err
@@ -1522,9 +1507,9 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 		return v, found, nil
 	}
 
-	// if still not found, use index
+	// if still not found, then use index
+	exactStep1, lastIndexedTxNum, foundExactShard1 := dc.hc.ic.loc.lookupLatest(filekey)
 	if foundExactShard1 {
-		fmt.Printf("return from file: %s, %x, %d\n", dc.files[exactStep1/StepsInBiggestFile].src.decompressor.FileName(), filekey, exactStep1)
 		k, v, err = dc.statelessBtree(int(exactStep1 / StepsInBiggestFile)).Get(filekey)
 		if err != nil {
 			return nil, false, err
@@ -1625,7 +1610,7 @@ func (dc *DomainContext) Close() {
 	//	r.Close()
 	//}
 	dc.hc.Close()
-	dc.loc.Close()
+	//dc.loc.Close()
 }
 
 func (dc *DomainContext) statelessGetter(i int) *compress.Getter {
