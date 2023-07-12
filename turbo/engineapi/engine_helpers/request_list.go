@@ -7,28 +7,9 @@ import (
 
 	"github.com/emirpasic/gods/maps/treemap"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
-
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 )
-
-// This is the status of a newly execute block.
-// Hash: Block hash
-// Status: block's status
-type PayloadStatus struct {
-	Status          engine.EngineStatus
-	LatestValidHash libcommon.Hash
-	ValidationError error
-	CriticalError   error
-}
-
-// The message we are going to send to the stage sync in ForkchoiceUpdated
-type ForkChoiceMessage struct {
-	HeadBlockHash      libcommon.Hash
-	SafeBlockHash      libcommon.Hash
-	FinalizedBlockHash libcommon.Hash
-}
 
 type RequestStatus int
 
@@ -91,7 +72,7 @@ func (rl *RequestList) AddPayloadRequest(message *types.Block) {
 	rl.syncCond.Broadcast()
 }
 
-func (rl *RequestList) AddForkChoiceRequest(message *ForkChoiceMessage) {
+func (rl *RequestList) AddForkChoiceRequest(message *engine_types.ForkChoiceState) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
@@ -100,7 +81,7 @@ func (rl *RequestList) AddForkChoiceRequest(message *ForkChoiceMessage) {
 	// purge previous fork choices that are still syncing
 	rl.requests = rl.requests.Select(func(key interface{}, value interface{}) bool {
 		req := value.(*RequestWithStatus)
-		_, isForkChoice := req.Message.(*ForkChoiceMessage)
+		_, isForkChoice := req.Message.(*engine_types.ForkChoiceUpdatedResponse)
 		return req.Status == New || !isForkChoice
 	})
 	// TODO(yperbasis): potentially purge some non-syncing old fork choices?
