@@ -867,7 +867,7 @@ func CreateBtreeIndex(indexPath, dataPath string, M uint64, logger log.Logger) (
 
 // DefaultBtreeM - amount of keys on leaf of BTree
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf
-var DefaultBtreeM = uint64(2048)
+var DefaultBtreeM = uint64(1024)
 
 func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *compress.Decompressor, p *background.Progress, tmpdir string, logger log.Logger) (*BtIndex, error) {
 	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, p, tmpdir, logger)
