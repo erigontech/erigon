@@ -460,9 +460,11 @@ func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) 
 	lm, rm = -1, -1
 	var m uint64
 
+	j := 0
 	for l < r {
 		m = (l + r) >> 1
 
+		j++
 		a.naccess++
 		cmp := bytes.Compare(a.nodes[i][m].key, x)
 		switch {
@@ -483,20 +485,10 @@ func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) 
 
 // find position of key with node.di <= d at level lvl
 func (a *btAlloc) seekLeast(lvl, d uint64) uint64 {
-	x := uint64(sort.Search(len(a.nodes[lvl]), func(i int) bool {
+	//TODO: this seems calculatable from M and tree depth
+	return uint64(sort.Search(len(a.nodes[lvl]), func(i int) bool {
 		return a.nodes[lvl][i].d >= d
 	}))
-	//fmt.Printf("a: %d, %d -> %d\n", lvl, d, x)
-	return x
-
-	for i := range a.nodes[lvl] {
-		if a.nodes[lvl][i].d >= d {
-			fmt.Printf("a: %d, %d -> %d\n", lvl, d, i)
-			return uint64(i)
-		}
-	}
-	fmt.Printf("a: %d, %d -> %d\n", lvl, d, uint64(len(a.nodes[lvl])))
-	return uint64(len(a.nodes[lvl]))
 }
 
 func (a *btAlloc) Seek(ik []byte) (*Cursor, error) {
@@ -533,7 +525,7 @@ func (a *btAlloc) seek(seek, kBuf, vBuf []byte) (k, v []byte, di uint64, found b
 			if a.trace {
 				fmt.Printf("found nil key %x pos_range[%d-%d] naccess_ram=%d\n", l, lm, rm, a.naccess)
 			}
-			return k, v, 0, false, fmt.Errorf("bt index nil node at level %d", l)
+			return kBuf, vBuf, 0, false, fmt.Errorf("bt index nil node at level %d", l)
 		}
 		//fmt.Printf("b: %x, %x\n", ik, ln.key)
 		cmp := bytes.Compare(ln.key, seek)
@@ -874,7 +866,7 @@ func CreateBtreeIndex(indexPath, dataPath string, M uint64, logger log.Logger) (
 
 // DefaultBtreeM - amount of keys on leaf of BTree
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf
-var DefaultBtreeM = uint64(1024)
+var DefaultBtreeM = uint64(2048)
 
 func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *compress.Decompressor, p *background.Progress, tmpdir string, logger log.Logger) (*BtIndex, error) {
 	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, p, tmpdir, logger)
