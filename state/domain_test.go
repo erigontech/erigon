@@ -65,6 +65,8 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Cleanup(db.Close)
 	d, err := NewDomain(path, path, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, true, AccDomainLargeValues, logger)
 	require.NoError(t, err)
+	d.DisableFsync()
+	d.compressWorkers = 1
 	t.Cleanup(d.Close)
 	d.DisableFsync()
 	return db, d
@@ -514,7 +516,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 	var err error
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		tx, err = db.BeginRw(ctx)
+		tx, err = db.BeginRwNosync(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
 	}
@@ -537,7 +539,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		if stop := func() bool {
 			dc := d.MakeContext()
 			defer dc.Close()
-			r = d.findMergeRange(maxEndTxNum, maxSpan)
+			r = dc.findMergeRange(maxEndTxNum, maxSpan)
 			if !r.any() {
 				return true
 			}
@@ -573,11 +575,14 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	err = d.prune(ctx, step, txFrom, txTo, math.MaxUint64, logEvery)
 	require.NoError(t, err)
 
-	var r DomainRanges
 	maxEndTxNum := d.endTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInBiggestFile
-	for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
+	for {
 		dc := d.MakeContext()
+		r := dc.findMergeRange(maxEndTxNum, maxSpan)
+		if r.any() {
+			break
+		}
 		valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
 		valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1, background.NewProgressSet())
 		require.NoError(t, err)
@@ -655,7 +660,7 @@ func TestDomain_Delete(t *testing.T) {
 	}
 }
 
-func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain, map[string][]bool) {
+func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain, map[uint64][]bool) {
 	t.Helper()
 	db, d := testDbAndDomainOfStep(t, aggStep, logger)
 	ctx := context.Background()
@@ -668,26 +673,47 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
-	dat := make(map[string][]bool) // K:V is key -> list of bools. If list[i] == true, i'th txNum should persists
+	dat := make(map[uint64][]bool) // K:V is key -> list of bools. If list[i] == true, i'th txNum should persists
 
+	var k [8]byte
+	var v [8]byte
+	maxFrozenFiles := (txCount / d.aggregationStep) / StepsInBiggestFile
+	// key 0: only in frozen file 0
+	// key 1: only in frozen file 1 and file 2
+	// key 2: in frozen file 2 and in warm files
+	// other keys: only in warm files
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
 		d.SetTxNum(txNum)
-		for keyNum := uint64(1); keyNum <= keysCount; keyNum++ {
-			if keyNum == txNum%d.aggregationStep {
-				continue
+		step := txNum / d.aggregationStep
+		frozenFileNum := step / 32
+		for keyNum := uint64(0); keyNum < keysCount; keyNum++ {
+			if frozenFileNum < maxFrozenFiles { // frozen data
+				allowInsert := (keyNum == 0 && frozenFileNum == 0) ||
+					(keyNum == 1 && (frozenFileNum == 1 || frozenFileNum == 2)) ||
+					(keyNum == 2 && frozenFileNum == 2)
+				if !allowInsert {
+					continue
+				}
+				//fmt.Printf("put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
+			} else { //warm data
+				if keyNum == 0 || keyNum == 1 {
+					continue
+				}
+				if keyNum == txNum%d.aggregationStep {
+					continue
+				}
+				//fmt.Printf("put: %d, step=%d\n", keyNum, step)
 			}
-			var k [8]byte
-			var v [8]byte
+
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
 			//v[0] = 3 // value marker
 			err = d.Put(k[:], nil, v[:])
 			require.NoError(t, err)
-
-			if _, ok := dat[fmt.Sprintf("%d", keyNum)]; !ok {
-				dat[fmt.Sprintf("%d", keyNum)] = make([]bool, txCount+1)
+			if _, ok := dat[keyNum]; !ok {
+				dat[keyNum] = make([]bool, txCount+1)
 			}
-			dat[fmt.Sprintf("%d", keyNum)][txNum] = true
+			dat[keyNum][txNum] = true
 		}
 		if txNum%d.aggregationStep == 0 {
 			err = d.Rotate().Flush(ctx, tx)
@@ -707,8 +733,8 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	logger := log.New()
 	keyCount, txCount := uint64(4), uint64(64)
 	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
-
 	collateAndMerge(t, db, nil, dom, txCount)
+	maxFrozenFiles := (txCount / dom.aggregationStep) / StepsInBiggestFile
 
 	ctx := context.Background()
 	roTx, err := db.BeginRo(ctx)
@@ -718,10 +744,28 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	// Check the history
 	dc := dom.MakeContext()
 	defer dc.Close()
+	var k, v [8]byte
+
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
-		for keyNum := uint64(1); keyNum <= keyCount; keyNum++ {
-			var k [8]byte
-			var v [8]byte
+		for keyNum := uint64(0); keyNum < keyCount; keyNum++ {
+			step := txNum / dom.aggregationStep
+			frozenFileNum := step / 32
+			if frozenFileNum < maxFrozenFiles { // frozen data
+				if keyNum != frozenFileNum {
+					continue
+				}
+				continue
+				//fmt.Printf("put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
+			} else { //warm data
+				if keyNum == 0 || keyNum == 1 {
+					continue
+				}
+				if keyNum == txNum%dom.aggregationStep {
+					continue
+				}
+				//fmt.Printf("put: %d, step=%d\n", keyNum, step)
+			}
+
 			label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txNum, keyNum)
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
@@ -729,7 +773,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 			val, err := dc.GetBeforeTxNum(k[:], txNum+1, roTx)
 			// during generation such keys are skipped so value should be nil for this call
 			require.NoError(t, err, label)
-			if !data[fmt.Sprintf("%d", keyNum)][txNum] {
+			if !data[keyNum][txNum] {
 				if txNum > 1 {
 					binary.BigEndian.PutUint64(v[:], txNum-1)
 				} else {
@@ -741,12 +785,10 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 		}
 	}
 
-	var v [8]byte
+	//warm keys
 	binary.BigEndian.PutUint64(v[:], txCount)
-
-	for keyNum := uint64(1); keyNum <= keyCount; keyNum++ {
-		var k [8]byte
-		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount, keyNum)
+	for keyNum := uint64(2); keyNum < keyCount; keyNum++ {
+		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount-1, keyNum)
 		binary.BigEndian.PutUint64(k[:], keyNum)
 
 		storedV, found, err := dc.GetLatest(k[:], nil, roTx)
@@ -854,6 +896,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	from, to := d.stepsRangeInDB(tx)
 	require.Equal(t, 3, int(from))
 	require.Equal(t, 4, int(to))
+
 }
 
 func TestScanStaticFilesD(t *testing.T) {
@@ -1087,7 +1130,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	ctx := context.Background()
 	ps := background.NewProgressSet()
 	for step := uint64(0); step < uint64(len(vals))/d.aggregationStep; step++ {
-		dctx := d.MakeContext()
+		dc := d.MakeContext()
 
 		txFrom := step * d.aggregationStep
 		txTo := (step + 1) * d.aggregationStep
@@ -1108,8 +1151,8 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		err = d.prune(ctx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		require.NoError(t, err)
 
-		ranges := d.findMergeRange(txFrom, txTo)
-		vl, il, hl, _ := dctx.staticFilesInRange(ranges)
+		ranges := dc.findMergeRange(txFrom, txTo)
+		vl, il, hl, _ := dc.staticFilesInRange(ranges)
 
 		dv, di, dh, err := d.mergeFiles(ctx, vl, il, hl, ranges, 1, ps)
 		require.NoError(t, err)
@@ -1118,7 +1161,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 		logEvery.Stop()
 
-		dctx.Close()
+		dc.Close()
 	}
 
 	mc = d.MakeContext()
@@ -1160,7 +1203,6 @@ func TestDomain_Unwind(t *testing.T) {
 	for i := 0; i < int(maxTx); i++ {
 		v1 := []byte(fmt.Sprintf("value1.%d", i))
 		v2 := []byte(fmt.Sprintf("value2.%d", i))
-		fmt.Printf("i=%d\n", i)
 
 		//if i > 0 {
 		//	pv, _, err := dctx.GetLatest([]byte("key1"), nil, tx)

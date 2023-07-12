@@ -530,13 +530,15 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 			icx := d.MakeContext()
 			mxRunningMerges.Inc()
 
-			if err := d.mergeRangesUpTo(ctx, d.endTxNumMinimax(), maxSpan, workers, icx, a.ps); err != nil {
-				errCh <- err
-
-				mxRunningMerges.Dec()
-				icx.Close()
-				return
-			}
+			_ = maxSpan
+			_ = workers
+			//if err := d.mergeRangesUpTo(ctx, d.endTxNumMinimax(), maxSpan, workers, icx, a.ps); err != nil {
+			//	errCh <- err
+			//
+			//	mxRunningMerges.Dec()
+			//	icx.Close()
+			//	return
+			//}
 
 			mxRunningMerges.Dec()
 			icx.Close()
@@ -626,11 +628,13 @@ func (r Ranges) any() bool {
 }
 
 func (a *Aggregator) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges {
+	ac := a.MakeContext()
+	defer ac.Close()
 	var r Ranges
-	r.accounts = a.accounts.findMergeRange(maxEndTxNum, maxSpan)
-	r.storage = a.storage.findMergeRange(maxEndTxNum, maxSpan)
-	r.code = a.code.findMergeRange(maxEndTxNum, maxSpan)
-	r.commitment = a.commitment.findMergeRange(maxEndTxNum, maxSpan)
+	r.accounts = ac.accounts.findMergeRange(maxEndTxNum, maxSpan)
+	r.storage = ac.storage.findMergeRange(maxEndTxNum, maxSpan)
+	r.code = ac.code.findMergeRange(maxEndTxNum, maxSpan)
+	r.commitment = ac.commitment.findMergeRange(maxEndTxNum, maxSpan)
 	//if r.any() {
 	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%+v\n", maxEndTxNum, maxSpan, r))
 	//}

@@ -370,7 +370,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 				if stop := func() bool {
 					ic := ii.MakeContext()
 					defer ic.Close()
-					found, startTxNum, endTxNum = ii.findMergeRange(maxEndTxNum, maxSpan)
+					found, startTxNum, endTxNum = ic.findMergeRange(maxEndTxNum, maxSpan)
 					if !found {
 						return true
 					}

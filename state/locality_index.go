@@ -52,6 +52,8 @@ type LocalityIndex struct {
 	roFiles  atomic.Pointer[ctxItem]
 	roBmFile atomic.Pointer[bitmapdb.FixedSizeBitmaps]
 	logger   log.Logger
+
+	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
 func NewLocalityIndex(
@@ -204,8 +206,9 @@ func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
 		return nil
 	}
 	x := &ctxLocalityIdx{
-		file: li.roFiles.Load(),
-		bm:   li.roBmFile.Load(),
+		file:            li.roFiles.Load(),
+		bm:              li.roBmFile.Load(),
+		aggregationStep: li.aggregationStep,
 	}
 	if x.file != nil && x.file.src != nil {
 		x.file.src.refcount.Add(1)
@@ -213,13 +216,13 @@ func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
 	return x
 }
 
-func (out *ctxLocalityIdx) Close() {
-	if out == nil || out.file == nil || out.file.src == nil {
+func (lc *ctxLocalityIdx) Close() {
+	if lc == nil || lc.file == nil || lc.file.src == nil {
 		return
 	}
-	refCnt := out.file.src.refcount.Add(-1)
-	if refCnt == 0 && out.file.src.canDelete.Load() {
-		closeLocalityIndexFilesAndRemove(out)
+	refCnt := lc.file.src.refcount.Add(-1)
+	if refCnt == 0 && lc.file.src.canDelete.Load() {
+		closeLocalityIndexFilesAndRemove(lc)
 	}
 }
 
@@ -253,24 +256,48 @@ func (li *LocalityIndex) NewIdxReader() *recsplit.IndexReader {
 
 // LocalityIndex return exactly 2 file (step)
 // prevents searching key in many files
-func (li *LocalityIndex) lookupIdxFiles(loc *ctxLocalityIdx, key []byte, fromTxNum uint64) (exactShard1, exactShard2 uint64, lastIndexedTxNum uint64, ok1, ok2 bool) {
-	if li == nil || loc == nil || loc.bm == nil {
+func (lc *ctxLocalityIdx) lookupIdxFiles(key []byte, fromTxNum uint64) (exactShard1, exactShard2 uint64, lastIndexedTxNum uint64, ok1, ok2 bool) {
+	if lc == nil || lc.bm == nil {
 		return 0, 0, 0, false, false
 	}
-	if loc.reader == nil {
-		loc.reader = recsplit.NewIndexReader(loc.file.src.index)
+	if lc.reader == nil {
+		lc.reader = recsplit.NewIndexReader(lc.file.src.index)
 	}
 
-	if fromTxNum >= loc.file.endTxNum {
+	if fromTxNum >= lc.file.endTxNum {
 		return 0, 0, fromTxNum, false, false
 	}
 
-	fromFileNum := fromTxNum / li.aggregationStep / StepsInBiggestFile
-	fn1, fn2, ok1, ok2, err := loc.bm.First2At(loc.reader.Lookup(key), fromFileNum)
+	fromFileNum := fromTxNum / lc.aggregationStep / StepsInBiggestFile
+	fn1, fn2, ok1, ok2, err := lc.bm.First2At(lc.reader.Lookup(key), fromFileNum)
 	if err != nil {
 		panic(err)
 	}
-	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, loc.file.endTxNum, ok1, ok2
+	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, lc.file.endTxNum, ok1, ok2
+}
+
+// indexedTo - [from, to)
+func (lc *ctxLocalityIdx) indexedTo() uint64 {
+	if lc == nil || lc.bm == nil {
+		return 0
+	}
+	return lc.file.endTxNum
+}
+
+// lookupLatest return latest file (step)
+// prevents searching key in many files
+func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool) {
+	if lc == nil || lc.bm == nil {
+		return 0, false
+	}
+	if lc.reader == nil {
+		lc.reader = recsplit.NewIndexReader(lc.file.src.index)
+	}
+	fn1, ok1, err := lc.bm.LastAt(lc.reader.Lookup(key))
+	if err != nil {
+		panic(err)
+	}
+	return fn1, ok1
 }
 
 func (li *LocalityIndex) exists(step uint64) bool {
@@ -322,7 +349,9 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, toStep uint64, makeIter
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
-
+	if li.noFsync {
+		rs.DisableFsync()
+	}
 	i := uint64(0)
 	for {
 		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, int(it.FilesAmount()), uint64(count), li.logger)
@@ -330,14 +359,18 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, toStep uint64, makeIter
 			return nil, err
 		}
 		defer dense.Close()
+		if li.noFsync {
+			dense.DisableFsync()
+		}
 
 		it = makeIter()
 		for it.HasNext() {
 			k, inFiles := it.Next()
+			//fmt.Printf("buld: %x, %d, %d\n", k, i, inFiles)
 			if err := dense.AddArray(i, inFiles); err != nil {
 				return nil, err
 			}
-			if err = rs.AddKey(k, 0); err != nil {
+			if err = rs.AddKey(k, i); err != nil {
 				return nil, err
 			}
 			i++
@@ -417,13 +450,12 @@ func (sf LocalityIndexFiles) Close() {
 }
 
 type LocalityIterator struct {
-	aggStep          uint64
-	compressVals     bool
-	h                ReconHeapOlderFirst
-	files, nextFiles []uint64
-	key, nextKey     []byte
-	progress         uint64
-	hasNext          bool
+	aggStep           uint64
+	compressVals      bool
+	h                 ReconHeapOlderFirst
+	v, nextV, vBackup []uint64
+	k, nextK, kBackup []byte
+	progress          uint64
 
 	totalOffsets, filesAmount uint64
 }
@@ -446,39 +478,45 @@ func (si *LocalityIterator) advance() {
 			heap.Push(&si.h, top)
 		}
 
-		inFile := inStep / StepsInBiggestFile
+		inFile := uint64(inStep / StepsInBiggestFile)
 
-		if !bytes.Equal(key, si.key) {
-			if si.key == nil {
-				si.key = key
-				si.files = append(si.files, uint64(inFile))
-				continue
-			}
-			si.nextFiles, si.files = si.files, si.nextFiles[:0]
-			si.nextKey = si.key
+		if si.k == nil {
+			si.k = key
+			si.v = append(si.v, inFile)
+			continue
+		}
 
-			si.files = append(si.files, uint64(inFile))
-			si.key = key
-			si.hasNext = true
+		if !bytes.Equal(key, si.k) {
+			si.nextV, si.v = si.v, si.nextV[:0]
+			si.nextK = si.k
+
+			si.v = append(si.v, inFile)
+			si.k = key
 			return
 		}
-		si.files = append(si.files, uint64(inFile))
+		si.v = append(si.v, inFile)
 	}
-	si.nextFiles, si.files = si.files, si.nextFiles[:0]
-	si.nextKey = si.key
-	si.hasNext = false
+	si.nextV, si.v = si.v, si.nextV[:0]
+	si.nextK = si.k
+	si.k = nil
 }
 
-func (si *LocalityIterator) HasNext() bool { return si.hasNext }
+func (si *LocalityIterator) HasNext() bool { return si.nextK != nil }
 func (si *LocalityIterator) Progress() float64 {
 	return (float64(si.progress) / float64(si.totalOffsets)) * 100
 }
 func (si *LocalityIterator) FilesAmount() uint64 { return si.filesAmount }
 
 func (si *LocalityIterator) Next() ([]byte, []uint64) {
-	k, v := si.nextKey, si.nextFiles
+	//if hi.err != nil {
+	//	return nil, nil, hi.err
+	//}
+	//hi.limit--
+
+	// Satisfy iter.Dual Invariant 2
+	si.nextK, si.kBackup, si.nextV, si.vBackup = si.kBackup, si.nextK, si.vBackup, si.nextV
 	si.advance()
-	return k, v
+	return si.kBackup, si.vBackup
 }
 
 func (ic *InvertedIndexContext) iterateKeysLocality(uptoTxNum uint64) *LocalityIterator {

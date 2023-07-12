@@ -679,8 +679,9 @@ type BtIndexWriter struct {
 	keyCount    uint64
 	etlBufLimit datasize.ByteSize
 	bytesPerRec int
-	logger      log.Logger
-	noFsync     bool // fsync is enabled by default, but tests can manually disable
+
+	logger  log.Logger
+	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
 type BtIndexWriterArgs struct {

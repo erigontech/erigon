@@ -171,8 +171,6 @@ type Domain struct {
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 	logger       log.Logger
-
-	domainLocalityIndex *LocalityIndex
 }
 
 func NewDomain(dir, tmpdir string, aggregationStep uint64,
@@ -192,23 +190,16 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 		return nil, err
 	}
 
-	if d.withLocalityIndex {
-		var err error
-		d.domainLocalityIndex, err = NewLocalityIndex(d.dir, d.tmpdir, d.aggregationStep, d.filenameBase+"_kv", d.logger)
-		if err != nil {
-			return nil, err
-		}
-	}
 	return d, nil
 }
 
 // LastStepInDB - return the latest available step in db (at-least 1 value in such step)
 func (d *Domain) LastStepInDB(tx kv.Tx) (lstInDb uint64) {
-	lst, _ := kv.FirstKey(tx, d.valsTable)
-	if len(lst) > 0 {
-		lstInDb = ^binary.BigEndian.Uint64(lst[len(lst)-8:])
+	lstIdx, _ := kv.LastKey(tx, d.History.indexKeysTable)
+	if len(lstIdx) == 0 {
+		return 0
 	}
-	return lstInDb
+	return binary.BigEndian.Uint64(lstIdx) / d.aggregationStep
 }
 
 func (d *Domain) DiscardHistory() {
@@ -684,9 +675,10 @@ type ctxItem struct {
 }
 
 type ctxLocalityIdx struct {
-	reader *recsplit.IndexReader
-	bm     *bitmapdb.FixedSizeBitmaps
-	file   *ctxItem
+	reader          *recsplit.IndexReader
+	bm              *bitmapdb.FixedSizeBitmaps
+	file            *ctxItem
+	aggregationStep uint64
 }
 
 // DomainContext allows accesing the same domain from multiple go-routines
@@ -699,7 +691,7 @@ type DomainContext struct {
 	keyBuf  [60]byte // 52b key and 8b for inverted step
 	numBuf  [8]byte
 
-	loc *ctxLocalityIdx
+	//loc *ctxLocalityIdx
 }
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
@@ -740,7 +732,7 @@ func (d *Domain) MakeContext() *DomainContext {
 		d:     d,
 		hc:    d.History.MakeContext(),
 		files: *d.roFiles.Load(),
-		loc:   d.domainLocalityIndex.MakeContext(),
+		//loc:   d.domainLocalityIndex.MakeContext(),
 	}
 	for _, item := range dc.files {
 		if !item.src.frozen {
@@ -1441,11 +1433,19 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 	}
 	return v, found, nil
 }
+
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 
+	// find what has LocalityIndex
+	lastIndexedTxNum := dc.hc.ic.coldLocality.indexedTo()
+	// grind non-indexed files
 	var k []byte
 	for i := len(dc.files) - 1; i >= 0; i-- {
+		if dc.files[i].src.endTxNum <= lastIndexedTxNum {
+			break
+		}
+
 		k, v, err = dc.statelessBtree(i).Get(filekey)
 		if err != nil {
 			return nil, false, err
@@ -1470,9 +1470,27 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 				panic("not equal")
 			}
 		}
-		break
+		return v, found, nil
 	}
-	return v, found, nil
+
+	// still not found, search in indexed cold shards
+	return dc.getLatestFromColdFiles(filekey)
+}
+
+func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found bool, err error) {
+	var k []byte
+	exactColdShard, ok := dc.hc.ic.coldLocality.lookupLatest(filekey)
+	if !ok {
+		return nil, false, nil
+	}
+	k, v, err = dc.statelessBtree(int(exactColdShard)).Get(filekey)
+	if err != nil {
+		return nil, false, err
+	}
+	if k == nil {
+		return nil, false, err
+	}
+	return v, true, nil
 }
 
 // historyBeforeTxNum searches history for a value of specified key before txNum
@@ -1562,7 +1580,7 @@ func (dc *DomainContext) Close() {
 	//	r.Close()
 	//}
 	dc.hc.Close()
-	dc.loc.Close()
+	//dc.loc.Close()
 }
 
 func (dc *DomainContext) statelessGetter(i int) *compress.Getter {
@@ -1625,6 +1643,9 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 	foundInvStep, err := roTx.GetOne(dc.d.keysTable, key) // reads first DupSort value
 	if err != nil {
 		return nil, false, err
+	}
+	if bytes.Equal(key, common.FromHex("c4f43c78a8a52fb34b485c2e926f90628b019281")) {
+		fmt.Printf("getLatest: %x, %t\n", key, foundInvStep != nil)
 	}
 	if foundInvStep == nil {
 		v, found, err := dc.getLatestFromFiles(key)

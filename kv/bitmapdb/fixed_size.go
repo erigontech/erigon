@@ -121,6 +121,20 @@ func (bm *FixedSizeBitmaps) At(item uint64) (res []uint64, err error) {
 	return res, nil
 }
 
+func (bm *FixedSizeBitmaps) LastAt(item uint64) (last uint64, ok bool, err error) {
+	if item > bm.amount {
+		return 0, false, fmt.Errorf("too big item number: %d > %d", item, bm.amount)
+	}
+	res, err := bm.At(item)
+	if err != nil {
+		return 0, false, err
+	}
+	if len(res) > 0 {
+		return res[len(res)-1], true, nil
+	}
+	return 0, false, nil
+}
+
 func (bm *FixedSizeBitmaps) First2At(item, after uint64) (fst uint64, snd uint64, ok, ok2 bool, err error) {
 	if item > bm.amount {
 		return 0, 0, false, false, fmt.Errorf("too big item number: %d > %d", item, bm.amount)

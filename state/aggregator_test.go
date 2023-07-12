@@ -205,15 +205,15 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 	require.NoError(t, err)
 	tx = nil
 
-	tx, err = db.BeginRw(context.Background())
-	require.NoError(t, err)
-
-	ac := agg.MakeContext()
-	ac.IterateAccounts(tx, []byte{}, func(addr, val []byte) {
-		fmt.Printf("addr=%x val=%x\n", addr, val)
-	})
-	ac.Close()
-	tx.Rollback()
+	//tx, err = db.BeginRw(context.Background())
+	//require.NoError(t, err)
+	//
+	//ac := agg.MakeContext()
+	//ac.IterateAccounts(tx, []byte{}, func(addr, val []byte) {
+	//	fmt.Printf("addr=%x val=%x\n", addr, val)
+	//})
+	//ac.Close()
+	//tx.Rollback()
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
@@ -224,9 +224,9 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 	// Start another aggregator on same datadir
 	anotherAgg, err := NewAggregatorV3(context.Background(), filepath.Join(path, "e4"), filepath.Join(path, "e4", "tmp2"), aggStep, db, logger)
 	require.NoError(t, err)
-	require.NoError(t, anotherAgg.OpenFolder())
-
 	defer anotherAgg.Close()
+
+	require.NoError(t, anotherAgg.OpenFolder())
 
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -316,6 +316,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	err = agg.Flush(context.Background(), tx)
 	require.NoError(t, err)
 
+	latestStepInDB := agg.accounts.LastStepInDB(tx)
+	require.Equal(t, 5, int(latestStepInDB))
+
 	err = tx.Commit()
 	require.NoError(t, err)
 	agg.FinishWrites()
@@ -331,10 +334,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, os.RemoveAll(filepath.Join(path, "db4")))
 
 	// open new db and aggregator instances
-	newDb, err := mdbx.NewMDBX(logger).InMem(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	newDb := mdbx.NewMDBX(logger).InMem(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
-	}).Open()
-	require.NoError(t, err)
+	}).MustOpen()
 	t.Cleanup(newDb.Close)
 
 	newTx, err := newDb.BeginRw(context.Background())
@@ -366,12 +368,12 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.NoError(t, err)
 		if len(stored) == 0 {
 			miss++
-			fmt.Printf("%x [%d/%d]", key, miss, i+1) // txnum starts from 1
+			//fmt.Printf("%x [%d/%d]", key, miss, i+1) // txnum starts from 1
 			continue
 		}
-
 		nonce, _, _ := DecodeAccountBytes(stored)
-		require.EqualValues(t, i+1, nonce)
+
+		require.EqualValues(t, i+1, int(nonce))
 
 		storedV, _, err := ac.GetLatest(kv.StorageDomain, key[:length.Addr], key[length.Addr:], newTx)
 		require.NoError(t, err)
@@ -760,7 +762,6 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	for i = 0; i < len(vals); i++ {
 		domains.SetTxNum(uint64(i))
-		fmt.Printf("txn=%d\n", i)
 
 		for j := 0; j < len(keys); j++ {
 			buf := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
@@ -786,7 +787,6 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	for i = int(pruneFrom); i < len(vals); i++ {
 		domains.SetTxNum(uint64(i))
 
-		fmt.Printf("txn=%d\n", i)
 		for j := 0; j < len(keys); j++ {
 			buf := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
 			prev, _, err := mc.GetLatest(kv.AccountsDomain, keys[j], nil, rwTx)
@@ -814,7 +814,6 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	for i = int(pruneFrom); i < len(vals); i++ {
 		domains.SetTxNum(uint64(i))
 
-		fmt.Printf("txn=%d\n", i)
 		for j := 0; j < len(keys); j++ {
 			buf := EncodeAccountBytes(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
 			prev, _, err := mc.GetLatest(kv.AccountsDomain, keys[j], nil, rwTx)

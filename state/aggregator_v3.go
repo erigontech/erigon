@@ -628,7 +628,7 @@ Loop:
 }
 
 func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {
-	ac := a.MakeContext() // this need, to ensure we do all operations on files in "transaction-style", maybe we will ensure it on type-level in future
+	ac := a.MakeContext()
 	defer ac.Close()
 
 	closeAll := true
@@ -1044,21 +1044,49 @@ type RangesV3 struct {
 	tracesTo             bool
 }
 
+func (r RangesV3) String() string {
+	ss := []string{}
+	if r.accounts.any() {
+		ss = append(ss, fmt.Sprintf("accounts=%s", r.accounts.String()))
+	}
+	if r.storage.any() {
+		ss = append(ss, fmt.Sprintf("storage=%s", r.storage.String()))
+	}
+	if r.code.any() {
+		ss = append(ss, fmt.Sprintf("code=%s", r.code.String()))
+	}
+	if r.commitment.any() {
+		ss = append(ss, fmt.Sprintf("commitment=%s", r.commitment.String()))
+	}
+	if r.logAddrs {
+		ss = append(ss, fmt.Sprintf("logAddr=%d-%d", r.logAddrsStartTxNum/r.accounts.aggStep, r.logAddrsEndTxNum/r.accounts.aggStep))
+	}
+	if r.logTopics {
+		ss = append(ss, fmt.Sprintf("logTopic=%d-%d", r.logTopicsStartTxNum/r.accounts.aggStep, r.logTopicsEndTxNum/r.accounts.aggStep))
+	}
+	if r.tracesFrom {
+		ss = append(ss, fmt.Sprintf("traceFrom=%d-%d", r.tracesFromStartTxNum/r.accounts.aggStep, r.tracesFromEndTxNum/r.accounts.aggStep))
+	}
+	if r.tracesTo {
+		ss = append(ss, fmt.Sprintf("traceTo=%d-%d", r.tracesToStartTxNum/r.accounts.aggStep, r.tracesToEndTxNum/r.accounts.aggStep))
+	}
+	return strings.Join(ss, ", ")
+}
 func (r RangesV3) any() bool {
 	return r.accounts.any() || r.storage.any() || r.code.any() || r.commitment.any() || r.logAddrs || r.logTopics || r.tracesFrom || r.tracesTo
 }
 
 func (ac *AggregatorV3Context) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
 	var r RangesV3
-	r.accounts = ac.a.accounts.findMergeRange(maxEndTxNum, maxSpan)
-	r.storage = ac.a.storage.findMergeRange(maxEndTxNum, maxSpan)
-	r.code = ac.a.code.findMergeRange(maxEndTxNum, maxSpan)
-	r.commitment = ac.a.commitment.findMergeRange(maxEndTxNum, maxSpan)
-	r.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum = ac.a.logAddrs.findMergeRange(maxEndTxNum, maxSpan)
-	r.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum = ac.a.logTopics.findMergeRange(maxEndTxNum, maxSpan)
-	r.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum = ac.a.tracesFrom.findMergeRange(maxEndTxNum, maxSpan)
-	r.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum = ac.a.tracesTo.findMergeRange(maxEndTxNum, maxSpan)
-	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%+v\n", maxEndTxNum, maxSpan, r))
+	r.accounts = ac.accounts.findMergeRange(maxEndTxNum, maxSpan)
+	r.storage = ac.storage.findMergeRange(maxEndTxNum, maxSpan)
+	r.code = ac.code.findMergeRange(maxEndTxNum, maxSpan)
+	r.commitment = ac.commitment.findMergeRange(maxEndTxNum, maxSpan)
+	r.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum = ac.logAddrs.findMergeRange(maxEndTxNum, maxSpan)
+	r.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum = ac.logTopics.findMergeRange(maxEndTxNum, maxSpan)
+	r.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum = ac.tracesFrom.findMergeRange(maxEndTxNum, maxSpan)
+	r.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum = ac.tracesTo.findMergeRange(maxEndTxNum, maxSpan)
+	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/ac.a.aggregationStep, maxSpan/ac.a.aggregationStep, r))
 	return r
 }
 
@@ -1226,7 +1254,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if r.accounts.any() {
 		predicates.Add(1)
 
-		log.Info(fmt.Sprintf("[snapshots] merge: %d-%d", r.accounts.historyStartTxNum/ac.a.aggregationStep, r.accounts.historyEndTxNum/ac.a.aggregationStep))
+		log.Info(fmt.Sprintf("[snapshots] merge: %s", r.String()))
 		g.Go(func() (err error) {
 			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, workers, ac.a.ps)
 			predicates.Done()
@@ -1250,7 +1278,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	}
 	if r.commitment.any() {
 		predicates.Wait()
-		log.Info(fmt.Sprintf("[snapshots] merge commitment: %d-%d", r.accounts.historyStartTxNum/ac.a.aggregationStep, r.accounts.historyEndTxNum/ac.a.aggregationStep))
+		//log.Info(fmt.Sprintf("[snapshots] merge commitment: %d-%d", r.accounts.historyStartTxNum/ac.a.aggregationStep, r.accounts.historyEndTxNum/ac.a.aggregationStep))
 		g.Go(func() (err error) {
 			var v4Files SelectedStaticFiles
 			var v4MergedF MergedFiles
@@ -1554,6 +1582,11 @@ func (a *AggregatorV3) Stats() FilesStats22 {
 	return fs
 }
 
+// AggregatorV3Context guarantee consistent View of files:
+//   - long-living consistent view of all files (no limitations)
+//   - hiding garbage and files overlaps
+//   - protecting useful files from removal
+//   - other will not see "partial writes" or "new files appearance"
 type AggregatorV3Context struct {
 	a          *AggregatorV3
 	accounts   *DomainContext

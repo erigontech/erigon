@@ -106,24 +106,26 @@ type DomainRanges struct {
 	values            bool
 	history           bool
 	index             bool
+
+	aggStep uint64
 }
 
 func (r DomainRanges) String() string {
 	var b strings.Builder
 	if r.values {
-		b.WriteString(fmt.Sprintf("Values: [%d, %d)", r.valuesStartTxNum, r.valuesEndTxNum))
+		b.WriteString(fmt.Sprintf("vals:%d-%d", r.valuesStartTxNum/r.aggStep, r.valuesEndTxNum/r.aggStep))
 	}
 	if r.history {
 		if b.Len() > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(fmt.Sprintf("History: [%d, %d)", r.historyStartTxNum, r.historyEndTxNum))
+		b.WriteString(fmt.Sprintf("history:%d-%d", r.historyStartTxNum/r.aggStep, r.historyEndTxNum/r.aggStep))
 	}
 	if r.index {
 		if b.Len() > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(fmt.Sprintf("Index: [%d, %d)", r.indexStartTxNum, r.indexEndTxNum))
+		b.WriteString(fmt.Sprintf("idx:%d-%d", r.indexStartTxNum/r.aggStep, r.indexEndTxNum/r.aggStep))
 	}
 	return b.String()
 }
@@ -132,10 +134,13 @@ func (r DomainRanges) any() bool {
 	return r.values || r.history || r.index
 }
 
-// findMergeRange assumes that all fTypes in d.files have items at least as far as maxEndTxNum
+// findMergeRange
+// assumes that all fTypes in d.files have items at least as far as maxEndTxNum
 // That is why only Values type is inspected
-func (d *Domain) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
-	hr := d.History.findMergeRange(maxEndTxNum, maxSpan)
+//
+// As any other methods of DomainContext - it can't see any files overlaps or garbage
+func (dc *DomainContext) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
+	hr := dc.hc.findMergeRange(maxEndTxNum, maxSpan)
 	r := DomainRanges{
 		historyStartTxNum: hr.historyStartTxNum,
 		historyEndTxNum:   hr.historyEndTxNum,
@@ -143,26 +148,66 @@ func (d *Domain) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		indexStartTxNum:   hr.indexStartTxNum,
 		indexEndTxNum:     hr.indexEndTxNum,
 		index:             hr.index,
+		aggStep:           dc.d.aggregationStep,
 	}
-	d.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.endTxNum > maxEndTxNum {
-				return false
-			}
-			endStep := item.endTxNum / d.aggregationStep
-			spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-			span := cmp.Min(spanStep*d.aggregationStep, maxSpan)
-			start := item.endTxNum - span
-			if start < item.startTxNum {
-				if !r.values || start < r.valuesStartTxNum {
-					r.values = true
-					r.valuesStartTxNum = start
-					r.valuesEndTxNum = item.endTxNum
-				}
+	for _, item := range dc.files {
+		if item.endTxNum > maxEndTxNum {
+			break
+		}
+		endStep := item.endTxNum / dc.d.aggregationStep
+		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
+		span := cmp.Min(spanStep*dc.d.aggregationStep, maxSpan)
+		start := item.endTxNum - span
+		if start < item.startTxNum {
+			if !r.values || start < r.valuesStartTxNum {
+				r.values = true
+				r.valuesStartTxNum = start
+				r.valuesEndTxNum = item.endTxNum
 			}
 		}
-		return true
-	})
+	}
+	return r
+}
+
+func (hc *HistoryContext) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
+	var r HistoryRanges
+	r.index, r.indexStartTxNum, r.indexEndTxNum = hc.ic.findMergeRange(maxEndTxNum, maxSpan)
+	for _, item := range hc.files {
+		if item.endTxNum > maxEndTxNum {
+			continue
+		}
+		endStep := item.endTxNum / hc.h.aggregationStep
+		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
+		span := cmp.Min(spanStep*hc.h.aggregationStep, maxSpan)
+		start := item.endTxNum - span
+		foundSuperSet := r.indexStartTxNum == item.startTxNum && item.endTxNum >= r.historyEndTxNum
+		if foundSuperSet {
+			r.history = false
+			r.historyStartTxNum = start
+			r.historyEndTxNum = item.endTxNum
+		} else if start < item.startTxNum {
+			if !r.history || start < r.historyStartTxNum {
+				r.history = true
+				r.historyStartTxNum = start
+				r.historyEndTxNum = item.endTxNum
+			}
+		}
+	}
+
+	if r.history && r.index {
+		// history is behind idx: then merge only history
+		historyIsAgead := r.historyEndTxNum > r.indexEndTxNum
+		if historyIsAgead {
+			r.history, r.historyStartTxNum, r.historyEndTxNum = false, 0, 0
+			return r
+		}
+
+		historyIsBehind := r.historyEndTxNum < r.indexEndTxNum
+		if historyIsBehind {
+			r.index, r.indexStartTxNum, r.indexEndTxNum = false, 0, 0
+			return r
+		}
+	}
 	return r
 }
 
@@ -173,36 +218,34 @@ func (d *Domain) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 // 0-1,1-2,2-3: allow merge 0-2
 //
 // 0-2,2-3: nothing to merge
-func (ii *InvertedIndex) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint64, uint64) {
+func (ic *InvertedIndexContext) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint64, uint64) {
 	var minFound bool
 	var startTxNum, endTxNum uint64
-	ii.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.endTxNum > maxEndTxNum {
-				continue
-			}
-			endStep := item.endTxNum / ii.aggregationStep
-			spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-			span := cmp.Min(spanStep*ii.aggregationStep, maxSpan)
-			start := item.endTxNum - span
-			foundSuperSet := startTxNum == item.startTxNum && item.endTxNum >= endTxNum
-			if foundSuperSet {
-				minFound = false
+	for _, item := range ic.files {
+		if item.endTxNum > maxEndTxNum {
+			continue
+		}
+		endStep := item.endTxNum / ic.ii.aggregationStep
+		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
+		span := cmp.Min(spanStep*ic.ii.aggregationStep, maxSpan)
+		start := item.endTxNum - span
+		foundSuperSet := startTxNum == item.startTxNum && item.endTxNum >= endTxNum
+		if foundSuperSet {
+			minFound = false
+			startTxNum = start
+			endTxNum = item.endTxNum
+		} else if start < item.startTxNum {
+			if !minFound || start < startTxNum {
+				minFound = true
 				startTxNum = start
 				endTxNum = item.endTxNum
-			} else if start < item.startTxNum {
-				if !minFound || start < startTxNum {
-					minFound = true
-					startTxNum = start
-					endTxNum = item.endTxNum
-				}
 			}
 		}
-		return true
-	})
+	}
 	return minFound, startTxNum, endTxNum
 }
 
+/*
 func (ii *InvertedIndex) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan uint64, workers int, ictx *InvertedIndexContext, ps *background.ProgressSet) (err error) {
 	closeAll := true
 	for updated, startTx, endTx := ii.findMergeRange(maxSpan, maxTxNum); updated; updated, startTx, endTx = ii.findMergeRange(maxTxNum, maxSpan) {
@@ -235,6 +278,7 @@ func (ii *InvertedIndex) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan 
 	closeAll = false
 	return nil
 }
+*/
 
 type HistoryRanges struct {
 	historyStartTxNum uint64
@@ -259,78 +303,23 @@ func (r HistoryRanges) any() bool {
 	return r.history || r.index
 }
 
-func (h *History) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
-	var r HistoryRanges
-	r.index, r.indexStartTxNum, r.indexEndTxNum = h.InvertedIndex.findMergeRange(maxEndTxNum, maxSpan)
-	h.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.endTxNum > maxEndTxNum {
-				continue
-			}
-			endStep := item.endTxNum / h.aggregationStep
-			spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-			span := cmp.Min(spanStep*h.aggregationStep, maxSpan)
-			start := item.endTxNum - span
-			foundSuperSet := r.indexStartTxNum == item.startTxNum && item.endTxNum >= r.historyEndTxNum
-			if foundSuperSet {
-				r.history = false
-				r.historyStartTxNum = start
-				r.historyEndTxNum = item.endTxNum
-			} else if start < item.startTxNum {
-				if !r.history || start < r.historyStartTxNum {
-					r.history = true
-					r.historyStartTxNum = start
-					r.historyEndTxNum = item.endTxNum
-				}
-			}
-		}
-		return true
-	})
-
-	if r.history && r.index {
-		// history is behind idx: then merge only history
-		historyIsAgead := r.historyEndTxNum > r.indexEndTxNum
-		if historyIsAgead {
-			r.history, r.historyStartTxNum, r.historyEndTxNum = false, 0, 0
-			return r
-		}
-
-		historyIsBehind := r.historyEndTxNum < r.indexEndTxNum
-		if historyIsBehind {
-			r.index, r.indexStartTxNum, r.indexEndTxNum = false, 0, 0
-			return r
-		}
-	}
-	return r
-}
-
 func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	return nil //TODO: un-comment when index is ready
 	if err := dc.hc.ic.BuildOptionalMissedIndices(ctx); err != nil {
 		return err
 	}
-
-	if !dc.d.withLocalityIndex || dc.d.domainLocalityIndex == nil {
-		return
-	}
-	to := dc.maxFrozenStep()
-	if to == 0 || dc.d.domainLocalityIndex.exists(to) {
-		return nil
-	}
-	defer dc.d.EnableMadvNormalReadAhead().DisableReadAhead()
-	return dc.d.domainLocalityIndex.BuildMissedIndices(ctx, to, func() *LocalityIterator { return dc.iterateKeysLocality(to * dc.d.aggregationStep) })
+	return nil
 }
 
 func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	if !ic.ii.withLocalityIndex || ic.ii.localityIndex == nil {
+	if !ic.ii.withLocalityIndex || ic.ii.coldLocalityIdx == nil {
 		return
 	}
 	to := ic.maxFrozenStep()
-	if to == 0 || ic.ii.localityIndex.exists(to) {
+	if to == 0 || ic.ii.coldLocalityIdx.exists(to) {
 		return nil
 	}
 	defer ic.ii.EnableMadvNormalReadAhead().DisableReadAhead()
-	return ic.ii.localityIndex.BuildMissedIndices(ctx, to, func() *LocalityIterator { return ic.iterateKeysLocality(to * ic.ii.aggregationStep) })
+	return ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, to, func() *LocalityIterator { return ic.iterateKeysLocality(to * ic.ii.aggregationStep) })
 }
 
 func (dc *DomainContext) maxFrozenStep() uint64 {
