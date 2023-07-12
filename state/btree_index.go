@@ -111,7 +111,7 @@ type btAlloc struct {
 	trace   bool
 
 	dataLookup func(kBuf, vBuf []byte, di uint64) ([]byte, []byte, error)
-	keyCmp     func(k, kBuf []byte, di uint64) (int, error)
+	keyCmp     func(k, kBuf []byte, di uint64) (cmp int, outKBuf []byte, err error)
 }
 
 func newBtAlloc(k, M uint64, trace bool) *btAlloc {
@@ -413,11 +413,11 @@ func (a *btAlloc) traverseDfs() {
 
 func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err error) {
 	//i := 0
+	var cmp int
 	for l <= r {
 		di = (l + r) >> 1
 
-		cmp, err := a.keyCmp(k[:0], x, di)
-		//k, v, err = a.dataLookup(k[:0], v[:0], di)
+		cmp, k, err = a.keyCmp(k[:0], x, di)
 		a.naccess++
 
 		//i++
@@ -1107,13 +1107,13 @@ func (b *BtIndex) dataLookup(kBuf, vBuf []byte, di uint64) ([]byte, []byte, erro
 }
 
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
-func (b *BtIndex) keyCmp(kBuf, k []byte, di uint64) (int, error) {
+func (b *BtIndex) keyCmp(kBuf, k []byte, di uint64) (int, []byte, error) {
 	if di >= b.keyCount {
-		return 0, fmt.Errorf("%w: keyCount=%d, item %d requested. file: %s", ErrBtIndexLookupBounds, b.keyCount, di+1, b.FileName())
+		return 0, kBuf, fmt.Errorf("%w: keyCount=%d, item %d requested. file: %s", ErrBtIndexLookupBounds, b.keyCount, di+1, b.FileName())
 	}
 	p := int(b.dataoffset) + int(di)*b.bytesPerRec
 	if len(b.data) < p+b.bytesPerRec {
-		return 0, fmt.Errorf("data lookup gone too far (%d after %d). keyCount=%d, requesed item %d. file: %s", p+b.bytesPerRec-len(b.data), len(b.data), b.keyCount, di, b.FileName())
+		return 0, kBuf, fmt.Errorf("data lookup gone too far (%d after %d). keyCount=%d, requesed item %d. file: %s", p+b.bytesPerRec-len(b.data), len(b.data), b.keyCount, di, b.FileName())
 	}
 
 	var aux [8]byte
@@ -1123,12 +1123,12 @@ func (b *BtIndex) keyCmp(kBuf, k []byte, di uint64) (int, error) {
 	offset := binary.BigEndian.Uint64(aux[:])
 	b.getter.Reset(offset)
 	if !b.getter.HasNext() {
-		return 0, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
+		return 0, kBuf, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
 	}
 
 	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
 	kBuf, _ = b.getter.Next(kBuf[:0])
-	return bytes.Compare(kBuf, k), nil
+	return bytes.Compare(kBuf, k), kBuf, nil
 }
 
 func (b *BtIndex) Size() int64 { return b.size }
