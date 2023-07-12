@@ -411,13 +411,13 @@ func (a *btAlloc) traverseDfs() {
 	}
 }
 
-func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err error) {
+func (a *btAlloc) bsKey(x []byte, l, r uint64, kBuf, vBuf []byte) (k, v []byte, di uint64, found bool, err error) {
 	//i := 0
 	var cmp int
 	for l <= r {
 		di = (l + r) >> 1
 
-		cmp, k, err = a.keyCmp(k[:0], x, di)
+		cmp, kBuf, err = a.keyCmp(kBuf[:0], x, di)
 		a.naccess++
 
 		//i++
@@ -425,15 +425,15 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err erro
 		switch {
 		case err != nil:
 			if errors.Is(err, ErrBtIndexLookupBounds) {
-				return nil, nil, 0, nil
+				return kBuf, vBuf, 0, false, nil
 			}
-			return nil, nil, 0, err
+			return kBuf, vBuf, 0, false, err
 		case cmp == 0:
-			k, v, err = a.dataLookup(k[:0], v[:0], di)
+			k, v, err = a.dataLookup(kBuf[:0], vBuf[:0], di)
 			if errors.Is(err, ErrBtIndexLookupBounds) {
-				return nil, nil, 0, nil
+				return k, v, 0, false, nil
 			}
-			return k, v, di, err
+			return k, v, di, true, err
 		case cmp == -1:
 			l = di + 1
 		default:
@@ -446,14 +446,14 @@ func (a *btAlloc) bsKey(x []byte, l, r uint64) (k, v []byte, di uint64, err erro
 	//if i > 12 {
 	//	log.Warn("bsKey", "dataLookups", i)
 	//}
-	k, v, err = a.dataLookup(k[:0], v[:0], l)
+	k, v, err = a.dataLookup(kBuf[:0], vBuf[:0], l)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
-			return nil, nil, 0, nil
+			return k, v, 0, false, nil
 		}
-		return nil, nil, 0, fmt.Errorf("key >= %x was not found. %w", x, err)
+		return k, v, 0, false, fmt.Errorf("key >= %x was not found. %w", x, err)
 	}
-	return k, v, l, nil
+	return k, v, l, true, nil
 }
 
 func (a *btAlloc) bsNode(i, l, r uint64, x []byte) (n node, lm int64, rm int64) {
@@ -492,19 +492,19 @@ func (a *btAlloc) seekLeast(lvl, d uint64) uint64 {
 }
 
 func (a *btAlloc) Seek(ik []byte) (*Cursor, error) {
-	k, v, di, err := a.seek(ik)
+	k, v, di, found, err := a.seek(ik, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	if k == nil {
+	if !found {
 		return nil, nil
 	}
 	return a.newCursor(context.TODO(), k, v, di), nil
 }
 
-func (a *btAlloc) seek(ik []byte) (k, v []byte, di uint64, err error) {
+func (a *btAlloc) seek(seek, kBuf, vBuf []byte) (k, v []byte, di uint64, found bool, err error) {
 	if a.trace {
-		fmt.Printf("seek key %x\n", ik)
+		fmt.Printf("seek key %x\n", seek)
 	}
 
 	var (
@@ -520,15 +520,15 @@ func (a *btAlloc) seek(ik []byte) (k, v []byte, di uint64, err error) {
 			maxD = ln.d
 			break
 		}
-		ln, lm, rm = a.bsNode(uint64(l), L, R, ik)
+		ln, lm, rm = a.bsNode(uint64(l), L, R, seek)
 		if ln.key == nil { // should return node which is nearest to key from the left so never nil
 			if a.trace {
 				fmt.Printf("found nil key %x pos_range[%d-%d] naccess_ram=%d\n", l, lm, rm, a.naccess)
 			}
-			return nil, nil, 0, fmt.Errorf("bt index nil node at level %d", l)
+			return k, v, 0, false, fmt.Errorf("bt index nil node at level %d", l)
 		}
 		//fmt.Printf("b: %x, %x\n", ik, ln.key)
-		cmp := bytes.Compare(ln.key, ik)
+		cmp := bytes.Compare(ln.key, seek)
 		switch cmp {
 		case 1: // key > ik
 			maxD = ln.d
@@ -536,9 +536,11 @@ func (a *btAlloc) seek(ik []byte) (k, v []byte, di uint64, err error) {
 			minD = ln.d
 		case 0:
 			if a.trace {
-				fmt.Printf("found key %x v=%x naccess_ram=%d\n", ik, ln.val /*level[m].d,*/, a.naccess)
+				fmt.Printf("found key %x v=%x naccess_ram=%d\n", seek, ln.val /*level[m].d,*/, a.naccess)
 			}
-			return common.Copy(ln.key), common.Copy(ln.val), ln.d, nil
+			kBuf = append(kBuf[:0], ln.key...)
+			vBuf = append(vBuf[:0], ln.val...)
+			return kBuf, vBuf, ln.d, true, nil
 		}
 
 		if lm >= 0 {
@@ -571,23 +573,20 @@ func (a *btAlloc) seek(ik []byte) (k, v []byte, di uint64, err error) {
 
 	a.naccess = 0 // reset count before actually go to disk
 	if maxD-minD > a.M+2 {
-		log.Warn("too big binary search", "minD", minD, "maxD", maxD, "keysCount", a.K, "key", fmt.Sprintf("%x", ik))
+		log.Warn("too big binary search", "minD", minD, "maxD", maxD, "keysCount", a.K, "key", fmt.Sprintf("%x", seek))
 		//return nil, nil, 0, fmt.Errorf("too big binary search: minD=%d, maxD=%d, keysCount=%d, key=%x", minD, maxD, a.K, ik)
 	}
-	k, v, di, err = a.bsKey(ik, minD, maxD)
+	k, v, di, found, err = a.bsKey(seek, minD, maxD, kBuf, vBuf)
 	if err != nil {
 		if a.trace {
-			fmt.Printf("key %x not found\n", ik)
+			fmt.Printf("key %x not found\n", seek)
 		}
-		return nil, nil, 0, err
+		return k, v, 0, found, err
 	}
 	if a.trace {
 		fmt.Printf("finally found key %x v=%x naccess_disk=%d\n", k, v, a.naccess)
 	}
-	if k == nil {
-		return nil, nil, 0, nil
-	}
-	return k, v, di, nil
+	return k, v, di, found, nil
 }
 
 func (a *btAlloc) fillSearchMx() {
@@ -1079,11 +1078,11 @@ var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
 // di starts from 0 so di is never >= keyCount
 func (b *BtIndex) dataLookup(kBuf, vBuf []byte, di uint64) ([]byte, []byte, error) {
 	if di >= b.keyCount {
-		return nil, nil, fmt.Errorf("%w: keyCount=%d, item %d requested. file: %s", ErrBtIndexLookupBounds, b.keyCount, di+1, b.FileName())
+		return kBuf, vBuf, fmt.Errorf("%w: keyCount=%d, item %d requested. file: %s", ErrBtIndexLookupBounds, b.keyCount, di+1, b.FileName())
 	}
 	p := int(b.dataoffset) + int(di)*b.bytesPerRec
 	if len(b.data) < p+b.bytesPerRec {
-		return nil, nil, fmt.Errorf("data lookup gone too far (%d after %d). keyCount=%d, requesed item %d. file: %s", p+b.bytesPerRec-len(b.data), len(b.data), b.keyCount, di, b.FileName())
+		return kBuf, vBuf, fmt.Errorf("data lookup gone too far (%d after %d). keyCount=%d, requesed item %d. file: %s", p+b.bytesPerRec-len(b.data), len(b.data), b.keyCount, di, b.FileName())
 	}
 
 	var aux [8]byte
@@ -1093,13 +1092,13 @@ func (b *BtIndex) dataLookup(kBuf, vBuf []byte, di uint64) ([]byte, []byte, erro
 	offset := binary.BigEndian.Uint64(aux[:])
 	b.getter.Reset(offset)
 	if !b.getter.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
+		return kBuf, vBuf, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
 	}
 
 	key, kp := b.getter.Next(kBuf[:0])
 
 	if !b.getter.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
+		return kBuf, vBuf, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
 	}
 	val, vp := b.getter.Next(vBuf[:0])
 	_, _ = kp, vp
@@ -1163,29 +1162,29 @@ func (b *BtIndex) Close() {
 }
 
 // Get - exact match of key. `k == nil` - means not found
-func (b *BtIndex) Get(lookup []byte) (k, v []byte, err error) {
+func (b *BtIndex) Get(lookup, kBuf, vBuf []byte) (k, v []byte, found bool, err error) {
 	// TODO: optimize by "push-down" - instead of using seek+compare, alloc can have method Get which will return nil if key doesn't exists
 	// alternativaly: can allocate cursor on-stack
 	// 	it := Iter{} // allocation on stack
 	//  it.Initialize(file)
 
 	if b.Empty() {
-		return nil, nil, nil
+		return kBuf, vBuf, false, nil
 	}
 	if b.alloc == nil {
-		return nil, nil, err
+		return kBuf, vBuf, false, err
 	}
-	k, v, _, err = b.alloc.seek(lookup)
+	k, v, _, found, err = b.alloc.seek(lookup, kBuf, vBuf)
 	if err != nil {
-		return nil, nil, err
+		return k, v, false, err
 	}
-	if k == nil {
-		return nil, nil, nil
+	if !found {
+		return k, v, false, nil
 	}
 	if !bytes.Equal(k, lookup) {
-		return nil, nil, nil
+		return k, v, false, nil
 	}
-	return k, v, nil
+	return k, v, true, nil
 }
 
 func (b *BtIndex) Seek(x []byte) (*Cursor, error) {
