@@ -1126,9 +1126,9 @@ func (b *BtIndex) keyCmp(kBuf, k []byte, di uint64) (int, []byte, error) {
 	}
 
 	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
-	kBuf, _ = b.getter.Next(kBuf[:0])
-	return bytes.Compare(kBuf, k), kBuf, nil
-	//return -b.getter.Match(k), kBuf, nil
+	//kBuf, _ = b.getter.Next(kBuf[:0])
+	//return bytes.Compare(kBuf, k), kBuf, nil
+	return -b.getter.Match(k), kBuf, nil
 }
 
 func (b *BtIndex) Size() int64 { return b.size }
