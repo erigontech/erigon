@@ -1331,7 +1331,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		lastInDB := lastIdInDB(a.db, a.accounts.valsTable)
-		hasData = lastInDB >= step
+		hasData = lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
 			close(fin)
 			return
@@ -1341,7 +1341,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		// - to reduce amount of small merges
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
-		for step <= lastIdInDB(a.db, a.accounts.valsTable) {
+		for ; step < lastIdInDB(a.db, a.accounts.valsTable); step++ { //`step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) {
 					close(fin)
@@ -1350,7 +1350,6 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 				log.Warn("[snapshots] buildFilesInBackground", "err", err)
 				break
 			}
-			step++
 		}
 
 		//TODO: disabling merge until sepolia/mainnet execution works

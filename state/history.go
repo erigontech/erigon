@@ -1174,6 +1174,11 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 }
 
 func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+	historyKeysCursorForDeletes, err := h.tx.RwCursorDupSort(h.indexKeysTable)
+	if err != nil {
+		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
+	}
+	defer historyKeysCursorForDeletes.Close()
 	historyKeysCursor, err := h.tx.RwCursorDupSort(h.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
@@ -1225,7 +1230,10 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 			}
 		}
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if err = historyKeysCursor.DeleteCurrent(); err != nil {
+		if _, _, err = historyKeysCursorForDeletes.SeekBothExact(k, v); err != nil {
+			return err
+		}
+		if err = historyKeysCursorForDeletes.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
