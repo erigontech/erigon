@@ -15,18 +15,16 @@ import (
 	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 const (
-	LEN_BLOB = params.FieldElementsPerBlob * 32 // 131072
-	LEN_48   = 48                               // KZGCommitment & KZGProof sizes
+	LEN_48 = 48 // KZGCommitment & KZGProof sizes
 )
 
 type KZGCommitment [LEN_48]byte // Compressed BLS12-381 G1 element
 type KZGProof [LEN_48]byte
-type Blob [LEN_BLOB]byte
+type Blob [chain.BlobSize]byte
 
 type BlobKzgs []KZGCommitment
 type KZGProofs []KZGProof
@@ -42,9 +40,9 @@ type BlobTxWrapper struct {
 /* Blob methods */
 
 func (b *Blob) payloadSize() int {
-	size := 1                                             // 0xb7..0xbf
-	size += libcommon.BitLenToByteLen(bits.Len(LEN_BLOB)) // params.FieldElementsPerBlob * 32 = 131072 (length encoding size)
-	size += LEN_BLOB                                      // byte_array it self
+	size := 1                                                   // 0xb7..0xbf
+	size += libcommon.BitLenToByteLen(bits.Len(chain.BlobSize)) // length encoding size
+	size += chain.BlobSize                                      // byte_array it self
 	return size
 }
 
@@ -188,7 +186,7 @@ func (blobs *Blobs) DecodeRLP(s *rlp.Stream) error {
 	blob := Blob{}
 
 	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) == LEN_BLOB {
+		if len(b) == chain.BlobSize {
 			copy((blob)[:], b)
 			*blobs = append(*blobs, blob)
 		} else {
@@ -272,7 +270,7 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	// the following check isn't strictly necessary as it would be caught by data gas processing
 	// (and hence it is not explicitly in the spec for this function), but it doesn't hurt to fail
 	// early in case we are getting spammed with too many blobs or there is a bug somewhere:
-	if uint64(l1) > params.MaxBlobsPerBlock {
+	if uint64(l1) > chain.MaxBlobsPerBlock {
 		return fmt.Errorf("number of blobs exceeds max: %v", l1)
 	}
 	kzgCtx := libkzg.Ctx()
