@@ -1453,40 +1453,6 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 
-	var ok bool
-	for i := len(dc.files) - 1; i >= 0; i-- {
-		v, ok, err = dc.statelessBtree(i).Get(filekey)
-		if err != nil {
-			return nil, false, err
-		}
-		if !ok {
-			continue
-		}
-		found = true
-
-		if COMPARE_INDEXES {
-			rd := recsplit.NewIndexReader(dc.files[i].src.index)
-			oft := rd.Lookup(filekey)
-			gt := dc.statelessGetter(i)
-			gt.Reset(oft)
-			var kk, vv []byte
-			if gt.HasNext() {
-				kk, _ = gt.Next(nil)
-				vv, _ = gt.Next(nil)
-			}
-			fmt.Printf("key: %x, val: %x\n", kk, vv)
-			if !bytes.Equal(vv, v) {
-				panic("not equal")
-			}
-		}
-		break
-	}
-	return v, found, nil
-}
-
-func (dc *DomainContext) getLatestFromFiles2(filekey []byte) (v []byte, found bool, err error) {
-	dc.d.stats.FilesQueries.Add(1)
-
 	// cold data lookup
 	exactStep1, exactStep2, lastIndexedTxNum, foundExactShard1, foundExactShard2 := dc.d.domainLocalityIndex.lookupIdxFiles(dc.loc, filekey, 0)
 	_ = lastIndexedTxNum

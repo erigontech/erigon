@@ -268,12 +268,12 @@ func (li *LocalityIndex) lookupIdxFiles(loc *ctxLocalityIdx, key []byte, fromTxN
 	}
 
 	fromFileNum := fromTxNum / li.aggregationStep / StepsInBiggestFile
-	fmt.Printf("fromFileNum: %x, %d, %d\n", key, loc.reader.Lookup(key), fromFileNum)
+	//fmt.Printf("fromFileNum: %x, %d, %d\n", key, loc.reader.Lookup(key), fromFileNum)
 	fn1, fn2, ok1, ok2, err := loc.bm.First2At(loc.reader.Lookup(key), fromFileNum)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("First2At: %x, %d, %d\n", key, fn1, fn2)
+	//fmt.Printf("First2At: %x, %d, %d\n", key, fn1, fn2)
 	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, loc.file.endTxNum, ok1, ok2
 }
 

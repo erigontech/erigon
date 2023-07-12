@@ -140,9 +140,9 @@ func TestLocalityDomain(t *testing.T) {
 
 	_, _ = ctx, data
 	t.Run("locality iterator", func(t *testing.T) {
-		ic := dom.MakeContext()
-		defer ic.Close()
-		it := ic.iterateKeysLocality(math.MaxUint64)
+		dc := dom.MakeContext()
+		defer dc.Close()
+		it := dc.iterateKeysLocality(math.MaxUint64)
 		require.True(it.HasNext())
 		key, bitmap := it.Next()
 		require.Equal(uint64(0), binary.BigEndian.Uint64(key))
