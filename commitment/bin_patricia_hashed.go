@@ -746,7 +746,7 @@ func (bph *BinPatriciaHashed) computeBinaryCellHash(cell *BinaryCell, depth int,
 		var valBuf [128]byte
 		valLen := cell.accountForHashing(valBuf[:], storageRootHash)
 		if bph.trace {
-			fmt.Printf("accountLeafHashWithKey for [%x]=>[%x]\n", bph.hashAuxBuffer[:halfKeySize+1-depth], valBuf[:valLen])
+			fmt.Printf("accountLeafHashWithKey for [%x]=>[%x]\n", cell.downHashedKey[:halfKeySize+1-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
 		}
 		return bph.accountLeafHashWithKey(buf, cell.downHashedKey[:halfKeySize+1-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
 	}
@@ -1553,7 +1553,7 @@ func (bph *BinPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 			}
 			if update.Flags&BalanceUpdate != 0 {
 				if bph.trace {
-					fmt.Printf(" balance=%d", update.Balance.Uint64())
+					fmt.Printf(" balance=%d", &update.Balance)
 				}
 				cell.Balance.Set(&update.Balance)
 			}

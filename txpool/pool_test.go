@@ -1,5 +1,5 @@
 /*
-   Copyright 2021 Erigon contributors
+   Copyright 2021 The Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -37,8 +37,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestNonceFromAddress(t *testing.T) {
@@ -48,7 +48,7 @@ func TestNonceFromAddress(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, log.New())
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, log.New())
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
@@ -124,7 +124,7 @@ func TestNonceFromAddress(t *testing.T) {
 		assert.True(ok)
 		assert.Equal(uint64(6), nonce)
 	}
-	// test too expencive tx
+	// test too expensive tx
 	{
 		var txSlots types.TxSlots
 		txSlot1 := &types.TxSlot{
@@ -168,7 +168,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, log.New())
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, log.New())
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
@@ -285,7 +285,7 @@ func TestReverseNonces(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, log.New())
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, log.New())
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
@@ -403,7 +403,7 @@ func TestReverseNonces(t *testing.T) {
 
 // When local transaction is send to the pool, but it cannot replace existing transaction,
 // the existing transaction gets "poked" and is getting re-broadcasted
-// this is a workaround for cases when transactions are getting stuck for strage reasons
+// this is a workaround for cases when transactions are getting stuck for strange reasons
 // even though logs show they are broadcast
 func TestTxPoke(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
@@ -412,7 +412,7 @@ func TestTxPoke(t *testing.T) {
 
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, log.New())
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, log.New())
 	assert.NoError(err)
 	require.True(pool != nil)
 	ctx := context.Background()
@@ -677,7 +677,7 @@ func TestShanghaiValidateTx(t *testing.T) {
 			}
 
 			cache := &kvcache.DummyCache{}
-			pool, err := New(ch, coreDB, cfg, cache, *u256.N1, shanghaiTime, logger)
+			pool, err := New(ch, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* cancunTime */, logger)
 			asrt.NoError(err)
 			ctx := context.Background()
 			tx, err := coreDB.BeginRw(ctx)
