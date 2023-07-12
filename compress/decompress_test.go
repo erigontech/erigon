@@ -84,8 +84,8 @@ func TestDecompressMatchOK(t *testing.T) {
 		w := loremStrings[i]
 		if i%2 != 0 {
 			expected := fmt.Sprintf("%s %d", w, i)
-			ok, _ := g.Match([]byte(expected))
-			if !ok {
+			cmp := g.Match([]byte(expected))
+			if cmp != 0 {
 				t.Errorf("expexted match with %s", expected)
 			}
 		} else {
@@ -136,8 +136,8 @@ func TestDecompressMatchOKCondensed(t *testing.T) {
 	for g.HasNext() {
 		if i%2 != 0 {
 			expected := fmt.Sprintf("word-%d", i)
-			ok, _ := g.Match([]byte(expected))
-			if !ok {
+			cmp := g.Match([]byte(expected))
+			if cmp != 0 {
 				t.Errorf("expexted match with %s", expected)
 			}
 		} else {
@@ -161,8 +161,8 @@ func TestDecompressMatchNotOK(t *testing.T) {
 		w := loremStrings[i]
 		expected := fmt.Sprintf("%s %d", w, i+1)
 
-		ok, _ := g.Match([]byte(expected))
-		if ok {
+		cmp := g.Match([]byte(expected))
+		if cmp == 0 {
 			t.Errorf("not expexted match with %s", expected)
 		} else {
 			g.Skip()
