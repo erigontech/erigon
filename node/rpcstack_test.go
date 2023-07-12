@@ -50,7 +50,7 @@ func TestCorsHandler(t *testing.T) {
 	assert.Equal(t, "", resp2.Header.Get("Access-Control-Allow-Origin"))
 }
 
-// TestVhosts makes sure vhosts are properly handled on the http server.
+// TestVhosts makes sure vhosts is properly handled on the http server.
 func TestVhosts(t *testing.T) {
 	srv := createAndStartServer(t, &httpConfig{Vhosts: []string{"test"}}, false, &wsConfig{})
 	defer srv.stop()
@@ -63,6 +63,21 @@ func TestVhosts(t *testing.T) {
 	resp2 := rpcRequest(t, url, "host", "bad")
 	defer resp2.Body.Close()
 	assert.Equal(t, resp2.StatusCode, http.StatusForbidden)
+}
+
+// TestVhostsAny makes sure vhosts any is properly handled on the http server.
+func TestVhostsAny(t *testing.T) {
+	srv := createAndStartServer(t, &httpConfig{Vhosts: []string{"any"}}, false, &wsConfig{})
+	defer srv.stop()
+	url := "http://" + srv.listenAddr()
+
+	resp := rpcRequest(t, url, "host", "test")
+	defer resp.Body.Close()
+	assert.Equal(t, resp.StatusCode, http.StatusOK)
+
+	resp2 := rpcRequest(t, url, "host", "bad")
+	defer resp2.Body.Close()
+	assert.Equal(t, resp.StatusCode, http.StatusOK)
 }
 
 type originTest struct {

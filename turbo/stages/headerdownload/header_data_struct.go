@@ -8,15 +8,14 @@ import (
 	"time"
 
 	"github.com/google/btree"
-	"github.com/hashicorp/golang-lru/v2"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -261,17 +260,17 @@ type HeaderDownload struct {
 	requestId            int
 	posAnchor            *Anchor
 	posStatus            SyncStatus
-	posSync              bool                         // Whether the chain is syncing in the PoS mode
-	headersCollector     *etl.Collector               // ETL collector for headers
-	BeaconRequestList    *engineapi.RequestList       // Requests from ethbackend to staged sync
-	PayloadStatusCh      chan engineapi.PayloadStatus // Responses (validation/execution status)
-	ShutdownCh           chan struct{}                // Channel to signal shutdown
-	pendingPayloadHash   common.Hash                  // Header whose status we still should send to PayloadStatusCh
-	pendingPayloadStatus *engineapi.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
-	unsettledForkChoice  *engineapi.ForkChoiceMessage // Forkchoice to process after unwind
-	unsettledHeadHeight  uint64                       // Height of unsettledForkChoice.headBlockHash
-	posDownloaderTip     common.Hash                  // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
-	badPoSHeaders        map[common.Hash]common.Hash  // Invalid Tip -> Last Valid Ancestor
+	posSync              bool                            // Whether the chain is syncing in the PoS mode
+	headersCollector     *etl.Collector                  // ETL collector for headers
+	BeaconRequestList    *engine_helpers.RequestList     // Requests from ethbackend to staged sync
+	PayloadStatusCh      chan engine_types.PayloadStatus // Responses (validation/execution status)
+	ShutdownCh           chan struct{}                   // Channel to signal shutdown
+	pendingPayloadHash   common.Hash                     // Header whose status we still should send to PayloadStatusCh
+	pendingPayloadStatus *engine_types.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
+	unsettledForkChoice  *engine_types.ForkChoiceState   // Forkchoice to process after unwind
+	unsettledHeadHeight  uint64                          // Height of unsettledForkChoice.headBlockHash
+	posDownloaderTip     common.Hash                     // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
+	badPoSHeaders        map[common.Hash]common.Hash     // Invalid Tip -> Last Valid Ancestor
 	logger               log.Logger
 }
 
@@ -302,8 +301,8 @@ func NewHeaderDownload(
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
 		QuitPoWMining:      make(chan struct{}),
-		BeaconRequestList:  engineapi.NewRequestList(),
-		PayloadStatusCh:    make(chan engineapi.PayloadStatus, 1),
+		BeaconRequestList:  engine_helpers.NewRequestList(),
+		PayloadStatusCh:    make(chan engine_types.PayloadStatus, 1),
 		ShutdownCh:         make(chan struct{}),
 		headerReader:       headerReader,
 		badPoSHeaders:      make(map[common.Hash]common.Hash),
@@ -385,16 +384,14 @@ type HeaderInserter struct {
 	highestTimestamp uint64
 	canonicalCache   *lru.Cache[uint64, common.Hash]
 	headerReader     services.HeaderAndCanonicalReader
-	headerWriter     *blockio.BlockWriter
 }
 
-func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64, headerReader services.HeaderAndCanonicalReader, headerWriter *blockio.BlockWriter) *HeaderInserter {
+func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64, headerReader services.HeaderAndCanonicalReader) *HeaderInserter {
 	hi := &HeaderInserter{
 		logPrefix:    logPrefix,
 		localTd:      localTd,
 		unwindPoint:  headerProgress,
 		headerReader: headerReader,
-		headerWriter: headerWriter,
 	}
 	hi.canonicalCache, _ = lru.New[uint64, common.Hash](1000)
 	return hi

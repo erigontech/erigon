@@ -162,18 +162,10 @@ const (
 	RefundQuotient        uint64 = 2
 	RefundQuotientEIP3529 uint64 = 5
 
-	// stuff from EIP-4844
-	FieldElementsPerBlob              = 4096 // each field element is 32 bytes
-	MaxDataGasPerBlock                = 1 << 19
-	DataGasPerBlob                    = 1 << 17
-	TargetDataGasPerBlock      uint64 = 1 << 18
+	// EIP-4844: Shard Blob Transactions
 	MinDataGasPrice                   = 1
-	DataGasPriceUpdateFraction        = 2225652
-	MaxBlobsPerBlock                  = MaxDataGasPerBlock / DataGasPerBlob
-
-	BlobVerificationGas      uint64 = 1800000
-	BlobCommitmentVersionKZG uint8  = 0x01
-	PointEvaluationGas       uint64 = 50000
+	DataGasPriceUpdateFraction        = 3338477
+	PointEvaluationGas         uint64 = 50000
 )
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations

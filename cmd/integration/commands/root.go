@@ -2,16 +2,20 @@ package commands
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
@@ -21,12 +25,29 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
+func expandHomeDir(dirpath string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return dirpath
+	}
+	prefix := fmt.Sprintf("~%c", os.PathSeparator)
+	if strings.HasPrefix(dirpath, prefix) {
+		return filepath.Join(home, dirpath[len(prefix):])
+	} else if dirpath == "~" {
+		return home
+	}
+	return dirpath
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "integration",
 	Short: "long and heavy integration tests for Erigon",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		datadirCli = expandHomeDir(datadirCli)
 		if chaindata == "" {
 			chaindata = filepath.Join(datadirCli, "chaindata")
+		} else {
+			chaindata = expandHomeDir(chaindata)
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

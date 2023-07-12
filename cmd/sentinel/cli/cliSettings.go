@@ -1,10 +1,15 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/common"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/urfave/cli/v2"
@@ -17,27 +22,34 @@ import (
 )
 
 type ConsensusClientCliCfg struct {
-	GenesisCfg       *clparams.GenesisConfig     `json:"genesisCfg"`
-	BeaconCfg        *clparams.BeaconChainConfig `json:"beaconCfg"`
-	NetworkCfg       *clparams.NetworkConfig     `json:"networkCfg"`
-	BeaconDataCfg    *rawdb.BeaconDataConfig     `json:"beaconDataConfig"`
-	Port             uint                        `json:"port"`
-	Addr             string                      `json:"address"`
-	ServerAddr       string                      `json:"serverAddr"`
-	ServerProtocol   string                      `json:"serverProtocol"`
-	ServerTcpPort    uint                        `json:"serverTcpPort"`
-	LogLvl           uint                        `json:"logLevel"`
-	NoDiscovery      bool                        `json:"noDiscovery"`
-	CheckpointUri    string                      `json:"checkpointUri"`
-	Chaindata        string                      `json:"chaindata"`
-	ErigonPrivateApi string                      `json:"erigonPrivateApi"`
-	TransitionChain  bool                        `json:"transitionChain"`
-	NetworkType      clparams.NetworkType        `json:"networkType"`
-	InitialSync      bool                        `json:"initialSync"`
-	BeaconAddr       string                      `json:"beaconAddr"`
-	BeaconProtocol   string                      `json:"beaconProtocol"`
-	RecordMode       bool                        `json:"recordMode"`
-	RecordDir        string                      `json:"recordDir"`
+	GenesisCfg            *clparams.GenesisConfig
+	BeaconCfg             *clparams.BeaconChainConfig
+	NetworkCfg            *clparams.NetworkConfig
+	BeaconDataCfg         *rawdb.BeaconDataConfig
+	Port                  uint   `json:"port"`
+	Addr                  string `json:"address"`
+	ServerAddr            string `json:"serverAddr"`
+	ServerProtocol        string `json:"serverProtocol"`
+	ServerTcpPort         uint   `json:"serverTcpPort"`
+	LogLvl                uint   `json:"logLevel"`
+	NoDiscovery           bool   `json:"noDiscovery"`
+	CheckpointUri         string `json:"checkpointUri"`
+	Chaindata             string `json:"chaindata"`
+	ErigonPrivateApi      string `json:"erigonPrivateApi"`
+	TransitionChain       bool   `json:"transitionChain"`
+	NetworkType           clparams.NetworkType
+	InitialSync           bool          `json:"initialSync"`
+	NoBeaconApi           bool          `json:"noBeaconApi"`
+	BeaconApiReadTimeout  time.Duration `json:"beaconApiReadTimeout"`
+	BeaconApiWriteTimeout time.Duration `json:"beaconApiWriteTimeout"`
+	BeaconAddr            string        `json:"beaconAddr"`
+	BeaconProtocol        string        `json:"beaconProtocol"`
+	RecordMode            bool          `json:"recordMode"`
+	RecordDir             string        `json:"recordDir"`
+	RunEngineAPI          bool          `json:"run_engine_api"`
+	EngineAPIAddr         string        `json:"engine_api_addr"`
+	EngineAPIPort         int           `json:"engine_api_port"`
+	JwtSecret             []byte
 
 	InitalState *state.BeaconState
 }
@@ -75,10 +87,26 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.String(flags.SentinelServerAddr.Name), ctx.Int(flags.SentinelServerPort.Name))
 	cfg.ServerProtocol = "tcp"
 
+	cfg.NoBeaconApi = ctx.Bool(flags.NoBeaconApi.Name)
+	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(flags.BeaconApiReadTimeout.Name)) * time.Second
+	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint(flags.BeaconApiWriteTimeout.Name)) * time.Second
 	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(flags.BeaconApiAddr.Name), ctx.Int(flags.BeaconApiPort.Name))
 	cfg.BeaconProtocol = "tcp"
 	cfg.RecordMode = ctx.Bool(flags.RecordModeFlag.Name)
 	cfg.RecordDir = ctx.String(flags.RecordModeDir.Name)
+
+	cfg.RunEngineAPI = ctx.Bool(flags.RunEngineAPI.Name)
+	cfg.EngineAPIAddr = ctx.String(flags.EngineApiHostFlag.Name)
+	cfg.EngineAPIPort = ctx.Int(flags.EngineApiPortFlag.Name)
+	if cfg.RunEngineAPI {
+		secret, err := ObtainJwtSecret(ctx)
+		if err != nil {
+			log.Error("Failed to obtain jwt secret", "err", err)
+			cfg.RunEngineAPI = false
+		} else {
+			cfg.JwtSecret = secret
+		}
+	}
 
 	cfg.Port = uint(ctx.Int(flags.SentinelDiscoveryPort.Name))
 	cfg.Addr = ctx.String(flags.SentinelDiscoveryAddr.Name)
@@ -108,4 +136,22 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg.TransitionChain = ctx.Bool(flags.TransitionChainFlag.Name)
 	cfg.InitialSync = ctx.Bool(flags.InitSyncFlag.Name)
 	return cfg, nil
+}
+
+func ObtainJwtSecret(ctx *cli.Context) ([]byte, error) {
+	path := ctx.String(flags.JwtSecret.Name)
+	if len(strings.TrimSpace(path)) == 0 {
+		return nil, errors.New("Missing jwt secret path")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	jwtSecret := common.FromHex(strings.TrimSpace(string(data)))
+	if len(jwtSecret) == 32 {
+		return jwtSecret, nil
+	}
+
+	return nil, fmt.Errorf("Invalid JWT secret at %s, invalid size", path)
 }

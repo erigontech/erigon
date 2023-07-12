@@ -14,12 +14,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 )
 
 type Eth1Execution struct {
@@ -27,15 +26,13 @@ type Eth1Execution struct {
 
 	db          kv.RwDB
 	blockReader services.FullBlockReader
-	blockWriter *blockio.BlockWriter
 	mu          sync.Mutex
 }
 
-func NewEth1Execution(db kv.RwDB, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter) *Eth1Execution {
+func NewEth1Execution(db kv.RwDB, blockReader services.FullBlockReader) *Eth1Execution {
 	return &Eth1Execution{
 		db:          db,
 		blockReader: blockReader,
-		blockWriter: blockWriter,
 	}
 }
 
@@ -53,7 +50,7 @@ func (e *Eth1Execution) InsertHeaders(ctx context.Context, req *execution.Insert
 		if err != nil {
 			return nil, err
 		}
-		if err := e.blockWriter.WriteHeader(tx, h); err != nil {
+		if err := rawdb.WriteHeader(tx, h); err != nil {
 			return nil, err
 		}
 	}
@@ -88,7 +85,7 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 				Amount:    withdrawal.Amount,
 			})
 		}
-		if _, err := e.blockWriter.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
+		if _, err := rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
 			body.BlockNumber, &types.RawBody{
 				Transactions: body.Transactions,
 				Uncles:       uncles,
@@ -200,7 +197,7 @@ func (e *Eth1Execution) GetBody(ctx context.Context, req *execution.GetSegmentRe
 	if err != nil {
 		return nil, err
 	}
-	rpcWithdrawals := privateapi.ConvertWithdrawalsToRpc(body.Withdrawals)
+	rpcWithdrawals := engineapi.ConvertWithdrawalsToRpc(body.Withdrawals)
 	unclesRpc := make([]*execution.Header, 0, len(body.Uncles))
 	for _, uncle := range body.Uncles {
 		unclesRpc = append(unclesRpc, HeaderToHeaderRPC(uncle))

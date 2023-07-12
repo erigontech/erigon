@@ -17,12 +17,10 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func TestSenders(t *testing.T) {
-	logger := log.New()
 	require := require.New(t)
 
 	m := stages2.Mock(t)
@@ -30,7 +28,7 @@ func TestSenders(t *testing.T) {
 	tx, err := db.BeginRw(m.Ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	br, bw := m.NewBlocksIO()
+	br := m.BlockReader
 
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
@@ -42,11 +40,11 @@ func TestSenders(t *testing.T) {
 	}
 
 	// prepare tx so it works with our test
-	signer1 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64())
+	signer1 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64(), 0)
 	header := &types.Header{Number: libcommon.Big1}
 	hash := header.Hash()
-	require.NoError(bw.WriteHeader(tx, header))
-	require.NoError(bw.WriteBody(tx, hash, 1, &types.Body{
+	require.NoError(rawdb.WriteHeader(tx, header))
+	require.NoError(rawdb.WriteBody(tx, hash, 1, &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(&types.AccessListTx{
 				LegacyTx: types.LegacyTx{
@@ -74,11 +72,11 @@ func TestSenders(t *testing.T) {
 	}))
 	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 1))
 
-	signer2 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64())
+	signer2 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64(), 0)
 	header.Number = libcommon.Big2
 	hash = header.Hash()
-	require.NoError(bw.WriteHeader(tx, header))
-	require.NoError(bw.WriteBody(tx, hash, 2, &types.Body{
+	require.NoError(rawdb.WriteHeader(tx, header))
+	require.NoError(rawdb.WriteBody(tx, hash, 2, &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(&types.AccessListTx{
 				LegacyTx: types.LegacyTx{
@@ -120,8 +118,8 @@ func TestSenders(t *testing.T) {
 
 	header.Number = libcommon.Big3
 	hash = header.Hash()
-	require.NoError(bw.WriteHeader(tx, header))
-	err = bw.WriteBody(tx, hash, 3, &types.Body{
+	require.NoError(rawdb.WriteHeader(tx, header))
+	err = rawdb.WriteBody(tx, hash, 3, &types.Body{
 		Transactions: []types.Transaction{}, Uncles: []*types.Header{{GasLimit: 3}},
 	})
 	require.NoError(err)
@@ -130,8 +128,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	blockRetire := snapshotsync.NewBlockRetire(1, "", br, bw, db, nil, nil, logger)
-	cfg := stagedsync.StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, blockRetire, bw, br, nil)
+	cfg := stagedsync.StageSendersCfg(db, params.TestChainConfig, false, "", prune.Mode{}, br, nil)
 	err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 3, m.Ctx, log.New())
 	require.NoError(err)
 

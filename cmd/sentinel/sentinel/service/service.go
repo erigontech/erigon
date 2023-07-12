@@ -253,35 +253,6 @@ func (s *SentinelServer) ListenToGossip() {
 	}
 }
 
-var sentinelLoopInterval = 4 * time.Hour
-
-func (s *SentinelServer) startServerBackgroundLoop() {
-	var err error
-	ticker := time.NewTicker(sentinelLoopInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			s.mu.Lock()
-			peers := s.sentinel.PeersList()
-			s.sentinel.Stop()
-			status := s.sentinel.Status()
-			s.sentinel, err = createSentinel(s.sentinel.Config(), s.sentinel.DB(), s.logger)
-			if err != nil {
-				log.Warn("Could not coordinate sentinel", "err", err)
-				continue
-			}
-			s.sentinel.SetStatus(status)
-			for _, peer := range peers {
-				s.sentinel.ConnectWithPeer(s.ctx, peer, true)
-			}
-			s.mu.Unlock()
-		case <-s.ctx.Done():
-			return
-		}
-	}
-}
-
 func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
 	var err error
 	s.logger.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.Topic)

@@ -96,7 +96,7 @@ var Defaults = Config{
 	RPCTxFeeCap:      1, // 1 ether
 
 	ImportMode: false,
-	Snapshot: Snapshot{
+	Snapshot: BlocksFreezing{
 		Enabled:    false,
 		KeepBlocks: false,
 		Produce:    true,
@@ -130,7 +130,7 @@ func init() {
 
 //go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
 
-type Snapshot struct {
+type BlocksFreezing struct {
 	Enabled        bool
 	KeepBlocks     bool // produce new snapshots of blocks but don't remove blocks from DB
 	Produce        bool // produce new snapshots
@@ -139,7 +139,7 @@ type Snapshot struct {
 	DownloaderAddr string
 }
 
-func (s Snapshot) String() string {
+func (s BlocksFreezing) String() string {
 	var out []string
 	if s.Enabled {
 		out = append(out, "--snapshots=true")
@@ -158,8 +158,8 @@ var (
 	FlagSnapStop       = "snap.stop"
 )
 
-func NewSnapCfg(enabled, keepBlocks, produce bool) Snapshot {
-	return Snapshot{Enabled: enabled, KeepBlocks: keepBlocks, Produce: produce}
+func NewSnapCfg(enabled, keepBlocks, produce bool) BlocksFreezing {
+	return BlocksFreezing{Enabled: enabled, KeepBlocks: keepBlocks, Produce: produce}
 }
 
 // Config contains configuration options for ETH protocol.
@@ -186,7 +186,7 @@ type Config struct {
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 
-	Snapshot   Snapshot
+	Snapshot   BlocksFreezing
 	Downloader *downloadercfg.Cfg
 
 	Dirs datadir.Dirs

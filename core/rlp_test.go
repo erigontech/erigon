@@ -18,7 +18,6 @@
 package core
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"testing"
@@ -26,7 +25,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -38,8 +36,7 @@ import (
 )
 
 func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string) *types.Block {
-	logger := log.New()
-	_, db, _ := temporal.NewTestDB(tb, context.Background(), datadir.New(tmpDir), nil, logger)
+	_, db, _ := temporal.NewTestDB(tb, datadir.New(tmpDir), nil)
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
 		// Generate a canonical chain to act as the main dataset
@@ -56,20 +53,19 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 	)
 
 	// We need to generate as many blocks +1 as uncles
-	chain, _ := GenerateChain(params.TestChainConfig, genesis, engine, db, uncles+1,
-		func(n int, b *BlockGen) {
-			if n == uncles {
-				// Add transactions and stuff on the last block
-				for i := 0; i < transactions; i++ {
-					tx, _ := types.SignTx(types.NewTransaction(uint64(i), aa,
-						u256.Num0, 50000, u256.Num1, make([]byte, dataSize)), *types.LatestSignerForChainID(nil), key)
-					b.AddTx(tx)
-				}
-				for i := 0; i < uncles; i++ {
-					b.AddUncle(&types.Header{ParentHash: b.PrevBlock(n - 1 - i).Hash(), Number: big.NewInt(int64(n - i))})
-				}
+	chain, _ := GenerateChain(params.TestChainConfig, genesis, engine, db, uncles+1, func(n int, b *BlockGen) {
+		if n == uncles {
+			// Add transactions and stuff on the last block
+			for i := 0; i < transactions; i++ {
+				tx, _ := types.SignTx(types.NewTransaction(uint64(i), aa,
+					u256.Num0, 50000, u256.Num1, make([]byte, dataSize)), *types.LatestSignerForChainID(nil), key)
+				b.AddTx(tx)
 			}
-		}, false /* intermediateHashes */)
+			for i := 0; i < uncles; i++ {
+				b.AddUncle(&types.Header{ParentHash: b.PrevBlock(n - 1 - i).Hash(), Number: big.NewInt(int64(n - i))})
+			}
+		}
+	})
 	block := chain.TopBlock
 	return block
 }

@@ -29,7 +29,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -163,7 +162,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			return nil, err
 		}
 
-		it, err := ttx.DomainRange(temporal.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults+1)
+		it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults+1)
 		if err != nil {
 			return nil, err
 		}
@@ -172,16 +171,15 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			if err != nil {
 				return nil, err
 			}
-			//TODO: what to do in this case? maybe iterator must skip this values??
-			if len(v) == 0 {
-				continue
-			}
 			if maxResults > 0 && numberOfResults >= maxResults {
 				if nextKey == nil {
 					nextKey = make([]byte, len(k))
 				}
 				copy(nextKey, k)
 				break
+			}
+			if len(v) == 0 {
+				continue
 			}
 
 			if e := acc.DecodeForStorage(v); e != nil {
@@ -261,7 +259,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
 			if d.historyV3 {
-				r, err := d.db.(kv.TemporalTx).DomainRange(temporal.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
+				r, err := d.db.(kv.TemporalTx).DomainRange(kv.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
 				if err != nil {
 					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 				}

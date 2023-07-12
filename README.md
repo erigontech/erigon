@@ -1,6 +1,6 @@
 # Erigon
 
-Erigon is an implementation of Ethereum (execution client with light client for consensus layer), on the efficiency
+Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
 frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
 by default.
 
@@ -111,7 +111,7 @@ Running `make help` will list and describe the convenience commands available in
 ### Datadir structure
 
 - chaindata: recent blocks, state, recent state history. low-latency disk recommended.
-- snapshots: old blocks, old state history. can symlink/mount it to cheaper disk. mostly immutable.
+- snapshots: old blocks, old state history. can symlink/mount it to cheaper disk. mostly immutable. must have ~100gb free space (for merge recent files to bigger one).
 - temp: can grow to ~100gb, but usually empty. can symlink/mount it to cheaper disk.
 - txpool: pending transactions. safe to remove.
 - nodes:  p2p peers. safe to remove.
@@ -125,6 +125,7 @@ _Flags:_
 - `log.json`
 - `log.console.json` (alias for `log.json`)
 - `log.dir.path`
+- `log.dir.prefix`
 - `log.dir.verbosity`
 - `log.dir.json`
 
@@ -140,7 +141,7 @@ int value specifying the highest output log level:
   LvlTrace = 5
 ```
 
-To set an output dir for logs to be collected on disk, please set `--log.dir.path`. The flag `--log.dir.verbosity` is
+To set an output dir for logs to be collected on disk, please set `--log.dir.path` If you want to change the filename prodiced from `erigon` you should also set the `--log.dir.prefix` flag to an alternate name. The flag `--log.dir.verbosity` is
 also available to control the verbosity of this logging, with the same int value as above, or the string value e.g. '
 debug' or 'info'. Default verbosity is 'debug' (4), for disk logging.
 
@@ -287,7 +288,7 @@ http.api : ["eth","debug","net"]
 Erigon can be used as an Execution Layer (EL) for Consensus Layer clients (CL). Default configuration is OK.
 
 If your CL client is on a different device, add `--authrpc.addr 0.0.0.0` ([Engine API] listens on localhost by default)
-as well as `--authrpc.vhosts <CL host>`.
+as well as `--authrpc.vhosts <CL host>` where `<CL host>` is your source host or `any`.
 
 [Engine API]: https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md
 
@@ -498,7 +499,7 @@ Windows support for docker-compose is not ready yet. Please help us with .ps1 po
 
 ### Grafana dashboard
 
-`docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
+`docker compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
 
 ###       
 
@@ -639,47 +640,12 @@ Getting in touch
 
 ### Erigon Discord Server
 
-The main discussions are happening on our Discord server. To get an invite, send an email to `tg [at] torquem.ch` with
+The main discussions are happening on our Discord server. To get an invite, send an email to `bloxster [at] proton.me` with
 your name, occupation, a brief explanation of why you want to join the Discord, and how you heard about Erigon.
 
 ### Reporting security issues/concerns
 
 Send an email to `security [at] torquem.ch`.
-
-### Team
-
-Core contributors (in alphabetical order of first names):
-
-* Alex Sharov ([AskAlexSharov](https://twitter.com/AskAlexSharov))
-
-* Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
-
-* Andrea Lanfranchi([@AndreaLanfranchi](https://github.com/AndreaLanfranchi))
-
-* Andrew Ashikhmin ([yperbasis](https://github.com/yperbasis))
-
-* Artem Vorotnikov ([vorot93](https://github.com/vorot93))
-
-* Boris Petrov ([b00ris](https://github.com/b00ris))
-
-* Eugene Danilenko ([JekaMas](https://github.com/JekaMas))
-
-* Igor Mandrigin ([@mandrigin](https://twitter.com/mandrigin))
-
-* Giulio Rebuffo ([Giulio2002](https://github.com/Giulio2002))
-
-* Thomas Jay Rush ([@tjayrush](https://twitter.com/tjayrush))
-
-Thanks to:
-
-* All contributors of Erigon
-
-* All contributors of Go-Ethereum
-
-* Our special respect and gratitude is to the core team of [Go-Ethereum](https://github.com/ethereum/go-ethereum). Keep
-  up the great job!
-
-Happy testing! 🥤
 
 Known issues
 ============

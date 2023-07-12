@@ -11,7 +11,7 @@ make erigon
 ```
 
 
-## 2. Build RPC deamon
+## 2. Build RPC daemon
 On the same terminal folder you can build the RPC daemon.
 
 ```bash
@@ -25,6 +25,10 @@ On the terminal you can type the following command to start node1.
 ```bash
 ./erigon --datadir=dev --chain=dev --private.api.addr=localhost:9090 --mine
 ```
+Or, you could start the rpcdaemon internally together
+```bash
+./erigon --datadir=dev --chain=dev --private.api.addr=localhost:9090 --mine --http.api=eth,erigon,web3,net,debug,trace,txpool,parity,admin --http.corsdomain="*"
+```
  
  Argument notes:
  * datadir : Tells where the data is stored, default level is dev folder.
@@ -32,6 +36,7 @@ On the terminal you can type the following command to start node1.
  * private.api.addr=localhost:9090 : Tells where Eigon is going to listen for connections.
  * mine : Add this if you want the node to mine.
  * dev.period <number-of-seconds>: Add this to specify the timing interval among blocks. Number of seconds MUST be > 0 (if you want empty blocks) otherwise the default value 0 does not allow mining of empty blocks.
+ * http.api: List of services to start on http (rpc) access
  
 The result will be something like this:
 
@@ -43,7 +48,7 @@ Now save the enode information generated in the logs, we will use this in a minu
 enode://d30d079163d7b69fcb261c0538c0c3faba4fb4429652970e60fa25deb02a789b4811e98b468726ba0be63b9dc925a019f433177eb6b45c23bb78892f786d8f7a@127.0.0.1:53171 
 ```
 
-## 4. Start RPC deamon
+## 4. Start RPC daemon
 
 Open terminal 2 and navigate to erigon/build/bin folder. Here type the following command
     
@@ -62,13 +67,20 @@ To tell Node 2 where Node 1 is we will use the Enode info of Node 1 we saved bef
 
 Open terminal 3 and navigate to erigon/build/bin folder. Paste in the following command the Enode info and run it, be careful to remove the last part ?discport=0.
 
+The node info of the first peer can also be obtained with an admin RPC call
+```bash
+  curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc": "2.0", "method": "admin_nodeInfo", "params": [], "id":83}' localhost:8545
+  ```
+
 ```bash  
 ./erigon --datadir=dev2  --chain=dev --private.api.addr=localhost:9091 \
     --staticpeers="enode://d30d079163d7b69fcb261c0538c0c3faba4fb4429652970e60fa25deb02a789b4811e98b468726ba0be63b9dc925a019f433177eb6b45c23bb78892f786d8f7a@127.0.0.1:53171" \
     --nodiscover
 ```
+
+You might face a conflict with ports if you run it on the same machine. To specify different ports use, for instance ``--torrent.port 42079``, you might consider specifying all the other flags too: ``--port --http.port --authrpc.port ``
     
-To check if the nodes are connected, you can go to the log of both the nodes and look for the line
+To check if the nodes are connected, you can go to the log of both nodes and look for the line
     
   ```  [p2p] GoodPeers    eth66=1 ```
     

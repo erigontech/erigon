@@ -40,7 +40,7 @@ func createSentinel(cfg *sentinel.SentinelConfig, db kv.RoDB, logger log.Logger)
 		//sentinel.ProposerSlashingSsz,
 		//sentinel.AttesterSlashingSsz,
 	}
-	// gossipTopics = append(gossipTopics, sentinel.GossipSidecarTopics(params.MaxBlobsPerBlock)...)
+	// gossipTopics = append(gossipTopics, sentinel.GossipSidecarTopics(chain.MaxBlobsPerBlock)...)
 
 	for _, v := range gossipTopics {
 		if err := sent.Unsubscribe(v); err != nil {
@@ -111,7 +111,6 @@ func StartServe(server *SentinelServer, srvCfg *ServerConfig, creds credentials.
 	// Create a gRPC server
 	gRPCserver := grpc.NewServer(grpc.Creds(creds))
 	go server.ListenToGossip()
-	go server.startServerBackgroundLoop()
 	// Regiser our server as a gRPC server
 	sentinelrpc.RegisterSentinelServer(gRPCserver, server)
 	if err := gRPCserver.Serve(lis); err != nil {

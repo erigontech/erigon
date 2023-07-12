@@ -17,23 +17,23 @@
 package state
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 type accessList struct {
-	addresses map[libcommon.Address]int
-	slots     []map[libcommon.Hash]struct{}
+	addresses map[common.Address]int
+	slots     []map[common.Hash]struct{}
 }
 
 // ContainsAddress returns true if the address is in the access list.
-func (al *accessList) ContainsAddress(address libcommon.Address) bool {
+func (al *accessList) ContainsAddress(address common.Address) bool {
 	_, ok := al.addresses[address]
 	return ok
 }
 
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
-func (al *accessList) Contains(address libcommon.Address, slot libcommon.Hash) (addressPresent bool, slotPresent bool) {
+func (al *accessList) Contains(address common.Address, slot common.Hash) (addressPresent bool, slotPresent bool) {
 	idx, ok := al.addresses[address]
 	if !ok {
 		// no such address (and hence zero slots)
@@ -50,7 +50,7 @@ func (al *accessList) Contains(address libcommon.Address, slot libcommon.Hash) (
 // newAccessList creates a new accessList.
 func newAccessList() *accessList {
 	return &accessList{
-		addresses: make(map[libcommon.Address]int),
+		addresses: make(map[common.Address]int),
 	}
 }
 
@@ -60,9 +60,9 @@ func (al *accessList) Copy() *accessList {
 	for k, v := range al.addresses {
 		cp.addresses[k] = v
 	}
-	cp.slots = make([]map[libcommon.Hash]struct{}, len(al.slots))
+	cp.slots = make([]map[common.Hash]struct{}, len(al.slots))
 	for i, slotMap := range al.slots {
-		newSlotmap := make(map[libcommon.Hash]struct{}, len(slotMap))
+		newSlotmap := make(map[common.Hash]struct{}, len(slotMap))
 		for k := range slotMap {
 			newSlotmap[k] = struct{}{}
 		}
@@ -73,7 +73,7 @@ func (al *accessList) Copy() *accessList {
 
 // AddAddress adds an address to the access list, and returns 'true' if the operation
 // caused a change (addr was not previously in the list).
-func (al *accessList) AddAddress(address libcommon.Address) bool {
+func (al *accessList) AddAddress(address common.Address) bool {
 	if _, present := al.addresses[address]; present {
 		return false
 	}
@@ -86,12 +86,12 @@ func (al *accessList) AddAddress(address libcommon.Address) bool {
 // - address added
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
-func (al *accessList) AddSlot(address libcommon.Address, slot libcommon.Hash) (addrChange bool, slotChange bool) {
+func (al *accessList) AddSlot(address common.Address, slot common.Hash) (addrChange bool, slotChange bool) {
 	idx, addrPresent := al.addresses[address]
 	if !addrPresent || idx == -1 {
 		// Address not present, or addr present but no slots there
 		al.addresses[address] = len(al.slots)
-		slotmap := map[libcommon.Hash]struct{}{slot: {}}
+		slotmap := map[common.Hash]struct{}{slot: {}}
 		al.slots = append(al.slots, slotmap)
 		return !addrPresent, true
 	}
@@ -110,7 +110,7 @@ func (al *accessList) AddSlot(address libcommon.Address, slot libcommon.Hash) (a
 // This operation needs to be performed in the same order as the addition happened.
 // This method is meant to be used  by the journal, which maintains ordering of
 // operations.
-func (al *accessList) DeleteSlot(address libcommon.Address, slot libcommon.Hash) {
+func (al *accessList) DeleteSlot(address common.Address, slot common.Hash) {
 	idx, addrOk := al.addresses[address]
 	// There are two ways this can fail
 	if !addrOk {
@@ -131,6 +131,6 @@ func (al *accessList) DeleteSlot(address libcommon.Address, slot libcommon.Hash)
 // needs to be performed in the same order as the addition happened.
 // This method is meant to be used  by the journal, which maintains ordering of
 // operations.
-func (al *accessList) DeleteAddress(address libcommon.Address) {
+func (al *accessList) DeleteAddress(address common.Address) {
 	delete(al.addresses, address)
 }

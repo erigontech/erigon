@@ -26,15 +26,14 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -43,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -50,6 +50,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -92,14 +93,13 @@ func NewSimulatedBackendWithConfig(alloc types.GenesisAlloc, config *chain.Confi
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
 	m := stages.MockWithGenesisEngine(nil, &genesis, engine, false)
-	br, _ := m.NewBlocksIO()
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
 		getHeader: func(hash libcommon.Hash, number uint64) (h *types.Header) {
 			var err error
 			if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-				h, err = br.Header(context.Background(), tx, hash, number)
+				h, err = m.BlockReader.Header(context.Background(), tx, hash, number)
 				return nil
 			}); err != nil {
 				panic(err)
@@ -123,14 +123,11 @@ func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, c
 	t.Cleanup(b.Close)
 	return b
 }
-func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
-func (b *SimulatedBackend) Agg() *state2.AggregatorV3 { return b.m.HistoryV3Components() }
-func (b *SimulatedBackend) HistoryV3() bool           { return b.m.HistoryV3 }
-func (b *SimulatedBackend) Engine() consensus.Engine  { return b.m.Engine }
-func (b *SimulatedBackend) BlockReader() services.FullBlockReader {
-	br, _ := b.m.NewBlocksIO()
-	return br
-}
+func (b *SimulatedBackend) DB() kv.RwDB                           { return b.m.DB }
+func (b *SimulatedBackend) Agg() *state2.AggregatorV3             { return b.m.HistoryV3Components() }
+func (b *SimulatedBackend) HistoryV3() bool                       { return b.m.HistoryV3 }
+func (b *SimulatedBackend) Engine() consensus.Engine              { return b.m.Engine }
+func (b *SimulatedBackend) BlockReader() services.FullBlockReader { return b.m.BlockReader }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {
@@ -149,7 +146,7 @@ func (b *SimulatedBackend) Commit() {
 		Headers:  []*types.Header{b.pendingHeader},
 		Blocks:   []*types.Block{b.pendingBlock},
 		TopBlock: b.pendingBlock,
-	}); err != nil {
+	}, nil); err != nil {
 		panic(err)
 	}
 	//nolint:prealloc
@@ -171,11 +168,11 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	chain, _ := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
-	b.pendingBlock = chain.Blocks[0]
-	b.pendingReceipts = chain.Receipts[0]
-	b.pendingHeader = chain.Headers[0]
-	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit).AddDataGas(params.MaxDataGasPerBlock)
+	blockChain, _ := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *core.BlockGen) {})
+	b.pendingBlock = blockChain.Blocks[0]
+	b.pendingReceipts = blockChain.Receipts[0]
+	b.pendingHeader = blockChain.Headers[0]
+	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit).AddDataGas(chain.MaxDataGasPerBlock)
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
 	}
@@ -184,13 +181,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 		panic(err)
 	}
 	b.pendingReaderTx = tx
-
-	if ethconfig.EnableHistoryV4InTest {
-		panic("implement me")
-		//b.pendingReader = state.NewReaderV4(b.pendingReaderTx.(kv.TemporalTx))
-	} else {
-		b.pendingReader = state.NewPlainStateReader(b.pendingReaderTx)
-	}
+	b.pendingReader = b.m.NewStateReader(b.pendingReaderTx)
 	b.pendingState = state.New(b.pendingReader)
 }
 
@@ -744,7 +735,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	defer b.mu.Unlock()
 
 	// Check transaction validity.
-	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64())
+	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64(), b.pendingBlock.Time())
 	sender, senderErr := tx.Sender(*signer)
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %w", senderErr)
@@ -761,7 +752,8 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
-		&b.pendingHeader.GasUsed, vm.Config{}); err != nil {
+		&b.pendingHeader.GasUsed, b.pendingHeader.DataGasUsed,
+		vm.Config{}); err != nil {
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
@@ -770,7 +762,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 			block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
 		}
 		block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		return err
 	}
@@ -815,7 +807,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 			block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
-	}, false /* intermediateHashes */)
+	})
 	if err != nil {
 		return err
 	}
@@ -843,6 +835,6 @@ func (m callMsg) Data() []byte                  { return m.CallMsg.Data }
 func (m callMsg) AccessList() types2.AccessList { return m.CallMsg.AccessList }
 func (m callMsg) IsFree() bool                  { return false }
 
-func (m callMsg) DataGas() uint64                { return params.DataGasPerBlob * uint64(len(m.CallMsg.DataHashes)) }
+func (m callMsg) DataGas() uint64                { return misc.GetDataGasUsed(len(m.CallMsg.DataHashes)) }
 func (m callMsg) MaxFeePerDataGas() *uint256.Int { return m.CallMsg.MaxFeePerDataGas }
 func (m callMsg) DataHashes() []libcommon.Hash   { return m.CallMsg.DataHashes }

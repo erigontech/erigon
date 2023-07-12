@@ -6,7 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/transition"
+	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 )
@@ -289,6 +289,10 @@ func (f *ForkGraph) GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (sol
 func (f *ForkGraph) GetFinalizedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool) {
 	obj, has := f.finalizedCheckpoints[blockRoot]
 	return obj, has
+}
+
+func (f *ForkGraph) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
+	f.badBlocks[blockRoot] = struct{}{}
 }
 
 func (f *ForkGraph) removeOldData() (err error) {

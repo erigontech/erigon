@@ -1,6 +1,8 @@
 package flags
 
-import "github.com/urfave/cli/v2"
+import (
+	"github.com/urfave/cli/v2"
+)
 
 var (
 	SentinelDiscoveryPort = cli.IntFlag{
@@ -27,6 +29,21 @@ var (
 		Name:  "sentinel.addr",
 		Usage: "sets the lightclient server host addr",
 		Value: "localhost",
+	}
+	NoBeaconApi = cli.BoolFlag{
+		Name:  "no-beacon-api",
+		Usage: "turn off the beacon api",
+		Value: false,
+	}
+	BeaconApiReadTimeout = cli.Uint64Flag{
+		Name:  "beacon.api.read.timeout",
+		Usage: "Sets the seconds for a read time out in the beacon api",
+		Value: 5,
+	}
+	BeaconApiWriteTimeout = cli.Uint64Flag{
+		Name:  "beacon.api.write.timeout",
+		Usage: "Sets the seconds for a write time out in the beacon api",
+		Value: 5,
 	}
 	BeaconApiAddr = cli.StringFlag{
 		Name:  "beacon.api.addr",
@@ -81,6 +98,26 @@ var (
 	ErigonPrivateApiFlag = cli.StringFlag{
 		Name:  "private.api.addr",
 		Usage: "connect to existing erigon instance",
+		Value: "",
+	}
+	RunEngineAPI = cli.BoolFlag{
+		Name:  "engine.api",
+		Usage: "Turns on engine communication (Needed for none Erigon ELs)",
+		Value: false,
+	}
+	EngineApiPortFlag = cli.UintFlag{
+		Name:  "engine.api.port",
+		Usage: "Sets engine API port",
+		Value: 8551,
+	}
+	EngineApiHostFlag = cli.StringFlag{
+		Name:  "engine.api.host",
+		Usage: "Sets the engine API host",
+		Value: "http://localhost",
+	}
+	JwtSecret = cli.StringFlag{
+		Name:  "engine.api.jwtsecret",
+		Usage: "Path to the token that ensures safe connection between CL and EL",
 		Value: "",
 	}
 	SentinelStaticPeersFlag = cli.StringFlag{

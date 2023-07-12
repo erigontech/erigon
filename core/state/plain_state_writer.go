@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -55,6 +56,10 @@ func (w *PlainStateWriter) UpdateAccountData(address libcommon.Address, original
 	if w.accumulator != nil {
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
+	if address[len(address)-1] == 16 {
+		fmt.Println("ADDR", address[:])
+	}
+
 	return w.db.Put(kv.PlainState, address[:], value)
 }
 
@@ -130,6 +135,7 @@ func (w *PlainStateWriter) CreateContract(address libcommon.Address) error {
 
 func (w *PlainStateWriter) WriteChangeSets() error {
 	if w.csw != nil {
+
 		return w.csw.WriteChangeSets()
 	}
 

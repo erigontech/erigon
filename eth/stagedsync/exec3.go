@@ -27,7 +27,6 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
@@ -49,8 +48,8 @@ var ExecStepsInDB = metrics.NewCounter(`exec_steps_in_db`) //nolint
 var ExecRepeats = metrics.NewCounter(`exec_repeats`)       //nolint
 var ExecTriggers = metrics.NewCounter(`exec_triggers`)     //nolint
 
-func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string) *Progress {
-	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix}
+func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string, logger log.Logger) *Progress {
+	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
 }
 
 type Progress struct {
@@ -62,6 +61,7 @@ type Progress struct {
 
 	workersCount int
 	logPrefix    string
+	logger       log.Logger
 }
 
 func (p *Progress) Log(rs *state.StateV3, in *exec22.QueueWithRetry, rws *exec22.ResultsQueue, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64) {
@@ -77,7 +77,7 @@ func (p *Progress) Log(rs *state.StateV3, in *exec22.QueueWithRetry, rws *exec22
 	if doneCount > p.prevCount {
 		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
 	}
-	log.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
+	p.logger.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
 		//"workers", workerCount,
 		"blk", outputBlockNum,
 		//"blk/s", fmt.Sprintf("%.1f", speedBlock),
@@ -149,13 +149,13 @@ func ExecV3(ctx context.Context,
 	parallel bool, logPrefix string,
 	maxBlockNum uint64,
 	logger log.Logger,
+	initialCycle bool,
 ) error {
 	batchSize := cfg.batchSize
 	chainDb := cfg.db
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
-	blockSnapshots := blockReader.Snapshots().(*snapshotsync.RoSnapshots)
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
@@ -250,7 +250,7 @@ func ExecV3(ctx context.Context,
 	applyWorker.DiscardReadList()
 
 	commitThreshold := batchSize.Bytes()
-	progress := NewProgress(block, commitThreshold, workerCount, execStage.LogPrefix())
+	progress := NewProgress(block, commitThreshold, workerCount, execStage.LogPrefix(), logger)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
@@ -470,7 +470,7 @@ func ExecV3(ctx context.Context,
 		})
 	}
 
-	if block < blockSnapshots.BlocksAvailable() {
+	if block < cfg.blockReader.FrozenBlocks() {
 		agg.KeepInDB(0)
 		defer agg.KeepInDB(ethconfig.HistoryV3AggregationStep)
 	}
@@ -503,6 +503,8 @@ func ExecV3(ctx context.Context,
 	slowDownLimit := time.NewTicker(time.Second)
 	defer slowDownLimit.Stop()
 
+	stateStream := !initialCycle && cfg.stateStream && maxBlockNum-block < stateStreamLimit
+
 	var b *types.Block
 	var blockNum uint64
 	var err error
@@ -520,7 +522,7 @@ Loop:
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
-		signer := *types.MakeSigner(chainConfig, blockNum)
+		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
@@ -560,6 +562,14 @@ Loop:
 					}
 				}
 			}()
+		} else {
+			if !initialCycle && stateStream {
+				txs, err := blockReader.RawTransactions(context.Background(), applyTx, b.NumberU64(), b.NumberU64())
+				if err != nil {
+					return err
+				}
+				cfg.accumulator.StartChange(b.NumberU64(), b.Hash(), txs, false)
+			}
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
@@ -698,7 +708,7 @@ Loop:
 			}
 		}
 
-		if blockSnapshots.Cfg().Produce {
+		if cfg.blockReader.FreezingCfg().Produce {
 			agg.BuildFilesInBackground(outputTxNum.Load())
 		}
 		select {
@@ -726,7 +736,7 @@ Loop:
 		}
 	}
 
-	if blockSnapshots.Cfg().Produce {
+	if cfg.blockReader.FreezingCfg().Produce {
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
@@ -1037,7 +1047,7 @@ func reconstituteStep(last bool,
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
 			skipAnalysis := core.SkipAnalysis(chainConfig, bn)
-			signer := *types.MakeSigner(chainConfig, bn)
+			signer := *types.MakeSigner(chainConfig, bn, header.Time)
 
 			f := core.GetHashFn(header, getHeaderFunc)
 			getHashFnMute := &sync.Mutex{}
@@ -1326,8 +1336,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	chainConfig *chain.Config, genesis *types.Genesis) (err error) {
 	startTime := time.Now()
 	defer agg.EnableMadvNormal().DisableReadAhead()
-	blockSnapshots := blockReader.Snapshots().(*snapshotsync.RoSnapshots)
-	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
 
 	// force merge snapshots before reconstitution, to allign domains progress
 	// un-finished merge can happen at "kill -9" during merge

@@ -161,7 +161,7 @@ func (w *ChangeSetWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, accountChanges, kv.AccountsHistory, w.db)
+	err = writeIndex(w.blockNumber, accountChanges, kv.E2AccountsHistory, w.db)
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func (w *ChangeSetWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, storageChanges, kv.StorageHistory, w.db)
+	err = writeIndex(w.blockNumber, storageChanges, kv.E2StorageHistory, w.db)
 	if err != nil {
 		return err
 	}

@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 
 	"github.com/ledgerwatch/erigon/core/types"
@@ -36,10 +37,10 @@ func CalcExcessDataGas(parent *types.Header) uint64 {
 		dataGasUsed = *parent.DataGasUsed
 	}
 
-	if excessDataGas+dataGasUsed < params.TargetDataGasPerBlock {
+	if excessDataGas+dataGasUsed < chain.TargetDataGasPerBlock {
 		return 0
 	}
-	return excessDataGas + dataGasUsed - params.TargetDataGasPerBlock
+	return excessDataGas + dataGasUsed - chain.TargetDataGasPerBlock
 }
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
@@ -70,15 +71,6 @@ func FakeExponential(factor, denom *uint256.Int, excessDataGas uint64) (*uint256
 	return output.Div(output, denom), nil
 }
 
-// CountBlobs returns the number of blob transactions in txs
-func CountBlobs(txs []types.Transaction) int {
-	var count int
-	for _, tx := range txs {
-		count += len(tx.GetDataHashes())
-	}
-	return count
-}
-
 // VerifyEip4844Header verifies that the header is not malformed
 func VerifyEip4844Header(config *chain.Config, parent, header *types.Header) error {
 	if header.DataGasUsed == nil {
@@ -96,5 +88,5 @@ func GetDataGasPrice(excessDataGas uint64) (*uint256.Int, error) {
 }
 
 func GetDataGasUsed(numBlobs int) uint64 {
-	return uint64(numBlobs) * params.DataGasPerBlob
+	return uint64(numBlobs) * chain.DataGasPerBlob
 }

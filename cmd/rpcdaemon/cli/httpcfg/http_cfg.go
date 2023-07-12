@@ -39,7 +39,7 @@ type HttpCfg struct {
 	TraceCompatibility       bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	TxPoolApiAddr            string
 	StateCache               kvcache.CoherentConfig
-	Snap                     ethconfig.Snapshot
+	Snap                     ethconfig.BlocksFreezing
 	Sync                     ethconfig.Sync
 
 	// GRPC server
@@ -58,7 +58,6 @@ type HttpCfg struct {
 	HTTPTimeouts    rpccfg.HTTPTimeouts
 	AuthRpcTimeouts rpccfg.HTTPTimeouts
 	EvmCallTimeout  time.Duration
-	InternalCL      bool
 	LogDirVerbosity string
 	LogDirPath      string
 
