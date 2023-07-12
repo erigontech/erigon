@@ -691,6 +691,7 @@ type DomainContext struct {
 	keyBuf  [60]byte // 52b key and 8b for inverted step
 	numBuf  [8]byte
 
+	kBuf, vBuf []byte
 	//loc *ctxLocalityIdx
 }
 
@@ -1417,15 +1418,16 @@ var COMPARE_INDEXES = false // if true, will compare values from Btree and INver
 func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint64) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 	var k []byte
+	var ok bool
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		if dc.files[i].endTxNum < fromTxNum {
 			break
 		}
-		k, v, err = dc.statelessBtree(i).Get(filekey)
+		k, v, ok, err = dc.statelessBtree(i).Get(filekey, k[:0], v[:0])
 		if err != nil {
 			return nil, false, err
 		}
-		if k == nil {
+		if !ok {
 			continue
 		}
 		found = true
@@ -1440,17 +1442,17 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 	// find what has LocalityIndex
 	lastIndexedTxNum := dc.hc.ic.coldLocality.indexedTo()
 	// grind non-indexed files
-	var k []byte
+	var ok bool
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		if dc.files[i].src.endTxNum <= lastIndexedTxNum {
 			break
 		}
 
-		k, v, err = dc.statelessBtree(i).Get(filekey)
+		dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
 		if err != nil {
 			return nil, false, err
 		}
-		if k == nil {
+		if !ok {
 			continue
 		}
 		found = true
@@ -1470,7 +1472,11 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 				panic("not equal")
 			}
 		}
-		return v, found, nil
+
+		if found {
+			return common.Copy(dc.vBuf), true, nil
+		}
+		return nil, false, nil
 	}
 
 	// still not found, search in indexed cold shards
@@ -1478,19 +1484,18 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 }
 
 func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found bool, err error) {
-	var k []byte
 	exactColdShard, ok := dc.hc.ic.coldLocality.lookupLatest(filekey)
 	if !ok {
 		return nil, false, nil
 	}
-	k, v, err = dc.statelessBtree(int(exactColdShard)).Get(filekey)
+	dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
 	if err != nil {
 		return nil, false, err
 	}
-	if k == nil {
+	if !ok {
 		return nil, false, err
 	}
-	return v, true, nil
+	return common.Copy(dc.vBuf), true, nil
 }
 
 // historyBeforeTxNum searches history for a value of specified key before txNum
@@ -1521,15 +1526,16 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 	if anyItem {
 		// If there were no changes but there were history files, the value can be obtained from value files
 		var k []byte
+		var ok bool
 		for i := len(dc.files) - 1; i >= 0; i-- {
 			if dc.files[i].startTxNum > topState.startTxNum {
 				continue
 			}
-			k, v, err = dc.statelessBtree(i).Get(key)
+			k, v, ok, err = dc.statelessBtree(i).Get(key, k[:0], v[:0])
 			if err != nil {
 				return nil, false, err
 			}
-			if k == nil {
+			if !ok {
 				continue
 			}
 			found = true
@@ -1643,9 +1649,6 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 	foundInvStep, err := roTx.GetOne(dc.d.keysTable, key) // reads first DupSort value
 	if err != nil {
 		return nil, false, err
-	}
-	if bytes.Equal(key, common.FromHex("c4f43c78a8a52fb34b485c2e926f90628b019281")) {
-		fmt.Printf("getLatest: %x, %t\n", key, foundInvStep != nil)
 	}
 	if foundInvStep == nil {
 		v, found, err := dc.getLatestFromFiles(key)

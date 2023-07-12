@@ -479,8 +479,8 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 }
 
 func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value, preVal []byte) error {
-	composite := common.Append(addr, loc)
-
+	composite := make([]byte, 0, len(addr)+len(loc))
+	composite = append(append(composite, addr...), loc...)
 	sd.Commitment.TouchPlainKey(composite, value, sd.Commitment.TouchStorage)
 	sd.put(kv.StorageDomain, composite, value)
 	if len(value) == 0 {
