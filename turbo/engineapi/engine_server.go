@@ -94,12 +94,12 @@ func (e *EngineServer) Start(httpConfig httpcfg.HttpCfg,
 	// engineImpl := NewEngineAPI(base, db, engineBackend)
 
 	apiList := []rpc.API{
-		rpc.API{
+		{
 			Namespace: "eth",
 			Public:    true,
 			Service:   jsonrpc.EthAPI(ethImpl),
 			Version:   "1.0",
-		}, rpc.API{
+		}, {
 			Namespace: "engine",
 			Public:    true,
 			Service:   EngineAPI(e),
