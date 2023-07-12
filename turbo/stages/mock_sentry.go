@@ -33,6 +33,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -204,20 +205,31 @@ func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*ptypes.NodeInf
 	return nil, nil
 }
 
+const blockBufferSize = 128
+
 func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool) *MockSentry {
-	return MockWithGenesisPruneMode(tb, gspec, key, prune.DefaultMode, withPosDownloader)
+	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.DefaultMode, withPosDownloader)
 }
 
 func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine consensus.Engine, withPosDownloader bool) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(tb, gspec, key, prune.DefaultMode, engine, false, withPosDownloader)
+	return MockWithEverything(tb, gspec, key, prune.DefaultMode, engine, blockBufferSize, false, withPosDownloader)
 }
 
-func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, withPosDownloader bool) *MockSentry {
-	return MockWithEverything(tb, gspec, key, prune, ethash.NewFaker(), false, withPosDownloader)
+func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, withPosDownloader bool) *MockSentry {
+	var engine consensus.Engine
+
+	switch {
+	case gspec.Config.Bor != nil:
+		engine = bor.NewFaker()
+	default:
+		engine = ethash.NewFaker()
+	}
+
+	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader)
 }
 
-func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool, withPosDownloader bool) *MockSentry {
+func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, blockBufferSize int, withTxPool bool, withPosDownloader bool) *MockSentry {
 	var tmpdir string
 	if tb != nil {
 		tmpdir = tb.TempDir()
@@ -235,6 +247,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.DeprecatedTxPool.StartOnInit = true
 
 	logger := log.New()
+
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	histV3, db, agg := temporal.NewTestDB(tb, dirs, nil)
 	cfg.HistoryV3 = histV3
@@ -355,6 +368,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		sentries,
 		cfg.Sync,
 		mock.BlockReader,
+		blockBufferSize,
 		false,
 		forkValidator,
 		cfg.DropUselessPeers,
@@ -482,7 +496,7 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 		},
 	}
 
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), true, false)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false)
 }
 
 func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {

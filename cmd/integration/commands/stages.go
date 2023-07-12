@@ -1411,6 +1411,8 @@ func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.
 	return engine, cfg, allSn, agg
 }
 
+const blockBufferSize = 128
+
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig, logger log.Logger) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	dirs, historyV3, pm := datadir.New(datadirCli), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 
@@ -1454,6 +1456,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		nil,
 		ethconfig.Defaults.Sync,
 		blockReader,
+		blockBufferSize,
 		false,
 		nil,
 		ethconfig.Defaults.DropUselessPeers,
