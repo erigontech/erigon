@@ -9,7 +9,6 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
@@ -132,7 +131,7 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(finalized libcommon.Hash, head li
 		SafeBlockHash:      head,
 		FinalizedBlockHash: finalized,
 	}
-	forkChoiceResp := &engine.EngineForkChoiceUpdatedResponse{}
+	forkChoiceResp := &engine_types.ForkChoiceUpdatedResponse{}
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
 
 	err := cc.client.CallContext(cc.ctx, forkChoiceResp, rpc_helper.ForkChoiceUpdatedV1, forkChoiceRequest)
