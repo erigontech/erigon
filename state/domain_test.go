@@ -1197,7 +1197,6 @@ func TestDomain_Unwind(t *testing.T) {
 	for i := 0; i < int(maxTx); i++ {
 		v1 := []byte(fmt.Sprintf("value1.%d", i))
 		v2 := []byte(fmt.Sprintf("value2.%d", i))
-		fmt.Printf("i=%d\n", i)
 
 		//if i > 0 {
 		//	pv, _, err := dctx.GetLatest([]byte("key1"), nil, tx)
