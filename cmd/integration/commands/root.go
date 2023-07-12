@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,10 +28,11 @@ import (
 func expandHomeDir(dirpath string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		panic(err)
+		return dirpath
 	}
-	if strings.HasPrefix(dirpath, "~/") {
-		return filepath.Join(home, dirpath[2:])
+	prefix := fmt.Sprintf("~%c", os.PathSeparator)
+	if strings.HasPrefix(dirpath, prefix) {
+		return filepath.Join(home, dirpath[len(prefix):])
 	} else if dirpath == "~" {
 		return home
 	}
