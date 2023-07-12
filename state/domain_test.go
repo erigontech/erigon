@@ -122,7 +122,6 @@ func TestDomain_CollationBuild(t *testing.T) {
 
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(t, err)
-		defer sf.Close()
 		c.Close()
 
 		g := sf.valuesDecomp.MakeGetter()
@@ -152,7 +151,6 @@ func TestDomain_CollationBuild(t *testing.T) {
 		require.NoError(t, err)
 		sf, err := d.buildFiles(ctx, 1, c, background.NewProgressSet())
 		require.NoError(t, err)
-		defer sf.Close()
 		c.Close()
 
 		g := sf.valuesDecomp.MakeGetter()
@@ -949,7 +947,6 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 	require.NoError(t, err)
-	defer sf.Close()
 	c.Close()
 
 	g := sf.valuesDecomp.MakeGetter()
@@ -1073,7 +1070,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 			err = d.PutWithPrev(keys[j], nil, buf, prev)
 			require.NoError(t, err)
 
-			if i > 0 && i%int(d.aggregationStep) == 0 {
+			if i > 0 && i+1%int(d.aggregationStep) == 0 {
 				values[hex.EncodeToString(keys[j])] = append(values[hex.EncodeToString(keys[j])], buf)
 			}
 		}
@@ -1099,7 +1096,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 		d.integrateFiles(sf, txFrom, txTo)
 		collation.Close()
-		sf.Close()
+
 		logEvery := time.NewTicker(time.Second * 30)
 
 		err = d.prune(ctx, step, txFrom, txTo, math.MaxUint64, logEvery)
@@ -1129,7 +1126,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 			ks, _ := hex.DecodeString(key)
 			val, err := mc.GetBeforeTxNum(ks, beforeTx, tx)
 			require.NoError(t, err)
-			require.EqualValues(t, bufs[i], val)
+			require.EqualValuesf(t, bufs[i], val, "key %s, tx %d", key, beforeTx)
 			beforeTx += d.aggregationStep
 		}
 	}

@@ -462,14 +462,15 @@ type AggV3StaticFiles struct {
 	tracesTo   InvertedFiles
 }
 
-func (sf AggV3StaticFiles) Close() {
-	sf.accounts.Close()
-	sf.storage.Close()
-	sf.code.Close()
-	sf.logAddrs.Close()
-	sf.logTopics.Close()
-	sf.tracesFrom.Close()
-	sf.tracesTo.Close()
+// CleanupOnError - call it on collation fail. It closing all files
+func (sf AggV3StaticFiles) CleanupOnError() {
+	sf.accounts.CleanupOnError()
+	sf.storage.CleanupOnError()
+	sf.code.CleanupOnError()
+	sf.logAddrs.CleanupOnError()
+	sf.logTopics.CleanupOnError()
+	sf.tracesFrom.CleanupOnError()
+	sf.tracesTo.CleanupOnError()
 }
 
 func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
@@ -514,7 +515,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			collation.Close()
 			if err != nil {
-				sf.Close()
+				sf.CleanupOnError()
 				return err
 			}
 
@@ -549,7 +550,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			defer a.wg.Done()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
-				sf.Close()
+				sf.CleanupOnError()
 				return err
 			}
 
@@ -570,6 +571,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	}
 
 	if err := g.Wait(); err != nil {
+		static.CleanupOnError()
 		log.Warn("domain collate-buildFiles failed", "err", err)
 		return fmt.Errorf("domain collate-build failed: %w", err)
 	}
@@ -837,17 +839,18 @@ func (a *AggregatorV3) CanPruneFrom(tx kv.Tx) uint64 {
 func (a *AggregatorV3) PruneWithTiemout(ctx context.Context, timeout time.Duration) error {
 	t := time.Now()
 	for a.CanPrune(a.rwTx) && time.Since(t) < timeout {
-		if err := a.Prune(ctx, 1_000); err != nil { // prune part of retired data, before commit
+		if err := a.Prune(ctx, 0.01); err != nil { // prune part of retired data, before commit
 			return err
 		}
 	}
 	return nil
 }
 
-func (a *AggregatorV3) Prune(ctx context.Context, limit uint64) error {
+func (a *AggregatorV3) Prune(ctx context.Context, stepsLimit float64) error {
 	if dbg.NoPrune() {
 		return nil
 	}
+	limit := uint64(stepsLimit * float64(a.aggregationStep))
 	to := a.minimaxTxNumInFiles.Load()
 	if to == 0 {
 		return nil
@@ -1293,9 +1296,12 @@ func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
 	}
 }
 
-// KeepInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
+// KeepStepsInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
 // we can set it to 0, because no re-org on this blocks are possible
-func (a *AggregatorV3) KeepInDB(v uint64) { a.keepInDB = v }
+func (a *AggregatorV3) KeepStepsInDB(steps uint64) *AggregatorV3 {
+	a.keepInDB = steps * a.aggregationStep
+	return a
+}
 
 // Returns channel which is closed when aggregation is done
 func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {

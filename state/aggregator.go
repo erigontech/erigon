@@ -463,7 +463,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 			if err != nil {
 				errCh <- err
 
-				sf.Close()
+				sf.CleanupOnError()
 				mxRunningMerges.Dec()
 				return
 			}
@@ -518,7 +518,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
 				errCh <- err
-				sf.Close()
+				sf.CleanupOnError()
 				return
 			}
 

@@ -53,8 +53,9 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	}()
 	agg.SetTx(rwTx)
 	agg.StartWrites()
-	domains := agg.SharedDomains()
 	domCtx := agg.MakeContext()
+	defer domCtx.Close()
+	domains := agg.SharedDomains(domCtx)
 
 	txs := uint64(100000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -94,12 +95,14 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			require.NoError(t, err)
 
 			err = domains.UpdateCommitmentData(commKey2, v[:], pv)
+			require.NoError(t, err)
 			otherMaxWrite = txNum
 		} else {
 			pv, _, err := domCtx.GetLatest(kv.CommitmentDomain, commKey1, nil, rwTx)
 			require.NoError(t, err)
 
 			err = domains.UpdateCommitmentData(commKey1, v[:], pv)
+			require.NoError(t, err)
 			maxWrite = txNum
 		}
 		require.NoError(t, err)
@@ -154,7 +157,9 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 	}()
 	agg.SetTx(tx)
 	agg.StartWrites()
-	domains := agg.SharedDomains()
+	domCtx := agg.MakeContext()
+	defer domCtx.Close()
+	domains := agg.SharedDomains(domCtx)
 
 	var latestCommitTxNum uint64
 	rnd := rand.New(rand.NewSource(time.Now().Unix()))
@@ -233,7 +238,9 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 
 	anotherAgg.SetTx(rwTx)
 	startTx := anotherAgg.EndTxNumMinimax()
-	dom2 := anotherAgg.SharedDomains()
+	ac2 := anotherAgg.MakeContext()
+	defer ac2.Close()
+	dom2 := anotherAgg.SharedDomains(ac2)
 
 	_, sstartTx, err := dom2.SeekCommitment()
 
@@ -274,7 +281,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	}()
 	agg.SetTx(tx)
 	agg.StartWrites()
-	domains := agg.SharedDomains()
+	domCtx := agg.MakeContext()
+	defer domCtx.Close()
+	domains := agg.SharedDomains(domCtx)
 
 	txs := aggStep * 5
 	t.Logf("step=%d tx_count=%d\n", aggStep, txs)
@@ -340,22 +349,21 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	newAgg.SetTx(newTx)
 	defer newAgg.StartWrites().FinishWrites()
 
-	newDoms := newAgg.SharedDomains()
+	ac := newAgg.MakeContext()
+	defer ac.Close()
+	newDoms := newAgg.SharedDomains(ac)
 	defer newDoms.Close()
 
 	_, latestTx, err := newDoms.SeekCommitment()
 	require.NoError(t, err)
 	t.Logf("seek to latest_tx=%d", latestTx)
 
-	ctx := newAgg.MakeContext()
-	defer ctx.Close()
-
 	miss := uint64(0)
 	for i, key := range keys {
 		if uint64(i+1) >= txs-aggStep {
 			continue // finishtx always stores last agg step in db which we deleted, so missing  values which were not aggregated is expected
 		}
-		stored, _, err := ctx.GetLatest(kv.AccountsDomain, key[:length.Addr], nil, newTx)
+		stored, _, err := ac.GetLatest(kv.AccountsDomain, key[:length.Addr], nil, newTx)
 		require.NoError(t, err)
 		if len(stored) == 0 {
 			miss++
@@ -366,7 +374,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		nonce, _, _ := DecodeAccountBytes(stored)
 		require.EqualValues(t, i+1, nonce)
 
-		storedV, _, err := ctx.GetLatest(kv.StorageDomain, key[:length.Addr], key[length.Addr:], newTx)
+		storedV, _, err := ac.GetLatest(kv.StorageDomain, key[:length.Addr], key[length.Addr:], newTx)
 		require.NoError(t, err)
 		require.EqualValues(t, key[0], storedV[0])
 		require.EqualValues(t, key[length.Addr], storedV[1])
@@ -405,16 +413,15 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 		return nil
 	}
 
-	domains := agg.SharedDomains()
+	ct := agg.MakeContext()
+	defer ct.Close()
+	domains := agg.SharedDomains(ct)
 
 	txs := (aggStep) * StepsInBiggestFile
 	t.Logf("step=%d tx_count=%d", aggStep, txs)
 
 	rnd := rand.New(rand.NewSource(0))
 	keys := make([][]byte, txs/2)
-
-	ct := agg.MakeContext()
-	defer ct.Close()
 
 	var txNum uint64
 	for txNum = uint64(1); txNum <= txs/2; txNum++ {
@@ -725,7 +732,9 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	defer agg.Close()
 	defer db.Close()
 
-	domains := agg.SharedDomains()
+	mc2 := agg.MakeContext()
+	defer mc2.Close()
+	domains := agg.SharedDomains(mc2)
 
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)

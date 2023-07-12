@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"hash"
 	"path/filepath"
@@ -77,16 +78,20 @@ func ParseCommitmentMode(s string) CommitmentMode {
 type ValueMerger func(prev, current []byte) (merged []byte, err error)
 
 type UpdateTree struct {
-	tree   *btree.BTreeG[*commitmentItem]
-	keccak hash.Hash
+	tree      *btree.BTreeG[*commitmentItem]
+	plainKeys *btree.BTreeG[string]
+	keccak    hash.Hash
 }
 
 func NewUpdateTree() *UpdateTree {
 	return &UpdateTree{
-		tree:   btree.NewG[*commitmentItem](64, commitmentItemLess),
-		keccak: sha3.NewLegacyKeccak256(),
+		tree:      btree.NewG[*commitmentItem](64, commitmentItemLess),
+		plainKeys: btree.NewG[string](64, stringLess),
+		keccak:    sha3.NewLegacyKeccak256(),
 	}
 }
+
+func stringLess(a, b string) bool { return a < b }
 
 func (t *UpdateTree) get(key []byte) (*commitmentItem, bool) {
 	c := &commitmentItem{plainKey: common.Copy(key),
@@ -111,11 +116,28 @@ func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, v
 	item, _ := t.get(key)
 	fn(item, val)
 	t.tree.ReplaceOrInsert(item)
+	t.plainKeys.ReplaceOrInsert(hex.EncodeToString(key))
 }
 
 func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
+	fmt.Printf("TouchAccount: %x %x\n", c.plainKey, val)
 	if len(val) == 0 {
+		c.update.Reset()
 		c.update.Flags = commitment.DeleteUpdate
+		ks := hex.EncodeToString(c.plainKey)
+		t.plainKeys.AscendGreaterOrEqual(hex.EncodeToString(c.plainKey), func(key string) bool {
+			if !strings.HasPrefix(key, ks) {
+				return false
+			}
+			if key == ks {
+				return true
+			}
+			//t.TouchPlainKey(common.FromHex(key), nil, t.TouchStorage)
+			fmt.Printf("drop update for %s\n", key)
+			t.tree.Delete(&commitmentItem{plainKey: common.FromHex(key), hashedKey: t.hashAndNibblizeKey(common.FromHex(key))})
+			t.plainKeys.Delete(key) // we already marked those keys as deleted
+			return true
+		})
 		return
 	}
 	if c.update.Flags&commitment.DeleteUpdate != 0 {
@@ -153,6 +175,7 @@ func (t *UpdateTree) UpdatePrefix(prefix, val []byte, fn func(c *commitmentItem,
 }
 
 func (t *UpdateTree) TouchStorage(c *commitmentItem, val []byte) {
+	fmt.Printf("TouchStorage: %x %x\n", c.plainKey, val)
 	c.update.ValLength = len(val)
 	if len(val) == 0 {
 		c.update.Flags = commitment.DeleteUpdate
@@ -163,6 +186,7 @@ func (t *UpdateTree) TouchStorage(c *commitmentItem, val []byte) {
 }
 
 func (t *UpdateTree) TouchCode(c *commitmentItem, val []byte) {
+	fmt.Printf("TouchCode: %x %x\n", c.plainKey, val)
 	t.keccak.Reset()
 	t.keccak.Write(val)
 	copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
@@ -170,33 +194,25 @@ func (t *UpdateTree) TouchCode(c *commitmentItem, val []byte) {
 	c.update.Flags |= commitment.CodeUpdate
 }
 
-func (t *UpdateTree) ListItems() []commitmentItem {
-	updates := make([]commitmentItem, t.tree.Len())
-
-	j := 0
-	t.tree.Ascend(func(item *commitmentItem) bool {
-		updates[j] = *item
-		j++
-		return true
-	})
-	return updates
-}
-
 // Returns list of both plain and hashed keys. If .mode is CommitmentModeUpdate, updates also returned.
 func (t *UpdateTree) List(clear bool) ([][]byte, [][]byte, []commitment.Update) {
-	plainKeys := make([][]byte, t.tree.Len())
-	hashedKeys := make([][]byte, t.tree.Len())
-	updates := make([]commitment.Update, t.tree.Len())
+	plainKeys := make([][]byte, 0, t.tree.Len())
+	hashedKeys := make([][]byte, 0, t.tree.Len())
+	updates := make([]commitment.Update, 0, t.tree.Len())
 
-	j := 0
+	//j := 0
 	t.tree.Ascend(func(item *commitmentItem) bool {
-		plainKeys[j] = item.plainKey
-		hashedKeys[j] = item.hashedKey
-		updates[j] = item.update
-		j++
+		plainKeys = append(plainKeys, item.plainKey)
+		hashedKeys = append(hashedKeys, item.hashedKey)
+		updates = append(updates, item.update)
+		//plainKeys[j] = item.plainKey
+		//hashedKeys[j] = item.hashedKey
+		//updates[j] = item.update
+		//j++
 		return true
 	})
 	if clear {
+		t.plainKeys.Clear(true)
 		t.tree.Clear(true)
 	}
 	return plainKeys, hashedKeys, updates

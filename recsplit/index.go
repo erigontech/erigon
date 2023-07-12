@@ -28,6 +28,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -174,17 +175,19 @@ func (idx *Index) BaseDataID() uint64 { return idx.baseDataID }
 func (idx *Index) FilePath() string   { return idx.filePath }
 func (idx *Index) FileName() string   { return idx.fileName }
 
-func (idx *Index) Close() error {
+func (idx *Index) Close() {
 	if idx == nil {
-		return nil
+		return
 	}
-	if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
-		log.Trace("unmap", "err", err, "file", idx.FileName())
+	if idx.f != nil {
+		if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
+			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
+		}
+		if err := idx.f.Close(); err != nil {
+			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
+		}
+		idx.f = nil
 	}
-	if err := idx.f.Close(); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (idx *Index) skipBits(m uint16) int {

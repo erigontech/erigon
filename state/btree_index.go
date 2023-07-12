@@ -16,6 +16,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -1050,22 +1051,23 @@ func (b *BtIndex) Empty() bool { return b == nil || b.keyCount == 0 }
 
 func (b *BtIndex) KeyCount() uint64 { return b.keyCount }
 
-func (b *BtIndex) Close() error {
+func (b *BtIndex) Close() {
 	if b == nil {
-		return nil
+		return
 	}
-	if err := b.m.Unmap(); err != nil {
-		log.Warn("unmap", "err", err, "file", b.FileName())
-	}
-	if err := b.file.Close(); err != nil {
-		log.Warn("close", "err", err, "file", b.FileName())
+	if b.file != nil {
+		if err := b.m.Unmap(); err != nil {
+			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", b.FileName(), "stack", dbg.Stack())
+		}
+		if err := b.file.Close(); err != nil {
+			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", b.FileName(), "stack", dbg.Stack())
+		}
+		b.file = nil
 	}
 	if b.decompressor != nil {
-		if err := b.decompressor.Close(); err != nil {
-			log.Warn("close", "err", err, "file", b.decompressor.Close())
-		}
+		b.decompressor.Close()
+		b.decompressor = nil
 	}
-	return nil
 }
 
 func (b *BtIndex) Seek(x []byte) (*Cursor, error) {
