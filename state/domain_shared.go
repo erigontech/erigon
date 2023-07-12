@@ -94,7 +94,7 @@ func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 }
 
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, step uint64, txUnwindTo uint64) error {
-	sd.clear()
+	sd.ClearRam()
 
 	if err := sd.Account.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
 		return err
@@ -167,19 +167,6 @@ func (sd *SharedDomains) ClearRam() {
 	sd.Commitment.updates.List(true)
 	sd.Commitment.patriciaTrie.Reset()
 	sd.storage = btree2.NewMap[string, []byte](128)
-	sd.estSize.Store(0)
-}
-
-func (sd *SharedDomains) clear() {
-	sd.muMaps.Lock()
-	defer sd.muMaps.Unlock()
-	sd.account = map[string][]byte{}
-	sd.code = map[string][]byte{}
-	sd.commitment.Clear()
-
-	sd.Commitment.updates.List(true)
-	sd.Commitment.patriciaTrie.Reset()
-	sd.storage.Clear()
 	sd.estSize.Store(0)
 }
 

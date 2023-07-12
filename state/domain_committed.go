@@ -272,6 +272,10 @@ func (d *DomainCommitted) PatriciaState() ([]byte, error) {
 	return state, nil
 }
 
+func (d *DomainCommitted) Reset() {
+	d.patriciaTrie.Reset()
+}
+
 func (d *DomainCommitted) ResetFns(
 	branchFn func(prefix []byte) ([]byte, error),
 	accountFn func(plainKey []byte, cell *commitment.Cell) error,
