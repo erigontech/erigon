@@ -49,7 +49,7 @@ jobs:
         if: matrix.os == 'ubuntu-20.04'
         uses: golangci/golangci-lint-action@v3
         with:
-          version: v1.52
+          version: v1.53
 
       - name: Test win
         if: matrix.os == 'windows-2022'

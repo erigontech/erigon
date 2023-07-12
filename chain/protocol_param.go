@@ -18,7 +18,10 @@ package chain
 
 const (
 	// EIP-4844: Shard Blob Transactions
+	FieldElementsPerBlob         = 4096 // each field element is 32 bytes
+	BlobSize                     = FieldElementsPerBlob * 32
 	DataGasPerBlob        uint64 = 0x20000
 	TargetDataGasPerBlock uint64 = 0x60000
 	MaxDataGasPerBlock    uint64 = 0xC0000
+	MaxBlobsPerBlock      uint64 = MaxDataGasPerBlock / DataGasPerBlob
 )

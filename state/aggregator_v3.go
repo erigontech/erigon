@@ -144,6 +144,16 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	return a, nil
 }
 func (a *AggregatorV3) OnFreeze(f OnFreezeFunc) { a.onFreeze = f }
+func (a *AggregatorV3) DisableFsync() {
+	a.accounts.DisableFsync()
+	a.storage.DisableFsync()
+	a.code.DisableFsync()
+	a.commitment.DisableFsync()
+	a.logAddrs.DisableFsync()
+	a.logTopics.DisableFsync()
+	a.tracesFrom.DisableFsync()
+	a.tracesTo.DisableFsync()
+}
 
 func (a *AggregatorV3) OpenFolder() error {
 	a.filesMutationLock.Lock()

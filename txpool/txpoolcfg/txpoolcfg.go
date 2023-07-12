@@ -1,3 +1,19 @@
+/*
+   Copyright 2022 The Erigon contributors
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package txpoolcfg
 
 import (
@@ -72,6 +88,7 @@ const (
 	TypeNotActivated    DiscardReason = 23 // For example, an EIP-4844 transaction is submitted before Cancun activation
 	CreateBlobTxn       DiscardReason = 24 // Blob transactions cannot have the form of a create transaction
 	NoBlobs             DiscardReason = 25 // Blob transactions must have at least one blob
+	TooManyBlobs        DiscardReason = 26 // There's a limit on how many blobs a block (and thus any transaction) may have
 )
 
 func (r DiscardReason) String() string {
@@ -128,6 +145,8 @@ func (r DiscardReason) String() string {
 		return "blob transactions cannot have the form of a create transaction"
 	case NoBlobs:
 		return "blob transactions must have at least one blob"
+	case TooManyBlobs:
+		return "max number of blobs exceeded"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
