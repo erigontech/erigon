@@ -147,9 +147,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
 		misc.ApplyDAOHardFork(ibs)
 		ibs.SoftFinalise()
-		//if err = ibs.FinalizeTx(rules, rw.stateWriter); err != nil {
-		//	panic(err)
-		//}
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
 			// Genesis block
