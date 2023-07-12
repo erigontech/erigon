@@ -1,6 +1,9 @@
 package engine_types
 
 import (
+	"encoding/json"
+	"errors"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -63,19 +66,40 @@ type ExecutionPayloadBodyV1 struct {
 }
 
 type PayloadStatus struct {
-	Status          EngineStatus `json:"status" gencodec:"required"`
-	ValidationError error        `json:"validationError"`
-	LatestValidHash *common.Hash `json:"latestValidHash"`
+	Status          EngineStatus      `json:"status" gencodec:"required"`
+	ValidationError *StringifiedError `json:"validationError"`
+	LatestValidHash *common.Hash      `json:"latestValidHash"`
 	CriticalError   error
 }
 
 type ForkChoiceUpdatedResponse struct {
-	PayloadId     *hexutil.Uint64 `json:"payloadID"`
-	PayloadStatus *PayloadStatus  `json:"payloadStatus"`
+	PayloadId     *hexutility.Bytes `json:"payloadId"` // We need to reformat the uint64 so this makes more sense.
+	PayloadStatus *PayloadStatus    `json:"payloadStatus"`
 }
 
 type GetPayloadResponse struct {
 	ExecutionPayload *ExecutionPayload `json:"executionPayload" gencodec:"required"`
 	BlockValue       *hexutil.Big      `json:"blockValue"      `
 	BlobsBundle      *BlobsBundleV1    `json:"blobsBundle"`
+}
+
+type StringifiedError struct{ err error }
+
+func NewStringifiedError(err error) *StringifiedError {
+	return &StringifiedError{err: err}
+}
+
+func NewStringifiedErrorFromString(err string) *StringifiedError {
+	return &StringifiedError{err: errors.New(err)}
+}
+
+func (e StringifiedError) MarshalJSON() ([]byte, error) {
+	if e.err == nil {
+		return json.Marshal(nil)
+	}
+	return json.Marshal(e.err.Error())
+}
+
+func (e StringifiedError) Error() error {
+	return e.err
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math/big"
 	"reflect"
@@ -197,7 +196,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash())
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
-			ValidationError: errors.New("invalid block hash"),
+			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
 		}, nil
 	}
 
@@ -206,7 +205,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
-				ValidationError: errors.New("typed txn marshalled as RLP string"),
+				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
 			}, nil
 		}
 	}
@@ -216,7 +215,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		s.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
-			ValidationError: err,
+			ValidationError: engine_types.NewStringifiedError(err),
 		}, nil
 	}
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
@@ -322,7 +321,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(blockHash libcommon.Hash,
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
 			LatestValidHash: &parentHash,
-			ValidationError: errors.New("invalid block number"),
+			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block number"),
 		}, nil
 	}
 	// Check if we already determined if the hash is attributed to a previously received invalid header.
@@ -580,7 +579,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 				Status:          engine_types.ValidStatus,
 				LatestValidHash: &headHash,
 			},
-			PayloadId: (*hexutil.Uint64)(&s.payloadId),
+			PayloadId: convertPayloadId(s.payloadId),
 		}, nil
 	}
 
@@ -599,8 +598,15 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 			Status:          engine_types.ValidStatus,
 			LatestValidHash: &headHash,
 		},
-		PayloadId: (*hexutil.Uint64)(&s.payloadId),
+		PayloadId: convertPayloadId(s.payloadId),
 	}, nil
+}
+
+func convertPayloadId(payloadId uint64) *hexutility.Bytes {
+	encodedPayloadId := make([]byte, 8)
+	binary.BigEndian.PutUint64(encodedPayloadId, payloadId)
+	ret := hexutility.Bytes(encodedPayloadId)
+	return &ret
 }
 
 func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []libcommon.Hash, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
@@ -720,9 +726,9 @@ func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
 	return out
 }
 
-func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.ExecutionPayload, error) {
+func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.Bytes) (*engine_types.ExecutionPayload, error) {
 
-	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	decodedPayloadId := binary.BigEndian.Uint64(payloadId)
 	log.Info("Received GetPayloadV1", "payloadId", decodedPayloadId)
 
 	response, err := e.getPayload(ctx, decodedPayloadId)

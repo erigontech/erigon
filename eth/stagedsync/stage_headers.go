@@ -580,7 +580,7 @@ func verifyAndSaveNewPoSHeader(
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
 			LatestValidHash: &lvh,
-			ValidationError: verificationErr,
+			ValidationError: engine_types.NewStringifiedError(verificationErr),
 		}, false, nil
 	}
 
@@ -602,7 +602,7 @@ func verifyAndSaveNewPoSHeader(
 	return &engine_types.PayloadStatus{
 		Status:          status,
 		LatestValidHash: &latestValidHash,
-		ValidationError: validationError,
+		ValidationError: engine_types.NewStringifiedError(validationError),
 	}, success, nil
 }
 
