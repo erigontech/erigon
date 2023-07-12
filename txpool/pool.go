@@ -567,10 +567,11 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		}
 
 		// Skip transactions that require more data gas than is available
-		if mt.Tx.BlobCount*chain.DataGasPerBlob > availableDataGas {
+		blobCount := uint64(len(mt.Tx.BlobHashes))
+		if blobCount*chain.DataGasPerBlob > availableDataGas {
 			continue
 		}
-		availableDataGas -= mt.Tx.BlobCount * chain.DataGasPerBlob
+		availableDataGas -= blobCount * chain.DataGasPerBlob
 
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
@@ -650,8 +651,12 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		if txn.Creation {
 			return txpoolcfg.CreateBlobTxn
 		}
-		if txn.BlobCount == 0 {
+		blobCount := uint64(len(txn.BlobHashes))
+		if blobCount == 0 {
 			return txpoolcfg.NoBlobs
+		}
+		if blobCount > chain.MaxBlobsPerBlock {
+			return txpoolcfg.TooManyBlobs
 		}
 	}
 
@@ -716,9 +721,10 @@ func requiredBalance(txn *types.TxSlot) *uint256.Int {
 		return maxUint256
 	}
 	// and https://eips.ethereum.org/EIPS/eip-4844#gas-accounting
-	if txn.BlobCount != 0 {
+	blobCount := uint64(len(txn.BlobHashes))
+	if blobCount != 0 {
 		maxDataGasCost := uint256.NewInt(chain.DataGasPerBlob)
-		maxDataGasCost.Mul(maxDataGasCost, uint256.NewInt(txn.BlobCount))
+		maxDataGasCost.Mul(maxDataGasCost, uint256.NewInt(blobCount))
 		_, overflow = maxDataGasCost.MulOverflow(maxDataGasCost, &txn.DataFeeCap)
 		if overflow {
 			return maxUint256
