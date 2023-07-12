@@ -33,6 +33,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -214,7 +215,16 @@ func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine consensus
 }
 
 func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, withPosDownloader bool) *MockSentry {
-	return MockWithEverything(tb, gspec, key, prune, ethash.NewFaker(), blockBufferSize, false, withPosDownloader)
+	var engine consensus.Engine
+
+	switch {
+	case gspec.Config.Bor != nil:
+		engine = bor.NewFaker()
+	default:
+		engine = ethash.NewFaker()
+	}
+
+	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader)
 }
 
 func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, blockBufferSize int, withTxPool bool, withPosDownloader bool) *MockSentry {
@@ -235,6 +245,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.DeprecatedTxPool.StartOnInit = true
 
 	logger := log.New()
+
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	histV3, db, agg := temporal.NewTestDB(tb, dirs, nil)
 	cfg.HistoryV3 = histV3

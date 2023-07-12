@@ -379,7 +379,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		txNumIncrement()
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil); err != nil {
+			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, logger); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
@@ -402,6 +402,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	for i := 0; i < n; i++ {
 		setBlockNum(uint64(i))
 		ibs := state.New(stateReader)
+		fmt.Println("generating block", i)
+		GenerateTrace = true
 		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)
@@ -529,6 +531,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4 bool) (hashRo
 			return hashRoot, fmt.Errorf("interate over plain state: %w", err)
 		}
 		newK, err := hashKeyAndAddIncarnation(k, h)
+		fmt.Println("HK", k, newK)
 		if err != nil {
 			return hashRoot, fmt.Errorf("insert hashed key: %w", err)
 		}

@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -77,6 +78,7 @@ func ExecuteBlockEphemerally(
 	engine consensus.Engine, block *types.Block,
 	stateReader state.StateReader, stateWriter state.WriterWithChangeSets,
 	chainReader consensus.ChainHeaderReader, getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
+	logger log.Logger,
 ) (*EphemeralExecResult, error) {
 
 	defer BlockExecutionTimer.UpdateDuration(time.Now())
@@ -160,7 +162,7 @@ func ExecuteBlockEphemerally(
 	}
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false); err != nil {
+		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, logger); err != nil {
 			return nil, err
 		}
 	}
@@ -319,14 +321,15 @@ func FinalizeBlockExecution(
 	ibs *state.IntraBlockState, receipts types.Receipts,
 	withdrawals []*types.Withdrawal, headerReader consensus.ChainHeaderReader,
 	isMining bool,
+	logger log.Logger,
 ) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, err error) {
 	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
 	}
 	if isMining {
-		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, headerReader, syscall, nil)
+		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, headerReader, syscall, nil, logger)
 	} else {
-		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, headerReader, syscall)
+		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, headerReader, syscall, logger)
 	}
 	if err != nil {
 		return nil, nil, nil, err
