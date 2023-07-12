@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -508,8 +508,8 @@ func TestForkchoiceToGenesis(t *testing.T) {
 	m := stages.MockWithZeroTTD(t, false)
 
 	// Trivial forkChoice: everything points to genesis
-	forkChoiceMessage := engine_helpers.ForkChoiceMessage{
-		HeadBlockHash:      m.Genesis.Hash(),
+	forkChoiceMessage := engine_types.ForkChoiceState{
+		HeadHash:           m.Genesis.Hash(),
 		SafeBlockHash:      m.Genesis.Hash(),
 		FinalizedBlockHash: m.Genesis.Hash(),
 	}
@@ -533,8 +533,8 @@ func TestBogusForkchoice(t *testing.T) {
 	m := stages.MockWithZeroTTD(t, false)
 
 	// Bogus forkChoice: head points to rubbish
-	forkChoiceMessage := engine_helpers.ForkChoiceMessage{
-		HeadBlockHash:      libcommon.HexToHash("11111111111111111111"),
+	forkChoiceMessage := engine_types.ForkChoiceState{
+		HeadHash:           libcommon.HexToHash("11111111111111111111"),
 		SafeBlockHash:      m.Genesis.Hash(),
 		FinalizedBlockHash: m.Genesis.Hash(),
 	}
@@ -552,8 +552,8 @@ func TestBogusForkchoice(t *testing.T) {
 	assert.Equal(t, engine.EngineStatus_SYNCING, payloadStatus.Status)
 
 	// Now send a correct forkChoice
-	forkChoiceMessage = engine_helpers.ForkChoiceMessage{
-		HeadBlockHash:      m.Genesis.Hash(),
+	forkChoiceMessage = engine_types.ForkChoiceState{
+		HeadHash:           m.Genesis.Hash(),
 		SafeBlockHash:      m.Genesis.Hash(),
 		FinalizedBlockHash: m.Genesis.Hash(),
 	}
@@ -612,8 +612,8 @@ func TestPoSDownloader(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 
 	// Point forkChoice to the head
-	forkChoiceMessage := engine_helpers.ForkChoiceMessage{
-		HeadBlockHash:      chain.TopBlock.Hash(),
+	forkChoiceMessage := engine_types.ForkChoiceState{
+		HeadHash:           chain.TopBlock.Hash(),
 		SafeBlockHash:      chain.TopBlock.Hash(),
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
@@ -677,8 +677,8 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 
 	// Point forkChoice to the invalid tip
-	forkChoiceMessage := engine_helpers.ForkChoiceMessage{
-		HeadBlockHash:      invalidTip.Hash(),
+	forkChoiceMessage := engine_types.ForkChoiceState{
+		HeadHash:           invalidTip.Hash(),
 		SafeBlockHash:      invalidTip.Hash(),
 		FinalizedBlockHash: invalidTip.Hash(),
 	}
@@ -749,8 +749,8 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 
 	payloadStatus0 := m.ReceivePayloadStatus()
 	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus0.Status)
-	forkChoiceMessage := engine_helpers.ForkChoiceMessage{
-		HeadBlockHash:      chain0.TopBlock.Hash(),
+	forkChoiceMessage := engine_types.ForkChoiceState{
+		HeadHash:           chain0.TopBlock.Hash(),
 		SafeBlockHash:      chain0.TopBlock.Hash(),
 		FinalizedBlockHash: chain0.TopBlock.Hash(),
 	}
@@ -770,8 +770,8 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	payloadStatus1 := m.ReceivePayloadStatus()
 	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus1.Status)
-	forkChoiceMessage = engine_helpers.ForkChoiceMessage{
-		HeadBlockHash:      chain1.TopBlock.Hash(),
+	forkChoiceMessage = engine_types.ForkChoiceState{
+		HeadHash:           chain1.TopBlock.Hash(),
 		SafeBlockHash:      chain1.TopBlock.Hash(),
 		FinalizedBlockHash: chain1.TopBlock.Hash(),
 	}
@@ -791,8 +791,8 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	payloadStatus2 := m.ReceivePayloadStatus()
 	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus2.Status)
-	forkChoiceMessage = engine_helpers.ForkChoiceMessage{
-		HeadBlockHash:      chain2.TopBlock.Hash(),
+	forkChoiceMessage = engine_types.ForkChoiceState{
+		HeadHash:           chain2.TopBlock.Hash(),
 		SafeBlockHash:      chain2.TopBlock.Hash(),
 		FinalizedBlockHash: chain2.TopBlock.Hash(),
 	}
@@ -819,12 +819,12 @@ func TestPOSWrongTrieRootReorgs(t *testing.T) {
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	payloadStatus3 = m.ReceivePayloadStatus()
 	assert.Equal(t, engine.EngineStatus_VALID, payloadStatus3.Status)
-	forkChoiceMessage = engine_helpers.ForkChoiceMessage{
-		HeadBlockHash:      chain3.TopBlock.Hash(),
+	forkChoiceMessage = engine_types.ForkChoiceState{
+		HeadHash:           chain3.TopBlock.Hash(),
 		SafeBlockHash:      chain3.TopBlock.Hash(),
 		FinalizedBlockHash: chain3.TopBlock.Hash(),
 	}
-	m.SendForkChoiceRequest(&forkChoiceMessage)
+	m.SendForkChoiceRequest(&)
 	err = stages.StageLoopIteration(m.Ctx, m.DB, tx, m.Sync, initialCycle, m.Log, m.BlockReader, nil)
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)

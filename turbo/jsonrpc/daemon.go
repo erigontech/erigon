@@ -15,7 +15,7 @@ import (
 )
 
 // APIList describes the list of available RPC apis
-func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, engineBackend rpchelper.EngineBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader services.FullBlockReader, agg *libstate.AggregatorV3, cfg httpcfg.HttpCfg, engine consensus.EngineReader,
 	logger log.Logger,
@@ -134,32 +134,6 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, engineBackend 
 			list = append(list, clique.NewCliqueAPI(db, engine, blockReader))
 		}
 	}
-
-	return list
-}
-
-func AuthAPIList(db kv.RoDB, eth rpchelper.ApiBackend, engineBackend rpchelper.EngineBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
-	filters *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader,
-	agg *libstate.AggregatorV3,
-	cfg httpcfg.HttpCfg, engine consensus.EngineReader,
-	logger log.Logger,
-) (list []rpc.API) {
-	base := NewBaseApi(filters, stateCache, blockReader, agg, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs)
-
-	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.ReturnDataLimit, logger)
-	engineImpl := NewEngineAPI(base, db, engineBackend)
-
-	list = append(list, rpc.API{
-		Namespace: "eth",
-		Public:    true,
-		Service:   EthAPI(ethImpl),
-		Version:   "1.0",
-	}, rpc.API{
-		Namespace: "engine",
-		Public:    true,
-		Service:   EngineAPI(engineImpl),
-		Version:   "1.0",
-	})
 
 	return list
 }

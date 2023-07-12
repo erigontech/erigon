@@ -15,19 +15,11 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/log/v3"
 )
 
 const DefaultRPCHTTPTimeout = time.Second * 30
-
-const (
-	ValidStatus            = "VALID"
-	InvalidStatus          = "INVALID"
-	SyncingStatus          = "SYNCING"
-	AcceptedStatus         = "ACCEPTED"
-	InvalidBlockHashStatus = "INVALID_BLOCK_HASH"
-)
 
 type ExecutionClientRpc struct {
 	client    *rpc.Client
@@ -85,7 +77,7 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) (invalid bo
 		return
 	}
 
-	request := jsonrpc.ExecutionPayload{
+	request := engine_types.ExecutionPayload{
 		ParentHash:   payload.ParentHash,
 		FeeRecipient: payload.FeeRecipient,
 		StateRoot:    payload.StateRoot,
@@ -117,7 +109,7 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) (invalid bo
 		*request.ExcessDataGas = hexutil.Uint64(payload.ExcessDataGas)
 	}
 
-	payloadStatus := make(map[string]interface{}) // As it is done in the rpcdaemon
+	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
 	err = cc.client.CallContext(cc.ctx, &payloadStatus, engineMethod, request)
 	if err != nil {
@@ -128,20 +120,14 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) (invalid bo
 		err = fmt.Errorf("execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
 		return
 	}
-	var status string
-	var ok bool
-	if status, ok = payloadStatus["status"].(string); !ok {
-		err = fmt.Errorf("invalid response received from NewPayload")
-		return
 
-	}
-	invalid = status == InvalidStatus || status == InvalidBlockHashStatus
+	invalid = payloadStatus.Status == engine_types.InvalidStatus || payloadStatus.Status == engine_types.InvalidBlockHashStatus
 
 	return
 }
 
 func (cc *ExecutionClientRpc) ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error {
-	forkChoiceRequest := jsonrpc.ForkChoiceState{
+	forkChoiceRequest := engine_types.ForkChoiceState{
 		HeadHash:           head,
 		SafeBlockHash:      head,
 		FinalizedBlockHash: finalized,

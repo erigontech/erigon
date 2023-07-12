@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -107,7 +107,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	}()
 
 	hd.BeaconRequestList.WaitForRequest(true, false)
-	hd.PayloadStatusCh <- engine_helpers.PayloadStatus{Status: engine.EngineStatus_SYNCING}
+	hd.PayloadStatusCh <- engine_types.PayloadStatus{Status: engine_types.SyncingStatus}
 	<-done
 	require.NoError(err)
 	require.Equal(reply.Status, engine.EngineStatus_SYNCING)
@@ -167,9 +167,9 @@ func TestMockValidExecution(t *testing.T) {
 
 	hd.BeaconRequestList.WaitForRequest(true, false)
 
-	hd.PayloadStatusCh <- engine_helpers.PayloadStatus{
-		Status:          engine.EngineStatus_VALID,
-		LatestValidHash: payload3Hash,
+	hd.PayloadStatusCh <- engine_types.PayloadStatus{
+		Status:          engine_types.ValidStatus,
+		LatestValidHash: &payload3Hash,
 	}
 	<-done
 
@@ -203,9 +203,9 @@ func TestMockInvalidExecution(t *testing.T) {
 
 	hd.BeaconRequestList.WaitForRequest(true, false)
 	// Simulate invalid status
-	hd.PayloadStatusCh <- engine_helpers.PayloadStatus{
-		Status:          engine.EngineStatus_INVALID,
-		LatestValidHash: startingHeadHash,
+	hd.PayloadStatusCh <- engine_types.PayloadStatus{
+		Status:          engine_types.InvalidStatus,
+		LatestValidHash: &startingHeadHash,
 	}
 	<-done
 

@@ -52,6 +52,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -620,8 +621,8 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 	SendPayloadStatus(ms.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	ms.ReceivePayloadStatus()
 
-	fc := engine_helpers.ForkChoiceMessage{
-		HeadBlockHash:      chain.TopBlock.Hash(),
+	fc := engine_types.ForkChoiceState{
+		HeadHash:           chain.TopBlock.Hash(),
 		SafeBlockHash:      chain.TopBlock.Hash(),
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
@@ -696,11 +697,11 @@ func (ms *MockSentry) SendPayloadRequest(message *types.Block) {
 	ms.sentriesClient.Hd.BeaconRequestList.AddPayloadRequest(message)
 }
 
-func (ms *MockSentry) SendForkChoiceRequest(message *engine_helpers.ForkChoiceMessage) {
+func (ms *MockSentry) SendForkChoiceRequest(message *engine_types.ForkChoiceState) {
 	ms.sentriesClient.Hd.BeaconRequestList.AddForkChoiceRequest(message)
 }
 
-func (ms *MockSentry) ReceivePayloadStatus() engine_helpers.PayloadStatus {
+func (ms *MockSentry) ReceivePayloadStatus() engine_types.PayloadStatus {
 	return <-ms.sentriesClient.Hd.PayloadStatusCh
 }
 
