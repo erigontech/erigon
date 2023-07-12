@@ -30,9 +30,11 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -762,8 +764,8 @@ func newRandProofs(size int) KZGProofs {
 func newRandBlobs(size int) Blobs {
 	var result Blobs
 	for i := 0; i < size; i++ {
-		var arr [LEN_BLOB]byte
-		for j := 0; j < LEN_BLOB; j++ {
+		var arr [chain.BlobSize]byte
+		for j := 0; j < chain.BlobSize; j++ {
 			arr[j] = randByte()
 		}
 		result = append(result, arr)
