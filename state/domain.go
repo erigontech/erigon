@@ -1474,6 +1474,11 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 	}
 
 	// still not found, search in indexed cold shards
+	return dc.getLatestFromColdFiles(filekey)
+}
+
+func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found bool, err error) {
+	var k []byte
 	exactColdShard, ok := dc.hc.ic.loc.lookupLatest(filekey)
 	if !ok {
 		return nil, false, nil

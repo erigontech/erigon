@@ -1044,6 +1044,34 @@ type RangesV3 struct {
 	tracesTo             bool
 }
 
+func (r RangesV3) String() string {
+	ss := []string{}
+	if r.accounts.any() {
+		ss = append(ss, r.accounts.String())
+	}
+	if r.storage.any() {
+		ss = append(ss, r.storage.String())
+	}
+	if r.code.any() {
+		ss = append(ss, r.code.String())
+	}
+	if r.commitment.any() {
+		ss = append(ss, r.commitment.String())
+	}
+	if r.logAddrs {
+		ss = append(ss, fmt.Sprintf("logAddr=[%d,%d)", r.logAddrsStartTxNum/r.accounts.aggStep, r.logAddrsEndTxNum/r.accounts.aggStep))
+	}
+	if r.logTopics {
+		ss = append(ss, fmt.Sprintf("logTopic=[%d,%d)", r.logTopicsStartTxNum/r.accounts.aggStep, r.logTopicsEndTxNum/r.accounts.aggStep))
+	}
+	if r.tracesFrom {
+		ss = append(ss, fmt.Sprintf("traceFrom=[%d,%d)", r.tracesFromStartTxNum/r.accounts.aggStep, r.tracesFromEndTxNum/r.accounts.aggStep))
+	}
+	if r.tracesTo {
+		ss = append(ss, fmt.Sprintf("traceTo=[%d,%d)", r.tracesToStartTxNum/r.accounts.aggStep, r.tracesToEndTxNum/r.accounts.aggStep))
+	}
+	return strings.Join(ss, ", ")
+}
 func (r RangesV3) any() bool {
 	return r.accounts.any() || r.storage.any() || r.code.any() || r.commitment.any() || r.logAddrs || r.logTopics || r.tracesFrom || r.tracesTo
 }
@@ -1058,7 +1086,7 @@ func (ac *AggregatorV3Context) findMergeRange(maxEndTxNum, maxSpan uint64) Range
 	r.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum = ac.a.logTopics.findMergeRange(maxEndTxNum, maxSpan)
 	r.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum = ac.a.tracesFrom.findMergeRange(maxEndTxNum, maxSpan)
 	r.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum = ac.a.tracesTo.findMergeRange(maxEndTxNum, maxSpan)
-	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%+v\n", maxEndTxNum, maxSpan, r))
+	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/ac.a.aggregationStep, maxSpan/ac.a.aggregationStep, r))
 	return r
 }
 
@@ -1226,7 +1254,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if r.accounts.any() {
 		predicates.Add(1)
 
-		log.Info(fmt.Sprintf("[snapshots] merge: %d-%d", r.accounts.historyStartTxNum/ac.a.aggregationStep, r.accounts.historyEndTxNum/ac.a.aggregationStep))
+		log.Info(fmt.Sprintf("[snapshots] merge: %s", r.String()))
 		g.Go(func() (err error) {
 			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, workers, ac.a.ps)
 			predicates.Done()

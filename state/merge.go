@@ -106,24 +106,26 @@ type DomainRanges struct {
 	values            bool
 	history           bool
 	index             bool
+
+	aggStep uint64
 }
 
 func (r DomainRanges) String() string {
 	var b strings.Builder
 	if r.values {
-		b.WriteString(fmt.Sprintf("Values: [%d, %d)", r.valuesStartTxNum, r.valuesEndTxNum))
+		b.WriteString(fmt.Sprintf("Values: [%d, %d)", r.valuesStartTxNum/r.aggStep, r.valuesEndTxNum/r.aggStep))
 	}
 	if r.history {
 		if b.Len() > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(fmt.Sprintf("History: [%d, %d)", r.historyStartTxNum, r.historyEndTxNum))
+		b.WriteString(fmt.Sprintf("History: [%d, %d)", r.historyStartTxNum/r.aggStep, r.historyEndTxNum/r.aggStep))
 	}
 	if r.index {
 		if b.Len() > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(fmt.Sprintf("Index: [%d, %d)", r.indexStartTxNum, r.indexEndTxNum))
+		b.WriteString(fmt.Sprintf("Index: [%d, %d)", r.indexStartTxNum/r.aggStep, r.indexEndTxNum/r.aggStep))
 	}
 	return b.String()
 }
@@ -143,6 +145,7 @@ func (d *Domain) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		indexStartTxNum:   hr.indexStartTxNum,
 		indexEndTxNum:     hr.indexEndTxNum,
 		index:             hr.index,
+		aggStep:           d.aggregationStep,
 	}
 	d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
