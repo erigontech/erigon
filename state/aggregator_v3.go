@@ -1047,28 +1047,28 @@ type RangesV3 struct {
 func (r RangesV3) String() string {
 	ss := []string{}
 	if r.accounts.any() {
-		ss = append(ss, fmt.Sprintf("accounts=[%s)", r.accounts.String()))
+		ss = append(ss, fmt.Sprintf("accounts=%s", r.accounts.String()))
 	}
 	if r.storage.any() {
-		ss = append(ss, fmt.Sprintf("storage=[%s)", r.storage.String()))
+		ss = append(ss, fmt.Sprintf("storage=%s", r.storage.String()))
 	}
 	if r.code.any() {
-		ss = append(ss, fmt.Sprintf("code=[%s)", r.code.String()))
+		ss = append(ss, fmt.Sprintf("code=%s", r.code.String()))
 	}
 	if r.commitment.any() {
-		ss = append(ss, fmt.Sprintf("commitment=[%s)", r.commitment.String()))
+		ss = append(ss, fmt.Sprintf("commitment=%s", r.commitment.String()))
 	}
 	if r.logAddrs {
-		ss = append(ss, fmt.Sprintf("logAddr=[%d,%d)", r.logAddrsStartTxNum/r.accounts.aggStep, r.logAddrsEndTxNum/r.accounts.aggStep))
+		ss = append(ss, fmt.Sprintf("logAddr=%d-%d", r.logAddrsStartTxNum/r.accounts.aggStep, r.logAddrsEndTxNum/r.accounts.aggStep))
 	}
 	if r.logTopics {
-		ss = append(ss, fmt.Sprintf("logTopic=[%d,%d)", r.logTopicsStartTxNum/r.accounts.aggStep, r.logTopicsEndTxNum/r.accounts.aggStep))
+		ss = append(ss, fmt.Sprintf("logTopic=%d-%d", r.logTopicsStartTxNum/r.accounts.aggStep, r.logTopicsEndTxNum/r.accounts.aggStep))
 	}
 	if r.tracesFrom {
-		ss = append(ss, fmt.Sprintf("traceFrom=[%d,%d)", r.tracesFromStartTxNum/r.accounts.aggStep, r.tracesFromEndTxNum/r.accounts.aggStep))
+		ss = append(ss, fmt.Sprintf("traceFrom=%d-%d", r.tracesFromStartTxNum/r.accounts.aggStep, r.tracesFromEndTxNum/r.accounts.aggStep))
 	}
 	if r.tracesTo {
-		ss = append(ss, fmt.Sprintf("traceTo=[%d,%d)", r.tracesToStartTxNum/r.accounts.aggStep, r.tracesToEndTxNum/r.accounts.aggStep))
+		ss = append(ss, fmt.Sprintf("traceTo=%d-%d", r.tracesToStartTxNum/r.accounts.aggStep, r.tracesToEndTxNum/r.accounts.aggStep))
 	}
 	return strings.Join(ss, ", ")
 }
