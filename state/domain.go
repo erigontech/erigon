@@ -858,9 +858,6 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		if err != nil {
 			return Collation{}, err
 		}
-		if bytes.Equal(k, common.FromHex("c4f43c78a8a52fb34b485c2e926f90628b019281")) {
-			fmt.Printf("collate: %x, %d, %d\n", k, ^binary.BigEndian.Uint64(stepInDB), step)
-		}
 		pos++
 		if ^binary.BigEndian.Uint64(stepInDB) != step {
 			continue
