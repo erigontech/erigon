@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
-	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -835,88 +834,12 @@ func (s *RoSnapshots) PrintDebug() {
 	}
 }
 
-type blockHashStore interface {
-	get(blockNum uint64) common2.Hash
-	put(blockNum uint64, hash common2.Hash)
-}
-
-type arrayHashStore struct {
-	hashes     []common2.Hash
-	startBlock uint64
-	sprintSize uint64
-}
-
-func newArrayHashStore(chainConfig *chain.Config, from, to uint64) blockHashStore {
-	startSprintSize := bor.CalculateSprint(chainConfig.Bor, from)
-	endSprintSize := bor.CalculateSprint(chainConfig.Bor, to)
-
-	if startSprintSize == endSprintSize {
-		return &arrayHashStore{
-			hashes:     make([]common2.Hash, (to-from)/startSprintSize),
-			startBlock: from,
-			sprintSize: startSprintSize,
-		}
-	}
-
-	return &multiSprintHashStore{
-		hashes:      make([]common2.Hash, bor.CalculateSprintCount(chainConfig.Bor, from, to)),
-		startBlock:  from,
-		chainConfig: chainConfig,
-	}
-}
-
-func (a arrayHashStore) get(blockNum uint64) common2.Hash {
-	if blockNum >= a.startBlock {
-		hashPos := int((blockNum - a.startBlock) / a.sprintSize)
-		if len(a.hashes) > hashPos {
-			return a.hashes[hashPos]
-		}
-	}
-
-	return common2.Hash{}
-}
-
-func (a *arrayHashStore) put(blockNum uint64, hash common2.Hash) {
-	if blockNum >= a.startBlock {
-		hashPos := int((blockNum - a.startBlock) / a.sprintSize)
-		if len(a.hashes) > hashPos {
-			a.hashes[hashPos] = hash
-		}
-	}
-}
-
-type multiSprintHashStore struct {
-	hashes      []common2.Hash
-	startBlock  uint64
-	chainConfig *chain.Config
-}
-
-func (a multiSprintHashStore) get(blockNum uint64) common2.Hash {
-	if blockNum >= a.startBlock {
-		hashPos := bor.CalculateSprintCount(a.chainConfig.Bor, a.startBlock, blockNum) - 1
-		if len(a.hashes) > hashPos {
-			return a.hashes[hashPos]
-		}
-	}
-
-	return common2.Hash{}
-}
-
-func (a *multiSprintHashStore) put(blockNum uint64, hash common2.Hash) {
-	if blockNum >= a.startBlock {
-		hashPos := bor.CalculateSprintCount(a.chainConfig.Bor, a.startBlock, blockNum) - 1
-		if len(a.hashes) > hashPos {
-			a.hashes[hashPos] = hash
-		}
-	}
-}
-
-func buildIdx(ctx context.Context, sn snaptype.FileInfo, blockHashes blockHashStore, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
 	//_, fName := filepath.Split(sn.Path)
 	//log.Debug("[snapshots] build idx", "file", fName)
 	switch sn.T {
 	case snaptype.Headers:
-		if err := HeadersIdx(ctx, blockHashes, chainConfig, sn.Path, sn.From, tmpDir, p, lvl, logger); err != nil {
+		if err := HeadersIdx(ctx, chainConfig, sn.Path, sn.From, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
 	case snaptype.Bodies:
@@ -925,7 +848,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, blockHashes blockHashSt
 		}
 	case snaptype.Transactions:
 		dir, _ := filepath.Split(sn.Path)
-		if err := TransactionsIdx(ctx, blockHashes, chainConfig, sn.From, sn.To, dir, tmpDir, p, lvl, logger); err != nil {
+		if err := TransactionsIdx(ctx, chainConfig, sn.From, sn.To, dir, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
 	}
@@ -959,7 +882,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 				p := &background.Progress{}
 				ps.Add(p)
 				defer ps.Delete(p)
-				return buildIdx(gCtx, sn, nil, chainConfig, tmpDir, p, log.LvlInfo, logger)
+				return buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, logger)
 			})
 		}
 	}
@@ -1302,12 +1225,6 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	var blockHashes blockHashStore
-
-	if chainConfig.Bor != nil {
-		blockHashes = newArrayHashStore(&chainConfig, blockFrom, blockTo)
-	}
-
 	{
 		segName := snaptype.SegmentFileName(blockFrom, blockTo, snaptype.Headers)
 		f, _ := snaptype.ParseFileName(snapDir, segName)
@@ -1327,7 +1244,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		}
 
 		p := &background.Progress{}
-		if err := buildIdx(ctx, f, blockHashes, &chainConfig, tmpDir, p, lvl, logger); err != nil {
+		if err := buildIdx(ctx, f, &chainConfig, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
 	}
@@ -1351,7 +1268,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		}
 
 		p := &background.Progress{}
-		if err := buildIdx(ctx, f, nil, &chainConfig, tmpDir, p, lvl, logger); err != nil {
+		if err := buildIdx(ctx, f, &chainConfig, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
 	}
@@ -1391,7 +1308,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		}
 
 		p := &background.Progress{}
-		if err := buildIdx(ctx, f, blockHashes, &chainConfig, tmpDir, p, lvl, logger); err != nil {
+		if err := buildIdx(ctx, f, &chainConfig, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
 	}
@@ -1749,7 +1666,7 @@ func txsAmountBasedOnBodiesSnapshots(snapDir string, blockFrom, blockTo uint64) 
 	return
 }
 
-func TransactionsIdx(ctx context.Context, blockHashes blockHashStore, chainConfig *chain.Config, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
@@ -1794,14 +1711,8 @@ func TransactionsIdx(ctx context.Context, blockHashes blockHashStore, chainConfi
 		return err
 	}
 
-	additionalIdxCount := 0
-
-	if chainConfig.Bor != nil && blockHashes != nil {
-		additionalIdxCount = bor.CalculateSprintCount(chainConfig.Bor, blockFrom, blockTo)
-	}
-
 	txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:    d.Count() + additionalIdxCount,
+		KeyCount:    d.Count(),
 		Enums:       false,
 		BucketSize:  2000,
 		LeafSize:    8,
@@ -1856,16 +1767,6 @@ RETRY:
 				return err
 			}
 
-			if chainConfig.Bor != nil && blockHashes != nil {
-				if blockNum%bor.CalculateSprint(chainConfig.Bor, blockNum) == 0 {
-					txnHash := types.ComputeBorTxHash(blockNum, blockHashes.get(blockNum))
-
-					if err := txnHash2BlockNumIdx.AddKey(txnHash[:], blockNum); err != nil {
-						return err
-					}
-				}
-			}
-
 			blockNum++
 		}
 
@@ -1888,18 +1789,6 @@ RETRY:
 
 		i++
 		offset = nextPos
-	}
-
-	if chainConfig.Bor != nil && blockHashes != nil {
-		// we add state sync transactions every bor Sprint amount of blocks
-
-		if blockNum%bor.CalculateSprint(chainConfig.Bor, blockNum) == 0 {
-			txnHash := types.ComputeBorTxHash(blockNum, blockHashes.get(blockNum))
-
-			if err := txnHash2BlockNumIdx.AddKey(txnHash[:], blockNum); err != nil {
-				return err
-			}
-		}
 	}
 
 	if int(i) != expectedCount {
@@ -1929,7 +1818,7 @@ RETRY:
 }
 
 // HeadersIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersIdx(ctx context.Context, blockHashes blockHashStore, chainConfig *chain.Config, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func HeadersIdx(ctx context.Context, chainConfig *chain.Config, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			_, fName := filepath.Split(segmentFilePath)
@@ -1956,11 +1845,6 @@ func HeadersIdx(ctx context.Context, blockHashes blockHashStore, chainConfig *ch
 		hasher.Reset()
 		hasher.Write(headerRlp)
 		hasher.Read(h[:])
-		if chainConfig.Bor != nil && blockHashes != nil {
-			if i > 0 && i%bor.CalculateSprint(chainConfig.Bor, i) == 0 {
-				blockHashes.put(i, h)
-			}
-		}
 		if err := idx.AddKey(h[:], offset); err != nil {
 			return err
 		}
@@ -2209,46 +2093,6 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snap
 	return toMerge, nil
 }
 
-type syncHashStore struct {
-	store blockHashStore
-	sync.Mutex
-	*sync.Cond
-}
-
-func newSyncHashStore(chainConfig *chain.Config, from, to uint64) *syncHashStore {
-	store := &syncHashStore{
-		store: newArrayHashStore(chainConfig, from, to),
-	}
-
-	store.Cond = sync.NewCond(&store.Mutex)
-
-	return store
-}
-
-func (a *syncHashStore) get(blockNum uint64) common2.Hash {
-	a.Lock()
-	defer a.Unlock()
-
-	result := a.store.get(blockNum)
-	zero := common2.Hash{}
-
-	for result == zero {
-		a.Wait()
-		result = a.store.get(blockNum)
-	}
-
-	return result
-}
-
-func (a *syncHashStore) put(blockNum uint64, hash common2.Hash) {
-	a.Lock()
-	defer a.Unlock()
-
-	a.store.put(blockNum, hash)
-
-	a.Signal()
-}
-
 // Merge does merge segments in given ranges
 func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []Range, snapDir string, doIndex bool) error {
 	if len(mergeRanges) == 0 {
@@ -2262,12 +2106,6 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			return err
 		}
 
-		var blockHashes blockHashStore
-
-		if m.chainConfig.Bor != nil {
-			blockHashes = newSyncHashStore(m.chainConfig, r.from, r.to)
-		}
-
 		for _, t := range snaptype.AllSnapshotTypes {
 			segName := snaptype.SegmentFileName(r.from, r.to, t)
 			f, _ := snaptype.ParseFileName(snapDir, segName)
@@ -2276,7 +2114,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			}
 			if doIndex {
 				p := &background.Progress{}
-				if err := buildIdx(ctx, f, blockHashes, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
+				if err := buildIdx(ctx, f, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
 					return err
 				}
 			}
