@@ -194,7 +194,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
-		s.logger.Error("[NewPayload] invalid block hash", "stated", libcommon.Hash(blockHash), "actual", header.Hash())
+		s.logger.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash())
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
 			ValidationError: errors.New("invalid block hash"),
@@ -232,7 +232,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", libcommon.Hash(blockHash))
+	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	s.hd.BeaconRequestList.AddPayloadRequest(block)
 
 	payloadStatus := <-s.hd.PayloadStatusCh
