@@ -580,7 +580,8 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	for {
 		dc := d.MakeContext()
 		r := dc.findMergeRange(maxEndTxNum, maxSpan)
-		if r.any() {
+		if !r.any() {
+			dc.Close()
 			break
 		}
 		valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
