@@ -7,7 +7,7 @@ import (
 )
 
 func CheckTxPoolContent(ctx context.Context, expectedPendingSize, expectedQueuedSize, expectedBaseFeeSize int) {
-	pendingSize, queuedSize, baseFeeSize, err := devnet.SelectMiner(ctx).TxpoolContent()
+	pendingSize, queuedSize, baseFeeSize, err := devnet.SelectNode(ctx).TxpoolContent()
 
 	logger := devnet.Logger(ctx)
 

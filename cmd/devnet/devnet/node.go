@@ -18,8 +18,8 @@ import (
 type Node interface {
 	requests.RequestGenerator
 	Name() string
-	IsMiner() bool
 	Account() *accounts.Account
+	IsBlockProducer() bool
 }
 
 type NodeSelector interface {
@@ -74,9 +74,9 @@ func (n *node) done() {
 	}
 }
 
-func (n *node) IsMiner() bool {
-	_, isMiner := n.args.(args.Miner)
-	return isMiner
+func (n *node) IsBlockProducer() bool {
+	_, isBlockProducer := n.args.(args.BlockProducer)
+	return isBlockProducer
 }
 
 func (n *node) Account() *accounts.Account {

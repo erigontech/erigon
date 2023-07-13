@@ -119,7 +119,7 @@ func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config
 				if heimdallGrpcAddress != "" {
 					heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(heimdallGrpcAddress)
 				} else {
-					heimdallClient = heimdall.NewHeimdallClient(heimdallUrl)
+					heimdallClient = heimdall.NewHeimdallClient(heimdallUrl, logger)
 				}
 				eng = bor.New(chainConfig, db, spanner, heimdallClient, genesisContractsClient, logger)
 			}

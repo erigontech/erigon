@@ -35,11 +35,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 
@@ -58,7 +61,6 @@ import (
 	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -77,7 +79,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/caplin-phase1/caplin1"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -138,7 +139,7 @@ type Ethereum struct {
 	genesisHash  libcommon.Hash
 
 	ethBackendRPC      *privateapi.EthBackendServer
-	engineBackendRPC   engine.EngineClient
+	engineBackendRPC   *engineapi.EngineServer
 	miningRPC          txpool_proto.MiningServer
 	stateChangesClient txpool.StateChangesClient
 
@@ -193,6 +194,8 @@ func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
 	return
 }
 
+const blockBufferSize = 128
+
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
@@ -213,6 +216,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if err != nil {
 		return nil, err
 	}
+	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
 		if err = stagedsync.UpdateMetrics(tx); err != nil {
@@ -477,6 +481,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		sentries,
 		config.Sync,
 		blockReader,
+		blockBufferSize,
 		stack.Config().SentryLogPeerInfo,
 		backend.forkValidator,
 		config.DropUselessPeers,
@@ -520,7 +525,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool, backend.txPoolDB, blockReader),
 			stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
-			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader),
+			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 		logger)
 
@@ -539,7 +544,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool, backend.txPoolDB, blockReader),
 				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
-				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader),
+				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 			logger)
 		// We start the mining step
@@ -551,10 +556,10 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	// Initialize ethbackend
-	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader, logger)
+	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader, logger, latestBlockBuiltStore)
 	// intiialize engine backend
-	engineSrv := engineapi.NewEngineServer(ctx, logger, chainConfig, assembleBlockPOS, backend.chainDB, blockReader, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
-	backend.engineBackendRPC = direct.NewEngineClient(engineSrv)
+	backend.engineBackendRPC = engineapi.NewEngineServer(ctx, logger, chainConfig, assembleBlockPOS, backend.chainDB, blockReader, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
+
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi, logger)
 
 	var creds credentials.TransportCredentials
@@ -568,7 +573,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		backend.privateAPI, err = privateapi.StartGrpc(
 			kvRPC,
 			ethBackendRPC,
-			engineSrv,
 			backend.txPoolGrpcServer,
 			miningRPC,
 			stack.Config().PrivateApiAddr,
@@ -615,7 +619,22 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
-		engine := execution_client.NewExecutionEnginePhase1FromServer(ctx, backend.engineBackendRPC)
+		// read jwt secret
+		rawJwt, err := os.ReadFile(stack.Config().Http.JWTSecretPath)
+		if err != nil {
+			return nil, fmt.Errorf("could not load jwt for Caplin: %s", err)
+		}
+
+		jwt := common.FromHex(strings.TrimSpace(string(rawJwt)))
+		if len(jwt) != 32 {
+			return nil, fmt.Errorf("could not load jwt for Caplin: %s", err)
+		}
+
+		engine, err := execution_client.NewExecutionClientRPC(ctx,
+			jwt,
+			stack.Config().Http.HttpListenAddress,
+			stack.Config().Http.AuthRpcPort,
+		)
 
 		if err != nil {
 			return nil, err
@@ -753,8 +772,8 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
-	ethRpcClient, engineClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, ethBackendRPC,
-		s.engineBackendRPC, s.txPoolGrpcServer, miningRPC, stateDiffClient, s.logger)
+	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, ethBackendRPC,
+		s.txPoolGrpcServer, miningRPC, stateDiffClient, s.logger)
 	if err != nil {
 		return err
 	}
@@ -763,14 +782,14 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	if casted, ok := s.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, engineClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
-	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, engineClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
+	apiList := jsonrpc.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
 	go func() {
-		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList, s.logger); err != nil {
+		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, s.logger); err != nil {
 			s.logger.Error(err.Error())
 			return
 		}
 	}()
+	go s.engineBackendRPC.Start(httpRpcCfg, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
 
 	// Register the backend on the node
 	stack.RegisterLifecycle(s)

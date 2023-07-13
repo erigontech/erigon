@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,7 +27,8 @@ type Network struct {
 	Chain              string
 	Logger             log.Logger
 	BasePrivateApiAddr string
-	BaseRPCAddr        string
+	BaseRPCHost        string
+	BaseRPCPort        int
 	Snapshots          bool
 	Nodes              []Node
 	Services           []Service
@@ -37,23 +37,11 @@ type Network struct {
 	namedNodes         map[string]Node
 }
 
-// Start starts the process for two erigon nodes running on the dev chain
+// Start starts the process for multiple erigon nodes running on the dev chain
 func (nw *Network) Start(ctx *cli.Context) error {
 
 	type configurable interface {
 		Configure(baseNode args.Node, nodeNumber int) (int, interface{}, error)
-	}
-
-	apiHost, apiPort, err := net.SplitHostPort(nw.BaseRPCAddr)
-
-	if err != nil {
-		return err
-	}
-
-	apiPortNo, err := strconv.Atoi(apiPort)
-
-	if err != nil {
-		return err
 	}
 
 	serviceContext := WithCliContext(go_context.Background(), ctx)
@@ -68,7 +56,7 @@ func (nw *Network) Start(ctx *cli.Context) error {
 	baseNode := args.Node{
 		DataDir:        nw.DataDir,
 		Chain:          nw.Chain,
-		HttpPort:       apiPortNo,
+		HttpPort:       nw.BaseRPCPort,
 		PrivateApiAddr: nw.BasePrivateApiAddr,
 		Snapshots:      nw.Snapshots,
 	}
@@ -90,7 +78,7 @@ func (nw *Network) Start(ctx *cli.Context) error {
 			nodePort, args, err := configurable.Configure(base, i)
 
 			if err == nil {
-				node, err = nw.startNode(fmt.Sprintf("http://%s:%d", apiHost, nodePort), args, i)
+				node, err = nw.startNode(fmt.Sprintf("http://%s:%d", nw.BaseRPCHost, nodePort), args, i)
 			}
 
 			if err != nil {
@@ -255,8 +243,8 @@ func (nw *Network) Wait() {
 	nw.wg.Wait()
 }
 
-func (nw *Network) AnyNode(ctx go_context.Context) Node {
-	return nw.SelectNode(ctx, devnetutils.RandomInt(len(nw.Nodes)-1))
+func (nw *Network) FirstNode() Node {
+	return nw.Nodes[0]
 }
 
 func (nw *Network) SelectNode(ctx go_context.Context, selector interface{}) Node {
@@ -276,26 +264,26 @@ func (nw *Network) SelectNode(ctx go_context.Context, selector interface{}) Node
 	return nil
 }
 
-func (nw *Network) Miners() []Node {
-	var miners []Node
+func (nw *Network) BlockProducers() []Node {
+	var blockProducers []Node
 
 	for _, node := range nw.Nodes {
-		if node.IsMiner() {
-			miners = append(miners, node)
+		if node.IsBlockProducer() {
+			blockProducers = append(blockProducers, node)
 		}
 	}
 
-	return miners
+	return blockProducers
 }
 
-func (nw *Network) NonMiners() []Node {
-	var nonMiners []Node
+func (nw *Network) NonBlockProducers() []Node {
+	var nonBlockProducers []Node
 
 	for _, node := range nw.Nodes {
-		if !node.IsMiner() {
-			nonMiners = append(nonMiners, node)
+		if !node.IsBlockProducer() {
+			nonBlockProducers = append(nonBlockProducers, node)
 		}
 	}
 
-	return nonMiners
+	return nonBlockProducers
 }

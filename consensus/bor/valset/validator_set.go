@@ -384,15 +384,13 @@ func processChanges(origChanges []*Validator) (updates, removals []*Validator, e
 	removals = make([]*Validator, 0, sliceCap)
 	updates = make([]*Validator, 0, sliceCap)
 
-	var prevAddr *libcommon.Address
+	var prevAddr libcommon.Address
 
 	// Scan changes by address and append valid validators to updates or removals lists.
-	for _, valUpdate := range changes {
-		if prevAddr != nil {
-			if bytes.Equal(valUpdate.Address.Bytes(), prevAddr.Bytes()) {
-				err = fmt.Errorf("duplicate entry %v in %v", valUpdate, changes)
-				return nil, nil, err
-			}
+	for i, valUpdate := range changes {
+		if i > 0 && bytes.Equal(valUpdate.Address.Bytes(), prevAddr.Bytes()) {
+			err = fmt.Errorf("duplicate entry %v in %v", valUpdate, changes)
+			return nil, nil, err
 		}
 
 		if valUpdate.VotingPower < 0 {
@@ -412,7 +410,7 @@ func processChanges(origChanges []*Validator) (updates, removals []*Validator, e
 			updates = append(updates, valUpdate)
 		}
 
-		prevAddr = &valUpdate.Address
+		prevAddr = valUpdate.Address
 	}
 
 	return updates, removals, err

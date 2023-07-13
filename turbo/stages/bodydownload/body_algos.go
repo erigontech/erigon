@@ -22,8 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
-const BlockBufferSize = 128
-
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
 func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, headHash libcommon.Hash, headTd256 *uint256.Int, err error) {
 	var headerProgress, bodyProgress uint64
@@ -78,10 +76,10 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 // RequestMoreBodies - returns nil if nothing to request
 func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, error) {
 	var bodyReq *BodyRequest
-	blockNums := make([]uint64, 0, BlockBufferSize)
-	hashes := make([]libcommon.Hash, 0, BlockBufferSize)
+	blockNums := make([]uint64, 0, bd.blockBufferSize)
+	hashes := make([]libcommon.Hash, 0, bd.blockBufferSize)
 
-	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && blockNum < bd.maxProgress; blockNum++ {
+	for blockNum := bd.requestedLow; len(blockNums) < bd.blockBufferSize && blockNum < bd.maxProgress; blockNum++ {
 		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
 			continue

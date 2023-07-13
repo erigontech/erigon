@@ -2,19 +2,18 @@ package engineapi
 
 import (
 	"context"
+	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -29,53 +28,47 @@ var (
 
 // Payloads
 var (
-	mockPayload1 = &types2.ExecutionPayload{
-		ParentHash:    gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x2")),
-		BlockHash:     gointerfaces.ConvertHashToH256(payload1Hash),
-		ReceiptRoot:   gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x3")),
-		StateRoot:     gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x4")),
-		PrevRandao:    gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x0b3")),
-		LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
-		ExtraData:     make([]byte, 0),
-		BaseFeePerGas: gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x0b3")),
+	mockPayload1 = &engine_types.ExecutionPayload{
+		ParentHash:    libcommon.HexToHash("0x2"),
+		BlockHash:     payload1Hash,
+		ReceiptsRoot:  libcommon.HexToHash("0x3"),
+		StateRoot:     libcommon.HexToHash("0x4"),
+		PrevRandao:    libcommon.HexToHash("0x0b3"),
+		LogsBloom:     make([]byte, 256),
+		BaseFeePerGas: (*hexutil.Big)(big.NewInt(0x0b3)),
 		BlockNumber:   100,
 		GasLimit:      52,
 		GasUsed:       4,
 		Timestamp:     4,
-		Coinbase:      gointerfaces.ConvertAddressToH160(libcommon.HexToAddress("0x1")),
-		Transactions:  make([][]byte, 0),
+		FeeRecipient:  libcommon.HexToAddress("0x1"),
 	}
-	mockPayload2 = &types2.ExecutionPayload{
-		ParentHash:    gointerfaces.ConvertHashToH256(payload1Hash),
-		BlockHash:     gointerfaces.ConvertHashToH256(payload2Hash),
-		ReceiptRoot:   gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x3")),
-		StateRoot:     gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x4")),
-		PrevRandao:    gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x0b3")),
-		LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
-		ExtraData:     make([]byte, 0),
-		BaseFeePerGas: gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x0b3")),
+	mockPayload2 = &engine_types.ExecutionPayload{
+		ParentHash:    payload1Hash,
+		BlockHash:     payload2Hash,
+		ReceiptsRoot:  libcommon.HexToHash("0x3"),
+		StateRoot:     libcommon.HexToHash("0x4"),
+		PrevRandao:    libcommon.HexToHash("0x0b3"),
+		LogsBloom:     make([]byte, 256),
+		BaseFeePerGas: (*hexutil.Big)(big.NewInt(0x0b3)),
 		BlockNumber:   101,
 		GasLimit:      52,
 		GasUsed:       4,
 		Timestamp:     4,
-		Coinbase:      gointerfaces.ConvertAddressToH160(libcommon.HexToAddress("0x1")),
-		Transactions:  make([][]byte, 0),
+		FeeRecipient:  libcommon.HexToAddress("0x1"),
 	}
-	mockPayload3 = &types2.ExecutionPayload{
-		ParentHash:    gointerfaces.ConvertHashToH256(startingHeadHash),
-		BlockHash:     gointerfaces.ConvertHashToH256(payload3Hash),
-		ReceiptRoot:   gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x3")),
-		StateRoot:     gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x4")),
-		PrevRandao:    gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x0b3")),
-		LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
-		ExtraData:     make([]byte, 0),
-		BaseFeePerGas: gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x0b3")),
+	mockPayload3 = &engine_types.ExecutionPayload{
+		ParentHash:    startingHeadHash,
+		BlockHash:     payload3Hash,
+		ReceiptsRoot:  libcommon.HexToHash("0x3"),
+		StateRoot:     libcommon.HexToHash("0x4"),
+		PrevRandao:    libcommon.HexToHash("0x0b3"),
+		LogsBloom:     make([]byte, 256),
+		BaseFeePerGas: (*hexutil.Big)(big.NewInt(0x0b3)),
 		BlockNumber:   51,
 		GasLimit:      52,
 		GasUsed:       4,
 		Timestamp:     4,
-		Coinbase:      gointerfaces.ConvertAddressToH160(libcommon.HexToAddress("0x1")),
-		Transactions:  make([][]byte, 0),
+		FeeRecipient:  libcommon.HexToAddress("0x1"),
 	}
 )
 
@@ -98,31 +91,31 @@ func TestMockDownloadRequest(t *testing.T) {
 	backend := NewEngineServer(ctx, logger, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, db, nil, hd, false)
 
 	var err error
-	var reply *engine.EnginePayloadStatus
+	var reply *engine_types.PayloadStatus
 	done := make(chan bool)
 
 	go func() {
-		reply, err = backend.EngineNewPayload(ctx, mockPayload1)
+		reply, err = backend.NewPayloadV1(ctx, mockPayload1)
 		done <- true
 	}()
 
 	hd.BeaconRequestList.WaitForRequest(true, false)
-	hd.PayloadStatusCh <- engine_helpers.PayloadStatus{Status: engine.EngineStatus_SYNCING}
+	hd.PayloadStatusCh <- engine_types.PayloadStatus{Status: engine_types.SyncingStatus}
 	<-done
 	require.NoError(err)
-	require.Equal(reply.Status, engine.EngineStatus_SYNCING)
+	require.Equal(reply.Status, engine_types.SyncingStatus)
 	require.Nil(reply.LatestValidHash)
 
 	// If we get another request we don't need to process it with processDownloadCh and ignore it and return Syncing status
 	go func() {
-		reply, err = backend.EngineNewPayload(ctx, mockPayload2)
+		reply, err = backend.NewPayloadV1(ctx, mockPayload2)
 		done <- true
 	}()
 
 	<-done
 	// Same result as before
 	require.NoError(err)
-	require.Equal(reply.Status, engine.EngineStatus_SYNCING)
+	require.Equal(reply.Status, engine_types.SyncingStatus)
 	require.Nil(reply.LatestValidHash)
 
 	// However if we simulate that we finish reverse downloading the chain by updating the head, we just execute 1:1
@@ -132,14 +125,14 @@ func TestMockDownloadRequest(t *testing.T) {
 	_ = tx.Commit()
 	// Now we try to sync the next payload again
 	go func() {
-		reply, err = backend.EngineNewPayload(ctx, mockPayload2)
+		reply, err = backend.NewPayloadV1(ctx, mockPayload2)
 		done <- true
 	}()
 
 	<-done
 
 	require.NoError(err)
-	require.Equal(reply.Status, engine.EngineStatus_SYNCING)
+	require.Equal(reply.Status, engine_types.SyncingStatus)
 	require.Nil(reply.LatestValidHash)
 }
 
@@ -157,25 +150,26 @@ func TestMockValidExecution(t *testing.T) {
 	backend := NewEngineServer(ctx, logger, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, db, nil, hd, false)
 
 	var err error
-	var reply *engine.EnginePayloadStatus
+	var reply *engine_types.PayloadStatus
+
 	done := make(chan bool)
 
 	go func() {
-		reply, err = backend.EngineNewPayload(ctx, mockPayload3)
+		reply, err = backend.NewPayloadV1(ctx, mockPayload3)
 		done <- true
 	}()
 
 	hd.BeaconRequestList.WaitForRequest(true, false)
 
-	hd.PayloadStatusCh <- engine_helpers.PayloadStatus{
-		Status:          engine.EngineStatus_VALID,
-		LatestValidHash: payload3Hash,
+	hd.PayloadStatusCh <- engine_types.PayloadStatus{
+		Status:          engine_types.ValidStatus,
+		LatestValidHash: &payload3Hash,
 	}
 	<-done
 
 	require.NoError(err)
-	require.Equal(reply.Status, engine.EngineStatus_VALID)
-	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
+	require.Equal(reply.Status, engine_types.ValidStatus)
+	replyHash := reply.LatestValidHash
 	require.Equal(replyHash[:], payload3Hash[:])
 }
 
@@ -193,25 +187,25 @@ func TestMockInvalidExecution(t *testing.T) {
 	backend := NewEngineServer(ctx, logger, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, db, nil, hd, false)
 
 	var err error
-	var reply *engine.EnginePayloadStatus
+	var reply *engine_types.PayloadStatus
 	done := make(chan bool)
 
 	go func() {
-		reply, err = backend.EngineNewPayload(ctx, mockPayload3)
+		reply, err = backend.NewPayloadV1(ctx, mockPayload3)
 		done <- true
 	}()
 
 	hd.BeaconRequestList.WaitForRequest(true, false)
 	// Simulate invalid status
-	hd.PayloadStatusCh <- engine_helpers.PayloadStatus{
-		Status:          engine.EngineStatus_INVALID,
-		LatestValidHash: startingHeadHash,
+	hd.PayloadStatusCh <- engine_types.PayloadStatus{
+		Status:          engine_types.InvalidStatus,
+		LatestValidHash: &startingHeadHash,
 	}
 	<-done
 
 	require.NoError(err)
-	require.Equal(reply.Status, engine.EngineStatus_INVALID)
-	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
+	require.Equal(reply.Status, engine_types.InvalidStatus)
+	replyHash := reply.LatestValidHash
 	require.Equal(replyHash[:], startingHeadHash[:])
 }
 
@@ -232,21 +226,9 @@ func TestNoTTD(t *testing.T) {
 	done := make(chan bool)
 
 	go func() {
-		_, err = backend.EngineNewPayload(ctx, &types2.ExecutionPayload{
-			ParentHash:    gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x2")),
-			BlockHash:     gointerfaces.ConvertHashToH256(libcommon.HexToHash("0xe6a580606b065e08034dcd6eea026cfdcbd3b41918d98b41cb9bf797d0c27033")),
-			ReceiptRoot:   gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x4")),
-			StateRoot:     gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x4")),
-			PrevRandao:    gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x0b3")),
-			LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
-			ExtraData:     make([]byte, 0),
-			BaseFeePerGas: gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x0b3")),
-			BlockNumber:   51,
-			GasLimit:      52,
-			GasUsed:       4,
-			Timestamp:     4,
-			Coinbase:      gointerfaces.ConvertAddressToH160(libcommon.HexToAddress("0x1")),
-			Transactions:  make([][]byte, 0),
+		_, err = backend.NewPayloadV1(ctx, &engine_types.ExecutionPayload{
+			BlockHash:     libcommon.HexToHash("0x809f6ec0f4fff2bcbb83d1a0c82f59200c531a5e220c68dd9603b17485375c40"),
+			BaseFeePerGas: (*hexutil.Big)(big.NewInt(0x0b3)),
 		})
 		done <- true
 	}()

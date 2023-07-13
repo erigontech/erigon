@@ -82,7 +82,7 @@ func (node *Node) configure(base Node, nodeNumber int) error {
 	return nil
 }
 
-type Miner struct {
+type BlockProducer struct {
 	Node
 	Mine            bool   `arg:"--mine" flag:"true"`
 	Etherbase       string `arg:"--miner.etherbase"`
@@ -94,7 +94,7 @@ type Miner struct {
 	account         *accounts.Account
 }
 
-func (m Miner) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
+func (m BlockProducer) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
 	err := m.configure(baseNode, nodeNumber)
 
 	if err != nil {
@@ -107,6 +107,7 @@ func (m Miner) Configure(baseNode Node, nodeNumber int) (int, interface{}, error
 			m.DevPeriod = 30
 		}
 		m.account = accounts.NewAccount(m.Name() + "-etherbase")
+
 	case networkname.BorDevnetChainName:
 		m.account = accounts.NewAccount(m.Name() + "-etherbase")
 	}
@@ -118,26 +119,30 @@ func (m Miner) Configure(baseNode Node, nodeNumber int) (int, interface{}, error
 	return m.HttpPort, m, nil
 }
 
-func (n Miner) Name() string {
+func (n BlockProducer) Name() string {
 	return n.Node.Name
 }
 
-func (n Miner) IsMiner() bool {
+func (n BlockProducer) IsMiner() bool {
 	return true
 }
 
-func (n Miner) Account() *accounts.Account {
+func (n BlockProducer) Account() *accounts.Account {
 	return n.account
 }
 
-type NonMiner struct {
+func (n BlockProducer) IsBlockProducer() bool {
+	return true
+}
+
+type NonBlockProducer struct {
 	Node
 	HttpApi     string `arg:"--http.api" default:"admin,eth,debug,net,trace,web3,erigon,txpool" json:"http.api"`
 	TorrentPort string `arg:"--torrent.port" default:"42070" json:"torrent.port"`
 	NoDiscover  string `arg:"--nodiscover" flag:"" default:"true" json:"nodiscover"`
 }
 
-func (n NonMiner) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
+func (n NonBlockProducer) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
 	err := n.configure(baseNode, nodeNumber)
 
 	if err != nil {
@@ -147,15 +152,15 @@ func (n NonMiner) Configure(baseNode Node, nodeNumber int) (int, interface{}, er
 	return n.HttpPort, n, nil
 }
 
-func (n NonMiner) Name() string {
+func (n NonBlockProducer) Name() string {
 	return n.Node.Name
 }
 
-func (n NonMiner) IsMiner() bool {
+func (n NonBlockProducer) IsBlockProducer() bool {
 	return false
 }
 
-func (n NonMiner) Account() *accounts.Account {
+func (n NonBlockProducer) Account() *accounts.Account {
 	return nil
 }
 
