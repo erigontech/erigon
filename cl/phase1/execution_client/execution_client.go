@@ -2,146 +2,241 @@ package execution_client
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/big"
-	"net/http"
-	"strings"
 	"time"
 
+	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
-	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
 
-const DefaultRPCHTTPTimeout = time.Second * 30
-
-type ExecutionClientRpc struct {
-	client    *rpc.Client
-	ctx       context.Context
-	addr      string
-	jwtSecret []byte
+// ExecutionClient interfaces with the Erigon-EL component consensus side.
+type ExecutionClient struct {
+	client execution.ExecutionClient
+	ctx    context.Context
 }
 
-func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string, port int) (*ExecutionClientRpc, error) {
-	roundTripper := rpc_helper.NewJWTRoundTripper(jwtSecret)
-	client := &http.Client{Timeout: DefaultRPCHTTPTimeout, Transport: roundTripper}
-
-	isHTTPpecified := strings.HasPrefix(addr, "http")
-	isHTTPSpecified := strings.HasPrefix(addr, "https")
-	protocol := ""
-	if isHTTPSpecified {
-		protocol = "https://"
-	} else if !isHTTPpecified {
-		protocol = "http://"
+func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
+	var blockNonce types.BlockNonce
+	binary.BigEndian.PutUint64(blockNonce[:], header.Nonce)
+	h := &types.Header{
+		ParentHash:  gointerfaces.ConvertH256ToHash(header.ParentHash),
+		UncleHash:   gointerfaces.ConvertH256ToHash(header.OmmerHash),
+		Coinbase:    gointerfaces.ConvertH160toAddress(header.Coinbase),
+		Root:        gointerfaces.ConvertH256ToHash(header.StateRoot),
+		TxHash:      gointerfaces.ConvertH256ToHash(header.TransactionHash),
+		ReceiptHash: gointerfaces.ConvertH256ToHash(header.ReceiptRoot),
+		Bloom:       gointerfaces.ConvertH2048ToBloom(header.LogsBloom),
+		Difficulty:  gointerfaces.ConvertH256ToUint256Int(header.Difficulty).ToBig(),
+		Number:      big.NewInt(int64(header.BlockNumber)),
+		GasLimit:    header.GasLimit,
+		GasUsed:     header.GasUsed,
+		Time:        header.Timestamp,
+		Extra:       header.ExtraData,
+		MixDigest:   gointerfaces.ConvertH256ToHash(header.PrevRandao),
+		Nonce:       blockNonce,
 	}
-	rpcClient, err := rpc.DialHTTPWithClient(fmt.Sprintf("%s%s:%d", protocol, addr, port), client, nil)
+	if header.BaseFeePerGas != nil {
+		h.BaseFee = gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
+	}
+	if header.WithdrawalHash != nil {
+		h.WithdrawalsHash = new(libcommon.Hash)
+		*h.WithdrawalsHash = gointerfaces.ConvertH256ToHash(header.WithdrawalHash)
+	}
+	blockHash := gointerfaces.ConvertH256ToHash(header.BlockHash)
+	if blockHash != h.Hash() {
+		return nil, fmt.Errorf("block %d, %x has invalid hash. expected: %x", header.BlockNumber, h.Hash(), blockHash)
+	}
+	return h, nil
+}
+
+func HeaderToHeaderRPC(header *types.Header) *execution.Header {
+	difficulty := new(uint256.Int)
+	difficulty.SetFromBig(header.Difficulty)
+
+	var baseFeeReply *types2.H256
+	if header.BaseFee != nil {
+		var baseFee uint256.Int
+		baseFee.SetFromBig(header.BaseFee)
+		baseFeeReply = gointerfaces.ConvertUint256IntToH256(&baseFee)
+	}
+	var withdrawalHashReply *types2.H256
+	if header.WithdrawalsHash != nil {
+		withdrawalHashReply = gointerfaces.ConvertHashToH256(*header.WithdrawalsHash)
+	}
+	return &execution.Header{
+		ParentHash:      gointerfaces.ConvertHashToH256(header.ParentHash),
+		Coinbase:        gointerfaces.ConvertAddressToH160(header.Coinbase),
+		StateRoot:       gointerfaces.ConvertHashToH256(header.Root),
+		TransactionHash: gointerfaces.ConvertHashToH256(header.TxHash),
+		LogsBloom:       gointerfaces.ConvertBytesToH2048(header.Bloom[:]),
+		ReceiptRoot:     gointerfaces.ConvertHashToH256(header.ReceiptHash),
+		PrevRandao:      gointerfaces.ConvertHashToH256(header.MixDigest),
+		BlockNumber:     header.Number.Uint64(),
+		Nonce:           header.Nonce.Uint64(),
+		GasLimit:        header.GasLimit,
+		GasUsed:         header.GasUsed,
+		Timestamp:       header.Time,
+		ExtraData:       header.Extra,
+		Difficulty:      gointerfaces.ConvertUint256IntToH256(difficulty),
+		BlockHash:       gointerfaces.ConvertHashToH256(header.Hash()),
+		OmmerHash:       gointerfaces.ConvertHashToH256(header.UncleHash),
+		BaseFeePerGas:   baseFeeReply,
+		WithdrawalHash:  withdrawalHashReply,
+	}
+
+}
+
+// NewExecutionClient establishes a client-side connection with Erigon-EL
+func NewExecutionClient(ctx context.Context, addr string) (*ExecutionClient, error) {
+	// Set up dial options for the gRPC client connection
+	var dialOpts []grpc.DialOption
+	dialOpts = []grpc.DialOption{
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                5 * time.Minute,
+			Timeout:             10 * time.Minute,
+			PermitWithoutStream: true,
+		}),
+	}
+
+	// Add transport credentials to the dial options
+	dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+	// Create the gRPC client connection
+	conn, err := grpc.DialContext(ctx, addr, dialOpts...)
+	if err != nil {
+		// Return an error if the connection fails
+		return nil, fmt.Errorf("creating client connection to execution client: %w", err)
+	}
+
+	// Return a new ExecutionClient struct with the gRPC client and context set as fields
+	return &ExecutionClient{
+		client: execution.NewExecutionClient(conn),
+		ctx:    ctx,
+	}, nil
+}
+
+// InsertHeaders will send block bodies to execution client
+func (ec *ExecutionClient) InsertHeaders(headers []*types.Header) error {
+	grpcHeaders := make([]*execution.Header, 0, len(headers))
+	for _, header := range headers {
+		grpcHeaders = append(grpcHeaders, HeaderToHeaderRPC(header))
+	}
+	_, err := ec.client.InsertHeaders(ec.ctx, &execution.InsertHeadersRequest{Headers: grpcHeaders})
+	return err
+}
+
+// InsertBodies will send block bodies to execution client
+func (ec *ExecutionClient) InsertBodies(bodies []*types.RawBody, blockHashes []libcommon.Hash, blockNumbers []uint64) error {
+	if len(bodies) != len(blockHashes) || len(bodies) != len(blockNumbers) {
+		return fmt.Errorf("unbalanced inputs")
+	}
+	grpcBodies := make([]*execution.BlockBody, 0, len(bodies))
+	for i, body := range bodies {
+		grpcBodies = append(grpcBodies, &execution.BlockBody{
+			BlockHash:    gointerfaces.ConvertHashToH256(blockHashes[i]),
+			BlockNumber:  blockNumbers[i],
+			Transactions: body.Transactions,
+			Withdrawals:  engineapi.ConvertWithdrawalsToRpc(body.Withdrawals),
+		})
+	}
+	_, err := ec.client.InsertBodies(ec.ctx, &execution.InsertBodiesRequest{Bodies: grpcBodies})
+	return err
+}
+
+// InsertExecutionPayloads insert a segment of execution payloads
+func (ec *ExecutionClient) InsertExecutionPayloads(payloads []*cltypes.Eth1Block) error {
+	headers := make([]*types.Header, 0, len(payloads))
+	bodies := make([]*types.RawBody, 0, len(payloads))
+	blockHashes := make([]libcommon.Hash, 0, len(payloads))
+	blockNumbers := make([]uint64, 0, len(payloads))
+
+	for _, payload := range payloads {
+		rlpHeader, err := payload.RlpHeader()
+		if err != nil {
+			return err
+		}
+		headers = append(headers, rlpHeader)
+		bodies = append(bodies, payload.Body())
+		blockHashes = append(blockHashes, payload.BlockHash)
+		blockNumbers = append(blockNumbers, payload.BlockNumber)
+	}
+
+	if err := ec.InsertHeaders(headers); err != nil {
+		return err
+	}
+	return ec.InsertBodies(bodies, blockHashes, blockNumbers)
+}
+
+func (ec *ExecutionClient) ForkChoiceUpdate(headHash libcommon.Hash) (*execution.ForkChoiceReceipt, error) {
+	return ec.client.UpdateForkChoice(ec.ctx, gointerfaces.ConvertHashToH256(headHash))
+}
+
+func (ec *ExecutionClient) IsCanonical(hash libcommon.Hash) (bool, error) {
+	resp, err := ec.client.IsCanonicalHash(ec.ctx, gointerfaces.ConvertHashToH256(hash))
+	if err != nil {
+		return false, err
+	}
+	return resp.Canonical, nil
+}
+
+func (ec *ExecutionClient) ReadHeader(number uint64, blockHash libcommon.Hash) (*types.Header, error) {
+	resp, err := ec.client.GetHeader(ec.ctx, &execution.GetSegmentRequest{
+		BlockNumber: &number,
+		BlockHash:   gointerfaces.ConvertHashToH256(blockHash),
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	return &ExecutionClientRpc{
-		client:    rpcClient,
-		ctx:       ctx,
-		addr:      addr,
-		jwtSecret: jwtSecret,
+	return HeaderRpcToHeader(resp.Header)
+}
+
+func (ec *ExecutionClient) ReadExecutionPayload(number uint64, blockHash libcommon.Hash) (*cltypes.Eth1Block, error) {
+	header, err := ec.ReadHeader(number, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	body, err := ec.ReadBody(number, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	return cltypes.NewEth1BlockFromHeaderAndBody(header, body), nil
+}
+
+func (ec *ExecutionClient) ReadBody(number uint64, blockHash libcommon.Hash) (*types.RawBody, error) {
+	resp, err := ec.client.GetBody(ec.ctx, &execution.GetSegmentRequest{
+		BlockNumber: &number,
+		BlockHash:   gointerfaces.ConvertHashToH256(blockHash),
+	})
+	if err != nil {
+		return nil, err
+	}
+	uncles := make([]*types.Header, 0, len(resp.Body.Uncles))
+	for _, uncle := range resp.Body.Uncles {
+		h, err := HeaderRpcToHeader(uncle)
+		if err != nil {
+			return nil, err
+		}
+		uncles = append(uncles, h)
+	}
+	return &types.RawBody{
+		Transactions: resp.Body.Transactions,
+		Uncles:       uncles,
+		Withdrawals:  engineapi.ConvertWithdrawalsFromRpc(resp.Body.Withdrawals),
 	}, nil
-}
-
-func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) (invalid bool, err error) {
-	if payload == nil {
-		return
-	}
-
-	reversedBaseFeePerGas := libcommon.Copy(payload.BaseFeePerGas[:])
-	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
-		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
-	}
-	baseFee := new(big.Int).SetBytes(reversedBaseFeePerGas)
-	var engineMethod string
-	// determine the engine method
-	switch payload.Version() {
-	case clparams.BellatrixVersion:
-		engineMethod = rpc_helper.EngineNewPayloadV1
-	case clparams.CapellaVersion:
-		engineMethod = rpc_helper.EngineNewPayloadV2
-	case clparams.DenebVersion:
-		engineMethod = rpc_helper.EngineNewPayloadV3
-	default:
-		err = fmt.Errorf("invalid payload version")
-		return
-	}
-
-	request := engine_types.ExecutionPayload{
-		ParentHash:   payload.ParentHash,
-		FeeRecipient: payload.FeeRecipient,
-		StateRoot:    payload.StateRoot,
-		ReceiptsRoot: payload.ReceiptsRoot,
-		LogsBloom:    payload.LogsBloom[:],
-		PrevRandao:   payload.PrevRandao,
-		BlockNumber:  hexutil.Uint64(payload.BlockNumber),
-		GasLimit:     hexutil.Uint64(payload.GasLimit),
-		GasUsed:      hexutil.Uint64(payload.GasUsed),
-		Timestamp:    hexutil.Uint64(payload.Time),
-		ExtraData:    payload.Extra.Bytes(),
-		BlockHash:    payload.BlockHash,
-	}
-
-	request.BaseFeePerGas = new(hexutil.Big)
-	*request.BaseFeePerGas = hexutil.Big(*baseFee)
-	payloadBody := payload.Body()
-	// Setup transactionbody
-	request.Withdrawals = payloadBody.Withdrawals
-
-	for _, bytesTransaction := range payloadBody.Transactions {
-		request.Transactions = append(request.Transactions, bytesTransaction)
-	}
-	// Process Deneb
-	if payload.Version() >= clparams.DenebVersion {
-		request.DataGasUsed = new(hexutil.Uint64)
-		request.ExcessDataGas = new(hexutil.Uint64)
-		*request.DataGasUsed = hexutil.Uint64(payload.DataGasUsed)
-		*request.ExcessDataGas = hexutil.Uint64(payload.ExcessDataGas)
-	}
-
-	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon
-	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
-	err = cc.client.CallContext(cc.ctx, &payloadStatus, engineMethod, request)
-	if err != nil {
-		return
-	}
-
-	if err != nil {
-		err = fmt.Errorf("execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
-		return
-	}
-
-	invalid = payloadStatus.Status == engine_types.InvalidStatus || payloadStatus.Status == engine_types.InvalidBlockHashStatus
-
-	return
-}
-
-func (cc *ExecutionClientRpc) ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error {
-	forkChoiceRequest := engine_types.ForkChoiceState{
-		HeadHash:           head,
-		SafeBlockHash:      head,
-		FinalizedBlockHash: finalized,
-	}
-	forkChoiceResp := &engine_types.ForkChoiceUpdatedResponse{}
-	log.Debug("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
-
-	err := cc.client.CallContext(cc.ctx, forkChoiceResp, rpc_helper.ForkChoiceUpdatedV1, forkChoiceRequest)
-	if err != nil {
-		return fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
-	}
-	// Ignore timeouts
-	if err != nil && err.Error() == errContextExceeded {
-		return nil
-	}
-
-	return err
 }

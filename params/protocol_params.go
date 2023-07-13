@@ -166,6 +166,8 @@ const (
 	MinDataGasPrice                   = 1
 	DataGasPriceUpdateFraction        = 3338477
 	PointEvaluationGas         uint64 = 50000
+	ParentBeaconBlockRootGas uint64 = 4200
+	HistoricalRootsModulus          = 98304
 )
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
