@@ -60,9 +60,9 @@ func (e *ExecutionEnginePhase1) NewPayload(payload *cltypes.Eth1Block) error {
 
 	var status *engine.EnginePayloadStatus
 	grpcMessage := &engine.EngineNewPayloadRequest{
-		ExecutionPayload: execPayload,
+		ExecutionPayload:            execPayload,
 		ExpectedBlobVersionedHashes: nil,
-		ParentBeaconBlockRoot: nil,
+		ParentBeaconBlockRoot:       nil,
 	}
 	status, err = e.engineClient.EngineNewPayload(ctx, grpcMessage)
 	// Ignore timeouts

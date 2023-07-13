@@ -246,7 +246,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	if cancun && header.ParentBeaconBlockRoot == nil {
 		return fmt.Errorf("missing parentBeaconBlockRoot")
 	}
-	if cancun && header.ParentBeaconBlockRoot != chain.CurrentHeader().ParentBeaconBlockRoot{
+	if cancun && header.ParentBeaconBlockRoot != chain.CurrentHeader().ParentBeaconBlockRoot {
 		return fmt.Errorf("parentBeaconBlockRoot mismatch")
 	}
 
@@ -258,7 +258,7 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 			return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
 		}
 	}
-	
+
 	if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil && cancun {
 		// Verify the header's EIP-4844 attributes.
 		return err
@@ -283,7 +283,7 @@ func (s *Merge) IsServiceTransaction(sender libcommon.Address, syscall consensus
 
 func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SysCallCustom) {
 	s.eth1Engine.Initialize(config, chain, header, state, txs, uncles, syscall)
-	
+
 	historyStorageAddress := libcommon.Address{0xB}
 	// gBeaconRoot := 4200
 	historicalRootsModulus := uint64(98304)
@@ -291,20 +291,19 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 	//header.ParentBeaconBlockRoot
 	cancun := chain.Config().IsCancun(header.Time)
 	if cancun {
-	
-	timestampReduced := header.Time % historicalRootsModulus
-	timestampExtended := timestampReduced + historicalRootsModulus
-	timestampIndex := libcommon.BytesToHash((uint256.NewInt(timestampReduced)).Bytes())
-	rootIndex := libcommon.BytesToHash(uint256.NewInt(timestampExtended).Bytes())
-	parentBeaconBlockRootInt := *uint256.NewInt(0).SetBytes(header.ParentBeaconBlockRoot.Bytes())
 
-	state.SetState(historyStorageAddress, &timestampIndex, *uint256.NewInt(header.Time))
-	state.SetState(historyStorageAddress, &rootIndex, parentBeaconBlockRootInt)
+		timestampReduced := header.Time % historicalRootsModulus
+		timestampExtended := timestampReduced + historicalRootsModulus
+		timestampIndex := libcommon.BytesToHash((uint256.NewInt(timestampReduced)).Bytes())
+		rootIndex := libcommon.BytesToHash(uint256.NewInt(timestampExtended).Bytes())
+		parentBeaconBlockRootInt := *uint256.NewInt(0).SetBytes(header.ParentBeaconBlockRoot.Bytes())
 
-	// two ring buffers are used: one to track the latest timestamp at a given index in the ring buffer and another to track the latest root at a given index
+		state.SetState(historyStorageAddress, &timestampIndex, *uint256.NewInt(header.Time))
+		state.SetState(historyStorageAddress, &rootIndex, parentBeaconBlockRootInt)
 
-	//How the hell do I implement a ring buffer here
+		// two ring buffers are used: one to track the latest timestamp at a given index in the ring buffer and another to track the latest root at a given index
 
+		//How the hell do I implement a ring buffer here
 
 	}
 }

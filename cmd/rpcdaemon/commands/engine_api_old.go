@@ -73,7 +73,7 @@ type PayloadAttributes struct {
 	PrevRandao            common.Hash         `json:"prevRandao"            gencodec:"required"`
 	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
 	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
-	ParentBeaconBlockRoot common.Hash		  `json:"parentBeaconBlockRoot" gencodec:"required"`
+	ParentBeaconBlockRoot common.Hash         `json:"parentBeaconBlockRoot" gencodec:"required"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
@@ -106,10 +106,10 @@ type EngineAPI interface {
 	GetPayloadV1(ctx context.Context, payloadID hexutility.Bytes) (*ExecutionPayload, error)
 	GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*GetPayloadV2Response, error)
 	GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*GetPayloadV3Response, error)
-	
+
 	//Deprecated for dencun
 	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration *TransitionConfiguration) (*TransitionConfiguration, error)
-	
+
 	GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*ExecutionPayloadBodyV1, error)
 	GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*ExecutionPayloadBodyV1, error)
 }
@@ -313,9 +313,9 @@ func (e *EngineImpl) newPayload(version uint32, ctx context.Context, payload *Ex
 	}
 
 	epReq := &engine.EngineNewPayloadRequest{
-		ExecutionPayload: ep,
+		ExecutionPayload:            ep,
 		ExpectedBlobVersionedHashes: nil,
-		ParentBeaconBlockRoot: nil,
+		ParentBeaconBlockRoot:       nil,
 	}
 
 	res, err := e.api.EngineNewPayload(ctx, epReq)

@@ -101,15 +101,12 @@ type Header struct {
 	DataGasUsed   *uint64 `json:"dataGasUsed"`
 	ExcessDataGas *uint64 `json:"excessDataGas"`
 
-	ParentBeaconBlockRoot	*libcommon.Hash `json:parentBeaconBlockRoot`	// EIP-4788
-
+	ParentBeaconBlockRoot *libcommon.Hash `json:parentBeaconBlockRoot` // EIP-4788
 
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
 	VerkleProof   []byte
 	VerkleKeyVals []verkle.KeyValuePair
-
-
 }
 
 func (h *Header) EncodingSize() int {
@@ -1487,9 +1484,10 @@ func (b *Block) BaseFee() *big.Int {
 	}
 	return new(big.Int).Set(b.header.BaseFee)
 }
-func (b *Block) WithdrawalsHash() *libcommon.Hash { return b.header.WithdrawalsHash }
-func (b *Block) Withdrawals() Withdrawals         { return b.withdrawals }
-func (b *Block) ParentBeaconBlockRoot() *libcommon.Hash {return b.header.ParentBeaconBlockRoot}
+func (b *Block) WithdrawalsHash() *libcommon.Hash       { return b.header.WithdrawalsHash }
+func (b *Block) Withdrawals() Withdrawals               { return b.withdrawals }
+func (b *Block) ParentBeaconBlockRoot() *libcommon.Hash { return b.header.ParentBeaconBlockRoot }
+
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
 func (b *Block) HeaderNoCopy() *Header { return b.header }

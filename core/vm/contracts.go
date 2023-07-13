@@ -1103,7 +1103,7 @@ func (c *parentBeaconBlockRoot) RequiredGas(input []byte) uint64 {
 	return params.ParentBeaconBlockRootGas
 }
 
-func (c *parentBeaconBlockRoot) Run(input []byte) ([]byte, error){
+func (c *parentBeaconBlockRoot) Run(input []byte) ([]byte, error) {
 	// timestampParam := input[:32]
 	// if len(timestampParam) < 32 {
 	// 	return nil, errors.New("timestamp param too short")
@@ -1111,23 +1111,20 @@ func (c *parentBeaconBlockRoot) Run(input []byte) ([]byte, error){
 
 	// timestampReduced := uint256.NewInt(0).SetBytes(timestampParam).Uint64() % params.HistoricalRootsModulus
 	// timestampIndex := uint256.NewInt(timestampReduced)
-	// recordedTimestamp := 
+	// recordedTimestamp :=
 
-
-
-	
 	/*
-	timestamp_reduced = to_uint64_be(timestamp) % HISTORICAL_ROOTS_MODULUS
-	timestamp_index = to_uint256_be(timestamp_reduced)
+		timestamp_reduced = to_uint64_be(timestamp) % HISTORICAL_ROOTS_MODULUS
+		timestamp_index = to_uint256_be(timestamp_reduced)
 
-	recorded_timestamp = sload(HISTORY_STORAGE_ADDRESS, timestamp_index)
-	if recorded_timestamp != timestamp:
-		evm.returndata[:32].set(uint256(0))
-	else:
-		timestamp_extended = timestamp_reduced + HISTORICAL_ROOTS_MODULUS
-		root_index = to_uint256_be(timestamp_extended)
-		root = sload(HISTORY_STORAGE_ADDRESS, root_index)
-		evm.returndata[:32].set(root)
+		recorded_timestamp = sload(HISTORY_STORAGE_ADDRESS, timestamp_index)
+		if recorded_timestamp != timestamp:
+			evm.returndata[:32].set(uint256(0))
+		else:
+			timestamp_extended = timestamp_reduced + HISTORICAL_ROOTS_MODULUS
+			root_index = to_uint256_be(timestamp_extended)
+			root = sload(HISTORY_STORAGE_ADDRESS, root_index)
+			evm.returndata[:32].set(root)
 
 	*/
 	return nil, nil
