@@ -137,6 +137,9 @@ func (ii *InvertedIndex) fileNamesOnDisk() ([]string, error) {
 }
 
 func (ii *InvertedIndex) OpenList(fNames []string) error {
+	if err := ii.warmLocalityIdx.OpenList(fNames); err != nil {
+		return err
+	}
 	if err := ii.coldLocalityIdx.OpenList(fNames); err != nil {
 		return err
 	}
