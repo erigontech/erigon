@@ -126,11 +126,7 @@ func (li *LocalityIndex) scanStateFiles(fNames []string) (uselessFiles []*filesI
 			continue
 		}
 
-		if startStep != 0 {
-			li.logger.Warn("LocalityIndex must always starts from step 0")
-			continue
-		}
-		if endStep > StepsInColdFile*LocalityIndexUint64Limit {
+		if endStep-startStep > StepsInColdFile*LocalityIndexUint64Limit {
 			li.logger.Warn("LocalityIndex does store bitmaps as uint64, means it can't handle > 2048 steps. But it's possible to implement")
 			continue
 		}
@@ -356,7 +352,14 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	}
 	i := uint64(0)
 	for {
-		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, int(it.FilesAmount()), uint64(count), li.logger)
+		maxPossibleValue := int(it.StepsAmount())
+		baseDataID := fromStep
+		if convertStepsToFileNums {
+			maxPossibleValue = int(it.FilesAmount())
+			baseDataID = uint64(0)
+		}
+
+		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, maxPossibleValue, baseDataID, uint64(count), li.logger)
 		if err != nil {
 			return nil, err
 		}
@@ -468,6 +471,7 @@ type LocalityIterator struct {
 	progress          uint64
 
 	totalOffsets, filesAmount uint64
+	stepsAmount               uint64
 	involvedFiles             []*compress.Decompressor //used in destructor to disable read-ahead
 }
 
@@ -517,6 +521,7 @@ func (si *LocalityIterator) Progress() float64 {
 	return (float64(si.progress) / float64(si.totalOffsets)) * 100
 }
 func (si *LocalityIterator) FilesAmount() uint64 { return si.filesAmount }
+func (si *LocalityIterator) StepsAmount() uint64 { return si.stepsAmount }
 
 func (si *LocalityIterator) Next() ([]byte, []uint64) {
 	//if hi.err != nil {
@@ -542,7 +547,7 @@ func (si *LocalityIterator) Close() {
 func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64) *LocalityIterator {
 	toTxNum := toStep * ic.ii.aggregationStep
 	fromTxNum := fromStep * ic.ii.aggregationStep
-	si := &LocalityIterator{aggStep: ic.ii.aggregationStep, compressVals: false}
+	si := &LocalityIterator{aggStep: ic.ii.aggregationStep, compressVals: false, stepsAmount: toStep - fromStep}
 
 	for _, item := range ic.files {
 		if item.endTxNum <= fromTxNum || item.startTxNum >= toTxNum {

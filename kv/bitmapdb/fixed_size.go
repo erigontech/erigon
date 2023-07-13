@@ -35,10 +35,12 @@ type FixedSizeBitmaps struct {
 	f                  *os.File
 	filePath, fileName string
 
-	data     []uint64
-	metaData []byte
-	amount   uint64
-	version  uint8
+	data []uint64
+
+	metaData   []byte
+	count      uint64 //of keys
+	baseDataID uint64 // deducted from all stored values
+	version    uint8
 
 	m             mmap2.MMap
 	bitsPerBitmap int
@@ -57,6 +59,7 @@ func OpenFixedSizeBitmaps(filePath string, bitsPerBitmap int) (*FixedSizeBitmaps
 	var err error
 	idx.f, err = os.Open(filePath)
 	if err != nil {
+		panic(err)
 		return nil, fmt.Errorf("OpenFile: %w", err)
 	}
 	var stat os.FileInfo
@@ -73,7 +76,8 @@ func OpenFixedSizeBitmaps(filePath string, bitsPerBitmap int) (*FixedSizeBitmaps
 	idx.data = castToArrU64(idx.m[MetaHeaderSize:])
 
 	idx.version = idx.metaData[0]
-	idx.amount = binary.BigEndian.Uint64(idx.metaData[1 : 8+1])
+	idx.count = binary.BigEndian.Uint64(idx.metaData[1 : 1+8])
+	idx.baseDataID = binary.BigEndian.Uint64(idx.metaData[1+8 : 1+8+8])
 
 	return idx, nil
 }
@@ -95,8 +99,8 @@ func (bm *FixedSizeBitmaps) Close() error {
 }
 
 func (bm *FixedSizeBitmaps) At(item uint64) (res []uint64, err error) {
-	if item > bm.amount {
-		return nil, fmt.Errorf("too big item number: %d > %d", item, bm.amount)
+	if item > bm.count {
+		return nil, fmt.Errorf("too big item number: %d > %d", item, bm.count)
 	}
 
 	n := bm.bitsPerBitmap * int(item)
@@ -111,7 +115,7 @@ func (bm *FixedSizeBitmaps) At(item uint64) (res []uint64, err error) {
 		}
 		for bit := bitFrom; bit < bitTo; bit++ {
 			if bm.data[i]&(1<<bit) != 0 {
-				res = append(res, j)
+				res = append(res, j+bm.baseDataID)
 			}
 			j++
 		}
@@ -122,8 +126,8 @@ func (bm *FixedSizeBitmaps) At(item uint64) (res []uint64, err error) {
 }
 
 func (bm *FixedSizeBitmaps) LastAt(item uint64) (last uint64, ok bool, err error) {
-	if item > bm.amount {
-		return 0, false, fmt.Errorf("too big item number: %d > %d", item, bm.amount)
+	if item > bm.count {
+		return 0, false, fmt.Errorf("too big item number: %d > %d", item, bm.count)
 	}
 
 	n := bm.bitsPerBitmap * int(item)
@@ -146,12 +150,12 @@ func (bm *FixedSizeBitmaps) LastAt(item uint64) (last uint64, ok bool, err error
 		}
 		bitFrom = 0
 	}
-	return last, found, nil
+	return last + bm.baseDataID, found, nil
 }
 
 func (bm *FixedSizeBitmaps) First2At(item, after uint64) (fst uint64, snd uint64, ok, ok2 bool, err error) {
-	if item > bm.amount {
-		return 0, 0, false, false, fmt.Errorf("too big item number: %d > %d", item, bm.amount)
+	if item > bm.count {
+		return 0, 0, false, false, fmt.Errorf("too big item number: %d > %d", item, bm.count)
 	}
 	n := bm.bitsPerBitmap * int(item)
 	blkFrom, bitFrom := n/64, n%64
@@ -181,7 +185,7 @@ func (bm *FixedSizeBitmaps) First2At(item, after uint64) (fst uint64, snd uint64
 		bitFrom = 0
 	}
 
-	return
+	return fst + bm.baseDataID, snd + bm.baseDataID, ok, ok2, err
 }
 
 type FixedSizeBitmapsWriter struct {
@@ -193,7 +197,8 @@ type FixedSizeBitmapsWriter struct {
 	m                         mmap2.MMap
 
 	version       uint8
-	amount        uint64
+	baseDataID    uint64 // deducted from all stored
+	count         uint64 // of keys
 	size          int
 	bitsPerBitmap uint64
 
@@ -203,7 +208,7 @@ type FixedSizeBitmapsWriter struct {
 
 const MetaHeaderSize = 64
 
-func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, amount uint64, logger log.Logger) (*FixedSizeBitmapsWriter, error) {
+func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, baseDataID, amount uint64, logger log.Logger) (*FixedSizeBitmapsWriter, error) {
 	pageSize := os.Getpagesize()
 	//TODO: use math.SafeMul()
 	bytesAmount := MetaHeaderSize + (bitsPerBitmap*int(amount))/8
@@ -213,9 +218,10 @@ func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, amount uint6
 		tmpIdxFilePath: indexFile + ".tmp",
 		bitsPerBitmap:  uint64(bitsPerBitmap),
 		size:           size,
-		amount:         amount,
+		count:          amount,
 		version:        1,
 		logger:         logger,
+		baseDataID:     baseDataID,
 	}
 
 	_ = os.Remove(idx.tmpIdxFilePath)
@@ -241,8 +247,8 @@ func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, amount uint6
 	//	return nil, err
 	//}
 	idx.metaData[0] = idx.version
-	binary.BigEndian.PutUint64(idx.metaData[1:], idx.amount)
-	idx.amount = binary.BigEndian.Uint64(idx.metaData[1 : 8+1])
+	binary.BigEndian.PutUint64(idx.metaData[1:], idx.count)
+	binary.BigEndian.PutUint64(idx.metaData[1+8:], idx.baseDataID)
 
 	return idx, nil
 }
@@ -277,11 +283,12 @@ func castToArrU64(in []byte) []uint64 {
 }
 
 func (w *FixedSizeBitmapsWriter) AddArray(item uint64, listOfValues []uint64) error {
-	if item > w.amount {
-		return fmt.Errorf("too big item number: %d > %d", item, w.amount)
+	if item > w.count {
+		return fmt.Errorf("too big item number: %d > %d", item, w.count)
 	}
 	offset := item * w.bitsPerBitmap
 	for _, v := range listOfValues {
+		v = v - w.baseDataID
 		if v > w.bitsPerBitmap {
 			return fmt.Errorf("too big value: %d > %d", v, w.bitsPerBitmap)
 		}
@@ -315,6 +322,7 @@ func (w *FixedSizeBitmapsWriter) Build() error {
 
 	_ = os.Remove(w.indexFile)
 	if err := os.Rename(w.tmpIdxFilePath, w.indexFile); err != nil {
+		panic(err)
 		return err
 	}
 	return nil

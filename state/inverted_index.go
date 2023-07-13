@@ -90,7 +90,8 @@ func NewInvertedIndex(
 	integrityFileExtensions []string,
 	logger log.Logger,
 ) (*InvertedIndex, error) {
-	baseDir, _ := filepath.Split(dir)
+	baseDir := filepath.Dir(dir)
+	baseDir = filepath.Dir(baseDir)
 	ii := InvertedIndex{
 		dir:                     dir,
 		warmDir:                 filepath.Join(baseDir, "warm"),
@@ -309,6 +310,7 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 			ic := ii.MakeContext()
 			defer ic.Close()
 			from, to := ic.maxColdStep(), ic.maxWarmStep()
+			fmt.Printf("warm build?: %d-%d, exists=%t\n", from, to, ic.ii.warmLocalityIdx.exists(from, to))
 			if from == to || ic.ii.warmLocalityIdx.exists(from, to) {
 				return nil
 			}

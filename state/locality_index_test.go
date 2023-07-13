@@ -40,9 +40,9 @@ func TestLocality(t *testing.T) {
 	{ //prepare
 		ii.withLocalityIndex = true
 		var err error
-		ii.coldLocalityIdx, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
-		require.NoError(err)
 		ii.warmLocalityIdx, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
+		require.NoError(err)
+		ii.coldLocalityIdx, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
 		require.NoError(err)
 
 		ic := ii.MakeContext()
@@ -61,11 +61,11 @@ func TestLocality(t *testing.T) {
 		require.True(it.HasNext())
 		key, bitmap := it.Next()
 		require.Equal(uint64(1), binary.BigEndian.Uint64(key))
-		require.Equal([]uint64{0, 1}, bitmap)
+		require.Equal([]uint64{0 * StepsInColdFile, 1 * StepsInColdFile}, bitmap)
 		require.True(it.HasNext())
 		key, bitmap = it.Next()
 		require.Equal(uint64(2), binary.BigEndian.Uint64(key))
-		require.Equal([]uint64{0, 1}, bitmap)
+		require.Equal([]uint64{0 * StepsInColdFile, 1 * StepsInColdFile}, bitmap)
 
 		var last []byte
 		for it.HasNext() {
@@ -137,6 +137,8 @@ func TestLocalityDomain(t *testing.T) {
 	{ //prepare
 		dom.withLocalityIndex = true
 		var err error
+		dom.warmLocalityIdx, err = NewLocalityIndex(dom.dir, dom.tmpdir, dom.aggregationStep, dom.filenameBase, dom.logger)
+		require.NoError(err)
 		dom.coldLocalityIdx, err = NewLocalityIndex(dom.dir, dom.tmpdir, dom.aggregationStep, dom.filenameBase, dom.logger)
 		require.NoError(err)
 
