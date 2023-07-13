@@ -1453,7 +1453,6 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 		firstWarmIndexedTxNum = dc.files[len(dc.files)-1].endTxNum
 	}
 	if firstWarmIndexedTxNum != lastIndexedTxNum {
-		fmt.Printf("gring: %d-%d, %d, %d\n", lastIndexedTxNum/dc.d.aggregationStep, firstWarmIndexedTxNum/dc.d.aggregationStep, dc.hc.ic.warmLocality.indexedFrom(), dc.hc.ic.warmLocality.indexedTo())
 		for i := len(dc.files) - 1; i >= 0; i-- {
 			isUseful := dc.files[i].startTxNum >= lastIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
 			if !isUseful {
