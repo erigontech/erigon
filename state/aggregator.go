@@ -206,30 +206,30 @@ func (a *Aggregator) ReopenFolder() (err error) {
 	return nil
 }
 
-func (a *Aggregator) ReopenList(fNames []string) error {
+func (a *Aggregator) ReopenList(fNames, warmNames []string) error {
 	var err error
-	if err = a.accounts.OpenList(fNames); err != nil {
+	if err = a.accounts.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.storage.OpenList(fNames); err != nil {
+	if err = a.storage.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.code.OpenList(fNames); err != nil {
+	if err = a.code.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.commitment.OpenList(fNames); err != nil {
+	if err = a.commitment.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.logAddrs.OpenList(fNames); err != nil {
+	if err = a.logAddrs.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.logTopics.OpenList(fNames); err != nil {
+	if err = a.logTopics.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.tracesFrom.OpenList(fNames); err != nil {
+	if err = a.tracesFrom.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.tracesTo.OpenList(fNames); err != nil {
+	if err = a.tracesTo.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
 	return nil

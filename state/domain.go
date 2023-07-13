@@ -236,11 +236,11 @@ func (d *Domain) FinishWrites() {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (d *Domain) OpenList(fNames []string) error {
-	if err := d.History.OpenList(fNames); err != nil {
+func (d *Domain) OpenList(coldNames, warmNames []string) error {
+	if err := d.History.OpenList(coldNames, warmNames); err != nil {
 		return err
 	}
-	return d.openList(fNames)
+	return d.openList(coldNames)
 }
 
 func (d *Domain) openList(fNames []string) error {
@@ -253,11 +253,11 @@ func (d *Domain) openList(fNames []string) error {
 }
 
 func (d *Domain) OpenFolder() error {
-	files, err := d.fileNamesOnDisk()
+	files, warmNames, err := d.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return d.OpenList(files)
+	return d.OpenList(files, warmNames)
 }
 
 func (d *Domain) GetAndResetStats() DomainStats {
@@ -1453,6 +1453,7 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 		firstWarmIndexedTxNum = dc.files[len(dc.files)-1].endTxNum
 	}
 	if firstWarmIndexedTxNum != lastIndexedTxNum {
+		fmt.Printf("gring: %d-%d, %d, %d\n", lastIndexedTxNum/dc.d.aggregationStep, firstWarmIndexedTxNum/dc.d.aggregationStep, dc.hc.ic.warmLocality.indexedFrom(), dc.hc.ic.warmLocality.indexedTo())
 		for i := len(dc.files) - 1; i >= 0; i-- {
 			isUseful := dc.files[i].startTxNum >= lastIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
 			if !isUseful {

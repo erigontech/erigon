@@ -106,11 +106,11 @@ func NewHistory(dir, tmpdir string, aggregationStep uint64,
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) OpenList(fNames []string) error {
-	if err := h.InvertedIndex.OpenList(fNames); err != nil {
+func (h *History) OpenList(coldNames, warmNames []string) error {
+	if err := h.InvertedIndex.OpenList(coldNames, warmNames); err != nil {
 		return err
 	}
-	return h.openList(fNames)
+	return h.openList(coldNames)
 
 }
 func (h *History) openList(fNames []string) error {
@@ -123,11 +123,11 @@ func (h *History) openList(fNames []string) error {
 }
 
 func (h *History) OpenFolder() error {
-	files, err := h.fileNamesOnDisk()
+	coldNames, warmNames, err := h.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return h.OpenList(files)
+	return h.OpenList(coldNames, warmNames)
 }
 
 // scanStateFiles

@@ -122,10 +122,10 @@ func NewInvertedIndex(
 	return &ii, nil
 }
 
-func (ii *InvertedIndex) fileNamesOnDisk() ([]string, error) {
+func (ii *InvertedIndex) fileNamesOnDisk() ([]string, []string, error) {
 	files, err := os.ReadDir(ii.dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	filteredFiles := make([]string, 0, len(files))
 	for _, f := range files {
@@ -134,11 +134,24 @@ func (ii *InvertedIndex) fileNamesOnDisk() ([]string, error) {
 		}
 		filteredFiles = append(filteredFiles, f.Name())
 	}
-	return filteredFiles, nil
+
+	warmFiles := make([]string, 0, len(files))
+	files, err = os.ReadDir(ii.warmDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, f := range files {
+		if !f.Type().IsRegular() {
+			continue
+		}
+		warmFiles = append(warmFiles, f.Name())
+	}
+
+	return filteredFiles, warmFiles, nil
 }
 
-func (ii *InvertedIndex) OpenList(fNames []string) error {
-	if err := ii.warmLocalityIdx.OpenList(fNames); err != nil {
+func (ii *InvertedIndex) OpenList(fNames, warmFNames []string) error {
+	if err := ii.warmLocalityIdx.OpenList(warmFNames); err != nil {
 		return err
 	}
 	if err := ii.coldLocalityIdx.OpenList(fNames); err != nil {
@@ -153,11 +166,11 @@ func (ii *InvertedIndex) OpenList(fNames []string) error {
 }
 
 func (ii *InvertedIndex) OpenFolder() error {
-	files, err := ii.fileNamesOnDisk()
+	files, warm, err := ii.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return ii.OpenList(files)
+	return ii.OpenList(files, warm)
 }
 
 func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
