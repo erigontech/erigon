@@ -88,11 +88,11 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 		})
 	}
 	t.Run("large_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, true, logger)
+		db, h, txs := filledHistory(t, true, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		_, db, h, txs := filledHistory(t, false, logger)
+		db, h, txs := filledHistory(t, false, logger)
 		test(t, h, db, txs)
 	})
 }

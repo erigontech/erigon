@@ -35,7 +35,7 @@ func TestLocality(t *testing.T) {
 	const Module uint64 = 31
 	aggStep := uint64(4)
 	coldFiles := uint64(2)
-	_, db, ii, txs := filledInvIndexOfSize(t, 300, aggStep, Module, logger)
+	db, ii, txs := filledInvIndexOfSize(t, 300, aggStep, Module, logger)
 	mergeInverted(t, db, ii, txs)
 
 	{ //prepare

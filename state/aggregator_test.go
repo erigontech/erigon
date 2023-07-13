@@ -695,8 +695,8 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (string, kv.RwDB, *Aggr
 	t.Cleanup(db.Close)
 
 	dir := filepath.Join(path, "e4")
-	err := os.Mkdir(dir, 0740)
-	require.NoError(t, err)
+	require.NoError(t, os.Mkdir(filepath.Join(path, "warm"), 0740))
+	require.NoError(t, os.Mkdir(dir, 0740))
 
 	agg, err := NewAggregatorV3(context.Background(), dir, filepath.Join(path, "e4", "tmp"), aggStep, db, logger)
 	require.NoError(t, err)

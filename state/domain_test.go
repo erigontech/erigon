@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +48,9 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	path := t.TempDir()
+	dir := filepath.Join(path, "e4")
+	require.NoError(t, os.Mkdir(filepath.Join(path, "warm"), 0740))
+	require.NoError(t, os.Mkdir(dir, 0740))
 	keysTable := "Keys"
 	valsTable := "Vals"
 	historyKeysTable := "HistoryKeys"
@@ -63,7 +68,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 		}
 	}).MustOpen()
 	t.Cleanup(db.Close)
-	d, err := NewDomain(path, path, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, true, AccDomainLargeValues, logger)
+	d, err := NewDomain(dir, dir, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, true, AccDomainLargeValues, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
 	d.compressWorkers = 1
