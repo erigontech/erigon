@@ -21,6 +21,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -1162,25 +1163,25 @@ func (hd *HeaderDownload) ClearPendingPayloadHash() {
 	hd.pendingPayloadHash = libcommon.Hash{}
 }
 
-func (hd *HeaderDownload) GetPendingPayloadStatus() *engine_helpers.PayloadStatus {
+func (hd *HeaderDownload) GetPendingPayloadStatus() *engine_types.PayloadStatus {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.pendingPayloadStatus
 }
 
-func (hd *HeaderDownload) SetPendingPayloadStatus(response *engine_helpers.PayloadStatus) {
+func (hd *HeaderDownload) SetPendingPayloadStatus(response *engine_types.PayloadStatus) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.pendingPayloadStatus = response
 }
 
-func (hd *HeaderDownload) GetUnsettledForkChoice() (*engine_helpers.ForkChoiceMessage, uint64) {
+func (hd *HeaderDownload) GetUnsettledForkChoice() (*engine_types.ForkChoiceState, uint64) {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.unsettledForkChoice, hd.unsettledHeadHeight
 }
 
-func (hd *HeaderDownload) SetUnsettledForkChoice(forkChoice *engine_helpers.ForkChoiceMessage, headHeight uint64) {
+func (hd *HeaderDownload) SetUnsettledForkChoice(forkChoice *engine_types.ForkChoiceState, headHeight uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.unsettledForkChoice = forkChoice

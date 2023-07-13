@@ -84,11 +84,11 @@ func NewNodConfigUrfave(ctx *cli.Context, logger log.Logger) *nodecfg.Config {
 	return nodeConfig
 }
 func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
-	ethConfig := &ethconfig.Defaults
-	utils.SetEthConfig(ctx, nodeConfig, ethConfig, logger)
-	erigoncli.ApplyFlagsForEthConfig(ctx, ethConfig, logger)
+	ethConfig := ethconfig.Defaults // Needs to be a copy, not pointer
+	utils.SetEthConfig(ctx, nodeConfig, &ethConfig, logger)
+	erigoncli.ApplyFlagsForEthConfig(ctx, &ethConfig, logger)
 
-	return ethConfig
+	return &ethConfig
 }
 
 // New creates a new `ErigonNode`.

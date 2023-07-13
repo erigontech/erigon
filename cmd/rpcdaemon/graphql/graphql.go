@@ -7,9 +7,9 @@ import (
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/playground"
 
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql/graph"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 )
 
 const (
@@ -18,14 +18,14 @@ const (
 
 func CreateHandler(api []rpc.API) *handler.Server {
 
-	var graphqlAPI commands.GraphQLAPI
+	var graphqlAPI jsonrpc.GraphQLAPI
 
 	for _, rpc := range api {
 		if rpc.Service == nil {
 			continue
 		}
 
-		if graphqlCandidate, ok := rpc.Service.(commands.GraphQLAPI); ok {
+		if graphqlCandidate, ok := rpc.Service.(jsonrpc.GraphQLAPI); ok {
 			graphqlAPI = graphqlCandidate
 		}
 	}

@@ -16,7 +16,7 @@ import (
 
 type Node interface {
 	requests.RequestGenerator
-	IsMiner() bool
+	IsBlockProducer() bool
 }
 
 type NodeSelector interface {
@@ -71,9 +71,9 @@ func (n *node) done() {
 	}
 }
 
-func (n *node) IsMiner() bool {
-	_, isMiner := n.args.(args.Miner)
-	return isMiner
+func (n *node) IsBlockProducer() bool {
+	_, isBlockProducer := n.args.(args.BlockProducer)
+	return isBlockProducer
 }
 
 // run configures, creates and serves an erigon node

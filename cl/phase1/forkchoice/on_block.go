@@ -41,11 +41,15 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	default:
 		return fmt.Errorf("replay block, code: %+v", status)
 	}
+	var invalidBlock bool
 	if newPayload && f.engine != nil {
-		if err := f.engine.NewPayload(block.Block.Body.ExecutionPayload); err != nil {
+		if invalidBlock, err = f.engine.NewPayload(block.Block.Body.ExecutionPayload); err != nil {
 			log.Warn("newPayload failed", "err", err)
 			return err
 		}
+	}
+	if invalidBlock {
+		f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 	}
 	if block.Block.Body.ExecutionPayload != nil {
 		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
