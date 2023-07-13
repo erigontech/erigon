@@ -217,7 +217,6 @@ func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, baseDataID, 
 	pageSize := os.Getpagesize()
 	//TODO: use math.SafeMul()
 	bytesAmount := MetaHeaderSize + (bitsPerBitmap*int(amount))/8 + 1
-	fmt.Printf("a: bitsPerBitmap=%d, amount=%d, sz=%d\n", bitsPerBitmap, amount, (bitsPerBitmap*int(amount))/8)
 	size := (bytesAmount/pageSize + 1) * pageSize // must be page-size-aligned
 	idx := &FixedSizeBitmapsWriter{
 		indexFile:      indexFile,
