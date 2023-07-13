@@ -637,7 +637,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	var borTx types.Transaction
 	if txn == nil {
-		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, block)
+		borTx = rawdb.ReadBorTransactionForBlock(tx, blockNum)
 		if borTx == nil {
 			return nil, nil
 		}
@@ -701,9 +701,9 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	}
 
 	if chainConfig.Bor != nil {
-		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
+		borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
 		if borTx != nil {
-			borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), block.NumberU64(), receipts)
+			borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
 			if err != nil {
 				return nil, err
 			}
