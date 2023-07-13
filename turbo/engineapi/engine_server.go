@@ -127,28 +127,28 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*type
 }
 
 // EngineNewPayload validates and possibly executes payload
-func (s *EngineServer) EngineNewPayload(ctx context.Context, req *types2.ExecutionPayload) (*engine.EnginePayloadStatus, error) {
+func (s *EngineServer) EngineNewPayload(ctx context.Context, req *engine.EngineNewPayloadRequest) (*engine.EnginePayloadStatus, error) {
 	header := types.Header{
-		ParentHash:  gointerfaces.ConvertH256ToHash(req.ParentHash),
-		Coinbase:    gointerfaces.ConvertH160toAddress(req.Coinbase),
-		Root:        gointerfaces.ConvertH256ToHash(req.StateRoot),
-		Bloom:       gointerfaces.ConvertH2048ToBloom(req.LogsBloom),
-		BaseFee:     gointerfaces.ConvertH256ToUint256Int(req.BaseFeePerGas).ToBig(),
-		Extra:       req.ExtraData,
-		Number:      big.NewInt(int64(req.BlockNumber)),
-		GasUsed:     req.GasUsed,
-		GasLimit:    req.GasLimit,
-		Time:        req.Timestamp,
-		MixDigest:   gointerfaces.ConvertH256ToHash(req.PrevRandao),
+		ParentHash:  gointerfaces.ConvertH256ToHash(req.ExecutionPayload.ParentHash),
+		Coinbase:    gointerfaces.ConvertH160toAddress(req.ExecutionPayload.Coinbase),
+		Root:        gointerfaces.ConvertH256ToHash(req.ExecutionPayload.StateRoot),
+		Bloom:       gointerfaces.ConvertH2048ToBloom(req.ExecutionPayload.LogsBloom),
+		BaseFee:     gointerfaces.ConvertH256ToUint256Int(req.ExecutionPayload.BaseFeePerGas).ToBig(),
+		Extra:       req.ExecutionPayload.ExtraData,
+		Number:      big.NewInt(int64(req.ExecutionPayload.BlockNumber)),
+		GasUsed:     req.ExecutionPayload.GasUsed,
+		GasLimit:    req.ExecutionPayload.GasLimit,
+		Time:        req.ExecutionPayload.Timestamp,
+		MixDigest:   gointerfaces.ConvertH256ToHash(req.ExecutionPayload.PrevRandao),
 		UncleHash:   types.EmptyUncleHash,
 		Difficulty:  merge.ProofOfStakeDifficulty,
 		Nonce:       merge.ProofOfStakeNonce,
-		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
-		TxHash:      types.DeriveSha(types.BinaryTransactions(req.Transactions)),
+		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ExecutionPayload.ReceiptRoot),
+		TxHash:      types.DeriveSha(types.BinaryTransactions(req.ExecutionPayload.Transactions)),
 	}
 	var withdrawals []*types.Withdrawal
-	if req.Version >= 2 {
-		withdrawals = ConvertWithdrawalsFromRpc(req.Withdrawals)
+	if req.ExecutionPayload.Version >= 2 {
+		withdrawals = ConvertWithdrawalsFromRpc(req.ExecutionPayload.Withdrawals)
 	}
 
 	if withdrawals != nil {
@@ -160,9 +160,9 @@ func (s *EngineServer) EngineNewPayload(ctx context.Context, req *types2.Executi
 		return nil, err
 	}
 
-	if req.Version >= 3 {
-		header.DataGasUsed = req.DataGasUsed
-		header.ExcessDataGas = req.ExcessDataGas
+	if req.ExecutionPayload.Version >= 3 {
+		header.DataGasUsed = req.ExecutionPayload.DataGasUsed
+		header.ExcessDataGas = req.ExecutionPayload.ExcessDataGas
 	}
 
 	if !s.config.IsCancun(header.Time) && (header.DataGasUsed != nil || header.ExcessDataGas != nil) {
@@ -173,7 +173,7 @@ func (s *EngineServer) EngineNewPayload(ctx context.Context, req *types2.Executi
 		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas missing"}
 	}
 
-	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
+	blockHash := gointerfaces.ConvertH256ToHash(req.ExecutionPayload.BlockHash)
 	if header.Hash() != blockHash {
 		s.logger.Error("[NewPayload] invalid block hash", "stated", libcommon.Hash(blockHash), "actual", header.Hash())
 		return &engine.EnginePayloadStatus{
@@ -182,7 +182,7 @@ func (s *EngineServer) EngineNewPayload(ctx context.Context, req *types2.Executi
 		}, nil
 	}
 
-	for _, txn := range req.Transactions {
+	for _, txn := range req.ExecutionPayload.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(txn) {
 			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
 			return &engine.EnginePayloadStatus{
@@ -192,7 +192,7 @@ func (s *EngineServer) EngineNewPayload(ctx context.Context, req *types2.Executi
 		}
 	}
 
-	transactions, err := types.DecodeTransactions(req.Transactions)
+	transactions, err := types.DecodeTransactions(req.ExecutionPayload.Transactions)
 	if err != nil {
 		s.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
 		return &engine.EnginePayloadStatus{
@@ -202,7 +202,7 @@ func (s *EngineServer) EngineNewPayload(ctx context.Context, req *types2.Executi
 	}
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 
-	possibleStatus, err := s.getQuickPayloadStatusIfPossible(blockHash, req.BlockNumber, header.ParentHash, nil, true)
+	possibleStatus, err := s.getQuickPayloadStatusIfPossible(blockHash, req.ExecutionPayload.BlockNumber, header.ParentHash, nil, true)
 	if err != nil {
 		return nil, err
 	}

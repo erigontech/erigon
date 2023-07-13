@@ -175,6 +175,9 @@ const (
 	BlobVerificationGas      uint64 = 1800000
 	BlobCommitmentVersionKZG uint8  = 0x01
 	PointEvaluationGas       uint64 = 50000
+
+	ParentBeaconBlockRootGas uint64 = 4200
+	HistoricalRootsModulus          = 98304
 )
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations

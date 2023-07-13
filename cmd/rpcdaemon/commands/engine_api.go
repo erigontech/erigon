@@ -73,6 +73,7 @@ type PayloadAttributes struct {
 	PrevRandao            common.Hash         `json:"prevRandao"            gencodec:"required"`
 	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
 	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
+	ParentBeaconBlockRoot common.Hash		  `json:"parentBeaconBlockRoot" gencodec:"required"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
@@ -98,13 +99,17 @@ type ExecutionPayloadBodyV1 struct {
 type EngineAPI interface {
 	NewPayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	NewPayloadV2(context.Context, *ExecutionPayload) (map[string]interface{}, error)
-	NewPayloadV3(context.Context, *ExecutionPayload) (map[string]interface{}, error)
+	NewPayloadV3(ctx context.Context, executionPayload *ExecutionPayload, expectedBlobVersionedHashes []common.Hash, parentBeaconBlockRoot common.Hash) (map[string]interface{}, error)
 	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
 	ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
+	ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutility.Bytes) (*ExecutionPayload, error)
 	GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*GetPayloadV2Response, error)
 	GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*GetPayloadV3Response, error)
+	
+	//Deprecated for dencun
 	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration *TransitionConfiguration) (*TransitionConfiguration, error)
+	
 	GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*ExecutionPayloadBodyV1, error)
 	GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*ExecutionPayloadBodyV1, error)
 }
@@ -169,6 +174,10 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 }
 
 func (e *EngineImpl) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
+	return e.forkchoiceUpdated(2, ctx, forkChoiceState, payloadAttributes)
+}
+
+func (e *EngineImpl) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
 	return e.forkchoiceUpdated(2, ctx, forkChoiceState, payloadAttributes)
 }
 
@@ -273,6 +282,7 @@ func (e *EngineImpl) newPayload(version uint32, ctx context.Context, payload *Ex
 	for i, transaction := range payload.Transactions {
 		transactions[i] = transaction
 	}
+	//TODO replace with engine.EngineNewPayloadRequest
 	ep := &types2.ExecutionPayload{
 		Version:       1,
 		ParentHash:    gointerfaces.ConvertHashToH256(payload.ParentHash),
@@ -302,7 +312,13 @@ func (e *EngineImpl) newPayload(version uint32, ctx context.Context, payload *Ex
 		ep.ExcessDataGas = &excessDataGas
 	}
 
-	res, err := e.api.EngineNewPayload(ctx, ep)
+	epReq := &engine.EngineNewPayloadRequest{
+		ExecutionPayload: ep,
+		ExpectedBlobVersionedHashes: nil,
+		ParentBeaconBlockRoot: nil,
+	}
+
+	res, err := e.api.EngineNewPayload(ctx, epReq)
 	if err != nil {
 		log.Warn("NewPayload", "err", err)
 		return nil, err

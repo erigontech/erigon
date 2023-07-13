@@ -51,7 +51,7 @@ func NewExecutionEnginePhase1FromClient(ctx context.Context, engineClient engine
 }
 
 func (e *ExecutionEnginePhase1) NewPayload(payload *cltypes.Eth1Block) error {
-	grpcMessage, err := convertPayloadToGrpc(payload)
+	execPayload, err := convertPayloadToGrpc(payload)
 	if err != nil {
 		return err
 	}
@@ -59,7 +59,11 @@ func (e *ExecutionEnginePhase1) NewPayload(payload *cltypes.Eth1Block) error {
 	defer cancel()
 
 	var status *engine.EnginePayloadStatus
-
+	grpcMessage := &engine.EngineNewPayloadRequest{
+		ExecutionPayload: execPayload,
+		ExpectedBlobVersionedHashes: nil,
+		ParentBeaconBlockRoot: nil,
+	}
 	status, err = e.engineClient.EngineNewPayload(ctx, grpcMessage)
 	// Ignore timeouts
 	if err != nil {

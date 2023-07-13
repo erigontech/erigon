@@ -7,7 +7,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	// types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 
@@ -32,7 +32,7 @@ type ApiBackend interface {
 }
 
 type EngineBackend interface {
-	EngineNewPayload(ctx context.Context, payload *types2.ExecutionPayload) (*engine.EnginePayloadStatus, error)
+	EngineNewPayload(ctx context.Context, request *engine.EngineNewPayloadRequest) (*engine.EnginePayloadStatus, error)
 	EngineForkchoiceUpdated(ctx context.Context, request *engine.EngineForkChoiceUpdatedRequest) (*engine.EngineForkChoiceUpdatedResponse, error)
 	EngineGetPayload(ctx context.Context, payloadId uint64) (*engine.EngineGetPayloadResponse, error)
 	EngineGetPayloadBodiesByHashV1(ctx context.Context, request *engine.EngineGetPayloadBodiesByHashV1Request) (*engine.EngineGetPayloadBodiesV1Response, error)

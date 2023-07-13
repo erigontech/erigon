@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -20,8 +19,8 @@ func NewEngineBackend(server engine.EngineClient) *EngineBackend {
 	return &EngineBackend{server: server}
 }
 
-func (back *EngineBackend) EngineNewPayload(ctx context.Context, payload *types2.ExecutionPayload) (res *engine.EnginePayloadStatus, err error) {
-	return back.server.EngineNewPayload(ctx, payload)
+func (back *EngineBackend) EngineNewPayload(ctx context.Context, request *engine.EngineNewPayloadRequest) (res *engine.EnginePayloadStatus, err error) {
+	return back.server.EngineNewPayload(ctx, request)
 }
 
 func (back *EngineBackend) EngineForkchoiceUpdated(ctx context.Context, request *engine.EngineForkChoiceUpdatedRequest) (*engine.EngineForkChoiceUpdatedResponse, error) {
