@@ -3,7 +3,6 @@ package state
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -260,7 +259,6 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("locality index: lookup", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		fmt.Printf("--start\n")
 		to := dc.hc.ic.coldLocality.indexedTo()
 		require.Equal(coldFiles*txsInColdFile, int(to))
 
@@ -280,12 +278,10 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("domain.getLatestFromFiles", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		fmt.Printf("--start aaaa\n")
 		v, ok, err := dc.getLatestFromFiles(hexutility.EncodeTs(0))
 		require.NoError(err)
 		require.True(ok)
 		require.Equal(1*txsInColdFile-1, int(binary.BigEndian.Uint64(v)))
-		fmt.Printf("--- end aaaa\n")
 
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(1))
 		require.NoError(err)

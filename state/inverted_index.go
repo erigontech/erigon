@@ -109,11 +109,11 @@ func NewInvertedIndex(
 
 	if ii.withLocalityIndex {
 		var err error
-		ii.coldLocalityIdx, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
+		ii.warmLocalityIdx, err = NewLocalityIndex(ii.warmDir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
 		if err != nil {
 			return nil, fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
 		}
-		ii.warmLocalityIdx, err = NewLocalityIndex(ii.warmDir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
+		ii.coldLocalityIdx, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
 		if err != nil {
 			return nil, fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
 		}
@@ -309,7 +309,7 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 			ic := ii.MakeContext()
 			defer ic.Close()
 			from, to := ic.maxColdStep(), ic.maxWarmStep()
-			if from == 0 || ic.ii.coldLocalityIdx.exists(from, to) {
+			if from == to || ic.ii.warmLocalityIdx.exists(from, to) {
 				return nil
 			}
 			if err := ic.ii.warmLocalityIdx.BuildMissedIndices(ctx, from, to, false, func() *LocalityIterator { return ic.iterateKeysLocality(from, to) }); err != nil {
@@ -395,6 +395,7 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 }
 
 func (ii *InvertedIndex) Close() {
+	ii.warmLocalityIdx.Close()
 	ii.coldLocalityIdx.Close()
 	ii.closeWhatNotInList([]string{})
 	ii.reCalcRoFiles()
