@@ -1026,7 +1026,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 			idxPath := fitem.decompressor.FilePath()
 			idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
 
-			p := ps.AddNew("fixme", uint64(fitem.decompressor.Count()))
+			p := ps.AddNew(fitem.decompressor.FileName(), uint64(fitem.decompressor.Count()))
 			defer ps.Delete(p)
 
 			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, p, d.tmpdir, d.logger); err != nil {

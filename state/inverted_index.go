@@ -308,8 +308,7 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 	for _, item := range missedFiles {
 		item := item
 		g.Go(func() error {
-			p := &background.Progress{}
-			ps.Add(p)
+			p := ps.AddNew(item.decompressor.FileName(), uint64(item.decompressor.Count()))
 			defer ps.Delete(p)
 			return ii.buildEfi(ctx, item, p)
 		})
@@ -317,16 +316,13 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 
 	if ii.withLocalityIndex && ii.warmLocalityIdx != nil {
 		g.Go(func() error {
-			p := &background.Progress{}
-			ps.Add(p)
-			defer ps.Delete(p)
 			ic := ii.MakeContext()
 			defer ic.Close()
 			from, to := ic.maxColdStep(), ic.maxWarmStep()
 			if from == to || ic.ii.warmLocalityIdx.exists(from, to) {
 				return nil
 			}
-			if err := ic.ii.warmLocalityIdx.BuildMissedIndices(ctx, from, to, false, func() *LocalityIterator { return ic.iterateKeysLocality(from, to) }); err != nil {
+			if err := ic.ii.warmLocalityIdx.BuildMissedIndices(ctx, from, to, false, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to) }); err != nil {
 				return err
 			}
 			return nil

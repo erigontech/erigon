@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/assert"
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
@@ -319,9 +320,16 @@ func (li *LocalityIndex) missedIdxFiles(ii *HistoryContext) (toStep uint64, idxE
 	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, 0, toStep)
 	return toStep, dir.FileExist(filepath.Join(li.dir, fName))
 }
-func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
+func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, ps *background.ProgressSet, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
+
+	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep)
+	idxPath := filepath.Join(li.dir, fName)
+	filePath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
+
+	p := ps.AddNew(fName, uint64(1))
+	defer ps.Delete(p)
 
 	count := 0
 	it := makeIter()
@@ -332,9 +340,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	}
 	it.Close()
 
-	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep)
-	idxPath := filepath.Join(li.dir, fName)
-	filePath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
+	p.Total.Store(uint64(count))
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   count,
@@ -353,6 +359,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		rs.DisableFsync()
 	}
 	for {
+		p.Processed.Store(0)
 		i := uint64(0)
 		maxPossibleValue := int(toStep - fromStep)
 		baseDataID := fromStep
@@ -388,6 +395,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 				return nil, err
 			}
 			i++
+			p.Processed.Add(1)
 
 			select {
 			case <-ctx.Done():
@@ -440,8 +448,8 @@ func (li *LocalityIndex) integrateFiles(sf LocalityIndexFiles, txNumFrom, txNumT
 	li.reCalcRoFiles()
 }
 
-func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, makeIter func() *LocalityIterator) error {
-	f, err := li.buildFiles(ctx, fromStep, toStep, convertStepsToFileNums, makeIter)
+func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, ps *background.ProgressSet, makeIter func() *LocalityIterator) error {
+	f, err := li.buildFiles(ctx, fromStep, toStep, convertStepsToFileNums, ps, makeIter)
 	if err != nil {
 		return err
 	}

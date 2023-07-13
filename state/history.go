@@ -333,8 +333,7 @@ func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps 
 	for _, item := range missedFiles {
 		item := item
 		g.Go(func() error {
-			p := &background.Progress{}
-			ps.Add(p)
+			p := ps.AddNew(item.decompressor.FileName(), uint64(item.decompressor.Count()))
 			defer ps.Delete(p)
 			return h.buildVi(ctx, item, p)
 		})
