@@ -243,9 +243,9 @@ func (d *Domain) OpenList(coldNames, warmNames []string) error {
 	return d.openList(coldNames)
 }
 
-func (d *Domain) openList(fNames []string) error {
-	d.closeWhatNotInList(fNames)
-	d.garbageFiles = d.scanStateFiles(fNames)
+func (d *Domain) openList(coldNames []string) error {
+	d.closeWhatNotInList(coldNames)
+	d.garbageFiles = d.scanStateFiles(coldNames)
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
