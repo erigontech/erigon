@@ -16,7 +16,11 @@
 
 package params
 
-import "math/big"
+import (
+	"math/big"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
+)
 
 const (
 	GasLimitBoundDivisor uint64 = 1024               // The bound divisor of the gas limit, used in update calculations.
@@ -162,10 +166,18 @@ const (
 	RefundQuotient        uint64 = 2
 	RefundQuotientEIP3529 uint64 = 5
 
-	// EIP-4844: Shard Blob Transactions
-	MinDataGasPrice                   = 1
-	DataGasPriceUpdateFraction        = 3338477
-	PointEvaluationGas         uint64 = 50000
+	// stuff from EIP-4844
+	FieldElementsPerBlob       = 4096 // each field element is 32 bytes
+	MinDataGasPrice            = 1
+	DataGasPriceUpdateFraction = 3338477
+	MaxBlobsPerBlock           = chain.MaxDataGasPerBlock / chain.DataGasPerBlob
+
+	BlobVerificationGas      uint64 = 1800000
+	BlobCommitmentVersionKZG uint8  = 0x01
+	PointEvaluationGas       uint64 = 50000
+
+	ParentBeaconBlockRootGas uint64 = 4200
+	HistoricalRootsModulus          = 98304
 )
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
