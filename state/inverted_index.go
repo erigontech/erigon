@@ -548,9 +548,9 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 
 func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 	var ic = InvertedIndexContext{
-		ii:    ii,
-		files: *ii.roFiles.Load(),
-		//warmLocality: ii.warmLocalityIdx.MakeContext(),
+		ii:           ii,
+		files:        *ii.roFiles.Load(),
+		warmLocality: ii.warmLocalityIdx.MakeContext(),
 		coldLocality: ii.coldLocalityIdx.MakeContext(),
 	}
 	for _, item := range ic.files {
@@ -576,6 +576,7 @@ func (ic *InvertedIndexContext) Close() {
 		r.Close()
 	}
 
+	ic.warmLocality.Close()
 	ic.coldLocality.Close()
 }
 

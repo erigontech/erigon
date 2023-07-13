@@ -7,9 +7,11 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 func BenchmarkName2(b *testing.B) {
@@ -41,8 +43,13 @@ func TestLocality(t *testing.T) {
 		var err error
 		ii.coldLocalityIdx, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
 		require.NoError(err)
+		ii.warmLocalityIdx, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
+		require.NoError(err)
 
 		ic := ii.MakeContext()
+		g := &errgroup.Group{}
+		ii.BuildMissedIndices(ctx, g, background.NewProgressSet())
+		require.NoError(g.Wait())
 		err = ic.BuildOptionalMissedIndices(ctx)
 		require.NoError(err)
 		ic.Close()
@@ -120,13 +127,13 @@ func TestLocality(t *testing.T) {
 func TestLocalityDomain(t *testing.T) {
 	logger := log.New()
 	ctx, require := context.Background(), require.New(t)
-	aggStep := uint64(2)
-	coldFiles := uint64(3)
+	aggStep := 2
+	coldFiles := 3
 	coldSteps := coldFiles * StepsInColdFile
 	txsInColdFile := aggStep * StepsInColdFile
 	keyCount, txCount := uint64(6), coldFiles*txsInColdFile+aggStep*16
-	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, aggStep, logger)
-	collateAndMerge(t, db, nil, dom, txCount)
+	db, dom, data := filledDomainFixedSize(t, keyCount, uint64(txCount), uint64(aggStep), logger)
+	collateAndMerge(t, db, nil, dom, uint64(txCount))
 
 	{ //prepare
 		dom.withLocalityIndex = true
@@ -144,11 +151,10 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("locality iterator", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		require.Equal(coldSteps, dc.maxColdStep())
+		require.Equal(coldSteps, int(dc.maxColdStep()))
 		var last []byte
 
-		//fmt.Printf("--case\n")
-		it := dc.hc.ic.iterateKeysLocality(0, coldFiles*StepsInColdFile)
+		it := dc.hc.ic.iterateKeysLocality(0, uint64(coldSteps))
 		require.True(it.HasNext())
 		key, bitmap := it.Next()
 		require.Equal(uint64(0), binary.BigEndian.Uint64(key))
@@ -161,17 +167,17 @@ func TestLocalityDomain(t *testing.T) {
 		for it.HasNext() {
 			last, _ = it.Next()
 		}
-		require.Equal(int(coldFiles-1), int(binary.BigEndian.Uint64(last)))
+		require.Equal(coldFiles-1, int(binary.BigEndian.Uint64(last)))
 
 		it = dc.hc.ic.iterateKeysLocality(dc.hc.ic.maxColdStep(), dc.hc.ic.maxWarmStep()+1)
 		require.True(it.HasNext())
 		key, bitmap = it.Next()
 		require.Equal(2, int(binary.BigEndian.Uint64(key)))
-		require.Equal([]uint64{coldSteps, coldSteps + 8, coldSteps + 8 + 4, coldSteps + 8 + 4 + 2}, bitmap)
+		require.Equal([]uint64{uint64(coldSteps), uint64(coldSteps + 8), uint64(coldSteps + 8 + 4), uint64(coldSteps + 8 + 4 + 2)}, bitmap)
 		require.True(it.HasNext())
 		key, bitmap = it.Next()
 		require.Equal(3, int(binary.BigEndian.Uint64(key)))
-		require.Equal([]uint64{coldSteps, coldSteps + 8, coldSteps + 8 + 4, coldSteps + 8 + 4 + 2}, bitmap)
+		require.Equal([]uint64{uint64(coldSteps), uint64(coldSteps + 8), uint64(coldSteps + 8 + 4), uint64(coldSteps + 8 + 4 + 2)}, bitmap)
 
 		last = nil
 		for it.HasNext() {
