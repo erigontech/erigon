@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -143,6 +144,10 @@ func TestLocalityDomain(t *testing.T) {
 		require.NoError(err)
 
 		dc := dom.MakeContext()
+		g := &errgroup.Group{}
+		dom.BuildMissedIndices(ctx, g, background.NewProgressSet())
+		require.NoError(err)
+		require.NoError(g.Wait())
 		err = dc.BuildOptionalMissedIndices(ctx)
 		require.NoError(err)
 		dc.Close()
@@ -280,21 +285,25 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("domain.getLatestFromFiles", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
+		fmt.Printf("--case0\n")
 		v, ok, err := dc.getLatestFromFiles(hexutility.EncodeTs(0))
 		require.NoError(err)
 		require.True(ok)
 		require.Equal(1*txsInColdFile-1, int(binary.BigEndian.Uint64(v)))
 
+		fmt.Printf("--case1\n")
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(1))
 		require.NoError(err)
 		require.True(ok)
 		require.Equal(3*txsInColdFile-1, int(binary.BigEndian.Uint64(v)))
 
+		fmt.Printf("--case2\n")
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(2))
 		require.NoError(err)
 		require.True(ok)
 		require.Equal(221, int(binary.BigEndian.Uint64(v)))
 
+		fmt.Printf("--case5\n")
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(5))
 		require.NoError(err)
 		require.True(ok)

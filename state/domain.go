@@ -1017,7 +1017,7 @@ func (d *Domain) missedIdxFiles() (l []*filesItem) {
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) (err error) {
+func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	d.History.BuildMissedIndices(ctx, g, ps)
 	for _, item := range d.missedIdxFiles() {
 		//TODO: build .kvi
@@ -1035,7 +1035,6 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 			return nil
 		})
 	}
-	return nil
 }
 
 func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool, p *background.Progress, logger log.Logger, noFsync bool) (*recsplit.Index, error) {
@@ -1438,13 +1437,58 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 
-	// find what has LocalityIndex
+	if v, found, err = dc.getLatestFromWarmFiles(filekey); err != nil {
+		return nil, false, err
+	} else if found {
+		return v, true, nil
+	}
+
+	// sometimes there is a gap between indexed cold files and indexed warm files. just grind them.
+	// possible reasons:
+	// - no locality indices at all
+	// - cold locality index is "lazy"-built
 	lastIndexedTxNum := dc.hc.ic.coldLocality.indexedTo()
+	firstWarmIndexedTxNum := dc.hc.ic.warmLocality.indexedFrom()
+	if firstWarmIndexedTxNum == 0 && len(dc.files) > 0 {
+		firstWarmIndexedTxNum = dc.files[len(dc.files)-1].endTxNum
+	}
+	if firstWarmIndexedTxNum != lastIndexedTxNum {
+		for i := len(dc.files) - 1; i >= 0; i-- {
+			isUseful := dc.files[i].startTxNum >= lastIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
+			if !isUseful {
+				continue
+			}
+			var ok bool
+			dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
+			if err != nil {
+				return nil, false, err
+			}
+			if !ok {
+				continue
+			}
+			return common.Copy(dc.vBuf), true, nil
+		}
+	}
+
+	// still not found, search in indexed cold shards
+	return dc.getLatestFromColdFiles(filekey)
+}
+
+func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, error) {
+	exactWarmStep, ok, err := dc.hc.ic.warmLocality.lookupLatest(filekey)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
+	}
+
 	// grind non-indexed files
-	var ok bool
+	exactTxNum := exactWarmStep * dc.d.aggregationStep
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		if dc.files[i].src.endTxNum <= lastIndexedTxNum {
-			break
+		isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
+		if !isUseful {
+			continue
 		}
 
 		dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
@@ -1452,38 +1496,18 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 			return nil, false, err
 		}
 		if !ok {
-			continue
+			break
 		}
-		found = true
-
-		if COMPARE_INDEXES {
-			rd := recsplit.NewIndexReader(dc.files[i].src.index)
-			oft := rd.Lookup(filekey)
-			gt := dc.statelessGetter(i)
-			gt.Reset(oft)
-			var kk, vv []byte
-			if gt.HasNext() {
-				kk, _ = gt.Next(nil)
-				vv, _ = gt.Next(nil)
-			}
-			fmt.Printf("key: %x, val: %x\n", kk, vv)
-			if !bytes.Equal(vv, v) {
-				panic("not equal")
-			}
-		}
-
-		if found {
-			return common.Copy(dc.vBuf), true, nil
-		}
-		return nil, false, nil
+		return common.Copy(dc.vBuf), true, nil
 	}
-
-	// still not found, search in indexed cold shards
-	return dc.getLatestFromColdFiles(filekey)
+	return nil, false, nil
 }
 
 func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found bool, err error) {
-	exactColdShard, ok := dc.hc.ic.coldLocality.lookupLatest(filekey)
+	exactColdShard, ok, err := dc.hc.ic.coldLocality.lookupLatest(filekey)
+	if err != nil {
+		return nil, false, err
+	}
 	if !ok {
 		return nil, false, nil
 	}

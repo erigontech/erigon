@@ -47,7 +47,7 @@ func TestFixedSizeBitmaps(t *testing.T) {
 	err = wr.Build()
 	require.NoError(err)
 
-	bm, err := OpenFixedSizeBitmaps(idxPath, 14)
+	bm, err := OpenFixedSizeBitmaps(idxPath)
 	require.NoError(err)
 	defer bm.Close()
 

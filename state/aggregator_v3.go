@@ -364,18 +364,10 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 				}
 			}
 		}()
-		if err := a.accounts.BuildMissedIndices(ctx, g, ps); err != nil {
-			return err
-		}
-		if err := a.storage.BuildMissedIndices(ctx, g, ps); err != nil {
-			return err
-		}
-		if err := a.code.BuildMissedIndices(ctx, g, ps); err != nil {
-			return err
-		}
-		if err := a.commitment.BuildMissedIndices(ctx, g, ps); err != nil {
-			return err
-		}
+		a.accounts.BuildMissedIndices(ctx, g, ps)
+		a.storage.BuildMissedIndices(ctx, g, ps)
+		a.code.BuildMissedIndices(ctx, g, ps)
+		a.commitment.BuildMissedIndices(ctx, g, ps)
 		a.logAddrs.BuildMissedIndices(ctx, g, ps)
 		a.logTopics.BuildMissedIndices(ctx, g, ps)
 		a.tracesFrom.BuildMissedIndices(ctx, g, ps)

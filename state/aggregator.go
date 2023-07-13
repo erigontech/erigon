@@ -160,9 +160,7 @@ func (a *Aggregator) SetDB(db kv.RwDB) { a.db = db }
 func (a *Aggregator) buildMissedIdxBlocking(d *Domain) error {
 	eg, ctx := errgroup.WithContext(context.Background())
 	eg.SetLimit(32)
-	if err := d.BuildMissedIndices(ctx, eg, a.ps); err != nil {
-		return err
-	}
+	d.BuildMissedIndices(ctx, eg, a.ps)
 	return eg.Wait()
 }
 func (a *Aggregator) ReopenFolder() (err error) {

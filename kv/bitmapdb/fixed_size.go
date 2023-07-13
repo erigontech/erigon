@@ -48,19 +48,17 @@ type FixedSizeBitmaps struct {
 	modTime       time.Time
 }
 
-func OpenFixedSizeBitmaps(filePath string, bitsPerBitmap int) (*FixedSizeBitmaps, error) {
+func OpenFixedSizeBitmaps(filePath string) (*FixedSizeBitmaps, error) {
 	_, fName := filepath.Split(filePath)
 	idx := &FixedSizeBitmaps{
-		filePath:      filePath,
-		fileName:      fName,
-		bitsPerBitmap: bitsPerBitmap,
+		filePath: filePath,
+		fileName: fName,
 	}
 
 	var err error
 	idx.f, err = os.Open(filePath)
 	if err != nil {
-		panic(err)
-		return nil, fmt.Errorf("OpenFile: %w", err)
+		return nil, fmt.Errorf("OpenFixedSizeBitmaps: %w", err)
 	}
 	var stat os.FileInfo
 	if stat, err = idx.f.Stat(); err != nil {
@@ -76,9 +74,16 @@ func OpenFixedSizeBitmaps(filePath string, bitsPerBitmap int) (*FixedSizeBitmaps
 	idx.data = castToArrU64(idx.m[MetaHeaderSize:])
 
 	idx.version = idx.metaData[0]
-	idx.count = binary.BigEndian.Uint64(idx.metaData[1 : 1+8])
-	idx.baseDataID = binary.BigEndian.Uint64(idx.metaData[1+8 : 1+8+8])
-
+	pos := 1
+	idx.count = binary.BigEndian.Uint64(idx.metaData[pos : pos+8])
+	pos += 8
+	idx.baseDataID = binary.BigEndian.Uint64(idx.metaData[pos : pos+8])
+	pos += 8
+	idx.bitsPerBitmap = int(binary.BigEndian.Uint16(idx.metaData[pos : pos+8]))
+	pos += 2 // nolint
+	if idx.bitsPerBitmap*int(idx.count)/8 > idx.size-MetaHeaderSize {
+		return nil, fmt.Errorf("file metadata doesn't match file length: bitsPerBitmap=%d, count=%d, len=%d, %s", idx.bitsPerBitmap, int(idx.count), idx.size, fName)
+	}
 	return idx, nil
 }
 
@@ -211,7 +216,8 @@ const MetaHeaderSize = 64
 func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, baseDataID, amount uint64, logger log.Logger) (*FixedSizeBitmapsWriter, error) {
 	pageSize := os.Getpagesize()
 	//TODO: use math.SafeMul()
-	bytesAmount := MetaHeaderSize + (bitsPerBitmap*int(amount))/8
+	bytesAmount := MetaHeaderSize + (bitsPerBitmap*int(amount))/8 + 1
+	fmt.Printf("a: bitsPerBitmap=%d, amount=%d, sz=%d\n", bitsPerBitmap, amount, (bitsPerBitmap*int(amount))/8)
 	size := (bytesAmount/pageSize + 1) * pageSize // must be page-size-aligned
 	idx := &FixedSizeBitmapsWriter{
 		indexFile:      indexFile,
@@ -247,8 +253,10 @@ func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, baseDataID, 
 	//	return nil, err
 	//}
 	idx.metaData[0] = idx.version
+	//fmt.Printf("build: count=%d, %s\n", idx.count, indexFile)
 	binary.BigEndian.PutUint64(idx.metaData[1:], idx.count)
 	binary.BigEndian.PutUint64(idx.metaData[1+8:], idx.baseDataID)
+	binary.BigEndian.PutUint16(idx.metaData[1+8+8:], uint16(idx.bitsPerBitmap))
 
 	return idx, nil
 }

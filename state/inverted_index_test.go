@@ -551,13 +551,13 @@ func TestCtxFiles(t *testing.T) {
 	roFiles := ctxFiles(ii.files)
 	for i, item := range roFiles {
 		if item.src.canDelete.Load() {
-			require.Failf(t, "deleted file", "%d-%d", item.src.startTxNum, item.src.endTxNum)
+			require.Failf(t, "deleted file", "%d-%d", item.startTxNum, item.endTxNum)
 		}
 		if i == 0 {
 			continue
 		}
 		if item.src.isSubsetOf(roFiles[i-1].src) || roFiles[i-1].src.isSubsetOf(item.src) {
-			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.src.startTxNum, item.src.endTxNum, roFiles[i-1].src.startTxNum, roFiles[i-1].src.endTxNum)
+			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.startTxNum, item.endTxNum, roFiles[i-1].startTxNum, roFiles[i-1].endTxNum)
 		}
 	}
 	require.Equal(t, 3, len(roFiles))

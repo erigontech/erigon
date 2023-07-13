@@ -153,7 +153,7 @@ func (li *LocalityIndex) openFiles() (err error) {
 	if li.bm == nil {
 		dataPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
 		if dir.FileExist(dataPath) {
-			li.bm, err = bitmapdb.OpenFixedSizeBitmaps(dataPath, int((toStep-fromStep)/StepsInColdFile))
+			li.bm, err = bitmapdb.OpenFixedSizeBitmaps(dataPath)
 			if err != nil {
 				return err
 			}
@@ -280,21 +280,23 @@ func (lc *ctxLocalityIdx) indexedTo() uint64 {
 	}
 	return lc.file.endTxNum
 }
+func (lc *ctxLocalityIdx) indexedFrom() uint64 {
+	if lc == nil || lc.bm == nil {
+		return 0
+	}
+	return lc.file.startTxNum
+}
 
 // lookupLatest return latest file (step)
 // prevents searching key in many files
-func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool) {
+func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool, err error) {
 	if lc == nil || lc.bm == nil {
-		return 0, false
+		return 0, false, nil
 	}
 	if lc.reader == nil {
 		lc.reader = recsplit.NewIndexReader(lc.file.src.index)
 	}
-	fn1, ok1, err := lc.bm.LastAt(lc.reader.Lookup(key))
-	if err != nil {
-		panic(err)
-	}
-	return fn1, ok1
+	return lc.bm.LastAt(lc.reader.Lookup(key))
 }
 
 func (li *LocalityIndex) exists(fromStep, toStep uint64) bool {
@@ -350,15 +352,14 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	if li.noFsync {
 		rs.DisableFsync()
 	}
-	i := uint64(0)
 	for {
-		maxPossibleValue := int(it.StepsAmount())
+		i := uint64(0)
+		maxPossibleValue := int(toStep - fromStep)
 		baseDataID := fromStep
 		if convertStepsToFileNums {
 			maxPossibleValue = int(it.FilesAmount())
 			baseDataID = uint64(0)
 		}
-
 		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, maxPossibleValue, baseDataID, uint64(count), li.logger)
 		if err != nil {
 			return nil, err
@@ -418,7 +419,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	if err != nil {
 		return nil, err
 	}
-	bm, err := bitmapdb.OpenFixedSizeBitmaps(filePath, int(it.FilesAmount()))
+	bm, err := bitmapdb.OpenFixedSizeBitmaps(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -471,7 +472,6 @@ type LocalityIterator struct {
 	progress          uint64
 
 	totalOffsets, filesAmount uint64
-	stepsAmount               uint64
 	involvedFiles             []*compress.Decompressor //used in destructor to disable read-ahead
 }
 
@@ -521,7 +521,6 @@ func (si *LocalityIterator) Progress() float64 {
 	return (float64(si.progress) / float64(si.totalOffsets)) * 100
 }
 func (si *LocalityIterator) FilesAmount() uint64 { return si.filesAmount }
-func (si *LocalityIterator) StepsAmount() uint64 { return si.stepsAmount }
 
 func (si *LocalityIterator) Next() ([]byte, []uint64) {
 	//if hi.err != nil {
@@ -547,7 +546,7 @@ func (si *LocalityIterator) Close() {
 func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64) *LocalityIterator {
 	toTxNum := toStep * ic.ii.aggregationStep
 	fromTxNum := fromStep * ic.ii.aggregationStep
-	si := &LocalityIterator{aggStep: ic.ii.aggregationStep, compressVals: false, stepsAmount: toStep - fromStep}
+	si := &LocalityIterator{aggStep: ic.ii.aggregationStep, compressVals: false}
 
 	for _, item := range ic.files {
 		if item.endTxNum <= fromTxNum || item.startTxNum >= toTxNum {
