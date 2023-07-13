@@ -1290,7 +1290,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			return nil
 		})
 		dirs := datadir.New(datadirCli)
-		dir.MustExist(dirs.SnapHistory)
+		dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
 
 		//useSnapshots = true
 		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
@@ -1348,7 +1348,7 @@ func allDomains(ctx context.Context, db kv.RoDB, stepSize uint64, mode libstate.
 			return nil
 		})
 		dirs := datadir.New(datadirCli)
-		dir.MustExist(dirs.SnapHistory)
+		dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
 
 		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
 		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, logger)

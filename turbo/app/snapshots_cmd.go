@@ -305,7 +305,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).Readonly().MustOpen()
 	defer chainDB.Close()
 
-	dir.MustExist(dirs.SnapHistory)
+	dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
 	chainConfig := fromdb.ChainConfig(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
@@ -353,7 +353,7 @@ func doLocalityIdx(cliCtx *cli.Context) error {
 	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).Readonly().MustOpen()
 	defer chainDB.Close()
 
-	dir.MustExist(dirs.SnapHistory)
+	dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
 	chainConfig := fromdb.ChainConfig(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
