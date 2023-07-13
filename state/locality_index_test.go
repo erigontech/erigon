@@ -50,7 +50,7 @@ func TestLocality(t *testing.T) {
 		g := &errgroup.Group{}
 		ii.BuildMissedIndices(ctx, g, background.NewProgressSet())
 		require.NoError(g.Wait())
-		err = ic.BuildOptionalMissedIndices(ctx)
+		err = ic.BuildOptionalMissedIndices(ctx, background.NewProgressSet())
 		require.NoError(err)
 		ic.Close()
 	}
@@ -148,7 +148,7 @@ func TestLocalityDomain(t *testing.T) {
 		dom.BuildMissedIndices(ctx, g, background.NewProgressSet())
 		require.NoError(err)
 		require.NoError(g.Wait())
-		err = dc.BuildOptionalMissedIndices(ctx)
+		err = dc.BuildOptionalMissedIndices(ctx, background.NewProgressSet())
 		require.NoError(err)
 		dc.Close()
 	}

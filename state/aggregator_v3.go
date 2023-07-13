@@ -328,17 +328,18 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 func (ac *AggregatorV3Context) BuildOptionalMissedIndices(ctx context.Context, workers int) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
+	ps := background.NewProgressSet()
 	if ac.accounts != nil {
-		g.Go(func() error { return ac.accounts.BuildOptionalMissedIndices(ctx) })
+		g.Go(func() error { return ac.accounts.BuildOptionalMissedIndices(ctx, ps) })
 	}
 	if ac.storage != nil {
-		g.Go(func() error { return ac.storage.BuildOptionalMissedIndices(ctx) })
+		g.Go(func() error { return ac.storage.BuildOptionalMissedIndices(ctx, ps) })
 	}
 	if ac.code != nil {
-		g.Go(func() error { return ac.code.BuildOptionalMissedIndices(ctx) })
+		g.Go(func() error { return ac.code.BuildOptionalMissedIndices(ctx, ps) })
 	}
 	if ac.commitment != nil {
-		g.Go(func() error { return ac.commitment.BuildOptionalMissedIndices(ctx) })
+		g.Go(func() error { return ac.commitment.BuildOptionalMissedIndices(ctx, ps) })
 	}
 	return g.Wait()
 }

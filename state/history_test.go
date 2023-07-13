@@ -420,7 +420,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 
 	hc := h.MakeContext()
 	defer hc.Close()
-	err = hc.ic.BuildOptionalMissedIndices(ctx)
+	err = hc.ic.BuildOptionalMissedIndices(ctx, background.NewProgressSet())
 	require.NoError(err)
 
 	err = tx.Commit()

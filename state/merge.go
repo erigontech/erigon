@@ -303,20 +303,20 @@ func (r HistoryRanges) any() bool {
 	return r.history || r.index
 }
 
-func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	if err := dc.hc.ic.BuildOptionalMissedIndices(ctx); err != nil {
+func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
+	if err := dc.hc.ic.BuildOptionalMissedIndices(ctx, ps); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
+func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
 	if ic.ii.withLocalityIndex && ic.ii.coldLocalityIdx != nil {
 		from, to := uint64(0), ic.maxColdStep()
 		if to == 0 || ic.ii.coldLocalityIdx.exists(from, to) {
 			return nil
 		}
-		if err := ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, from, to, true, func() *LocalityIterator { return ic.iterateKeysLocality(from, to) }); err != nil {
+		if err := ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, from, to, true, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to) }); err != nil {
 			return err
 		}
 	}
