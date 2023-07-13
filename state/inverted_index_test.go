@@ -43,8 +43,8 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	tb.Helper()
 	path := tb.TempDir()
 	dir := filepath.Join(path, "e4")
-	require.NoError(tb, os.Mkdir(filepath.Join(path, "warm"), 0740))
-	require.NoError(tb, os.Mkdir(dir, 0740))
+	require.NoError(tb, os.MkdirAll(filepath.Join(path, "warm"), 0740))
+	require.NoError(tb, os.MkdirAll(dir, 0740))
 	keysTable := "Keys"
 	indexTable := "Index"
 	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {

@@ -44,8 +44,8 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	tb.Helper()
 	path := tb.TempDir()
 	dir := filepath.Join(path, "e4")
-	require.NoError(tb, os.Mkdir(filepath.Join(path, "warm"), 0740))
-	require.NoError(tb, os.Mkdir(dir, 0740))
+	require.NoError(tb, os.MkdirAll(filepath.Join(path, "warm"), 0740))
+	require.NoError(tb, os.MkdirAll(dir, 0740))
 	keysTable := "AccountKeys"
 	indexTable := "AccountIndex"
 	valsTable := "AccountVals"
