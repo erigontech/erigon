@@ -83,6 +83,13 @@ func (s *ProgressSet) String() string {
 		return ""
 	}
 	s.list.Scan(func(_ int, p *Progress) bool {
+		if p == nil {
+			return true
+		}
+		namePtr := p.Name.Load()
+		if namePtr == nil {
+			return true
+		}
 		sb.WriteString(fmt.Sprintf("%s=%d%%", *p.Name.Load(), p.percent()))
 		i++
 		if i != s.list.Len() {
