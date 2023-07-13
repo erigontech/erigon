@@ -79,9 +79,6 @@ func (s *ProgressSet) String() string {
 	defer s.lock.RUnlock()
 	var sb strings.Builder
 	var i int
-	if s.list == nil {
-		return ""
-	}
 	s.list.Scan(func(_ int, p *Progress) bool {
 		if p == nil {
 			return true
