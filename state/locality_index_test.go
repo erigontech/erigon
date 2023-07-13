@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"sync/atomic"
 	"testing"
 
@@ -32,7 +31,9 @@ func TestLocality(t *testing.T) {
 	logger := log.New()
 	ctx, require := context.Background(), require.New(t)
 	const Module uint64 = 31
-	_, db, ii, txs := filledInvIndexOfSize(t, 300, 4, Module, logger)
+	aggStep := uint64(4)
+	coldFiles := uint64(2)
+	_, db, ii, txs := filledInvIndexOfSize(t, 300, aggStep, Module, logger)
 	mergeInverted(t, db, ii, txs)
 
 	{ //prepare
@@ -50,7 +51,7 @@ func TestLocality(t *testing.T) {
 	t.Run("locality iterator", func(t *testing.T) {
 		ic := ii.MakeContext()
 		defer ic.Close()
-		it := ic.iterateKeysLocality(math.MaxUint64)
+		it := ic.iterateKeysLocality(0, coldFiles*StepsInColdFile)
 		require.True(it.HasNext())
 		key, bitmap := it.Next()
 		require.Equal(uint64(1), binary.BigEndian.Uint64(key))
@@ -107,23 +108,24 @@ func TestLocality(t *testing.T) {
 		ic := ii.MakeContext()
 		defer ic.Close()
 		k := hexutility.EncodeTs(1)
-		v1, v2, from, ok1, ok2 := ic.coldLocality.lookupIdxFiles(k, 1*ic.ii.aggregationStep*StepsInBiggestFile)
+		v1, v2, from, ok1, ok2 := ic.coldLocality.lookupIdxFiles(k, 1*ic.ii.aggregationStep*StepsInColdFile)
 		require.True(ok1)
 		require.False(ok2)
-		require.Equal(uint64(1*StepsInBiggestFile), v1)
-		require.Equal(uint64(0*StepsInBiggestFile), v2)
-		require.Equal(2*ic.ii.aggregationStep*StepsInBiggestFile, from)
+		require.Equal(uint64(1*StepsInColdFile), v1)
+		require.Equal(uint64(0*StepsInColdFile), v2)
+		require.Equal(2*ic.ii.aggregationStep*StepsInColdFile, from)
 	})
 }
 
 func TestLocalityDomain(t *testing.T) {
 	logger := log.New()
 	ctx, require := context.Background(), require.New(t)
-	aggStep := 2
-	frozenFiles := 3
-	txsInFrozenFile := aggStep * StepsInBiggestFile
-	keyCount, txCount := uint64(6), uint64(frozenFiles*txsInFrozenFile+aggStep*16)
-	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, uint64(aggStep), logger)
+	aggStep := uint64(2)
+	coldFiles := uint64(3)
+	coldSteps := coldFiles * StepsInColdFile
+	txsInColdFile := aggStep * StepsInColdFile
+	keyCount, txCount := uint64(6), coldFiles*txsInColdFile+aggStep*16
+	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, aggStep, logger)
 	collateAndMerge(t, db, nil, dom, txCount)
 
 	{ //prepare
@@ -142,23 +144,41 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("locality iterator", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		it := dc.iterateKeysLocality(math.MaxUint64)
+		require.Equal(coldSteps, dc.maxColdStep())
+		var last []byte
+
+		//fmt.Printf("--case\n")
+		it := dc.hc.ic.iterateKeysLocality(0, coldFiles*StepsInColdFile)
 		require.True(it.HasNext())
 		key, bitmap := it.Next()
 		require.Equal(uint64(0), binary.BigEndian.Uint64(key))
-		require.Equal([]uint64{0}, bitmap)
+		require.Equal([]uint64{0 * StepsInColdFile}, bitmap)
 		require.True(it.HasNext())
 		key, bitmap = it.Next()
 		require.Equal(uint64(1), binary.BigEndian.Uint64(key))
-		require.Equal([]uint64{1, 2}, bitmap)
+		require.Equal([]uint64{1 * StepsInColdFile, 2 * StepsInColdFile}, bitmap)
 
-		var last []byte
 		for it.HasNext() {
-			key, bm := it.Next()
-			last = key
-			fmt.Printf("key: %d, bitmap: %d\n", binary.BigEndian.Uint64(key), bm)
+			last, _ = it.Next()
 		}
-		require.Equal(frozenFiles-1, int(binary.BigEndian.Uint64(last)))
+		require.Equal(int(coldFiles-1), int(binary.BigEndian.Uint64(last)))
+
+		it = dc.hc.ic.iterateKeysLocality(dc.hc.ic.maxColdStep(), dc.hc.ic.maxWarmStep()+1)
+		require.True(it.HasNext())
+		key, bitmap = it.Next()
+		require.Equal(2, int(binary.BigEndian.Uint64(key)))
+		require.Equal([]uint64{coldSteps, coldSteps + 8, coldSteps + 8 + 4, coldSteps + 8 + 4 + 2}, bitmap)
+		require.True(it.HasNext())
+		key, bitmap = it.Next()
+		require.Equal(3, int(binary.BigEndian.Uint64(key)))
+		require.Equal([]uint64{coldSteps, coldSteps + 8, coldSteps + 8 + 4, coldSteps + 8 + 4 + 2}, bitmap)
+
+		last = nil
+		for it.HasNext() {
+			last, _ = it.Next()
+		}
+		require.Equal(int(keyCount-1), int(binary.BigEndian.Uint64(last)))
+
 	})
 
 	t.Run("locality index: bitmap all data check", func(t *testing.T) {
@@ -236,20 +256,20 @@ func TestLocalityDomain(t *testing.T) {
 		defer dc.Close()
 		fmt.Printf("--start\n")
 		to := dc.hc.ic.coldLocality.indexedTo()
-		require.Equal(frozenFiles*txsInFrozenFile, int(to))
+		require.Equal(coldFiles*txsInColdFile, int(to))
 
 		v1, v2, from, ok1, ok2 := dc.hc.ic.coldLocality.lookupIdxFiles(hexutility.EncodeTs(0), 0)
 		require.True(ok1)
 		require.False(ok2)
-		require.Equal(uint64(0*StepsInBiggestFile), v1)
-		require.Equal(txsInFrozenFile*frozenFiles, int(from))
+		require.Equal(uint64(0*StepsInColdFile), v1)
+		require.Equal(txsInColdFile*coldFiles, int(from))
 
 		v1, v2, from, ok1, ok2 = dc.hc.ic.coldLocality.lookupIdxFiles(hexutility.EncodeTs(1), 0)
 		require.True(ok1)
 		require.True(ok2)
-		require.Equal(uint64(1*StepsInBiggestFile), v1)
-		require.Equal(uint64(2*StepsInBiggestFile), v2)
-		require.Equal(txsInFrozenFile*frozenFiles, int(from))
+		require.Equal(uint64(1*StepsInColdFile), v1)
+		require.Equal(uint64(2*StepsInColdFile), v2)
+		require.Equal(txsInColdFile*coldFiles, int(from))
 	})
 	t.Run("domain.getLatestFromFiles", func(t *testing.T) {
 		dc := dom.MakeContext()
@@ -258,13 +278,13 @@ func TestLocalityDomain(t *testing.T) {
 		v, ok, err := dc.getLatestFromFiles(hexutility.EncodeTs(0))
 		require.NoError(err)
 		require.True(ok)
-		require.Equal(1*txsInFrozenFile-1, int(binary.BigEndian.Uint64(v)))
+		require.Equal(1*txsInColdFile-1, int(binary.BigEndian.Uint64(v)))
 		fmt.Printf("--- end aaaa\n")
 
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(1))
 		require.NoError(err)
 		require.True(ok)
-		require.Equal(3*txsInFrozenFile-1, int(binary.BigEndian.Uint64(v)))
+		require.Equal(3*txsInColdFile-1, int(binary.BigEndian.Uint64(v)))
 
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(2))
 		require.NoError(err)

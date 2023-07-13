@@ -56,12 +56,12 @@ type InvertedIndex struct {
 	// MakeContext() using this field in zero-copy way
 	roFiles atomic.Pointer[[]ctxItem]
 
-	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
-	indexTable      string // k -> txnNum_u64 , Needs to be table with DupSort
-	dir, tmpdir     string // Directory where static files are created
-	filenameBase    string
-	aggregationStep uint64
-	compressWorkers int
+	indexKeysTable       string // txnNum_u64 -> key (k+auto_increment)
+	indexTable           string // k -> txnNum_u64 , Needs to be table with DupSort
+	dir, warmDir, tmpdir string // Directory where static files are created
+	filenameBase         string
+	aggregationStep      uint64
+	compressWorkers      int
 
 	integrityFileExtensions []string
 	withLocalityIndex       bool
@@ -90,8 +90,10 @@ func NewInvertedIndex(
 	integrityFileExtensions []string,
 	logger log.Logger,
 ) (*InvertedIndex, error) {
+	baseDir, _ := filepath.Split(dir)
 	ii := InvertedIndex{
 		dir:                     dir,
+		warmDir:                 filepath.Join(baseDir, "warm"),
 		tmpdir:                  tmpdir,
 		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		aggregationStep:         aggregationStep,
@@ -108,6 +110,10 @@ func NewInvertedIndex(
 	if ii.withLocalityIndex {
 		var err error
 		ii.coldLocalityIdx, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
+		if err != nil {
+			return nil, fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
+		}
+		ii.warmLocalityIdx, err = NewLocalityIndex(ii.warmDir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
 		if err != nil {
 			return nil, fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
 		}
@@ -291,6 +297,25 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 			return ii.buildEfi(ctx, item, p)
 		})
 	}
+
+	if ii.withLocalityIndex && ii.warmLocalityIdx != nil {
+		g.Go(func() error {
+			p := &background.Progress{}
+			ps.Add(p)
+			defer ps.Delete(p)
+			ic := ii.MakeContext()
+			defer ic.Close()
+			from, to := ic.maxColdStep(), ic.maxWarmStep()
+			if from == 0 || ic.ii.coldLocalityIdx.exists(from, to) {
+				return nil
+			}
+			if err := ic.ii.warmLocalityIdx.BuildMissedIndices(ctx, from, to, false, func() *LocalityIterator { return ic.iterateKeysLocality(from, to) }); err != nil {
+				return err
+			}
+			return nil
+		})
+	}
+
 }
 
 func (ii *InvertedIndex) openFiles() error {

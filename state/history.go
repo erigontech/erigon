@@ -1367,7 +1367,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	// -- LocaliyIndex opimization --
 	// check up to 2 exact files
 	if foundExactShard1 {
-		from, to := exactStep1*hc.h.aggregationStep, (exactStep1+StepsInBiggestFile)*hc.h.aggregationStep
+		from, to := exactStep1*hc.h.aggregationStep, (exactStep1+StepsInColdFile)*hc.h.aggregationStep
 		item, ok := hc.ic.getFile(from, to)
 		if ok {
 			findInFile(item)
@@ -1383,7 +1383,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		//}
 	}
 	if !found && foundExactShard2 {
-		from, to := exactStep2*hc.h.aggregationStep, (exactStep2+StepsInBiggestFile)*hc.h.aggregationStep
+		from, to := exactStep2*hc.h.aggregationStep, (exactStep2+StepsInColdFile)*hc.h.aggregationStep
 		item, ok := hc.ic.getFile(from, to)
 		if ok {
 			findInFile(item)

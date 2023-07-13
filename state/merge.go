@@ -311,32 +311,44 @@ func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err er
 }
 
 func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	if !ic.ii.withLocalityIndex || ic.ii.coldLocalityIdx == nil {
-		return
+	if ic.ii.withLocalityIndex && ic.ii.coldLocalityIdx != nil {
+		from, to := uint64(0), ic.maxColdStep()
+		if to == 0 || ic.ii.coldLocalityIdx.exists(from, to) {
+			return nil
+		}
+		if err := ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, from, to, true, func() *LocalityIterator { return ic.iterateKeysLocality(from, to) }); err != nil {
+			return err
+		}
 	}
-	to := ic.maxFrozenStep()
-	if to == 0 || ic.ii.coldLocalityIdx.exists(to) {
-		return nil
-	}
-	defer ic.ii.EnableMadvNormalReadAhead().DisableReadAhead()
-	return ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, to, func() *LocalityIterator { return ic.iterateKeysLocality(to * ic.ii.aggregationStep) })
+	return nil
 }
 
-func (dc *DomainContext) maxFrozenStep() uint64 {
+func (dc *DomainContext) maxColdStep() uint64 {
 	return dc.maxTxNumInFiles(true) / dc.d.aggregationStep
 }
-func (hc *HistoryContext) maxFrozenStep() uint64 {
+func (hc *HistoryContext) maxColdStep() uint64 {
 	return hc.maxTxNumInFiles(true) / hc.h.aggregationStep
 }
-func (ic *InvertedIndexContext) maxFrozenStep() uint64 {
+func (ic *InvertedIndexContext) maxColdStep() uint64 {
 	return ic.maxTxNumInFiles(true) / ic.ii.aggregationStep
 }
-func (dc *DomainContext) maxTxNumInFiles(frozen bool) uint64 {
+func (ic *InvertedIndexContext) minWarmStep() uint64 {
+	cold, warm := ic.maxColdStep(), ic.maxWarmStep()
+	if cold == warm {
+		return cold
+	}
+	return cold + 1
+}
+func (ic *InvertedIndexContext) maxWarmStep() uint64 {
+	return ic.maxTxNumInFiles(false) / ic.ii.aggregationStep
+}
+
+func (dc *DomainContext) maxTxNumInFiles(cold bool) uint64 {
 	if len(dc.files) == 0 {
 		return 0
 	}
 	var max uint64
-	if frozen {
+	if cold {
 		for i := len(dc.files) - 1; i >= 0; i-- {
 			if !dc.files[i].src.frozen {
 				continue
@@ -347,15 +359,15 @@ func (dc *DomainContext) maxTxNumInFiles(frozen bool) uint64 {
 	} else {
 		max = dc.files[len(dc.files)-1].endTxNum
 	}
-	return cmp.Min(max, dc.hc.maxTxNumInFiles(frozen))
+	return cmp.Min(max, dc.hc.maxTxNumInFiles(cold))
 }
 
-func (hc *HistoryContext) maxTxNumInFiles(frozen bool) uint64 {
+func (hc *HistoryContext) maxTxNumInFiles(cold bool) uint64 {
 	if len(hc.files) == 0 {
 		return 0
 	}
 	var max uint64
-	if frozen {
+	if cold {
 		for i := len(hc.files) - 1; i >= 0; i-- {
 			if !hc.files[i].src.frozen {
 				continue
@@ -366,13 +378,13 @@ func (hc *HistoryContext) maxTxNumInFiles(frozen bool) uint64 {
 	} else {
 		max = hc.files[len(hc.files)-1].endTxNum
 	}
-	return cmp.Min(max, hc.ic.maxTxNumInFiles(frozen))
+	return cmp.Min(max, hc.ic.maxTxNumInFiles(cold))
 }
-func (ic *InvertedIndexContext) maxTxNumInFiles(frozen bool) uint64 {
+func (ic *InvertedIndexContext) maxTxNumInFiles(cold bool) uint64 {
 	if len(ic.files) == 0 {
 		return 0
 	}
-	if !frozen {
+	if !cold {
 		return ic.files[len(ic.files)-1].endTxNum
 	}
 	for i := len(ic.files) - 1; i >= 0; i-- {
@@ -1327,7 +1339,7 @@ func (d *Domain) deleteGarbageFiles() {
 	for _, item := range d.garbageFiles {
 		// paranoic-mode: don't delete frozen files
 		steps := item.endTxNum/d.aggregationStep - item.startTxNum/d.aggregationStep
-		if steps%StepsInBiggestFile == 0 {
+		if steps%StepsInColdFile == 0 {
 			continue
 		}
 		f1 := fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep)
@@ -1343,7 +1355,7 @@ func (d *Domain) deleteGarbageFiles() {
 func (h *History) deleteGarbageFiles() {
 	for _, item := range h.garbageFiles {
 		// paranoic-mode: don't delete frozen files
-		if item.endTxNum/h.aggregationStep-item.startTxNum/h.aggregationStep == StepsInBiggestFile {
+		if item.endTxNum/h.aggregationStep-item.startTxNum/h.aggregationStep == StepsInColdFile {
 			continue
 		}
 		f1 := fmt.Sprintf("%s.%d-%d.v", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
@@ -1359,7 +1371,7 @@ func (h *History) deleteGarbageFiles() {
 func (ii *InvertedIndex) deleteGarbageFiles() {
 	for _, item := range ii.garbageFiles {
 		// paranoic-mode: don't delete frozen files
-		if item.endTxNum/ii.aggregationStep-item.startTxNum/ii.aggregationStep == StepsInBiggestFile {
+		if item.endTxNum/ii.aggregationStep-item.startTxNum/ii.aggregationStep == StepsInColdFile {
 			continue
 		}
 		f1 := fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)

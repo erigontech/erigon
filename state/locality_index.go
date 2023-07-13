@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/log/v3"
@@ -129,7 +130,7 @@ func (li *LocalityIndex) scanStateFiles(fNames []string) (uselessFiles []*filesI
 			li.logger.Warn("LocalityIndex must always starts from step 0")
 			continue
 		}
-		if endStep > StepsInBiggestFile*LocalityIndexUint64Limit {
+		if endStep > StepsInColdFile*LocalityIndexUint64Limit {
 			li.logger.Warn("LocalityIndex does store bitmaps as uint64, means it can't handle > 2048 steps. But it's possible to implement")
 			continue
 		}
@@ -156,7 +157,7 @@ func (li *LocalityIndex) openFiles() (err error) {
 	if li.bm == nil {
 		dataPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
 		if dir.FileExist(dataPath) {
-			li.bm, err = bitmapdb.OpenFixedSizeBitmaps(dataPath, int((toStep-fromStep)/StepsInBiggestFile))
+			li.bm, err = bitmapdb.OpenFixedSizeBitmaps(dataPath, int((toStep-fromStep)/StepsInColdFile))
 			if err != nil {
 				return err
 			}
@@ -268,12 +269,12 @@ func (lc *ctxLocalityIdx) lookupIdxFiles(key []byte, fromTxNum uint64) (exactSha
 		return 0, 0, fromTxNum, false, false
 	}
 
-	fromFileNum := fromTxNum / lc.aggregationStep / StepsInBiggestFile
+	fromFileNum := fromTxNum / lc.aggregationStep / StepsInColdFile
 	fn1, fn2, ok1, ok2, err := lc.bm.First2At(lc.reader.Lookup(key), fromFileNum)
 	if err != nil {
 		panic(err)
 	}
-	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, lc.file.endTxNum, ok1, ok2
+	return fn1 * StepsInColdFile, fn2 * StepsInColdFile, lc.file.endTxNum, ok1, ok2
 }
 
 // indexedTo - [from, to)
@@ -300,8 +301,8 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool)
 	return fn1, ok1
 }
 
-func (li *LocalityIndex) exists(step uint64) bool {
-	return dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li", li.filenameBase, 0, step)))
+func (li *LocalityIndex) exists(fromStep, toStep uint64) bool {
+	return dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep)))
 }
 func (li *LocalityIndex) missedIdxFiles(ii *HistoryContext) (toStep uint64, idxExists bool) {
 	if len(ii.files) == 0 {
@@ -320,17 +321,18 @@ func (li *LocalityIndex) missedIdxFiles(ii *HistoryContext) (toStep uint64, idxE
 	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, 0, toStep)
 	return toStep, dir.FileExist(filepath.Join(li.dir, fName))
 }
-func (li *LocalityIndex) buildFiles(ctx context.Context, toStep uint64, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
+func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	fromStep := uint64(0)
 	count := 0
 	it := makeIter()
+	defer it.Close()
 	for it.HasNext() {
 		_, _ = it.Next()
 		count++
 	}
+	it.Close()
 
 	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep)
 	idxPath := filepath.Join(li.dir, fName)
@@ -364,10 +366,18 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, toStep uint64, makeIter
 		}
 
 		it = makeIter()
+		defer it.Close()
 		for it.HasNext() {
-			k, inFiles := it.Next()
+			k, inSteps := it.Next()
+
+			if convertStepsToFileNums {
+				for j := range inSteps {
+					inSteps[j] = inSteps[j] / StepsInColdFile
+				}
+			}
+
 			//fmt.Printf("buld: %x, %d, %d\n", k, i, inFiles)
-			if err := dense.AddArray(i, inFiles); err != nil {
+			if err := dense.AddArray(i, inSteps); err != nil {
 				return nil, err
 			}
 			if err = rs.AddKey(k, i); err != nil {
@@ -383,6 +393,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, toStep uint64, makeIter
 			default:
 			}
 		}
+		it.Close()
 
 		if err := dense.Build(); err != nil {
 			return nil, err
@@ -425,9 +436,8 @@ func (li *LocalityIndex) integrateFiles(sf LocalityIndexFiles, txNumFrom, txNumT
 	li.reCalcRoFiles()
 }
 
-func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, toStep uint64, makeIter func() *LocalityIterator) error {
-	fromStep := uint64(0)
-	f, err := li.buildFiles(ctx, toStep, makeIter)
+func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, makeIter func() *LocalityIterator) error {
+	f, err := li.buildFiles(ctx, fromStep, toStep, convertStepsToFileNums, makeIter)
 	if err != nil {
 		return err
 	}
@@ -458,6 +468,7 @@ type LocalityIterator struct {
 	progress          uint64
 
 	totalOffsets, filesAmount uint64
+	involvedFiles             []*compress.Decompressor //used in destructor to disable read-ahead
 }
 
 func (si *LocalityIterator) advance() {
@@ -472,17 +483,17 @@ func (si *LocalityIterator) advance() {
 		}
 		si.progress += offset - top.lastOffset
 		top.lastOffset = offset
-		inStep := uint32(top.startTxNum / si.aggStep)
+		inStep := top.startTxNum / si.aggStep
 		if top.g.HasNext() {
 			top.key, _ = top.g.NextUncompressed()
 			heap.Push(&si.h, top)
 		}
 
-		inFile := uint64(inStep / StepsInBiggestFile)
+		//inFile := in
 
 		if si.k == nil {
 			si.k = key
-			si.v = append(si.v, inFile)
+			si.v = append(si.v, inStep)
 			continue
 		}
 
@@ -490,11 +501,11 @@ func (si *LocalityIterator) advance() {
 			si.nextV, si.v = si.v, si.nextV[:0]
 			si.nextK = si.k
 
-			si.v = append(si.v, inFile)
+			si.v = append(si.v, inStep)
 			si.k = key
 			return
 		}
-		si.v = append(si.v, inFile)
+		si.v = append(si.v, inStep)
 	}
 	si.nextV, si.v = si.v, si.nextV[:0]
 	si.nextK = si.k
@@ -519,45 +530,36 @@ func (si *LocalityIterator) Next() ([]byte, []uint64) {
 	return si.kBackup, si.vBackup
 }
 
-func (ic *InvertedIndexContext) iterateKeysLocality(uptoTxNum uint64) *LocalityIterator {
-	si := &LocalityIterator{aggStep: ic.ii.aggregationStep, compressVals: false}
-	for _, item := range ic.files {
-		if !item.src.frozen || item.startTxNum > uptoTxNum {
-			continue
-		}
-		if assert.Enable {
-			if (item.endTxNum-item.startTxNum)/si.aggStep != StepsInBiggestFile {
-				panic(fmt.Errorf("frozen file of small size: %s", item.src.decompressor.FileName()))
-			}
-		}
-		g := item.src.decompressor.MakeGetter()
-		if g.HasNext() {
-			key, offset := g.NextUncompressed()
-
-			heapItem := &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key, startOffset: offset, lastOffset: offset}
-			heap.Push(&si.h, heapItem)
-		}
-		si.totalOffsets += uint64(g.Size())
-		si.filesAmount++
+// Close - safe to call multiple times
+func (si *LocalityIterator) Close() {
+	for _, f := range si.involvedFiles {
+		f.DisableReadAhead()
 	}
-	si.advance()
-	return si
+	si.involvedFiles = nil
 }
 
-func (dc *DomainContext) iterateKeysLocality(uptoTxNum uint64) *LocalityIterator {
-	si := &LocalityIterator{aggStep: dc.d.aggregationStep, compressVals: dc.d.compressVals}
-	for _, item := range dc.files {
-		if !item.src.frozen || item.startTxNum > uptoTxNum {
+// iterateKeysLocality [from, to)
+func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64) *LocalityIterator {
+	toTxNum := toStep * ic.ii.aggregationStep
+	fromTxNum := fromStep * ic.ii.aggregationStep
+	si := &LocalityIterator{aggStep: ic.ii.aggregationStep, compressVals: false}
+
+	for _, item := range ic.files {
+		if item.endTxNum <= fromTxNum || item.startTxNum >= toTxNum {
 			continue
 		}
 		if assert.Enable {
-			if (item.endTxNum-item.startTxNum)/si.aggStep != StepsInBiggestFile {
+			if (item.endTxNum-item.startTxNum)/si.aggStep != StepsInColdFile {
 				panic(fmt.Errorf("frozen file of small size: %s", item.src.decompressor.FileName()))
 			}
 		}
+		item.src.decompressor.EnableReadAhead() // disable in destructor of iterator
+		si.involvedFiles = append(si.involvedFiles, item.src.decompressor)
+
 		g := item.src.decompressor.MakeGetter()
 		if g.HasNext() {
 			key, offset := g.NextUncompressed()
+
 			heapItem := &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key, startOffset: offset, lastOffset: offset}
 			heap.Push(&si.h, heapItem)
 		}

@@ -72,7 +72,7 @@ type filesItem struct {
 func newFilesItem(startTxNum, endTxNum uint64, stepSize uint64) *filesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
-	frozen := endStep-startStep == StepsInBiggestFile
+	frozen := endStep-startStep == StepsInColdFile
 	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
 

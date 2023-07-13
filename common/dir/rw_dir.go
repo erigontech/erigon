@@ -21,10 +21,12 @@ import (
 	"path/filepath"
 )
 
-func MustExist(path string) {
+func MustExist(path ...string) {
 	const perm = 0764 // user rwx, group rw, other r
-	if err := os.MkdirAll(path, perm); err != nil {
-		panic(err)
+	for _, p := range path {
+		if err := os.MkdirAll(p, perm); err != nil {
+			panic(err)
+		}
 	}
 }
 

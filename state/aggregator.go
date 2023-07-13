@@ -43,7 +43,7 @@ import (
 
 // StepsInBiggestFile - files of this size are completely frozen/immutable.
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
-const StepsInBiggestFile = 32
+const StepsInColdFile = 32
 
 var (
 	mxCurrentTx                = metrics.GetOrCreateCounter("domain_tx_processed")
@@ -425,7 +425,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		logEvery = time.NewTicker(time.Second * 30)
 		wg       sync.WaitGroup
 		errCh    = make(chan error, 8)
-		maxSpan  = StepsInBiggestFile * a.aggregationStep
+		maxSpan  = StepsInColdFile * a.aggregationStep
 		txFrom   = step * a.aggregationStep
 		txTo     = (step + 1) * a.aggregationStep
 		workers  = 1
@@ -576,7 +576,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, maxEndTxNum uint64, work
 	closeAll := true
 	mergeStartedAt := time.Now()
 
-	maxSpan := a.aggregationStep * StepsInBiggestFile
+	maxSpan := a.aggregationStep * StepsInColdFile
 	r := a.findMergeRange(maxEndTxNum, maxSpan)
 	if !r.any() {
 		return false, nil
