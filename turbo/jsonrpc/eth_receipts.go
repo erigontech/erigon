@@ -667,15 +667,14 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 }
 
 // GetBlockReceipts - receipts for individual block
-// func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber) ([]map[string]interface{}, error) {
-func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber) ([]map[string]interface{}, error) {
+func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(numberOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
