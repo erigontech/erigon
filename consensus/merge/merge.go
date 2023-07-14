@@ -284,28 +284,8 @@ func (s *Merge) IsServiceTransaction(sender libcommon.Address, syscall consensus
 
 func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SysCallCustom) {
 	s.eth1Engine.Initialize(config, chain, header, state, txs, uncles, syscall)
-
-	historyStorageAddress := libcommon.Address{0xB}
-	// gBeaconRoot := 4200
-	historicalRootsModulus := uint64(98304)
-	//there goes 4788
-	//header.ParentBeaconBlockRoot
-	cancun := chain.Config().IsCancun(header.Time)
-	if cancun {
-
-		timestampReduced := header.Time % historicalRootsModulus
-		timestampExtended := timestampReduced + historicalRootsModulus
-		timestampIndex := libcommon.BytesToHash((uint256.NewInt(timestampReduced)).Bytes())
-		rootIndex := libcommon.BytesToHash(uint256.NewInt(timestampExtended).Bytes())
-		parentBeaconBlockRootInt := *uint256.NewInt(0).SetBytes(header.ParentBeaconBlockRoot.Bytes())
-
-		state.SetState(historyStorageAddress, &timestampIndex, *uint256.NewInt(header.Time))
-		state.SetState(historyStorageAddress, &rootIndex, parentBeaconBlockRootInt)
-
-		// two ring buffers are used: one to track the latest timestamp at a given index in the ring buffer and another to track the latest root at a given index
-
-		//How the hell do I implement a ring buffer here
-
+	if chain.Config().IsCancun(header.Time) {
+		applyBeaconRootEip4788(chain, header, state)
 	}
 }
 
@@ -329,4 +309,16 @@ func IsTTDReached(chain consensus.ChainHeaderReader, parentHash libcommon.Hash, 
 		return false, consensus.ErrUnknownAncestorTD
 	}
 	return td.Cmp(chain.Config().TerminalTotalDifficulty) >= 0, nil
+}
+
+func applyBeaconRootEip4788(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) {
+	historyStorageAddress := libcommon.BytesToAddress(params.HistoryStorageAddress)
+	historicalRootsModulus := params.HistoricalRootsModulus
+	timestampReduced := header.Time % historicalRootsModulus
+	timestampExtended := timestampReduced + historicalRootsModulus
+	timestampIndex := libcommon.BytesToHash((uint256.NewInt(timestampReduced)).Bytes())
+	rootIndex := libcommon.BytesToHash(uint256.NewInt(timestampExtended).Bytes())
+	parentBeaconBlockRootInt := *uint256.NewInt(0).SetBytes(header.ParentBeaconBlockRoot.Bytes())
+	state.SetState(historyStorageAddress, &timestampIndex, *uint256.NewInt(header.Time))
+	state.SetState(historyStorageAddress, &rootIndex, parentBeaconBlockRootInt)
 }
