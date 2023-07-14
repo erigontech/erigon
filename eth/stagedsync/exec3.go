@@ -719,11 +719,11 @@ Loop:
 		}
 
 		if !parallel {
-			if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
-				return err
-			} else if !ok {
-				break Loop
-			}
+			//if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+			//	return err
+			//} else if !ok {
+			//	break Loop
+			//}
 
 			outputBlockNum.Set(blockNum)
 			select {
@@ -742,12 +742,6 @@ Loop:
 				var t1, t2, t3, t32, t4, t5, t6 time.Duration
 				commitStart := time.Now()
 				if err := func() error {
-					_, err := agg.ComputeCommitment(true, false)
-					if err != nil {
-						return err
-					}
-					t1 = time.Since(commitStart)
-
 					// prune befor flush, to speedup flush
 					tt := time.Now()
 					if applyTx.(*temporal.Tx).AggCtx().CanPrune(applyTx) {
@@ -756,6 +750,13 @@ Loop:
 						}
 					}
 					t2 = time.Since(tt)
+
+					tt = time.Now()
+					_, err := agg.ComputeCommitment(true, false)
+					if err != nil {
+						return err
+					}
+					t1 = time.Since(tt)
 
 					tt = time.Now()
 					doms.ClearRam()
