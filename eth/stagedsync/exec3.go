@@ -742,6 +742,7 @@ Loop:
 				}
 
 				var t1, t2, t3, t32, t4, t5, t6 time.Duration
+				commtitStart := time.Now()
 				if err := func() error {
 					// prune befor flush, to speedup flush
 					tt := time.Now()
@@ -752,12 +753,12 @@ Loop:
 					}
 					t2 = time.Since(tt)
 
-					commitStart := time.Now()
+					tt := time.Now()
 					_, err := agg.ComputeCommitment(true, false)
 					if err != nil {
 						return err
 					}
-					t1 = time.Since(commitStart)
+					t1 = time.Since(tt)
 
 					tt = time.Now()
 					doms.ClearRam()
@@ -804,7 +805,7 @@ Loop:
 				}(); err != nil {
 					return err
 				}
-				logger.Info("Committed", "time", time.Since(commitStart),
+				logger.Info("Committed", "time", time.Since(commtitStart),
 					"commitment", t1, "prune", t2, "flush", t3, "tx.CollectMetrics", t32, "tx.commit", t4, "aggregate", t5, "prune2", t6)
 			default:
 			}
