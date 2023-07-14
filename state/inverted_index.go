@@ -1290,6 +1290,16 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 	if index, err = buildIndexThenOpen(ctx, decomp, idxPath, ii.tmpdir, len(keys), false /* values */, p, ii.logger, ii.noFsync); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
+
+	//f, err := li.buildFiles(ctx, fromStep, toStep, convertStepsToFileNums, ps, makeIter)
+	//if err != nil {
+	//	return err
+	//}
+	//ii.first
+	//if err := ii.warmLocalityIdx.buildFiles(ctx, from, step, false, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to) }); err != nil {
+	//	return err
+	//}
+
 	closeComp = false
 	return InvertedFiles{decomp: decomp, index: index}, nil
 }

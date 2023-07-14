@@ -285,6 +285,7 @@ func (lc *ctxLocalityIdx) indexedFrom() uint64 {
 	if lc == nil || lc.bm == nil {
 		return 0
 	}
+	return 0
 	return lc.file.startTxNum
 }
 

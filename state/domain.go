@@ -1481,11 +1481,11 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 func (dc *DomainContext) getLatestFromFiles2(filekey []byte) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 
-	if v, found, err = dc.getLatestFromWarmFiles(filekey); err != nil {
-		return nil, false, err
-	} else if found {
-		return v, true, nil
-	}
+	//if v, found, err = dc.getLatestFromWarmFiles(filekey); err != nil {
+	//	return nil, false, err
+	//} else if found {
+	//	return v, true, nil
+	//}
 
 	// sometimes there is a gap between indexed cold files and indexed warm files. just grind them.
 	// possible reasons:
