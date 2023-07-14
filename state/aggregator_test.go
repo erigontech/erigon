@@ -556,7 +556,6 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	require.NoError(t, err)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
-		fmt.Printf("i=%d key %x\n", i, k)
 		if !bytes.Equal(keys[i], k) {
 			fmt.Printf("\tinvalid, want %x\n", keys[i])
 		}

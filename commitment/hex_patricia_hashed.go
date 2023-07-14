@@ -24,6 +24,7 @@ import (
 	"hash"
 	"io"
 	"math/bits"
+	"sort"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -1756,8 +1757,19 @@ func commonPrefixLen(b1, b2 []byte) int {
 func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
 	branchNodeUpdates = make(map[string]BranchData)
 
-	for i, plainKey := range plainKeys {
-		hashedKey := hashedKeys[i]
+	for i, pk := range plainKeys {
+		updates[i].hashedKey = hph.hashAndNibblizeKey(pk)
+		updates[i].plainKey = pk
+	}
+
+	sort.Slice(updates, func(i, j int) bool {
+		return bytes.Compare(updates[i].hashedKey, updates[j].hashedKey) < 0
+	})
+
+	for i, update := range updates {
+		//hashedKey := hashedKeys[i]
+		plainKey := updates[i].plainKey
+		hashedKey := updates[i].hashedKey
 		if hph.trace {
 			fmt.Printf("plainKey=[%x] %s, hashedKey=[%x], currentKey=[%x]\n", plainKey, updates[i].String(), hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
@@ -1776,7 +1788,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 			}
 		}
 
-		update := updates[i]
+		//update := updates[i]
 		// Update the cell
 		if update.Flags == DeleteUpdate {
 			hph.deleteCell(hashedKey)
@@ -1889,6 +1901,8 @@ func (uf UpdateFlags) String() string {
 }
 
 type Update struct {
+	hashedKey         []byte
+	plainKey          []byte
 	Flags             UpdateFlags
 	Balance           uint256.Int
 	Nonce             uint64

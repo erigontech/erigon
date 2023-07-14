@@ -77,16 +77,14 @@ func ParseCommitmentMode(s string) CommitmentMode {
 type ValueMerger func(prev, current []byte) (merged []byte, err error)
 
 type UpdateTree struct {
-	tree      *btree.BTreeG[*commitmentItem]
-	plainKeys *btree.BTreeG[string]
-	keccak    hash.Hash
+	tree   *btree.BTreeG[*commitmentItem]
+	keccak hash.Hash
 }
 
 func NewUpdateTree() *UpdateTree {
 	return &UpdateTree{
-		tree:      btree.NewG[*commitmentItem](64, commitmentItemLess),
-		plainKeys: btree.NewG[string](64, stringLess),
-		keccak:    sha3.NewLegacyKeccak256(),
+		tree:   btree.NewG[*commitmentItem](64, commitmentItemLessPlain),
+		keccak: sha3.NewLegacyKeccak256(),
 	}
 }
 
@@ -116,24 +114,21 @@ func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, v
 	item, _ := t.get(key)
 	fn(item, val)
 	t.tree.ReplaceOrInsert(item)
-	t.plainKeys.ReplaceOrInsert(string(key))
+	//t.plainKeys.ReplaceOrInsert(string(key))
 }
 
 func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
 	if len(val) == 0 {
 		c.update.Reset()
 		c.update.Flags = commitment.DeleteUpdate
-		ks := string(c.plainKey)
-		t.plainKeys.AscendGreaterOrEqual(string(c.plainKey), func(key string) bool {
-			if !strings.HasPrefix(key, ks) {
+		ks := common.Copy(c.plainKey)
+		t.tree.AscendGreaterOrEqual(c, func(ci *commitmentItem) bool {
+			if !bytes.HasPrefix(ci.plainKey, ks) {
 				return false
 			}
-			if key == ks {
-				return true
+			if !bytes.Equal(ci.plainKey, ks) {
+				t.tree.Delete(ci)
 			}
-			//t.TouchPlainKey(common.FromHex(key), nil, t.TouchStorage)
-			t.tree.Delete(&commitmentItem{plainKey: []byte(key), hashedKey: t.hashAndNibblizeKey([]byte(key))})
-			t.plainKeys.Delete(key) // we already marked those keys as deleted
 			return true
 		})
 		return
@@ -198,19 +193,14 @@ func (t *UpdateTree) List(clear bool) ([][]byte, [][]byte, []commitment.Update) 
 	hashedKeys := make([][]byte, 0, t.tree.Len())
 	updates := make([]commitment.Update, 0, t.tree.Len())
 
-	//j := 0
 	t.tree.Ascend(func(item *commitmentItem) bool {
 		plainKeys = append(plainKeys, item.plainKey)
+		item.hashedKey = t.hashAndNibblizeKey(item.plainKey)
 		hashedKeys = append(hashedKeys, item.hashedKey)
 		updates = append(updates, item.update)
-		//plainKeys[j] = item.plainKey
-		//hashedKeys[j] = item.hashedKey
-		//updates[j] = item.update
-		//j++
 		return true
 	})
 	if clear {
-		t.plainKeys.Clear(true)
 		t.tree.Clear(true)
 	}
 	return plainKeys, hashedKeys, updates
@@ -330,7 +320,11 @@ type commitmentItem struct {
 	update    commitment.Update
 }
 
-func commitmentItemLess(i, j *commitmentItem) bool {
+func commitmentItemLessPlain(i, j *commitmentItem) bool {
+	return bytes.Compare(i.plainKey, j.plainKey) < 0
+}
+
+func commitmentItemLessHashed(i, j *commitmentItem) bool {
 	return bytes.Compare(i.hashedKey, j.hashedKey) < 0
 }
 
