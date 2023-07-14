@@ -107,12 +107,12 @@ func TestLocality(t *testing.T) {
 		ic := ii.MakeContext()
 		defer ic.Close()
 		k := hexutility.EncodeTs(1)
-		v1, v2, from, ok1, ok2 := ic.coldLocality.lookupIdxFiles(k, 1*ic.ii.aggregationStep*StepsInBiggestFile)
+		v1, v2, from, ok1, ok2 := ic.coldLocality.lookupIdxFiles(k, 1*ic.ii.aggregationStep*StepsInColdFile)
 		require.True(ok1)
 		require.False(ok2)
-		require.Equal(uint64(1*StepsInBiggestFile), v1)
-		require.Equal(uint64(0*StepsInBiggestFile), v2)
-		require.Equal(2*ic.ii.aggregationStep*StepsInBiggestFile, from)
+		require.Equal(uint64(1*StepsInColdFile), v1)
+		require.Equal(uint64(0*StepsInColdFile), v2)
+		require.Equal(2*ic.ii.aggregationStep*StepsInColdFile, from)
 	})
 }
 
@@ -121,7 +121,7 @@ func TestLocalityDomain(t *testing.T) {
 	ctx, require := context.Background(), require.New(t)
 	aggStep := 2
 	frozenFiles := 3
-	txsInFrozenFile := aggStep * StepsInBiggestFile
+	txsInFrozenFile := aggStep * StepsInColdFile
 	keyCount, txCount := uint64(6), uint64(frozenFiles*txsInFrozenFile+aggStep*16)
 	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, uint64(aggStep), logger)
 	collateAndMerge(t, db, nil, dom, txCount)
@@ -241,14 +241,14 @@ func TestLocalityDomain(t *testing.T) {
 		v1, v2, from, ok1, ok2 := dc.hc.ic.coldLocality.lookupIdxFiles(hexutility.EncodeTs(0), 0)
 		require.True(ok1)
 		require.False(ok2)
-		require.Equal(uint64(0*StepsInBiggestFile), v1)
+		require.Equal(uint64(0*StepsInColdFile), v1)
 		require.Equal(txsInFrozenFile*frozenFiles, int(from))
 
 		v1, v2, from, ok1, ok2 = dc.hc.ic.coldLocality.lookupIdxFiles(hexutility.EncodeTs(1), 0)
 		require.True(ok1)
 		require.True(ok2)
-		require.Equal(uint64(1*StepsInBiggestFile), v1)
-		require.Equal(uint64(2*StepsInBiggestFile), v2)
+		require.Equal(uint64(1*StepsInColdFile), v1)
+		require.Equal(uint64(2*StepsInColdFile), v2)
 		require.Equal(txsInFrozenFile*frozenFiles, int(from))
 	})
 	t.Run("domain.getLatestFromFiles", func(t *testing.T) {

@@ -392,7 +392,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 	var r HistoryRanges
 	maxEndTxNum := h.endTxNumMinimax()
 
-	maxSpan := h.aggregationStep * StepsInBiggestFile
+	maxSpan := h.aggregationStep * StepsInColdFile
 
 	for {
 		if stop := func() bool {

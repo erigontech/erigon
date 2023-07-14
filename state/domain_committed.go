@@ -93,13 +93,14 @@ func NewUpdateTree() *UpdateTree {
 func stringLess(a, b string) bool { return a < b }
 
 func (t *UpdateTree) get(key []byte) (*commitmentItem, bool) {
-	c := &commitmentItem{plainKey: common.Copy(key),
+	c := &commitmentItem{plainKey: key,
 		hashedKey: t.hashAndNibblizeKey(key),
 		update:    commitment.Update{}}
 	copy(c.update.CodeHashOrStorage[:], commitment.EmptyCodeHash)
 	if t.tree.Has(c) {
 		return t.tree.Get(c)
 	}
+	c.plainKey = common.Copy(c.plainKey)
 	return c, false
 }
 

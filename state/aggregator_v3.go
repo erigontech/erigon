@@ -632,7 +632,7 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 	defer ac.Close()
 
 	closeAll := true
-	maxSpan := a.aggregationStep * StepsInBiggestFile
+	maxSpan := a.aggregationStep * StepsInColdFile
 	r := ac.findMergeRange(a.minimaxTxNumInFiles.Load(), maxSpan)
 	if !r.any() {
 		return false, nil
@@ -898,7 +898,7 @@ func (a *AggregatorV3) Prune(ctx context.Context, stepsLimit float64) error {
 		return nil
 	}
 
-	//if limit/a.aggregationStep > StepsInBiggestFile {
+	//if limit/a.aggregationStep > StepsInColdFile {
 	//	ctx, cancel := context.WithCancel(ctx)
 	//	defer cancel()
 	//
