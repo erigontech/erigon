@@ -196,14 +196,14 @@ func ExecV3(ctx context.Context,
 		stageProgress = execStage.BlockNumber
 		block = execStage.BlockNumber + 1
 	} else if !useExternalTx {
-		found, _downloadedBlockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, agg.EndTxNumMinimax())
-		if err != nil {
-			return err
-		}
-		if found {
-			stageProgress = _downloadedBlockNum - 1
-			block = _downloadedBlockNum - 1
-		}
+		//found, _downloadedBlockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, agg.EndTxNumMinimax())
+		//if err != nil {
+		//	return err
+		//}
+		//if found {
+		//	stageProgress = _downloadedBlockNum - 1
+		//	block = _downloadedBlockNum - 1
+		//}
 	}
 	if applyTx != nil {
 		agg.SetTx(applyTx)
