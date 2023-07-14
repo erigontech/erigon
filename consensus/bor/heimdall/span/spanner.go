@@ -13,8 +13,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-var devnetSigner = libcommon.HexToAddress("0x67b1d87101671b127f5f8714789c7192f7ad340e")
-
 type ChainSpanner struct {
 	validatorSet    abi.ABI
 	chainConfig     *chain.Config
@@ -76,7 +74,7 @@ func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon
 		validators := []*valset.Validator{
 			{
 				ID:               1,
-				Address:          devnetSigner,
+				Address:          signer,
 				VotingPower:      1000,
 				ProposerPriority: 1,
 			},
@@ -99,7 +97,7 @@ func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.
 		validators := []*valset.Validator{
 			{
 				ID:               1,
-				Address:          devnetSigner,
+				Address:          signer,
 				VotingPower:      1000,
 				ProposerPriority: 1,
 			},

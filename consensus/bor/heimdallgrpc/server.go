@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/log/v3"
 	proto "github.com/maticnetwork/polyproto/heimdall"
@@ -22,17 +23,80 @@ type HeimdallGRPCServer struct {
 }
 
 func (h *HeimdallGRPCServer) Span(ctx context.Context, in *proto.SpanRequest) (*proto.SpanResponse, error) {
-	_ /*result*/, err := h.heimdall.Span(ctx, in.ID)
+	result, err := h.heimdall.Span(ctx, in.ID)
 
 	if err != nil {
 		h.logger.Error("Error while fetching span")
 		return nil, err
 	}
 
-	resp := &proto.SpanResponse{}
-	//TODO
-	//resp.Result = parseSpan(result.Result)
-	//resp.Height = fmt.Sprint(result.Height)
+	validators := make([]*proto.Validator, len(result.ValidatorSet.Validators))
+
+	for i, validator := range result.ValidatorSet.Validators {
+		h160 := gointerfaces.ConvertAddressToH160(validator.Address)
+		validators[i] = &proto.Validator{
+			ID: validator.ID,
+			Address: &proto.H160{
+				Hi: &proto.H128{
+					Hi: h160.Hi.Hi,
+					Lo: h160.Hi.Lo,
+				},
+				Lo: h160.Lo,
+			},
+			VotingPower:      validator.VotingPower,
+			ProposerPriority: validator.ProposerPriority,
+		}
+	}
+
+	var proposer *proto.Validator
+
+	if vsp := result.ValidatorSet.Proposer; vsp != nil {
+		proposerH160 := gointerfaces.ConvertAddressToH160(vsp.Address)
+		proposer = &proto.Validator{
+			ID: vsp.ID,
+			Address: &proto.H160{
+				Hi: &proto.H128{
+					Hi: proposerH160.Hi.Hi,
+					Lo: proposerH160.Hi.Lo,
+				},
+				Lo: proposerH160.Lo,
+			},
+			VotingPower:      vsp.VotingPower,
+			ProposerPriority: vsp.ProposerPriority,
+		}
+	}
+
+	producers := make([]*proto.Validator, len(result.SelectedProducers))
+
+	for i, producer := range result.SelectedProducers {
+		h160 := gointerfaces.ConvertAddressToH160(producer.Address)
+		producers[i] = &proto.Validator{
+			ID: producer.ID,
+			Address: &proto.H160{
+				Hi: &proto.H128{
+					Hi: h160.Hi.Hi,
+					Lo: h160.Hi.Lo,
+				},
+				Lo: h160.Lo,
+			},
+			VotingPower:      producer.VotingPower,
+			ProposerPriority: producer.ProposerPriority,
+		}
+	}
+
+	resp := &proto.SpanResponse{
+		Result: &proto.Span{
+			ID:         result.ID,
+			StartBlock: result.StartBlock,
+			EndBlock:   result.EndBlock,
+			ValidatorSet: &proto.ValidatorSet{
+				Validators: validators,
+				Proposer:   proposer,
+			},
+			SelectedProducers: producers,
+			ChainID:           result.ChainID,
+		},
+	}
 
 	return resp, nil
 }
@@ -134,7 +198,7 @@ func withLoggingUnaryInterceptor(logger log.Logger) grpc.ServerOption {
 			err = status.Errorf(codes.Internal, err.Error())
 		}
 
-		logger.Info("Request", "method", info.FullMethod, "duration", time.Since(start), "error", err)
+		logger.Debug("Request", "method", info.FullMethod, "duration", time.Since(start), "error", err)
 
 		return h, err
 	})

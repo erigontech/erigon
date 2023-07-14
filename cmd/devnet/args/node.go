@@ -41,6 +41,7 @@ type Node struct {
 	MetricsAddr               string `arg:"--metrics.addr" json:"metrics.addr,omitempty"`
 	StaticPeers               string `arg:"--staticpeers" json:"staticpeers,omitempty"`
 	WithoutHeimdall           bool   `arg:"--bor.withoutheimdall" flag:"" default:"false" json:"bor.withoutheimdall,omitempty"`
+	HeimdallGRpc              string `arg:"--bor.heimdallgRPC" json:"bor.heimdallgRPC,omitempty"`
 }
 
 func (node *Node) configure(base Node, nodeNumber int) error {
@@ -121,10 +122,6 @@ func (m BlockProducer) Configure(baseNode Node, nodeNumber int) (int, interface{
 
 func (n BlockProducer) Name() string {
 	return n.Node.Name
-}
-
-func (n BlockProducer) IsMiner() bool {
-	return true
 }
 
 func (n BlockProducer) Account() *accounts.Account {

@@ -25,9 +25,16 @@ func init() {
 func GetBalance(ctx context.Context, addr string, blockNum requests.BlockNumber) (uint64, error) {
 	logger := devnet.Logger(ctx)
 
-	logger.Info("Getting balance", "addeess", addr)
+	node := devnet.CurrentNode(ctx)
+
+	if node == nil {
+		node = devnet.SelectBlockProducer(ctx)
+	}
+
+	logger.Info("Getting balance", "addess", addr)
 	address := libcommon.HexToAddress(addr)
-	bal, err := devnet.SelectNode(ctx).GetBalance(address, blockNum)
+
+	bal, err := node.GetBalance(address, blockNum)
 
 	if err != nil {
 		logger.Error("FAILURE", "error", err)
@@ -40,7 +47,13 @@ func GetBalance(ctx context.Context, addr string, blockNum requests.BlockNumber)
 }
 
 func GetNonce(ctx context.Context, address libcommon.Address) (uint64, error) {
-	res, err := devnet.CurrentNode(ctx).GetTransactionCount(address, requests.BlockNumbers.Latest)
+	node := devnet.CurrentNode(ctx)
+
+	if node == nil {
+		node = devnet.SelectBlockProducer(ctx)
+	}
+
+	res, err := node.GetTransactionCount(address, requests.BlockNumbers.Latest)
 
 	if err != nil {
 		return 0, fmt.Errorf("failed to get transaction count for address 0x%x: %v", address, err)

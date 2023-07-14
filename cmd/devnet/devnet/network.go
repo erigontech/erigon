@@ -78,7 +78,7 @@ func (nw *Network) Start(ctx *cli.Context) error {
 			nodePort, args, err := configurable.Configure(base, i)
 
 			if err == nil {
-				node, err = nw.startNode(fmt.Sprintf("http://%s:%d", nw.BaseRPCHost, nodePort), args, i)
+				node, err = nw.createNode(fmt.Sprintf("http://%s:%d", nw.BaseRPCHost, nodePort), args)
 			}
 
 			if err != nil {
@@ -90,56 +90,72 @@ func (nw *Network) Start(ctx *cli.Context) error {
 			nw.namedNodes[node.Name()] = node
 
 			for _, service := range nw.Services {
-				service.NodeStarted(node)
+				service.NodeCreated(node)
 			}
-
-			// get the enode of the node
-			// - note this has the side effect of waiting for the node to start
-			enode, err := getEnode(node)
-
-			if err != nil {
-				if errors.Is(err, devnetutils.ErrInvalidEnodeString) {
-					continue
-				}
-
-				nw.Stop()
-				return err
-			}
-
-			nw.peers = append(nw.peers, enode)
-			baseNode.StaticPeers = strings.Join(nw.peers, ",")
-
-			// TODO do we need to call AddPeer to the nodes to make them aware of this one
-			// the current model only works for an appending node network where the peers gossip
-			// connections - not sure if this is the case ?
 		}
+	}
+
+	for _, node := range nw.Nodes {
+		err := nw.startNode(node)
+
+		if err != nil {
+			nw.Stop()
+			return err
+		}
+
+		for _, service := range nw.Services {
+			service.NodeStarted(node)
+		}
+
+		// get the enode of the node
+		// - note this has the side effect of waiting for the node to start
+		enode, err := getEnode(node)
+
+		if err != nil {
+			if errors.Is(err, devnetutils.ErrInvalidEnodeString) {
+				continue
+			}
+
+			nw.Stop()
+			return err
+		}
+
+		nw.peers = append(nw.peers, enode)
+		baseNode.StaticPeers = strings.Join(nw.peers, ",")
+
+		// TODO do we need to call AddPeer to the nodes to make them aware of this one
+		// the current model only works for an appending node network where the peers gossip
+		// connections - not sure if this is the case ?
 	}
 
 	return nil
 }
 
-// startNode starts an erigon node on the dev chain
-func (nw *Network) startNode(nodeAddr string, cfg interface{}, nodeNumber int) (Node, error) {
-
-	args, err := devnetutils.AsArgs(cfg)
-
-	if err != nil {
-		return nil, err
-	}
-
-	nw.wg.Add(1)
-
-	node := node{
+func (nw *Network) createNode(nodeAddr string, cfg interface{}) (Node, error) {
+	return &node{
 		sync.Mutex{},
 		requests.NewRequestGenerator(nodeAddr, nw.Logger),
 		cfg,
 		&nw.wg,
 		make(chan error),
 		nil,
+	}, nil
+}
+
+// startNode starts an erigon node on the dev chain
+func (nw *Network) startNode(n Node) error {
+	nw.wg.Add(1)
+
+	node := n.(*node)
+
+	args, err := devnetutils.AsArgs(node.args)
+
+	if err != nil {
+		return err
 	}
 
 	go func() {
-		nw.Logger.Info("Running node", "number", nodeNumber, "args", args)
+		nw.Logger.Info("Running node", "name", node.Name(), "args", args)
 
 		// catch any errors and avoid panics if an error occurs
 		defer func() {
@@ -148,23 +164,23 @@ func (nw *Network) startNode(nodeAddr string, cfg interface{}, nodeNumber int) (
 				return
 			}
 
-			nw.Logger.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
+			nw.Logger.Error("catch panic", "node", node.Name(), "err", panicResult, "stack", dbg.Stack())
 			nw.Stop()
 			os.Exit(1)
 		}()
 
-		app := erigonapp.MakeApp(fmt.Sprintf("node-%d", nodeNumber), node.run, erigoncli.DefaultFlags)
+		app := erigonapp.MakeApp(node.Name(), node.run, erigoncli.DefaultFlags)
 
 		if err := app.Run(args); err != nil {
-			nw.Logger.Warn("App run returned error", "node", fmt.Sprintf("node-%d", nodeNumber), "err", err)
+			nw.Logger.Warn("App run returned error", "node", node.Name(), "err", err)
 		}
 	}()
 
 	if err = <-node.startErr; err != nil {
-		return nil, err
+		return err
 	}
 
-	return &node, nil
+	return nil
 }
 
 // getEnode returns the enode of the netowrk node

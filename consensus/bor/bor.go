@@ -677,11 +677,17 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			}
 		}
 
+		if number == 0 {
+			break
+		}
+
 		headers = append(headers, header)
 		number, hash = number-1, header.ParentHash
+
 		if number <= chain.FrozenBlocks() {
 			break
 		}
+
 		select {
 		case <-logEvery.C:
 			log.Info("Gathering headers for validator proposer prorities (backwards)", "blockNum", number)
@@ -887,8 +893,8 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 
 	var succession int
 	// if signer is not empty
-	if !bytes.Equal(c.authorizedSigner.Load().signer.Bytes(), libcommon.Address{}.Bytes()) {
-		succession, err = snap.GetSignerSuccessionNumber(c.authorizedSigner.Load().signer)
+	if signer := c.authorizedSigner.Load().signer; !bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
+		succession, err = snap.GetSignerSuccessionNumber(signer)
 		if err != nil {
 			return err
 		}

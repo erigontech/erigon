@@ -80,7 +80,7 @@ func (n *node) IsBlockProducer() bool {
 }
 
 func (n *node) Account() *accounts.Account {
-	if miner, ok := n.args.(args.Miner); ok {
+	if miner, ok := n.args.(args.BlockProducer); ok {
 		return miner.Account()
 	}
 

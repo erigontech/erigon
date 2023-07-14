@@ -131,6 +131,9 @@ func main() {
 		&DiagnosticsURLFlag,
 		&insecureFlag,
 		&metricsURLsFlag,
+		&logging.LogVerbosityFlag,
+		&logging.LogConsoleVerbosityFlag,
+		&logging.LogDirVerbosityFlag,
 	}
 
 	app.After = func(ctx *cli.Context) error {
@@ -258,13 +261,6 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 				BaseRPCPort:        8545,
 				//Snapshots:          true,
 				Nodes: []devnet.Node{
-					args.NonBlockProducer{
-						Node: args.Node{
-							ConsoleVerbosity: "0",
-							DirVerbosity:     "5",
-							WithoutHeimdall:  true,
-						},
-					},
 					args.BlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
@@ -273,10 +269,18 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 						},
 						AccountSlots: 200,
 					},
+					args.NonBlockProducer{
+						Node: args.Node{
+							ConsoleVerbosity: "0",
+							DirVerbosity:     "5",
+							WithoutHeimdall:  true,
+						},
+					},
 				},
 			}, nil
 		} else {
 			var services []devnet.Service
+			var heimdallGrpc string
 
 			if ctx.Bool(LocalHeimdallFlag.Name) {
 				config := *params.BorDevnetChainConfig
@@ -286,6 +290,8 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 				}
 
 				services = append(services, bor.NewHeimdall(&config, logger))
+
+				heimdallGrpc = bor.HeimdallGRpc(devnet.WithCliContext(context.Background(), ctx))
 			}
 
 			return &devnet.Network{
@@ -297,25 +303,28 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 				BaseRPCPort:        8545,
 				Services:           services,
 				Nodes: []devnet.Node{
+					args.BlockProducer{
+						Node: args.Node{
+							ConsoleVerbosity: "0",
+							DirVerbosity:     "5",
+							HeimdallGRpc:     heimdallGrpc,
+						},
+						AccountSlots: 200,
+					},
+					args.BlockProducer{
+						Node: args.Node{
+							ConsoleVerbosity: "0",
+							DirVerbosity:     "5",
+							HeimdallGRpc:     heimdallGrpc,
+						},
+						AccountSlots: 200,
+					},
 					args.NonBlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
+							HeimdallGRpc:     heimdallGrpc,
 						},
-					},
-					args.BlockProducer{
-						Node: args.Node{
-							ConsoleVerbosity: "0",
-							DirVerbosity:     "5",
-						},
-						AccountSlots: 200,
-					},
-					args.BlockProducer{
-						Node: args.Node{
-							ConsoleVerbosity: "0",
-							DirVerbosity:     "5",
-						},
-						AccountSlots: 200,
 					},
 				},
 			}, nil
@@ -330,18 +339,18 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 			BaseRPCHost:        "localhost",
 			BaseRPCPort:        8545,
 			Nodes: []devnet.Node{
-				args.NonBlockProducer{
-					Node: args.Node{
-						ConsoleVerbosity: "0",
-						DirVerbosity:     "5",
-					},
-				},
 				args.BlockProducer{
 					Node: args.Node{
 						ConsoleVerbosity: "0",
 						DirVerbosity:     "5",
 					},
 					AccountSlots: 200,
+				},
+				args.NonBlockProducer{
+					Node: args.Node{
+						ConsoleVerbosity: "0",
+						DirVerbosity:     "5",
+					},
 				},
 			},
 		}, nil

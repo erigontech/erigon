@@ -101,7 +101,7 @@ func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config
 		if chainConfig.Bor != nil && chainConfig.Bor.ValidatorContract != "" {
 			genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, chainConfig.Bor.ValidatorContract, chainConfig.Bor.StateReceiverContract, logger)
 
-			spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig, false, logger)
+			spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig, withoutHeimdall, logger)
 
 			var err error
 			var db kv.RwDB
@@ -117,7 +117,7 @@ func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config
 				return bor.New(chainConfig, db, spanner, nil, genesisContractsClient, logger)
 			} else {
 				if heimdallGrpcAddress != "" {
-					heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(heimdallGrpcAddress)
+					heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(heimdallGrpcAddress, logger)
 				} else {
 					heimdallClient = heimdall.NewHeimdallClient(heimdallUrl, logger)
 				}

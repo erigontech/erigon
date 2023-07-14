@@ -38,7 +38,7 @@ func NewSubscription(name requests.SubMethod) *Subscription {
 func InitSubscriptions(ctx context.Context, methods []requests.SubMethod) {
 	logger := devnet.Logger(ctx)
 
-	logger.Info("CONNECTING TO WEBSOCKETS AND SUBSCRIBING TO METHODS...")
+	logger.Trace("CONNECTING TO WEBSOCKETS AND SUBSCRIBING TO METHODS...")
 	if err := subscribeAll(methods, logger); err != nil {
 		logger.Error("failed to subscribe to all methods", "error", err)
 		return

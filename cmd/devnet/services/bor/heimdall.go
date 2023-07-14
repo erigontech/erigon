@@ -94,11 +94,14 @@ func (h *Heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
 func (h *Heimdall) Close() {
 }
 
-func (h *Heimdall) NodeStarted(node devnet.Node) {
-	if node.IsMiner() && node.Account() != nil {
+func (h *Heimdall) NodeCreated(node devnet.Node) {
+	if node.IsBlockProducer() && node.Account() != nil {
 		// TODO configurable voting power
 		h.addValidator(node.Account().Address, 1000, 0)
 	}
+}
+
+func (h *Heimdall) NodeStarted(node devnet.Node) {
 }
 
 func (h *Heimdall) addValidator(validatorAddress libcommon.Address, votingPower int64, proposerPriority int64) {
@@ -129,6 +132,11 @@ func (h *Heimdall) Start(ctx context.Context) error {
 		return nil
 	}
 
+	ctx, h.cancelFunc = context.WithCancel(ctx)
+	return heimdallgrpc.StartHeimdallServer(ctx, h, HeimdallGRpc(ctx), h.logger)
+}
+
+func HeimdallGRpc(ctx context.Context) string {
 	addr := "localhost:8540"
 
 	if cli := devnet.CliContext(ctx); cli != nil {
@@ -137,8 +145,7 @@ func (h *Heimdall) Start(ctx context.Context) error {
 		}
 	}
 
-	ctx, h.cancelFunc = context.WithCancel(ctx)
-	return heimdallgrpc.StartHeimdallServer(ctx, h, addr, h.logger)
+	return addr
 }
 
 func (h *Heimdall) Stop() {
