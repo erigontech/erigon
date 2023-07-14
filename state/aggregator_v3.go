@@ -1404,14 +1404,12 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		for ; step < lastIdInDB(a.db, a.accounts); step++ { //`step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, context.Canceled) {
-					fmt.Printf("canceled\n")
 					close(fin)
 					return
 				}
 				log.Warn("[snapshots] buildFilesInBackground", "err", err)
 				break
 			}
-			fmt.Printf("build: %d, %d\n", step, lastIdInDB(a.db, a.accounts))
 		}
 		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 
