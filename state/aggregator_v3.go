@@ -319,7 +319,7 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 			if errors.Is(err, context.Canceled) {
 				return
 			}
-			log.Warn("[snapshots] merge", "err", err)
+			log.Warn("[snapshots] BuildOptionalMissedIndicesInBackground", "err", err)
 		}
 	}()
 }
@@ -490,26 +490,24 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	defer a.recalcMaxTxNum()
 	var static AggV3StaticFiles
 
-	roTx, err := a.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer roTx.Rollback()
 	log.Warn("[dbg] collate", "step", step)
-
 	g, ctx := errgroup.WithContext(ctx)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
 		d := d
-		var collation Collation
-		var err error
-		collation, err = d.collate(ctx, step, txFrom, txTo, roTx)
-		if err != nil {
-			collation.Close() // TODO: it must be handled inside collateStream func - by defer
-			return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
-		}
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
+			var collation Collation
+			var err error
+			err = a.db.View(ctx, func(tx kv.Tx) error {
+				collation, err = d.collate(ctx, step, txFrom, txTo, tx)
+				return err
+			})
+			if err != nil {
+				collation.Close() // TODO: it must be handled inside collateStream func - by defer
+				return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
+			}
+
 			mxCollationSize.Set(uint64(collation.valuesComp.Count()))
 			mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 
@@ -542,15 +540,18 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	// indices are built concurrently
 	for _, d := range []*InvertedIndex{a.logTopics, a.logAddrs, a.tracesFrom, a.tracesTo} {
 		d := d
-		var collation map[string]*roaring64.Bitmap
-		var err error
-		collation, err = d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, roTx)
-		if err != nil {
-			return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
-		}
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
+
+			var collation map[string]*roaring64.Bitmap
+			var err error
+			if err = a.db.View(ctx, func(tx kv.Tx) error {
+				collation, err = d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, tx)
+				return err
+			}); err != nil {
+				return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
+			}
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
 				sf.CleanupOnError()
@@ -578,12 +579,18 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 		log.Warn("domain collate-buildFiles failed", "err", err)
 		return fmt.Errorf("domain collate-build failed: %w", err)
 	}
-	log.Info("[stat] aggregation is finished",
-		"step", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(a.aggregationStep), float64(txTo)/float64(a.aggregationStep)),
-		"took", time.Since(stepStartedAt))
-
 	mxStepTook.UpdateDuration(stepStartedAt)
 	a.integrateFiles(static, txFrom, txTo)
+
+	startLocalityIdx := time.Now()
+	if err := a.BuildMissedIndices(ctx, 12); err != nil {
+		return err
+	}
+	log.Info("[stat] aggregation is finished",
+		"step", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(a.aggregationStep), float64(txTo)/float64(a.aggregationStep)),
+		"took", time.Since(stepStartedAt),
+		"li_took", time.Since(startLocalityIdx))
+
 	return nil
 }
 
@@ -1410,6 +1417,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 				break
 			}
 		}
+		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 
 		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
 			close(fin)

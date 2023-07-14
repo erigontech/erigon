@@ -987,9 +987,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			return StaticFiles{}, fmt.Errorf("build %s values bt idx: %w", d.filenameBase, err)
 		}
 	}
-	if d.filenameBase == "accounts" {
-		log.Warn("[dbg] buildFiles index", "step", step)
-	}
 
 	closeComp = false
 	return StaticFiles{
@@ -1609,7 +1606,6 @@ func (dc *DomainContext) Close() {
 	//	r.Close()
 	//}
 	dc.hc.Close()
-	//dc.loc.Close()
 }
 
 func (dc *DomainContext) statelessGetter(i int) *compress.Getter {
