@@ -55,6 +55,7 @@ func (w *PlainStateWriter) UpdateAccountData(address libcommon.Address, original
 	if w.accumulator != nil {
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
+
 	return w.db.Put(kv.PlainState, address[:], value)
 }
 

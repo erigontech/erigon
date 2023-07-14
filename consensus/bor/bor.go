@@ -260,6 +260,95 @@ type signer struct {
 	signFn SignerFn          // Signer function to authorize hashes with
 }
 
+type sprint struct {
+	from, size uint64
+}
+
+type sprints []sprint
+
+func (s sprints) Len() int {
+	return len(s)
+}
+
+func (s sprints) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+func (s sprints) Less(i, j int) bool {
+	return s[i].from < s[j].from
+}
+
+func asSprints(configSprints map[string]uint64) sprints {
+	sprints := make(sprints, len(configSprints))
+
+	i := 0
+	for key, value := range configSprints {
+		sprints[i].from, _ = strconv.ParseUint(key, 10, 64)
+		sprints[i].size = value
+		i++
+	}
+
+	sort.Sort(sprints)
+
+	return sprints
+}
+
+func CalculateSprintCount(config *chain.BorConfig, from, to uint64) int {
+
+	switch {
+	case from > to:
+		return 0
+	case from < to:
+		to--
+	}
+
+	sprints := asSprints(config.Sprint)
+
+	count := uint64(0)
+	startCalc := from
+
+	zeroth := func(boundary uint64, size uint64) uint64 {
+		if boundary%size == 0 {
+			return 1
+		}
+
+		return 0
+	}
+
+	for i := 0; i < len(sprints)-1; i++ {
+		if startCalc >= sprints[i].from && startCalc < sprints[i+1].from {
+			if to >= sprints[i].from && to < sprints[i+1].from {
+				if startCalc == to {
+					return int(count + zeroth(startCalc, sprints[i].size))
+				}
+				return int(count + zeroth(startCalc, sprints[i].size) + (to-startCalc)/sprints[i].size)
+			} else {
+				endCalc := sprints[i+1].from - 1
+				count += zeroth(startCalc, sprints[i].size) + (endCalc-startCalc)/sprints[i].size
+				startCalc = endCalc + 1
+			}
+		}
+	}
+
+	if startCalc == to {
+		return int(count + zeroth(startCalc, sprints[len(sprints)-1].size))
+	}
+
+	return int(count + zeroth(startCalc, sprints[len(sprints)-1].size) + (to-startCalc)/sprints[len(sprints)-1].size)
+}
+
+func CalculateSprint(config *chain.BorConfig, number uint64) uint64 {
+	sprints := asSprints(config.Sprint)
+
+	for i := 0; i < len(sprints)-1; i++ {
+		if number >= sprints[i].from && number < sprints[i+1].from {
+			return sprints[i].size
+		}
+	}
+
+	return sprints[len(sprints)-1].size
+}
+
 // New creates a Matic Bor consensus engine.
 func New(
 	chainConfig *chain.Config,
@@ -824,7 +913,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, logger log.Logger,
 ) (types.Transactions, types.Receipts, error) {
 	var err error
 
@@ -899,7 +988,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 // nor block rewards given, and returns the final block.
 func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// stateSyncData := []*types.StateSyncData{}
 

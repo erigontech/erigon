@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -259,17 +260,17 @@ type HeaderDownload struct {
 	requestId            int
 	posAnchor            *Anchor
 	posStatus            SyncStatus
-	posSync              bool                              // Whether the chain is syncing in the PoS mode
-	headersCollector     *etl.Collector                    // ETL collector for headers
-	BeaconRequestList    *engine_helpers.RequestList       // Requests from ethbackend to staged sync
-	PayloadStatusCh      chan engine_helpers.PayloadStatus // Responses (validation/execution status)
-	ShutdownCh           chan struct{}                     // Channel to signal shutdown
-	pendingPayloadHash   common.Hash                       // Header whose status we still should send to PayloadStatusCh
-	pendingPayloadStatus *engine_helpers.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
-	unsettledForkChoice  *engine_helpers.ForkChoiceMessage // Forkchoice to process after unwind
-	unsettledHeadHeight  uint64                            // Height of unsettledForkChoice.headBlockHash
-	posDownloaderTip     common.Hash                       // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
-	badPoSHeaders        map[common.Hash]common.Hash       // Invalid Tip -> Last Valid Ancestor
+	posSync              bool                            // Whether the chain is syncing in the PoS mode
+	headersCollector     *etl.Collector                  // ETL collector for headers
+	BeaconRequestList    *engine_helpers.RequestList     // Requests from ethbackend to staged sync
+	PayloadStatusCh      chan engine_types.PayloadStatus // Responses (validation/execution status)
+	ShutdownCh           chan struct{}                   // Channel to signal shutdown
+	pendingPayloadHash   common.Hash                     // Header whose status we still should send to PayloadStatusCh
+	pendingPayloadStatus *engine_types.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
+	unsettledForkChoice  *engine_types.ForkChoiceState   // Forkchoice to process after unwind
+	unsettledHeadHeight  uint64                          // Height of unsettledForkChoice.headBlockHash
+	posDownloaderTip     common.Hash                     // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
+	badPoSHeaders        map[common.Hash]common.Hash     // Invalid Tip -> Last Valid Ancestor
 	logger               log.Logger
 }
 
@@ -301,7 +302,7 @@ func NewHeaderDownload(
 		DeliveryNotify:     make(chan struct{}, 1),
 		QuitPoWMining:      make(chan struct{}),
 		BeaconRequestList:  engine_helpers.NewRequestList(),
-		PayloadStatusCh:    make(chan engine_helpers.PayloadStatus, 1),
+		PayloadStatusCh:    make(chan engine_types.PayloadStatus, 1),
 		ShutdownCh:         make(chan struct{}),
 		headerReader:       headerReader,
 		badPoSHeaders:      make(map[common.Hash]common.Hash),

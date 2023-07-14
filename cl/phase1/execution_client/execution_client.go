@@ -23,6 +23,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
 
+const fcuTimeout = 12 * time.Second
+
 // ExecutionClient interfaces with the Erigon-EL component consensus side.
 type ExecutionClient struct {
 	client execution.ExecutionClient
@@ -183,7 +185,10 @@ func (ec *ExecutionClient) InsertExecutionPayloads(payloads []*cltypes.Eth1Block
 }
 
 func (ec *ExecutionClient) ForkChoiceUpdate(headHash libcommon.Hash) (*execution.ForkChoiceReceipt, error) {
-	return ec.client.UpdateForkChoice(ec.ctx, gointerfaces.ConvertHashToH256(headHash))
+	return ec.client.UpdateForkChoice(ec.ctx, &execution.ForkChoice{
+		HeadBlockHash: gointerfaces.ConvertHashToH256(headHash),
+		Timeout:       uint64(fcuTimeout.Milliseconds()),
+	})
 }
 
 func (ec *ExecutionClient) IsCanonical(hash libcommon.Hash) (bool, error) {
