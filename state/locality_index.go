@@ -321,7 +321,6 @@ func (li *LocalityIndex) missedIdxFiles(ii *HistoryContext) (toStep uint64, idxE
 	return toStep, dir.FileExist(filepath.Join(li.dir, fName))
 }
 func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, ps *background.ProgressSet, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
-	defer func(t time.Time) { fmt.Printf("locality_index.go:324: %s\n", time.Since(t)) }(time.Now())
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -335,15 +334,21 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	count := 0
 	it := makeIter()
 	defer it.Close()
-	if it.FilesAmount() == 1 {
-		fmt.Printf("locality on file 1\n")
-		panic(1)
+	if it.FilesAmount() == 1 { // optimization: no reason to create LocalityIndex for 1 file
+		return nil, nil
 	}
+
+	defer func(t time.Time) {
+		li.logger.Info(fmt.Sprintf("locality_index with count, took: %s: %s", time.Since(t), fName))
+	}(time.Now())
 	for it.HasNext() {
 		_, _ = it.Next()
 		count++
 	}
 	it.Close()
+	defer func(t time.Time) {
+		li.logger.Info(fmt.Sprintf("locality_index, took: %s: %s", time.Since(t), fName))
+	}(time.Now())
 
 	p.Total.Store(uint64(count))
 
@@ -443,6 +448,7 @@ func (li *LocalityIndex) integrateFiles(sf *LocalityIndexFiles) {
 	if sf == nil || li == nil {
 		return
 	}
+	fmt.Printf("integrate: %s\n", sf.bm.FileName())
 	if li.file != nil {
 		li.file.canDelete.Store(true)
 	}
