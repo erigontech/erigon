@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"os"
 	"runtime"
 	"time"
 
@@ -241,22 +240,22 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	cfg.agg.SetCompressWorkers(estimate.CompressSnapshot.WorkersQuarter())
 
-	if initialCycle {
-		reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)
-		if err != nil {
-			return err
-		}
-
-		if found && reconstituteToBlock > s.BlockNumber+1 {
-			reconWorkers := cfg.syncCfg.ReconWorkerCount
-			if err := ReconstituteState(ctx, s, cfg.dirs, reconWorkers, cfg.batchSize, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
-				return err
-			}
-			if dbg.StopAfterReconst() {
-				os.Exit(1)
-			}
-		}
-	}
+	//if initialCycle {
+	//	reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)
+	//	if err != nil {
+	//		return err
+	//	}
+	//
+	//	if found && reconstituteToBlock > s.BlockNumber+1 {
+	//		reconWorkers := cfg.syncCfg.ReconWorkerCount
+	//		if err := ReconstituteState(ctx, s, cfg.dirs, reconWorkers, cfg.batchSize, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
+	//			return err
+	//		}
+	//		if dbg.StopAfterReconst() {
+	//			os.Exit(1)
+	//		}
+	//	}
+	//}
 
 	prevStageProgress, err := senderStageProgress(tx, cfg.db)
 	if err != nil {
