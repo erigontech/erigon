@@ -1327,7 +1327,7 @@ func (d *Domain) deleteGarbageFiles() {
 	for _, item := range d.garbageFiles {
 		// paranoic-mode: don't delete frozen files
 		steps := item.endTxNum/d.aggregationStep - item.startTxNum/d.aggregationStep
-		if steps%StepsInBiggestFile == 0 {
+		if steps%StepsInColdFile == 0 {
 			continue
 		}
 		f1 := fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep)
@@ -1343,7 +1343,7 @@ func (d *Domain) deleteGarbageFiles() {
 func (h *History) deleteGarbageFiles() {
 	for _, item := range h.garbageFiles {
 		// paranoic-mode: don't delete frozen files
-		if item.endTxNum/h.aggregationStep-item.startTxNum/h.aggregationStep == StepsInBiggestFile {
+		if item.endTxNum/h.aggregationStep-item.startTxNum/h.aggregationStep == StepsInColdFile {
 			continue
 		}
 		f1 := fmt.Sprintf("%s.%d-%d.v", h.filenameBase, item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep)
@@ -1359,7 +1359,7 @@ func (h *History) deleteGarbageFiles() {
 func (ii *InvertedIndex) deleteGarbageFiles() {
 	for _, item := range ii.garbageFiles {
 		// paranoic-mode: don't delete frozen files
-		if item.endTxNum/ii.aggregationStep-item.startTxNum/ii.aggregationStep == StepsInBiggestFile {
+		if item.endTxNum/ii.aggregationStep-item.startTxNum/ii.aggregationStep == StepsInColdFile {
 			continue
 		}
 		f1 := fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)

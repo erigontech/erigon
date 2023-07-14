@@ -418,7 +418,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 	defer ct.Close()
 	domains := agg.SharedDomains(ct)
 
-	txs := (aggStep) * StepsInBiggestFile
+	txs := (aggStep) * StepsInColdFile
 	t.Logf("step=%d tx_count=%d", aggStep, txs)
 
 	rnd := rand.New(rand.NewSource(0))

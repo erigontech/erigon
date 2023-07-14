@@ -533,7 +533,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 	}
 	var r DomainRanges
 	maxEndTxNum := d.endTxNumMinimax()
-	maxSpan := d.aggregationStep * StepsInBiggestFile
+	maxSpan := d.aggregationStep * StepsInColdFile
 
 	for {
 		if stop := func() bool {
@@ -576,7 +576,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	require.NoError(t, err)
 
 	maxEndTxNum := d.endTxNumMinimax()
-	maxSpan := d.aggregationStep * StepsInBiggestFile
+	maxSpan := d.aggregationStep * StepsInColdFile
 	for {
 		dc := d.MakeContext()
 		r := dc.findMergeRange(maxEndTxNum, maxSpan)
@@ -678,7 +678,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 
 	var k [8]byte
 	var v [8]byte
-	maxFrozenFiles := (txCount / d.aggregationStep) / StepsInBiggestFile
+	maxFrozenFiles := (txCount / d.aggregationStep) / StepsInColdFile
 	// key 0: only in frozen file 0
 	// key 1: only in frozen file 1 and file 2
 	// key 2: in frozen file 2 and in warm files
@@ -735,7 +735,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	keyCount, txCount := uint64(4), uint64(64)
 	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
 	collateAndMerge(t, db, nil, dom, txCount)
-	maxFrozenFiles := (txCount / dom.aggregationStep) / StepsInBiggestFile
+	maxFrozenFiles := (txCount / dom.aggregationStep) / StepsInColdFile
 
 	ctx := context.Background()
 	roTx, err := db.BeginRo(ctx)
