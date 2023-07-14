@@ -272,6 +272,10 @@ func (d *DomainCommitted) PatriciaState() ([]byte, error) {
 	return state, nil
 }
 
+func (d *DomainCommitted) Reset() {
+	d.patriciaTrie.Reset()
+}
+
 func (d *DomainCommitted) ResetFns(
 	branchFn func(prefix []byte) ([]byte, error),
 	accountFn func(plainKey []byte, cell *commitment.Cell) error,
@@ -339,6 +343,9 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 	if err != nil {
 		return err
 	}
+	if bytes.Equal(encoded, d.prevState) {
+		return nil
+	}
 
 	if d.trace {
 		fmt.Printf("commitment put tx %d rh %x\n\n", d.txNum, rh)
@@ -346,7 +353,7 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 	if err := d.Domain.PutWithPrev(keyCommitmentState, nil, encoded, d.prevState); err != nil {
 		return err
 	}
-	d.prevState = encoded
+	d.prevState = common.Copy(encoded)
 	return nil
 }
 

@@ -51,7 +51,7 @@ func (s *ExecutionClientDirect) ValidateChain(ctx context.Context, in *types.H25
 
 }
 
-func (s *ExecutionClientDirect) UpdateForkChoice(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*execution.ForkChoiceReceipt, error) {
+func (s *ExecutionClientDirect) UpdateForkChoice(ctx context.Context, in *execution.ForkChoice, opts ...grpc.CallOption) (*execution.ForkChoiceReceipt, error) {
 	return s.server.UpdateForkChoice(ctx, in)
 }
 
