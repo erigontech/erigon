@@ -28,7 +28,7 @@ func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv
 		blockNumber = *blockNumberPtr
 	case req.BlockHash == nil && req.BlockNumber != nil:
 		blockNumber = *req.BlockNumber
-		blockHash, err = e.blockReader.CanonicalHash(ctx, tx, blockNumber)
+		blockHash, err = e.canonicalHash(ctx, tx, blockNumber)
 		if err != nil {
 			err = fmt.Errorf("ethereumExecutionModule.parseSegmentRequest: could not read block %d: %s", blockNumber, err)
 			return
@@ -47,31 +47,33 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.Ge
 	}
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: could not open database: %s", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not open database: %s", err)
 	}
 	defer tx.Rollback()
+
+	chainTx, err := e.chainDb.BeginRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not open database: %s", err)
+	}
+	defer chainTx.Rollback()
 
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: %s", err)
 	}
-	body, err := e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+	body, err := e.getBody(ctx, chainTx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: coild not read body: %s", err)
 	}
+	if body == nil {
+		return &execution.GetBodyResponse{Body: nil}, nil
+	}
 	rawBody := body.RawBody()
 
-	return &execution.GetBodyResponse{
-		Body: &execution.BlockBody{
-			BlockNumber:  blockNumber,
-			BlockHash:    gointerfaces.ConvertHashToH256(blockHash),
-			Transactions: rawBody.Transactions,
-			Withdrawals:  ConvertWithdrawalsToRpc(rawBody.Withdrawals),
-		}}, nil
+	return &execution.GetBodyResponse{Body: ConvertRawBlockBodyToRpc(rawBody, blockNumber, blockHash)}, nil
 }
 
 func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.GetSegmentRequest) (*execution.GetHeaderResponse, error) {
-	// Invalid case: request is invalid.
 	// Invalid case: request is invalid.
 	if req == nil || (req.BlockHash == nil && req.BlockNumber == nil) {
 		return nil, errors.New("ethereumExecutionModule.GetHeader: bad request")
@@ -82,18 +84,25 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 	}
 	defer tx.Rollback()
 
+	chainTx, err := e.chainDb.BeginRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not open database: %s", err)
+	}
+	defer chainTx.Rollback()
+
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: %s", err)
 	}
-	header, err := e.blockReader.Header(ctx, tx, blockHash, blockNumber)
+	header, err := e.getHeader(ctx, chainTx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: coild not read body: %s", err)
 	}
+	if header == nil {
+		return &execution.GetHeaderResponse{Header: nil}, nil
+	}
 
-	return &execution.GetHeaderResponse{
-		Header: HeaderToHeaderRPC(header),
-	}, nil
+	return &execution.GetHeaderResponse{Header: HeaderToHeaderRPC(header)}, nil
 }
 
 func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *types2.H256) (*execution.GetHeaderHashNumberResponse, error) {
@@ -106,9 +115,7 @@ func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *
 	if blockNumber == nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.parseSegmentRequest: could not read block: non existent index")
 	}
-	return &execution.GetHeaderHashNumberResponse{
-		BlockNumber: blockNumber,
-	}, nil
+	return &execution.GetHeaderHashNumberResponse{BlockNumber: blockNumber}, nil
 }
 
 func (e *EthereumExecutionModule) CanonicalHash(ctx context.Context, req *types2.H256) (*execution.IsCanonicalResponse, error) {
@@ -122,11 +129,9 @@ func (e *EthereumExecutionModule) CanonicalHash(ctx context.Context, req *types2
 	if blockNumber == nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not read block: non existent index")
 	}
-	expectedHash, err := e.blockReader.CanonicalHash(ctx, tx, *blockNumber)
+	expectedHash, err := e.canonicalHash(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not read canonical hash")
 	}
-	return &execution.IsCanonicalResponse{
-		Canonical: expectedHash == blockHash,
-	}, nil
+	return &execution.IsCanonicalResponse{Canonical: expectedHash == blockHash}, nil
 }
