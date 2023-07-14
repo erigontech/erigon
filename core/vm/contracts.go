@@ -51,9 +51,9 @@ type PrecompiledContract interface {
 }
 
 type StatefulPrecompiledContract interface {
-	RequiredGas(input []byte) uint64  // RequiredPrice calculates the contract gas use
+	RequiredGas(input []byte) uint64                                          // RequiredPrice calculates the contract gas use
 	RunStateful(input []byte, state evmtypes.IntraBlockState) ([]byte, error) // Run runs the precompiled contract
-	Run(input []byte) ([]byte, error) // Run runs the precompiled contract
+	Run(input []byte) ([]byte, error)                                         // Run runs the precompiled contract
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -1123,7 +1123,7 @@ func (c *parentBeaconBlockRoot) RequiredGas(input []byte) uint64 {
 	return params.ParentBeaconBlockRootGas
 }
 
-func (c *parentBeaconBlockRoot) Run(input []byte) ([]byte, error){
+func (c *parentBeaconBlockRoot) Run(input []byte) ([]byte, error) {
 	return nil, nil
 }
 

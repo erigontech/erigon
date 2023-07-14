@@ -137,7 +137,7 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*type
 }
 
 // EngineNewPayload validates and possibly executes payload
-func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,  expectedBlobVersionedHashes *[]libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, version clparams.StateVersion) (*engine_types.PayloadStatus, error) {
+func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload, expectedBlobVersionedHashes *[]libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, version clparams.StateVersion) (*engine_types.PayloadStatus, error) {
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
 
@@ -191,7 +191,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas missing"}
 	}
 
-	if s.config.IsCancun(header.Time){
+	if s.config.IsCancun(header.Time) {
 		if header.ParentBeaconBlockRoot == nil {
 			return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot missing"}
 		}
@@ -768,7 +768,7 @@ func (e *EngineServer) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState 
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.CapellaVersion)
 }
 
-//Currently not implemented properly
+// Currently not implemented properly
 func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.CapellaVersion)
 }
