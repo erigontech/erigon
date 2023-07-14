@@ -613,15 +613,16 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	logger.Info("Prune state history")
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
 			ac := agg.MakeContext()
 			defer ac.Close()
 			if ac.CanPrune(tx) {
-				if err = agg.Prune(ctx, 1); err != nil {
+				if err = agg.Prune(ctx, 10); err != nil {
 					return err
 				}
+				log.Warn(fmt.Sprintf("[snapshots] DB has: %s", agg.StepsRangeInDBAsStr(tx)))
 			}
 			return err
 		}); err != nil {
