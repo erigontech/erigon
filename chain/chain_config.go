@@ -416,6 +416,8 @@ type BorConfig struct {
 
 	IndoreBlock                *big.Int          `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on indore)
 	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
+
+	sprints sprints
 }
 
 // String implements the stringer interface, returning the consensus engine details.
@@ -428,7 +430,62 @@ func (c *BorConfig) CalculateProducerDelay(number uint64) uint64 {
 }
 
 func (c *BorConfig) CalculateSprint(number uint64) uint64 {
-	return borKeyValueConfigHelper(c.Sprint, number)
+	if c.sprints == nil {
+		c.sprints = asSprints(c.Sprint)
+	}
+
+	for i := 0; i < len(c.sprints)-1; i++ {
+		if number >= c.sprints[i].from && number < c.sprints[i+1].from {
+			return c.sprints[i].size
+		}
+	}
+
+	return c.sprints[len(c.sprints)-1].size
+}
+
+func (c *BorConfig) CalculateSprintCount(from, to uint64) int {
+	switch {
+	case from > to:
+		return 0
+	case from < to:
+		to--
+	}
+
+	if c.sprints == nil {
+		c.sprints = asSprints(c.Sprint)
+	}
+
+	count := uint64(0)
+	startCalc := from
+
+	zeroth := func(boundary uint64, size uint64) uint64 {
+		if boundary%size == 0 {
+			return 1
+		}
+
+		return 0
+	}
+
+	for i := 0; i < len(c.sprints)-1; i++ {
+		if startCalc >= c.sprints[i].from && startCalc < c.sprints[i+1].from {
+			if to >= c.sprints[i].from && to < c.sprints[i+1].from {
+				if startCalc == to {
+					return int(count + zeroth(startCalc, c.sprints[i].size))
+				}
+				return int(count + zeroth(startCalc, c.sprints[i].size) + (to-startCalc)/c.sprints[i].size)
+			} else {
+				endCalc := c.sprints[i+1].from - 1
+				count += zeroth(startCalc, c.sprints[i].size) + (endCalc-startCalc)/c.sprints[i].size
+				startCalc = endCalc + 1
+			}
+		}
+	}
+
+	if startCalc == to {
+		return int(count + zeroth(startCalc, c.sprints[len(c.sprints)-1].size))
+	}
+
+	return int(count + zeroth(startCalc, c.sprints[len(c.sprints)-1].size) + (to-startCalc)/c.sprints[len(c.sprints)-1].size)
 }
 
 func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
@@ -497,6 +554,39 @@ func sortMapKeys(m map[string]uint64) []string {
 	sort.Strings(keys)
 
 	return keys
+}
+
+type sprint struct {
+	from, size uint64
+}
+
+type sprints []sprint
+
+func (s sprints) Len() int {
+	return len(s)
+}
+
+func (s sprints) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+func (s sprints) Less(i, j int) bool {
+	return s[i].from < s[j].from
+}
+
+func asSprints(configSprints map[string]uint64) sprints {
+	sprints := make(sprints, len(configSprints))
+
+	i := 0
+	for key, value := range configSprints {
+		sprints[i].from, _ = strconv.ParseUint(key, 10, 64)
+		sprints[i].size = value
+		i++
+	}
+
+	sort.Sort(sprints)
+
+	return sprints
 }
 
 // Rules is syntactic sugar over Config. It can be used for functions
