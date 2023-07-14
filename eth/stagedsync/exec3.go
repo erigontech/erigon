@@ -272,7 +272,7 @@ func ExecV3(ctx context.Context,
 	rwsConsumed := make(chan struct{}, 1)
 	defer close(rwsConsumed)
 
-	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1)
+	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1)
 	defer stopWorkers()
 	applyWorker.DiscardReadList()
 

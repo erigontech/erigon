@@ -26,6 +26,7 @@ import (
 
 type Worker struct {
 	lock        sync.Locker
+	logger      log.Logger
 	chainDb     kv.RoDB
 	chainTx     kv.Tx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
@@ -50,9 +51,10 @@ type Worker struct {
 	ibs *state.IntraBlockState
 }
 
-func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec22.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec22.ResultsQueue, engine consensus.Engine) *Worker {
+func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec22.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec22.ResultsQueue, engine consensus.Engine) *Worker {
 	w := &Worker{
 		lock:        lock,
+		logger:      logger,
 		chainDb:     chainDb,
 		in:          in,
 		rs:          rs,
@@ -142,8 +144,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	var err error
 	header := txTask.Header
 
-	var logger = log.New("worker-tx")
-
 	switch {
 	case daoForkTx:
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
@@ -178,7 +178,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 		}
 
-		_, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall, logger)
+		_, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall, rw.logger)
 		if err != nil {
 			txTask.Error = err
 		} else {
@@ -296,7 +296,7 @@ func (cr ChainReader) FrozenBlocks() uint64 {
 	return cr.blockReader.FrozenBlocks()
 }
 
-func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec22.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *exec22.ResultsQueue, clear func(), wait func()) {
+func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec22.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *exec22.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultChSize := workerCount * 8
@@ -307,7 +307,7 @@ func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chai
 		ctx, cancel := context.WithCancel(ctx)
 		g, ctx := errgroup.WithContext(ctx)
 		for i := 0; i < workerCount; i++ {
-			reconWorkers[i] = NewWorker(lock, ctx, background, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine)
+			reconWorkers[i] = NewWorker(lock, logger, ctx, background, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine)
 		}
 		if background {
 			for i := 0; i < workerCount; i++ {
@@ -333,7 +333,7 @@ func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chai
 			//applyWorker.ResetTx(nil)
 		}
 	}
-	applyWorker = NewWorker(lock, ctx, false, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine)
+	applyWorker = NewWorker(lock, logger, ctx, false, chainDb, rs, in, blockReader, chainConfig, genesis, rws, engine)
 
 	return reconWorkers, applyWorker, rws, clear, wait
 }
