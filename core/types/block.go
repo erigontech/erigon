@@ -1572,9 +1572,6 @@ func (b *Block) HashCheck() error {
 	if hash := DeriveSha(b.Withdrawals()); hash != *b.WithdrawalsHash() {
 		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
 	}
-	if b.ParentBeaconBlockRoot() == nil {
-		return errors.New("header missing ParentBeaconBlockRoot")
-	}
 	return nil
 }
 
