@@ -642,7 +642,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 	}
 
 	syscall := func(addr libcommon.Address, data []byte) ([]byte, error) {
-		return syscallCustom(addr, data, state, header, true)
+		return syscallCustom(addr, data, state, header, false /* constCall */)
 	}
 	c.certifierLock.Lock()
 	if c.cfg.Registrar != nil && c.certifier == nil && config.IsLondon(blockNum) {
