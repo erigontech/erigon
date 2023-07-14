@@ -404,9 +404,9 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	}
 
 	if chainConfig.Bor != nil {
-		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
+		borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
 		if borTx != nil {
-			borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), block.NumberU64(), receipts)
+			borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
 			if err != nil {
 				return nil, err
 			}
