@@ -60,7 +60,6 @@ import (
 	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -139,7 +138,7 @@ type Ethereum struct {
 	genesisHash  libcommon.Hash
 
 	ethBackendRPC      *privateapi.EthBackendServer
-	engineBackendRPC   engine.EngineClient
+	engineBackendRPC   *engineapi.EngineServer
 	miningRPC          txpool_proto.MiningServer
 	stateChangesClient txpool.StateChangesClient
 
@@ -193,6 +192,8 @@ func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
 	port, err = strconv.Atoi(addr[idx+1:])
 	return
 }
+
+const blockBufferSize = 128
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
@@ -479,6 +480,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		sentries,
 		config.Sync,
 		blockReader,
+		blockBufferSize,
 		stack.Config().SentryLogPeerInfo,
 		backend.forkValidator,
 		config.DropUselessPeers,
@@ -555,8 +557,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader, logger, latestBlockBuiltStore)
 	// intiialize engine backend
-	engineSrv := engineapi.NewEngineServer(ctx, logger, chainConfig, assembleBlockPOS, backend.chainDB, blockReader, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
-	backend.engineBackendRPC = direct.NewEngineClient(engineSrv)
+	backend.engineBackendRPC = engineapi.NewEngineServer(ctx, logger, chainConfig, assembleBlockPOS, backend.chainDB, blockReader, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
+
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi, logger)
 
 	var creds credentials.TransportCredentials
@@ -570,7 +572,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		backend.privateAPI, err = privateapi.StartGrpc(
 			kvRPC,
 			ethBackendRPC,
-			engineSrv,
 			backend.txPoolGrpcServer,
 			miningRPC,
 			stack.Config().PrivateApiAddr,
@@ -770,8 +771,8 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
-	ethRpcClient, engineClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, ethBackendRPC,
-		s.engineBackendRPC, s.txPoolGrpcServer, miningRPC, stateDiffClient, s.logger)
+	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, ethBackendRPC,
+		s.txPoolGrpcServer, miningRPC, stateDiffClient, s.logger)
 	if err != nil {
 		return err
 	}
@@ -780,14 +781,14 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	if casted, ok := s.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := jsonrpc.APIList(chainKv, borDb, ethRpcClient, engineClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
-	authApiList := jsonrpc.AuthAPIList(chainKv, ethRpcClient, engineClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
+	apiList := jsonrpc.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, httpRpcCfg, s.engine, s.logger)
 	go func() {
-		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList, s.logger); err != nil {
+		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, s.logger); err != nil {
 			s.logger.Error(err.Error())
 			return
 		}
 	}()
+	go s.engineBackendRPC.Start(httpRpcCfg, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
 
 	// Register the backend on the node
 	stack.RegisterLifecycle(s)

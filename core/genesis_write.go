@@ -227,13 +227,15 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 		}
 	}
 	if ethconfig.EnableHistoryV4InTest {
-		rh, err := stateWriter.(*state.WriterV4).Commitment(true, false)
+		ww := stateWriter.(*state.WriterV4)
+		rh, err := ww.Commitment(true, false)
 		if err != nil {
 			return nil, nil, err
 		}
 		if !bytes.Equal(rh, block.Root().Bytes()) {
 			fmt.Printf("invalid genesis root hash: %x, expected %x\n", rh, block.Root().Bytes())
 		}
+		ww.Reset()
 	}
 	return block, statedb, nil
 }

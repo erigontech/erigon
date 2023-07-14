@@ -142,14 +142,13 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	var err error
 	header := txTask.Header
 
+	var logger = log.New("worker-tx")
+
 	switch {
 	case daoForkTx:
 		//fmt.Printf("txNum=%d, blockNum=%d, DAO fork\n", txTask.TxNum, txTask.BlockNum)
 		misc.ApplyDAOHardFork(ibs)
 		ibs.SoftFinalise()
-		//if err = ibs.FinalizeTx(rules, rw.stateWriter); err != nil {
-		//	panic(err)
-		//}
 	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
 			// Genesis block
@@ -179,7 +178,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 		}
 
-		_, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall)
+		_, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall, logger)
 		if err != nil {
 			txTask.Error = err
 		} else {

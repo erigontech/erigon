@@ -34,6 +34,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -53,6 +54,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -204,20 +206,31 @@ func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*ptypes.NodeInf
 	return nil, nil
 }
 
+const blockBufferSize = 128
+
 func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool) *MockSentry {
-	return MockWithGenesisPruneMode(tb, gspec, key, prune.DefaultMode, withPosDownloader)
+	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.DefaultMode, withPosDownloader)
 }
 
 func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine consensus.Engine, withPosDownloader bool) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(tb, gspec, key, prune.DefaultMode, engine, false, withPosDownloader)
+	return MockWithEverything(tb, gspec, key, prune.DefaultMode, engine, blockBufferSize, false, withPosDownloader)
 }
 
-func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, withPosDownloader bool) *MockSentry {
-	return MockWithEverything(tb, gspec, key, prune, ethash.NewFaker(), false, withPosDownloader)
+func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, withPosDownloader bool) *MockSentry {
+	var engine consensus.Engine
+
+	switch {
+	case gspec.Config.Bor != nil:
+		engine = bor.NewFaker()
+	default:
+		engine = ethash.NewFaker()
+	}
+
+	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader)
 }
 
-func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool, withPosDownloader bool) *MockSentry {
+func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, blockBufferSize int, withTxPool bool, withPosDownloader bool) *MockSentry {
 	var tmpdir string
 	if tb != nil {
 		tmpdir = tb.TempDir()
@@ -235,6 +248,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.DeprecatedTxPool.StartOnInit = true
 
 	logger := log.New()
+
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	histV3, db, agg := temporal.NewTestDB(tb, dirs, gspec)
 	cfg.HistoryV3 = histV3
@@ -355,6 +369,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		sentries,
 		cfg.Sync,
 		mock.BlockReader,
+		blockBufferSize,
 		false,
 		forkValidator,
 		cfg.DropUselessPeers,
@@ -377,7 +392,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		stagedsync.DefaultStages(mock.Ctx,
 			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs, blockRetire, snapshotsDownloader, mock.BlockReader, mock.Notifications.Events, mock.HistoryV3, mock.agg),
 			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, mock.BlockReader, blockWriter, dirs.Tmp, mock.Notifications, engine_helpers.NewForkValidatorMock(1)),
-			stagedsync.StageCumulativeIndexCfg(mock.DB, mock.BlockReader),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig, blockWriter),
 			stagedsync.StageBodiesCfg(mock.DB, mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, *mock.ChainConfig, mock.BlockReader, cfg.HistoryV3, blockWriter),
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
@@ -482,7 +496,7 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 		},
 	}
 
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), true, false)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), blockBufferSize, true, false)
 }
 
 func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
@@ -621,8 +635,8 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 	SendPayloadStatus(ms.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	ms.ReceivePayloadStatus()
 
-	fc := engine_helpers.ForkChoiceMessage{
-		HeadBlockHash:      chain.TopBlock.Hash(),
+	fc := engine_types.ForkChoiceState{
+		HeadHash:           chain.TopBlock.Hash(),
 		SafeBlockHash:      chain.TopBlock.Hash(),
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
@@ -692,11 +706,11 @@ func (ms *MockSentry) SendPayloadRequest(message *types.Block) {
 	ms.sentriesClient.Hd.BeaconRequestList.AddPayloadRequest(message)
 }
 
-func (ms *MockSentry) SendForkChoiceRequest(message *engine_helpers.ForkChoiceMessage) {
+func (ms *MockSentry) SendForkChoiceRequest(message *engine_types.ForkChoiceState) {
 	ms.sentriesClient.Hd.BeaconRequestList.AddForkChoiceRequest(message)
 }
 
-func (ms *MockSentry) ReceivePayloadStatus() engine_helpers.PayloadStatus {
+func (ms *MockSentry) ReceivePayloadStatus() engine_types.PayloadStatus {
 	return <-ms.sentriesClient.Hd.PayloadStatusCh
 }
 

@@ -65,3 +65,6 @@ func (w *WriterV4) Commitment(saveStateAfter, trace bool) (rootHash []byte, err 
 	w.domains.SetTx(w.tx.(kv.RwTx))
 	return w.domains.Commit(saveStateAfter, trace)
 }
+func (w *WriterV4) Reset() {
+	w.domains.Commitment.Reset()
+}

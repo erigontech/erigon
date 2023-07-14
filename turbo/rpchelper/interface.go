@@ -5,9 +5,7 @@ import (
 	"sync/atomic"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/engine"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 
@@ -30,12 +28,4 @@ type ApiBackend interface {
 	NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error)
 	Peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 	PendingBlock(ctx context.Context) (*types.Block, error)
-}
-
-type EngineBackend interface {
-	EngineNewPayload(ctx context.Context, payload *types2.ExecutionPayload) (*engine.EnginePayloadStatus, error)
-	EngineForkchoiceUpdated(ctx context.Context, request *engine.EngineForkChoiceUpdatedRequest) (*engine.EngineForkChoiceUpdatedResponse, error)
-	EngineGetPayload(ctx context.Context, payloadId uint64) (*engine.EngineGetPayloadResponse, error)
-	EngineGetPayloadBodiesByHashV1(ctx context.Context, request *engine.EngineGetPayloadBodiesByHashV1Request) (*engine.EngineGetPayloadBodiesV1Response, error)
-	EngineGetPayloadBodiesByRangeV1(ctx context.Context, request *engine.EngineGetPayloadBodiesByRangeV1Request) (*engine.EngineGetPayloadBodiesV1Response, error)
 }

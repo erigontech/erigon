@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/torquem-ch/mdbx-go/mdbx"
@@ -258,7 +257,6 @@ func ExecV3(ctx context.Context,
 	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 	defer cfg.agg.CloseSharedDomains()
 	rs := state.NewStateV3(doms, logger)
-	doms.ClearRam()
 
 	//TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -819,6 +817,15 @@ Loop:
 		}
 	}
 
+	rh, err := agg.ComputeCommitment(true, false)
+	if err != nil {
+		log.Error("commitment after ExecV3 failed", "err", err)
+	}
+	if !bytes.Equal(rh, b.HeaderNoCopy().Root.Bytes()) {
+		log.Error("commitment after ExecV3 mismatch", "computed", fmt.Sprintf("%x", rh), "expected (from header)", fmt.Sprintf("%x", b.HeaderNoCopy().Root.Bytes()))
+	}
+	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
+
 	if parallel {
 		logger.Warn("[dbg] all txs sent")
 		if err := rwLoopG.Wait(); err != nil {
@@ -832,9 +839,6 @@ Loop:
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
 			return err
 		}
-	}
-	if _, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
-		return err
 	}
 
 	if parallel && blocksFreezeCfg.Produce {
