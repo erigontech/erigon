@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -354,7 +353,6 @@ func doLocalityIdx(cliCtx *cli.Context) error {
 
 	dir.MustExist(dirs.SnapHistory)
 	chainConfig := fromdb.ChainConfig(chainDB)
-	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	if rebuild {
 		panic("not implemented")
