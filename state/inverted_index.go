@@ -326,7 +326,7 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 			if from == to || ic.ii.warmLocalityIdx.exists(from, to) {
 				return nil
 			}
-			if err := ic.ii.warmLocalityIdx.BuildMissedIndices(ctx, from, to, false, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to) }); err != nil {
+			if err := ic.ii.warmLocalityIdx.BuildMissedIndices(ctx, from, to, false, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to, nil, to) }); err != nil {
 				return err
 			}
 			return nil
@@ -1208,8 +1208,10 @@ func (ii *InvertedIndex) collate(ctx context.Context, txFrom, txTo uint64, roTx 
 }
 
 type InvertedFiles struct {
-	decomp *compress.Decompressor
-	index  *recsplit.Index
+	decomp       *compress.Decompressor
+	index        *recsplit.Index
+	warmLocality *LocalityIndexFiles
+	coldLocality *LocalityIndexFiles
 }
 
 func (sf InvertedFiles) CleanupOnError() {
@@ -1295,17 +1297,21 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 
-	//f, err := li.buildFiles(ctx, fromStep, toStep, convertStepsToFileNums, ps, makeIter)
-	//if err != nil {
-	//	return err
-	//}
-	//ii.first
-	//if err := ii.warmLocalityIdx.buildFiles(ctx, from, step, false, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to) }); err != nil {
-	//	return err
-	//}
+	var warmLocality *LocalityIndexFiles
+	if ii.withLocalityIndex && ii.warmLocalityIdx != nil {
+		ic := ii.MakeContext() // TODO: use existing context
+		defer ic.Close()
+		fromStep, toStep := ic.warmLocality.indexedTo()/ii.aggregationStep, step
+		warmLocality, err = ii.warmLocalityIdx.buildFiles(ctx, fromStep, toStep, false, ps, func() *LocalityIterator {
+			return ic.iterateKeysLocality(ic.warmLocality.indexedTo()/ii.aggregationStep, toStep, decomp, step)
+		})
+		if err != nil {
+			return InvertedFiles{}, err
+		}
+	}
 
 	closeComp = false
-	return InvertedFiles{decomp: decomp, index: index}, nil
+	return InvertedFiles{decomp: decomp, index: index, warmLocality: warmLocality}, nil
 }
 
 func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
@@ -1313,6 +1319,8 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	ii.files.Set(fi)
+
+	ii.warmLocalityIdx.integrateFiles(sf.warmLocality)
 
 	ii.reCalcRoFiles()
 }

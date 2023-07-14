@@ -436,16 +436,19 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	if err != nil {
 		return nil, err
 	}
-	return &LocalityIndexFiles{index: idx, bm: bm}, nil
+	return &LocalityIndexFiles{index: idx, bm: bm, fromStep: fromStep, toStep: toStep}, nil
 }
 
-func (li *LocalityIndex) integrateFiles(sf LocalityIndexFiles, txNumFrom, txNumTo uint64) {
+func (li *LocalityIndex) integrateFiles(sf *LocalityIndexFiles) {
+	if sf == nil || li == nil {
+		return
+	}
 	if li.file != nil {
 		li.file.canDelete.Store(true)
 	}
 	li.file = &filesItem{
-		startTxNum: txNumFrom,
-		endTxNum:   txNumTo,
+		startTxNum: sf.fromStep * li.aggregationStep,
+		endTxNum:   sf.toStep * li.aggregationStep,
 		index:      sf.index,
 		frozen:     false,
 	}
@@ -458,13 +461,15 @@ func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, fromStep, toSte
 	if err != nil {
 		return err
 	}
-	li.integrateFiles(*f, fromStep*li.aggregationStep, toStep*li.aggregationStep)
+	li.integrateFiles(f)
 	return nil
 }
 
 type LocalityIndexFiles struct {
 	index *recsplit.Index
 	bm    *bitmapdb.FixedSizeBitmaps
+
+	fromStep, toStep uint64
 }
 
 func (sf LocalityIndexFiles) Close() {
@@ -556,7 +561,7 @@ func (si *LocalityIterator) Close() {
 }
 
 // iterateKeysLocality [from, to)
-func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64) *LocalityIterator {
+func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64, last *compress.Decompressor, lastStep uint64) *LocalityIterator {
 	toTxNum := toStep * ic.ii.aggregationStep
 	fromTxNum := fromStep * ic.ii.aggregationStep
 	si := &LocalityIterator{aggStep: ic.ii.aggregationStep, compressVals: false}
@@ -583,6 +588,23 @@ func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64) *Lo
 		si.totalOffsets += uint64(g.Size())
 		si.filesAmount++
 	}
+
+	if last != nil {
+		//add last one
+		last.EnableReadAhead() // disable in destructor of iterator
+		si.involvedFiles = append(si.involvedFiles, last)
+		g := last.MakeGetter()
+		if g.HasNext() {
+			key, offset := g.NextUncompressed()
+
+			endTxNum := (lastStep + 1) * ic.ii.aggregationStep
+			heapItem := &ReconItem{startTxNum: lastStep * ic.ii.aggregationStep, endTxNum: endTxNum, g: g, txNum: ^endTxNum, key: key, startOffset: offset, lastOffset: offset}
+			heap.Push(&si.h, heapItem)
+		}
+		si.totalOffsets += uint64(g.Size())
+		si.filesAmount++
+	}
+
 	si.advance()
 	return si
 }
