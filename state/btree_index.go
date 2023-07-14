@@ -17,9 +17,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -187,86 +188,6 @@ func newBtAlloc(k, M uint64, trace bool) *btAlloc {
 	}
 
 	return a
-}
-
-// nolint
-// another implementation of traverseDfs supposed to be a bit cleaner but buggy yet
-func (a *btAlloc) traverseTrick() {
-	for l := 0; l < len(a.sons)-1; l++ {
-		if len(a.sons[l]) < 2 {
-			panic("invalid btree allocation markup")
-		}
-		a.cursors[l] = markupCursor{uint64(l), 1, 0, 0}
-		a.nodes[l] = make([]node, 0)
-	}
-
-	lf := a.cursors[len(a.cursors)-1]
-	c := a.cursors[(len(a.cursors) - 2)]
-
-	var d uint64
-	var fin bool
-
-	lf.di = d
-	lf.si++
-	d++
-	a.cursors[len(a.cursors)-1] = lf
-
-	moved := true
-	for int(c.p) <= len(a.sons[c.l]) {
-		if fin || d > a.K {
-			break
-		}
-		c, lf = a.cursors[c.l], a.cursors[lf.l]
-
-		c.di = d
-		c.si++
-
-		sons := a.sons[lf.l][lf.p]
-		for i := uint64(1); i < sons; i++ {
-			lf.si++
-			d++
-		}
-		lf.di = d
-		d++
-
-		a.nodes[lf.l] = append(a.nodes[lf.l], node{p: lf.p, s: lf.si, d: lf.di})
-		a.nodes[c.l] = append(a.nodes[c.l], node{p: c.p, s: c.si, d: c.di})
-		a.cursors[lf.l] = lf
-		a.cursors[c.l] = c
-
-		for l := lf.l; l >= 0; l-- {
-			sc := a.cursors[l]
-			sons, gsons := a.sons[sc.l][sc.p-1], a.sons[sc.l][sc.p]
-			if l < c.l && moved {
-				sc.di = d
-				a.nodes[sc.l] = append(a.nodes[sc.l], node{d: sc.di})
-				sc.si++
-				d++
-			}
-			moved = (sc.si-1)/gsons != sc.si/gsons
-			if sc.si/gsons >= sons {
-				sz := uint64(len(a.sons[sc.l]) - 1)
-				if sc.p+2 > sz {
-					fin = l == lf.l
-					break
-				} else {
-					sc.p += 2
-					sc.si, sc.di = 0, 0
-				}
-				//moved = true
-			}
-			if l == lf.l {
-				sc.si++
-				sc.di = d
-				d++
-			}
-			a.cursors[l] = sc
-			if l == 0 {
-				break
-			}
-		}
-		moved = false
-	}
 }
 
 func (a *btAlloc) traverseDfs() {
