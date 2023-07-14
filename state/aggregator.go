@@ -41,7 +41,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 )
 
-// StepsInBiggestFile - files of this size are completely frozen/immutable.
+// StepsInColdFile - files of this size are completely frozen/immutable.
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
 const StepsInColdFile = 32
 
