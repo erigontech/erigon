@@ -46,6 +46,8 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 		OmmerHash:       gointerfaces.ConvertHashToH256(header.UncleHash),
 		BaseFeePerGas:   baseFeeReply,
 		WithdrawalHash:  withdrawalHashReply,
+		ExcessDataGas:   header.ExcessDataGas,
+		DataGasUsed:     header.DataGasUsed,
 	}
 
 }
@@ -54,21 +56,23 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 	var blockNonce types.BlockNonce
 	binary.BigEndian.PutUint64(blockNonce[:], header.Nonce)
 	h := &types.Header{
-		ParentHash:  gointerfaces.ConvertH256ToHash(header.ParentHash),
-		UncleHash:   gointerfaces.ConvertH256ToHash(header.OmmerHash),
-		Coinbase:    gointerfaces.ConvertH160toAddress(header.Coinbase),
-		Root:        gointerfaces.ConvertH256ToHash(header.StateRoot),
-		TxHash:      gointerfaces.ConvertH256ToHash(header.TransactionHash),
-		ReceiptHash: gointerfaces.ConvertH256ToHash(header.ReceiptRoot),
-		Bloom:       gointerfaces.ConvertH2048ToBloom(header.LogsBloom),
-		Difficulty:  gointerfaces.ConvertH256ToUint256Int(header.Difficulty).ToBig(),
-		Number:      big.NewInt(int64(header.BlockNumber)),
-		GasLimit:    header.GasLimit,
-		GasUsed:     header.GasUsed,
-		Time:        header.Timestamp,
-		Extra:       header.ExtraData,
-		MixDigest:   gointerfaces.ConvertH256ToHash(header.PrevRandao),
-		Nonce:       blockNonce,
+		ParentHash:    gointerfaces.ConvertH256ToHash(header.ParentHash),
+		UncleHash:     gointerfaces.ConvertH256ToHash(header.OmmerHash),
+		Coinbase:      gointerfaces.ConvertH160toAddress(header.Coinbase),
+		Root:          gointerfaces.ConvertH256ToHash(header.StateRoot),
+		TxHash:        gointerfaces.ConvertH256ToHash(header.TransactionHash),
+		ReceiptHash:   gointerfaces.ConvertH256ToHash(header.ReceiptRoot),
+		Bloom:         gointerfaces.ConvertH2048ToBloom(header.LogsBloom),
+		Difficulty:    gointerfaces.ConvertH256ToUint256Int(header.Difficulty).ToBig(),
+		Number:        big.NewInt(int64(header.BlockNumber)),
+		GasLimit:      header.GasLimit,
+		GasUsed:       header.GasUsed,
+		Time:          header.Timestamp,
+		Extra:         header.ExtraData,
+		MixDigest:     gointerfaces.ConvertH256ToHash(header.PrevRandao),
+		Nonce:         blockNonce,
+		DataGasUsed:   header.DataGasUsed,
+		ExcessDataGas: header.ExcessDataGas,
 	}
 	if header.BaseFeePerGas != nil {
 		h.BaseFee = gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
