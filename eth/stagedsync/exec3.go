@@ -753,7 +753,7 @@ Loop:
 					}
 					t2 = time.Since(tt)
 
-					tt := time.Now()
+					tt = time.Now()
 					_, err := agg.ComputeCommitment(true, false)
 					if err != nil {
 						return err
