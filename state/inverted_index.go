@@ -65,9 +65,13 @@ type InvertedIndex struct {
 
 	integrityFileExtensions []string
 	withLocalityIndex       bool
-	warmLocalityIdx         *LocalityIndex
-	coldLocalityIdx         *LocalityIndex
-	tx                      kv.RwTx
+
+	// localityIdx of warm files - storing `steps` where `key` was updated
+	//  - need re-calc when new file created
+	//  - don't need re-calc after files merge - because merge doesn't change `steps` where `key` was updated
+	warmLocalityIdx *LocalityIndex
+	coldLocalityIdx *LocalityIndex
+	tx              kv.RwTx
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 

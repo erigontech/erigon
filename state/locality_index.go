@@ -285,7 +285,6 @@ func (lc *ctxLocalityIdx) indexedFrom() uint64 {
 	if lc == nil || lc.bm == nil {
 		return 0
 	}
-	return 0
 	return lc.file.startTxNum
 }
 
@@ -322,6 +321,7 @@ func (li *LocalityIndex) missedIdxFiles(ii *HistoryContext) (toStep uint64, idxE
 	return toStep, dir.FileExist(filepath.Join(li.dir, fName))
 }
 func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, ps *background.ProgressSet, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
+	defer func(t time.Time) { fmt.Printf("locality_index.go:324: %s\n", time.Since(t)) }(time.Now())
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -335,6 +335,10 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	count := 0
 	it := makeIter()
 	defer it.Close()
+	if it.FilesAmount() == 1 {
+		fmt.Printf("locality on file 1\n")
+		panic(1)
+	}
 	for it.HasNext() {
 		_, _ = it.Next()
 		count++

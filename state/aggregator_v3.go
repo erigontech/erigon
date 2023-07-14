@@ -1410,6 +1410,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 				log.Warn("[snapshots] buildFilesInBackground", "err", err)
 				break
 			}
+			a.BuildMissedIndices(a.ctx, 100) //TODO: ii.buildFile must build LI
 		}
 		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 
