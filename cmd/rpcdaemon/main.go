@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
+	"github.com/spf13/cobra"
 )
 
 func main() {
