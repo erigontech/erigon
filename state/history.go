@@ -782,6 +782,9 @@ type HistoryFiles struct {
 	historyIdx      *recsplit.Index
 	efHistoryDecomp *compress.Decompressor
 	efHistoryIdx    *recsplit.Index
+
+	warmLocality *LocalityIndexFiles
+	coldLocality *LocalityIndexFiles
 }
 
 func (sf HistoryFiles) Close() {
@@ -965,6 +968,12 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 	rs.Close()
 	rs = nil
+
+	warmLocality, err := h.buildWarmLocality(ctx, efHistoryDecomp, step, ps)
+	if err != nil {
+		return HistoryFiles{}, err
+	}
+
 	if historyIdx, err = recsplit.OpenIndex(historyIdxPath); err != nil {
 		return HistoryFiles{}, fmt.Errorf("open idx: %w", err)
 	}
@@ -974,6 +983,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		historyIdx:      historyIdx,
 		efHistoryDecomp: efHistoryDecomp,
 		efHistoryIdx:    efHistoryIdx,
+		warmLocality:    warmLocality,
 	}, nil
 }
 
@@ -987,6 +997,7 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	fi.decompressor = sf.historyDecomp
 	fi.index = sf.historyIdx
 	h.files.Set(fi)
+	h.warmLocalityIdx.integrateFiles(sf.warmLocality)
 
 	h.reCalcRoFiles()
 }

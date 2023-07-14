@@ -1297,21 +1297,27 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 
-	var warmLocality *LocalityIndexFiles
-	if ii.withLocalityIndex && ii.warmLocalityIdx != nil {
-		ic := ii.MakeContext() // TODO: use existing context
-		defer ic.Close()
-		fromStep, toStep := ic.warmLocality.indexedTo()/ii.aggregationStep, step
-		warmLocality, err = ii.warmLocalityIdx.buildFiles(ctx, fromStep, toStep, false, ps, func() *LocalityIterator {
-			return ic.iterateKeysLocality(ic.warmLocality.indexedTo()/ii.aggregationStep, toStep, decomp, step)
-		})
-		if err != nil {
-			return InvertedFiles{}, err
-		}
+	warmLocality, err := ii.buildWarmLocality(ctx, decomp, step, ps)
+	if err != nil {
+		return InvertedFiles{}, err
 	}
 
 	closeComp = false
 	return InvertedFiles{decomp: decomp, index: index, warmLocality: warmLocality}, nil
+}
+
+func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress.Decompressor, step uint64, ps *background.ProgressSet) (*LocalityIndexFiles, error) {
+	if !ii.withLocalityIndex {
+		return nil, nil
+	}
+
+	ic := ii.MakeContext() // TODO: use existing context
+	defer ic.Close()
+	fromStep, toStep := ic.coldLocality.indexedTo()/ii.aggregationStep, step
+	fmt.Printf("build warm locality: %d-%d\n", fromStep, toStep)
+	return ii.warmLocalityIdx.buildFiles(ctx, fromStep, toStep, false, ps, func() *LocalityIterator {
+		return ic.iterateKeysLocality(ic.warmLocality.indexedTo()/ii.aggregationStep, toStep, decomp, step)
+	})
 }
 
 func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
@@ -1319,7 +1325,6 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	ii.files.Set(fi)
-
 	ii.warmLocalityIdx.integrateFiles(sf.warmLocality)
 
 	ii.reCalcRoFiles()
