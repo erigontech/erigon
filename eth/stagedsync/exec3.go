@@ -721,12 +721,10 @@ Loop:
 		}
 
 		if !parallel {
-			//if blockNum%1_000 == 0 {
-			//	if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
-			//		return err
-			//	} else if !ok {
-			//		break Loop
-			//	}
+			//if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+			//	return err
+			//} else if !ok {
+			//	break Loop
 			//}
 
 			outputBlockNum.Set(blockNum)
@@ -823,12 +821,14 @@ Loop:
 		}
 	}
 
-	rh, err := agg.ComputeCommitment(true, false)
-	if err != nil {
-		log.Error("commitment after ExecV3 failed", "err", err)
-	}
-	if !bytes.Equal(rh, b.HeaderNoCopy().Root.Bytes()) {
-		log.Error("commitment after ExecV3 mismatch", "computed", fmt.Sprintf("%x", rh), "expected (from header)", fmt.Sprintf("%x", b.HeaderNoCopy().Root.Bytes()))
+	if !dbg.DiscardCommitment() {
+		rh, err := agg.ComputeCommitment(true, false)
+		if err != nil {
+			log.Error("commitment after ExecV3 failed", "err", err)
+		}
+		if !bytes.Equal(rh, b.HeaderNoCopy().Root.Bytes()) {
+			log.Error("commitment after ExecV3 mismatch", "computed", fmt.Sprintf("%x", rh), "expected (from header)", fmt.Sprintf("%x", b.HeaderNoCopy().Root.Bytes()))
+		}
 	}
 	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
 
