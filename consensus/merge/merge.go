@@ -244,13 +244,6 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 
 	cancun := chain.Config().IsCancun(header.Time)
 
-	if cancun && header.ParentBeaconBlockRoot == nil {
-		return fmt.Errorf("missing parentBeaconBlockRoot")
-	}
-	if cancun && header.ParentBeaconBlockRoot != chain.CurrentHeader().ParentBeaconBlockRoot {
-		return fmt.Errorf("parentBeaconBlockRoot mismatch")
-	}
-
 	if !cancun {
 		if header.DataGasUsed != nil {
 			return fmt.Errorf("invalid dataGasUsed before fork: have %v, expected 'nil'", header.DataGasUsed)
@@ -260,9 +253,17 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 		}
 	}
 
-	if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil && cancun {
-		// Verify the header's EIP-4844 attributes.
-		return err
+	if cancun {
+		if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil {
+			// Verify the header's EIP-4844 attributes.
+			return err
+		}
+		if header.ParentBeaconBlockRoot == nil {
+			return fmt.Errorf("missing parentBeaconBlockRoot")
+		}
+		if header.ParentBeaconBlockRoot != chain.CurrentHeader().ParentBeaconBlockRoot {
+			return fmt.Errorf("parentBeaconBlockRoot mismatch")
+		}
 	}
 	return nil
 }
