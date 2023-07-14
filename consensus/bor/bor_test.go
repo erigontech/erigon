@@ -161,7 +161,7 @@ func (c spanner) GetCurrentSpan(_ consensus.SystemCall) (*span.Span, error) {
 	return &c.currentSpan, nil
 }
 
-func (c spanner) CommitSpan(heimdallSpan span.HeimdallSpan, syscall consensus.SystemCall) error {
+func (c *spanner) CommitSpan(heimdallSpan span.HeimdallSpan, syscall consensus.SystemCall) error {
 	c.currentSpan = heimdallSpan.Span
 	return nil
 }
@@ -230,7 +230,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 	bor := bor.New(
 		heimdall.chainConfig,
 		memdb.New(""),
-		spanner{span.NewChainSpanner(contract.ValidatorSet(), heimdall.chainConfig, false, logger), span.Span{}},
+		&spanner{span.NewChainSpanner(contract.ValidatorSet(), heimdall.chainConfig, false, logger), span.Span{}},
 		heimdall,
 		test_genesisContract{},
 		logger,
