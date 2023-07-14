@@ -245,8 +245,8 @@ func ExecV3(ctx context.Context,
 	if !useExternalTx {
 		log.Warn(fmt.Sprintf("[snapshots] DB has: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		if blocksFreezeCfg.Produce {
-			agg.BuildOptionalMissedIndicesInBackground(ctx, 100)
-			agg.BuildMissedIndices(ctx, 100)
+			//agg.BuildOptionalMissedIndicesInBackground(ctx, 100)
+			//agg.BuildMissedIndices(ctx, 100)
 			agg.BuildFilesInBackground(outputTxNum.Load())
 		}
 	}

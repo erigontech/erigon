@@ -602,6 +602,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err = agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
+	fmt.Printf("is canceled? %s\n", ctx.Err())
 
 	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
 		return err
