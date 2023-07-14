@@ -156,7 +156,7 @@ func (li *LocalityIndex) openFiles() (err error) {
 	if li.bm == nil {
 		dataPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
 		if dir.FileExist(dataPath) {
-			li.bm, err = bitmapdb.OpenFixedSizeBitmaps(dataPath, int((toStep-fromStep)/StepsInColdFile))
+			li.bm, err = bitmapdb.OpenFixedSizeBitmaps(dataPath)
 			if err != nil {
 				return err
 			}
@@ -354,7 +354,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, toStep uint64, makeIter
 	}
 	i := uint64(0)
 	for {
-		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, int(it.FilesAmount()), uint64(count), li.logger)
+		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, int(it.FilesAmount()), 0, uint64(count), li.logger)
 		if err != nil {
 			return nil, err
 		}
@@ -404,7 +404,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, toStep uint64, makeIter
 	if err != nil {
 		return nil, err
 	}
-	bm, err := bitmapdb.OpenFixedSizeBitmaps(filePath, int(it.FilesAmount()))
+	bm, err := bitmapdb.OpenFixedSizeBitmaps(filePath)
 	if err != nil {
 		return nil, err
 	}
