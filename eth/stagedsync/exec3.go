@@ -819,12 +819,14 @@ Loop:
 		}
 	}
 
-	rh, err := agg.ComputeCommitment(true, false)
-	if err != nil {
-		log.Error("commitment after ExecV3 failed", "err", err)
-	}
-	if !bytes.Equal(rh, b.HeaderNoCopy().Root.Bytes()) {
-		log.Error("commitment after ExecV3 mismatch", "computed", fmt.Sprintf("%x", rh), "expected (from header)", fmt.Sprintf("%x", b.HeaderNoCopy().Root.Bytes()))
+	if !dbg.DiscardCommitment() {
+		rh, err := agg.ComputeCommitment(true, false)
+		if err != nil {
+			log.Error("commitment after ExecV3 failed", "err", err)
+		}
+		if !bytes.Equal(rh, b.HeaderNoCopy().Root.Bytes()) {
+			log.Error("commitment after ExecV3 mismatch", "computed", fmt.Sprintf("%x", rh), "expected (from header)", fmt.Sprintf("%x", b.HeaderNoCopy().Root.Bytes()))
+		}
 	}
 	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
 
