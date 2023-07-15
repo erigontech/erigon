@@ -119,3 +119,25 @@ func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
 	}
 	return out
 }
+
+func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash libcommon.Hash) *execution.BlockBody {
+	if in == nil {
+		return nil
+	}
+	return &execution.BlockBody{
+		BlockNumber:  blockNumber,
+		BlockHash:    gointerfaces.ConvertHashToH256(blockHash),
+		Transactions: in.Transactions,
+		Withdrawals:  ConvertWithdrawalsToRpc(in.Withdrawals),
+	}
+}
+
+func ConvertRawBlockBodyFromRpc(in *execution.BlockBody) *types.RawBody {
+	if in == nil {
+		return nil
+	}
+	return &types.RawBody{
+		Transactions: in.Transactions,
+		Withdrawals:  ConvertWithdrawalsFromRpc(in.Withdrawals),
+	}
+}
