@@ -30,6 +30,7 @@ type SyncStage string
 
 var (
 	Snapshots           SyncStage = "Snapshots"       // Snapshots
+	BorSnapshots        SyncStage = "BorSnapshots"    // Snapshots specific to Bor
 	Headers             SyncStage = "Headers"         // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
 	CumulativeIndex     SyncStage = "CumulativeIndex" // Calculate how much gas has been used up to each block.
 	BlockHashes         SyncStage = "BlockHashes"     // Headers Number are written, fills blockHash => number bucket
@@ -60,6 +61,7 @@ var (
 
 var AllStages = []SyncStage{
 	Snapshots,
+	BorSnapshots,
 	Headers,
 	BlockHashes,
 	Bodies,

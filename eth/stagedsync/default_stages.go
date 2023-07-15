@@ -28,6 +28,22 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			},
 		},
 		{
+			ID:          stages.BorSnapshots,
+			Description: "Download bor snapshots",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+				if badBlockUnwind {
+					return nil
+				}
+				return BorSnapshotsForward(s, ctx, tx, snapshots, firstCycle, logger)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+				return nil
+			},
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				return BorSnapshotsPrune(p, firstCycle, snapshots, ctx, tx)
+			},
+		},
+		{
 			ID:          stages.Headers,
 			Description: "Download headers",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
@@ -296,6 +312,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 
 var DefaultForwardOrder = UnwindOrder{
 	stages.Snapshots,
+	stages.BorSnapshots,
 	stages.Headers,
 	stages.BlockHashes,
 	stages.Bodies,
@@ -369,6 +386,7 @@ var DefaultPruneOrder = PruneOrder{
 	stages.Bodies,
 	stages.BlockHashes,
 	stages.Headers,
+	stages.BorSnapshots,
 	stages.Snapshots,
 }
 
