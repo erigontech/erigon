@@ -33,6 +33,7 @@ type ConsensusClientCliCfg struct {
 	ServerTcpPort         uint   `json:"serverTcpPort"`
 	LogLvl                uint   `json:"logLevel"`
 	NoDiscovery           bool   `json:"noDiscovery"`
+	LocalDiscovery        bool   `json:"localDiscovery"`
 	CheckpointUri         string `json:"checkpointUri"`
 	Chaindata             string `json:"chaindata"`
 	ErigonPrivateApi      string `json:"erigonPrivateApi"`
@@ -117,6 +118,7 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 		cfg.LogLvl = uint(log.LvlDebug)
 	}
 	cfg.NoDiscovery = ctx.Bool(flags.NoDiscovery.Name)
+	cfg.LocalDiscovery = ctx.Bool(flags.LocalDiscovery.Name)
 	if ctx.String(flags.CheckpointSyncUrlFlag.Name) != "" {
 		cfg.CheckpointUri = ctx.String(flags.CheckpointSyncUrlFlag.Name)
 	} else {
