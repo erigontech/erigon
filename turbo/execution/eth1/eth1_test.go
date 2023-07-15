@@ -37,7 +37,7 @@ func TestInsertGetterHeader(t *testing.T) {
 func TestInsertGetterBody(t *testing.T) {
 	bn := uint64(2)
 	bhash := libcommon.Hash{1}
-	txs := [][]byte{[]byte{1}}
+	txs := [][]byte{{1}}
 	body := &types.RawBody{
 		Transactions: txs,
 	}
