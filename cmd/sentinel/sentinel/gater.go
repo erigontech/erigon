@@ -122,20 +122,17 @@ func privateCIDRFilter(addrFilter *multiaddr.Filters, action multiaddr.Action) (
 		if err != nil {
 			return nil, err
 		}
-		// Get the current filter action for the address
-		// If it conflicts with the action given by the function call,
-		// log a warning
-		curAction, _ := addrFilter.ActionForFilter(*ipnet)
-		switch {
-		case action == multiaddr.ActionAccept:
-			if curAction == multiaddr.ActionDeny {
-				// rule conflict
-			}
-		case action == multiaddr.ActionDeny:
-			if curAction == multiaddr.ActionAccept {
-				// rule conflict
-			}
-		}
+		//	curAction, _ := addrFilter.ActionForFilter(*ipnet)
+		//	switch {
+		//	case action == multiaddr.ActionAccept:
+		//		if curAction == multiaddr.ActionDeny {
+		//			// rule conflict
+		//		}
+		//	case action == multiaddr.ActionDeny:
+		//		if curAction == multiaddr.ActionAccept {
+		//			// rule conflict
+		//		}
+		//	}
 		addrFilter.AddFilter(*ipnet, action)
 	}
 	return addrFilter, nil
