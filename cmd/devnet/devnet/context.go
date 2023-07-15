@@ -1,7 +1,7 @@
 package devnet
 
 import (
-	go_context "context"
+	context "context"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -16,32 +16,11 @@ const (
 	ckCliContext
 )
 
-type Context interface {
-	go_context.Context
-	WithValue(key, value interface{}) Context
+func WithNetwork(ctx context.Context, nw *Network) context.Context {
+	return context.WithValue(context.WithValue(ctx, ckNetwork, nw), ckLogger, nw.Logger)
 }
 
-type context struct {
-	go_context.Context
-}
-
-func (c *context) WithValue(key, value interface{}) Context {
-	return &context{go_context.WithValue(c, key, value)}
-}
-
-func AsContext(ctx go_context.Context) Context {
-	if ctx, ok := ctx.(Context); ok {
-		return ctx
-	}
-
-	return &context{ctx}
-}
-
-func WithNetwork(ctx go_context.Context, nw *Network) Context {
-	return &context{go_context.WithValue(go_context.WithValue(ctx, ckNetwork, nw), ckLogger, nw.Logger)}
-}
-
-func Logger(ctx go_context.Context) log.Logger {
+func Logger(ctx context.Context) log.Logger {
 	if logger, ok := ctx.Value(ckLogger).(log.Logger); ok {
 		return logger
 	}
@@ -54,19 +33,19 @@ type cnode struct {
 	node     Node
 }
 
-func WithCurrentNode(ctx go_context.Context, selector interface{}) Context {
-	return &context{go_context.WithValue(ctx, ckNode, &cnode{selector: selector})}
+func WithCurrentNode(ctx context.Context, selector interface{}) context.Context {
+	return context.WithValue(ctx, ckNode, &cnode{selector: selector})
 }
 
-func WithCliContext(ctx go_context.Context, cliCtx *cli.Context) Context {
-	return &context{go_context.WithValue(ctx, ckCliContext, cliCtx)}
+func WithCliContext(ctx context.Context, cliCtx *cli.Context) context.Context {
+	return context.WithValue(ctx, ckCliContext, cliCtx)
 }
 
-func CliContext(ctx go_context.Context) *cli.Context {
+func CliContext(ctx context.Context) *cli.Context {
 	return ctx.Value(ckCliContext).(*cli.Context)
 }
 
-func CurrentNode(ctx go_context.Context) Node {
+func CurrentNode(ctx context.Context) Node {
 	if cn, ok := ctx.Value(ckNode).(*cnode); ok {
 		if cn.node == nil {
 			if network, ok := ctx.Value(ckNetwork).(*Network); ok {
@@ -80,7 +59,7 @@ func CurrentNode(ctx go_context.Context) Node {
 	return nil
 }
 
-func SelectNode(ctx go_context.Context, selector ...interface{}) Node {
+func SelectNode(ctx context.Context, selector ...interface{}) Node {
 	if network, ok := ctx.Value(ckNetwork).(*Network); ok {
 		if len(selector) > 0 {
 			return network.SelectNode(ctx, selector[0])
@@ -96,7 +75,7 @@ func SelectNode(ctx go_context.Context, selector ...interface{}) Node {
 	return nil
 }
 
-func SelectBlockProducer(ctx go_context.Context, selector ...interface{}) Node {
+func SelectBlockProducer(ctx context.Context, selector ...interface{}) Node {
 	if network, ok := ctx.Value(ckNetwork).(*Network); ok {
 		if len(selector) > 0 {
 			blockProducers := network.BlockProducers()
@@ -126,7 +105,7 @@ func SelectBlockProducer(ctx go_context.Context, selector ...interface{}) Node {
 	return nil
 }
 
-func SelectNonBlockProducer(ctx go_context.Context, selector ...interface{}) Node {
+func SelectNonBlockProducer(ctx context.Context, selector ...interface{}) Node {
 	if network, ok := ctx.Value(ckNetwork).(*Network); ok {
 		if len(selector) > 0 {
 			nonBlockProducers := network.NonBlockProducers()

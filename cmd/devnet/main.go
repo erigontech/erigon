@@ -6,13 +6,16 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 
 	dbg "runtime/debug"
 	"syscall"
 	"time"
 
-	_ "github.com/ledgerwatch/erigon/cmd/devnet/commands"
+	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
+	_ "github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services/bor"
+	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
 
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
@@ -44,6 +47,12 @@ var (
 		Name:  "chain",
 		Usage: "The devnet chain to run (dev,bor-devnet)",
 		Value: networkname.DevChainName,
+	}
+
+	ScenariosFlag = cli.StringFlag{
+		Name:  "scenarios",
+		Usage: "Scenarios to be run on the devnet chain",
+		Value: "dynamic-tx-any-node",
 	}
 
 	WithoutHeimdallFlag = cli.BoolFlag{
@@ -121,6 +130,7 @@ func main() {
 	app.Flags = []cli.Flag{
 		&DataDirFlag,
 		&ChainFlag,
+		&ScenariosFlag,
 		&WithoutHeimdallFlag,
 		&LocalHeimdallFlag,
 		&HeimdallgRPCAddressFlag,
@@ -169,7 +179,7 @@ func action(ctx *cli.Context) error {
 		return err
 	}
 
-	network, err := selectNetwork(ctx, logger)
+	networks, err := selectNetworks(ctx, logger)
 
 	if err != nil {
 		return err
@@ -184,9 +194,11 @@ func action(ctx *cli.Context) error {
 	}
 
 	// start the network with each node in a go routine
-	logger.Info("Starting Network")
-	if err := network.Start(ctx); err != nil {
-		return fmt.Errorf("Network start failed: %w", err)
+	logger.Info("Starting Networks")
+	for _, network := range networks {
+		if err := network.Start(ctx); err != nil {
+			return fmt.Errorf("Network start failed: %w", err)
+		}
 	}
 
 	go func() {
@@ -195,9 +207,10 @@ func action(ctx *cli.Context) error {
 
 		switch s := <-signalCh; s {
 		case syscall.SIGTERM:
-			logger.Info("Stopping network")
-			network.Stop()
-
+			logger.Info("Stopping networks")
+			for _, network := range networks {
+				network.Stop()
+			}
 		case syscall.SIGINT:
 			logger.Info("Terminating network")
 			os.Exit(-int(syscall.SIGINT))
@@ -212,72 +225,87 @@ func action(ctx *cli.Context) error {
 		}()
 	}
 
-	runCtx := devnet.WithCliContext(context.Background(), ctx)
-
 	if ctx.String(ChainFlag.Name) == networkname.DevChainName {
-		// the dev network currently inserts blocks very slowly when run in multi node mode - needs investigaton
-		// this effectively makes it a ingle node network by routing all traffic to node 0
-		// devnet.WithCurrentNode(devnet.WithCliContext(context.Background(), ctx), 0)
-		services.MaxNumberOfEmptyBlockChecks = 30
+		transactions.MaxNumberOfEmptyBlockChecks = 30
 	}
 
-	network.Run(
-		runCtx,
-		scenarios.Scenario{
-			Name: "all",
+	scenarioNames := ctx.String("scenarios")
+
+	scenarios.Scenarios{
+		"dynamic-tx-node-0": {
+			Context: scenarios.WithCurrentNode(0),
 			Steps: []*scenarios.Step{
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
 				{Text: "PingErigonRpc"},
 				{Text: "CheckTxPoolContent", Args: []any{0, 0, 0}},
-				{Text: "SendTxWithDynamicFee", Args: []any{recipientAddress, services.DevAddress, sendValue}},
+				{Text: "SendTxWithDynamicFee", Args: []any{recipientAddress, accounts.DevAddress, sendValue}},
 				{Text: "AwaitBlocks", Args: []any{2 * time.Second}},
 			},
-		})
+		},
+		"dynamic-tx-any-node": {
+			Steps: []*scenarios.Step{
+				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
+				{Text: "PingErigonRpc"},
+				{Text: "CheckTxPoolContent", Args: []any{0, 0, 0}},
+				{Text: "SendTxWithDynamicFee", Args: []any{recipientAddress, accounts.DevAddress, sendValue}},
+				{Text: "AwaitBlocks", Args: []any{2 * time.Second}},
+			},
+		},
+		"call-contract": {
+			Steps: []*scenarios.Step{
+				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
+				{Text: "DeployAndCallLogSubscriber", Args: []any{accounts.DevAddress}},
+			},
+		},
+	}.Run(networks[0].RunContext(ctx), strings.Split(scenarioNames, ",")...)
 
 	if metrics && len(diagnosticsUrl) > 0 {
 		logger.Info("Waiting")
-		network.Wait()
+		networks[0].Wait()
 	} else {
-		logger.Info("Stopping Network")
-		network.Stop()
+		logger.Info("Stopping Networks")
+		for _, network := range networks {
+			network.Stop()
+		}
 	}
 
 	return nil
 }
 
-func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error) {
+func selectNetworks(ctx *cli.Context, logger log.Logger) ([]*devnet.Network, error) {
 	dataDir := ctx.String(DataDirFlag.Name)
 	chain := ctx.String(ChainFlag.Name)
 
 	switch chain {
 	case networkname.BorDevnetChainName:
 		if ctx.Bool(WithoutHeimdallFlag.Name) {
-			return &devnet.Network{
-				DataDir:            dataDir,
-				Chain:              networkname.BorDevnetChainName,
-				Logger:             logger,
-				BasePrivateApiAddr: "localhost:10090",
-				BaseRPCHost:        "localhost",
-				BaseRPCPort:        8545,
-				//Snapshots:          true,
-				Nodes: []devnet.Node{
-					args.BlockProducer{
-						Node: args.Node{
-							ConsoleVerbosity: "0",
-							DirVerbosity:     "5",
-							WithoutHeimdall:  true,
+			return []*devnet.Network{
+				{
+					DataDir:            dataDir,
+					Chain:              networkname.BorDevnetChainName,
+					Logger:             logger,
+					BasePrivateApiAddr: "localhost:10090",
+					BaseRPCHost:        "localhost",
+					BaseRPCPort:        8545,
+					//Snapshots:          true,
+					Nodes: []devnet.Node{
+						args.BlockProducer{
+							Node: args.Node{
+								ConsoleVerbosity: "0",
+								DirVerbosity:     "5",
+								WithoutHeimdall:  true,
+							},
+							AccountSlots: 200,
 						},
-						AccountSlots: 200,
-					},
-					args.NonBlockProducer{
-						Node: args.Node{
-							ConsoleVerbosity: "0",
-							DirVerbosity:     "5",
-							WithoutHeimdall:  true,
+						args.NonBlockProducer{
+							Node: args.Node{
+								ConsoleVerbosity: "0",
+								DirVerbosity:     "5",
+								WithoutHeimdall:  true,
+							},
 						},
 					},
-				},
-			}, nil
+				}}, nil
 		} else {
 			var services []devnet.Service
 			var heimdallGrpc string
@@ -294,28 +322,80 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 				heimdallGrpc = bor.HeimdallGRpc(devnet.WithCliContext(context.Background(), ctx))
 			}
 
-			return &devnet.Network{
+			return []*devnet.Network{
+				{
+					DataDir:            dataDir,
+					Chain:              networkname.BorDevnetChainName,
+					Logger:             logger,
+					BasePrivateApiAddr: "localhost:10090",
+					BaseRPCHost:        "localhost",
+					BaseRPCPort:        8545,
+					Services:           services,
+					Nodes: []devnet.Node{
+						args.BlockProducer{
+							Node: args.Node{
+								ConsoleVerbosity: "0",
+								DirVerbosity:     "5",
+								HeimdallGRpc:     heimdallGrpc,
+							},
+							AccountSlots: 200,
+						},
+						args.BlockProducer{
+							Node: args.Node{
+								ConsoleVerbosity: "0",
+								DirVerbosity:     "5",
+								HeimdallGRpc:     heimdallGrpc,
+							},
+							AccountSlots: 200,
+						},
+						args.NonBlockProducer{
+							Node: args.Node{
+								ConsoleVerbosity: "0",
+								DirVerbosity:     "5",
+								HeimdallGRpc:     heimdallGrpc,
+							},
+						},
+					},
+				},
+				{
+					DataDir:            dataDir,
+					Chain:              networkname.DevChainName,
+					Logger:             logger,
+					BasePrivateApiAddr: "localhost:10190",
+					BaseRPCHost:        "localhost",
+					BaseRPCPort:        8645,
+					Nodes: []devnet.Node{
+						args.BlockProducer{
+							Node: args.Node{
+								ConsoleVerbosity: "0",
+								DirVerbosity:     "5",
+							},
+							AccountSlots: 200,
+						},
+						args.NonBlockProducer{
+							Node: args.Node{
+								ConsoleVerbosity: "0",
+								DirVerbosity:     "5",
+							},
+						},
+					},
+				}}, nil
+		}
+
+	case networkname.DevChainName:
+		return []*devnet.Network{
+			{
 				DataDir:            dataDir,
-				Chain:              networkname.BorDevnetChainName,
+				Chain:              networkname.DevChainName,
 				Logger:             logger,
 				BasePrivateApiAddr: "localhost:10090",
 				BaseRPCHost:        "localhost",
 				BaseRPCPort:        8545,
-				Services:           services,
 				Nodes: []devnet.Node{
 					args.BlockProducer{
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
-							HeimdallGRpc:     heimdallGrpc,
-						},
-						AccountSlots: 200,
-					},
-					args.BlockProducer{
-						Node: args.Node{
-							ConsoleVerbosity: "0",
-							DirVerbosity:     "5",
-							HeimdallGRpc:     heimdallGrpc,
 						},
 						AccountSlots: 200,
 					},
@@ -323,37 +403,10 @@ func selectNetwork(ctx *cli.Context, logger log.Logger) (*devnet.Network, error)
 						Node: args.Node{
 							ConsoleVerbosity: "0",
 							DirVerbosity:     "5",
-							HeimdallGRpc:     heimdallGrpc,
 						},
 					},
 				},
-			}, nil
-		}
-
-	case networkname.DevChainName:
-		return &devnet.Network{
-			DataDir:            dataDir,
-			Chain:              networkname.DevChainName,
-			Logger:             logger,
-			BasePrivateApiAddr: "localhost:10090",
-			BaseRPCHost:        "localhost",
-			BaseRPCPort:        8545,
-			Nodes: []devnet.Node{
-				args.BlockProducer{
-					Node: args.Node{
-						ConsoleVerbosity: "0",
-						DirVerbosity:     "5",
-					},
-					AccountSlots: 200,
-				},
-				args.NonBlockProducer{
-					Node: args.Node{
-						ConsoleVerbosity: "0",
-						DirVerbosity:     "5",
-					},
-				},
-			},
-		}, nil
+			}}, nil
 	}
 
 	return nil, fmt.Errorf(`Unknown network: "%s"`, chain)

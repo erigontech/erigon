@@ -217,6 +217,11 @@ func (s *suite) maybeSubSteps(ctx context.Context, result interface{}) (context.
 
 func (s *suite) runScenario(scenario *Scenario) (sr *ScenarioResult, err error) {
 	ctx := s.defaultContext
+
+	if scenario.Context != nil {
+		ctx = JoinContexts(scenario.Context, ctx)
+	}
+
 	if ctx == nil {
 		ctx = context.Background()
 	}

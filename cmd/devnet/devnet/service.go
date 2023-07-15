@@ -1,9 +1,9 @@
 package devnet
 
-import go_context "context"
+import context "context"
 
 type Service interface {
-	Start(context go_context.Context) error
+	Start(context context.Context) error
 	Stop()
 
 	NodeCreated(node Node)

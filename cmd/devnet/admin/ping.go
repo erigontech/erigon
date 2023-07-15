@@ -1,4 +1,4 @@
-package jsonrpc
+package admin
 
 import (
 	"context"

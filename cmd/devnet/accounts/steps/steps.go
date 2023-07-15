@@ -59,5 +59,5 @@ func GetNonce(ctx context.Context, address libcommon.Address) (uint64, error) {
 		return 0, fmt.Errorf("failed to get transaction count for address 0x%x: %v", address, err)
 	}
 
-	return uint64(res.Result), nil
+	return res.Uint64(), nil
 }

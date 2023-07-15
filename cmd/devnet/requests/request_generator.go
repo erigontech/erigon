@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -44,9 +45,9 @@ type RequestGenerator interface {
 	GetBlockByNumberDetails(blockNum string, withTxs bool) (map[string]interface{}, error)
 	GetBlockByNumber(blockNum uint64, withTxs bool) (EthBlockByNumber, error)
 	BlockNumber() (uint64, error)
-	GetTransactionCount(address libcommon.Address, blockNum BlockNumber) (EthGetTransactionCount, error)
+	GetTransactionCount(address libcommon.Address, blockNum BlockNumber) (*big.Int, error)
 	SendTransaction(signedTx types.Transaction) (*libcommon.Hash, error)
-	GetAndCompareLogs(fromBlock uint64, toBlock uint64, expected Log) error
+	GetLogs(fromBlock uint64, toBlock uint64, address libcommon.Address) ([]Log, error)
 	TxpoolContent() (int, int, int, error)
 }
 

@@ -74,6 +74,7 @@ func StepHandler(handler interface{}, matchExpressions ...string) stepHandler {
 }
 
 type Scenario struct {
+	Context     Context `json:"-"`
 	Id          string  `json:"id"`
 	Name        string  `json:"name"`
 	Description string  `json:"description,omitempty"`
@@ -147,4 +148,26 @@ func (c *stepRunner) Run(ctx context.Context, args []interface{}) (context.Conte
 	}
 
 	return ctx, results
+}
+
+type Scenarios map[string]Scenario
+
+func (s Scenarios) Run(ctx context.Context, scenarioNames ...string) error {
+	var scenarios []*Scenario
+
+	if len(scenarioNames) == 0 {
+		for name, scenario := range s {
+			scenario.Name = name
+			scenarios = append(scenarios, &scenario)
+		}
+	} else {
+		for _, name := range scenarioNames {
+			if scenario, ok := s[name]; ok {
+				scenario.Name = name
+				scenarios = append(scenarios, &scenario)
+			}
+		}
+	}
+
+	return Run(ctx, scenarios...)
 }

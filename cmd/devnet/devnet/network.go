@@ -1,7 +1,7 @@
 package devnet
 
 import (
-	go_context "context"
+	context "context"
 	"errors"
 	"fmt"
 	"net"
@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/log/v3"
@@ -44,7 +43,7 @@ func (nw *Network) Start(ctx *cli.Context) error {
 		Configure(baseNode args.Node, nodeNumber int) (int, interface{}, error)
 	}
 
-	serviceContext := WithCliContext(go_context.Background(), ctx)
+	serviceContext := WithCliContext(context.Background(), ctx)
 
 	for _, service := range nw.Services {
 		if err := service.Start(serviceContext); err != nil {
@@ -139,6 +138,8 @@ func (nw *Network) createNode(nodeAddr string, cfg interface{}) (Node, error) {
 		&nw.wg,
 		make(chan error),
 		nil,
+		nil,
+		nil,
 	}, nil
 }
 
@@ -227,8 +228,8 @@ func getEnode(n Node) (string, error) {
 	}
 }
 
-func (nw *Network) Run(ctx go_context.Context, scenario scenarios.Scenario) error {
-	return scenarios.Run(WithNetwork(ctx, nw), &scenario)
+func (nw *Network) RunContext(ctx *cli.Context) context.Context {
+	return WithNetwork(WithCliContext(context.Background(), ctx), nw)
 }
 
 func (nw *Network) Stop() {
@@ -263,7 +264,7 @@ func (nw *Network) FirstNode() Node {
 	return nw.Nodes[0]
 }
 
-func (nw *Network) SelectNode(ctx go_context.Context, selector interface{}) Node {
+func (nw *Network) SelectNode(ctx context.Context, selector interface{}) Node {
 	switch selector := selector.(type) {
 	case int:
 		if selector < len(nw.Nodes) {

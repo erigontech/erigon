@@ -8,6 +8,8 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
+const DevAddress = "0x67b1d87101671b127f5f8714789C7192f7ad340e"
+
 type Account struct {
 	Name    string
 	Address libcommon.Address
@@ -15,17 +17,7 @@ type Account struct {
 }
 
 func init() {
-	core.DevnetSignKey = func(address libcommon.Address) *ecdsa.PrivateKey {
-		if account, ok := accountsByAddress[address]; ok {
-			return account.sigKey
-		}
-
-		if address == core.DevnetEtherbase {
-			return core.DevnetSignPrivateKey
-		}
-
-		return nil
-	}
+	core.DevnetSignKey = SigKey
 }
 
 var accountsByAddress = map[libcommon.Address]*Account{}
@@ -48,4 +40,16 @@ func NewAccount(name string) *Account {
 	accountsByName[name] = account
 
 	return account
+}
+
+func SigKey(address libcommon.Address) *ecdsa.PrivateKey {
+	if account, ok := accountsByAddress[address]; ok {
+		return account.sigKey
+	}
+
+	if address == core.DevnetEtherbase {
+		return core.DevnetSignPrivateKey
+	}
+
+	return nil
 }

@@ -2,6 +2,7 @@ package args
 
 import (
 	"fmt"
+	"math/big"
 	"net"
 	"path/filepath"
 	"strconv"
@@ -45,11 +46,12 @@ type Node struct {
 }
 
 func (node *Node) configure(base Node, nodeNumber int) error {
-	node.DataDir = filepath.Join(base.DataDir, fmt.Sprintf("%d", nodeNumber))
 
 	if len(node.Name) == 0 {
-		node.Name = fmt.Sprintf("node-%d", nodeNumber)
+		node.Name = fmt.Sprintf("%s-%d", base.Chain, nodeNumber)
 	}
+
+	node.DataDir = filepath.Join(base.DataDir, node.Name)
 
 	node.LogDirPath = filepath.Join(base.DataDir, "logs")
 	node.LogDirPrefix = node.Name
@@ -81,6 +83,10 @@ func (node *Node) configure(base Node, nodeNumber int) error {
 	node.AuthRpcPort = apiPort + 4
 
 	return nil
+}
+
+func (node Node) ChainID() *big.Int {
+	return &big.Int{}
 }
 
 type BlockProducer struct {
