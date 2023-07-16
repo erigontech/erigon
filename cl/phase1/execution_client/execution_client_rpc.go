@@ -142,6 +142,21 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(finalized libcommon.Hash, head li
 	if err != nil && err.Error() == errContextExceeded {
 		return nil
 	}
+	if err != nil {
+		return err
+	}
 
-	return err
+	if forkChoiceResp.PayloadStatus == nil {
+		return fmt.Errorf("void forkChoiceResponse")
+	}
+
+	validationError := forkChoiceResp.PayloadStatus.ValidationError
+	if validationError != nil {
+		return validationError.Error()
+	}
+
+	if forkChoiceResp.PayloadStatus.Status != engine_types.ValidStatus {
+		return fmt.Errorf("status: %s", forkChoiceResp.PayloadStatus.Status)
+	}
+	return nil
 }

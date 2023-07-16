@@ -144,7 +144,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 						cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
 						cfg.forkChoice.GetEth1Hash(headRoot),
 					); err != nil {
-						log.Warn("Could send not forkchoice", "err", err)
+						log.Warn("Could not set forkchoice", "err", err)
 					}
 				}
 			}
