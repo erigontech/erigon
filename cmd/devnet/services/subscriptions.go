@@ -19,7 +19,7 @@ func init() {
 }
 
 var (
-	Subscriptions               *map[requests.SubMethod]*Subscription
+	Subscriptions *map[requests.SubMethod]*Subscription
 )
 
 // Subscription houses the client subscription, name and channel for its delivery

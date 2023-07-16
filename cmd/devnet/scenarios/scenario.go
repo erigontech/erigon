@@ -150,7 +150,7 @@ func (c *stepRunner) Run(ctx context.Context, args []interface{}) (context.Conte
 	return ctx, results
 }
 
-type Scenarios map[string]Scenario
+type Scenarios map[string]*Scenario
 
 func (s Scenarios) Run(ctx context.Context, scenarioNames ...string) error {
 	var scenarios []*Scenario
@@ -158,13 +158,13 @@ func (s Scenarios) Run(ctx context.Context, scenarioNames ...string) error {
 	if len(scenarioNames) == 0 {
 		for name, scenario := range s {
 			scenario.Name = name
-			scenarios = append(scenarios, &scenario)
+			scenarios = append(scenarios, scenario)
 		}
 	} else {
 		for _, name := range scenarioNames {
 			if scenario, ok := s[name]; ok {
 				scenario.Name = name
-				scenarios = append(scenarios, &scenario)
+				scenarios = append(scenarios, scenario)
 			}
 		}
 	}
