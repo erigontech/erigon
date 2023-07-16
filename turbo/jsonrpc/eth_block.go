@@ -224,7 +224,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	var borTx types.Transaction
 	var borTxHash common.Hash
 	if chainConfig.Bor != nil {
-		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, b)
+		borTx = rawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
 		if borTx != nil {
 			borTxHash = types.ComputeBorTxHash(b.NumberU64(), b.Hash())
 		}
@@ -283,9 +283,9 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	var borTx types.Transaction
 	var borTxHash common.Hash
 	if chainConfig.Bor != nil {
-		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, block)
+		borTx = rawdb.ReadBorTransactionForBlock(tx, number)
 		if borTx != nil {
-			borTxHash = types.ComputeBorTxHash(block.NumberU64(), block.Hash())
+			borTxHash = types.ComputeBorTxHash(number, block.Hash())
 		}
 	}
 

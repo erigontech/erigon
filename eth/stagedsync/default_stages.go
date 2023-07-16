@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersCfg, cumulativeIndex CumulativeIndexCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
@@ -41,19 +41,6 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return HeadersPrune(p, tx, headers, ctx)
-			},
-		},
-		{
-			ID:          stages.CumulativeIndex,
-			Description: "Write Cumulative Index",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnStageCumulativeIndex(cumulativeIndex, s, tx, ctx, logger)
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
-				return UnwindCumulativeIndexStage(u, cumulativeIndex, tx, ctx)
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneCumulativeIndexStage(p, tx, ctx)
 			},
 		},
 		{
@@ -316,7 +303,6 @@ var DefaultForwardOrder = UnwindOrder{
 	// Stages below don't use Internet
 	stages.Senders,
 	stages.Execution,
-	stages.Translation,
 	stages.HashState,
 	stages.IntermediateHashes,
 	stages.CallTraces,
@@ -346,7 +332,6 @@ var DefaultUnwindOrder = UnwindOrder{
 	stages.HashState,
 	stages.IntermediateHashes,
 
-	stages.Translation,
 	stages.Execution,
 	stages.Senders,
 
@@ -378,7 +363,6 @@ var DefaultPruneOrder = PruneOrder{
 	stages.HashState,
 	stages.IntermediateHashes,
 
-	stages.Translation,
 	stages.Execution,
 	stages.Senders,
 
