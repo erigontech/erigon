@@ -602,17 +602,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err = agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
-	fmt.Printf("is canceled? %s\n", ctx.Err())
-
-	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
-		return err
-	}
-	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteSnapshots(tx, snapshots.Files(), agg.Files())
-	}); err != nil {
-		return err
-	}
-	logger.Info("Prune state history")
 	for i := 0; i < 10; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
@@ -629,6 +618,19 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			return err
 		}
 	}
+
+	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
+		return err
+	}
+	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
+		return err
+	}
+	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteSnapshots(tx, snapshots.Files(), agg.Files())
+	}); err != nil {
+		return err
+	}
+	logger.Info("Prune state history")
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return rawdb.WriteSnapshots(tx, snapshots.Files(), agg.Files())
 	}); err != nil {
