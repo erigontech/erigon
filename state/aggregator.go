@@ -557,7 +557,6 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 	}()
 
 	for err := range errCh {
-		a.logger.Warn("domain collate-buildFiles failed", "err", err)
 		return fmt.Errorf("domain collate-build failed: %w", err)
 	}
 

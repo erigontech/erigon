@@ -575,7 +575,6 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 
 	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
-		log.Warn("domain collate-buildFiles failed", "err", err)
 		return fmt.Errorf("domain collate-build failed: %w", err)
 	}
 	mxStepTook.UpdateDuration(stepStartedAt)
