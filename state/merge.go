@@ -333,14 +333,16 @@ func (ic *InvertedIndexContext) maxColdStep() uint64 {
 	return ic.maxTxNumInFiles(true) / ic.ii.aggregationStep
 }
 func (ic *InvertedIndexContext) minWarmStep() uint64 {
-	cold, warm := ic.maxColdStep(), ic.maxWarmStep()
-	if cold == warm {
-		return cold
-	}
-	if cold == 0 {
-		return 0
-	}
-	return cold + 1
+	fmt.Printf("minWarmStep: %d, %d\n", ic.maxColdStep(), ic.maxWarmStep())
+	return ic.maxColdStep()
+	//cold, warm := ic.maxColdStep(), ic.maxWarmStep()
+	//if cold == warm {
+	//	return cold
+	//}
+	//if cold == 0 {
+	//	return 0
+	//}
+	//return cold + 1
 }
 func (ic *InvertedIndexContext) maxWarmStep() uint64 {
 	return ic.maxTxNumInFiles(false) / ic.ii.aggregationStep

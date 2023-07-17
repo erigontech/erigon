@@ -379,6 +379,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			maxPossibleValue = int(it.FilesAmount())
 			baseDataID = uint64(0)
 		}
+		fmt.Printf("buil: %s, %d,%d\n", fName, count, baseDataID)
 		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, maxPossibleValue, baseDataID, uint64(count), li.logger)
 		if err != nil {
 			return nil, err
@@ -575,6 +576,7 @@ func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64, las
 		if item.endTxNum <= fromTxNum || item.startTxNum >= toTxNum {
 			continue
 		}
+		fmt.Printf("add to iter:%s, %d-%d\n", item.src.decompressor.FileName(), fromStep, toStep)
 		if assert.Enable {
 			if (item.endTxNum-item.startTxNum)/si.aggStep != StepsInColdFile {
 				panic(fmt.Errorf("frozen file of small size: %s", item.src.decompressor.FileName()))
