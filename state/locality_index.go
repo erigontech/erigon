@@ -138,7 +138,6 @@ func (li *LocalityIndex) scanStateFiles(fNames []string) (uselessFiles []*filesI
 			(li.preferSmallerFiles && li.file.endTxNum == endTxNum && li.file.startTxNum < startTxNum) ||
 			(!li.preferSmallerFiles && li.file.startTxNum == startTxNum && li.file.endTxNum < endTxNum)
 		if useThisFile {
-			fmt.Printf("open li: %s, %t\n", name, li.preferSmallerFiles)
 			li.file = newFilesItem(startTxNum, endTxNum, li.aggregationStep)
 			li.file.frozen = false // LocalityIndex files are never frozen
 		}
