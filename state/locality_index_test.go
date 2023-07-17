@@ -40,18 +40,13 @@ func TestLocality(t *testing.T) {
 
 	{ //prepare
 		ii.withLocalityIndex = true
-		var err error
-		ii.warmLocalityIdx, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
-		require.NoError(err)
-		ii.coldLocalityIdx, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
-		require.NoError(err)
+		require.NoError(ii.enableLocalityIndex())
 
 		ic := ii.MakeContext()
 		g := &errgroup.Group{}
 		ii.BuildMissedIndices(ctx, g, background.NewProgressSet())
 		require.NoError(g.Wait())
-		err = ic.BuildOptionalMissedIndices(ctx, background.NewProgressSet())
-		require.NoError(err)
+		require.NoError(ic.BuildOptionalMissedIndices(ctx, background.NewProgressSet()))
 		ic.Close()
 	}
 
@@ -137,18 +132,13 @@ func TestLocalityDomain(t *testing.T) {
 
 	{ //prepare
 		dom.withLocalityIndex = true
-		var err error
-		dom.warmLocalityIdx, err = NewLocalityIndex(dom.dir, dom.tmpdir, dom.aggregationStep, dom.filenameBase, dom.logger)
-		require.NoError(err)
-		dom.coldLocalityIdx, err = NewLocalityIndex(dom.dir, dom.tmpdir, dom.aggregationStep, dom.filenameBase, dom.logger)
-		require.NoError(err)
+		require.NoError(dom.enableLocalityIndex())
 
 		dc := dom.MakeContext()
 		g := &errgroup.Group{}
 		dom.BuildMissedIndices(ctx, g, background.NewProgressSet())
-		require.NoError(err)
 		require.NoError(g.Wait())
-		err = dc.BuildOptionalMissedIndices(ctx, background.NewProgressSet())
+		err := dc.BuildOptionalMissedIndices(ctx, background.NewProgressSet())
 		require.NoError(err)
 		dc.Close()
 	}

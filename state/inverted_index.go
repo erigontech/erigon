@@ -113,17 +113,24 @@ func NewInvertedIndex(
 	ii.roFiles.Store(&[]ctxItem{})
 
 	if ii.withLocalityIndex {
-		var err error
-		ii.warmLocalityIdx, err = NewLocalityIndex(ii.warmDir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
-		if err != nil {
-			return nil, fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
-		}
-		ii.coldLocalityIdx, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase, ii.logger)
-		if err != nil {
-			return nil, fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
+		if err := ii.enableLocalityIndex(); err != nil {
+			return nil, err
 		}
 	}
 	return &ii, nil
+}
+
+func (ii *InvertedIndex) enableLocalityIndex() error {
+	var err error
+	ii.warmLocalityIdx, err = NewLocalityIndex(true, ii.warmDir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.logger)
+	if err != nil {
+		return fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
+	}
+	ii.coldLocalityIdx, err = NewLocalityIndex(false, ii.dir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.logger)
+	if err != nil {
+		return fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
+	}
+	return nil
 }
 
 func (ii *InvertedIndex) fileNamesOnDisk() ([]string, []string, error) {
@@ -319,10 +326,12 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 	}
 
 	if ii.withLocalityIndex && ii.warmLocalityIdx != nil {
+		fmt.Printf("trying build1\n")
 		g.Go(func() error {
 			ic := ii.MakeContext()
 			defer ic.Close()
 			from, to := ic.minWarmStep(), ic.maxWarmStep()
+			fmt.Printf("trying build2: %d-%d\n", from, to)
 			if from == to || ic.ii.warmLocalityIdx.exists(from, to) {
 				return nil
 			}

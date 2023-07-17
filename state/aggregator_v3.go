@@ -348,6 +348,12 @@ func (ac *AggregatorV3Context) BuildOptionalMissedIndices(ctx context.Context, w
 }
 
 func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) error {
+	ac := a.MakeContext()
+	defer ac.Close()
+	if err := ac.BuildOptionalMissedIndices(ctx, workers); err != nil {
+		return err
+	}
+
 	startIndexingTime := time.Now()
 	{
 		ps := background.NewProgressSet()
@@ -384,10 +390,7 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 			return err
 		}
 	}
-
-	ac := a.MakeContext()
-	defer ac.Close()
-	return ac.BuildOptionalMissedIndices(ctx, workers)
+	return nil
 }
 
 func (a *AggregatorV3) SetLogPrefix(v string) { a.logPrefix = v }

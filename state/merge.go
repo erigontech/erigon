@@ -56,6 +56,12 @@ func (ii *InvertedIndex) endTxNumMinimax() uint64 {
 			minimax = endTxNum
 		}
 	}
+	if ii.warmLocalityIdx != nil {
+		fmt.Printf("ii: %s, %t\n", ii.filenameBase, ii.warmLocalityIdx.file != nil)
+	}
+	if ii.warmLocalityIdx != nil && ii.warmLocalityIdx.file != nil {
+		fmt.Printf("ii: %s, %d, %s\n", ii.filenameBase, minimax, ii.warmLocalityIdx.bm.FileName())
+	}
 	return minimax
 }
 func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {

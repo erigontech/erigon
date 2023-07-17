@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -48,6 +49,11 @@ type LocalityIndex struct {
 	dir, tmpdir     string // Directory where static files are created
 	aggregationStep uint64 // immutable
 
+	// preferSmallerFiles forcing files like `32-40.l` have higher priority than `0-40.l`.
+	// It's used by "warm data indexing": new small "warm index" created after old data
+	// merged and indexed by "cold index"
+	preferSmallerFiles bool
+
 	file *filesItem
 	bm   *bitmapdb.FixedSizeBitmaps
 
@@ -58,18 +64,14 @@ type LocalityIndex struct {
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
-func NewLocalityIndex(
-	dir, tmpdir string,
-	aggregationStep uint64,
-	filenameBase string,
-	logger log.Logger,
-) (*LocalityIndex, error) {
+func NewLocalityIndex(preferSmallerFiles bool, dir, filenameBase string, aggregationStep uint64, tmpdir string, logger log.Logger) (*LocalityIndex, error) {
 	li := &LocalityIndex{
-		dir:             dir,
-		tmpdir:          tmpdir,
-		aggregationStep: aggregationStep,
-		filenameBase:    filenameBase,
-		logger:          logger,
+		dir:                dir,
+		tmpdir:             tmpdir,
+		aggregationStep:    aggregationStep,
+		filenameBase:       filenameBase,
+		logger:             logger,
+		preferSmallerFiles: preferSmallerFiles,
 	}
 	return li, nil
 }
@@ -133,11 +135,12 @@ func (li *LocalityIndex) scanStateFiles(fNames []string) (uselessFiles []*filesI
 		}
 
 		startTxNum, endTxNum := startStep*li.aggregationStep, endStep*li.aggregationStep
-		if li.file == nil {
-			li.file = newFilesItem(startTxNum, endTxNum, li.aggregationStep)
-			li.file.frozen = false // LocalityIndex files are never frozen
-		} else if li.file.endTxNum < endTxNum {
-			uselessFiles = append(uselessFiles, li.file)
+		useThisFile := li.file == nil ||
+			(li.file.endTxNum < endTxNum) || // newer
+			(li.preferSmallerFiles && li.file.endTxNum == endTxNum && li.file.startTxNum < startTxNum) ||
+			(!li.preferSmallerFiles && li.file.startTxNum == startTxNum && li.file.endTxNum < endTxNum)
+		if useThisFile {
+			fmt.Printf("open li: %s, %t\n", name, li.preferSmallerFiles)
 			li.file = newFilesItem(startTxNum, endTxNum, li.aggregationStep)
 			li.file.frozen = false // LocalityIndex files are never frozen
 		}
@@ -393,6 +396,9 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		defer it.Close()
 		for it.HasNext() {
 			k, inSteps := it.Next()
+			if bytes.HasPrefix(k, common.FromHex("1050")) {
+				fmt.Printf("build: %x, %d\n", k, inSteps)
+			}
 
 			if convertStepsToFileNums {
 				for j := range inSteps {

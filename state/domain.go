@@ -1443,6 +1443,54 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 	return v, found, nil
 }
 
+func (dc *DomainContext) getLatestFromFiles2(filekey []byte) (v []byte, found bool, err error) {
+	dc.d.stats.FilesQueries.Add(1)
+
+	// find what has LocalityIndex
+	lastIndexedTxNum := dc.hc.ic.coldLocality.indexedTo()
+	// grind non-indexed files
+	var ok bool
+	for i := len(dc.files) - 1; i >= 0; i-- {
+		if dc.files[i].src.endTxNum <= lastIndexedTxNum {
+			break
+		}
+
+		dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
+		if err != nil {
+			return nil, false, err
+		}
+		if !ok {
+			continue
+		}
+		found = true
+		if bytes.HasPrefix(filekey, common.FromHex("1050")) {
+			fmt.Printf("k1: %x, %t, %s\n", filekey, found, dc.files[i].src.decompressor.FileName())
+		}
+		if COMPARE_INDEXES {
+			rd := recsplit.NewIndexReader(dc.files[i].src.index)
+			oft := rd.Lookup(filekey)
+			gt := dc.statelessGetter(i)
+			gt.Reset(oft)
+			var kk, vv []byte
+			if gt.HasNext() {
+				kk, _ = gt.Next(nil)
+				vv, _ = gt.Next(nil)
+			}
+			fmt.Printf("key: %x, val: %x\n", kk, vv)
+			if !bytes.Equal(vv, v) {
+				panic("not equal")
+			}
+		}
+
+		if found {
+			return common.Copy(dc.vBuf), true, nil
+		}
+		return nil, false, nil
+	}
+
+	// still not found, search in indexed cold shards
+	return dc.getLatestFromColdFiles(filekey)
+}
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 
@@ -1490,6 +1538,9 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 	if err != nil {
 		return nil, false, err
 	}
+	//if bytes.HasPrefix(filekey, common.FromHex("1050")) {
+	//	fmt.Printf("k1: %x, %d, %t, %s, %s\n", filekey, exactWarmStep, ok, dc.hc.ic.warmLocality.bm.FileName(), dc.hc.ic.ii.warmLocalityIdx.file.index.FileName())
+	//}
 	if !ok {
 		return nil, false, nil
 	}
@@ -1703,6 +1754,10 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 	v, err := roTx.GetOne(dc.d.valsTable, dc.keyBuf[:len(key)+8])
 	if err != nil {
 		return nil, false, err
+	}
+
+	if bytes.HasPrefix(key, common.FromHex("1050")) {
+		fmt.Printf("k: %x, %d, %d -> %x, %x\n", key, ^binary.BigEndian.Uint64(foundInvStep), dc.d.txNum/dc.d.aggregationStep, dc.keyBuf[:len(key)+8], v)
 	}
 	return v, true, nil
 }
