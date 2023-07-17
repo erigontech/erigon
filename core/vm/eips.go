@@ -28,6 +28,7 @@ import (
 )
 
 var activators = map[int]func(*JumpTable){
+	5656: enable5656,
 	4844: enable4844,
 	3860: enable3860,
 	3855: enable3855,
@@ -262,5 +263,31 @@ func opDataHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	} else {
 		idx.Clear()
 	}
+	return nil, nil
+}
+
+// enable5656 enables EIP-5656 (MCOPY opcode)
+// https://eips.ethereum.org/EIPS/eip-5656
+func enable5656(jt *JumpTable) {
+	jt[MCOPY] = &operation{
+		execute:     opMcopy,
+		constantGas: GasFastestStep,
+		dynamicGas:  gasMcopy,
+		numPop:      3,
+		numPush:     0,
+		memorySize:  memoryMcopy,
+	}
+}
+
+// opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
+func opMcopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	var (
+		dst    = scope.Stack.Pop()
+		src    = scope.Stack.Pop()
+		length = scope.Stack.Pop()
+	)
+	// These values are checked for overflow during memory expansion calculation
+	// (the memorySize function on the opcode).
+	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
 	return nil, nil
 }

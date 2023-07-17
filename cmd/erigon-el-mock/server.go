@@ -102,12 +102,12 @@ type canonicalEntry struct {
 	number uint64
 }
 
-func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256) (*execution.ForkChoiceReceipt, error) {
+func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, fcu *execution.ForkChoice) (*execution.ForkChoiceReceipt, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return &execution.ForkChoiceReceipt{
-		LatestValidHash: hash,
-		Success:         true,
+		LatestValidHash: fcu.HeadBlockHash,
+		Status:          execution.ValidationStatus_Success,
 	}, nil
 }
 
