@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -13,11 +14,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
+	"github.com/ledgerwatch/erigon-lib/etl"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -550,6 +553,16 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		require.Nil(t, cur)
 	})
 
+	c, err := bt.Seek(nil)
+	require.NoError(t, err)
+	for i := 0; i < len(keys); i++ {
+		k := c.Key()
+		if !bytes.Equal(keys[i], k) {
+			fmt.Printf("\tinvalid, want %x\n", keys[i])
+		}
+		c.Next()
+	}
+
 	for i := 0; i < len(keys); i++ {
 		cur, err := bt.Seek(keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
@@ -619,21 +632,34 @@ func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCoun
 	comp, err := compress.NewCompressor(context.Background(), "cmp", dataPath, tmp, compress.MinPatternScore, 1, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
+	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(datasize.KB*8), logger)
+
 	for i := 0; i < keyCount; i++ {
 		key := make([]byte, keySize)
 		n, err := rnd.Read(key[:])
 		require.EqualValues(tb, keySize, n)
 		binary.BigEndian.PutUint64(key[keySize-8:], uint64(i))
 		require.NoError(tb, err)
-		err = comp.AddWord(key[:])
-		require.NoError(tb, err)
 
 		n, err = rnd.Read(values[:rnd.Intn(valueSize)+1])
 		require.NoError(tb, err)
 
-		err = comp.AddWord(values[:n])
+		err = collector.Collect(key, values[:n])
 		require.NoError(tb, err)
 	}
+
+	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		err = comp.AddWord(k)
+		require.NoError(tb, err)
+		err = comp.AddWord(v)
+		require.NoError(tb, err)
+		return nil
+	}
+
+	err = collector.Load(nil, "", loader, etl.TransformArgs{})
+	require.NoError(tb, err)
+
+	collector.Close()
 
 	err = comp.Compress()
 	require.NoError(tb, err)
