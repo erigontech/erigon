@@ -380,21 +380,20 @@ func (hc *HistoryContext) maxTxNumInFiles(cold bool) uint64 {
 	}
 	return cmp.Min(max, hc.ic.maxTxNumInFiles(cold))
 }
-func (ic *InvertedIndexContext) maxTxNumInFiles(forceCold bool) uint64 {
+func (ic *InvertedIndexContext) maxTxNumInFiles(cold bool) uint64 {
 	if len(ic.files) == 0 {
 		return 0
 	}
-	if forceCold {
-		for i := len(ic.files) - 1; i >= 0; i-- {
-			if !ic.files[i].src.frozen {
-				continue
-			}
-			return ic.files[i].endTxNum
-		}
-		return 0
+	if !cold {
+		return ic.files[len(ic.files)-1].endTxNum
 	}
-
-	return ic.files[len(ic.files)-1].endTxNum
+	for i := len(ic.files) - 1; i >= 0; i-- {
+		if !ic.files[i].src.frozen {
+			continue
+		}
+		return ic.files[i].endTxNum
+	}
+	return 0
 }
 
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)

@@ -1428,9 +1428,6 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		var txKey [8]byte
 		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
 		reader := hc.statelessIdxReader(historyItem.i)
-		if reader.Empty() {
-			return nil, false, nil
-		}
 		offset := reader.Lookup2(txKey[:], key)
 		//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
 		g := hc.statelessGetter(historyItem.i)
