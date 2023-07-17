@@ -276,6 +276,14 @@ func New(
 		}
 		opts = append(opts, libp2p.ResourceManager(rmgr))
 	}
+
+	gater, err := NewGater(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	opts = append(opts, libp2p.ConnectionGater(gater))
+
 	host, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, err
