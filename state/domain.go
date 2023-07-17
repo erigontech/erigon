@@ -881,7 +881,6 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	}(); err != nil {
 		return Collation{}, fmt.Errorf("iterate over %s keys cursor: %w", d.filenameBase, err)
 	}
-
 	if err := eg.Wait(); err != nil {
 		return Collation{}, fmt.Errorf("collate over %s keys cursor: %w", d.filenameBase, err)
 	}
