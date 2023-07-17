@@ -27,7 +27,7 @@ func (c *chainCfg) configs() (beaconConfig *clparams.BeaconChainConfig, genesisC
 }
 
 type outputFolder struct {
-	Output string `help:"where to output to, defaults to current directory" default:"." short:"o"`
+	Output string `help:"where to output to, defaults to tmp directory" default:"/tmp" short:"o"`
 }
 
 type withSentinel struct {
@@ -64,7 +64,17 @@ func (b *Blocks) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
+
+	err = beacon.SetStatus(
+		genesisConfig.GenesisValidatorRoot,
+		beaconConfig.GenesisEpoch,
+		genesisConfig.GenesisValidatorRoot,
+		beaconConfig.GenesisSlot)
+	if err != nil {
+		return err
+	}
 	resp, _, err := beacon.SendBeaconBlocksByRangeReq(ctx, uint64(b.FromBlock), uint64(b.ToBlock))
 	if err != nil {
 		return fmt.Errorf("error get beacon blocks: %w", err)
@@ -73,11 +83,10 @@ func (b *Blocks) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	d.MkdirAll("", 0o640)
 	for _, vv := range resp {
 		v := vv
 		err := func() error {
-			fname := fmt.Sprintf("%16x_b.ssz", v.Block.Slot)
+			fname := fmt.Sprintf("b%08d.ssz", v.Block.Slot)
 			info, err := d.Stat(fname)
 			if err == nil {
 				if info.Size() > 0 {
@@ -88,7 +97,7 @@ func (b *Blocks) Run(ctx *Context) error {
 			if err != nil {
 				return err
 			}
-			fp, err := d.OpenFile(fname, os.O_CREATE|os.O_TRUNC, 0o640)
+			fp, err := d.Create(fname)
 			if err != nil {
 				return err
 			}
