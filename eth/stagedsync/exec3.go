@@ -828,17 +828,22 @@ Loop:
 		}
 	}
 
-	if !dbg.DiscardCommitment() {
-		rh, err := agg.ComputeCommitment(true, false)
-		if err != nil {
-			log.Error("commitment after ExecV3 failed", "err", err)
-		}
-		if !bytes.Equal(rh, b.HeaderNoCopy().Root.Bytes()) {
-			log.Error("commitment after ExecV3 mismatch", "computed", fmt.Sprintf("%x", rh), "expected (from header)", fmt.Sprintf("%x", b.HeaderNoCopy().Root.Bytes()))
-		}
-	}
 	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
 
+	if !dbg.DiscardCommitment() {
+		//_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
+		//if err != nil {
+		//	return err
+		//}
+		rh, err := agg.ComputeCommitment(true, false)
+		if err != nil {
+			return fmt.Errorf("StateV3.Apply: %w", err)
+		}
+		if !bytes.Equal(rh, b.HeaderNoCopy().Root.Bytes()) {
+			fmt.Printf("Expected uniwnd to somewhere\n\n")
+			// unwind is coming after, instead of calling unwind from checkCommitmentV3
+		}
+	}
 	if parallel {
 		logger.Warn("[dbg] all txs sent")
 		if err := rwLoopG.Wait(); err != nil {
