@@ -2,7 +2,6 @@ package state
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -85,7 +84,6 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			h.integrateMergedFiles(nil, []*filesItem{lastOnFs}, nil, nil)
 
-			fmt.Printf("a: %s\n", lastOnFs.decompressor.FileName())
 			require.NotNil(lastOnFs.decompressor)
 			hc.Close()
 			require.Nil(lastOnFs.decompressor)
