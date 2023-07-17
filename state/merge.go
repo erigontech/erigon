@@ -337,6 +337,9 @@ func (ic *InvertedIndexContext) minWarmStep() uint64 {
 	if cold == warm {
 		return cold
 	}
+	//if cold == 0 {
+	//	return 0
+	//}
 	return cold + 1
 }
 func (ic *InvertedIndexContext) maxWarmStep() uint64 {

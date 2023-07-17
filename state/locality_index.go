@@ -297,6 +297,10 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 	if lc.reader == nil {
 		lc.reader = recsplit.NewIndexReader(lc.file.src.index)
 	}
+	if lc.reader.Empty() {
+		fmt.Printf("empty: %s, %s\n", lc.file.src.index.FileName(), lc.bm.FileName())
+		return 0, false, nil
+	}
 	return lc.bm.LastAt(lc.reader.Lookup(key))
 }
 
@@ -375,6 +379,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			maxPossibleValue = int(it.FilesAmount())
 			baseDataID = uint64(0)
 		}
+		fmt.Printf("buil: %s, %d\n", fName, count)
 		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, maxPossibleValue, baseDataID, uint64(count), li.logger)
 		if err != nil {
 			return nil, err

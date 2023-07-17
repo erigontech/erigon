@@ -544,7 +544,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 		d := d
 		var collation map[string]*roaring64.Bitmap
 		var err error
-		collation, err = d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, roTx)
+		collation, err = d.collate(ctx, step, step+1, roTx)
 		if err != nil {
 			return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
 		}

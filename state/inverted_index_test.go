@@ -97,7 +97,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	bs, err := ii.collate(ctx, 0, 7, roTx)
+	bs, err := ii.collate(ctx, 0, 1, roTx)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(bs))
 	require.Equal(t, []uint64{3}, bs["key2"].ToArray())
@@ -175,7 +175,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	bs, err := ii.collate(ctx, 0, 16, roTx)
+	bs, err := ii.collate(ctx, 0, 1, roTx)
 	require.NoError(t, err)
 
 	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
@@ -357,7 +357,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
 		func() {
-			bs, err := ii.collate(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, tx)
+			bs, err := ii.collate(ctx, step, step+1, tx)
 			require.NoError(tb, err)
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(tb, err)

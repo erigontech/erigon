@@ -499,7 +499,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 
 		mxRunningCollations.Inc()
 		start := time.Now()
-		collation, err := d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, d.tx)
+		collation, err := d.collate(ctx, step, step+1, d.tx)
 		mxRunningCollations.Dec()
 		mxCollateTook.UpdateDuration(start)
 
