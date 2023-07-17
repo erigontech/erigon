@@ -316,7 +316,7 @@ func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context, 
 		if to == 0 || ic.ii.coldLocalityIdx.exists(from, to) {
 			return nil
 		}
-		if err := ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, from, to, true, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to, nil, to) }); err != nil {
+		if err := ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, from, to, true, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to, nil) }); err != nil {
 			return err
 		}
 	}
@@ -380,20 +380,21 @@ func (hc *HistoryContext) maxTxNumInFiles(cold bool) uint64 {
 	}
 	return cmp.Min(max, hc.ic.maxTxNumInFiles(cold))
 }
-func (ic *InvertedIndexContext) maxTxNumInFiles(cold bool) uint64 {
+func (ic *InvertedIndexContext) maxTxNumInFiles(forceCold bool) uint64 {
 	if len(ic.files) == 0 {
 		return 0
 	}
-	if !cold {
-		return ic.files[len(ic.files)-1].endTxNum
-	}
-	for i := len(ic.files) - 1; i >= 0; i-- {
-		if !ic.files[i].src.frozen {
-			continue
+	if forceCold {
+		for i := len(ic.files) - 1; i >= 0; i-- {
+			if !ic.files[i].src.frozen {
+				continue
+			}
+			return ic.files[i].endTxNum
 		}
-		return ic.files[i].endTxNum
+		return 0
 	}
-	return 0
+
+	return ic.files[len(ic.files)-1].endTxNum
 }
 
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)

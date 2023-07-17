@@ -52,7 +52,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 
 			require.NotNil(lastOnFs.decompressor)
 			loc := hc.ic.coldLocality // replace of locality index must not affect current HistoryContext, but expect to be closed after last reader
-			h.coldLocalityIdx.integrateFiles(LocalityIndexFiles{}, 0, 0)
+			h.coldLocalityIdx.integrateFiles(&LocalityIndexFiles{})
 			require.NotNil(loc.file)
 			hc.Close()
 			require.Nil(lastOnFs.decompressor)

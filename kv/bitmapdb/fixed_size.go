@@ -299,6 +299,9 @@ func (w *FixedSizeBitmapsWriter) AddArray(item uint64, listOfValues []uint64) er
 	}
 	offset := item * w.bitsPerBitmap
 	for _, v := range listOfValues {
+		if v < w.baseDataID { //uint-underflow protection
+			return fmt.Errorf("too small value: %d < %d, %s", v, w.baseDataID, w.fileName)
+		}
 		v = v - w.baseDataID
 		if v > w.bitsPerBitmap {
 			return fmt.Errorf("too big value: %d > %d, %s", v, w.bitsPerBitmap, w.fileName)

@@ -826,23 +826,23 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (a *AggregatorV3Context) maxTxNumInFiles(frozen bool) uint64 {
+func (a *AggregatorV3Context) maxTxNumInFiles(cold bool) uint64 {
 	return cmp.Min(
 		cmp.Min(
 			cmp.Min(
-				a.accounts.maxTxNumInFiles(frozen),
-				a.code.maxTxNumInFiles(frozen)),
+				a.accounts.maxTxNumInFiles(cold),
+				a.code.maxTxNumInFiles(cold)),
 			cmp.Min(
-				a.storage.maxTxNumInFiles(frozen),
-				a.commitment.maxTxNumInFiles(frozen)),
+				a.storage.maxTxNumInFiles(cold),
+				a.commitment.maxTxNumInFiles(cold)),
 		),
 		cmp.Min(
 			cmp.Min(
-				a.logAddrs.maxTxNumInFiles(frozen),
-				a.logTopics.maxTxNumInFiles(frozen)),
+				a.logAddrs.maxTxNumInFiles(cold),
+				a.logTopics.maxTxNumInFiles(cold)),
 			cmp.Min(
-				a.tracesFrom.maxTxNumInFiles(frozen),
-				a.tracesTo.maxTxNumInFiles(frozen)),
+				a.tracesFrom.maxTxNumInFiles(cold),
+				a.tracesTo.maxTxNumInFiles(cold)),
 		),
 	)
 }

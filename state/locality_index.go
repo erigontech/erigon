@@ -321,6 +321,10 @@ func (li *LocalityIndex) missedIdxFiles(ii *HistoryContext) (toStep uint64, idxE
 	return toStep, dir.FileExist(filepath.Join(li.dir, fName))
 }
 func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, ps *background.ProgressSet, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
+	if toStep < fromStep {
+		return nil, fmt.Errorf("LocalityIndex.buildFiles: fromStep(%d) < toStep(%d)", fromStep, toStep)
+	}
+
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -338,17 +342,11 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		return nil, nil
 	}
 
-	defer func(t time.Time) {
-		li.logger.Info(fmt.Sprintf("locality_index with count, took: %s: %s", time.Since(t), fName))
-	}(time.Now())
 	for it.HasNext() {
 		_, _ = it.Next()
 		count++
 	}
 	it.Close()
-	defer func(t time.Time) {
-		li.logger.Info(fmt.Sprintf("locality_index, took: %s: %s", time.Since(t), fName))
-	}(time.Now())
 
 	p.Total.Store(uint64(count))
 
@@ -397,7 +395,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 				}
 			}
 
-			//fmt.Printf("buld: %x, %d, %d\n", k, i, inFiles)
+			//wrintf("buld: %x, %d, %d\n", k, i, inFiles)
 			if err := dense.AddArray(i, inSteps); err != nil {
 				return nil, err
 			}
@@ -448,7 +446,6 @@ func (li *LocalityIndex) integrateFiles(sf *LocalityIndexFiles) {
 	if sf == nil || li == nil {
 		return
 	}
-	fmt.Printf("integrate: %s\n", sf.bm.FileName())
 	if li.file != nil {
 		li.file.canDelete.Store(true)
 	}
@@ -517,8 +514,6 @@ func (si *LocalityIterator) advance() {
 			heap.Push(&si.h, top)
 		}
 
-		//inFile := in
-
 		if si.k == nil {
 			si.k = key
 			si.v = append(si.v, inStep)
@@ -567,7 +562,7 @@ func (si *LocalityIterator) Close() {
 }
 
 // iterateKeysLocality [from, to)
-func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64, last *compress.Decompressor, lastStep uint64) *LocalityIterator {
+func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64, last *compress.Decompressor) *LocalityIterator {
 	toTxNum := toStep * ic.ii.aggregationStep
 	fromTxNum := fromStep * ic.ii.aggregationStep
 	si := &LocalityIterator{aggStep: ic.ii.aggregationStep, compressVals: false}
@@ -603,8 +598,8 @@ func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64, las
 		if g.HasNext() {
 			key, offset := g.NextUncompressed()
 
-			endTxNum := (lastStep + 1) * ic.ii.aggregationStep
-			heapItem := &ReconItem{startTxNum: lastStep * ic.ii.aggregationStep, endTxNum: endTxNum, g: g, txNum: ^endTxNum, key: key, startOffset: offset, lastOffset: offset}
+			endTxNum := (toStep + 1) * ic.ii.aggregationStep
+			heapItem := &ReconItem{startTxNum: toStep * ic.ii.aggregationStep, endTxNum: endTxNum, g: g, txNum: ^endTxNum, key: key, startOffset: offset, lastOffset: offset}
 			heap.Push(&si.h, heapItem)
 		}
 		si.totalOffsets += uint64(g.Size())

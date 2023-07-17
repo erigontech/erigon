@@ -58,7 +58,7 @@ func TestLocality(t *testing.T) {
 	t.Run("locality iterator", func(t *testing.T) {
 		ic := ii.MakeContext()
 		defer ic.Close()
-		it := ic.iterateKeysLocality(0, coldFiles*StepsInColdFile)
+		it := ic.iterateKeysLocality(0, coldFiles*StepsInColdFile, nil)
 		require.True(it.HasNext())
 		key, bitmap := it.Next()
 		require.Equal(uint64(1), binary.BigEndian.Uint64(key))
@@ -160,7 +160,7 @@ func TestLocalityDomain(t *testing.T) {
 		require.Equal(coldSteps, int(dc.maxColdStep()))
 		var last []byte
 
-		it := dc.hc.ic.iterateKeysLocality(0, uint64(coldSteps))
+		it := dc.hc.ic.iterateKeysLocality(0, uint64(coldSteps), nil)
 		require.True(it.HasNext())
 		key, bitmap := it.Next()
 		require.Equal(uint64(0), binary.BigEndian.Uint64(key))
@@ -175,7 +175,7 @@ func TestLocalityDomain(t *testing.T) {
 		}
 		require.Equal(coldFiles-1, int(binary.BigEndian.Uint64(last)))
 
-		it = dc.hc.ic.iterateKeysLocality(dc.hc.ic.maxColdStep(), dc.hc.ic.maxWarmStep()+1)
+		it = dc.hc.ic.iterateKeysLocality(dc.hc.ic.maxColdStep(), dc.hc.ic.maxWarmStep()+1, nil)
 		require.True(it.HasNext())
 		key, bitmap = it.Next()
 		require.Equal(2, int(binary.BigEndian.Uint64(key)))

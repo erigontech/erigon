@@ -326,7 +326,7 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 			if from == to || ic.ii.warmLocalityIdx.exists(from, to) {
 				return nil
 			}
-			if err := ic.ii.warmLocalityIdx.BuildMissedIndices(ctx, from, to, false, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to, nil, to) }); err != nil {
+			if err := ic.ii.warmLocalityIdx.BuildMissedIndices(ctx, from, to, false, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to, nil) }); err != nil {
 				return err
 			}
 			return nil
@@ -1299,7 +1299,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 
 	warmLocality, err := ii.buildWarmLocality(ctx, decomp, step, ps)
 	if err != nil {
-		return InvertedFiles{}, err
+		return InvertedFiles{}, fmt.Errorf("buildWarmLocality: %w", err)
 	}
 
 	closeComp = false
@@ -1313,10 +1313,11 @@ func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress
 
 	ic := ii.MakeContext() // TODO: use existing context
 	defer ic.Close()
-	fromStep, toStep := ic.coldLocality.indexedTo()/ii.aggregationStep, step
-	fmt.Printf("build warm locality: %d-%d\n", fromStep, toStep)
+	// Here we can make a choise: to index "cold non-indexed file" by warm locality index, or not?
+	// Let's don't index. Because: speed of new files build is very important - to speed-up pruning
+	fromStep, toStep := ic.minWarmStep(), step
 	return ii.warmLocalityIdx.buildFiles(ctx, fromStep, toStep, false, ps, func() *LocalityIterator {
-		return ic.iterateKeysLocality(ic.warmLocality.indexedTo()/ii.aggregationStep, toStep, decomp, step)
+		return ic.iterateKeysLocality(fromStep, toStep, decomp)
 	})
 }
 

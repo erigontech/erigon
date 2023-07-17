@@ -148,6 +148,11 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 
 // Domain is a part of the state (examples are Accounts, Storage, Code)
 // Domain should not have any go routines or locks
+//
+// Data-Existence in .kv vs .v files:
+//  1. key doesn’t exists, then create: .kv - yes, .v - yes
+//  2. acc exists, then update/delete:  .kv - yes, .v - yes
+//  3. acc doesn’t exists, then delete: .kv - no,  .v - no
 type Domain struct {
 	/*
 	   not large:
