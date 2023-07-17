@@ -199,8 +199,13 @@ type Tx struct {
 func (tx *Tx) AggCtx() *state.AggregatorV3Context { return tx.aggCtx }
 func (tx *Tx) Agg() *state.AggregatorV3           { return tx.db.agg }
 func (tx *Tx) Rollback() {
+	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+		return
+	}
+	mdbxTx := tx.MdbxTx
+	tx.MdbxTx = nil
 	tx.autoClose()
-	tx.MdbxTx.Rollback()
+	mdbxTx.Rollback()
 }
 func (tx *Tx) autoClose() {
 	for _, closer := range tx.resourcesToClose {
@@ -215,8 +220,13 @@ func (tx *Tx) autoClose() {
 	}
 }
 func (tx *Tx) Commit() error {
+	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+		return nil
+	}
+	mdbxTx := tx.MdbxTx
+	tx.MdbxTx = nil
 	tx.autoClose()
-	return tx.MdbxTx.Commit()
+	return mdbxTx.Commit()
 }
 
 func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error) {
