@@ -296,17 +296,16 @@ func (a *AggregatorV3) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *AggregatorV3) BackgroundProgress() string    { return a.ps.String() }
 
 func (a *AggregatorV3) Files() (res []string) {
-	a.filesMutationLock.Lock()
-	defer a.filesMutationLock.Unlock()
-
-	res = append(res, a.accounts.Files()...)
-	res = append(res, a.storage.Files()...)
-	res = append(res, a.code.Files()...)
-	res = append(res, a.commitment.Files()...)
-	res = append(res, a.logAddrs.Files()...)
-	res = append(res, a.logTopics.Files()...)
-	res = append(res, a.tracesFrom.Files()...)
-	res = append(res, a.tracesTo.Files()...)
+	ac := a.MakeContext()
+	defer ac.Close()
+	res = append(res, ac.accounts.Files()...)
+	res = append(res, ac.storage.Files()...)
+	res = append(res, ac.code.Files()...)
+	res = append(res, ac.commitment.Files()...)
+	res = append(res, ac.logAddrs.Files()...)
+	res = append(res, ac.logTopics.Files()...)
+	res = append(res, ac.tracesFrom.Files()...)
+	res = append(res, ac.tracesTo.Files()...)
 	return res
 }
 func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Context, workers int) {
@@ -948,30 +947,17 @@ func (a *AggregatorV3) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) 
 	if a.minimaxTxNumInFiles.Load() == 0 {
 		return
 	}
-	histBlockNumProgress := tx2block(a.minimaxTxNumInFiles.Load())
-	str := make([]string, 0, a.accounts.InvertedIndex.files.Len())
-	a.accounts.InvertedIndex.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			bn := tx2block(item.endTxNum)
-			str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/a.aggregationStep, bn/1_000))
-		}
-		return true
-	})
+	ac := a.MakeContext()
+	defer ac.Close()
 
-	c, err := tx.CursorDupSort(a.accounts.InvertedIndex.indexTable)
-	if err != nil {
-		// TODO pass error properly around
-		panic(err)
+	histBlockNumProgress := tx2block(ac.maxTxNumInFiles(false))
+	str := make([]string, 0, len(ac.accounts.files))
+	for _, item := range ac.accounts.files {
+		bn := tx2block(item.endTxNum)
+		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/a.aggregationStep, bn/1_000))
 	}
-	_, v, err := c.First()
-	if err != nil {
-		// TODO pass error properly around
-		panic(err)
-	}
-	var firstHistoryIndexBlockInDB uint64
-	if len(v) != 0 {
-		firstHistoryIndexBlockInDB = tx2block(binary.BigEndian.Uint64(v))
-	}
+
+	firstHistoryIndexBlockInDB := tx2block(a.accounts.FirstStepInDB(tx) * a.aggregationStep)
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)

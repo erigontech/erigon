@@ -278,17 +278,13 @@ func (h *History) Close() {
 	h.reCalcRoFiles()
 }
 
-func (h *History) Files() (res []string) {
-	h.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.decompressor != nil {
-				res = append(res, item.decompressor.FileName())
-			}
+func (hc *HistoryContext) Files() (res []string) {
+	for _, item := range hc.files {
+		if item.src.decompressor != nil {
+			res = append(res, item.src.decompressor.FileName())
 		}
-		return true
-	})
-	res = append(res, h.InvertedIndex.Files()...)
-	return res
+	}
+	return append(res, hc.ic.Files()...)
 }
 
 func (h *History) missedIdxFiles() (l []*filesItem) {

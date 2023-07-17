@@ -418,15 +418,12 @@ func (ii *InvertedIndex) Close() {
 // DisableFsync - just for tests
 func (ii *InvertedIndex) DisableFsync() { ii.noFsync = true }
 
-func (ii *InvertedIndex) Files() (res []string) {
-	ii.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.decompressor != nil {
-				res = append(res, item.decompressor.FileName())
-			}
+func (ic *InvertedIndexContext) Files() (res []string) {
+	for _, item := range ic.files {
+		if item.src.decompressor != nil {
+			res = append(res, item.src.decompressor.FileName())
 		}
-		return true
-	})
+	}
 	return res
 }
 

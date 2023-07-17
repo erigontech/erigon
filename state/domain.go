@@ -206,6 +206,13 @@ func (d *Domain) LastStepInDB(tx kv.Tx) (lstInDb uint64) {
 	}
 	return binary.BigEndian.Uint64(lstIdx) / d.aggregationStep
 }
+func (d *Domain) FirstStepInDB(tx kv.Tx) (lstInDb uint64) {
+	lstIdx, _ := kv.FirstKey(tx, d.History.indexKeysTable)
+	if len(lstIdx) == 0 {
+		return 0
+	}
+	return binary.BigEndian.Uint64(lstIdx) / d.aggregationStep
+}
 
 func (d *Domain) DiscardHistory() {
 	d.History.DiscardHistory()
@@ -1967,4 +1974,13 @@ func (d *Domain) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 		from = float64(^binary.BigEndian.Uint64(lst[len(lst)-8:]))
 	}
 	return from, to
+}
+
+func (dc *DomainContext) Files() (res []string) {
+	for _, item := range dc.files {
+		if item.src.decompressor != nil {
+			res = append(res, item.src.decompressor.FileName())
+		}
+	}
+	return append(res, dc.hc.Files()...)
 }
