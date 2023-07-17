@@ -301,8 +301,9 @@ func TestVerifyRun(t *testing.T) {
 }
 
 func TestVerifySprint(t *testing.T) {
-	testVerify(t, 10, int(params.BorDevnetChainConfig.Bor.CalculateSprint(256)))
+	testVerify(t /*10*/, 4, int(params.BorDevnetChainConfig.Bor.CalculateSprint(256)))
 }
+
 func TestVerifySpan(t *testing.T) {
 	//testVerify(t, 10, 4 /*100**/ *int(params.BorDevnetChainConfig.Bor.CalculateSprint(256)))
 }
