@@ -390,7 +390,8 @@ type StateWriterBufferedV3 struct {
 
 func NewStateWriterBufferedV3(rs *StateV3) *StateWriterBufferedV3 {
 	return &StateWriterBufferedV3{
-		rs:         rs,
+		rs: rs,
+		//trace:      true,
 		writeLists: newWriteList(),
 	}
 }
@@ -421,17 +422,8 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address.Bytes()), value)
 
 	if w.trace {
-		fmt.Printf("[v3_buff] account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address.Bytes(), &account.Balance, account.Nonce, account.Root, account.CodeHash)
+		fmt.Printf("V3 account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address.Bytes(), &account.Balance, account.Nonce, account.Root, account.CodeHash)
 	}
-
-	//var prev []byte
-	//if original.Initialised {
-	//	prev = accounts.SerialiseV3(original)
-	//}
-	//if w.accountPrevs == nil {
-	//	w.accountPrevs = map[string][]byte{}
-	//}
-	//w.accountPrevs[string(addressBytes)] = prev
 	return nil
 }
 
@@ -439,28 +431,18 @@ func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarn
 	w.writeLists[string(kv.CodeDomain)].Push(string(address.Bytes()), code)
 	if len(code) > 0 {
 		if w.trace {
-			fmt.Printf("[v3_buff] code [%x] => [%x] value: %x\n", address.Bytes(), codeHash, code)
+			fmt.Printf("V3 code [%x] => [%x] value: %x\n", address.Bytes(), codeHash, code)
 		}
 		//w.writeLists[kv.PlainContractCode].Push(addr, code)
 	}
-	//if w.codePrevs == nil {
-	//	w.codePrevs = map[string]uint64{}
-	//}
-	//w.codePrevs[addr] = incarnation
 	return nil
 }
 
 func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *accounts.Account) error {
 	w.writeLists[string(kv.AccountsDomain)].Push(string(address.Bytes()), nil)
 	if w.trace {
-		fmt.Printf("[v3_buff] account [%x] deleted\n", address.Bytes())
+		fmt.Printf("V3 account [%x] deleted\n", address.Bytes())
 	}
-	//if original.Initialised {
-	//	if w.accountDels == nil {
-	//		w.accountDels = map[string]*accounts.Account{}
-	//	}
-	//	w.accountDels[addr] = original
-	//}
 	return nil
 }
 
@@ -471,12 +453,8 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 	compositeS := string(append(address.Bytes(), key.Bytes()...))
 	w.writeLists[string(kv.StorageDomain)].Push(compositeS, value.Bytes())
 	if w.trace {
-		fmt.Printf("[v3_buff] storage [%x] [%x] => [%x]\n", address, key.Bytes(), value.Bytes())
+		fmt.Printf("V3 storage [%x] [%x] => [%x]\n", address, key.Bytes(), value.Bytes())
 	}
-	//if w.storagePrevs == nil {
-	//	w.storagePrevs = map[string][]byte{}
-	//}
-	//w.storagePrevs[compositeS] = original.Bytes()
 	return nil
 }
 
@@ -486,6 +464,9 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 	})
 	if err != nil {
 		return err
+	}
+	if w.trace {
+		fmt.Printf("V3 contract [%x]\n", address)
 	}
 	return nil
 }

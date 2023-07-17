@@ -36,6 +36,7 @@ func (w *WriterV4) UpdateAccountCode(address libcommon.Address, incarnation uint
 
 func (w *WriterV4) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
 	w.domains.SetTx(w.tx.(kv.RwTx))
+	//fmt.Printf("v4 delete %x\n", address)
 	return w.domains.DeleteAccount(address.Bytes(), accounts.SerialiseV3(original))
 }
 
@@ -66,5 +67,6 @@ func (w *WriterV4) Commitment(saveStateAfter, trace bool) (rootHash []byte, err 
 	return w.domains.Commit(saveStateAfter, trace)
 }
 func (w *WriterV4) Reset() {
-	w.domains.Commitment.Reset()
+	//w.domains.Commitment.Reset()
+	w.domains.ClearRam()
 }

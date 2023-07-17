@@ -267,6 +267,9 @@ func ExecV3(ctx context.Context,
 	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 	defer cfg.agg.CloseSharedDomains()
 	rs := state.NewStateV3(doms, logger)
+	if execStage.BlockNumber == 0 {
+		doms.ClearRam()
+	}
 
 	//TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -831,17 +834,9 @@ Loop:
 	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
 
 	if !dbg.DiscardCommitment() {
-		//_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
-		//if err != nil {
-		//	return err
-		//}
-		rh, err := agg.ComputeCommitment(true, false)
+		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
 		if err != nil {
-			return fmt.Errorf("StateV3.Apply: %w", err)
-		}
-		if !bytes.Equal(rh, b.HeaderNoCopy().Root.Bytes()) {
-			fmt.Printf("Expected uniwnd to somewhere\n\n")
-			// unwind is coming after, instead of calling unwind from checkCommitmentV3
+			return err
 		}
 	}
 	if parallel {
@@ -906,7 +901,7 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.Aggreg
 	minBlockNum := e.BlockNumber
 	if maxBlockNum > minBlockNum {
 		unwindTo := (maxBlockNum + minBlockNum) / 2 // Binary search for the correct block, biased to the lower numbers
-		//unwindTo := blockNum - 1
+		//unwindTo := maxBlockNum - 1
 
 		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 		u.UnwindTo(unwindTo, header.Hash())
