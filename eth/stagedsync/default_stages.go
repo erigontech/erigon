@@ -9,7 +9,23 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func DefaultStages(ctx context.Context,
+	snapshots SnapshotsCfg,
+	borSnapshots BorSnapshotsCfg,
+	headers HeadersCfg,
+	borHeimdallCfg BorHeimdallCfg,
+	blockHashCfg BlockHashesCfg,
+	bodies BodiesCfg,
+	senders SendersCfg,
+	exec ExecuteBlockCfg,
+	hashState HashStateCfg,
+	trieCfg TrieCfg,
+	history HistoryCfg,
+	logIndex LogIndexCfg,
+	callTraces CallTracesCfg,
+	txLookup TxLookupCfg,
+	finish FinishCfg,
+	test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
@@ -34,13 +50,13 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 				if badBlockUnwind {
 					return nil
 				}
-				return BorSnapshotsForward(s, ctx, tx, snapshots, firstCycle, logger)
+				return BorSnapshotsForward(s, ctx, tx, borSnapshots, firstCycle, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
 				return nil
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return BorSnapshotsPrune(p, firstCycle, snapshots, ctx, tx)
+				return BorSnapshotsPrune(p, firstCycle, borSnapshots, ctx, tx)
 			},
 		},
 		{
@@ -66,13 +82,13 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 				if badBlockUnwind {
 					return nil
 				}
-				return BorHeimdallForward(s, u, ctx, tx, logger)
+				return BorHeimdallForward(s, u, ctx, tx, borHeimdallCfg, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
-				return BorHeimdallUnwind(u, s, tx)
+				return BorHeimdallUnwind(u, s, tx, borHeimdallCfg)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return BorHeimdallPrune(p, ctx, tx)
+				return BorHeimdallPrune(p, ctx, tx, borHeimdallCfg)
 			},
 		},
 		{

@@ -3,16 +3,55 @@ package stagedsync
 import (
 	"context"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
+
+type BorSnapshotsCfg struct {
+	db          kv.RwDB
+	chainConfig chain.Config
+	dirs        datadir.Dirs
+
+	blockRetire        services.BlockRetire
+	snapshotDownloader proto_downloader.DownloaderClient
+	blockReader        services.FullBlockReader
+	dbEventNotifier    services.DBEventNotifier
+
+	historyV3 bool
+	agg       *state.AggregatorV3
+}
+
+func StageBorSnapshotsCfg(db kv.RwDB,
+	chainConfig chain.Config, dirs datadir.Dirs,
+	blockRetire services.BlockRetire,
+	snapshotDownloader proto_downloader.DownloaderClient,
+	blockReader services.FullBlockReader, dbEventNotifier services.DBEventNotifier,
+	historyV3 bool, agg *state.AggregatorV3,
+) BorSnapshotsCfg {
+	return BorSnapshotsCfg{
+		db:                 db,
+		chainConfig:        chainConfig,
+		dirs:               dirs,
+		blockRetire:        blockRetire,
+		snapshotDownloader: snapshotDownloader,
+		blockReader:        blockReader,
+		dbEventNotifier:    dbEventNotifier,
+		historyV3:          historyV3,
+		agg:                agg,
+	}
+}
 
 func BorSnapshotsForward(
 	s *StageState,
 	ctx context.Context,
 	tx kv.RwTx,
-	cfg SnapshotsCfg,
+	cfg BorSnapshotsCfg,
 	initialCycle bool,
 	logger log.Logger,
 ) (err error) {
@@ -53,7 +92,7 @@ func BorSnapshotsForward(
 	return
 }
 
-func DownloadAndIndexBorSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool, logger log.Logger) error {
+func DownloadAndIndexBorSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg BorSnapshotsCfg, initialCycle bool, logger log.Logger) error {
 	if !initialCycle {
 		return nil
 	}
@@ -66,7 +105,7 @@ func DownloadAndIndexBorSnapshotsIfNeed(s *StageState, ctx context.Context, tx k
 /* ====== PRUNING ====== */
 // snapshots pruning sections works more as a retiring of blocks
 // retiring blocks means moving block data from db into snapshots
-func BorSnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
+func BorSnapshotsPrune(s *PruneState, initialCycle bool, cfg BorSnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	if cfg.chainConfig.Bor == nil {
 		return
 	}
