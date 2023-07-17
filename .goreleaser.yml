@@ -7,8 +7,7 @@ release:
 
 builds:
   - id: darwin-amd64
-    main: ./cmd/erigon
-    binary: erigon
+    main: ./cmd/
     goos: [ darwin ]
     goarch: [ amd64 ]
     env:
@@ -18,8 +17,7 @@ builds:
     ldflags: -s -w
 
   - id: darwin-arm64
-    main: ./cmd/erigon
-    binary: erigon
+    main: ./cmd/
     goos: [ darwin ]
     goarch: [ arm64 ]
     env:
@@ -29,8 +27,7 @@ builds:
     ldflags: -s -w
 
   - id: linux-amd64
-    main: ./cmd/erigon
-    binary: erigon
+    main: ./cmd/
     goos: [ linux ]
     goarch: [ amd64 ]
     env:
@@ -40,8 +37,7 @@ builds:
     ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
 
   - id: linux-arm64
-    main: ./cmd/erigon
-    binary: erigon
+    main: ./cmd/
     goos: [ linux ]
     goarch: [ arm64 ]
     env:
@@ -51,8 +47,7 @@ builds:
     ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
 
   - id: windows-amd64
-    main: ./cmd/erigon
-    binary: erigon
+    main: ./cmd/
     goos: [ windows ]
     goarch: [ amd64 ]
     env:
@@ -69,7 +64,7 @@ dockers:
   - image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
       - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-amd64
-    dockerfile: Dockerfile.release
+    dockerfile: Dockerfile
     use: buildx
     skip_push: true
     goarch: amd64
@@ -81,7 +76,7 @@ dockers:
   - image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
       - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-arm64
-    dockerfile: Dockerfile.release
+    dockerfile: Dockerfile
     skip_push: true
     use: buildx
     goarch: arm64
