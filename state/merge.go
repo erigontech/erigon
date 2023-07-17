@@ -113,13 +113,13 @@ type DomainRanges struct {
 func (r DomainRanges) String() string {
 	var b strings.Builder
 	if r.values {
-		b.WriteString(fmt.Sprintf("vals:%d-%d", r.valuesStartTxNum/r.aggStep, r.valuesEndTxNum/r.aggStep))
+		b.WriteString(fmt.Sprintf("val:%d-%d", r.valuesStartTxNum/r.aggStep, r.valuesEndTxNum/r.aggStep))
 	}
 	if r.history {
 		if b.Len() > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(fmt.Sprintf("history:%d-%d", r.historyStartTxNum/r.aggStep, r.historyEndTxNum/r.aggStep))
+		b.WriteString(fmt.Sprintf("hist:%d-%d", r.historyStartTxNum/r.aggStep, r.historyEndTxNum/r.aggStep))
 	}
 	if r.index {
 		if b.Len() > 0 {

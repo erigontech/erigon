@@ -1545,7 +1545,7 @@ func (ii *InvertedIndex) collectFilesStat() (filesCount, filesSize, idxSize uint
 
 func (ii *InvertedIndex) stepsRangeInDBAsStr(tx kv.Tx) string {
 	a1, a2 := ii.stepsRangeInDB(tx)
-	return fmt.Sprintf("%s: %.1f-%.1f", ii.filenameBase, a1, a2)
+	return fmt.Sprintf("%s: %.0f-%.0f", ii.filenameBase, a1, a2)
 }
 func (ii *InvertedIndex) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	fst, _ := kv.FirstKey(tx, ii.indexKeysTable)
