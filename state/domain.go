@@ -1453,17 +1453,13 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 	// - cold and warm segments can overlap
 	lastColdIndexedTxNum := dc.hc.ic.coldLocality.indexedTo()
 	firstWarmIndexedTxNum := dc.hc.ic.warmLocality.indexedFrom()
-	fmt.Printf("a: %d,%d\n", lastColdIndexedTxNum/dc.d.aggregationStep, firstWarmIndexedTxNum/dc.d.aggregationStep)
 	if firstWarmIndexedTxNum == 0 && len(dc.files) > 0 {
 		firstWarmIndexedTxNum = dc.files[len(dc.files)-1].endTxNum
 	}
 	if firstWarmIndexedTxNum > lastColdIndexedTxNum {
-		fmt.Printf("b: %d,%d\n", lastColdIndexedTxNum/dc.d.aggregationStep, firstWarmIndexedTxNum/dc.d.aggregationStep)
 		for i := len(dc.files) - 1; i >= 0; i-- {
 			isUseful := dc.files[i].startTxNum >= lastColdIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
 			if !isUseful {
-				fmt.Printf("c: %s,%d,%d\n", dc.files[i].src.decompressor.FileName(), dc.files[i].startTxNum/dc.d.aggregationStep, dc.files[i].endTxNum/dc.d.aggregationStep)
-				fmt.Printf("d: %s\n", dc.hc.ic.warmLocality.bm.FileName())
 				continue
 			}
 			var ok bool

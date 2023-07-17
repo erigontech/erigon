@@ -88,6 +88,10 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	err = ii.Add([]byte("key3"))
 	require.NoError(t, err)
 
+	ii.SetTxNum(17)
+	err = ii.Add([]byte("key10"))
+	require.NoError(t, err)
+
 	err = ii.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 	err = tx.Commit()

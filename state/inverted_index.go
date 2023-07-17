@@ -1167,6 +1167,7 @@ func (ic *InvertedIndexContext) IterateChangedKeys(startTxNum, endTxNum uint64, 
 	return ii1
 }
 
+// collate [stepFrom, stepTo)
 func (ii *InvertedIndex) collate(ctx context.Context, stepFrom, stepTo uint64, roTx kv.Tx) (map[string]*roaring64.Bitmap, error) {
 	txFrom, txTo := stepFrom*ii.aggregationStep, stepTo*ii.aggregationStep
 	mxRunningCollations.Inc()
@@ -1183,7 +1184,10 @@ func (ii *InvertedIndex) collate(ctx context.Context, stepFrom, stepTo uint64, r
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	var k, v []byte
-	for k, v, err = keysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = keysCursor.Next() {
+	for k, v, err = keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.Next() {
+		if err != nil {
+			return nil, fmt.Errorf("iterate over %s keys cursor: %w", ii.filenameBase, err)
+		}
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
 			break
@@ -1201,9 +1205,6 @@ func (ii *InvertedIndex) collate(ctx context.Context, stepFrom, stepTo uint64, r
 			return nil, ctx.Err()
 		default:
 		}
-	}
-	if err != nil {
-		return nil, fmt.Errorf("iterate over %s keys cursor: %w", ii.filenameBase, err)
 	}
 	return indexBitmaps, nil
 }
@@ -1224,6 +1225,7 @@ func (sf InvertedFiles) CleanupOnError() {
 	}
 }
 
+// buildFiles - `step=N` means build file `[N:N+1)` which is equal to [N:N+1)
 func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps map[string]*roaring64.Bitmap, ps *background.ProgressSet) (InvertedFiles, error) {
 	start := time.Now()
 	defer mxBuildTook.UpdateDuration(start)
@@ -1246,9 +1248,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 			}
 		}
 	}()
-	txNumFrom := step * ii.aggregationStep
-	txNumTo := (step + 1) * ii.aggregationStep
-	datFileName := fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, txNumFrom/ii.aggregationStep, txNumTo/ii.aggregationStep)
+	datFileName := fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, step, step+1)
 	datPath := filepath.Join(ii.dir, datFileName)
 	keys := make([]string, 0, len(bitmaps))
 	for key := range bitmaps {
@@ -1290,7 +1290,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		return InvertedFiles{}, fmt.Errorf("open %s decompressor: %w", ii.filenameBase, err)
 	}
 
-	idxFileName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, txNumFrom/ii.aggregationStep, txNumTo/ii.aggregationStep)
+	idxFileName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, step, step+1)
 	idxPath := filepath.Join(ii.dir, idxFileName)
 	p := ps.AddNew(idxFileName, uint64(decomp.Count()*2))
 	defer ps.Delete(p)
@@ -1298,7 +1298,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 
-	warmLocality, err := ii.buildWarmLocality(ctx, decomp, step, ps)
+	warmLocality, err := ii.buildWarmLocality(ctx, decomp, step+1, ps)
 	if err != nil {
 		return InvertedFiles{}, fmt.Errorf("buildWarmLocality: %w", err)
 	}

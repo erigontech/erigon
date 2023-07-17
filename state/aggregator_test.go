@@ -780,7 +780,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	defer agg.FinishWrites()
 	defer domains.Close()
 
-	keys, vals := generateInputData(t, 8, 16, 10)
+	keys, vals := generateInputData(t, 20, 16, 10)
 	keys = keys[:2]
 
 	var i int
