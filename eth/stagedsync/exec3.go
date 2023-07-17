@@ -244,11 +244,11 @@ func ExecV3(ctx context.Context,
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 	if initialCycle && blocksFreezeCfg.Produce {
 		log.Warn(fmt.Sprintf("[snapshots] db has: %s", agg.StepsRangeInDBAsStr(applyTx)))
-		if err := agg.BuildMissedIndices(ctx, 100); err != nil {
-			return err
-		}
-		agg.BuildOptionalMissedIndicesInBackground(ctx, 100)
-		agg.BuildFilesInBackground(outputTxNum.Load())
+		//if err := agg.BuildMissedIndices(ctx, 100); err != nil {
+		//	return err
+		//}
+		//agg.BuildOptionalMissedIndicesInBackground(ctx, 100)
+		//agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
 	var outputBlockNum = syncMetrics[stages.Execution]
