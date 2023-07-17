@@ -313,10 +313,12 @@ func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context, ps *bac
 func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
 	if ic.ii.withLocalityIndex && ic.ii.coldLocalityIdx != nil {
 		from, to := uint64(0), ic.maxColdStep()
+		fmt.Printf("cold: %d, %d\n", from, to)
 		if to == 0 || ic.ii.coldLocalityIdx.exists(from, to) {
 			return nil
 		}
-		if err := ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, from, to, true, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to, nil) }); err != nil {
+		fmt.Printf("cold2: %d, %d\n", from, to)
+		if err = ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, from, to, true, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to, nil) }); err != nil {
 			return err
 		}
 	}
@@ -334,7 +336,7 @@ func (ic *InvertedIndexContext) maxColdStep() uint64 {
 }
 func (ic *InvertedIndexContext) minWarmStep() uint64 {
 	fmt.Printf("minWarmStep: %d, %d\n", ic.maxColdStep(), ic.maxWarmStep())
-	return ic.maxColdStep()
+	return ic.maxTxNumInFiles(true) / ic.ii.aggregationStep
 	//cold, warm := ic.maxColdStep(), ic.maxWarmStep()
 	//if cold == warm {
 	//	return cold

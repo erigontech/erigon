@@ -215,13 +215,14 @@ func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
 }
 
 func (lc *ctxLocalityIdx) Close() {
-	if lc == nil || lc.file == nil || lc.file.src == nil {
+	if lc == nil || lc.file == nil || lc.file.src == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
 	refCnt := lc.file.src.refcount.Add(-1)
 	if refCnt == 0 && lc.file.src.canDelete.Load() {
 		closeLocalityIndexFilesAndRemove(lc)
 	}
+	lc.file = nil
 }
 
 func closeLocalityIndexFilesAndRemove(i *ctxLocalityIdx) {
@@ -333,6 +334,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	defer logEvery.Stop()
 
 	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep)
+	fmt.Printf("alex: %s\n", fName)
 	idxPath := filepath.Join(li.dir, fName)
 	filePath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
 
@@ -576,7 +578,6 @@ func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64, las
 		if item.endTxNum <= fromTxNum || item.startTxNum >= toTxNum {
 			continue
 		}
-		fmt.Printf("add to iter:%s, %d-%d\n", item.src.decompressor.FileName(), fromStep, toStep)
 		if assert.Enable {
 			if (item.endTxNum-item.startTxNum)/si.aggStep != StepsInColdFile {
 				panic(fmt.Errorf("frozen file of small size: %s", item.src.decompressor.FileName()))

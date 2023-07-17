@@ -322,7 +322,7 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 		g.Go(func() error {
 			ic := ii.MakeContext()
 			defer ic.Close()
-			from, to := ic.maxColdStep(), ic.maxWarmStep()
+			from, to := ic.minWarmStep(), ic.maxWarmStep()
 			if from == to || ic.ii.warmLocalityIdx.exists(from, to) {
 				return nil
 			}
@@ -579,6 +579,10 @@ func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 	return &ic
 }
 func (ic *InvertedIndexContext) Close() {
+	if ic.files == nil { // invariant: it's safe to call Close multiple times
+		return
+	}
+
 	for _, item := range ic.files {
 		if item.src.frozen {
 			continue
@@ -589,6 +593,7 @@ func (ic *InvertedIndexContext) Close() {
 			item.src.closeFilesAndRemove()
 		}
 	}
+	ic.files = nil
 
 	for _, r := range ic.readers {
 		r.Close()
@@ -1317,7 +1322,6 @@ func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress
 	// Here we can make a choise: to index "cold non-indexed file" by warm locality index, or not?
 	// Let's don't index. Because: speed of new files build is very important - to speed-up pruning
 	fromStep, toStep := ic.minWarmStep(), step
-	fmt.Printf("build warm: %d-%d\n", fromStep, toStep)
 	return ii.warmLocalityIdx.buildFiles(ctx, fromStep, toStep, false, ps, func() *LocalityIterator {
 		return ic.iterateKeysLocality(fromStep, toStep, decomp)
 	})

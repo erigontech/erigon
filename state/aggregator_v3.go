@@ -220,7 +220,11 @@ func (a *AggregatorV3) OpenList(fNames, warmNames []string) error {
 }
 
 func (a *AggregatorV3) Close() {
+	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times
+		return
+	}
 	a.ctxCancel()
+	a.ctxCancel = nil
 	a.wg.Wait()
 
 	a.filesMutationLock.Lock()
@@ -1684,7 +1688,12 @@ func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.T
 // --- Domain part END ---
 
 func (ac *AggregatorV3Context) Close() {
+	if ac.a == nil { // invariant: it's safe to call Close multiple times
+		return
+	}
 	ac.a.leakDetector.Del(ac.id)
+	ac.a = nil
+
 	ac.accounts.Close()
 	ac.storage.Close()
 	ac.code.Close()

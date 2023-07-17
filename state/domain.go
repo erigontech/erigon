@@ -1599,6 +1599,9 @@ func (dc *DomainContext) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([
 }
 
 func (dc *DomainContext) Close() {
+	if dc.files == nil { // invariant: it's safe to call Close multiple times
+		return
+	}
 	for _, item := range dc.files {
 		if item.src.frozen {
 			continue
@@ -1609,6 +1612,7 @@ func (dc *DomainContext) Close() {
 			item.src.closeFilesAndRemove()
 		}
 	}
+	dc.files = nil
 	//for _, r := range dc.readers {
 	//	r.Close()
 	//}
