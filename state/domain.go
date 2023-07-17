@@ -848,35 +848,37 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		keySuffix = make([]byte, 256+8)
 	)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
+	if err := func() error {
+		defer close(pairs)
 
-	if !d.largeValues {
-		panic("implement me")
-	}
-	for k, stepInDB, err := keysCursor.First(); k != nil; k, stepInDB, err = keysCursor.Next() {
-		if err != nil {
-			return Collation{}, err
+		if !d.largeValues {
+			panic("implement me")
 		}
-		pos++
-		if ^binary.BigEndian.Uint64(stepInDB) != step {
-			continue
-		}
+		for k, stepInDB, err := keysCursor.First(); k != nil; k, stepInDB, err = keysCursor.Next() {
+			if err != nil {
+				return err
+			}
+			pos++
+			if ^binary.BigEndian.Uint64(stepInDB) != step {
+				continue
+			}
 
-		copy(keySuffix, k)
-		copy(keySuffix[len(k):], stepInDB)
-		v, err := roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
-		if err != nil {
-			return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
-		}
-		pairs <- kvpair{k: k, v: v}
+			copy(keySuffix, k)
+			copy(keySuffix[len(k):], stepInDB)
+			v, err := roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
+			if err != nil {
+				return fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+			}
+			pairs <- kvpair{k: k, v: v}
 
-		select {
-		case <-ctx.Done():
-			return Collation{}, ctx.Err()
-		default:
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 		}
-	}
-	close(pairs)
-	if err != nil {
+		return nil
+	}(); err != nil {
 		return Collation{}, fmt.Errorf("iterate over %s keys cursor: %w", d.filenameBase, err)
 	}
 
