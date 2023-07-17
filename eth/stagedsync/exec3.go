@@ -242,13 +242,13 @@ func ExecV3(ctx context.Context,
 	agg.SetTxNum(inputTxNum)
 
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
-	if !useExternalTx {
+	if initialCycle && blocksFreezeCfg.Produce {
 		log.Warn(fmt.Sprintf("[snapshots] db has: %s", agg.StepsRangeInDBAsStr(applyTx)))
-		if blocksFreezeCfg.Produce {
-			//agg.BuildOptionalMissedIndicesInBackground(ctx, 100)
-			//agg.BuildMissedIndices(ctx, 100)
-			agg.BuildFilesInBackground(outputTxNum.Load())
+		if err := agg.BuildMissedIndices(ctx, 100); err != nil {
+			return err
 		}
+		agg.BuildOptionalMissedIndicesInBackground(ctx, 100)
+		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
 	var outputBlockNum = syncMetrics[stages.Execution]
@@ -278,7 +278,7 @@ func ExecV3(ctx context.Context,
 
 	commitThreshold := batchSize.Bytes()
 	progress := NewProgress(block, commitThreshold, workerCount, execStage.LogPrefix(), logger)
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery := time.NewTicker(2 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
 	defer pruneEvery.Stop()
