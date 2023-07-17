@@ -379,7 +379,6 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			maxPossibleValue = int(it.FilesAmount())
 			baseDataID = uint64(0)
 		}
-		fmt.Printf("buil: %s, %d\n", fName, count)
 		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, maxPossibleValue, baseDataID, uint64(count), li.logger)
 		if err != nil {
 			return nil, err
