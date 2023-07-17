@@ -88,6 +88,7 @@ type stateObject struct {
 	dirtyCode       bool // true if the code was updated
 	selfdestructed  bool
 	deleted         bool // true if account was deleted during the lifetime of this object
+	newlyCreated    bool // true if this object was created in the current transaction
 	createdContract bool // true if this object represents a newly created contract
 }
 

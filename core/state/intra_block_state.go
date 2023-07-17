@@ -421,6 +421,17 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) bool {
 	return true
 }
 
+func (sdb *IntraBlockState) Selfdestruct6780(addr libcommon.Address) {
+	stateObject := sdb.getStateObject(addr)
+	if stateObject == nil {
+		return
+	}
+
+	if stateObject.newlyCreated {
+		sdb.Selfdestruct(addr)
+	}
+}
+
 // SetTransientState sets transient storage for a given account. It
 // adds the change to the journal so that it can be rolled back
 // to its previous value if there is a revert.
@@ -518,6 +529,7 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 	} else {
 		sdb.journal.append(resetObjectChange{account: &addr, prev: previous})
 	}
+	newobj.newlyCreated = true
 	sdb.setStateObject(addr, newobj)
 	return newobj
 }
@@ -666,7 +678,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true); err != nil {
 			return err
 		}
-
+		so.newlyCreated = false
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
