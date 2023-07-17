@@ -50,9 +50,9 @@ func (cb contractBackend) SendTransaction(ctx context.Context, tx types.Transact
 }
 
 func (cb contractBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
-	return nil, fmt.Errorf("TODO")
+	return cb.node.FilterLogs(ctx, query)
 }
 
 func (cb contractBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
-	return nil, fmt.Errorf("TODO")
+	return cb.node.SubscribeFilterLogs(ctx, query, ch)
 }

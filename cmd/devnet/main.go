@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
+	_ "github.com/ledgerwatch/erigon/cmd/devnet/admin"
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services/bor"
 	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
@@ -52,7 +53,7 @@ var (
 	ScenariosFlag = cli.StringFlag{
 		Name:  "scenarios",
 		Usage: "Scenarios to be run on the devnet chain",
-		Value: "dynamic-tx-any-node",
+		Value: "dynamic-tx-node-0",
 	}
 
 	WithoutHeimdallFlag = cli.BoolFlag{
@@ -179,7 +180,7 @@ func action(ctx *cli.Context) error {
 		return err
 	}
 
-	networks, err := selectNetworks(ctx, logger)
+	network, err := initDevnet(ctx, logger)
 
 	if err != nil {
 		return err
@@ -194,11 +195,12 @@ func action(ctx *cli.Context) error {
 	}
 
 	// start the network with each node in a go routine
-	logger.Info("Starting Networks")
-	for _, network := range networks {
-		if err := network.Start(ctx); err != nil {
-			return fmt.Errorf("Network start failed: %w", err)
-		}
+	logger.Info("Starting Devnet")
+
+	runCtx, err := network.Start(ctx, logger)
+
+	if err != nil {
+		return fmt.Errorf("Devnet start failed: %w", err)
 	}
 
 	go func() {
@@ -208,9 +210,7 @@ func action(ctx *cli.Context) error {
 		switch s := <-signalCh; s {
 		case syscall.SIGTERM:
 			logger.Info("Stopping networks")
-			for _, network := range networks {
-				network.Stop()
-			}
+			network.Stop()
 		case syscall.SIGINT:
 			logger.Info("Terminating network")
 			os.Exit(-int(syscall.SIGINT))
@@ -233,7 +233,9 @@ func action(ctx *cli.Context) error {
 
 	scenarios.Scenarios{
 		"dynamic-tx-node-0": {
-			Context: scenarios.WithCurrentNode(0),
+			Context: runCtx.
+				WithCurrentNetwork(0).
+				WithCurrentNode(0),
 			Steps: []*scenarios.Step{
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
 				{Text: "PingErigonRpc"},
@@ -243,6 +245,7 @@ func action(ctx *cli.Context) error {
 			},
 		},
 		"dynamic-tx-any-node": {
+			Context: runCtx.WithCurrentNetwork(0),
 			Steps: []*scenarios.Step{
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
 				{Text: "PingErigonRpc"},
@@ -252,27 +255,29 @@ func action(ctx *cli.Context) error {
 			},
 		},
 		"call-contract": {
+			Context: runCtx.WithCurrentNetwork(0),
 			Steps: []*scenarios.Step{
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
 				{Text: "DeployAndCallLogSubscriber", Args: []any{accounts.DevAddress}},
 			},
 		},
-	}.Run(networks[0].RunContext(ctx), strings.Split(scenarioNames, ",")...)
+		"state-sync": {
+			Steps: []*scenarios.Step{},
+		},
+	}.Run(runCtx, strings.Split(scenarioNames, ",")...)
 
 	if metrics && len(diagnosticsUrl) > 0 {
 		logger.Info("Waiting")
-		networks[0].Wait()
+		network.Wait()
 	} else {
 		logger.Info("Stopping Networks")
-		for _, network := range networks {
-			network.Stop()
-		}
+		network.Stop()
 	}
 
 	return nil
 }
 
-func selectNetworks(ctx *cli.Context, logger log.Logger) ([]*devnet.Network, error) {
+func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 	dataDir := ctx.String(DataDirFlag.Name)
 	chain := ctx.String(ChainFlag.Name)
 
@@ -284,6 +289,7 @@ func selectNetworks(ctx *cli.Context, logger log.Logger) ([]*devnet.Network, err
 					DataDir:            dataDir,
 					Chain:              networkname.BorDevnetChainName,
 					Logger:             logger,
+					BasePort:           30303,
 					BasePrivateApiAddr: "localhost:10090",
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8545,
@@ -327,6 +333,7 @@ func selectNetworks(ctx *cli.Context, logger log.Logger) ([]*devnet.Network, err
 					DataDir:            dataDir,
 					Chain:              networkname.BorDevnetChainName,
 					Logger:             logger,
+					BasePort:           30303,
 					BasePrivateApiAddr: "localhost:10090",
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8545,
@@ -361,9 +368,11 @@ func selectNetworks(ctx *cli.Context, logger log.Logger) ([]*devnet.Network, err
 					DataDir:            dataDir,
 					Chain:              networkname.DevChainName,
 					Logger:             logger,
+					BasePort:           30403,
 					BasePrivateApiAddr: "localhost:10190",
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8645,
+					Services:           services,
 					Nodes: []devnet.Node{
 						args.BlockProducer{
 							Node: args.Node{

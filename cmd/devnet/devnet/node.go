@@ -41,6 +41,7 @@ type node struct {
 	requests.RequestGenerator
 	args     interface{}
 	wg       *sync.WaitGroup
+	network  *Network
 	startErr chan error
 	nodeCfg  *nodecfg.Config
 	ethCfg   *ethconfig.Config
@@ -139,6 +140,10 @@ func (n *node) run(ctx *cli.Context) error {
 	// MdbxGrowthStep impacts disk usage, MdbxDBSizeLimit impacts page file usage
 	n.nodeCfg.MdbxGrowthStep = 32 * datasize.MB
 	n.nodeCfg.MdbxDBSizeLimit = 512 * datasize.MB
+
+	for addr, account := range n.network.Alloc {
+		n.ethCfg.Genesis.Alloc[addr] = account
+	}
 
 	n.ethNode, err = enode.New(n.nodeCfg, n.ethCfg, logger)
 

@@ -1,6 +1,7 @@
 package requests
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,9 +10,12 @@ import (
 	"strings"
 	"time"
 
+	ethereum "github.com/ledgerwatch/erigon"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/valyala/fastjson"
 )
@@ -47,15 +51,39 @@ type RequestGenerator interface {
 	BlockNumber() (uint64, error)
 	GetTransactionCount(address libcommon.Address, blockNum BlockNumber) (*big.Int, error)
 	SendTransaction(signedTx types.Transaction) (*libcommon.Hash, error)
-	GetLogs(fromBlock uint64, toBlock uint64, address libcommon.Address) ([]Log, error)
+	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error)
+	SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
 	TxpoolContent() (int, int, int, error)
 }
 
+type SubscriptionHandler func(interface{})
+
+// Subscription houses the client subscription, name and channel for its delivery
+type Subscription struct {
+	Name      SubMethod
+	Handler   SubscriptionHandler
+	clientSub *rpc.ClientSubscription
+	reqGen    *requestGenerator
+	subChan   chan interface{}
+}
+
+func (s *Subscription) Unsubscribe() {
+	s.clientSub.Unsubscribe()
+	close(s.subChan)
+	s.subChan = nil
+}
+
+func (s *Subscription) Err() <-chan error {
+	return s.clientSub.Err()
+}
+
 type requestGenerator struct {
-	reqID  int
-	client *http.Client
-	logger log.Logger
-	target string
+	reqID              int
+	client             *http.Client
+	subscriptionClient *rpc.Client
+	logger             log.Logger
+	target             string
+	subscriptions      map[SubMethod]*Subscription
 }
 
 type (
@@ -103,6 +131,7 @@ var Methods = struct {
 	OTSGetBlockDetails RPCMethod
 	// ETHNewHeads represents the eth_newHeads sub method
 	ETHNewHeads SubMethod
+	ETHLogs     SubMethod
 }{
 	ETHGetTransactionCount: "eth_getTransactionCount",
 	ETHGetBalance:          "eth_getBalance",
@@ -115,15 +144,18 @@ var Methods = struct {
 	TxpoolContent:          "txpool_content",
 	OTSGetBlockDetails:     "ots_getBlockDetails",
 	ETHNewHeads:            "eth_newHeads",
+	ETHLogs:                "eth_logs",
 }
 
 func (req *requestGenerator) call(method RPCMethod, body string, response interface{}) CallResult {
 	start := time.Now()
-	err := post(req.client, req.target, string(method), body, response, req.logger)
+	targetUrl := "http://" + req.target
+	err := post(req.client, targetUrl, string(method), body, response, req.logger)
 	req.reqID++
+
 	return CallResult{
 		RequestBody: body,
-		Target:      req.target,
+		Target:      targetUrl,
 		Took:        time.Since(start),
 		RequestID:   req.reqID,
 		Method:      string(method),
@@ -138,7 +170,7 @@ func (req *requestGenerator) PingErigonRpc() CallResult {
 	}
 
 	// return early if the http module has issue fetching the url
-	resp, err := http.Get(req.target) //nolint
+	resp, err := http.Get("http://" + req.target) //nolint
 	if err != nil {
 		res.Took = time.Since(start)
 		res.Err = err
@@ -218,4 +250,81 @@ func post(client *http.Client, url, method, request string, response interface{}
 	logger.Info(fmt.Sprintf("%s%s", url, method), "time", time.Since(start).Seconds())
 
 	return nil
+}
+
+// NewSubscription returns a new Subscription instance
+func newSubscription(req *requestGenerator, name SubMethod, handler SubscriptionHandler) *Subscription {
+	sub := &Subscription{
+		Name:    name,
+		Handler: handler,
+		reqGen:  req,
+		subChan: make(chan interface{}),
+	}
+
+	go func() {
+		for value := range sub.subChan {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						sub.reqGen.logger.Error("Subscription Handler Crashed", "err", r)
+					}
+				}()
+
+				sub.Handler(value)
+			}()
+		}
+	}()
+
+	return sub
+}
+
+// subscribe connects to a websocket client and returns the subscription handler and a channel buffer
+func (req *requestGenerator) subscribe(method SubMethod, handler SubscriptionHandler, args ...interface{}) (*Subscription, error) {
+	var err error
+
+	if req.subscriptionClient == nil {
+		req.subscriptionClient, err = rpc.DialWebsocket(context.Background(), "ws://"+req.target, "", req.logger)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to dial websocket: %v", err)
+		}
+	}
+
+	methodSub := newSubscription(req, method, handler)
+
+	namespace, subMethod, err := devnetutils.NamespaceAndSubMethodFromMethod(string(method))
+
+	if err != nil {
+		return nil, fmt.Errorf("cannot get namespace and submethod from method: %v", err)
+	}
+
+	arr := append([]interface{}{subMethod}, args...)
+
+	sub, err := req.subscriptionClient.Subscribe(context.Background(), namespace, methodSub.subChan, arr...)
+
+	if err != nil {
+		return nil, fmt.Errorf("client failed to subscribe: %v", err)
+	}
+
+	methodSub.clientSub = sub
+
+	if req.subscriptions == nil {
+		req.subscriptions = map[SubMethod]*Subscription{}
+	}
+
+	req.subscriptions[method] = methodSub
+
+	return methodSub, nil
+}
+
+// UnsubscribeAll closes all the client subscriptions and empties their global subscription channel
+func (req *requestGenerator) UnsubscribeAll() {
+	if req.subscriptions == nil {
+		return
+	}
+	for _, methodSub := range req.subscriptions {
+		if methodSub != nil {
+			methodSub.Unsubscribe()
+		}
+	}
 }

@@ -3,33 +3,10 @@ package scenarios
 import (
 	"context"
 	"sync"
-
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 )
 
 func stepRunners(ctx context.Context) []*stepRunner {
 	return nil
-}
-
-type Context interface {
-	context.Context
-	WithValue(key, value interface{}) Context
-}
-
-type scenarioContext struct {
-	context.Context
-}
-
-func (c *scenarioContext) WithValue(key, value interface{}) Context {
-	return &scenarioContext{context.WithValue(c, key, value)}
-}
-
-func AsContext(ctx context.Context) Context {
-	if ctx, ok := ctx.(Context); ok {
-		return ctx
-	}
-
-	return &scenarioContext{ctx}
 }
 
 func ContextValues(ctx context.Context) []context.Context {
@@ -125,8 +102,4 @@ func JoinContexts(ctx context.Context, others ...context.Context) context.Contex
 	}
 
 	return join
-}
-
-func WithCurrentNode(selector interface{}) Context {
-	return &scenarioContext{devnet.WithCurrentNode(context.Background(), selector)}
 }

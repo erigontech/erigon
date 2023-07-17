@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
+	ethereum "github.com/ledgerwatch/erigon"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/log/v3"
@@ -59,6 +60,7 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 	hashes[eventHash] = true
 
 	txToBlockMap, err := transactions.SearchReservesForTransactionHash(hashes, logger)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to call contract tx: %v", err)
 	}
@@ -71,16 +73,19 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 		return nil, err
 	}
 
-	logs, err := node.GetLogs(0, 20, address)
+	logs, err := node.FilterLogs(ctx, ethereum.FilterQuery{
+		FromBlock: big.NewInt(0),
+		ToBlock:   big.NewInt(20),
+		Addresses: []libcommon.Address{address}})
 
 	if err != nil || len(logs) == 0 {
 		return nil, fmt.Errorf("failed to get logs: %v", err)
 	}
 
 	// compare the log events
-	errs, ok := logs[0].Compare(requests.NewLog(eventHash, blockNum, address,
-		devnetutils.GenerateTopic("SubscriptionEvent()"), hexutility.Bytes{}, hexutil.Uint(1),
-		block.Result.Hash, hexutil.Uint(0), false))
+	errs, ok := requests.Compare(requests.NewLog(eventHash, blockNum, address,
+		devnetutils.GenerateTopic("SubscriptionEvent()"), hexutility.Bytes{}, 1,
+		block.Result.Hash, hexutil.Uint(0), false), logs[0])
 
 	if !ok {
 		logger.Error("Log result is incorrect", "errors", errs)

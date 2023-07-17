@@ -4,9 +4,11 @@ import (
 	context "context"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/params"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/log/v3"
@@ -25,15 +29,25 @@ type Network struct {
 	DataDir            string
 	Chain              string
 	Logger             log.Logger
+	BasePort           int
 	BasePrivateApiAddr string
 	BaseRPCHost        string
 	BaseRPCPort        int
 	Snapshots          bool
 	Nodes              []Node
 	Services           []Service
+	Alloc              types.GenesisAlloc
 	wg                 sync.WaitGroup
 	peers              []string
 	namedNodes         map[string]Node
+}
+
+func (nw *Network) ChainID() *big.Int {
+	if len(nw.Nodes) > 0 {
+		return nw.Nodes[0].ChainID()
+	}
+
+	return &big.Int{}
 }
 
 // Start starts the process for multiple erigon nodes running on the dev chain
@@ -55,6 +69,7 @@ func (nw *Network) Start(ctx *cli.Context) error {
 	baseNode := args.Node{
 		DataDir:        nw.DataDir,
 		Chain:          nw.Chain,
+		Port:           nw.BasePort,
 		HttpPort:       nw.BaseRPCPort,
 		PrivateApiAddr: nw.BasePrivateApiAddr,
 		Snapshots:      nw.Snapshots,
@@ -77,7 +92,7 @@ func (nw *Network) Start(ctx *cli.Context) error {
 			nodePort, args, err := configurable.Configure(base, i)
 
 			if err == nil {
-				node, err = nw.createNode(fmt.Sprintf("http://%s:%d", nw.BaseRPCHost, nodePort), args)
+				node, err = nw.createNode(fmt.Sprintf("%s:%d", nw.BaseRPCHost, nodePort), args)
 			}
 
 			if err != nil {
@@ -130,17 +145,51 @@ func (nw *Network) Start(ctx *cli.Context) error {
 	return nil
 }
 
+var blockProducerFunds = (&big.Int{}).Mul(big.NewInt(1000), big.NewInt(params.Ether))
+
 func (nw *Network) createNode(nodeAddr string, cfg interface{}) (Node, error) {
-	return &node{
+	n := &node{
 		sync.Mutex{},
 		requests.NewRequestGenerator(nodeAddr, nw.Logger),
 		cfg,
 		&nw.wg,
+		nw,
 		make(chan error),
 		nil,
 		nil,
 		nil,
-	}, nil
+	}
+
+	if n.IsBlockProducer() {
+		if nw.Alloc == nil {
+			nw.Alloc = types.GenesisAlloc{
+				n.Account().Address: types.GenesisAccount{Balance: blockProducerFunds},
+			}
+		} else {
+			nw.Alloc[n.Account().Address] = types.GenesisAccount{Balance: blockProducerFunds}
+		}
+	}
+
+	return n, nil
+}
+
+func copyFlags(flags []cli.Flag) []cli.Flag {
+	copies := make([]cli.Flag, len(flags))
+
+	for i, flag := range flags {
+		flagValue := reflect.ValueOf(flag).Elem()
+		copyValue := reflect.New(flagValue.Type()).Elem()
+
+		for f := 0; f < flagValue.NumField(); f++ {
+			if flagValue.Type().Field(f).PkgPath == "" {
+				copyValue.Field(f).Set(flagValue.Field(f))
+			}
+		}
+
+		copies[i] = copyValue.Addr().Interface().(cli.Flag)
+	}
+
+	return copies
 }
 
 // startNode starts an erigon node on the dev chain
@@ -170,7 +219,9 @@ func (nw *Network) startNode(n Node) error {
 			os.Exit(1)
 		}()
 
-		app := erigonapp.MakeApp(node.Name(), node.run, erigoncli.DefaultFlags)
+		// cli flags are not thread safe and assume only one copy of a flag
+		// variable is needed per process - which does not work here
+		app := erigonapp.MakeApp(node.Name(), node.run, copyFlags(erigoncli.DefaultFlags))
 
 		if err := app.Run(args); err != nil {
 			nw.Logger.Warn("App run returned error", "node", node.Name(), "err", err)
@@ -226,10 +277,6 @@ func getEnode(n Node) (string, error) {
 
 		return enode, nil
 	}
-}
-
-func (nw *Network) RunContext(ctx *cli.Context) context.Context {
-	return WithNetwork(WithCliContext(context.Background(), ctx), nw)
 }
 
 func (nw *Network) Stop() {

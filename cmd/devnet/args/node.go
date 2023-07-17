@@ -82,6 +82,8 @@ func (node *Node) configure(base Node, nodeNumber int) error {
 	node.TCPPort = apiPort + 3
 	node.AuthRpcPort = apiPort + 4
 
+	node.Port = base.Port + nodeNumber
+
 	return nil
 }
 

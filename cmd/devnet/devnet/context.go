@@ -14,10 +14,42 @@ const (
 	ckNetwork
 	ckNode
 	ckCliContext
+	ckDevnet
 )
 
-func WithNetwork(ctx context.Context, nw *Network) context.Context {
-	return context.WithValue(context.WithValue(ctx, ckNetwork, nw), ckLogger, nw.Logger)
+type Context interface {
+	context.Context
+	WithValue(key, value interface{}) Context
+	WithCurrentNetwork(selector interface{}) Context
+	WithCurrentNode(selector interface{}) Context
+}
+
+type devnetContext struct {
+	context.Context
+}
+
+func (c devnetContext) WithValue(key, value interface{}) Context {
+	return devnetContext{context.WithValue(c, key, value)}
+}
+
+func (c devnetContext) WithCurrentNetwork(selector interface{}) Context {
+	return WithCurrentNetwork(c, selector)
+}
+
+func (c devnetContext) WithCurrentNode(selector interface{}) Context {
+	return WithCurrentNode(c, selector)
+}
+
+func WithNetwork(ctx context.Context, nw *Network) Context {
+	return devnetContext{context.WithValue(context.WithValue(ctx, ckNetwork, nw), ckLogger, nw.Logger)}
+}
+
+func AsContext(ctx context.Context) Context {
+	if ctx, ok := ctx.(Context); ok {
+		return ctx
+	}
+
+	return devnetContext{ctx}
 }
 
 func Logger(ctx context.Context) log.Logger {
@@ -33,22 +65,52 @@ type cnode struct {
 	node     Node
 }
 
-func WithCurrentNode(ctx context.Context, selector interface{}) context.Context {
-	return context.WithValue(ctx, ckNode, &cnode{selector: selector})
+type cnet struct {
+	selector interface{}
+	network  *Network
 }
 
-func WithCliContext(ctx context.Context, cliCtx *cli.Context) context.Context {
-	return context.WithValue(ctx, ckCliContext, cliCtx)
+func WithDevnet(ctx context.Context, cliCtx *cli.Context, devnet Devnet, logger log.Logger) Context {
+	return WithCliContext(
+		context.WithValue(
+			context.WithValue(ctx, ckDevnet, devnet),
+			ckLogger, logger), cliCtx)
+}
+
+func WithCurrentNetwork(ctx context.Context, selector interface{}) Context {
+	return devnetContext{context.WithValue(ctx, ckNetwork, &cnet{selector: selector})}
+}
+
+func WithCurrentNode(ctx context.Context, selector interface{}) Context {
+	return devnetContext{context.WithValue(ctx, ckNode, &cnode{selector: selector})}
+}
+
+func WithCliContext(ctx context.Context, cliCtx *cli.Context) Context {
+	return devnetContext{context.WithValue(ctx, ckCliContext, cliCtx)}
 }
 
 func CliContext(ctx context.Context) *cli.Context {
 	return ctx.Value(ckCliContext).(*cli.Context)
 }
 
+func CurrentNetwork(ctx context.Context) *Network {
+	if cn, ok := ctx.Value(ckNetwork).(*cnet); ok {
+		if cn.network == nil {
+			if devnet, ok := ctx.Value(ckDevnet).(Devnet); ok {
+				cn.network = devnet.SelectNetwork(ctx, cn.selector)
+			}
+		}
+
+		return cn.network
+	}
+
+	return nil
+}
+
 func CurrentNode(ctx context.Context) Node {
 	if cn, ok := ctx.Value(ckNode).(*cnode); ok {
 		if cn.node == nil {
-			if network, ok := ctx.Value(ckNetwork).(*Network); ok {
+			if network := CurrentNetwork(ctx); network != nil {
 				cn.node = network.SelectNode(ctx, cn.selector)
 			}
 		}
@@ -60,7 +122,7 @@ func CurrentNode(ctx context.Context) Node {
 }
 
 func SelectNode(ctx context.Context, selector ...interface{}) Node {
-	if network, ok := ctx.Value(ckNetwork).(*Network); ok {
+	if network := CurrentNetwork(ctx); network != nil {
 		if len(selector) > 0 {
 			return network.SelectNode(ctx, selector[0])
 		}
@@ -76,7 +138,7 @@ func SelectNode(ctx context.Context, selector ...interface{}) Node {
 }
 
 func SelectBlockProducer(ctx context.Context, selector ...interface{}) Node {
-	if network, ok := ctx.Value(ckNetwork).(*Network); ok {
+	if network := CurrentNetwork(ctx); network != nil {
 		if len(selector) > 0 {
 			blockProducers := network.BlockProducers()
 			switch selector := selector[0].(type) {
@@ -106,7 +168,7 @@ func SelectBlockProducer(ctx context.Context, selector ...interface{}) Node {
 }
 
 func SelectNonBlockProducer(ctx context.Context, selector ...interface{}) Node {
-	if network, ok := ctx.Value(ckNetwork).(*Network); ok {
+	if network := CurrentNetwork(ctx); network != nil {
 		if len(selector) > 0 {
 			nonBlockProducers := network.NonBlockProducers()
 			switch selector := selector[0].(type) {

@@ -9,6 +9,9 @@ import (
 	"regexp"
 	"runtime"
 	"unicode"
+
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -74,11 +77,11 @@ func StepHandler(handler interface{}, matchExpressions ...string) stepHandler {
 }
 
 type Scenario struct {
-	Context     Context `json:"-"`
-	Id          string  `json:"id"`
-	Name        string  `json:"name"`
-	Description string  `json:"description,omitempty"`
-	Steps       []*Step `json:"steps"`
+	Context     devnet.Context `json:"-"`
+	Id          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Steps       []*Step        `json:"steps"`
 }
 
 type Step struct {
@@ -100,7 +103,7 @@ var typeOfBytes = reflect.TypeOf([]byte(nil))
 
 var typeOfContext = reflect.TypeOf((*context.Context)(nil)).Elem()
 
-func (c *stepRunner) Run(ctx context.Context, args []interface{}) (context.Context, interface{}) {
+func (c *stepRunner) Run(ctx context.Context, text string, args []interface{}, logger log.Logger) (context.Context, interface{}) {
 	var values = make([]reflect.Value, 0, len(args))
 
 	typ := c.Handler.Type()
@@ -119,6 +122,8 @@ func (c *stepRunner) Run(ctx context.Context, args []interface{}) (context.Conte
 	for _, arg := range args {
 		values = append(values, reflect.ValueOf(arg))
 	}
+
+	logger.Info("Calling step: "+text, "handler", c.Handler, "args", args)
 
 	res := c.Handler.Call(values)
 
