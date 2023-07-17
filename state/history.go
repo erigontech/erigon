@@ -985,15 +985,16 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 
 func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	h.InvertedIndex.integrateFiles(InvertedFiles{
-		decomp: sf.efHistoryDecomp,
-		index:  sf.efHistoryIdx,
+		decomp:       sf.efHistoryDecomp,
+		index:        sf.efHistoryIdx,
+		warmLocality: sf.warmLocality,
+		coldLocality: sf.coldLocality,
 	}, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, h.aggregationStep)
 	fi.decompressor = sf.historyDecomp
 	fi.index = sf.historyIdx
 	h.files.Set(fi)
-	h.warmLocalityIdx.integrateFiles(sf.warmLocality)
 
 	h.reCalcRoFiles()
 }

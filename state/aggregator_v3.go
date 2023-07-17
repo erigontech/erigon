@@ -353,6 +353,7 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 	if err := ac.BuildOptionalMissedIndices(ctx, workers); err != nil {
 		return err
 	}
+	ac.Close()
 
 	startIndexingTime := time.Now()
 	{

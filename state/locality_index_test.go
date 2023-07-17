@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"sync/atomic"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -14,18 +13,43 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func BenchmarkName2(b *testing.B) {
-	b.Run("1", func(b *testing.B) {
-		j := atomic.Int32{}
-		for i := 0; i < b.N; i++ {
-			j.Add(1)
+func TestScanStaticFilesLocality(t *testing.T) {
+	logger, baseName := log.New(), "test"
+
+	t.Run("new", func(t *testing.T) {
+		ii := &InvertedIndex{filenameBase: baseName, aggregationStep: 1, dir: "", tmpdir: "", logger: logger}
+		ii.enableLocalityIndex()
+		files := []string{
+			"test.0-1.l",
+			"test.1-2.l",
+			"test.0-4.l",
+			"test.2-3.l",
+			"test.3-4.l",
+			"test.4-5.l",
 		}
+		ii.warmLocalityIdx.scanStateFiles(files)
+		require.Equal(t, 4, int(ii.warmLocalityIdx.file.startTxNum))
+		require.Equal(t, 5, int(ii.warmLocalityIdx.file.endTxNum))
+		ii.coldLocalityIdx.scanStateFiles(files)
+		require.Equal(t, 4, int(ii.coldLocalityIdx.file.startTxNum))
+		require.Equal(t, 5, int(ii.coldLocalityIdx.file.endTxNum))
 	})
-	b.Run("2", func(b *testing.B) {
-		j := &atomic.Int32{}
-		for i := 0; i < b.N; i++ {
-			j.Add(1)
-		}
+	t.Run("overlap", func(t *testing.T) {
+		ii := &InvertedIndex{filenameBase: baseName, aggregationStep: 1, dir: "", tmpdir: "", logger: logger}
+		ii.enableLocalityIndex()
+		ii.warmLocalityIdx.scanStateFiles([]string{
+			"test.0-50.l",
+			"test.0-70.l",
+			"test.64-70.l",
+		})
+		require.Equal(t, 64, int(ii.warmLocalityIdx.file.startTxNum))
+		require.Equal(t, 70, int(ii.warmLocalityIdx.file.endTxNum))
+		ii.coldLocalityIdx.scanStateFiles([]string{
+			"test.0-32.l",
+			"test.0-64.l",
+		})
+		require.Equal(t, 0, int(ii.coldLocalityIdx.file.startTxNum))
+		require.Equal(t, 64, int(ii.coldLocalityIdx.file.endTxNum))
 	})
 }
 

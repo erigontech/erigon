@@ -64,16 +64,15 @@ type LocalityIndex struct {
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
-func NewLocalityIndex(preferSmallerFiles bool, dir, filenameBase string, aggregationStep uint64, tmpdir string, logger log.Logger) (*LocalityIndex, error) {
-	li := &LocalityIndex{
+func NewLocalityIndex(preferSmallerFiles bool, dir, filenameBase string, aggregationStep uint64, tmpdir string, logger log.Logger) *LocalityIndex {
+	return &LocalityIndex{
+		preferSmallerFiles: preferSmallerFiles,
 		dir:                dir,
 		tmpdir:             tmpdir,
 		aggregationStep:    aggregationStep,
 		filenameBase:       filenameBase,
 		logger:             logger,
-		preferSmallerFiles: preferSmallerFiles,
 	}
-	return li, nil
 }
 func (li *LocalityIndex) closeWhatNotInList(fNames []string) {
 	if li == nil || li.bm == nil {
@@ -105,7 +104,7 @@ func (li *LocalityIndex) scanStateFiles(fNames []string) (uselessFiles []*filesI
 		return nil
 	}
 
-	re := regexp.MustCompile("^" + li.filenameBase + ".([0-9]+)-([0-9]+).li$")
+	re := regexp.MustCompile("^" + li.filenameBase + ".([0-9]+)-([0-9]+).l$")
 	var err error
 	for _, name := range fNames {
 		subs := re.FindStringSubmatch(name)
@@ -190,9 +189,15 @@ func (li *LocalityIndex) closeFiles() {
 	}
 }
 func (li *LocalityIndex) reCalcRoFiles() {
-	if li == nil || li.file == nil {
+	if li == nil {
 		return
 	}
+	if li.file == nil {
+		li.roFiles.Store(nil)
+		li.roBmFile.Store(nil)
+		return
+	}
+
 	li.roFiles.Store(&ctxItem{
 		startTxNum: li.file.startTxNum,
 		endTxNum:   li.file.endTxNum,
@@ -302,9 +307,12 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 		lc.reader = recsplit.NewIndexReader(lc.file.src.index)
 	}
 	if lc.reader.Empty() {
-		fmt.Printf("empty: %s, %s\n", lc.file.src.index.FileName(), lc.bm.FileName())
 		return 0, false, nil
 	}
+	//if bytes.HasPrefix(key, common.FromHex("5e7d")) {
+	//	res, _ := lc.bm.At(lc.reader.Lookup(key))
+	//	fmt.Printf("idx: %x, %d\n", key, res)
+	//}
 	return lc.bm.LastAt(lc.reader.Lookup(key))
 }
 
@@ -346,9 +354,9 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	count := 0
 	it := makeIter()
 	defer it.Close()
-	if it.FilesAmount() == 1 { // optimization: no reason to create LocalityIndex for 1 file
-		return nil, nil
-	}
+	//if it.FilesAmount() == 1 { // optimization: no reason to create LocalityIndex for 1 file
+	//	return nil, nil
+	//}
 
 	for it.HasNext() {
 		_, _ = it.Next()
@@ -396,7 +404,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		defer it.Close()
 		for it.HasNext() {
 			k, inSteps := it.Next()
-			if bytes.HasPrefix(k, common.FromHex("1050")) {
+			if bytes.HasPrefix(k, common.FromHex("5e7d")) {
 				fmt.Printf("build: %x, %d\n", k, inSteps)
 			}
 
@@ -454,19 +462,25 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 }
 
 func (li *LocalityIndex) integrateFiles(sf *LocalityIndexFiles) {
-	if sf == nil || li == nil {
+	if li == nil {
 		return
 	}
 	if li.file != nil {
 		li.file.canDelete.Store(true)
 	}
-	li.file = &filesItem{
-		startTxNum: sf.fromStep * li.aggregationStep,
-		endTxNum:   sf.toStep * li.aggregationStep,
-		index:      sf.index,
-		frozen:     false,
+	if sf == nil {
+		return //TODO: support non-indexing of single file
+		//li.file = nil
+		//li.bm = nil
+	} else {
+		li.file = &filesItem{
+			startTxNum: sf.fromStep * li.aggregationStep,
+			endTxNum:   sf.toStep * li.aggregationStep,
+			index:      sf.index,
+			frozen:     false,
+		}
+		li.bm = sf.bm
 	}
-	li.bm = sf.bm
 	li.reCalcRoFiles()
 }
 

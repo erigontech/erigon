@@ -122,11 +122,11 @@ func NewInvertedIndex(
 
 func (ii *InvertedIndex) enableLocalityIndex() error {
 	var err error
-	ii.warmLocalityIdx, err = NewLocalityIndex(true, ii.warmDir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.logger)
+	ii.warmLocalityIdx = NewLocalityIndex(true, ii.warmDir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.logger)
 	if err != nil {
 		return fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
 	}
-	ii.coldLocalityIdx, err = NewLocalityIndex(false, ii.dir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.logger)
+	ii.coldLocalityIdx = NewLocalityIndex(false, ii.dir, ii.filenameBase, ii.aggregationStep, ii.tmpdir, ii.logger)
 	if err != nil {
 		return fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
 	}
@@ -326,12 +326,10 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 	}
 
 	if ii.withLocalityIndex && ii.warmLocalityIdx != nil {
-		fmt.Printf("trying build1\n")
 		g.Go(func() error {
 			ic := ii.MakeContext()
 			defer ic.Close()
 			from, to := ic.minWarmStep(), ic.maxWarmStep()
-			fmt.Printf("trying build2: %d-%d\n", from, to)
 			if from == to || ic.ii.warmLocalityIdx.exists(from, to) {
 				return nil
 			}

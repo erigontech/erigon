@@ -897,13 +897,10 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 }
 
 type StaticFiles struct {
-	valuesDecomp    *compress.Decompressor
-	valuesIdx       *recsplit.Index
-	valuesBt        *BtIndex
-	historyDecomp   *compress.Decompressor
-	historyIdx      *recsplit.Index
-	efHistoryDecomp *compress.Decompressor
-	efHistoryIdx    *recsplit.Index
+	HistoryFiles
+	valuesDecomp *compress.Decompressor
+	valuesIdx    *recsplit.Index
+	valuesBt     *BtIndex
 }
 
 // CleanupOnError - call it on collation fail. It closing all files
@@ -1002,13 +999,10 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 
 	closeComp = false
 	return StaticFiles{
-		valuesDecomp:    valuesDecomp,
-		valuesIdx:       valuesIdx,
-		valuesBt:        bt,
-		historyDecomp:   hStaticFiles.historyDecomp,
-		historyIdx:      hStaticFiles.historyIdx,
-		efHistoryDecomp: hStaticFiles.efHistoryDecomp,
-		efHistoryIdx:    hStaticFiles.efHistoryIdx,
+		HistoryFiles: hStaticFiles,
+		valuesDecomp: valuesDecomp,
+		valuesIdx:    valuesIdx,
+		valuesBt:     bt,
 	}, nil
 }
 
@@ -1113,12 +1107,7 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 }
 
 func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
-	d.History.integrateFiles(HistoryFiles{
-		historyDecomp:   sf.historyDecomp,
-		historyIdx:      sf.historyIdx,
-		efHistoryDecomp: sf.efHistoryDecomp,
-		efHistoryIdx:    sf.efHistoryIdx,
-	}, txNumFrom, txNumTo)
+	d.History.integrateFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, d.aggregationStep)
 	fi.decompressor = sf.valuesDecomp
@@ -1463,7 +1452,7 @@ func (dc *DomainContext) getLatestFromFiles2(filekey []byte) (v []byte, found bo
 			continue
 		}
 		found = true
-		if bytes.HasPrefix(filekey, common.FromHex("1050")) {
+		if bytes.HasPrefix(filekey, common.FromHex("5e")) {
 			fmt.Printf("k1: %x, %t, %s\n", filekey, found, dc.files[i].src.decompressor.FileName())
 		}
 		if COMPARE_INDEXES {
@@ -1534,13 +1523,17 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 }
 
 func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, error) {
+	if dc.d.filenameBase == "accounts" {
+		//fmt.Printf("indexed to : %s, %s\n,", dc.hc.ic.warmLocality.bm.FileName(), dc.hc.ic.files[len(dc.hc.ic.files)-1].src.decompressor.FileName())
+	}
+
 	exactWarmStep, ok, err := dc.hc.ic.warmLocality.lookupLatest(filekey)
 	if err != nil {
 		return nil, false, err
 	}
-	//if bytes.HasPrefix(filekey, common.FromHex("1050")) {
-	//	fmt.Printf("k1: %x, %d, %t, %s, %s\n", filekey, exactWarmStep, ok, dc.hc.ic.warmLocality.bm.FileName(), dc.hc.ic.ii.warmLocalityIdx.file.index.FileName())
-	//}
+	if bytes.HasPrefix(filekey, common.FromHex("419e")) {
+		fmt.Printf("k1: %x, %d, %t, %s, %s\n", filekey, exactWarmStep, ok, dc.hc.ic.warmLocality.bm.FileName(), dc.hc.ic.ii.warmLocalityIdx.file.index.FileName())
+	}
 	if !ok {
 		return nil, false, nil
 	}
@@ -1756,9 +1749,9 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 		return nil, false, err
 	}
 
-	if bytes.HasPrefix(key, common.FromHex("1050")) {
-		fmt.Printf("k: %x, %d, %d -> %x, %x\n", key, ^binary.BigEndian.Uint64(foundInvStep), dc.d.txNum/dc.d.aggregationStep, dc.keyBuf[:len(key)+8], v)
-	}
+	//if bytes.HasPrefix(key, common.FromHex("1050")) {
+	//	fmt.Printf("k: %x, %d, %d -> %x, %x\n", key, ^binary.BigEndian.Uint64(foundInvStep), dc.d.txNum/dc.d.aggregationStep, dc.keyBuf[:len(key)+8], v)
+	//}
 	return v, true, nil
 }
 
