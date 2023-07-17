@@ -91,7 +91,7 @@ func (d Devnet) SelectNetwork(ctx context.Context, selector interface{}) *Networ
 	case string:
 		if exp, err := regexp.Compile(selector); err == nil {
 			for _, network := range d {
-				if exp.Match([]byte(network.Chain)) {
+				if exp.MatchString(network.Chain) {
 					return network
 				}
 			}

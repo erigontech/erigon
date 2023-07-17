@@ -17,7 +17,7 @@ func Compare(expected types.Log, actual types.Log) ([]error, bool) {
 	var errs []error
 
 	switch {
-	case expected.Address != expected.Address:
+	case expected.Address != actual.Address:
 		errs = append(errs, fmt.Errorf("expected address: %v, actual address %v", expected.Address, actual.Address))
 	case expected.TxHash != actual.TxHash:
 		errs = append(errs, fmt.Errorf("expected txhash: %v, actual txhash %v", expected.TxHash, actual.TxHash))
