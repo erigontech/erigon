@@ -1602,7 +1602,9 @@ func (dc *DomainContext) Close() {
 	if dc.files == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
-	for _, item := range dc.files {
+	files := dc.files
+	dc.files = nil
+	for _, item := range files {
 		if item.src.frozen {
 			continue
 		}
@@ -1612,7 +1614,6 @@ func (dc *DomainContext) Close() {
 			item.src.closeFilesAndRemove()
 		}
 	}
-	dc.files = nil
 	//for _, r := range dc.readers {
 	//	r.Close()
 	//}

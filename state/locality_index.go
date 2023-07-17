@@ -334,7 +334,6 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	defer logEvery.Stop()
 
 	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep)
-	fmt.Printf("alex: %s\n", fName)
 	idxPath := filepath.Join(li.dir, fName)
 	filePath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
 
@@ -381,7 +380,6 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			maxPossibleValue = int(it.FilesAmount())
 			baseDataID = uint64(0)
 		}
-		fmt.Printf("buil: %s, %d,%d\n", fName, count, baseDataID)
 		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, maxPossibleValue, baseDataID, uint64(count), li.logger)
 		if err != nil {
 			return nil, err

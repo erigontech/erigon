@@ -582,8 +582,9 @@ func (ic *InvertedIndexContext) Close() {
 	if ic.files == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
-
-	for _, item := range ic.files {
+	files := ic.files
+	ic.files = nil
+	for _, item := range files {
 		if item.src.frozen {
 			continue
 		}
@@ -593,7 +594,6 @@ func (ic *InvertedIndexContext) Close() {
 			item.src.closeFilesAndRemove()
 		}
 	}
-	ic.files = nil
 
 	for _, r := range ic.readers {
 		r.Close()
