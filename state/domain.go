@@ -1167,6 +1167,7 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 		}
 
 		edgeRecords, err := d.History.unwindKey(k, txFrom, d.tx)
+		//fmt.Printf("unwind %x to tx %d edges %+v\n", k, txFrom, edgeRecords)
 		if err != nil {
 			return err
 		}

@@ -1244,12 +1244,23 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rh[1:], nil // first byte is 128+hash_len
 }
 
-func (hph *HexPatriciaHashed) ReviewKeys(plainKeys, hashedKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
+func (hph *HexPatriciaHashed) ReviewKeys(plainKeys, _ [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
 	branchNodeUpdates = make(map[string]BranchData)
 
+	pks := make(map[string]int, len(plainKeys))
+	hashedKeys := make([][]byte, len(plainKeys))
+	for i, pk := range plainKeys {
+		hashedKeys[i] = hph.hashAndNibblizeKey(pk)
+		pks[string(hashedKeys[i])] = i
+	}
+
+	sort.Slice(hashedKeys, func(i, j int) bool {
+		return bytes.Compare(hashedKeys[i], hashedKeys[j]) < 0
+	})
+
 	stagedCell := new(Cell)
-	for i, hashedKey := range hashedKeys {
-		plainKey := plainKeys[i]
+	for _, hashedKey := range hashedKeys {
+		plainKey := plainKeys[pks[string(hashedKey)]]
 		if hph.trace {
 			fmt.Printf("plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
