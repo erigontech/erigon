@@ -150,7 +150,7 @@ var cmdStageExec = &cobra.Command{
 		}
 		defer db.Close()
 
-		defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
+		defer func(t time.Time) { logger.Info("stage_exec total", "took", time.Since(t)) }(time.Now())
 
 		if err := stageExec(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
