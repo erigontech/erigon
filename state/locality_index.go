@@ -28,7 +28,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -404,9 +403,9 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		defer it.Close()
 		for it.HasNext() {
 			k, inSteps := it.Next()
-			if bytes.HasPrefix(k, common.FromHex("5e7d")) {
-				fmt.Printf("build: %x, %d\n", k, inSteps)
-			}
+			//if bytes.HasPrefix(k, common.FromHex("5e7d")) {
+			//	fmt.Printf("build: %x, %d\n", k, inSteps)
+			//}
 
 			if convertStepsToFileNums {
 				for j := range inSteps {
