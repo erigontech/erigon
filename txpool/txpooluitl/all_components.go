@@ -105,6 +105,7 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 	txPoolDB, err := mdbx.NewMDBX(log.New()).Label(kv.TxPoolDB).Path(cfg.DBDir).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
 		Flags(func(f uint) uint { return f ^ mdbx2.Durable | mdbx2.SafeNoSync }).
+		MapSize(512 * datasize.MB).
 		GrowthStep(16 * datasize.MB).
 		SyncPeriod(30 * time.Second).
 		Open()
