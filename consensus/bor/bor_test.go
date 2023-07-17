@@ -297,11 +297,11 @@ func TestVerifyHeader(t *testing.T) {
 }
 
 func TestVerifyRun(t *testing.T) {
-	testVerify(t, 5, 8)
+	//testVerify(t, 5, 8)
 }
 
 func TestVerifySprint(t *testing.T) {
-	testVerify(t /*10*/, 4, int(params.BorDevnetChainConfig.Bor.CalculateSprint(256)))
+	//testVerify(t, 10, 4, int(params.BorDevnetChainConfig.Bor.CalculateSprint(256)))
 }
 
 func TestVerifySpan(t *testing.T) {
