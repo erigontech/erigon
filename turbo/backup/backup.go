@@ -116,8 +116,14 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	}
 	_, isDupsort := c.(kv.RwCursorDupSort)
 	i := uint64(0)
-	casted := c.(*mdbx2.MdbxDupSortCursor)
-	dstC := c.(*mdbx2.MdbxCursor)
+
+	var casted *mdbx2.MdbxDupSortCursor
+	var dstC *mdbx2.MdbxCursor
+	if isDupsort {
+		casted = c.(*mdbx2.MdbxDupSortCursor)
+	} else {
+		dstC = c.(*mdbx2.MdbxCursor)
+	}
 
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
