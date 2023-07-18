@@ -316,7 +316,6 @@ func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context, 
 		if to == 0 || ic.ii.coldLocalityIdx.exists(from, to) {
 			return nil
 		}
-		fmt.Printf("build cold: %d-%d\n", from, to)
 		if err = ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, from, to, true, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to, nil) }); err != nil {
 			return err
 		}
