@@ -17,9 +17,11 @@ RUN --mount=type=cache,target=/root/.cache \
     make all
 
 
-FROM docker.io/library/golang:1.20-alpine3.16 AS tools-builder
+FROM docker.io/library/golang:1.20-bullseye AS tools-builder
 
-RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
+RUN apt update
+RUN apt install -y build-essential git bash ca-certificates libstdc++6
+
 WORKDIR /app
 
 ADD Makefile Makefile
