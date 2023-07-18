@@ -72,6 +72,7 @@ func BorHeimdallForward(
 	if err != nil {
 		return err
 	}
+	defer cursor.Close()
 	k, _, err := cursor.Last()
 	if err != nil {
 		return err
@@ -212,13 +213,38 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv
 		}
 		defer tx.Rollback()
 	}
-	cursor, err := tx.Cursor(kv.BorEventNums)
+	cursor, err := tx.RwCursor(kv.BorEventNums)
 	if err != nil {
 		return err
 	}
+	defer cursor.Close()
 	var blockNumBuf [8]byte
 	binary.BigEndian.PutUint64(blockNumBuf[:], u.UnwindPoint+1)
 	k, v, err := cursor.Seek(blockNumBuf[:])
+	if err != nil {
+		return err
+	}
+	if k != nil {
+		// v is the encoding of the first eventId to be removed
+		eventCursor, err := tx.RwCursor(kv.BorEvents)
+		if err != nil {
+			return err
+		}
+		defer eventCursor.Close()
+		for v, _, err = eventCursor.Seek(v); err == nil && v != nil; v, _, err = eventCursor.Next() {
+			if err = eventCursor.DeleteCurrent(); err != nil {
+				return err
+			}
+		}
+		if err != nil {
+			return err
+		}
+	}
+	for ; err == nil && k != nil; k, v, err = cursor.Next() {
+		if err = cursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
 	if err != nil {
 		return err
 	}

@@ -72,7 +72,7 @@ func DefaultStages(ctx context.Context,
 				return HeadersUnwind(u, s, tx, headers, test)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return HeadersPrune(p, tx, headers, ctx)
+				return nil
 			},
 		},
 		{
@@ -114,7 +114,7 @@ func DefaultStages(ctx context.Context,
 				return UnwindBodiesStage(u, tx, bodies, ctx)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneBodiesStage(p, tx, bodies, ctx)
+				return nil
 			},
 		},
 		{
