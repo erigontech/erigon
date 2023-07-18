@@ -2,16 +2,19 @@ package args
 
 import (
 	"fmt"
+	"math/big"
 	"net"
 	"path/filepath"
 	"strconv"
 
+	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 type Node struct {
 	requests.RequestGenerator `arg:"-"`
+	Name                      string `arg:"-"`
 	BuildDir                  string `arg:"positional" default:"./build/bin/devnet" json:"builddir"`
 	DataDir                   string `arg:"--datadir" default:"./dev" json:"datadir"`
 	Chain                     string `arg:"--chain" default:"dev" json:"chain"`
@@ -39,13 +42,19 @@ type Node struct {
 	MetricsAddr               string `arg:"--metrics.addr" json:"metrics.addr,omitempty"`
 	StaticPeers               string `arg:"--staticpeers" json:"staticpeers,omitempty"`
 	WithoutHeimdall           bool   `arg:"--bor.withoutheimdall" flag:"" default:"false" json:"bor.withoutheimdall,omitempty"`
+	HeimdallGRpc              string `arg:"--bor.heimdallgRPC" json:"bor.heimdallgRPC,omitempty"`
 }
 
 func (node *Node) configure(base Node, nodeNumber int) error {
-	node.DataDir = filepath.Join(base.DataDir, fmt.Sprintf("%d", nodeNumber))
+
+	if len(node.Name) == 0 {
+		node.Name = fmt.Sprintf("%s-%d", base.Chain, nodeNumber)
+	}
+
+	node.DataDir = filepath.Join(base.DataDir, node.Name)
 
 	node.LogDirPath = filepath.Join(base.DataDir, "logs")
-	node.LogDirPrefix = fmt.Sprintf("node-%d", nodeNumber)
+	node.LogDirPrefix = node.Name
 
 	node.Chain = base.Chain
 
@@ -73,17 +82,25 @@ func (node *Node) configure(base Node, nodeNumber int) error {
 	node.TCPPort = apiPort + 3
 	node.AuthRpcPort = apiPort + 4
 
+	node.Port = base.Port + nodeNumber
+
 	return nil
+}
+
+func (node Node) ChainID() *big.Int {
+	return &big.Int{}
 }
 
 type BlockProducer struct {
 	Node
-	Mine            bool   `arg:"--mine" flag:"true" json:"mine"`
-	DevPeriod       int    `arg:"--dev.period" json:"dev.period"`
-	BorPeriod       int    `arg:"--bor.period" json:"bor.period"`
-	BorMinBlockSize int    `arg:"--bor.minblocksize" json:"bor.minblocksize"`
-	HttpApi         string `arg:"--http.api" default:"admin,eth,erigon,web3,net,debug,trace,txpool,parity,ots" json:"http.api"`
-	AccountSlots    int    `arg:"--txpool.accountslots" default:"16" json:"txpool.accountslots"`
+	Mine            bool   `arg:"--mine" flag:"true"`
+	Etherbase       string `arg:"--miner.etherbase"`
+	DevPeriod       int    `arg:"--dev.period"`
+	BorPeriod       int    `arg:"--bor.period"`
+	BorMinBlockSize int    `arg:"--bor.minblocksize"`
+	HttpApi         string `arg:"--http.api" default:"admin,eth,erigon,web3,net,debug,trace,txpool,parity,ots"`
+	AccountSlots    int    `arg:"--txpool.accountslots" default:"16"`
+	account         *accounts.Account
 }
 
 func (m BlockProducer) Configure(baseNode Node, nodeNumber int) (int, interface{}, error) {
@@ -98,9 +115,25 @@ func (m BlockProducer) Configure(baseNode Node, nodeNumber int) (int, interface{
 		if m.DevPeriod == 0 {
 			m.DevPeriod = 30
 		}
+		m.account = accounts.NewAccount(m.Name() + "-etherbase")
+
+	case networkname.BorDevnetChainName:
+		m.account = accounts.NewAccount(m.Name() + "-etherbase")
+	}
+
+	if m.account != nil {
+		m.Etherbase = m.account.Address.Hex()
 	}
 
 	return m.HttpPort, m, nil
+}
+
+func (n BlockProducer) Name() string {
+	return n.Node.Name
+}
+
+func (n BlockProducer) Account() *accounts.Account {
+	return n.account
 }
 
 func (n BlockProducer) IsBlockProducer() bool {
@@ -124,8 +157,16 @@ func (n NonBlockProducer) Configure(baseNode Node, nodeNumber int) (int, interfa
 	return n.HttpPort, n, nil
 }
 
+func (n NonBlockProducer) Name() string {
+	return n.Node.Name
+}
+
 func (n NonBlockProducer) IsBlockProducer() bool {
 	return false
+}
+
+func (n NonBlockProducer) Account() *accounts.Account {
+	return nil
 }
 
 func portFromBase(baseAddr string, increment int, portCount int) (string, int, error) {

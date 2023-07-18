@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type SimulationContext struct {
@@ -41,13 +44,15 @@ func (s *suite) runSteps(ctx context.Context, scenario *Scenario, steps []*Step)
 	var results = make([]StepResult, 0, len(steps))
 	var err error
 
+	logger := devnet.Logger(ctx)
+
 	for i, step := range steps {
 		isLast := i == len(steps)-1
 		isFirst := i == 0
 
 		var stepResult StepResult
 
-		ctx, stepResult = s.runStep(ctx, scenario, step, err, isFirst, isLast)
+		ctx, stepResult = s.runStep(ctx, scenario, step, err, isFirst, isLast, logger)
 
 		switch {
 		case stepResult.Err == nil:
@@ -66,7 +71,7 @@ func (s *suite) runSteps(ctx context.Context, scenario *Scenario, steps []*Step)
 	return ctx, results, err
 }
 
-func (s *suite) runStep(ctx context.Context, scenario *Scenario, step *Step, prevStepErr error, isFirst, isLast bool) (rctx context.Context, sr StepResult) {
+func (s *suite) runStep(ctx context.Context, scenario *Scenario, step *Step, prevStepErr error, isFirst, isLast bool, logger log.Logger) (rctx context.Context, sr StepResult) {
 	var match *stepRunner
 
 	sr = StepResult{Status: Undefined}
@@ -75,6 +80,7 @@ func (s *suite) runStep(ctx context.Context, scenario *Scenario, step *Step, pre
 	// user multistep definitions may panic
 	defer func() {
 		if e := recover(); e != nil {
+			logger.Error("Step failed with panic", "scenario", scenario.Name, "step", step.Text, "err", e)
 			sr.Err = &traceError{
 				msg:   fmt.Sprintf("%v", e),
 				stack: callStack(),
@@ -121,7 +127,7 @@ func (s *suite) runStep(ctx context.Context, scenario *Scenario, step *Step, pre
 		return ctx, sr
 	}
 
-	ctx, undef, match, err := s.maybeUndefined(ctx, step.Text, step.Args)
+	ctx, undef, match, err := s.maybeUndefined(ctx, step.Text, step.Args, logger)
 
 	if err != nil {
 		return ctx, sr
@@ -129,6 +135,7 @@ func (s *suite) runStep(ctx context.Context, scenario *Scenario, step *Step, pre
 		sr = NewStepResult(scenario.Id, step)
 		sr.Status = Undefined
 		sr.Err = ErrUndefined
+		logger.Error("Step failed undefined step", "scenario", scenario.Name, "step", step.Text)
 		return ctx, sr
 	}
 
@@ -138,12 +145,13 @@ func (s *suite) runStep(ctx context.Context, scenario *Scenario, step *Step, pre
 		return ctx, sr
 	}
 
-	ctx, sr.Err = s.maybeSubSteps(match.Run(ctx, step.Args))
+	ctx, res := match.Run(ctx, step.Text, step.Args, logger)
+	ctx, sr.Err = s.maybeSubSteps(ctx, res, logger)
 
 	return ctx, sr
 }
 
-func (s *suite) maybeUndefined(ctx context.Context, text string, args []interface{}) (context.Context, []string, *stepRunner, error) {
+func (s *suite) maybeUndefined(ctx context.Context, text string, args []interface{}, logger log.Logger) (context.Context, []string, *stepRunner, error) {
 	step := s.matchStep(text)
 
 	if nil == step {
@@ -156,10 +164,10 @@ func (s *suite) maybeUndefined(ctx context.Context, text string, args []interfac
 		return ctx, undefined, step, nil
 	}
 
-	ctx, steps := step.Run(ctx, args)
+	ctx, steps := step.Run(ctx, text, args, logger)
 
 	for _, next := range steps.([]Step) {
-		ctx, undef, _, err := s.maybeUndefined(ctx, next.Text, nil)
+		ctx, undef, _, err := s.maybeUndefined(ctx, next.Text, nil, logger)
 		if err != nil {
 			return ctx, undefined, nil, err
 		}
@@ -189,7 +197,7 @@ func (s *suite) matchStep(text string) *stepRunner {
 	return nil
 }
 
-func (s *suite) maybeSubSteps(ctx context.Context, result interface{}) (context.Context, error) {
+func (s *suite) maybeSubSteps(ctx context.Context, result interface{}, logger log.Logger) (context.Context, error) {
 	if nil == result {
 		return ctx, nil
 	}
@@ -208,8 +216,11 @@ func (s *suite) maybeSubSteps(ctx context.Context, result interface{}) (context.
 	for _, step := range steps {
 		if def := s.matchStep(step.Text); def == nil {
 			return ctx, ErrUndefined
-		} else if ctx, err = s.maybeSubSteps(def.Run(ctx, step.Args)); err != nil {
-			return ctx, fmt.Errorf("%s: %+v", step.Text, err)
+		} else {
+			ctx, res := def.Run(ctx, step.Text, step.Args, logger)
+			if ctx, err = s.maybeSubSteps(ctx, res, logger); err != nil {
+				return ctx, fmt.Errorf("%s: %+v", step.Text, err)
+			}
 		}
 	}
 	return ctx, nil
@@ -217,6 +228,11 @@ func (s *suite) maybeSubSteps(ctx context.Context, result interface{}) (context.
 
 func (s *suite) runScenario(scenario *Scenario) (sr *ScenarioResult, err error) {
 	ctx := s.defaultContext
+
+	if scenario.Context != nil {
+		ctx = JoinContexts(scenario.Context, ctx)
+	}
+
 	if ctx == nil {
 		ctx = context.Background()
 	}

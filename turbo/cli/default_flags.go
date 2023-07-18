@@ -143,6 +143,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.HeimdallURLFlag,
 	&utils.WithoutHeimdallFlag,
 	&utils.HeimdallgRPCAddressFlag,
+	&utils.BorBlockPeriodFlag,
+	&utils.BorBlockSizeFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideShanghaiTime,
 
