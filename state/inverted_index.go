@@ -330,6 +330,7 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 			ic := ii.MakeContext()
 			defer ic.Close()
 			from, to := ic.minWarmStep(), ic.maxWarmStep()
+			fmt.Printf("before build warm: %d-%d,%t\n", from, to, ic.ii.warmLocalityIdx.exists(from, to))
 			if from == to || ic.ii.warmLocalityIdx.exists(from, to) {
 				return nil
 			}

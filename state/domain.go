@@ -54,6 +54,7 @@ type filesItem struct {
 	decompressor *compress.Decompressor
 	index        *recsplit.Index
 	bindex       *BtIndex
+	bm           *bitmapdb.FixedSizeBitmaps
 	startTxNum   uint64
 	endTxNum     uint64
 
@@ -91,7 +92,7 @@ func (i *filesItem) closeFilesAndRemove() {
 		// paranoic-mode on: don't delete frozen files
 		if !i.frozen {
 			if err := os.Remove(i.decompressor.FilePath()); err != nil {
-				log.Trace("close", "err", err, "file", i.decompressor.FileName())
+				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
 			}
 		}
 		i.decompressor = nil
@@ -101,7 +102,7 @@ func (i *filesItem) closeFilesAndRemove() {
 		// paranoic-mode on: don't delete frozen files
 		if !i.frozen {
 			if err := os.Remove(i.index.FilePath()); err != nil {
-				log.Trace("close", "err", err, "file", i.index.FileName())
+				log.Trace("remove after close", "err", err, "file", i.index.FileName())
 			}
 		}
 		i.index = nil
@@ -109,7 +110,14 @@ func (i *filesItem) closeFilesAndRemove() {
 	if i.bindex != nil {
 		i.bindex.Close()
 		if err := os.Remove(i.bindex.FilePath()); err != nil {
-			log.Trace("close", "err", err, "file", i.bindex.FileName())
+			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
+		}
+		i.bindex = nil
+	}
+	if i.bm != nil {
+		i.bm.Close()
+		if err := os.Remove(i.bm.FilePath()); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
 		}
 		i.bindex = nil
 	}
@@ -687,7 +695,6 @@ type ctxItem struct {
 
 type ctxLocalityIdx struct {
 	reader          *recsplit.IndexReader
-	bm              *bitmapdb.FixedSizeBitmaps
 	file            *ctxItem
 	aggregationStep uint64
 }

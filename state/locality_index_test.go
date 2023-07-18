@@ -99,13 +99,13 @@ func TestLocality(t *testing.T) {
 		ic := ii.MakeContext()
 		defer ic.Close()
 
-		res, err := ic.coldLocality.bm.At(0)
+		res, err := ic.coldLocality.file.src.bm.At(0)
 		require.NoError(err)
 		require.Equal([]uint64{0, 1}, res)
-		res, err = ic.coldLocality.bm.At(1)
+		res, err = ic.coldLocality.file.src.bm.At(1)
 		require.NoError(err)
 		require.Equal([]uint64{0, 1}, res)
-		res, err = ic.coldLocality.bm.At(32) //too big, must error
+		res, err = ic.coldLocality.file.src.bm.At(32) //too big, must error
 		require.Error(err)
 		require.Empty(res)
 	})
@@ -113,7 +113,7 @@ func TestLocality(t *testing.T) {
 	t.Run("locality index: search from given position", func(t *testing.T) {
 		ic := ii.MakeContext()
 		defer ic.Close()
-		fst, snd, ok1, ok2, err := ic.coldLocality.bm.First2At(0, 1)
+		fst, snd, ok1, ok2, err := ic.coldLocality.file.src.bm.First2At(0, 1)
 		require.NoError(err)
 		require.True(ok1)
 		require.False(ok2)
@@ -123,7 +123,7 @@ func TestLocality(t *testing.T) {
 	t.Run("locality index: search from given position in future", func(t *testing.T) {
 		ic := ii.MakeContext()
 		defer ic.Close()
-		fst, snd, ok1, ok2, err := ic.coldLocality.bm.First2At(0, 2)
+		fst, snd, ok1, ok2, err := ic.coldLocality.file.src.bm.First2At(0, 2)
 		require.NoError(err)
 		require.False(ok1)
 		require.False(ok2)
@@ -210,13 +210,13 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("locality index: bitmap all data check", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		res, err := dc.hc.ic.coldLocality.bm.At(0)
+		res, err := dc.hc.ic.coldLocality.file.src.bm.At(0)
 		require.NoError(err)
 		require.Equal([]uint64{0}, res)
-		res, err = dc.hc.ic.coldLocality.bm.At(1)
+		res, err = dc.hc.ic.coldLocality.file.src.bm.At(1)
 		require.NoError(err)
 		require.Equal([]uint64{1, 2}, res)
-		res, err = dc.hc.ic.coldLocality.bm.At(keyCount) //too big, must error
+		res, err = dc.hc.ic.coldLocality.file.src.bm.At(keyCount) //too big, must error
 		require.Error(err)
 		require.Empty(res)
 	})
@@ -224,28 +224,28 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("locality index: search from given position", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		fst, snd, ok1, ok2, err := dc.hc.ic.coldLocality.bm.First2At(1, 1)
+		fst, snd, ok1, ok2, err := dc.hc.ic.coldLocality.file.src.bm.First2At(1, 1)
 		require.NoError(err)
 		require.True(ok1)
 		require.True(ok2)
 		require.Equal(1, int(fst))
 		require.Equal(2, int(snd))
 
-		fst, snd, ok1, ok2, err = dc.hc.ic.coldLocality.bm.First2At(1, 2)
+		fst, snd, ok1, ok2, err = dc.hc.ic.coldLocality.file.src.bm.First2At(1, 2)
 		require.NoError(err)
 		require.True(ok1)
 		require.False(ok2)
 		require.Equal(2, int(fst))
 		require.Equal(0, int(snd))
 
-		fst, snd, ok1, ok2, err = dc.hc.ic.coldLocality.bm.First2At(2, 1)
+		fst, snd, ok1, ok2, err = dc.hc.ic.coldLocality.file.src.bm.First2At(2, 1)
 		require.NoError(err)
 		require.True(ok1)
 		require.False(ok2)
 		require.Equal(uint64(2), fst)
 		require.Zero(snd)
 
-		fst, snd, ok1, ok2, err = dc.hc.ic.coldLocality.bm.First2At(0, 1)
+		fst, snd, ok1, ok2, err = dc.hc.ic.coldLocality.file.src.bm.First2At(0, 1)
 		require.NoError(err)
 		require.False(ok1)
 		require.False(ok2)
@@ -253,27 +253,27 @@ func TestLocalityDomain(t *testing.T) {
 	t.Run("locality index: bitmap operations", func(t *testing.T) {
 		dc := dom.MakeContext()
 		defer dc.Close()
-		_, _, ok1, ok2, err := dc.hc.ic.coldLocality.bm.First2At(0, 2)
+		_, _, ok1, ok2, err := dc.hc.ic.coldLocality.file.src.bm.First2At(0, 2)
 		require.NoError(err)
 		require.False(ok1)
 		require.False(ok2)
 
-		_, _, ok1, ok2, err = dc.hc.ic.coldLocality.bm.First2At(2, 3)
+		_, _, ok1, ok2, err = dc.hc.ic.coldLocality.file.src.bm.First2At(2, 3)
 		require.NoError(err)
 		require.False(ok1)
 		require.False(ok2)
 
-		v1, ok1, err := dc.hc.ic.coldLocality.bm.LastAt(0)
+		v1, ok1, err := dc.hc.ic.coldLocality.file.src.bm.LastAt(0)
 		require.NoError(err)
 		require.True(ok1)
 		require.Equal(0, int(v1))
 
-		v1, ok1, err = dc.hc.ic.coldLocality.bm.LastAt(1)
+		v1, ok1, err = dc.hc.ic.coldLocality.file.src.bm.LastAt(1)
 		require.NoError(err)
 		require.True(ok1)
 		require.Equal(2, int(v1))
 
-		_, ok1, err = dc.hc.ic.coldLocality.bm.LastAt(3)
+		_, ok1, err = dc.hc.ic.coldLocality.file.src.bm.LastAt(3)
 		require.NoError(err)
 		require.False(ok1)
 	})

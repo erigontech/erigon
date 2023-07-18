@@ -54,11 +54,9 @@ type LocalityIndex struct {
 	preferSmallerFiles bool
 
 	file *filesItem
-	bm   *bitmapdb.FixedSizeBitmaps
 
-	roFiles  atomic.Pointer[ctxItem]
-	roBmFile atomic.Pointer[bitmapdb.FixedSizeBitmaps]
-	logger   log.Logger
+	roFiles atomic.Pointer[ctxItem]
+	logger  log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
@@ -74,12 +72,12 @@ func NewLocalityIndex(preferSmallerFiles bool, dir, filenameBase string, aggrega
 	}
 }
 func (li *LocalityIndex) closeWhatNotInList(fNames []string) {
-	if li == nil || li.bm == nil {
+	if li == nil || li.file == nil {
 		return
 	}
 
 	for _, protectName := range fNames {
-		if li.bm.FileName() == protectName {
+		if li.file.bm.FileName() == protectName {
 			return
 		}
 	}
@@ -151,10 +149,10 @@ func (li *LocalityIndex) openFiles() (err error) {
 	}
 
 	fromStep, toStep := li.file.startTxNum/li.aggregationStep, li.file.endTxNum/li.aggregationStep
-	if li.bm == nil {
+	if li.file.bm == nil {
 		dataPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
 		if dir.FileExist(dataPath) {
-			li.bm, err = bitmapdb.OpenFixedSizeBitmaps(dataPath)
+			li.file.bm, err = bitmapdb.OpenFixedSizeBitmaps(dataPath)
 			if err != nil {
 				return err
 			}
@@ -181,9 +179,9 @@ func (li *LocalityIndex) closeFiles() {
 		li.file.index.Close()
 		li.file = nil
 	}
-	if li.bm != nil {
-		li.bm.Close()
-		li.bm = nil
+	if li.file.bm != nil {
+		li.file.bm.Close()
+		li.file.bm = nil
 	}
 }
 func (li *LocalityIndex) reCalcRoFiles() {
@@ -191,18 +189,17 @@ func (li *LocalityIndex) reCalcRoFiles() {
 		return
 	}
 	if li.file == nil {
+		fmt.Printf("reCalcRoFiles: nil\n")
 		li.roFiles.Store(nil)
-		li.roBmFile.Store(nil)
 		return
 	}
-
+	fmt.Printf("reCalcRoFiles: %s\n", li.file.bm.FileName())
 	li.roFiles.Store(&ctxItem{
 		startTxNum: li.file.startTxNum,
 		endTxNum:   li.file.endTxNum,
 		i:          0,
 		src:        li.file,
 	})
-	li.roBmFile.Store(li.bm)
 }
 
 func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
@@ -211,7 +208,6 @@ func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
 	}
 	x := &ctxLocalityIdx{
 		file:            li.roFiles.Load(),
-		bm:              li.roBmFile.Load(),
 		aggregationStep: li.aggregationStep,
 	}
 	if x.file != nil && x.file.src != nil {
@@ -236,14 +232,14 @@ func closeLocalityIndexFilesAndRemove(i *ctxLocalityIdx) {
 		i.file.src.closeFilesAndRemove()
 		i.file.src = nil
 	}
-	if i.bm != nil {
-		if err := i.bm.Close(); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", i.bm.FileName(), "stack", dbg.Stack())
+	if i.file.src.bm != nil {
+		if err := i.file.src.bm.Close(); err != nil {
+			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", i.file.src.bm.FileName(), "stack", dbg.Stack())
 		}
-		if err := os.Remove(i.bm.FilePath()); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "os.Remove", "err", err, "file", i.bm.FileName(), "stack", dbg.Stack())
+		if err := os.Remove(i.file.src.bm.FilePath()); err != nil {
+			log.Log(dbg.FileCloseLogLevel, "os.Remove", "err", err, "file", i.file.src.bm.FileName(), "stack", dbg.Stack())
 		}
-		i.bm = nil
+		i.file.src.bm = nil
 	}
 }
 
@@ -262,7 +258,7 @@ func (li *LocalityIndex) NewIdxReader() *recsplit.IndexReader {
 // LocalityIndex return exactly 2 file (step)
 // prevents searching key in many files
 func (lc *ctxLocalityIdx) lookupIdxFiles(key []byte, fromTxNum uint64) (exactShard1, exactShard2 uint64, lastIndexedTxNum uint64, ok1, ok2 bool) {
-	if lc == nil || lc.bm == nil {
+	if lc == nil {
 		return 0, 0, 0, false, false
 	}
 	if lc.reader == nil {
@@ -274,7 +270,7 @@ func (lc *ctxLocalityIdx) lookupIdxFiles(key []byte, fromTxNum uint64) (exactSha
 	}
 
 	fromFileNum := fromTxNum / lc.aggregationStep / StepsInColdFile
-	fn1, fn2, ok1, ok2, err := lc.bm.First2At(lc.reader.Lookup(key), fromFileNum)
+	fn1, fn2, ok1, ok2, err := lc.file.src.bm.First2At(lc.reader.Lookup(key), fromFileNum)
 	if err != nil {
 		panic(err)
 	}
@@ -283,13 +279,13 @@ func (lc *ctxLocalityIdx) lookupIdxFiles(key []byte, fromTxNum uint64) (exactSha
 
 // indexedTo - [from, to)
 func (lc *ctxLocalityIdx) indexedTo() uint64 {
-	if lc == nil || lc.bm == nil {
+	if lc == nil || lc.file == nil {
 		return 0
 	}
 	return lc.file.endTxNum
 }
 func (lc *ctxLocalityIdx) indexedFrom() uint64 {
-	if lc == nil || lc.bm == nil {
+	if lc == nil || lc.file == nil {
 		return 0
 	}
 	return lc.file.startTxNum
@@ -298,7 +294,7 @@ func (lc *ctxLocalityIdx) indexedFrom() uint64 {
 // lookupLatest return latest file (step)
 // prevents searching key in many files
 func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool, err error) {
-	if lc == nil || lc.bm == nil {
+	if lc == nil {
 		return 0, false, nil
 	}
 	if lc.reader == nil {
@@ -311,7 +307,7 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 	//	res, _ := lc.bm.At(lc.reader.Lookup(key))
 	//	fmt.Printf("idx: %x, %d\n", key, res)
 	//}
-	return lc.bm.LastAt(lc.reader.Lookup(key))
+	return lc.file.src.bm.LastAt(lc.reader.Lookup(key))
 }
 
 func (li *LocalityIndex) exists(fromStep, toStep uint64) bool {
@@ -463,10 +459,12 @@ func (li *LocalityIndex) integrateFiles(sf *LocalityIndexFiles) {
 	if li == nil {
 		return
 	}
+	fmt.Printf("integrate: %s\n", sf.bm.FileName())
 	if li.file != nil {
 		li.file.canDelete.Store(true)
 	}
 	if sf == nil {
+		fmt.Printf("integrate exit: %s\n", sf.bm.FileName())
 		return //TODO: support non-indexing of single file
 		//li.file = nil
 		//li.bm = nil
@@ -475,9 +473,9 @@ func (li *LocalityIndex) integrateFiles(sf *LocalityIndexFiles) {
 			startTxNum: sf.fromStep * li.aggregationStep,
 			endTxNum:   sf.toStep * li.aggregationStep,
 			index:      sf.index,
+			bm:         sf.bm,
 			frozen:     false,
 		}
-		li.bm = sf.bm
 	}
 	li.reCalcRoFiles()
 }
