@@ -13,9 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
@@ -26,7 +24,7 @@ import (
 )
 
 func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
-	heimdallGrpcAddress string, heimdallUrl string, withoutHeimdall bool, readonly bool,
+	heimdallClient bor.IHeimdallClient, withoutHeimdall bool, readonly bool,
 	logger log.Logger,
 ) consensus.Engine {
 	var eng consensus.Engine
@@ -112,17 +110,7 @@ func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config
 				panic(err)
 			}
 
-			var heimdallClient bor.IHeimdallClient
-			if withoutHeimdall {
-				return bor.New(chainConfig, db, spanner, nil, genesisContractsClient, logger)
-			} else {
-				if heimdallGrpcAddress != "" {
-					heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(heimdallGrpcAddress, logger)
-				} else {
-					heimdallClient = heimdall.NewHeimdallClient(heimdallUrl, logger)
-				}
-				eng = bor.New(chainConfig, db, spanner, heimdallClient, genesisContractsClient, logger)
-			}
+			eng = bor.New(chainConfig, db, spanner, heimdallClient, genesisContractsClient, logger)
 		}
 	}
 
@@ -153,5 +141,5 @@ func CreateConsensusEngineBareBones(chainConfig *chain.Config, logger log.Logger
 	}
 
 	return CreateConsensusEngine(&nodecfg.Config{}, chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
-		"" /* heimdallGrpcAddress */, "" /* heimdallUrl */, true /* withoutHeimdall */, false /* readonly */, logger)
+		nil /* heimdallClient */, true /* withoutHeimdall */, false /* readonly */, logger)
 }

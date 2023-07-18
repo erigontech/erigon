@@ -85,7 +85,7 @@ func DefaultStages(ctx context.Context,
 				return BorHeimdallForward(s, u, ctx, tx, borHeimdallCfg, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
-				return BorHeimdallUnwind(u, s, tx, borHeimdallCfg)
+				return BorHeimdallUnwind(u, ctx, s, tx, borHeimdallCfg)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return BorHeimdallPrune(p, ctx, tx, borHeimdallCfg)

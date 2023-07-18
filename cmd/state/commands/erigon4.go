@@ -29,6 +29,9 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -603,6 +606,7 @@ func initConsensusEngine(cc *chain2.Config, snapshots *freezeblocks.RoSnapshots,
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}
+	var heimdallClient bor.IHeimdallClient
 
 	if cc.Clique != nil {
 		consensusConfig = params.CliqueSnapshot
@@ -610,9 +614,15 @@ func initConsensusEngine(cc *chain2.Config, snapshots *freezeblocks.RoSnapshots,
 		consensusConfig = &config.Aura
 	} else if cc.Bor != nil {
 		consensusConfig = &config.Bor
+		if !config.WithoutHeimdall {
+			if config.HeimdallgRPCAddress != "" {
+				heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(config.HeimdallgRPCAddress, logger)
+			} else {
+				heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
+			}
+		}
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	return ethconsensusconfig.CreateConsensusEngine(&nodecfg.Config{Dirs: datadir.New(datadirCli)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress,
-		config.HeimdallURL, config.WithoutHeimdall, true /* readonly */, logger)
+	return ethconsensusconfig.CreateConsensusEngine(&nodecfg.Config{Dirs: datadir.New(datadirCli)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, true /* readonly */, logger)
 }

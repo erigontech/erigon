@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/turbo/builder"
@@ -1407,7 +1410,7 @@ func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.
 	allSn, agg := allDomains(ctx, db, stepSize, mode, trie, logger)
 	cfg.Snapshot = allSn.Cfg()
 
-	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, logger)
+	engine, _ := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, logger)
 	return engine, cfg, allSn, agg
 }
 
@@ -1443,7 +1446,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	allSn, agg := allSnapshots(ctx, db, logger)
 	cfg.Snapshot = allSn.Cfg()
 
-	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, logger)
+	engine, heimdallClient := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, logger)
 
 	blockReader, blockWriter := blocksIO(db, logger)
 	sentryControlServer, err := sentry.NewMultiClient(
@@ -1469,7 +1472,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	notifications := &shards.Notifications{}
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, db, notifications.Events, logger)
 
-	stages := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, logger)
+	stages := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, heimdallClient, logger)
 	sync := stagedsync.New(stages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger)
 
 	miner := stagedsync.NewMiningState(&cfg.Miner)
@@ -1531,20 +1534,26 @@ func overrideStorageMode(db kv.RwDB, logger log.Logger) error {
 	})
 }
 
-func initConsensusEngine(cc *chain2.Config, dir string, db kv.RwDB, logger log.Logger) (engine consensus.Engine) {
+func initConsensusEngine(cc *chain2.Config, dir string, db kv.RwDB, logger log.Logger) (engine consensus.Engine, heimdallClient bor.IHeimdallClient) {
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}
-
 	if cc.Clique != nil {
 		consensusConfig = params.CliqueSnapshot
 	} else if cc.Aura != nil {
 		consensusConfig = &config.Aura
 	} else if cc.Bor != nil {
 		consensusConfig = &config.Bor
+		if !config.WithoutHeimdall {
+			if config.HeimdallgRPCAddress != "" {
+				heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(config.HeimdallgRPCAddress, logger)
+			} else {
+				heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
+			}
+		}
 	} else {
 		consensusConfig = &config.Ethash
 	}
 	return ethconsensusconfig.CreateConsensusEngine(&nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
-		HeimdallgRPCAddress, HeimdallURL, config.WithoutHeimdall, db.ReadOnly(), logger)
+		heimdallClient, config.WithoutHeimdall, db.ReadOnly(), logger), heimdallClient
 }

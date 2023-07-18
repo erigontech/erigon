@@ -2,10 +2,17 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -13,16 +20,20 @@ type BorHeimdallCfg struct {
 	db             kv.RwDB
 	chainConfig    chain.Config
 	heimdallClient bor.IHeimdallClient
+	blockReader    services.FullBlockReader
 }
 
 func StageBorHeimdallCfg(
 	db kv.RwDB,
 	chainConfig chain.Config,
-	heimdallClient bor.IHeimdallClient) BorHeimdallCfg {
+	heimdallClient bor.IHeimdallClient,
+	blockReader services.FullBlockReader,
+) BorHeimdallCfg {
 	return BorHeimdallCfg{
 		db:             db,
 		chainConfig:    chainConfig,
 		heimdallClient: heimdallClient,
+		blockReader:    blockReader,
 	}
 }
 
@@ -37,6 +48,9 @@ func BorHeimdallForward(
 	if cfg.chainConfig.Bor == nil {
 		return
 	}
+	if cfg.heimdallClient == nil {
+		return
+	}
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -46,6 +60,37 @@ func BorHeimdallForward(
 		}
 		defer tx.Rollback()
 	}
+	headNumber, err := stages.GetStageProgress(tx, stages.Headers)
+	if err != nil {
+		return fmt.Errorf("getting headers progress: %w", err)
+	}
+	if s.BlockNumber == headNumber {
+		return nil
+	}
+	// Find out the latest event Id
+	cursor, err := tx.Cursor(kv.BorEvents)
+	if err != nil {
+		return err
+	}
+	k, _, err := cursor.Last()
+	if err != nil {
+		return err
+	}
+	var lastEventId uint64
+	if k != nil {
+		lastEventId = binary.BigEndian.Uint64(k)
+	}
+	for blockNum := s.BlockNumber + 1; blockNum <= headNumber; blockNum++ {
+		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
+			//cx := statefull.ChainContext{Chain: chain, Bor: c}
+			if lastEventId, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, blockNum, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, logger); err != nil {
+				return err
+			}
+		}
+	}
+	if err = s.Update(tx, headNumber); err != nil {
+		return err
+	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
@@ -54,9 +99,137 @@ func BorHeimdallForward(
 	return
 }
 
-func BorHeimdallUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg BorHeimdallCfg) (err error) {
+func fetchAndWriteBorEvents(
+	ctx context.Context,
+	blockReader services.FullBlockReader,
+	config *chain.BorConfig,
+	blockNum uint64,
+	lastEventId uint64,
+	chainID string,
+	tx kv.RwTx,
+	heimdallClient bor.IHeimdallClient,
+	logger log.Logger,
+) (uint64, error) {
+	fetchStart := time.Now()
+	header, err := blockReader.HeaderByNumber(ctx, tx, blockNum)
+	if err != nil {
+		return lastEventId, err
+	}
+	// Find out the latest eventId
+	var (
+		from uint64
+		to   time.Time
+	)
+
+	if config.IsIndore(blockNum) {
+		stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
+		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
+	} else {
+		pHeader, err := blockReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprint(blockNum))
+		if err != nil {
+			return lastEventId, err
+		}
+		to = time.Unix(int64(pHeader.Time), 0)
+	}
+
+	from = lastEventId + 1
+
+	logger.Info(
+		"Fetching state updates from Heimdall",
+		"fromID", from,
+		"to", to.Format(time.RFC3339),
+	)
+
+	eventRecords, err := heimdallClient.StateSyncEvents(ctx, from, to.Unix())
+	if err != nil {
+		return lastEventId, err
+	}
+
+	if config.OverrideStateSyncRecords != nil {
+		if val, ok := config.OverrideStateSyncRecords[strconv.FormatUint(blockNum, 10)]; ok {
+			eventRecords = eventRecords[0:val]
+		}
+	}
+
+	fetchTime := time.Since(fetchStart)
+	processStart := time.Now()
+
+	if len(eventRecords) > 0 {
+		var key, val [8]byte
+		binary.BigEndian.PutUint64(key[:], blockNum)
+		binary.BigEndian.PutUint64(val[:], lastEventId+1)
+	}
+
+	wroteIndex := false
+	for _, eventRecord := range eventRecords {
+		if eventRecord.ID <= lastEventId {
+			continue
+		}
+		if lastEventId+1 != eventRecord.ID || eventRecord.ChainID != chainID || !eventRecord.Time.Before(to) {
+			return lastEventId, fmt.Errorf("invalid event record received blockNum=%d, eventId=%d (exp %d), chainId=%s (exp %s), time=%s (exp to %s)", blockNum, eventRecord.ID, lastEventId+1, eventRecord.ChainID, chainID, eventRecord.Time, to)
+		}
+
+		eventRecordWithoutTime := eventRecord.BuildEventRecord()
+
+		recordBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
+		if err != nil {
+			return lastEventId, err
+		}
+		var eventIdBuf [8]byte
+		binary.BigEndian.PutUint64(eventIdBuf[:], eventRecord.ID)
+		if err = tx.Put(kv.BorEvents, eventIdBuf[:], recordBytes); err != nil {
+			return lastEventId, err
+		}
+		if !wroteIndex {
+			var blockNumBuf [8]byte
+			binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
+			binary.BigEndian.PutUint64(eventIdBuf[:], eventRecord.ID)
+			if err = tx.Put(kv.BorEventNums, blockNumBuf[:], eventIdBuf[:]); err != nil {
+				return lastEventId, err
+			}
+			wroteIndex = true
+		}
+
+		lastEventId++
+	}
+
+	processTime := time.Since(processStart)
+
+	logger.Info("StateSyncData", "number", blockNum, "lastEventID", lastEventId, "total records", len(eventRecords), "fetch time", fetchTime, "process time", processTime)
+
+	return lastEventId, nil
+}
+
+func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv.RwTx, cfg BorHeimdallCfg) (err error) {
 	if cfg.chainConfig.Bor == nil {
 		return
+	}
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+	cursor, err := tx.Cursor(kv.BorEventNums)
+	if err != nil {
+		return err
+	}
+	var blockNumBuf [8]byte
+	binary.BigEndian.PutUint64(blockNumBuf[:], u.UnwindPoint+1)
+	k, v, err := cursor.Seek(blockNumBuf[:])
+	if err != nil {
+		return err
+	}
+
+	if err = u.Done(tx); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return
 }

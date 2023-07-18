@@ -480,7 +480,6 @@ func NewDefaultStages(ctx context.Context,
 
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient,
 	dirs datadir.Dirs, notifications *shards.Notifications, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, agg *state.AggregatorV3,
-	heimdallClient bor.IHeimdallClient,
 	logger log.Logger) (*stagedsync.Sync, error) {
 
 	return stagedsync.New(
