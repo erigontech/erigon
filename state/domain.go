@@ -1996,7 +1996,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 func (d *Domain) stepsRangeInDBAsStr(tx kv.Tx) string {
 	a1, a2 := d.History.InvertedIndex.stepsRangeInDB(tx)
 	ad1, ad2 := d.stepsRangeInDB(tx)
-	return fmt.Sprintf("%s:(%.0f-%.0f, %.0f-%.0f)", d.filenameBase, ad1, ad2, a1, a2)
+	return fmt.Sprintf("%s:(%.1f,%.1f)", d.filenameBase, ad2-ad1, a2-a1)
 }
 func (d *Domain) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	fst, _ := kv.FirstKey(tx, d.valsTable)
