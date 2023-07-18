@@ -506,7 +506,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 		return err
 	}
 	defer roTx.Rollback()
-	log.Warn("[dbg] collate", "step", step)
+	//log.Warn("[dbg] collate", "step", step)
 
 	g, ctx := errgroup.WithContext(ctx)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
