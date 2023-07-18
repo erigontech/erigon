@@ -251,11 +251,13 @@ func ExecV3(ctx context.Context,
 	agg.SetTxNum(inputTxNum)
 
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
-	if !useExternalTx {
-		log.Warn(fmt.Sprintf("[snapshots] DB has: %s", agg.StepsRangeInDBAsStr(applyTx)))
-		if blocksFreezeCfg.Produce {
-			agg.BuildFilesInBackground(outputTxNum.Load())
-		}
+	if initialCycle && blocksFreezeCfg.Produce {
+		log.Warn(fmt.Sprintf("[snapshots] db has: %s", agg.StepsRangeInDBAsStr(applyTx)))
+		//if err := agg.BuildMissedIndices(ctx, 100); err != nil {
+		//	return err
+		//}
+		//agg.BuildOptionalMissedIndicesInBackground(ctx, 100)
+		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
 	var outputBlockNum = syncMetrics[stages.Execution]
