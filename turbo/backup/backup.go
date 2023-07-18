@@ -92,11 +92,10 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 		defer wg.Done()
 		WarmupTable(warmupCtx, src, table, log.LvlTrace, readAheadThreads)
 	}()
-	_srcC, err := srcTx.Cursor(table)
+	srcC, err := srcTx.Cursor(table)
 	if err != nil {
 		return err
 	}
-	srcC := _srcC.(*mdbx2.MdbxCursor)
 	total, _ = srcC.Count()
 
 	if err := dst.Update(ctx, func(tx kv.RwTx) error {
