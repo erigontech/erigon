@@ -252,7 +252,7 @@ func ExecV3(ctx context.Context,
 
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 	if initialCycle && blocksFreezeCfg.Produce {
-		log.Warn(fmt.Sprintf("[snapshots] db has: %s", agg.StepsRangeInDBAsStr(applyTx)))
+		log.Warn(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		//if err := agg.BuildMissedIndices(ctx, 100); err != nil {
 		//	return err
 		//}
