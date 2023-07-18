@@ -92,38 +92,45 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 		defer wg.Done()
 		WarmupTable(warmupCtx, src, table, log.LvlTrace, readAheadThreads)
 	}()
-	srcC, err := srcTx.Cursor(table)
+	_srcC, err := srcTx.Cursor(table)
 	if err != nil {
 		return err
 	}
+	srcC := _srcC.(*mdbx2.MdbxCursor)
 	total, _ = srcC.Count()
 
+	if err := dst.Update(ctx, func(tx kv.RwTx) error {
+		return tx.ClearBucket(table)
+	}); err != nil {
+		return err
+	}
 	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
 		return err1
 	}
 	defer dstTx.Rollback()
-	_ = dstTx.ClearBucket(table)
 
 	c, err := dstTx.RwCursor(table)
 	if err != nil {
 		return err
 	}
-	casted, isDupsort := c.(kv.RwCursorDupSort)
+	_, isDupsort := c.(kv.RwCursorDupSort)
 	i := uint64(0)
+	casted := c.(*mdbx2.MdbxDupSortCursor)
+	dstC := c.(*mdbx2.MdbxCursor)
 
-	for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
 
 		if isDupsort {
 			if err = casted.AppendDup(k, v); err != nil {
-				panic(err)
+				return err
 			}
 		} else {
-			if err = c.Append(k, v); err != nil {
-				panic(err)
+			if err = dstC.Append(k, v); err != nil {
+				return err
 			}
 		}
 
