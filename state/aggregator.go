@@ -565,9 +565,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		return fmt.Errorf("domain collate-build failed: %w", err)
 	}
 
-	a.logger.Info("[stat] aggregation is finished",
-		"step", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(a.aggregationStep), float64(txTo)/float64(a.aggregationStep)),
-		"took", time.Since(stepStartedAt))
+	a.logger.Info("[snapshots] aggregation", "step", step, "took", time.Since(stepStartedAt))
 
 	mxStepTook.UpdateDuration(stepStartedAt)
 

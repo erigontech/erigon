@@ -591,9 +591,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	mxStepTook.UpdateDuration(stepStartedAt)
 	a.integrateFiles(static, txFrom, txTo)
 
-	log.Info("[stat] aggregation is finished",
-		"step", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(a.aggregationStep), float64(txTo)/float64(a.aggregationStep)),
-		"took", time.Since(stepStartedAt))
+	a.logger.Info("[snapshots] aggregation", "step", step, "took", time.Since(stepStartedAt))
 
 	return nil
 }
