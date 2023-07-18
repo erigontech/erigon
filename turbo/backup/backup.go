@@ -103,9 +103,9 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	}); err != nil {
 		return err
 	}
-	dstTx, err1 := dst.BeginRw(ctx)
-	if err1 != nil {
-		return err1
+	dstTx, err := dst.BeginRw(ctx)
+	if err != nil {
+		return err
 	}
 	defer dstTx.Rollback()
 
@@ -160,7 +160,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	return nil
 }
 
-const ReadAheadThreads = 128
+const ReadAheadThreads = 1024
 
 func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, readAheadThreads int) {
 	var ThreadsLimit = readAheadThreads
