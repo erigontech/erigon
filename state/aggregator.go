@@ -133,7 +133,7 @@ func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode Co
 	if a.code, err = NewDomain(cfg, dir, tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
 		return nil, err
 	}
-	cfg = domainCfg{histCfg{withLocalityIndex: true, compressVals: false, largeValues: true}}
+	cfg = domainCfg{histCfg{withLocalityIndex: false, compressVals: false, largeValues: true}}
 	commitd, err := NewDomain(cfg, dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger)
 	if err != nil {
 		return nil, err
