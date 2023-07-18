@@ -293,7 +293,7 @@ func (lc *ctxLocalityIdx) indexedFrom() uint64 {
 // lookupLatest return latest file (step)
 // prevents searching key in many files
 func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool, err error) {
-	if lc == nil {
+	if lc == nil || lc.file == nil {
 		return 0, false, nil
 	}
 	if lc.reader == nil {
