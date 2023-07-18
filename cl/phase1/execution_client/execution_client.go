@@ -13,12 +13,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/log/v3"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
@@ -185,6 +187,8 @@ func (ec *ExecutionClient) InsertExecutionPayloads(payloads []*cltypes.Eth1Block
 }
 
 func (ec *ExecutionClient) ForkChoiceUpdate(headHash libcommon.Hash) (*execution.ForkChoiceReceipt, error) {
+	log.Debug("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
+
 	return ec.client.UpdateForkChoice(ec.ctx, &execution.ForkChoice{
 		HeadBlockHash: gointerfaces.ConvertHashToH256(headHash),
 		Timeout:       uint64(fcuTimeout.Milliseconds()),

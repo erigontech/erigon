@@ -630,10 +630,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, fmt.Errorf("could not load jwt for Caplin: %s", err)
 		}
 
-		engine, err := execution_client.NewExecutionClientRPC(ctx,
-			jwt,
-			stack.Config().Http.HttpListenAddress,
-			stack.Config().Http.AuthRpcPort,
+		engine, err := execution_client.NewExecutionClientDirect(ctx,
+			backend.engineBackendRPC,
 		)
 
 		if err != nil {
@@ -789,7 +787,9 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 			return
 		}
 	}()
-	go s.engineBackendRPC.Start(httpRpcCfg, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
+	if !config.InternalCL {
+		go s.engineBackendRPC.Start(httpRpcCfg, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
+	}
 
 	// Register the backend on the node
 	stack.RegisterLifecycle(s)
