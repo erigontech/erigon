@@ -549,3 +549,7 @@ announce:
     enabled: false
     # The name of the channel that the user selected as a destination for webhook messages.
     channel: '#code-releases'
+
+archives:
+- id: erigon-multiple-goos
+  allow_different_binary_count: true
