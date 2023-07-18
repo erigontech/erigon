@@ -80,6 +80,11 @@ var (
 		Usage: "turn off or on the lightclient finding peers",
 		Value: false,
 	}
+	LocalDiscovery = cli.BoolFlag{
+		Name:  "local-discovery",
+		Usage: "enable to also attempt to find peers over private ips. turning this on may cause issues with hosts such as hetzner",
+		Value: false,
+	}
 	ChaindataFlag = cli.StringFlag{
 		Name:  "chaindata",
 		Usage: "chaindata of database",
