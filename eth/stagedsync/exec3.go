@@ -269,11 +269,11 @@ func ExecV3(ctx context.Context,
 	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 	defer cfg.agg.CloseSharedDomains()
 	rs := state.NewStateV3(doms, logger)
-	if execStage.BlockNumber == 0 {
-		doms.ClearRam()
-	}
+	fmt.Printf("inputTxNum == %d\n", inputTxNum)
+	doms.Commit(true, false)
+	doms.ClearRam()
 
-	//TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
+	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
 	// Maybe need split channels? Maybe don't exit from ApplyLoop? Maybe current way is also ok?
 
@@ -732,6 +732,7 @@ Loop:
 			inputTxNum++
 		}
 
+		// MA commitTx
 		if !parallel {
 			//if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
 			//	return err
