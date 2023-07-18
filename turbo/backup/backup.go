@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -173,7 +172,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 	if total < 10_000 {
 		return
 	}
-	progress := atomic.Int64{}
+	//progress := atomic.Int64{}
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -191,18 +190,24 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 						return err
 					}
 					for it.HasNext() {
-						_, _, err = it.Next()
+						k, v, err := it.Next()
 						if err != nil {
 							return err
 						}
-						progress.Add(1)
-						select {
-						case <-ctx.Done():
-							return ctx.Err()
-						case <-logEvery.C:
-							log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
-						default:
+						if len(k) > 0 {
+							_, _ = k[0], k[len(k)-1]
 						}
+						if len(v) > 0 {
+							_, _ = v[0], v[len(v)-1]
+						}
+						//progress.Add(1)
+						//select {
+						//case <-ctx.Done():
+						//	return ctx.Err()
+						//case <-logEvery.C:
+						//	log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
+						//default:
+						//}
 					}
 					return nil
 				})
@@ -220,17 +225,23 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 					return err
 				}
 				for it.HasNext() {
-					_, _, err = it.Next()
+					k, v, err := it.Next()
 					if err != nil {
 						return err
 					}
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case <-logEvery.C:
-						log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
-					default:
+					if len(k) > 0 {
+						_, _ = k[0], k[len(k)-1]
 					}
+					if len(v) > 0 {
+						_, _ = v[0], v[len(v)-1]
+					}
+					//select {
+					//case <-ctx.Done():
+					//	return ctx.Err()
+					//case <-logEvery.C:
+					//	log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
+					//default:
+					//}
 				}
 				return nil
 			})
