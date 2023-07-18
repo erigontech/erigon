@@ -174,8 +174,8 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 	}
 	//progress := atomic.Int64{}
 
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
+	//logEvery := time.NewTicker(20 * time.Second)
+	//defer logEvery.Stop()
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(ThreadsLimit)
