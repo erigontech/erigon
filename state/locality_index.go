@@ -246,7 +246,7 @@ func (li *LocalityIndex) NewIdxReader() *recsplit.IndexReader {
 // LocalityIndex return exactly 2 file (step)
 // prevents searching key in many files
 func (lc *ctxLocalityIdx) lookupIdxFiles(key []byte, fromTxNum uint64) (exactShard1, exactShard2 uint64, lastIndexedTxNum uint64, ok1, ok2 bool) {
-	if lc == nil {
+	if lc == nil || lc.file == nil {
 		return 0, 0, 0, false, false
 	}
 	if lc.reader == nil {
