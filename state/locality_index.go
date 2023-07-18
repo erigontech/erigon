@@ -21,7 +21,6 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -30,7 +29,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -230,15 +228,6 @@ func closeLocalityIndexFilesAndRemove(i *ctxLocalityIdx) {
 		return
 	}
 	i.file.src.closeFilesAndRemove()
-	if i.file.src.bm != nil {
-		if err := i.file.src.bm.Close(); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", i.file.src.bm.FileName(), "stack", dbg.Stack())
-		}
-		if err := os.Remove(i.file.src.bm.FilePath()); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "os.Remove", "err", err, "file", i.file.src.bm.FileName(), "stack", dbg.Stack())
-		}
-		i.file.src.bm = nil
-	}
 	i.file.src = nil
 }
 
@@ -302,9 +291,10 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 	if lc.reader.Empty() {
 		return 0, false, nil
 	}
-	//if bytes.HasPrefix(key, common.FromHex("5e7d")) {
-	//	res, _ := lc.bm.At(lc.reader.Lookup(key))
-	//	fmt.Printf("idx: %x, %d\n", key, res)
+	//if bytes.HasPrefix(key, common.FromHex("f29a")) {
+	//	res, _ := lc.file.src.bm.At(lc.reader.Lookup(key))
+	//	l, _, _ := lc.file.src.bm.LastAt(lc.reader.Lookup(key))
+	//	fmt.Printf("idx: %x, %d, last: %d\n", key, res, l)
 	//}
 	return lc.file.src.bm.LastAt(lc.reader.Lookup(key))
 }
@@ -458,12 +448,10 @@ func (li *LocalityIndex) integrateFiles(sf *LocalityIndexFiles) {
 	if li == nil {
 		return
 	}
-	fmt.Printf("integrate: %s\n", sf.bm.FileName())
 	if li.file != nil {
 		li.file.canDelete.Store(true)
 	}
 	if sf == nil {
-		fmt.Printf("integrate exit: %s\n", sf.bm.FileName())
 		return //TODO: support non-indexing of single file
 		//li.file = nil
 		//li.bm = nil
@@ -583,8 +571,7 @@ func (si *LocalityIterator) Close() {
 
 // iterateKeysLocality [from, to)
 func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64, last *compress.Decompressor) *LocalityIterator {
-	toTxNum := toStep * ic.ii.aggregationStep
-	fromTxNum := fromStep * ic.ii.aggregationStep
+	fromTxNum, toTxNum := fromStep*ic.ii.aggregationStep, toStep*ic.ii.aggregationStep
 	si := &LocalityIterator{aggStep: ic.ii.aggregationStep, compressVals: false}
 
 	for _, item := range ic.files {
@@ -618,8 +605,8 @@ func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64, las
 		if g.HasNext() {
 			key, offset := g.NextUncompressed()
 
-			endTxNum := (toStep + 1) * ic.ii.aggregationStep
-			heapItem := &ReconItem{startTxNum: toStep * ic.ii.aggregationStep, endTxNum: endTxNum, g: g, txNum: ^endTxNum, key: key, startOffset: offset, lastOffset: offset}
+			startTxNum, endTxNum := (toStep-1)*ic.ii.aggregationStep, toStep*ic.ii.aggregationStep
+			heapItem := &ReconItem{startTxNum: startTxNum, endTxNum: endTxNum, g: g, txNum: ^endTxNum, key: key, startOffset: offset, lastOffset: offset}
 			heap.Push(&si.h, heapItem)
 		}
 		si.totalOffsets += uint64(g.Size())
