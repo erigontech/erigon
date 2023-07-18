@@ -113,13 +113,13 @@ type DomainRanges struct {
 func (r DomainRanges) String() string {
 	var b strings.Builder
 	if r.values {
-		b.WriteString(fmt.Sprintf("vals:%d-%d", r.valuesStartTxNum/r.aggStep, r.valuesEndTxNum/r.aggStep))
+		b.WriteString(fmt.Sprintf("val:%d-%d", r.valuesStartTxNum/r.aggStep, r.valuesEndTxNum/r.aggStep))
 	}
 	if r.history {
 		if b.Len() > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(fmt.Sprintf("history:%d-%d", r.historyStartTxNum/r.aggStep, r.historyEndTxNum/r.aggStep))
+		b.WriteString(fmt.Sprintf("hist:%d-%d", r.historyStartTxNum/r.aggStep, r.historyEndTxNum/r.aggStep))
 	}
 	if r.index {
 		if b.Len() > 0 {
@@ -303,40 +303,48 @@ func (r HistoryRanges) any() bool {
 	return r.history || r.index
 }
 
-func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	if err := dc.hc.ic.BuildOptionalMissedIndices(ctx); err != nil {
+func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
+	if err := dc.hc.ic.BuildOptionalMissedIndices(ctx, ps); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context) (err error) {
-	if !ic.ii.withLocalityIndex || ic.ii.coldLocalityIdx == nil {
-		return
+func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
+	if ic.ii.withLocalityIndex && ic.ii.coldLocalityIdx != nil {
+		from, to := uint64(0), ic.maxColdStep()
+		if to == 0 || ic.ii.coldLocalityIdx.exists(from, to) {
+			return nil
+		}
+		if err = ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, from, to, true, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to, nil) }); err != nil {
+			return err
+		}
 	}
-	to := ic.maxFrozenStep()
-	if to == 0 || ic.ii.coldLocalityIdx.exists(to) {
-		return nil
-	}
-	defer ic.ii.EnableMadvNormalReadAhead().DisableReadAhead()
-	return ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, to, func() *LocalityIterator { return ic.iterateKeysLocality(to * ic.ii.aggregationStep) })
+	return nil
 }
 
-func (dc *DomainContext) maxFrozenStep() uint64 {
+func (dc *DomainContext) maxColdStep() uint64 {
 	return dc.maxTxNumInFiles(true) / dc.d.aggregationStep
 }
-func (hc *HistoryContext) maxFrozenStep() uint64 {
+func (hc *HistoryContext) maxColdStep() uint64 {
 	return hc.maxTxNumInFiles(true) / hc.h.aggregationStep
 }
-func (ic *InvertedIndexContext) maxFrozenStep() uint64 {
+func (ic *InvertedIndexContext) maxColdStep() uint64 {
 	return ic.maxTxNumInFiles(true) / ic.ii.aggregationStep
 }
-func (dc *DomainContext) maxTxNumInFiles(frozen bool) uint64 {
+func (ic *InvertedIndexContext) minWarmStep() uint64 {
+	return ic.maxTxNumInFiles(true) / ic.ii.aggregationStep
+}
+func (ic *InvertedIndexContext) maxWarmStep() uint64 {
+	return ic.maxTxNumInFiles(false) / ic.ii.aggregationStep
+}
+
+func (dc *DomainContext) maxTxNumInFiles(cold bool) uint64 {
 	if len(dc.files) == 0 {
 		return 0
 	}
 	var max uint64
-	if frozen {
+	if cold {
 		for i := len(dc.files) - 1; i >= 0; i-- {
 			if !dc.files[i].src.frozen {
 				continue
@@ -347,15 +355,15 @@ func (dc *DomainContext) maxTxNumInFiles(frozen bool) uint64 {
 	} else {
 		max = dc.files[len(dc.files)-1].endTxNum
 	}
-	return cmp.Min(max, dc.hc.maxTxNumInFiles(frozen))
+	return cmp.Min(max, dc.hc.maxTxNumInFiles(cold))
 }
 
-func (hc *HistoryContext) maxTxNumInFiles(frozen bool) uint64 {
+func (hc *HistoryContext) maxTxNumInFiles(cold bool) uint64 {
 	if len(hc.files) == 0 {
 		return 0
 	}
 	var max uint64
-	if frozen {
+	if cold {
 		for i := len(hc.files) - 1; i >= 0; i-- {
 			if !hc.files[i].src.frozen {
 				continue
@@ -366,13 +374,13 @@ func (hc *HistoryContext) maxTxNumInFiles(frozen bool) uint64 {
 	} else {
 		max = hc.files[len(hc.files)-1].endTxNum
 	}
-	return cmp.Min(max, hc.ic.maxTxNumInFiles(frozen))
+	return cmp.Min(max, hc.ic.maxTxNumInFiles(cold))
 }
-func (ic *InvertedIndexContext) maxTxNumInFiles(frozen bool) uint64 {
+func (ic *InvertedIndexContext) maxTxNumInFiles(cold bool) uint64 {
 	if len(ic.files) == 0 {
 		return 0
 	}
-	if !frozen {
+	if !cold {
 		return ic.files[len(ic.files)-1].endTxNum
 	}
 	for i := len(ic.files) - 1; i >= 0; i-- {

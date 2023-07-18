@@ -113,16 +113,20 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 		logger:           logger,
 	}
 	var err error
-	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, false, AccDomainLargeValues, logger); err != nil {
+	cfg := domainCfg{histCfg{withLocalityIndex: true, compressVals: false, largeValues: AccDomainLargeValues}}
+	if a.accounts, err = NewDomain(cfg, dir, a.tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, false, StorageDomainLargeValues, logger); err != nil {
+	cfg = domainCfg{histCfg{withLocalityIndex: true, compressVals: false, largeValues: StorageDomainLargeValues}}
+	if a.storage, err = NewDomain(cfg, dir, a.tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
 		return nil, err
 	}
-	if a.code, err = NewDomain(dir, a.tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, true, true, logger); err != nil {
+	cfg = domainCfg{histCfg{withLocalityIndex: true, compressVals: true, largeValues: true}}
+	if a.code, err = NewDomain(cfg, dir, a.tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
 		return nil, err
 	}
-	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, true, true, logger)
+	cfg = domainCfg{histCfg{withLocalityIndex: false, compressVals: false, largeValues: true}}
+	commitd, err := NewDomain(cfg, dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -186,33 +190,33 @@ func (a *AggregatorV3) OpenFolder() error {
 	a.recalcMaxTxNum()
 	return nil
 }
-func (a *AggregatorV3) OpenList(fNames []string) error {
+func (a *AggregatorV3) OpenList(fNames, warmNames []string) error {
 	a.filesMutationLock.Lock()
 	defer a.filesMutationLock.Unlock()
 
 	var err error
-	if err = a.accounts.OpenList(fNames); err != nil {
+	if err = a.accounts.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.storage.OpenList(fNames); err != nil {
+	if err = a.storage.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.code.OpenList(fNames); err != nil {
+	if err = a.code.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.commitment.OpenList(fNames); err != nil {
+	if err = a.commitment.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.logAddrs.OpenList(fNames); err != nil {
+	if err = a.logAddrs.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.logTopics.OpenList(fNames); err != nil {
+	if err = a.logTopics.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.tracesFrom.OpenList(fNames); err != nil {
+	if err = a.tracesFrom.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.tracesTo.OpenList(fNames); err != nil {
+	if err = a.tracesTo.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
 	a.recalcMaxTxNum()
@@ -220,7 +224,11 @@ func (a *AggregatorV3) OpenList(fNames []string) error {
 }
 
 func (a *AggregatorV3) Close() {
+	if a.ctxCancel == nil { // invariant: it's safe to call Close multiple times
+		return
+	}
 	a.ctxCancel()
+	a.ctxCancel = nil
 	a.wg.Wait()
 
 	a.filesMutationLock.Lock()
@@ -292,17 +300,16 @@ func (a *AggregatorV3) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *AggregatorV3) BackgroundProgress() string    { return a.ps.String() }
 
 func (a *AggregatorV3) Files() (res []string) {
-	a.filesMutationLock.Lock()
-	defer a.filesMutationLock.Unlock()
-
-	res = append(res, a.accounts.Files()...)
-	res = append(res, a.storage.Files()...)
-	res = append(res, a.code.Files()...)
-	res = append(res, a.commitment.Files()...)
-	res = append(res, a.logAddrs.Files()...)
-	res = append(res, a.logTopics.Files()...)
-	res = append(res, a.tracesFrom.Files()...)
-	res = append(res, a.tracesTo.Files()...)
+	ac := a.MakeContext()
+	defer ac.Close()
+	res = append(res, ac.accounts.Files()...)
+	res = append(res, ac.storage.Files()...)
+	res = append(res, ac.code.Files()...)
+	res = append(res, ac.commitment.Files()...)
+	res = append(res, ac.logAddrs.Files()...)
+	res = append(res, ac.logTopics.Files()...)
+	res = append(res, ac.tracesFrom.Files()...)
+	res = append(res, ac.tracesTo.Files()...)
 	return res
 }
 func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Context, workers int) {
@@ -319,7 +326,7 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 			if errors.Is(err, context.Canceled) {
 				return
 			}
-			log.Warn("[snapshots] merge", "err", err)
+			log.Warn("[snapshots] BuildOptionalMissedIndicesInBackground", "err", err)
 		}
 	}()
 }
@@ -328,22 +335,30 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 func (ac *AggregatorV3Context) BuildOptionalMissedIndices(ctx context.Context, workers int) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
+	ps := background.NewProgressSet()
 	if ac.accounts != nil {
-		g.Go(func() error { return ac.accounts.BuildOptionalMissedIndices(ctx) })
+		g.Go(func() error { return ac.accounts.BuildOptionalMissedIndices(ctx, ps) })
 	}
 	if ac.storage != nil {
-		g.Go(func() error { return ac.storage.BuildOptionalMissedIndices(ctx) })
+		g.Go(func() error { return ac.storage.BuildOptionalMissedIndices(ctx, ps) })
 	}
 	if ac.code != nil {
-		g.Go(func() error { return ac.code.BuildOptionalMissedIndices(ctx) })
+		g.Go(func() error { return ac.code.BuildOptionalMissedIndices(ctx, ps) })
 	}
 	if ac.commitment != nil {
-		g.Go(func() error { return ac.commitment.BuildOptionalMissedIndices(ctx) })
+		g.Go(func() error { return ac.commitment.BuildOptionalMissedIndices(ctx, ps) })
 	}
 	return g.Wait()
 }
 
 func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) error {
+	ac := a.MakeContext()
+	defer ac.Close()
+	if err := ac.BuildOptionalMissedIndices(ctx, workers); err != nil {
+		return err
+	}
+	ac.Close()
+
 	startIndexingTime := time.Now()
 	{
 		ps := background.NewProgressSet()
@@ -364,18 +379,10 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 				}
 			}
 		}()
-		if err := a.accounts.BuildMissedIndices(ctx, g, ps); err != nil {
-			return err
-		}
-		if err := a.storage.BuildMissedIndices(ctx, g, ps); err != nil {
-			return err
-		}
-		if err := a.code.BuildMissedIndices(ctx, g, ps); err != nil {
-			return err
-		}
-		if err := a.commitment.BuildMissedIndices(ctx, g, ps); err != nil {
-			return err
-		}
+		a.accounts.BuildMissedIndices(ctx, g, ps)
+		a.storage.BuildMissedIndices(ctx, g, ps)
+		a.code.BuildMissedIndices(ctx, g, ps)
+		a.commitment.BuildMissedIndices(ctx, g, ps)
 		a.logAddrs.BuildMissedIndices(ctx, g, ps)
 		a.logTopics.BuildMissedIndices(ctx, g, ps)
 		a.tracesFrom.BuildMissedIndices(ctx, g, ps)
@@ -388,10 +395,7 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 			return err
 		}
 	}
-
-	ac := a.MakeContext()
-	defer ac.Close()
-	return ac.BuildOptionalMissedIndices(ctx, workers)
+	return nil
 }
 
 func (a *AggregatorV3) SetLogPrefix(v string) { a.logPrefix = v }
@@ -502,7 +506,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 		return err
 	}
 	defer roTx.Rollback()
-	log.Warn("[dbg] collate", "step", step)
+	//log.Warn("[dbg] collate", "step", step)
 
 	g, ctx := errgroup.WithContext(ctx)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
@@ -551,7 +555,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 		d := d
 		var collation map[string]*roaring64.Bitmap
 		var err error
-		collation, err = d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, roTx)
+		collation, err = d.collate(ctx, step, step+1, roTx)
 		if err != nil {
 			return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
 		}
@@ -582,15 +586,13 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 
 	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
-		log.Warn("domain collate-buildFiles failed", "err", err)
 		return fmt.Errorf("domain collate-build failed: %w", err)
 	}
-	log.Info("[stat] aggregation is finished",
-		"step", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(a.aggregationStep), float64(txTo)/float64(a.aggregationStep)),
-		"took", time.Since(stepStartedAt))
-
 	mxStepTook.UpdateDuration(stepStartedAt)
 	a.integrateFiles(static, txFrom, txTo)
+
+	a.logger.Info("[snapshots] aggregation", "step", step, "took", time.Since(stepStartedAt))
+
 	return nil
 }
 
@@ -832,23 +834,23 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (a *AggregatorV3Context) maxTxNumInFiles(frozen bool) uint64 {
+func (a *AggregatorV3Context) maxTxNumInFiles(cold bool) uint64 {
 	return cmp.Min(
 		cmp.Min(
 			cmp.Min(
-				a.accounts.maxTxNumInFiles(frozen),
-				a.code.maxTxNumInFiles(frozen)),
+				a.accounts.maxTxNumInFiles(cold),
+				a.code.maxTxNumInFiles(cold)),
 			cmp.Min(
-				a.storage.maxTxNumInFiles(frozen),
-				a.commitment.maxTxNumInFiles(frozen)),
+				a.storage.maxTxNumInFiles(cold),
+				a.commitment.maxTxNumInFiles(cold)),
 		),
 		cmp.Min(
 			cmp.Min(
-				a.logAddrs.maxTxNumInFiles(frozen),
-				a.logTopics.maxTxNumInFiles(frozen)),
+				a.logAddrs.maxTxNumInFiles(cold),
+				a.logTopics.maxTxNumInFiles(cold)),
 			cmp.Min(
-				a.tracesFrom.maxTxNumInFiles(frozen),
-				a.tracesTo.maxTxNumInFiles(frozen)),
+				a.tracesFrom.maxTxNumInFiles(cold),
+				a.tracesTo.maxTxNumInFiles(cold)),
 		),
 	)
 }
@@ -951,30 +953,17 @@ func (a *AggregatorV3) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) 
 	if a.minimaxTxNumInFiles.Load() == 0 {
 		return
 	}
-	histBlockNumProgress := tx2block(a.minimaxTxNumInFiles.Load())
-	str := make([]string, 0, a.accounts.InvertedIndex.files.Len())
-	a.accounts.InvertedIndex.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			bn := tx2block(item.endTxNum)
-			str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/a.aggregationStep, bn/1_000))
-		}
-		return true
-	})
+	ac := a.MakeContext()
+	defer ac.Close()
 
-	c, err := tx.CursorDupSort(a.accounts.InvertedIndex.indexTable)
-	if err != nil {
-		// TODO pass error properly around
-		panic(err)
+	histBlockNumProgress := tx2block(ac.maxTxNumInFiles(false))
+	str := make([]string, 0, len(ac.accounts.files))
+	for _, item := range ac.accounts.files {
+		bn := tx2block(item.endTxNum)
+		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/a.aggregationStep, bn/1_000))
 	}
-	_, v, err := c.First()
-	if err != nil {
-		// TODO pass error properly around
-		panic(err)
-	}
-	var firstHistoryIndexBlockInDB uint64
-	if len(v) != 0 {
-		firstHistoryIndexBlockInDB = tx2block(binary.BigEndian.Uint64(v))
-	}
+
+	firstHistoryIndexBlockInDB := tx2block(a.accounts.FirstStepInDB(tx) * a.aggregationStep)
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -1047,16 +1036,16 @@ type RangesV3 struct {
 func (r RangesV3) String() string {
 	ss := []string{}
 	if r.accounts.any() {
-		ss = append(ss, fmt.Sprintf("accounts=%s", r.accounts.String()))
+		ss = append(ss, fmt.Sprintf("accounts(%s)", r.accounts.String()))
 	}
 	if r.storage.any() {
-		ss = append(ss, fmt.Sprintf("storage=%s", r.storage.String()))
+		ss = append(ss, fmt.Sprintf("storage(%s)", r.storage.String()))
 	}
 	if r.code.any() {
-		ss = append(ss, fmt.Sprintf("code=%s", r.code.String()))
+		ss = append(ss, fmt.Sprintf("code(%s)", r.code.String()))
 	}
 	if r.commitment.any() {
-		ss = append(ss, fmt.Sprintf("commitment=%s", r.commitment.String()))
+		ss = append(ss, fmt.Sprintf("commitment(%s)", r.commitment.String()))
 	}
 	if r.logAddrs {
 		ss = append(ss, fmt.Sprintf("logAddr=%d-%d", r.logAddrsStartTxNum/r.accounts.aggStep, r.logAddrsEndTxNum/r.accounts.aggStep))
@@ -1417,6 +1406,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 				break
 			}
 		}
+		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 
 		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
 			close(fin)
@@ -1690,7 +1680,12 @@ func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.T
 // --- Domain part END ---
 
 func (ac *AggregatorV3Context) Close() {
+	if ac.a == nil { // invariant: it's safe to call Close multiple times
+		return
+	}
 	ac.a.leakDetector.Del(ac.id)
+	ac.a = nil
+
 	ac.accounts.Close()
 	ac.storage.Close()
 	ac.code.Close()

@@ -80,21 +80,25 @@ type History struct {
 	logger log.Logger
 }
 
-func NewHistory(dir, tmpdir string, aggregationStep uint64,
-	filenameBase, indexKeysTable, indexTable, historyValsTable string,
-	compressVals bool, integrityFileExtensions []string, largeValues bool, logger log.Logger) (*History, error) {
+type histCfg struct {
+	compressVals      bool
+	largeValues       bool
+	withLocalityIndex bool
+}
+
+func NewHistory(cfg histCfg, dir, tmpdir string, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityFileExtensions []string, logger log.Logger) (*History, error) {
 	h := History{
 		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		historyValsTable:        historyValsTable,
-		compressVals:            compressVals,
+		compressVals:            cfg.compressVals,
 		compressWorkers:         1,
 		integrityFileExtensions: integrityFileExtensions,
-		largeValues:             largeValues,
+		largeValues:             cfg.largeValues,
 		logger:                  logger,
 	}
 	h.roFiles.Store(&[]ctxItem{})
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, true, append(slices.Clone(h.integrityFileExtensions), "v"), logger)
+	h.InvertedIndex, err = NewInvertedIndex(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withLocalityIndex, append(slices.Clone(h.integrityFileExtensions), "v"), logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}
@@ -106,11 +110,11 @@ func NewHistory(dir, tmpdir string, aggregationStep uint64,
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) OpenList(fNames []string) error {
-	if err := h.InvertedIndex.OpenList(fNames); err != nil {
+func (h *History) OpenList(coldNames, warmNames []string) error {
+	if err := h.InvertedIndex.OpenList(coldNames, warmNames); err != nil {
 		return err
 	}
-	return h.openList(fNames)
+	return h.openList(coldNames)
 
 }
 func (h *History) openList(fNames []string) error {
@@ -123,11 +127,11 @@ func (h *History) openList(fNames []string) error {
 }
 
 func (h *History) OpenFolder() error {
-	files, err := h.fileNamesOnDisk()
+	coldNames, warmNames, err := h.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return h.OpenList(files)
+	return h.OpenList(coldNames, warmNames)
 }
 
 // scanStateFiles
@@ -278,17 +282,13 @@ func (h *History) Close() {
 	h.reCalcRoFiles()
 }
 
-func (h *History) Files() (res []string) {
-	h.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.decompressor != nil {
-				res = append(res, item.decompressor.FileName())
-			}
+func (hc *HistoryContext) Files() (res []string) {
+	for _, item := range hc.files {
+		if item.src.decompressor != nil {
+			res = append(res, item.src.decompressor.FileName())
 		}
-		return true
-	})
-	res = append(res, h.InvertedIndex.Files()...)
-	return res
+	}
+	return append(res, hc.ic.Files()...)
 }
 
 func (h *History) missedIdxFiles() (l []*filesItem) {
@@ -333,8 +333,7 @@ func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps 
 	for _, item := range missedFiles {
 		item := item
 		g.Go(func() error {
-			p := &background.Progress{}
-			ps.Add(p)
+			p := ps.AddNew(item.decompressor.FileName(), uint64(item.decompressor.Count()))
 			defer ps.Delete(p)
 			return h.buildVi(ctx, item, p)
 		})
@@ -783,6 +782,9 @@ type HistoryFiles struct {
 	historyIdx      *recsplit.Index
 	efHistoryDecomp *compress.Decompressor
 	efHistoryIdx    *recsplit.Index
+
+	warmLocality *LocalityIndexFiles
+	coldLocality *LocalityIndexFiles
 }
 
 func (sf HistoryFiles) Close() {
@@ -966,6 +968,12 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 	rs.Close()
 	rs = nil
+
+	warmLocality, err := h.buildWarmLocality(ctx, efHistoryDecomp, step, ps)
+	if err != nil {
+		return HistoryFiles{}, err
+	}
+
 	if historyIdx, err = recsplit.OpenIndex(historyIdxPath); err != nil {
 		return HistoryFiles{}, fmt.Errorf("open idx: %w", err)
 	}
@@ -975,13 +983,16 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		historyIdx:      historyIdx,
 		efHistoryDecomp: efHistoryDecomp,
 		efHistoryIdx:    efHistoryIdx,
+		warmLocality:    warmLocality,
 	}, nil
 }
 
 func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	h.InvertedIndex.integrateFiles(InvertedFiles{
-		decomp: sf.efHistoryDecomp,
-		index:  sf.efHistoryIdx,
+		decomp:       sf.efHistoryDecomp,
+		index:        sf.efHistoryIdx,
+		warmLocality: sf.warmLocality,
+		coldLocality: sf.coldLocality,
 	}, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, h.aggregationStep)
@@ -1293,8 +1304,12 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (hc *HistoryContext) Close() {
-	hc.ic.Close()
-	for _, item := range hc.files {
+	if hc.files == nil { // invariant: it's safe to call Close multiple times
+		return
+	}
+	files := hc.files
+	hc.files = nil
+	for _, item := range files {
 		if item.src.frozen {
 			continue
 		}
@@ -1311,6 +1326,7 @@ func (hc *HistoryContext) Close() {
 		r.Close()
 	}
 
+	hc.ic.Close()
 }
 
 func (hc *HistoryContext) getFile(from, to uint64) (it ctxItem, ok bool) {

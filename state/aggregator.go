@@ -121,17 +121,20 @@ func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode Co
 	if err != nil {
 		return nil, err
 	}
-	if a.accounts, err = NewDomain(dir, tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, false, AccDomainLargeValues, logger); err != nil {
+	cfg := domainCfg{histCfg{withLocalityIndex: true, compressVals: false, largeValues: AccDomainLargeValues}}
+	if a.accounts, err = NewDomain(cfg, dir, tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewDomain(dir, tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, false, StorageDomainLargeValues, logger); err != nil {
+	cfg = domainCfg{histCfg{withLocalityIndex: true, compressVals: false, largeValues: StorageDomainLargeValues}}
+	if a.storage, err = NewDomain(cfg, dir, tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
 		return nil, err
 	}
-	if a.code, err = NewDomain(dir, tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, true, true, logger); err != nil {
+	cfg = domainCfg{histCfg{withLocalityIndex: true, compressVals: true, largeValues: true}}
+	if a.code, err = NewDomain(cfg, dir, tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
 		return nil, err
 	}
-
-	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, false, true, logger)
+	cfg = domainCfg{histCfg{withLocalityIndex: false, compressVals: false, largeValues: true}}
+	commitd, err := NewDomain(cfg, dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -160,9 +163,7 @@ func (a *Aggregator) SetDB(db kv.RwDB) { a.db = db }
 func (a *Aggregator) buildMissedIdxBlocking(d *Domain) error {
 	eg, ctx := errgroup.WithContext(context.Background())
 	eg.SetLimit(32)
-	if err := d.BuildMissedIndices(ctx, eg, a.ps); err != nil {
-		return err
-	}
+	d.BuildMissedIndices(ctx, eg, a.ps)
 	return eg.Wait()
 }
 func (a *Aggregator) ReopenFolder() (err error) {
@@ -208,30 +209,30 @@ func (a *Aggregator) ReopenFolder() (err error) {
 	return nil
 }
 
-func (a *Aggregator) ReopenList(fNames []string) error {
+func (a *Aggregator) ReopenList(fNames, warmNames []string) error {
 	var err error
-	if err = a.accounts.OpenList(fNames); err != nil {
+	if err = a.accounts.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.storage.OpenList(fNames); err != nil {
+	if err = a.storage.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.code.OpenList(fNames); err != nil {
+	if err = a.code.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.commitment.OpenList(fNames); err != nil {
+	if err = a.commitment.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.logAddrs.OpenList(fNames); err != nil {
+	if err = a.logAddrs.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.logTopics.OpenList(fNames); err != nil {
+	if err = a.logTopics.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.tracesFrom.OpenList(fNames); err != nil {
+	if err = a.tracesFrom.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
-	if err = a.tracesTo.OpenList(fNames); err != nil {
+	if err = a.tracesTo.OpenList(fNames, warmNames); err != nil {
 		return err
 	}
 	return nil
@@ -503,7 +504,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 
 		mxRunningCollations.Inc()
 		start := time.Now()
-		collation, err := d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, d.tx)
+		collation, err := d.collate(ctx, step, step+1, d.tx)
 		mxRunningCollations.Dec()
 		mxCollateTook.UpdateDuration(start)
 
@@ -561,13 +562,10 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 	}()
 
 	for err := range errCh {
-		a.logger.Warn("domain collate-buildFiles failed", "err", err)
 		return fmt.Errorf("domain collate-build failed: %w", err)
 	}
 
-	a.logger.Info("[stat] aggregation is finished",
-		"step", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(a.aggregationStep), float64(txTo)/float64(a.aggregationStep)),
-		"took", time.Since(stepStartedAt))
+	a.logger.Info("[snapshots] aggregation", "step", step, "took", time.Since(stepStartedAt))
 
 	mxStepTook.UpdateDuration(stepStartedAt)
 

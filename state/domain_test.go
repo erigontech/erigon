@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -45,14 +47,17 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 }
 func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
-	path := t.TempDir()
+	datadir := t.TempDir()
+	coldDir := filepath.Join(datadir, "snapshots", "history")
+	require.NoError(t, os.MkdirAll(filepath.Join(datadir, "warm"), 0740))
+	require.NoError(t, os.MkdirAll(coldDir, 0740))
 	keysTable := "Keys"
 	valsTable := "Vals"
 	historyKeysTable := "HistoryKeys"
 	historyValsTable := "HistoryVals"
 	settingsTable := "Settings"
 	indexTable := "Index"
-	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.NewMDBX(logger).InMem(datadir).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:        kv.TableCfgItem{Flags: kv.DupSort},
 			valsTable:        kv.TableCfgItem{},
@@ -63,7 +68,8 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 		}
 	}).MustOpen()
 	t.Cleanup(db.Close)
-	d, err := NewDomain(path, path, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, true, AccDomainLargeValues, logger)
+	cfg := domainCfg{histCfg{withLocalityIndex: false, compressVals: false, largeValues: AccDomainLargeValues}}
+	d, err := NewDomain(cfg, coldDir, coldDir, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
 	d.compressWorkers = 1
@@ -608,7 +614,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 	// Recreate domain and re-scan the files
 	txNum := d.txNum
 	d.closeWhatNotInList([]string{})
-	d.OpenFolder()
+	require.NoError(t, d.OpenFolder())
 
 	d.SetTxNum(txNum)
 	// Check the history

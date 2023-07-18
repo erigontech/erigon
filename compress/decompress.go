@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -112,6 +113,8 @@ type Decompressor struct {
 	emptyWordsCount uint64
 
 	filePath, fileName string
+
+	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
 
 // Tables with bitlen greater than threshold will be condensed.
@@ -372,12 +375,18 @@ func (d *Decompressor) DisableReadAhead() {
 	if d == nil || d.mmapHandle1 == nil {
 		return
 	}
-	_ = mmap.MadviseRandom(d.mmapHandle1)
+	leftReaders := d.readAheadRefcnt.Add(-1)
+	if leftReaders == 0 {
+		_ = mmap.MadviseRandom(d.mmapHandle1)
+	} else if leftReaders < 0 {
+		log.Warn("read-ahead negative counter", "file", d.FileName())
+	}
 }
 func (d *Decompressor) EnableReadAhead() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
+	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseSequential(d.mmapHandle1)
 	return d
 }
@@ -385,6 +394,7 @@ func (d *Decompressor) EnableMadvNormal() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
+	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseNormal(d.mmapHandle1)
 	return d
 }
@@ -392,6 +402,7 @@ func (d *Decompressor) EnableWillNeed() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
+	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseWillNeed(d.mmapHandle1)
 	return d
 }

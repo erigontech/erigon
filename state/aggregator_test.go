@@ -28,7 +28,7 @@ import (
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
-	_, db, agg := testDbAndAggregatorv3(t, 1000)
+	db, agg := testDbAndAggregatorv3(t, 1000)
 	defer agg.Close()
 
 	rwTx, err := db.BeginRwNosync(context.Background())
@@ -133,7 +133,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 	logger := log.New()
 	aggStep := uint64(50)
-	path, db, agg := testDbAndAggregatorv3(t, aggStep)
+	db, agg := testDbAndAggregatorv3(t, aggStep)
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -209,7 +209,7 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 	agg.Close()
 
 	// Start another aggregator on same datadir
-	anotherAgg, err := NewAggregatorV3(context.Background(), filepath.Join(path, "e4"), filepath.Join(path, "e4", "tmp2"), aggStep, db, logger)
+	anotherAgg, err := NewAggregatorV3(context.Background(), agg.dir, agg.dir, aggStep, db, logger)
 	require.NoError(t, err)
 	defer anotherAgg.Close()
 
@@ -256,7 +256,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	logger := log.New()
 	aggStep := uint64(100)
 
-	path, db, agg := testDbAndAggregatorv3(t, aggStep)
+	db, agg := testDbAndAggregatorv3(t, aggStep)
+	path := filepath.Dir(agg.dir)
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -330,7 +331,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer newTx.Rollback()
 
-	newAgg, err := NewAggregatorV3(context.Background(), filepath.Join(path, "e4"), filepath.Join(path, "e4", "tmp"), aggStep, newDb, logger)
+	newAgg, err := NewAggregatorV3(context.Background(), agg.dir, agg.dir, aggStep, newDb, logger)
 	require.NoError(t, err)
 	require.NoError(t, newAgg.OpenFolder())
 
@@ -362,8 +363,11 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 		require.EqualValues(t, i+1, int(nonce))
 
-		storedV, _, err := ac.GetLatest(kv.StorageDomain, key[:length.Addr], key[length.Addr:], newTx)
+		storedV, found, err := ac.GetLatest(kv.StorageDomain, key[:length.Addr], key[length.Addr:], newTx)
 		require.NoError(t, err)
+		require.True(t, found)
+		_ = key[0]
+		_ = storedV[0]
 		require.EqualValues(t, key[0], storedV[0])
 		require.EqualValues(t, key[length.Addr], storedV[1])
 	}
@@ -375,7 +379,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 	aggStep := uint64(500)
 
-	_, db, agg := testDbAndAggregatorv3(t, aggStep)
+	db, agg := testDbAndAggregatorv3(t, aggStep)
 	t.Cleanup(agg.Close)
 
 	tx, err := db.BeginRw(context.Background())
@@ -599,25 +603,25 @@ func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCoun
 	return decomp.FilePath()
 }
 
-func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (string, kv.RwDB, *AggregatorV3) {
+func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *AggregatorV3) {
 	t.Helper()
 	path := t.TempDir()
 	logger := log.New()
-	db := mdbx.NewMDBX(logger).InMem(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	dir := filepath.Join(path, "snapshots", "history")
+	require.NoError(t, os.MkdirAll(filepath.Join(path, "db4"), 0740))
+	require.NoError(t, os.MkdirAll(filepath.Join(path, "warm"), 0740))
+	require.NoError(t, os.MkdirAll(dir, 0740))
+	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	t.Cleanup(db.Close)
-
-	dir := filepath.Join(path, "e4")
-	err := os.Mkdir(dir, 0740)
-	require.NoError(t, err)
 
 	agg, err := NewAggregatorV3(context.Background(), dir, filepath.Join(path, "e4", "tmp"), aggStep, db, logger)
 	require.NoError(t, err)
 	err = agg.OpenFolder()
 	agg.DisableFsync()
 	require.NoError(t, err)
-	return path, db, agg
+	return db, agg
 }
 
 // generate test data for table tests, containing n; n < 20 keys of length 20 bytes and values of length <= 16 bytes
@@ -644,7 +648,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 }
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {
-	_, db, agg := testDbAndAggregatorv3(t, 20)
+	db, agg := testDbAndAggregatorv3(t, 20)
 	defer agg.Close()
 	defer db.Close()
 
@@ -664,7 +668,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	defer agg.FinishWrites()
 	defer domains.Close()
 
-	keys, vals := generateInputData(t, 8, 16, 10)
+	keys, vals := generateInputData(t, 20, 16, 10)
 	keys = keys[:2]
 
 	var i int

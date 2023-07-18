@@ -197,9 +197,11 @@ type FixedSizeBitmapsWriter struct {
 	f *os.File
 
 	indexFile, tmpIdxFilePath string
-	data                      []uint64 // slice of correct size for the index to work with
-	metaData                  []byte
-	m                         mmap2.MMap
+	fileName                  string
+
+	data     []uint64 // slice of correct size for the index to work with
+	metaData []byte
+	m        mmap2.MMap
 
 	version       uint8
 	baseDataID    uint64 // deducted from all stored
@@ -215,11 +217,13 @@ const MetaHeaderSize = 64
 
 func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, baseDataID, amount uint64, logger log.Logger) (*FixedSizeBitmapsWriter, error) {
 	pageSize := os.Getpagesize()
+	_, fileName := filepath.Split(indexFile)
 	//TODO: use math.SafeMul()
 	bytesAmount := MetaHeaderSize + (bitsPerBitmap*int(amount))/8 + 1
 	size := (bytesAmount/pageSize + 1) * pageSize // must be page-size-aligned
 	idx := &FixedSizeBitmapsWriter{
 		indexFile:      indexFile,
+		fileName:       fileName,
 		tmpIdxFilePath: indexFile + ".tmp",
 		bitsPerBitmap:  uint64(bitsPerBitmap),
 		size:           size,
@@ -295,9 +299,12 @@ func (w *FixedSizeBitmapsWriter) AddArray(item uint64, listOfValues []uint64) er
 	}
 	offset := item * w.bitsPerBitmap
 	for _, v := range listOfValues {
+		if v < w.baseDataID { //uint-underflow protection
+			return fmt.Errorf("too small value: %d < %d, %s", v, w.baseDataID, w.fileName)
+		}
 		v = v - w.baseDataID
 		if v > w.bitsPerBitmap {
-			return fmt.Errorf("too big value: %d > %d", v, w.bitsPerBitmap)
+			return fmt.Errorf("too big value: %d > %d, %s", v, w.bitsPerBitmap, w.fileName)
 		}
 		n := offset + v
 		blkAt, bitAt := int(n/64), int(n%64)

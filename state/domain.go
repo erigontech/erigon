@@ -31,7 +31,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -55,6 +54,7 @@ type filesItem struct {
 	decompressor *compress.Decompressor
 	index        *recsplit.Index
 	bindex       *BtIndex
+	bm           *bitmapdb.FixedSizeBitmaps
 	startTxNum   uint64
 	endTxNum     uint64
 
@@ -92,7 +92,7 @@ func (i *filesItem) closeFilesAndRemove() {
 		// paranoic-mode on: don't delete frozen files
 		if !i.frozen {
 			if err := os.Remove(i.decompressor.FilePath()); err != nil {
-				log.Trace("close", "err", err, "file", i.decompressor.FileName())
+				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
 			}
 		}
 		i.decompressor = nil
@@ -102,7 +102,7 @@ func (i *filesItem) closeFilesAndRemove() {
 		// paranoic-mode on: don't delete frozen files
 		if !i.frozen {
 			if err := os.Remove(i.index.FilePath()); err != nil {
-				log.Trace("close", "err", err, "file", i.index.FileName())
+				log.Trace("remove after close", "err", err, "file", i.index.FileName())
 			}
 		}
 		i.index = nil
@@ -110,7 +110,14 @@ func (i *filesItem) closeFilesAndRemove() {
 	if i.bindex != nil {
 		i.bindex.Close()
 		if err := os.Remove(i.bindex.FilePath()); err != nil {
-			log.Trace("close", "err", err, "file", i.bindex.FileName())
+			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
+		}
+		i.bindex = nil
+	}
+	if i.bm != nil {
+		i.bm.Close()
+		if err := os.Remove(i.bm.FilePath()); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
 		}
 		i.bindex = nil
 	}
@@ -148,6 +155,11 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 
 // Domain is a part of the state (examples are Accounts, Storage, Code)
 // Domain should not have any go routines or locks
+//
+// Data-Existence in .kv vs .v files:
+//  1. key doesn’t exists, then create: .kv - yes, .v - yes
+//  2. acc exists, then update/delete:  .kv - yes, .v - yes
+//  3. acc doesn’t exists, then delete: .kv - no,  .v - no
 type Domain struct {
 	/*
 	   not large:
@@ -173,9 +185,11 @@ type Domain struct {
 	logger       log.Logger
 }
 
-func NewDomain(dir, tmpdir string, aggregationStep uint64,
-	filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string,
-	compressVals, largeValues bool, logger log.Logger) (*Domain, error) {
+type domainCfg struct {
+	histCfg
+}
+
+func NewDomain(cfg domainCfg, dir, tmpdir string, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
 	d := &Domain{
 		keysTable: keysTable,
 		valsTable: valsTable,
@@ -186,7 +200,7 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
-	if d.History, err = NewHistory(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, compressVals, []string{"kv"}, largeValues, logger); err != nil {
+	if d.History, err = NewHistory(cfg.histCfg, dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, []string{"kv"}, logger); err != nil {
 		return nil, err
 	}
 
@@ -196,6 +210,13 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 // LastStepInDB - return the latest available step in db (at-least 1 value in such step)
 func (d *Domain) LastStepInDB(tx kv.Tx) (lstInDb uint64) {
 	lstIdx, _ := kv.LastKey(tx, d.History.indexKeysTable)
+	if len(lstIdx) == 0 {
+		return 0
+	}
+	return binary.BigEndian.Uint64(lstIdx) / d.aggregationStep
+}
+func (d *Domain) FirstStepInDB(tx kv.Tx) (lstInDb uint64) {
+	lstIdx, _ := kv.FirstKey(tx, d.History.indexKeysTable)
 	if len(lstIdx) == 0 {
 		return 0
 	}
@@ -236,16 +257,16 @@ func (d *Domain) FinishWrites() {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (d *Domain) OpenList(fNames []string) error {
-	if err := d.History.OpenList(fNames); err != nil {
+func (d *Domain) OpenList(coldNames, warmNames []string) error {
+	if err := d.History.OpenList(coldNames, warmNames); err != nil {
 		return err
 	}
-	return d.openList(fNames)
+	return d.openList(coldNames)
 }
 
-func (d *Domain) openList(fNames []string) error {
-	d.closeWhatNotInList(fNames)
-	d.garbageFiles = d.scanStateFiles(fNames)
+func (d *Domain) openList(coldNames []string) error {
+	d.closeWhatNotInList(coldNames)
+	d.garbageFiles = d.scanStateFiles(coldNames)
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
@@ -253,11 +274,11 @@ func (d *Domain) openList(fNames []string) error {
 }
 
 func (d *Domain) OpenFolder() error {
-	files, err := d.fileNamesOnDisk()
+	files, warmNames, err := d.fileNamesOnDisk()
 	if err != nil {
 		return err
 	}
-	return d.OpenList(files)
+	return d.OpenList(files, warmNames)
 }
 
 func (d *Domain) GetAndResetStats() DomainStats {
@@ -676,7 +697,6 @@ type ctxItem struct {
 
 type ctxLocalityIdx struct {
 	reader          *recsplit.IndexReader
-	bm              *bitmapdb.FixedSizeBitmaps
 	file            *ctxItem
 	aggregationStep uint64
 }
@@ -745,13 +765,10 @@ func (d *Domain) MakeContext() *DomainContext {
 
 // Collation is the set of compressors created after aggregation
 type Collation struct {
-	valuesComp   *compress.Compressor
-	historyComp  *compress.Compressor
-	indexBitmaps map[string]*roaring64.Bitmap
-	valuesPath   string
-	historyPath  string
-	valuesCount  int
-	historyCount int
+	HistoryCollation
+	valuesComp  *compress.Compressor
+	valuesPath  string
+	valuesCount int
 }
 
 func (c Collation) Close() {
@@ -826,6 +843,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	)
 
 	eg, _ := errgroup.WithContext(ctx)
+	defer eg.Wait()
 	eg.Go(func() (errInternal error) {
 		valCount, errInternal = d.writeCollationPair(valuesComp, pairs)
 		return errInternal
@@ -836,62 +854,57 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		keySuffix = make([]byte, 256+8)
 	)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
+	if err := func() error {
+		defer close(pairs)
 
-	if !d.largeValues {
-		panic("implement me")
-	}
-	for k, stepInDB, err := keysCursor.First(); k != nil; k, stepInDB, err = keysCursor.Next() {
-		if err != nil {
-			return Collation{}, err
+		if !d.largeValues {
+			panic("implement me")
 		}
-		pos++
-		if ^binary.BigEndian.Uint64(stepInDB) != step {
-			continue
-		}
+		for k, stepInDB, err := keysCursor.First(); k != nil; k, stepInDB, err = keysCursor.Next() {
+			if err != nil {
+				return err
+			}
+			pos++
+			if ^binary.BigEndian.Uint64(stepInDB) != step {
+				continue
+			}
 
-		copy(keySuffix, k)
-		copy(keySuffix[len(k):], stepInDB)
-		v, err := roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
-		if err != nil {
-			return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
-		}
-		pairs <- kvpair{k: k, v: v}
+			copy(keySuffix, k)
+			copy(keySuffix[len(k):], stepInDB)
+			v, err := roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
+			if err != nil {
+				return fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+			}
+			pairs <- kvpair{k: k, v: v}
 
-		select {
-		case <-ctx.Done():
-			return Collation{}, ctx.Err()
-		default:
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 		}
-	}
-	close(pairs)
-	if err != nil {
+		return nil
+	}(); err != nil {
 		return Collation{}, fmt.Errorf("iterate over %s keys cursor: %w", d.filenameBase, err)
 	}
-
 	if err := eg.Wait(); err != nil {
 		return Collation{}, fmt.Errorf("collate over %s keys cursor: %w", d.filenameBase, err)
 	}
 
 	closeComp = false
 	return Collation{
-		valuesPath:   valuesPath,
-		valuesComp:   valuesComp,
-		valuesCount:  valCount,
-		historyPath:  hCollation.historyPath,
-		historyComp:  hCollation.historyComp,
-		historyCount: hCollation.historyCount,
-		indexBitmaps: hCollation.indexBitmaps,
+		HistoryCollation: hCollation,
+		valuesPath:       valuesPath,
+		valuesComp:       valuesComp,
+		valuesCount:      valCount,
 	}, nil
 }
 
 type StaticFiles struct {
-	valuesDecomp    *compress.Decompressor
-	valuesIdx       *recsplit.Index
-	valuesBt        *BtIndex
-	historyDecomp   *compress.Decompressor
-	historyIdx      *recsplit.Index
-	efHistoryDecomp *compress.Decompressor
-	efHistoryIdx    *recsplit.Index
+	HistoryFiles
+	valuesDecomp *compress.Decompressor
+	valuesIdx    *recsplit.Index
+	valuesBt     *BtIndex
 }
 
 // CleanupOnError - call it on collation fail. It closing all files
@@ -927,12 +940,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		d.stats.LastFileBuildingTook = time.Since(start)
 	}()
 
-	hStaticFiles, err := d.History.buildFiles(ctx, step, HistoryCollation{
-		historyPath:  collation.historyPath,
-		historyComp:  collation.historyComp,
-		historyCount: collation.historyCount,
-		indexBitmaps: collation.indexBitmaps,
-	}, ps)
+	hStaticFiles, err := d.History.buildFiles(ctx, step, collation.HistoryCollation, ps)
 	if err != nil {
 		return StaticFiles{}, err
 	}
@@ -987,19 +995,13 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			return StaticFiles{}, fmt.Errorf("build %s values bt idx: %w", d.filenameBase, err)
 		}
 	}
-	if d.filenameBase == "accounts" {
-		log.Warn("[dbg] buildFiles index", "step", step)
-	}
 
 	closeComp = false
 	return StaticFiles{
-		valuesDecomp:    valuesDecomp,
-		valuesIdx:       valuesIdx,
-		valuesBt:        bt,
-		historyDecomp:   hStaticFiles.historyDecomp,
-		historyIdx:      hStaticFiles.historyIdx,
-		efHistoryDecomp: hStaticFiles.efHistoryDecomp,
-		efHistoryIdx:    hStaticFiles.efHistoryIdx,
+		HistoryFiles: hStaticFiles,
+		valuesDecomp: valuesDecomp,
+		valuesIdx:    valuesIdx,
+		valuesBt:     bt,
 	}, nil
 }
 
@@ -1017,7 +1019,7 @@ func (d *Domain) missedIdxFiles() (l []*filesItem) {
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) (err error) {
+func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	d.History.BuildMissedIndices(ctx, g, ps)
 	for _, item := range d.missedIdxFiles() {
 		//TODO: build .kvi
@@ -1026,7 +1028,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 			idxPath := fitem.decompressor.FilePath()
 			idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
 
-			p := ps.AddNew("fixme", uint64(fitem.decompressor.Count()))
+			p := ps.AddNew(fitem.decompressor.FileName(), uint64(fitem.decompressor.Count()))
 			defer ps.Delete(p)
 
 			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, p, d.tmpdir, d.logger); err != nil {
@@ -1035,7 +1037,6 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 			return nil
 		})
 	}
-	return nil
 }
 
 func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool, p *background.Progress, logger log.Logger, noFsync bool) (*recsplit.Index, error) {
@@ -1105,12 +1106,7 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 }
 
 func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
-	d.History.integrateFiles(HistoryFiles{
-		historyDecomp:   sf.historyDecomp,
-		historyIdx:      sf.historyIdx,
-		efHistoryDecomp: sf.efHistoryDecomp,
-		efHistoryIdx:    sf.efHistoryIdx,
-	}, txNumFrom, txNumTo)
+	d.History.integrateFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, d.aggregationStep)
 	fi.decompressor = sf.valuesDecomp
@@ -1436,7 +1432,7 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 	return v, found, nil
 }
 
-func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
+func (dc *DomainContext) getLatestFromFiles2(filekey []byte) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
 
 	// find what has LocalityIndex
@@ -1456,7 +1452,6 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 			continue
 		}
 		found = true
-
 		if COMPARE_INDEXES {
 			rd := recsplit.NewIndexReader(dc.files[i].src.index)
 			oft := rd.Lookup(filekey)
@@ -1482,9 +1477,82 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 	// still not found, search in indexed cold shards
 	return dc.getLatestFromColdFiles(filekey)
 }
+func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
+	dc.d.stats.FilesQueries.Add(1)
+
+	if v, found, err = dc.getLatestFromWarmFiles(filekey); err != nil {
+		return nil, false, err
+	} else if found {
+		return v, true, nil
+	}
+
+	// sometimes there is a gap between indexed cold files and indexed warm files. just grind them.
+	// possible reasons:
+	// - no locality indices at all
+	// - cold locality index is "lazy"-built
+	// corner cases:
+	// - cold and warm segments can overlap
+	lastColdIndexedTxNum := dc.hc.ic.coldLocality.indexedTo()
+	firstWarmIndexedTxNum := dc.hc.ic.warmLocality.indexedFrom()
+	if firstWarmIndexedTxNum == 0 && len(dc.files) > 0 {
+		firstWarmIndexedTxNum = dc.files[len(dc.files)-1].endTxNum
+	}
+	if firstWarmIndexedTxNum > lastColdIndexedTxNum {
+		for i := len(dc.files) - 1; i >= 0; i-- {
+			isUseful := dc.files[i].startTxNum >= lastColdIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
+			if !isUseful {
+				continue
+			}
+			var ok bool
+			dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
+			if err != nil {
+				return nil, false, err
+			}
+			if !ok {
+				continue
+			}
+			return common.Copy(dc.vBuf), true, nil
+		}
+	}
+
+	// still not found, search in indexed cold shards
+	return dc.getLatestFromColdFiles(filekey)
+}
+
+func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, error) {
+	exactWarmStep, ok, err := dc.hc.ic.warmLocality.lookupLatest(filekey)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
+	}
+
+	// grind non-indexed files
+	exactTxNum := exactWarmStep * dc.d.aggregationStep
+	for i := len(dc.files) - 1; i >= 0; i-- {
+		isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
+		if !isUseful {
+			continue
+		}
+
+		dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
+		if err != nil {
+			return nil, false, err
+		}
+		if !ok {
+			break
+		}
+		return common.Copy(dc.vBuf), true, nil
+	}
+	return nil, false, nil
+}
 
 func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found bool, err error) {
-	exactColdShard, ok := dc.hc.ic.coldLocality.lookupLatest(filekey)
+	exactColdShard, ok, err := dc.hc.ic.coldLocality.lookupLatest(filekey)
+	if err != nil {
+		return nil, false, err
+	}
 	if !ok {
 		return nil, false, nil
 	}
@@ -1572,7 +1640,12 @@ func (dc *DomainContext) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([
 }
 
 func (dc *DomainContext) Close() {
-	for _, item := range dc.files {
+	if dc.files == nil { // invariant: it's safe to call Close multiple times
+		return
+	}
+	files := dc.files
+	dc.files = nil
+	for _, item := range files {
 		if item.src.frozen {
 			continue
 		}
@@ -1586,7 +1659,6 @@ func (dc *DomainContext) Close() {
 	//	r.Close()
 	//}
 	dc.hc.Close()
-	//dc.loc.Close()
 }
 
 func (dc *DomainContext) statelessGetter(i int) *compress.Getter {
@@ -1924,7 +1996,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 func (d *Domain) stepsRangeInDBAsStr(tx kv.Tx) string {
 	a1, a2 := d.History.InvertedIndex.stepsRangeInDB(tx)
 	ad1, ad2 := d.stepsRangeInDB(tx)
-	return fmt.Sprintf("%s: %.1f-%.1f, %.1f-%.1f", d.filenameBase, ad1, ad2, a1, a2)
+	return fmt.Sprintf("%s:(%.0f-%.0f, %.0f-%.0f)", d.filenameBase, ad1, ad2, a1, a2)
 }
 func (d *Domain) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	fst, _ := kv.FirstKey(tx, d.valsTable)
@@ -1936,4 +2008,13 @@ func (d *Domain) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 		from = float64(^binary.BigEndian.Uint64(lst[len(lst)-8:]))
 	}
 	return from, to
+}
+
+func (dc *DomainContext) Files() (res []string) {
+	for _, item := range dc.files {
+		if item.src.decompressor != nil {
+			res = append(res, item.src.decompressor.FileName())
+		}
+	}
+	return append(res, dc.hc.Files()...)
 }

@@ -14,7 +14,7 @@ import (
 
 func TestSharedDomain_Unwind(t *testing.T) {
 	stepSize := uint64(100)
-	_, db, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
 	defer db.Close()
 	defer agg.Close()
 
