@@ -1338,9 +1338,10 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	ii.files.Set(fi)
-	ii.warmLocalityIdx.integrateFiles(sf.warmLocality)
 
 	ii.reCalcRoFiles()
+
+	ii.warmLocalityIdx.integrateFiles(sf.warmLocality)
 }
 
 func (ii *InvertedIndex) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) error {

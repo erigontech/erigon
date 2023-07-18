@@ -228,10 +228,10 @@ func (lc *ctxLocalityIdx) Close() {
 }
 
 func closeLocalityIndexFilesAndRemove(i *ctxLocalityIdx) {
-	if i.file.src != nil {
-		i.file.src.closeFilesAndRemove()
-		i.file.src = nil
+	if i.file == nil || i.file.src == nil {
+		return
 	}
+	i.file.src.closeFilesAndRemove()
 	if i.file.src.bm != nil {
 		if err := i.file.src.bm.Close(); err != nil {
 			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", i.file.src.bm.FileName(), "stack", dbg.Stack())
@@ -241,6 +241,7 @@ func closeLocalityIndexFilesAndRemove(i *ctxLocalityIdx) {
 		}
 		i.file.src.bm = nil
 	}
+	i.file.src = nil
 }
 
 func (li *LocalityIndex) Close() {
