@@ -41,7 +41,8 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 		Label(label).
 		PageSize(targetPageSize.Bytes()).
 		MapSize(datasize.ByteSize(info.Geo.Upper)).
-		Flags(func(flags uint) uint { return flags | mdbx.NoMemInit | mdbx.WriteMap }).
+		GrowthStep(8 * datasize.GB).
+		Flags(func(flags uint) uint { return flags | mdbx.WriteMap }).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
 		MustOpen()
 	return src, dst
@@ -154,7 +155,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	return nil
 }
 
-const ReadAheadThreads = 1024
+const ReadAheadThreads = 5_000
 
 func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, readAheadThreads int) {
 	var ThreadsLimit = readAheadThreads
