@@ -199,14 +199,19 @@ type Tx struct {
 func (tx *Tx) AggCtx() *state.AggregatorV3Context { return tx.aggCtx }
 func (tx *Tx) Agg() *state.AggregatorV3           { return tx.db.agg }
 func (tx *Tx) Rollback() {
-	tx.autoClose()
-	tx.MdbxTx.Rollback()
+	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+		return
+	}
+	mdbxTx := tx.MdbxTx
+	tx.MdbxTx = nil
+	tx.autoClose(mdbxTx)
+	mdbxTx.Rollback()
 }
-func (tx *Tx) autoClose() {
+func (tx *Tx) autoClose(mdbxTx *mdbx.MdbxTx) {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
-	if !tx.MdbxTx.IsRo() {
+	if !mdbxTx.IsRo() {
 		tx.db.agg.FinishWrites()
 		tx.db.agg.SetTx(nil)
 	}
@@ -215,8 +220,13 @@ func (tx *Tx) autoClose() {
 	}
 }
 func (tx *Tx) Commit() error {
-	tx.autoClose()
-	return tx.MdbxTx.Commit()
+	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+		return nil
+	}
+	mdbxTx := tx.MdbxTx
+	tx.MdbxTx = nil
+	tx.autoClose(mdbxTx)
+	return mdbxTx.Commit()
 }
 
 func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error) {
@@ -314,7 +324,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 b
 
 	if historyV3 {
 		var err error
-		dir.MustExist(dirs.SnapHistory)
+		dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
 		agg, err = state.NewAggregatorV3(context.Background(), dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
 		if err != nil {
 			panic(err)
