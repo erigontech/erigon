@@ -1326,7 +1326,6 @@ func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress
 	// Here we can make a choise: to index "cold non-indexed file" by warm locality index, or not?
 	// Let's don't index. Because: speed of new files build is very important - to speed-up pruning
 	fromStep, toStep := ic.minWarmStep(), step+1
-	fmt.Printf("build warm: %d-%d, last: %s\n", fromStep, toStep, decomp.FileName())
 	return ii.warmLocalityIdx.buildFiles(ctx, fromStep, toStep, false, ps, func() *LocalityIterator {
 		return ic.iterateKeysLocality(fromStep, toStep, decomp)
 	})
