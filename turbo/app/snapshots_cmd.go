@@ -369,13 +369,9 @@ func doLocalityIdx(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	aggCtx := agg.MakeContext()
-	defer aggCtx.Close()
-	err = aggCtx.BuildOptionalMissedIndices(ctx, indexWorkers)
-	if err != nil {
+	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
-
 	return nil
 }
 
