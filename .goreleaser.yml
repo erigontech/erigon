@@ -6,7 +6,7 @@ release:
   prerelease: auto
 
 builds:
-  - id: darwin-amd64
+  - id: darwin-amd64-erigon
     main: ./cmd/erigon
     binary: erigon
     goos: [ darwin ]
@@ -28,7 +28,7 @@ builds:
     tags: [ nosqlite, noboltdb ]
     ldflags: -s -w
 
-  - id: linux-amd64
+  - id: linux-amd64-erigon
     main: ./cmd/erigon
     binary: erigon
     goos: [ linux ]
@@ -39,9 +39,405 @@ builds:
     tags: [ nosqlite, noboltdb ]
     ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
 
-  - id: linux-arm64
+  - id: linux-amd64-abigen
+    main: ./cmd/abigen
+    binary: abigen
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-caplin-phase1
+    main: ./cmd/caplin-phase1
+    binary: caplin-phase1
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-caplin-regression
+    main: ./cmd/caplin-regression
+    binary: caplin-regression
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-devnet
+    main: ./cmd/devnet
+    binary: devnet
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-downloader
+    main: ./cmd/downloader
+    binary: downloader
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-evm
+    main: ./cmd/evm
+    binary: evm
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-hack
+    main: ./cmd/hack
+    binary: hack
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-integration
+    main: ./cmd/integration
+    binary: integration
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-observer
+    main: ./cmd/observer
+    binary: observer
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-pics
+    main: ./cmd/pics
+    binary: pics
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-rlpdump
+    main: ./cmd/rlpdump
+    binary: rlpdump
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-rpcdaemon
+    main: ./cmd/rpcdaemon
+    binary: rpcdaemon
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-rpctest
+    main: ./cmd/rpctest
+    binary: rpctest
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-sentinel
+    main: ./cmd/sentinel
+    binary: sentinel
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-sentry
+    main: ./cmd/sentry
+    binary: sentry
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-state
+    main: ./cmd/state
+    binary: state
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-txpool
+    main: ./cmd/txpool
+    binary: txpool
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-amd64-verkle
+    main: ./cmd/verkle
+    binary: verkle
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-erigon
     main: ./cmd/erigon
     binary: erigon
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-abigen
+    main: ./cmd/abigen
+    binary: abigen
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-caplin-phase1
+    main: ./cmd/caplin-phase1
+    binary: caplin-phase1
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-caplin-regression
+    main: ./cmd/caplin-regression
+    binary: caplin-regression
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-devnet
+    main: ./cmd/devnet
+    binary: devnet
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-downloader
+    main: ./cmd/downloader
+    binary: downloader
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-evm
+    main: ./cmd/evm
+    binary: evm
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-hack
+    main: ./cmd/hack
+    binary: hack
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-integration
+    main: ./cmd/integration
+    binary: integration
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-observer
+    main: ./cmd/observer
+    binary: observer
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-pics
+    main: ./cmd/pics
+    binary: pics
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-rlpdump
+    main: ./cmd/rlpdump
+    binary: rlpdump
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-rpcdaemon
+    main: ./cmd/rpcdaemon
+    binary: rpcdaemon
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-rpctest
+    main: ./cmd/rpctest
+    binary: rpctest
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-sentinel
+    main: ./cmd/sentinel
+    binary: sentinel
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-sentry
+    main: ./cmd/sentry
+    binary: sentry
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-state
+    main: ./cmd/state
+    binary: state
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-txpool
+    main: ./cmd/txpool
+    binary: txpool
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64-verkle
+    main: ./cmd/verkle
+    binary: verkle
     goos: [ linux ]
     goarch: [ arm64 ]
     env:
