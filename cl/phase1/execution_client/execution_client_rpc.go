@@ -112,16 +112,15 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) (invalid bo
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
 	err = cc.client.CallContext(cc.ctx, &payloadStatus, engineMethod, request)
 	if err != nil {
-		return
-	}
-
-	if err != nil {
 		err = fmt.Errorf("execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
 		return
 	}
 
 	invalid = payloadStatus.Status == engine_types.InvalidStatus || payloadStatus.Status == engine_types.InvalidBlockHashStatus
-
+	err = checkPayloadStatus(payloadStatus)
+	if payloadStatus.Status == engine_types.AcceptedStatus {
+		log.Info("[ExecutionClientRpc] New block accepted")
+	}
 	return
 }
 
@@ -142,6 +141,25 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(finalized libcommon.Hash, head li
 	if err != nil && err.Error() == errContextExceeded {
 		return nil
 	}
+	if err != nil {
+		return err
+	}
 
-	return err
+	return checkPayloadStatus(forkChoiceResp.PayloadStatus)
+}
+
+func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
+	if payloadStatus == nil {
+		return fmt.Errorf("empty payloadStatus")
+	}
+
+	validationError := payloadStatus.ValidationError
+	if validationError != nil {
+		return validationError.Error()
+	}
+
+	if payloadStatus.Status != engine_types.ValidStatus && payloadStatus.Status != engine_types.AcceptedStatus {
+		return fmt.Errorf("status: %s", payloadStatus.Status)
+	}
+	return nil
 }

@@ -235,7 +235,6 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 		if !bytes.Equal(rh, block.Root().Bytes()) {
 			fmt.Printf("invalid genesis root hash: %x, expected %x\n", rh, block.Root().Bytes())
 		}
-		ww.Reset()
 	}
 	return block, statedb, nil
 }

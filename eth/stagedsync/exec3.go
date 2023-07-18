@@ -195,6 +195,15 @@ func ExecV3(ctx context.Context,
 	if execStage.BlockNumber > 0 {
 		stageProgress = execStage.BlockNumber
 		block = execStage.BlockNumber + 1
+	} else if !useExternalTx {
+		//found, _downloadedBlockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, agg.EndTxNumMinimax())
+		//if err != nil {
+		//	return err
+		//}
+		//if found {
+		//	stageProgress = _downloadedBlockNum - 1
+		//	block = _downloadedBlockNum - 1
+		//}
 	}
 	if applyTx != nil {
 		agg.SetTx(applyTx)
@@ -260,6 +269,9 @@ func ExecV3(ctx context.Context,
 	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 	defer cfg.agg.CloseSharedDomains()
 	rs := state.NewStateV3(doms, logger)
+	if execStage.BlockNumber == 0 {
+		doms.ClearRam()
+	}
 
 	//TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -821,17 +833,14 @@ Loop:
 		}
 	}
 
-	if !dbg.DiscardCommitment() {
-		rh, err := agg.ComputeCommitment(true, false)
-		if err != nil {
-			log.Error("commitment after ExecV3 failed", "err", err)
-		}
-		if !bytes.Equal(rh, b.HeaderNoCopy().Root.Bytes()) {
-			log.Error("commitment after ExecV3 mismatch", "computed", fmt.Sprintf("%x", rh), "expected (from header)", fmt.Sprintf("%x", b.HeaderNoCopy().Root.Bytes()))
-		}
-	}
 	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", ExecRepeats.Get())
 
+	if !dbg.DiscardCommitment() {
+		_, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u)
+		if err != nil {
+			return err
+		}
+	}
 	if parallel {
 		logger.Warn("[dbg] all txs sent")
 		if err := rwLoopG.Wait(); err != nil {
@@ -894,7 +903,7 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.Aggreg
 	minBlockNum := e.BlockNumber
 	if maxBlockNum > minBlockNum {
 		unwindTo := (maxBlockNum + minBlockNum) / 2 // Binary search for the correct block, biased to the lower numbers
-		//unwindTo := blockNum - 1
+		//unwindTo := maxBlockNum - 1
 
 		logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
 		u.UnwindTo(unwindTo, header.Hash())

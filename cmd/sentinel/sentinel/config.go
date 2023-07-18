@@ -36,13 +36,14 @@ type SentinelConfig struct {
 	Port          int
 	TCPPort       uint
 	// Optional
-	LocalIP       string
-	EnableUPnP    bool
-	RelayNodeAddr string
-	HostAddress   string
-	HostDNS       string
-	NoDiscovery   bool
-	TmpDir        string
+	LocalIP        string
+	EnableUPnP     bool
+	RelayNodeAddr  string
+	HostAddress    string
+	HostDNS        string
+	NoDiscovery    bool
+	TmpDir         string
+	LocalDiscovery bool
 }
 
 func convertToCryptoPrivkey(privkey *ecdsa.PrivateKey) (crypto.PrivKey, error) {

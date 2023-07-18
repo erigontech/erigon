@@ -425,7 +425,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 			}
 		}
 		if r.trace {
-			fmt.Printf("account %x =>b %d n %d ch %x\n", accountKey, accountValue.Balance.Uint64(), accountValue.Nonce, accountValue.CodeHash)
+			fmt.Printf("account %x =>b %d n %d ch %x\n", accountKey, &accountValue.Balance, accountValue.Nonce, accountValue.CodeHash)
 		}
 		if err := r.saveValueAccount(false, hasTree, accountValue, hash); err != nil {
 			return err
