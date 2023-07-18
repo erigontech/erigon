@@ -5,402 +5,50 @@ release:
   draft: true
   prerelease: auto
 
-darwin-amd64-build: &darwin-amd64-build
-  goos: [ darwin ]
-  goarch: [ amd64 ]
-  env:
-    - CC=o64-clang
-    - CXX=o64-clang++
-  tags: [ nosqlite, noboltdb ]
-  ldflags: -s -w
-
-darwin-arm64-build: &darwin-arm64-build
-  goos: [ darwin ]
-  goarch: [ arm64 ]
-  env:
-    - CC=oa64-clang
-    - CXX=oa64-clang++
-  tags: [ nosqlite, noboltdb ]
-  ldflags: -s -w
-
-linux-amd64-build: &linux-amd64-build
-  goos: [ linux ]
-  goarch: [ amd64 ]
-  env:
-    - CC=x86_64-linux-gnu-gcc
-    - CXX=x86_64-linux-gnu-g++
-  tags: [ nosqlite, noboltdb ]
-  ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
-
-linux-arm64-build: &linux-arm64-build
-  goos: [ linux ]
-  goarch: [ arm64 ]
-  env:
-    - CC=aarch64-linux-gnu-gcc
-    - CXX=aarch64-linux-gnu-g++
-  tags: [ nosqlite, noboltdb ]
-  ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
-
-erigon: &erigon
-  main: ./cmd/erigon
-  binary: erigon
-
-abigen: &abigen
-  main: ./cmd/abigen
-  binary: abigen
-
-caplin-phase1: &caplin-phase1
-  main: ./cmd/caplin-phase1
-  binary: caplin-phase1
-
-caplin-regression: &caplin-regression
-  main: ./cmd/caplin-regression
-  binary: caplin-regression
-
-devnet: &devnet
-  main: ./cmd/devnet
-  binary: devnet
-
-downloader: &downloader
-  main: ./cmd/downloader
-  binary: downloader
-
-evm: &evm
-  main: ./cmd/evm
-  binary: evm
-
-hack: &hack
-  main: ./cmd/hack
-  binary: hack
-
-integration: &integration
-  main: ./cmd/integration
-  binary: integration
-
-observer: &observer
-  main: ./cmd/observer
-  binary: observer
-
-pics: &pics
-  main: ./cmd/pics
-  binary: pics
-
-rpcdaemon: &rpcdaemon
-  main: ./cmd/rpcdaemon
-  binary: rpcdaemon
-
-rpctest: &rpctest
-  main: ./cmd/rpctest
-  binary: rpctest
-
-sentinel: &sentinel
-  main: ./cmd/sentinel
-  binary: sentinel
-
-sentry: &sentry
-  main: ./cmd/sentry
-  binary: sentry
-
-state: &state
-  main: ./cmd/state
-  binary: state
-
-txpool: &txpool
-  main: ./cmd/txpool
-  binary: txpool
-
-verkle: &verkle
-  main: ./cmd/verkle
-  binary: verkle
-
 builds:
-  - id: darwin-amd64-erigon
-    <<: *erigon
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-abigen
-    <<: *abigen
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-caplin-phase1
-    <<: *caplin-phase1
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-caplin-regression
-    <<: *caplin-regression
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-devnet
-    <<: *devnet
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-downloader
-    <<: *downloader
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-evm
-    <<: *evm
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-hack
-    <<: *hack
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-integration
-    <<: *integration
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-observer
-    <<: *observer
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-pics
-    <<: *pics
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-rpcdaemon
-    <<: *rpcdaemon
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-rpctest
-    <<: *rpctest
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-sentinel
-    <<: *sentinel
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-sentry
-    <<: *sentry
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-state
-    <<: *state
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-txpool
-    <<: *txpool
-    <<: *darwin-amd64-build
-
-  - id: darwin-amd64-verkle
-    <<: *verkle
-    <<: *darwin-amd64-build
-
-  - id: darwin-arm64-erigon
-    <<: *erigon
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-abigen
-    <<: *abigen
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-caplin-phase1
-    <<: *caplin-phase1
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-caplin-regression
-    <<: *caplin-regression
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-devnet
-    <<: *devnet
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-downloader
-    <<: *downloader
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-evm
-    <<: *evm
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-hack
-    <<: *hack
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-integration
-    <<: *integration
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-observer
-    <<: *observer
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-pics
-    <<: *pics
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-rpcdaemon
-    <<: *rpcdaemon
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-rpctest
-    <<: *rpctest
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-sentinel
-    <<: *sentinel
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-sentry
-    <<: *sentry
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-state
-    <<: *state
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-txpool
-    <<: *txpool
-    <<: *darwin-arm64-build
-
-  - id: darwin-arm64-verkle
-    <<: *verkle
-    <<: *darwin-arm64-build
-
-  - id: linux-amd64-erigon
-    <<: *erigon
-    << : *linux-amd64-build
-
-  - id: linux-amd64-abigen
-    <<: *abigen
-    << : *linux-amd64-build
-
-  - id: linux-amd64-caplin-phase1
-    <<: *caplin-phase1
-    << : *linux-amd64-build
-
-  - id: linux-amd64-caplin-regression
-    <<: *caplin-regression
-    << : *linux-amd64-build
-
-  - id: linux-amd64-devnet
-    <<: *devnet
-    << : *linux-amd64-build
-
-  - id: linux-amd64-downloader
-    <<: *downloader
-    << : *linux-amd64-build
-
-  - id: linux-amd64-evm
-    <<: *evm
-    << : *linux-amd64-build
-
-  - id: linux-amd64-hack
-    <<: *hack
-    << : *linux-amd64-build
-
-  - id: linux-amd64-integration
-    <<: *integration
-    << : *linux-amd64-build
-
-  - id: linux-amd64-observer
-    <<: *observer
-    << : *linux-amd64-build
-
-  - id: linux-amd64-pics
-    <<: *pics
-    << : *linux-amd64-build
-
-  - id: linux-amd64-rpcdaemon
-    <<: *rpcdaemon
-    << : *linux-amd64-build
-
-  - id: linux-amd64-rpctest
-    <<: *rpctest
-    << : *linux-amd64-build
-
-  - id: linux-amd64-sentinel
-    <<: *sentinel
-    << : *linux-amd64-build
-
-  - id: linux-amd64-sentry
-    <<: *sentry
-    << : *linux-amd64-build
-
-  - id: linux-amd64-state
-    <<: *state
-    << : *linux-amd64-build
-
-  - id: linux-amd64-txpool
-    <<: *txpool
-    << : *linux-amd64-build
-
-  - id: linux-amd64-verkle
-    <<: *verkle
-    << : *linux-amd64-build
-
-  - id: linux-arm64-erigon
-    <<: *erigon
-    << : *linux-arm64-build
-
-  - id: linux-arm64-abigen
-    <<: *abigen
-    << : *linux-arm64-build
-
-  - id: linux-arm64-caplin-phase1
-    <<: *caplin-phase1
-    << : *linux-arm64-build
-
-  - id: linux-arm64-caplin-regression
-    <<: *caplin-regression
-    << : *linux-arm64-build
-
-  - id: linux-arm64-devnet
-    <<: *devnet
-    << : *linux-arm64-build
-
-  - id: linux-arm64-downloader
-    <<: *downloader
-    << : *linux-arm64-build
-
-  - id: linux-arm64-evm
-    <<: *evm
-    << : *linux-arm64-build
-
-  - id: linux-arm64-hack
-    <<: *hack
-    << : *linux-arm64-build
-
-  - id: linux-arm64-integration
-    <<: *integration
-    << : *linux-arm64-build
-
-  - id: linux-arm64-observer
-    <<: *observer
-    << : *linux-arm64-build
-
-  - id: linux-arm64-pics
-    <<: *pics
-    << : *linux-arm64-build
-
-  - id: linux-arm64-rpcdaemon
-    <<: *rpcdaemon
-    << : *linux-arm64-build
-
-  - id: linux-arm64-rpctest
-    <<: *rpctest
-    << : *linux-arm64-build
-
-  - id: linux-arm64-sentinel
-    <<: *sentinel
-    << : *linux-arm64-build
-
-  - id: linux-arm64-sentry
-    <<: *sentry
-    << : *linux-arm64-build
-
-  - id: linux-arm64-state
-    <<: *state
-    << : *linux-arm64-build
-
-  - id: linux-arm64-txpool
-    <<: *txpool
-    << : *linux-arm64-build
-
-  - id: linux-arm64-verkle
-    <<: *verkle
-    << : *linux-arm64-build
+  - id: darwin-amd64
+    main: ./cmd/erigon
+    binary: erigon
+    goos: [ darwin ]
+    goarch: [ amd64 ]
+    env:
+      - CC=o64-clang
+      - CXX=o64-clang++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w
+
+  - id: darwin-arm64
+    main: ./cmd/erigon
+    binary: erigon
+    goos: [ darwin ]
+    goarch: [ arm64 ]
+    env:
+      - CC=oa64-clang
+      - CXX=oa64-clang++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w
+
+  - id: linux-amd64
+    main: ./cmd/erigon
+    binary: erigon
+    goos: [ linux ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: linux-arm64
+    main: ./cmd/erigon
+    binary: erigon
+    goos: [ linux ]
+    goarch: [ arm64 ]
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
 
   - id: windows-amd64
     main: ./cmd/erigon
@@ -412,7 +60,6 @@ builds:
       - CXX=x86_64-w64-mingw32-g++
     tags: [ nosqlite, noboltdb ]
     ldflags: -s -w
-
 
 snapshot:
   name_template: "{{ .Tag }}.next"
