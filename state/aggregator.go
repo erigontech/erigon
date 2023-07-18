@@ -381,7 +381,7 @@ func (a *Aggregator) DomainEndTxNumMinimax() uint64 {
 func (a *Aggregator) SeekCommitment() (blockNum, txNum uint64, err error) {
 	filesTxNum := a.EndTxNumMinimax()
 	cc := a.commitment.MakeContext()
-	blockNum, txNum, err = a.commitment.SeekCommitment(filesTxNum, cc)
+	blockNum, txNum, err = a.commitment.SeekCommitment(filesTxNum, math.MaxUint64, cc)
 	cc.Close()
 	if err != nil {
 		return 0, 0, err

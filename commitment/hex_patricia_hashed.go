@@ -1603,6 +1603,9 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 		RootTouched: hph.rootTouched,
 		RootPresent: hph.rootPresent,
 	}
+	if hph.currentKeyLen > 0 {
+		panic("currentKeyLen > 0")
+	}
 
 	s.Root = hph.root.Encode()
 	copy(s.Depths[:], hph.depths[:])

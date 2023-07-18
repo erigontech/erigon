@@ -95,7 +95,6 @@ func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, step uint64, txUnwindTo uint64) error {
 	sd.ClearRam()
-
 	if err := sd.Account.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
 		return err
 	}
@@ -122,42 +121,20 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, step uint64, 
 	//	return err
 	//}
 
-	bn, txn, err := sd.SeekCommitment()
+	bn, txn, err := sd.SeekCommitment(0, txUnwindTo)
 	fmt.Printf("Unwinded domains to block %d, txn %d wanted to %d\n", bn, txn, txUnwindTo)
 	return err
 }
 
-func (sd *SharedDomains) SeekCommitment() (bn, txn uint64, err error) {
-	cmcx := sd.Commitment.MakeContext()
-	defer cmcx.Close()
+func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn uint64, err error) {
+	//cmcx := sd.Commitment.MakeContext()
+	//defer cmcx.Close()
+	cmcx := sd.aggCtx.commitment
 
-	return sd.Commitment.SeekCommitment(0, cmcx)
-
-	//topTxn, topValue := uint64(0), make([]byte, 0)
-	//err = cmcx.IteratePrefix(sd.roTx, keyCommitmentState, func(key []byte, value []byte) {
-	//	fmt.Printf("iter %x value %x\n", key, value[:8])
-	//	txn := binary.BigEndian.Uint64(value)
-	//	if txn > topTxn {
-	//		topTxn = txn
-	//		topValue = append(topValue[:0], value...)
-	//	}
-	//})
-	//cmcx.GetLatest(keyCommitmentState, nil, sd.roTx)
-	//if err != nil {
-	//	return 0, 0, err
-	//}
-
-	rv, _, err := cmcx.GetLatest(keyCommitmentState, nil, sd.roTx)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	bn, txn, err = sd.Commitment.Restore(rv)
-	fmt.Printf("restored domains to block %d, txn %d\n", bn, txn)
-	if txn != 0 {
-		sd.SetTxNum(txn)
-	}
-	return bn, txn, err
+	bn, txn, err = sd.Commitment.SeekCommitment(fromTx, toTx, cmcx)
+	sd.SetBlockNum(bn)
+	sd.SetTxNum(txn)
+	return
 }
 
 func (sd *SharedDomains) ClearRam() {

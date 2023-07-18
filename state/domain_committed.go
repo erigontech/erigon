@@ -189,6 +189,11 @@ func (t *UpdateTree) TouchCode(c *commitmentItem, val []byte) {
 	t.keccak.Reset()
 	t.keccak.Write(val)
 	copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
+	if c.update.Flags == commitment.DeleteUpdate && len(val) == 0 {
+		c.update.Flags = commitment.DeleteUpdate
+		c.update.ValLength = 0
+		return
+	}
 	c.update.ValLength = length.Hash
 	if len(val) != 0 {
 		c.update.Flags |= commitment.CodeUpdate
@@ -344,12 +349,9 @@ func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error
 	if err != nil {
 		return err
 	}
-	if bytes.Equal(encoded, d.prevState) {
-		return nil
-	}
 
 	if d.trace {
-		fmt.Printf("commitment put tx %d rh %x\n\n", d.txNum, rh)
+		fmt.Printf("[commitment] put tx %d rh %x\n", d.txNum, rh)
 	}
 	if err := d.Domain.PutWithPrev(keyCommitmentState, nil, encoded, d.prevState); err != nil {
 		return err
@@ -701,6 +703,9 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 		return rootHash, nil, err
 	}
 
+	//if len(touchedKeys) > 1 {
+	//d.patriciaTrie.Reset()
+	//}
 	// data accessing functions should be set once before
 	d.patriciaTrie.SetTrace(trace)
 
@@ -732,18 +737,19 @@ var keyCommitmentState = []byte("state")
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (d *DomainCommitted) SeekCommitment(sinceTx uint64, cd *DomainContext) (blockNum, txNum uint64, err error) {
+func (d *DomainCommitted) SeekCommitment(sinceTx, untilTx uint64, cd *DomainContext) (blockNum, txNum uint64, err error) {
 	if d.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
 		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 
+	fmt.Printf("[commitment] SeekCommitment [%d, %d]\n", sinceTx, untilTx)
 	var latestState []byte
 	err = cd.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) {
 		txn := binary.BigEndian.Uint64(value)
-		if txn == sinceTx {
+		fmt.Printf("[commitment] Seek txn=%d %x\n", txn, value[:16])
+		if txn >= sinceTx && txn <= untilTx {
 			latestState = value
 		}
-		fmt.Printf("[commitment] GET txn=%d %x value: %x\n", txn, key, value)
 	})
 	if err != nil {
 		return 0, 0, err
