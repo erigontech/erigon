@@ -113,18 +113,10 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	if err != nil {
 		return err
 	}
-	_, isDupsort := c.(kv.RwCursorDupSort)
+	casted, isDupsort := c.(kv.RwCursorDupSort)
 	i := uint64(0)
 
-	var casted *mdbx2.MdbxDupSortCursor
-	var dstC *mdbx2.MdbxCursor
-	if isDupsort {
-		casted = c.(*mdbx2.MdbxDupSortCursor)
-	} else {
-		dstC = c.(*mdbx2.MdbxCursor)
-	}
-
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+	for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 		if err != nil {
 			return err
 		}
@@ -134,7 +126,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 				return err
 			}
 		} else {
-			if err = dstC.Append(k, v); err != nil {
+			if err = c.Append(k, v); err != nil {
 				return err
 			}
 		}
