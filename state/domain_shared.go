@@ -131,6 +131,8 @@ func (sd *SharedDomains) SeekCommitment() (bn, txn uint64, err error) {
 	cmcx := sd.Commitment.MakeContext()
 	defer cmcx.Close()
 
+	return sd.Commitment.SeekCommitment(0, cmcx)
+
 	//topTxn, topValue := uint64(0), make([]byte, 0)
 	//err = cmcx.IteratePrefix(sd.roTx, keyCommitmentState, func(key []byte, value []byte) {
 	//	fmt.Printf("iter %x value %x\n", key, value[:8])

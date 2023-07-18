@@ -88,8 +88,6 @@ func NewUpdateTree() *UpdateTree {
 	}
 }
 
-func stringLess(a, b string) bool { return a < b }
-
 func (t *UpdateTree) get(key []byte) (*commitmentItem, bool) {
 	c := &commitmentItem{plainKey: key,
 		hashedKey: t.hashAndNibblizeKey(key),
@@ -114,23 +112,33 @@ func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, v
 	item, _ := t.get(key)
 	fn(item, val)
 	t.tree.ReplaceOrInsert(item)
-	//t.plainKeys.ReplaceOrInsert(string(key))
 }
 
 func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
 	if len(val) == 0 {
-		c.update.Reset()
+		//c.update.Reset()
 		c.update.Flags = commitment.DeleteUpdate
-		ks := common.Copy(c.plainKey)
-		t.tree.AscendGreaterOrEqual(c, func(ci *commitmentItem) bool {
-			if !bytes.HasPrefix(ci.plainKey, ks) {
-				return false
-			}
-			if !bytes.Equal(ci.plainKey, ks) {
-				t.tree.Delete(ci)
-			}
-			return true
-		})
+		//ks := common.Copy(c.plainKey)
+		//toDel := make([][]byte, 0)
+		//t.tree.AscendGreaterOrEqual(c, func(ci *commitmentItem) bool {
+		//	if !bytes.HasPrefix(ci.plainKey, ks) {
+		//		return false
+		//	}
+		//	if !bytes.Equal(ci.plainKey, ks) {
+		//		toDel = append(toDel, common.Copy(ci.plainKey))
+		//		fmt.Printf("delete %x\n", ci.plainKey)
+		//	}
+		//	return true
+		//})
+		//for _, k := range toDel {
+		//	_, suc := t.tree.Delete(&commitmentItem{plainKey: k})
+		//	fmt.Printf("delete %x %v\n", k, suc)
+		//}
+		//
+		//t.tree.Ascend(func(ci *commitmentItem) bool {
+		//	fmt.Printf("tree %x\n", ci.plainKey)
+		//	return true
+		//})
 		return
 	}
 	if c.update.Flags&commitment.DeleteUpdate != 0 {
@@ -188,22 +196,20 @@ func (t *UpdateTree) TouchCode(c *commitmentItem, val []byte) {
 }
 
 // Returns list of both plain and hashed keys. If .mode is CommitmentModeUpdate, updates also returned.
-func (t *UpdateTree) List(clear bool) ([][]byte, [][]byte, []commitment.Update) {
-	plainKeys := make([][]byte, 0, t.tree.Len())
-	hashedKeys := make([][]byte, 0, t.tree.Len())
-	updates := make([]commitment.Update, 0, t.tree.Len())
+func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
+	plainKeys := make([][]byte, t.tree.Len())
+	updates := make([]commitment.Update, t.tree.Len())
 
+	i := 0
 	t.tree.Ascend(func(item *commitmentItem) bool {
-		plainKeys = append(plainKeys, item.plainKey)
-		item.hashedKey = t.hashAndNibblizeKey(item.plainKey)
-		hashedKeys = append(hashedKeys, item.hashedKey)
-		updates = append(updates, item.update)
+		plainKeys[i], updates[i] = item.plainKey, item.update
+		i++
 		return true
 	})
 	if clear {
 		t.tree.Clear(true)
 	}
-	return plainKeys, hashedKeys, updates
+	return plainKeys, updates
 }
 
 // TODO(awskii): let trie define hashing function
@@ -687,7 +693,7 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 
 	defer func(s time.Time) { d.comTook = time.Since(s) }(time.Now())
 
-	touchedKeys, hashedKeys, updates := d.updates.List(true)
+	touchedKeys, updates := d.updates.List(true)
 	d.comKeys = uint64(len(touchedKeys))
 
 	if len(touchedKeys) == 0 {
@@ -700,12 +706,12 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 
 	switch d.mode {
 	case CommitmentModeDirect:
-		rootHash, branchNodeUpdates, err = d.patriciaTrie.ReviewKeys(touchedKeys, hashedKeys)
+		rootHash, branchNodeUpdates, err = d.patriciaTrie.ReviewKeys(touchedKeys, nil)
 		if err != nil {
 			return nil, nil, err
 		}
 	case CommitmentModeUpdate:
-		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessUpdates(touchedKeys, hashedKeys, updates)
+		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessUpdates(touchedKeys, nil, updates)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -726,16 +732,13 @@ var keyCommitmentState = []byte("state")
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (d *DomainCommitted) SeekCommitment(sinceTx uint64) (blockNum, txNum uint64, err error) {
+func (d *DomainCommitted) SeekCommitment(sinceTx uint64, cd *DomainContext) (blockNum, txNum uint64, err error) {
 	if d.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
 		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
-	// todo add support of bin state dumping
-	ctx := d.MakeContext()
-	defer ctx.Close()
 
 	var latestState []byte
-	err = d.defaultDc.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) {
+	err = cd.IteratePrefix(d.tx, keyCommitmentState, func(key, value []byte) {
 		txn := binary.BigEndian.Uint64(value)
 		if txn == sinceTx {
 			latestState = value

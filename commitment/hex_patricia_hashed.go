@@ -1189,11 +1189,6 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 		}
 	}
 	cell.reset()
-	//cell.extLen = 0
-	//cell.Balance.Clear()
-	//copy(cell.CodeHash[:], EmptyCodeHash)
-	//cell.StorageLen = 0
-	//cell.Nonce = 0
 }
 
 // fetches cell by key and set touch/after maps
@@ -1249,12 +1244,23 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rh[1:], nil // first byte is 128+hash_len
 }
 
-func (hph *HexPatriciaHashed) ReviewKeys(plainKeys, hashedKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
+func (hph *HexPatriciaHashed) ReviewKeys(plainKeys, _ [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
 	branchNodeUpdates = make(map[string]BranchData)
 
+	pks := make(map[string]int, len(plainKeys))
+	hashedKeys := make([][]byte, len(plainKeys))
+	for i, pk := range plainKeys {
+		hashedKeys[i] = hph.hashAndNibblizeKey(pk)
+		pks[string(hashedKeys[i])] = i
+	}
+
+	sort.Slice(hashedKeys, func(i, j int) bool {
+		return bytes.Compare(hashedKeys[i], hashedKeys[j]) < 0
+	})
+
 	stagedCell := new(Cell)
-	for i, hashedKey := range hashedKeys {
-		plainKey := plainKeys[i]
+	for _, hashedKey := range hashedKeys {
+		plainKey := plainKeys[pks[string(hashedKey)]]
 		if hph.trace {
 			fmt.Printf("plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
@@ -1508,7 +1514,7 @@ func (c *Cell) Encode() []byte {
 		pos += c.apl
 	}
 	if c.spl != 0 {
-		flags |= 4
+		flags |= cellFlagStorage
 		buf[pos] = byte(c.spl)
 		pos++
 		copy(buf[pos:pos+c.spl], c.spk[:])
@@ -1767,7 +1773,6 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 	})
 
 	for i, update := range updates {
-		//hashedKey := hashedKeys[i]
 		plainKey := updates[i].plainKey
 		hashedKey := updates[i].hashedKey
 		if hph.trace {
@@ -1851,13 +1856,17 @@ func (hph *HexPatriciaHashed) hashAndNibblizeKey(key []byte) []byte {
 	hashedKey := make([]byte, length.Hash)
 
 	hph.keccak.Reset()
-	hph.keccak.Write(key[:length.Addr])
+	fp := length.Addr
+	if len(key) < length.Addr {
+		fp = len(key)
+	}
+	hph.keccak.Write(key[:fp])
 	copy(hashedKey[:length.Hash], hph.keccak.Sum(nil))
 
-	if len(key[length.Addr:]) > 0 {
+	if len(key[fp:]) > 0 {
 		hashedKey = append(hashedKey, make([]byte, length.Hash)...)
 		hph.keccak.Reset()
-		hph.keccak.Write(key[length.Addr:])
+		hph.keccak.Write(key[fp:])
 		copy(hashedKey[length.Hash:], hph.keccak.Sum(nil))
 	}
 
@@ -1908,7 +1917,6 @@ type Update struct {
 	Nonce             uint64
 	ValLength         int
 	CodeHashOrStorage [length.Hash]byte
-	CodeValue         []byte // does not need during commitment, but helpful for debugging. Could be removed
 }
 
 func (u *Update) Reset() {
