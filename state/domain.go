@@ -185,9 +185,11 @@ type Domain struct {
 	logger       log.Logger
 }
 
-func NewDomain(dir, tmpdir string, aggregationStep uint64,
-	filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string,
-	compressVals, largeValues bool, logger log.Logger) (*Domain, error) {
+type domainCfg struct {
+	histCfg
+}
+
+func NewDomain(cfg domainCfg, dir, tmpdir string, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
 	d := &Domain{
 		keysTable: keysTable,
 		valsTable: valsTable,
@@ -198,7 +200,7 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
-	if d.History, err = NewHistory(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, compressVals, []string{"kv"}, largeValues, logger); err != nil {
+	if d.History, err = NewHistory(cfg.histCfg, dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, []string{"kv"}, logger); err != nil {
 		return nil, err
 	}
 

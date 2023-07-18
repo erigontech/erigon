@@ -58,7 +58,8 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 			settingsTable: kv.TableCfgItem{},
 		}
 	}).MustOpen()
-	h, err := NewHistory(dir, dir, 16, "hist", keysTable, indexTable, valsTable, false, nil, largeValues, logger)
+	cfg := histCfg{withLocalityIndex: false, compressVals: false, largeValues: largeValues}
+	h, err := NewHistory(cfg, dir, dir, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
 	require.NoError(tb, err)
 	h.DisableFsync()
 	tb.Cleanup(db.Close)

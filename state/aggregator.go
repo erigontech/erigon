@@ -121,17 +121,20 @@ func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode Co
 	if err != nil {
 		return nil, err
 	}
-	if a.accounts, err = NewDomain(dir, tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, false, AccDomainLargeValues, logger); err != nil {
+	cfg := domainCfg{histCfg{withLocalityIndex: true, compressVals: false, largeValues: AccDomainLargeValues}}
+	if a.accounts, err = NewDomain(cfg, dir, tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewDomain(dir, tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, false, StorageDomainLargeValues, logger); err != nil {
+	cfg = domainCfg{histCfg{withLocalityIndex: true, compressVals: false, largeValues: StorageDomainLargeValues}}
+	if a.storage, err = NewDomain(cfg, dir, tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
 		return nil, err
 	}
-	if a.code, err = NewDomain(dir, tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, true, true, logger); err != nil {
+	cfg = domainCfg{histCfg{withLocalityIndex: true, compressVals: true, largeValues: true}}
+	if a.code, err = NewDomain(cfg, dir, tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
 		return nil, err
 	}
-
-	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, false, true, logger)
+	cfg = domainCfg{histCfg{withLocalityIndex: true, compressVals: false, largeValues: true}}
+	commitd, err := NewDomain(cfg, dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger)
 	if err != nil {
 		return nil, err
 	}

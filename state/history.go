@@ -80,21 +80,25 @@ type History struct {
 	logger log.Logger
 }
 
-func NewHistory(dir, tmpdir string, aggregationStep uint64,
-	filenameBase, indexKeysTable, indexTable, historyValsTable string,
-	compressVals bool, integrityFileExtensions []string, largeValues bool, logger log.Logger) (*History, error) {
+type histCfg struct {
+	compressVals      bool
+	largeValues       bool
+	withLocalityIndex bool
+}
+
+func NewHistory(cfg histCfg, dir, tmpdir string, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityFileExtensions []string, logger log.Logger) (*History, error) {
 	h := History{
 		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		historyValsTable:        historyValsTable,
-		compressVals:            compressVals,
+		compressVals:            cfg.compressVals,
 		compressWorkers:         1,
 		integrityFileExtensions: integrityFileExtensions,
-		largeValues:             largeValues,
+		largeValues:             cfg.largeValues,
 		logger:                  logger,
 	}
 	h.roFiles.Store(&[]ctxItem{})
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, true, append(slices.Clone(h.integrityFileExtensions), "v"), logger)
+	h.InvertedIndex, err = NewInvertedIndex(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withLocalityIndex, append(slices.Clone(h.integrityFileExtensions), "v"), logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}

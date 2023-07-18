@@ -1334,14 +1334,14 @@ func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress
 }
 
 func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
+	ii.warmLocalityIdx.integrateFiles(sf.warmLocality)
+
 	fi := newFilesItem(txNumFrom, txNumTo, ii.aggregationStep)
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	ii.files.Set(fi)
 
 	ii.reCalcRoFiles()
-
-	ii.warmLocalityIdx.integrateFiles(sf.warmLocality)
 }
 
 func (ii *InvertedIndex) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) error {

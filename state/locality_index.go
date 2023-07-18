@@ -172,12 +172,12 @@ func (li *LocalityIndex) openFiles() (err error) {
 }
 
 func (li *LocalityIndex) closeFiles() {
-	if li == nil {
+	if li == nil || li.file == nil {
 		return
 	}
-	if li.file != nil && li.file.index != nil {
+	if li.file.index != nil {
 		li.file.index.Close()
-		li.file = nil
+		li.file.index = nil
 	}
 	if li.file.bm != nil {
 		li.file.bm.Close()
@@ -189,11 +189,9 @@ func (li *LocalityIndex) reCalcRoFiles() {
 		return
 	}
 	if li.file == nil {
-		fmt.Printf("reCalcRoFiles: nil\n")
 		li.roFiles.Store(nil)
 		return
 	}
-	fmt.Printf("reCalcRoFiles: %s\n", li.file.bm.FileName())
 	li.roFiles.Store(&ctxItem{
 		startTxNum: li.file.startTxNum,
 		endTxNum:   li.file.endTxNum,
