@@ -31,7 +31,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -757,13 +756,10 @@ func (d *Domain) MakeContext() *DomainContext {
 
 // Collation is the set of compressors created after aggregation
 type Collation struct {
-	valuesComp   *compress.Compressor
-	historyComp  *compress.Compressor
-	indexBitmaps map[string]*roaring64.Bitmap
-	valuesPath   string
-	historyPath  string
-	valuesCount  int
-	historyCount int
+	HistoryCollation
+	valuesComp  *compress.Compressor
+	valuesPath  string
+	valuesCount int
 }
 
 func (c Collation) Close() {
@@ -888,13 +884,10 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 
 	closeComp = false
 	return Collation{
-		valuesPath:   valuesPath,
-		valuesComp:   valuesComp,
-		valuesCount:  valCount,
-		historyPath:  hCollation.historyPath,
-		historyComp:  hCollation.historyComp,
-		historyCount: hCollation.historyCount,
-		indexBitmaps: hCollation.indexBitmaps,
+		HistoryCollation: hCollation,
+		valuesPath:       valuesPath,
+		valuesComp:       valuesComp,
+		valuesCount:      valCount,
 	}, nil
 }
 
@@ -938,12 +931,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		d.stats.LastFileBuildingTook = time.Since(start)
 	}()
 
-	hStaticFiles, err := d.History.buildFiles(ctx, step, HistoryCollation{
-		historyPath:  collation.historyPath,
-		historyComp:  collation.historyComp,
-		historyCount: collation.historyCount,
-		indexBitmaps: collation.indexBitmaps,
-	}, ps)
+	hStaticFiles, err := d.History.buildFiles(ctx, step, collation.HistoryCollation, ps)
 	if err != nil {
 		return StaticFiles{}, err
 	}
@@ -1455,9 +1443,6 @@ func (dc *DomainContext) getLatestFromFiles2(filekey []byte) (v []byte, found bo
 			continue
 		}
 		found = true
-		if bytes.HasPrefix(filekey, common.FromHex("5e")) {
-			fmt.Printf("k1: %x, %t, %s\n", filekey, found, dc.files[i].src.decompressor.FileName())
-		}
 		if COMPARE_INDEXES {
 			rd := recsplit.NewIndexReader(dc.files[i].src.index)
 			oft := rd.Lookup(filekey)
@@ -1526,16 +1511,9 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 }
 
 func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, error) {
-	if dc.d.filenameBase == "accounts" {
-		//fmt.Printf("indexed to : %s, %s\n,", dc.hc.ic.warmLocality.bm.FileName(), dc.hc.ic.files[len(dc.hc.ic.files)-1].src.decompressor.FileName())
-	}
-
 	exactWarmStep, ok, err := dc.hc.ic.warmLocality.lookupLatest(filekey)
 	if err != nil {
 		return nil, false, err
-	}
-	if bytes.HasPrefix(filekey, common.FromHex("419e")) {
-		fmt.Printf("k1: %x, %d, %t, %s, %s\n", filekey, exactWarmStep, ok, dc.hc.ic.warmLocality.bm.FileName(), dc.hc.ic.ii.warmLocalityIdx.file.index.FileName())
 	}
 	if !ok {
 		return nil, false, nil
@@ -1751,10 +1729,6 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 	if err != nil {
 		return nil, false, err
 	}
-
-	//if bytes.HasPrefix(key, common.FromHex("1050")) {
-	//	fmt.Printf("k: %x, %d, %d -> %x, %x\n", key, ^binary.BigEndian.Uint64(foundInvStep), dc.d.txNum/dc.d.aggregationStep, dc.keyBuf[:len(key)+8], v)
-	//}
 	return v, true, nil
 }
 

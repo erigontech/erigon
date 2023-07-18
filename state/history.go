@@ -965,7 +965,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	rs.Close()
 	rs = nil
 
-	warmLocality, err := h.buildWarmLocality(ctx, efHistoryDecomp, step+1, ps)
+	warmLocality, err := h.buildWarmLocality(ctx, efHistoryDecomp, step, ps)
 	if err != nil {
 		return HistoryFiles{}, err
 	}

@@ -33,7 +33,8 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			// - open new view
 			// - make sure there is no canDelete file
 			hc := h.MakeContext()
-			require.Nil(hc.ic.coldLocality.file) // optimization: don't create LocalityIndex for 1 file
+			//require.Nil(hc.ic.coldLocality.file) // optimization: don't create LocalityIndex for 1 file
+			require.NotNil(hc.ic.coldLocality.file)
 			require.NotNil(hc.ic.warmLocality.file)
 
 			lastOnFs, _ := h.files.Max()
