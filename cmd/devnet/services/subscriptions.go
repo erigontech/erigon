@@ -4,19 +4,22 @@ import (
 	"context"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
 
+func init() {
+	scenarios.RegisterStepHandlers(
+		scenarios.StepHandler(InitSubscriptions),
+	)
+}
+
 var (
-	// MaxNumberOfBlockChecks is the max number of blocks to look for a transaction in
-	MaxNumberOfEmptyBlockChecks = 25
-	Subscriptions               *map[requests.SubMethod]*Subscription
+	Subscriptions *map[requests.SubMethod]*Subscription
 )
 
 // Subscription houses the client subscription, name and channel for its delivery
@@ -38,21 +41,11 @@ func NewSubscription(name requests.SubMethod) *Subscription {
 func InitSubscriptions(ctx context.Context, methods []requests.SubMethod) {
 	logger := devnet.Logger(ctx)
 
-	logger.Info("CONNECTING TO WEBSOCKETS AND SUBSCRIBING TO METHODS...")
+	logger.Trace("CONNECTING TO WEBSOCKETS AND SUBSCRIBING TO METHODS...")
 	if err := subscribeAll(methods, logger); err != nil {
 		logger.Error("failed to subscribe to all methods", "error", err)
 		return
 	}
-}
-
-func SearchReservesForTransactionHash(hashes map[libcommon.Hash]bool, logger log.Logger) (*map[libcommon.Hash]string, error) {
-	logger.Info("Searching for transactions in reserved blocks...")
-	m, err := searchBlockForHashes(hashes, logger)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search reserves for hashes: %v", err)
-	}
-
-	return m, nil
 }
 
 // subscribe connects to a websocket client and returns the subscription handler and a channel buffer
@@ -90,54 +83,6 @@ func subscribeToMethod(method requests.SubMethod, logger log.Logger) (*Subscript
 	sub.Client = client
 
 	return sub, nil
-}
-
-func searchBlockForHashes(hashmap map[libcommon.Hash]bool, logger log.Logger) (*map[libcommon.Hash]string, error) {
-	if len(hashmap) == 0 {
-		return nil, fmt.Errorf("no hashes to search for")
-	}
-
-	txToBlock := make(map[libcommon.Hash]string, len(hashmap))
-
-	methodSub := (*Subscriptions)[requests.Methods.ETHNewHeads]
-	if methodSub == nil {
-		return nil, fmt.Errorf("client subscription should not be nil")
-	}
-
-	headsSub := (*Subscriptions)[requests.Methods.ETHNewHeads]
-
-	// get a block from the new heads channel
-	if headsSub == nil {
-		return nil, fmt.Errorf("no block heads subscription")
-	}
-
-	var blockCount int
-	for {
-		block := <-headsSub.SubChan
-		blockNum := block.(map[string]interface{})["number"].(string)
-		_, numFound, foundErr := txHashInBlock(methodSub.Client, hashmap, blockNum, txToBlock, logger)
-
-		if foundErr != nil {
-			return nil, fmt.Errorf("failed to find hash in block with number %q: %v", foundErr, blockNum)
-		}
-
-		if len(hashmap) == 0 { // this means we have found all the txs we're looking for
-			logger.Info("All the transactions created have been included in blocks")
-			return &txToBlock, nil
-		}
-
-		if numFound == 0 {
-			blockCount++ // increment the number of blocks seen to check against the max number of blocks to iterate over
-		}
-
-		if blockCount == MaxNumberOfEmptyBlockChecks {
-			for h := range hashmap {
-				logger.Error("Missing Tx", "txHash", h)
-			}
-
-			return nil, fmt.Errorf("timeout when searching for tx")
-		}
-	}
 }
 
 // UnsubscribeAll closes all the client subscriptions and empties their global subscription channel

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -26,23 +27,35 @@ var ErrInvalidEnodeString = errors.New("invalid enode string")
 func ClearDevDB(dataDir string, logger log.Logger) error {
 	logger.Info("Deleting nodes' data folders")
 
-	for nodeNumber := 0; nodeNumber < 100; nodeNumber++ { // Arbitrary number
-		nodeDataDir := filepath.Join(dataDir, fmt.Sprintf("%d", nodeNumber))
-		fileInfo, err := os.Stat(nodeDataDir)
+	files, err := ioutil.ReadDir(dataDir)
+
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		if !file.IsDir() || file.Name() == "logs" {
+			continue
+		}
+
+		nodeDataDir := filepath.Join(dataDir, file.Name())
+
+		_, err := os.Stat(nodeDataDir)
+
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return err
 		}
-		if !fileInfo.IsDir() {
-			continue
-		}
+
 		if err := os.RemoveAll(nodeDataDir); err != nil {
 			return err
 		}
+
 		logger.Info("SUCCESS => Deleted", "datadir", nodeDataDir)
 	}
+
 	return nil
 }
 

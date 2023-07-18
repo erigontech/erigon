@@ -10,6 +10,10 @@ import (
 type SimulationInitializer func(*SimulationContext)
 
 func Run(ctx context.Context, scenarios ...*Scenario) error {
+	if len(scenarios) == 0 {
+		return nil
+	}
+
 	return runner{scenarios: scenarios}.runWithOptions(ctx, getDefaultOptions())
 }
 
