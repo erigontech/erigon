@@ -25,7 +25,6 @@ import (
 	"regexp"
 	"strconv"
 	"sync/atomic"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -186,6 +185,7 @@ func (li *LocalityIndex) reCalcRoFiles() {
 	if li == nil {
 		return
 	}
+
 	if li.file == nil {
 		li.roFiles.Store(nil)
 		return
@@ -272,17 +272,17 @@ func (lc *ctxLocalityIdx) indexedTo() uint64 {
 	}
 	return lc.file.endTxNum
 }
-func (lc *ctxLocalityIdx) indexedFrom() uint64 {
+func (lc *ctxLocalityIdx) indexedFrom() (uint64, bool) {
 	if lc == nil || lc.file == nil {
-		return 0
+		return 0, false
 	}
-	return lc.file.startTxNum
+	return lc.file.startTxNum, true
 }
 
 // lookupLatest return latest file (step)
 // prevents searching key in many files
 func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool, err error) {
-	if lc == nil || lc.file == nil {
+	if lc == nil || lc.file == nil || lc.file.src.index == nil {
 		return 0, false, nil
 	}
 	if lc.reader == nil {
@@ -324,9 +324,6 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		return nil, fmt.Errorf("LocalityIndex.buildFiles: fromStep(%d) < toStep(%d)", fromStep, toStep)
 	}
 
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
 	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep)
 	idxPath := filepath.Join(li.dir, fName)
 	filePath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
@@ -342,7 +339,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	//}
 
 	for it.HasNext() {
-		_, _ = it.Next()
+		_, _, _ = it.Next()
 		count++
 	}
 	it.Close()
@@ -386,7 +383,10 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		it = makeIter()
 		defer it.Close()
 		for it.HasNext() {
-			k, inSteps := it.Next()
+			k, inSteps, err := it.Next()
+			if err != nil {
+				return nil, err
+			}
 			//if bytes.HasPrefix(k, common.FromHex("5e7d")) {
 			//	fmt.Printf("build: %x, %d\n", k, inSteps)
 			//}
@@ -406,14 +406,6 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			}
 			i++
 			p.Processed.Add(1)
-
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-logEvery.C:
-				li.logger.Info("[LocalityIndex] build", "name", li.filenameBase, "progress", fmt.Sprintf("%.2f%%", 50+it.Progress()/2))
-			default:
-			}
 		}
 		it.Close()
 
@@ -502,6 +494,7 @@ type LocalityIterator struct {
 
 	totalOffsets, filesAmount uint64
 	involvedFiles             []*compress.Decompressor //used in destructor to disable read-ahead
+	ctx                       context.Context
 }
 
 func (si *LocalityIterator) advance() {
@@ -549,7 +542,13 @@ func (si *LocalityIterator) Progress() float64 {
 }
 func (si *LocalityIterator) FilesAmount() uint64 { return si.filesAmount }
 
-func (si *LocalityIterator) Next() ([]byte, []uint64) {
+func (si *LocalityIterator) Next() ([]byte, []uint64, error) {
+	select {
+	case <-si.ctx.Done():
+		return nil, nil, si.ctx.Err()
+	default:
+	}
+
 	//if hi.err != nil {
 	//	return nil, nil, hi.err
 	//}
@@ -558,7 +557,7 @@ func (si *LocalityIterator) Next() ([]byte, []uint64) {
 	// Satisfy iter.Dual Invariant 2
 	si.nextK, si.kBackup, si.nextV, si.vBackup = si.kBackup, si.nextK, si.vBackup, si.nextV
 	si.advance()
-	return si.kBackup, si.vBackup
+	return si.kBackup, si.vBackup, nil
 }
 
 // Close - safe to call multiple times
@@ -570,9 +569,9 @@ func (si *LocalityIterator) Close() {
 }
 
 // iterateKeysLocality [from, to)
-func (ic *InvertedIndexContext) iterateKeysLocality(fromStep, toStep uint64, last *compress.Decompressor) *LocalityIterator {
+func (ic *InvertedIndexContext) iterateKeysLocality(ctx context.Context, fromStep, toStep uint64, last *compress.Decompressor) *LocalityIterator {
 	fromTxNum, toTxNum := fromStep*ic.ii.aggregationStep, toStep*ic.ii.aggregationStep
-	si := &LocalityIterator{aggStep: ic.ii.aggregationStep, compressVals: false}
+	si := &LocalityIterator{ctx: ctx, aggStep: ic.ii.aggregationStep, compressVals: false}
 
 	for _, item := range ic.files {
 		if item.endTxNum <= fromTxNum || item.startTxNum >= toTxNum {

@@ -417,8 +417,8 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 	var txKey [8]byte
 	var valOffset uint64
 
-	defer iiItem.decompressor.EnableMadvNormal().DisableReadAhead()
-	defer historyItem.decompressor.EnableMadvNormal().DisableReadAhead()
+	defer iiItem.decompressor.EnableReadAhead().DisableReadAhead()
+	defer historyItem.decompressor.EnableReadAhead().DisableReadAhead()
 
 	g := iiItem.decompressor.MakeGetter()
 	g2 := historyItem.decompressor.MakeGetter()

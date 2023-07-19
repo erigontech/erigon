@@ -77,19 +77,19 @@ func TestLocality(t *testing.T) {
 	t.Run("locality iterator", func(t *testing.T) {
 		ic := ii.MakeContext()
 		defer ic.Close()
-		it := ic.iterateKeysLocality(0, coldFiles*StepsInColdFile, nil)
+		it := ic.iterateKeysLocality(ctx, 0, coldFiles*StepsInColdFile, nil)
 		require.True(it.HasNext())
-		key, bitmap := it.Next()
+		key, bitmap, _ := it.Next()
 		require.Equal(uint64(1), binary.BigEndian.Uint64(key))
 		require.Equal([]uint64{0 * StepsInColdFile, 1 * StepsInColdFile}, bitmap)
 		require.True(it.HasNext())
-		key, bitmap = it.Next()
+		key, bitmap, _ = it.Next()
 		require.Equal(uint64(2), binary.BigEndian.Uint64(key))
 		require.Equal([]uint64{0 * StepsInColdFile, 1 * StepsInColdFile}, bitmap)
 
 		var last []byte
 		for it.HasNext() {
-			key, _ = it.Next()
+			key, _, _ = it.Next()
 			last = key
 		}
 		require.Equal(Module, binary.BigEndian.Uint64(last))
@@ -174,34 +174,34 @@ func TestLocalityDomain(t *testing.T) {
 		require.Equal(coldSteps, int(dc.maxColdStep()))
 		var last []byte
 
-		it := dc.hc.ic.iterateKeysLocality(0, uint64(coldSteps), nil)
+		it := dc.hc.ic.iterateKeysLocality(ctx, 0, uint64(coldSteps), nil)
 		require.True(it.HasNext())
-		key, bitmap := it.Next()
+		key, bitmap, _ := it.Next()
 		require.Equal(uint64(0), binary.BigEndian.Uint64(key))
 		require.Equal([]uint64{0 * StepsInColdFile}, bitmap)
 		require.True(it.HasNext())
-		key, bitmap = it.Next()
+		key, bitmap, _ = it.Next()
 		require.Equal(uint64(1), binary.BigEndian.Uint64(key))
 		require.Equal([]uint64{1 * StepsInColdFile, 2 * StepsInColdFile}, bitmap)
 
 		for it.HasNext() {
-			last, _ = it.Next()
+			last, _, _ = it.Next()
 		}
 		require.Equal(coldFiles-1, int(binary.BigEndian.Uint64(last)))
 
-		it = dc.hc.ic.iterateKeysLocality(dc.hc.ic.maxColdStep(), dc.hc.ic.maxWarmStep()+1, nil)
+		it = dc.hc.ic.iterateKeysLocality(ctx, dc.hc.ic.maxColdStep(), dc.hc.ic.maxWarmStep()+1, nil)
 		require.True(it.HasNext())
-		key, bitmap = it.Next()
+		key, bitmap, _ = it.Next()
 		require.Equal(2, int(binary.BigEndian.Uint64(key)))
 		require.Equal([]uint64{uint64(coldSteps), uint64(coldSteps + 8), uint64(coldSteps + 8 + 4), uint64(coldSteps + 8 + 4 + 2)}, bitmap)
 		require.True(it.HasNext())
-		key, bitmap = it.Next()
+		key, bitmap, _ = it.Next()
 		require.Equal(3, int(binary.BigEndian.Uint64(key)))
 		require.Equal([]uint64{uint64(coldSteps), uint64(coldSteps + 8), uint64(coldSteps + 8 + 4), uint64(coldSteps + 8 + 4 + 2)}, bitmap)
 
 		last = nil
 		for it.HasNext() {
-			last, _ = it.Next()
+			last, _, _ = it.Next()
 		}
 		require.Equal(int(keyCount-1), int(binary.BigEndian.Uint64(last)))
 

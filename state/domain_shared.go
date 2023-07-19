@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -196,8 +197,8 @@ func (sd *SharedDomains) Get(table kv.Domain, key []byte) (v []byte, ok bool) {
 }
 
 func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
-	//keyS := *(*string)(unsafe.Pointer(&key))
-	keyS := string(key)
+	keyS := *(*string)(unsafe.Pointer(&key))
+	//keyS := string(key)
 	switch table {
 	case kv.AccountsDomain:
 		v, ok = sd.account[keyS]
@@ -565,8 +566,8 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 	}
 
 	sctx := sd.aggCtx.storage
-	for i, item := range sctx.files {
-		cursor, err := sctx.statelessBtree(i).Seek(prefix)
+	for _, item := range sctx.files {
+		cursor, err := item.src.bindex.Seek(prefix)
 		if err != nil {
 			return err
 		}
@@ -574,11 +575,10 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 			continue
 		}
 
-		g := sctx.statelessGetter(i)
 		key := cursor.Key()
 		if key != nil && bytes.HasPrefix(key, prefix) {
 			val := cursor.Value()
-			heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: g, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
+			heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: common.Copy(key), val: common.Copy(val), btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
 		}
 	}
 
@@ -595,8 +595,10 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 					if k != nil && bytes.HasPrefix(k, prefix) {
 						ci1.key = common.Copy(k)
 						ci1.val = common.Copy(ci1.iter.Value())
+						heap.Fix(&cp, 0)
+					} else {
+						heap.Pop(&cp)
 					}
-					heap.Fix(&cp, 0)
 				} else {
 					heap.Pop(&cp)
 				}
