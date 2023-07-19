@@ -186,6 +186,7 @@ func (li *LocalityIndex) reCalcRoFiles() {
 	if li == nil {
 		return
 	}
+
 	if li.file == nil {
 		li.roFiles.Store(nil)
 		return

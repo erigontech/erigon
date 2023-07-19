@@ -599,7 +599,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 	}
 	if r.values {
 		for _, f := range valuesFiles {
-			defer f.decompressor.EnableMadvNormal().DisableReadAhead()
+			defer f.decompressor.EnableReadAhead().DisableReadAhead()
 		}
 		datFileName := fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
 		datPath := filepath.Join(d.dir, datFileName)
@@ -743,7 +743,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 
 func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, startTxNum, endTxNum uint64, workers int, ps *background.ProgressSet) (*filesItem, error) {
 	for _, h := range files {
-		defer h.decompressor.EnableMadvNormal().DisableReadAhead()
+		defer h.decompressor.EnableReadAhead().DisableReadAhead()
 	}
 
 	var outItem *filesItem
@@ -899,10 +899,10 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 	}
 	if r.history {
 		for _, f := range indexFiles {
-			defer f.decompressor.EnableMadvNormal().DisableReadAhead()
+			defer f.decompressor.EnableReadAhead().DisableReadAhead()
 		}
 		for _, f := range historyFiles {
-			defer f.decompressor.EnableMadvNormal().DisableReadAhead()
+			defer f.decompressor.EnableReadAhead().DisableReadAhead()
 		}
 
 		var comp *compress.Compressor

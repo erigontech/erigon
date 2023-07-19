@@ -1564,5 +1564,8 @@ func (ii *InvertedIndex) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	if len(lst) > 0 {
 		to = float64(binary.BigEndian.Uint64(lst)) / float64(ii.aggregationStep)
 	}
+	if to == 0 {
+		to = from
+	}
 	return from, to
 }
