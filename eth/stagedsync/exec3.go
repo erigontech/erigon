@@ -181,6 +181,10 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
+		if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+			return err
+		}
+
 		defer func() { // need callback - because tx may be committed
 			applyTx.Rollback()
 		}()
@@ -804,6 +808,9 @@ Loop:
 						t5 = time.Since(tt)
 						applyTx, err = cfg.db.BeginRw(context.Background())
 						if err != nil {
+							return err
+						}
+						if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
 							return err
 						}
 						agg.StartWrites()
