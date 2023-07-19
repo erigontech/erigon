@@ -1,8 +1,10 @@
 package requests
 
 import (
+	"math/big"
 	"testing"
 
+	ethereum "github.com/ledgerwatch/erigon"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/require"
 )
@@ -132,7 +134,11 @@ func TestRequestGenerator_GetLogs(t *testing.T) {
 
 	for _, testCase := range testCases {
 		reqGen := MockRequestGenerator(testCase.reqId)
-		_, got := reqGen.getLogs(testCase.fromBlock, testCase.toBlock, testCase.address)
+		_, got := reqGen.getLogs(ethereum.FilterQuery{
+			FromBlock: big.NewInt(int64(testCase.fromBlock)),
+			ToBlock:   big.NewInt(int64(testCase.toBlock)),
+			Addresses: []libcommon.Address{testCase.address},
+		})
 		require.EqualValues(t, testCase.expected, got)
 	}
 }

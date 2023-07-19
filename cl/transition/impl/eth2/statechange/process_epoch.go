@@ -1,12 +1,12 @@
 package statechange
 
 import (
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
 // ProcessEpoch process epoch transition.
-func ProcessEpoch(state *state.BeaconState) error {
+func ProcessEpoch(state abstract.BeaconState) error {
 	if err := ProcessJustificationBitsAndFinality(state); err != nil {
 		return err
 	}

@@ -13,7 +13,7 @@ clean:
 	rm -rf test_report.html
 
 mainnet:
-	go test -tags=spectest -v -run=/mainnet
+	go test -tags=spectest -run=/mainnet
 
 run:
 	go test -v

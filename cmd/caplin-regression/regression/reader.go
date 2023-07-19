@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-func (r *RegressionTester) readStartingState() (*state.BeaconState, error) {
+func (r *RegressionTester) readStartingState() (*state.CachingBeaconState, error) {
 	stateFile, err := ioutil.ReadFile(path.Join(r.testDirectory, regressionPath, startingStatePath))
 	if err != nil {
 		return nil, err

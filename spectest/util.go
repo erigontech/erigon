@@ -51,7 +51,7 @@ func ReadSszOld(root fs.FS, obj ssz.Unmarshaler, version clparams.StateVersion, 
 	return ReadSsz(root, version, name, obj)
 }
 
-func ReadBeaconState(root fs.FS, version clparams.StateVersion, name string) (*state.BeaconState, error) {
+func ReadBeaconState(root fs.FS, version clparams.StateVersion, name string) (*state.CachingBeaconState, error) {
 	sszSnappy, err := fs.ReadFile(root, name)
 	if err != nil {
 		return nil, err

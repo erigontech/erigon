@@ -100,7 +100,8 @@ func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config
 		// Then, bor != nil will also be enabled for ethash and clique. Only enable Bor for real if there is a validator contract present.
 		if chainConfig.Bor != nil && chainConfig.Bor.ValidatorContract != "" {
 			genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, chainConfig.Bor.ValidatorContract, chainConfig.Bor.StateReceiverContract, logger)
-			spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig, logger)
+
+			spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig, withoutHeimdall, logger)
 
 			var err error
 			var db kv.RwDB
@@ -116,7 +117,7 @@ func CreateConsensusEngine(nodeConfig *nodecfg.Config, chainConfig *chain.Config
 				return bor.New(chainConfig, db, spanner, nil, genesisContractsClient, logger)
 			} else {
 				if heimdallGrpcAddress != "" {
-					heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(heimdallGrpcAddress)
+					heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(heimdallGrpcAddress, logger)
 				} else {
 					heimdallClient = heimdall.NewHeimdallClient(heimdallUrl, logger)
 				}
