@@ -136,7 +136,7 @@ type ForkChoicePayloadStatus struct {
 type ForkChoice struct {
 }
 
-func NewForkChoice(fn func(s *state.BeaconState) error) *ForkChoice {
+func NewForkChoice(fn func(s *state.CachingBeaconState) error) *ForkChoice {
 	return &ForkChoice{}
 }
 

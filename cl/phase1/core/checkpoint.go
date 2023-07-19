@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, uri string) (*state.BeaconState, error) {
+func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, uri string) (*state.CachingBeaconState, error) {
 	log.Info("[Checkpoint Sync] Requesting beacon state", "uri", uri)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {

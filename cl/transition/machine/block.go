@@ -3,16 +3,16 @@ package machine
 import (
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cl/abstract"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/metrics/methelp"
 )
 
 // ProcessBlock processes a block with the block processor
-func ProcessBlock(impl BlockProcessor, s *state.BeaconState, signedBlock *cltypes.SignedBeaconBlock) error {
+func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, signedBlock *cltypes.SignedBeaconBlock) error {
 	block := signedBlock.Block
 	version := s.Version()
 	// Check the state version is correct.
@@ -69,7 +69,7 @@ func ProcessBlock(impl BlockProcessor, s *state.BeaconState, signedBlock *cltype
 }
 
 // ProcessOperations is called by ProcessBlock and prcesses the block body operations
-func ProcessOperations(impl BlockOperationProcessor, s *state.BeaconState, blockBody *cltypes.BeaconBody) error {
+func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blockBody *cltypes.BeaconBody) error {
 	if blockBody.Deposits.Len() != int(maximumDeposits(s)) {
 		return errors.New("outstanding deposits do not match maximum deposits")
 	}
@@ -132,7 +132,7 @@ func ProcessOperations(impl BlockOperationProcessor, s *state.BeaconState, block
 	return nil
 }
 
-func maximumDeposits(s *state.BeaconState) (maxDeposits uint64) {
+func maximumDeposits(s abstract.BeaconState) (maxDeposits uint64) {
 	maxDeposits = s.Eth1Data().DepositCount - s.Eth1DepositIndex()
 	if maxDeposits > s.BeaconConfig().MaxDeposits {
 		maxDeposits = s.BeaconConfig().MaxDeposits
