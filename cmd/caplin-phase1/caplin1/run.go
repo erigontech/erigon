@@ -21,7 +21,7 @@ import (
 )
 
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig,
-	engine execution_client.ExecutionEngine, state *state.BeaconState, caplinFreezer freezer.Freezer) error {
+	engine execution_client.ExecutionEngine, state *state.CachingBeaconState, caplinFreezer freezer.Freezer) error {
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
 	downloader := network2.NewForwardBeaconDownloader(ctx, beaconRpc)
 

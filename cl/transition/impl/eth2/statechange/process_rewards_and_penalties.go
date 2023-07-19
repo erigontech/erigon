@@ -1,18 +1,19 @@
 package statechange
 
 import (
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
-func processRewardsAndPenaltiesPostAltair(s *state.BeaconState) (err error) {
+func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState) (err error) {
 	beaconConfig := s.BeaconConfig()
 	weights := beaconConfig.ParticipationWeights()
-	eligibleValidators := state.EligibleValidatorsIndicies(s.BeaconState)
+	eligibleValidators := state.EligibleValidatorsIndicies(s)
 	// Initialize variables
 	totalActiveBalance := s.GetTotalActiveBalance()
-	previousEpoch := state.PreviousEpoch(s.BeaconState)
+	previousEpoch := state.PreviousEpoch(s)
 	// Inactivity penalties denominator.
 	inactivityPenaltyDenominator := beaconConfig.InactivityScoreBias * beaconConfig.GetPenaltyQuotient(s.Version())
 	// Make buffer for flag indexes total balances.
@@ -20,7 +21,7 @@ func processRewardsAndPenaltiesPostAltair(s *state.BeaconState) (err error) {
 	// Compute all total balances for each enable unslashed validator indicies with all flags on.
 	s.ForEachValidator(func(validator solid.Validator, validatorIndex, total int) bool {
 		for i := range weights {
-			if state.IsUnslashedParticipatingIndex(s.BeaconState, previousEpoch, uint64(validatorIndex), i) {
+			if state.IsUnslashedParticipatingIndex(s, previousEpoch, uint64(validatorIndex), i) {
 				flagsTotalBalances[i] += validator.EffectiveBalance()
 			}
 		}
@@ -40,20 +41,20 @@ func processRewardsAndPenaltiesPostAltair(s *state.BeaconState) (err error) {
 			return
 		}
 		for flagIdx := range weights {
-			if state.IsUnslashedParticipatingIndex(s.BeaconState, previousEpoch, index, flagIdx) {
-				if !state.InactivityLeaking(s.BeaconState) {
+			if state.IsUnslashedParticipatingIndex(s, previousEpoch, index, flagIdx) {
+				if !state.InactivityLeaking(s) {
 					rewardNumerator := baseReward * rewardMultipliers[flagIdx]
-					if err := state.IncreaseBalance(s.BeaconState, index, rewardNumerator/rewardDenominator); err != nil {
+					if err := state.IncreaseBalance(s, index, rewardNumerator/rewardDenominator); err != nil {
 						return err
 					}
 				}
 			} else if flagIdx != int(beaconConfig.TimelyHeadFlagIndex) {
-				if err := state.DecreaseBalance(s.BeaconState, index, baseReward*weights[flagIdx]/beaconConfig.WeightDenominator); err != nil {
+				if err := state.DecreaseBalance(s, index, baseReward*weights[flagIdx]/beaconConfig.WeightDenominator); err != nil {
 					return err
 				}
 			}
 		}
-		if !state.IsUnslashedParticipatingIndex(s.BeaconState, previousEpoch, index, int(beaconConfig.TimelyTargetFlagIndex)) {
+		if !state.IsUnslashedParticipatingIndex(s, previousEpoch, index, int(beaconConfig.TimelyTargetFlagIndex)) {
 			inactivityScore, err := s.ValidatorInactivityScore(int(index))
 			if err != nil {
 				return err
@@ -63,19 +64,19 @@ func processRewardsAndPenaltiesPostAltair(s *state.BeaconState) (err error) {
 			if err != nil {
 				return err
 			}
-			state.DecreaseBalance(s.BeaconState, index, (effectiveBalance*inactivityScore)/inactivityPenaltyDenominator)
+			state.DecreaseBalance(s, index, (effectiveBalance*inactivityScore)/inactivityPenaltyDenominator)
 		}
 	}
 	return
 }
 
 // processRewardsAndPenaltiesPhase0 process rewards and penalties for phase0 state.
-func processRewardsAndPenaltiesPhase0(s *state.BeaconState) (err error) {
+func processRewardsAndPenaltiesPhase0(s abstract.BeaconState) (err error) {
 	beaconConfig := s.BeaconConfig()
-	if state.Epoch(s.BeaconState) == beaconConfig.GenesisEpoch {
+	if state.Epoch(s) == beaconConfig.GenesisEpoch {
 		return nil
 	}
-	eligibleValidators := state.EligibleValidatorsIndicies(s.BeaconState)
+	eligibleValidators := state.EligibleValidatorsIndicies(s)
 	// Initialize variables
 	rewardDenominator := s.GetTotalActiveBalance() / beaconConfig.EffectiveBalanceIncrement
 	// Make buffer for flag indexes totTargetal balances.
@@ -151,47 +152,47 @@ func processRewardsAndPenaltiesPhase0(s *state.BeaconState) (err error) {
 		}
 
 		// If we attested then we reward the validator.
-		if state.InactivityLeaking(s.BeaconState) {
-			if err := state.IncreaseBalance(s.BeaconState, index, baseReward*attested); err != nil {
+		if state.InactivityLeaking(s) {
+			if err := state.IncreaseBalance(s, index, baseReward*attested); err != nil {
 				return err
 			}
 		} else {
 			if !currentValidator.Slashed() && previousMatchingSourceAttester {
 				rewardNumerator := baseReward * unslashedMatchingSourceBalanceIncrements
-				if err := state.IncreaseBalance(s.BeaconState, index, rewardNumerator/rewardDenominator); err != nil {
+				if err := state.IncreaseBalance(s, index, rewardNumerator/rewardDenominator); err != nil {
 					return err
 				}
 			}
 			if !currentValidator.Slashed() && previousMatchingTargetAttester {
 				rewardNumerator := baseReward * unslashedMatchingTargetBalanceIncrements
-				if err := state.IncreaseBalance(s.BeaconState, index, rewardNumerator/rewardDenominator); err != nil {
+				if err := state.IncreaseBalance(s, index, rewardNumerator/rewardDenominator); err != nil {
 					return err
 				}
 			}
 			if !currentValidator.Slashed() && previousMatchingHeadAttester {
 				rewardNumerator := baseReward * unslashedMatchingHeadBalanceIncrements
-				if err := state.IncreaseBalance(s.BeaconState, index, rewardNumerator/rewardDenominator); err != nil {
+				if err := state.IncreaseBalance(s, index, rewardNumerator/rewardDenominator); err != nil {
 					return err
 				}
 			}
 		}
 		// Process inactivity of the network as a whole finalities.
-		if state.InactivityLeaking(s.BeaconState) {
+		if state.InactivityLeaking(s) {
 			proposerReward := baseReward / beaconConfig.ProposerRewardQuotient
 			// Neutralize rewards.
-			if state.DecreaseBalance(s.BeaconState, index, beaconConfig.BaseRewardsPerEpoch*baseReward-proposerReward); err != nil {
+			if state.DecreaseBalance(s, index, beaconConfig.BaseRewardsPerEpoch*baseReward-proposerReward); err != nil {
 				return err
 			}
 			if currentValidator.Slashed() || !previousMatchingTargetAttester {
 				// Increase penalities linearly if network is leaking.
-				if state.DecreaseBalance(s.BeaconState, index, currentValidator.EffectiveBalance()*state.FinalityDelay(s.BeaconState)/beaconConfig.InactivityPenaltyQuotient); err != nil {
+				if state.DecreaseBalance(s, index, currentValidator.EffectiveBalance()*state.FinalityDelay(s)/beaconConfig.InactivityPenaltyQuotient); err != nil {
 					return err
 				}
 			}
 		}
 
 		// For each missed duty we penalize the validator.
-		if state.DecreaseBalance(s.BeaconState, index, baseReward*missed); err != nil {
+		if state.DecreaseBalance(s, index, baseReward*missed); err != nil {
 			return err
 		}
 
@@ -217,11 +218,11 @@ func processRewardsAndPenaltiesPhase0(s *state.BeaconState) (err error) {
 		}
 		// Compute proposer reward.
 		proposerReward := (baseReward / beaconConfig.ProposerRewardQuotient)
-		if err = state.IncreaseBalance(s.BeaconState, attestation.ProposerIndex(), proposerReward); err != nil {
+		if err = state.IncreaseBalance(s, attestation.ProposerIndex(), proposerReward); err != nil {
 			return false
 		}
 		maxAttesterReward := baseReward - proposerReward
-		if err = state.IncreaseBalance(s.BeaconState, uint64(index), maxAttesterReward/attestation.InclusionDelay()); err != nil {
+		if err = state.IncreaseBalance(s, uint64(index), maxAttesterReward/attestation.InclusionDelay()); err != nil {
 			return false
 		}
 		return true
@@ -233,8 +234,8 @@ func processRewardsAndPenaltiesPhase0(s *state.BeaconState) (err error) {
 }
 
 // ProcessRewardsAndPenalties applies rewards/penalties accumulated during previous epoch.
-func ProcessRewardsAndPenalties(s *state.BeaconState) error {
-	if state.Epoch(s.BeaconState) == s.BeaconConfig().GenesisEpoch {
+func ProcessRewardsAndPenalties(s abstract.BeaconState) error {
+	if state.Epoch(s) == s.BeaconConfig().GenesisEpoch {
 		return nil
 	}
 	if s.Version() == clparams.Phase0Version {
