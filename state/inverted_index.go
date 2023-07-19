@@ -333,7 +333,7 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 			if from == to || ic.ii.warmLocalityIdx.exists(from, to) {
 				return nil
 			}
-			if err := ic.ii.warmLocalityIdx.BuildMissedIndices(ctx, from, to, false, ps, func() *LocalityIterator { return ic.iterateKeysLocality(from, to, nil) }); err != nil {
+			if err := ic.ii.warmLocalityIdx.BuildMissedIndices(ctx, from, to, false, ps, func() *LocalityIterator { return ic.iterateKeysLocality(ctx, from, to, nil) }); err != nil {
 				return err
 			}
 			return nil
@@ -1327,7 +1327,7 @@ func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress
 	// Let's don't index. Because: speed of new files build is very important - to speed-up pruning
 	fromStep, toStep := ic.minWarmStep(), step+1
 	return ii.warmLocalityIdx.buildFiles(ctx, fromStep, toStep, false, ps, func() *LocalityIterator {
-		return ic.iterateKeysLocality(fromStep, toStep, decomp)
+		return ic.iterateKeysLocality(ctx, fromStep, toStep, decomp)
 	})
 }
 
