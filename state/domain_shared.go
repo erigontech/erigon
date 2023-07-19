@@ -595,8 +595,10 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 					if k != nil && bytes.HasPrefix(k, prefix) {
 						ci1.key = common.Copy(k)
 						ci1.val = common.Copy(ci1.iter.Value())
+						heap.Fix(&cp, 0)
+					} else {
+						heap.Pop(&cp)
 					}
-					heap.Fix(&cp, 0)
 				} else {
 					heap.Pop(&cp)
 				}
