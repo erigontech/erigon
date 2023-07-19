@@ -322,7 +322,7 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 		defer a.buildingOptionalIndices.Store(false)
 		aggCtx := a.MakeContext()
 		defer aggCtx.Close()
-		if err := aggCtx.BuildOptionalMissedIndices(ctx, workers); err != nil {
+		if err := aggCtx.buildOptionalMissedIndices(ctx, workers); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return
 			}
@@ -331,8 +331,24 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 	}()
 }
 
+func (a *AggregatorV3) BuildOptionalMissedIndices(ctx context.Context, workers int) error {
+	if ok := a.buildingOptionalIndices.CompareAndSwap(false, true); !ok {
+		return nil
+	}
+	defer a.buildingOptionalIndices.Store(false)
+	aggCtx := a.MakeContext()
+	defer aggCtx.Close()
+	if err := aggCtx.buildOptionalMissedIndices(ctx, workers); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 // Useless
-func (ac *AggregatorV3Context) BuildOptionalMissedIndices(ctx context.Context, workers int) error {
+func (ac *AggregatorV3Context) buildOptionalMissedIndices(ctx context.Context, workers int) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
 	ps := background.NewProgressSet()
@@ -352,13 +368,6 @@ func (ac *AggregatorV3Context) BuildOptionalMissedIndices(ctx context.Context, w
 }
 
 func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) error {
-	ac := a.MakeContext()
-	defer ac.Close()
-	if err := ac.BuildOptionalMissedIndices(ctx, workers); err != nil {
-		return err
-	}
-	ac.Close()
-
 	startIndexingTime := time.Now()
 	{
 		ps := background.NewProgressSet()
