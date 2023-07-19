@@ -271,7 +271,7 @@ func (b *CachingBeaconState) GetAttestingIndicies(attestation solid.AttestationD
 	return attestingIndices, nil
 }
 
-// TODO: why are these the same...
+// See: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#get_validator_churn_limit
 func (b *CachingBeaconState) GetValidatorChurnLimit() uint64 {
 	activeIndsCount := uint64(len(b.GetActiveValidatorsIndices(Epoch(b))))
 	return utils.Max64(activeIndsCount/b.BeaconConfig().ChurnLimitQuotient, b.BeaconConfig().MinPerEpochChurnLimit)
