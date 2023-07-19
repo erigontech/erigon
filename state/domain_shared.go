@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -196,8 +197,8 @@ func (sd *SharedDomains) Get(table kv.Domain, key []byte) (v []byte, ok bool) {
 }
 
 func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
-	//keyS := *(*string)(unsafe.Pointer(&key))
-	keyS := string(key)
+	keyS := *(*string)(unsafe.Pointer(&key))
+	//keyS := string(key)
 	switch table {
 	case kv.AccountsDomain:
 		v, ok = sd.account[keyS]
