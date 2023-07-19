@@ -1071,7 +1071,6 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 	g := d.MakeGetter()
 	for {
 		if err := ctx.Err(); err != nil {
-			logger.Warn("recsplit index building cancelled", "err", err)
 			return err
 		}
 		g.Reset(0)
