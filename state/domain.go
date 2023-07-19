@@ -1488,8 +1488,8 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 	// corner cases:
 	// - cold and warm segments can overlap
 	lastColdIndexedTxNum := dc.hc.ic.coldLocality.indexedTo()
-	firstWarmIndexedTxNum := dc.hc.ic.warmLocality.indexedFrom()
-	if firstWarmIndexedTxNum == 0 && len(dc.files) > 0 {
+	firstWarmIndexedTxNum, haveWarmIdx := dc.hc.ic.warmLocality.indexedFrom()
+	if !haveWarmIdx && len(dc.files) > 0 {
 		firstWarmIndexedTxNum = dc.files[len(dc.files)-1].endTxNum
 	}
 	if firstWarmIndexedTxNum > lastColdIndexedTxNum {
@@ -1497,6 +1497,9 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 			log.Warn("[dbg] gap between warm and cold locality", "cold", lastColdIndexedTxNum/dc.d.aggregationStep, "warm", firstWarmIndexedTxNum/dc.d.aggregationStep, "nil", dc.hc.ic.coldLocality == nil, "name", dc.d.filenameBase)
 			if dc.hc.ic.coldLocality != nil && dc.hc.ic.coldLocality.file != nil {
 				log.Warn("[dbg] gap", "cold_f", dc.hc.ic.coldLocality.file.src.bm.FileName())
+			}
+			if dc.hc.ic.warmLocality != nil && dc.hc.ic.warmLocality.file != nil {
+				log.Warn("[dbg] gap", "warm_f", dc.hc.ic.warmLocality.file.src.bm.FileName())
 			}
 		}
 

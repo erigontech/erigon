@@ -149,6 +149,10 @@ func (li *LocalityIndex) openFiles() (err error) {
 	fromStep, toStep := li.file.startTxNum/li.aggregationStep, li.file.endTxNum/li.aggregationStep
 	if li.file.bm == nil {
 		dataPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
+		if li.filenameBase == "accounts" {
+			fmt.Printf("=== open: %t, %s\n", dir.FileExist(dataPath), dataPath)
+			fmt.Printf("=== open2: %t, %s\n", li.preferSmallerFiles, li.dir)
+		}
 		if dir.FileExist(dataPath) {
 			li.file.bm, err = bitmapdb.OpenFixedSizeBitmaps(dataPath)
 			if err != nil {
@@ -190,6 +194,9 @@ func (li *LocalityIndex) reCalcRoFiles() {
 	if li.file == nil {
 		li.roFiles.Store(nil)
 		return
+	}
+	if li.filenameBase == "accounts" {
+		fmt.Printf("=== recalc: %d-%d\n", li.file.startTxNum, li.file.endTxNum)
 	}
 	li.roFiles.Store(&ctxItem{
 		startTxNum: li.file.startTxNum,
@@ -273,11 +280,11 @@ func (lc *ctxLocalityIdx) indexedTo() uint64 {
 	}
 	return lc.file.endTxNum
 }
-func (lc *ctxLocalityIdx) indexedFrom() uint64 {
+func (lc *ctxLocalityIdx) indexedFrom() (uint64, bool) {
 	if lc == nil || lc.file == nil {
-		return 0
+		return 0, false
 	}
-	return lc.file.startTxNum
+	return lc.file.startTxNum, true
 }
 
 // lookupLatest return latest file (step)
