@@ -171,6 +171,7 @@ func ExecV3(ctx context.Context,
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
+		agg.BuildOptionalMissedIndicesInBackground(ctx, estimate.IndexSnapshot.Workers())
 		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
