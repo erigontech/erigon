@@ -1,22 +1,23 @@
 package consensus_tests
 
 import (
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
 	"io/fs"
 	"os"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/abstract"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
+
 	"github.com/ledgerwatch/erigon/spectest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type EpochProcessing struct {
-	Fn func(s *state.CachingBeaconState) error
+	Fn func(s abstract.BeaconState) error
 }
 
-func NewEpochProcessing(fn func(s *state.CachingBeaconState) error) *EpochProcessing {
+func NewEpochProcessing(fn func(s abstract.BeaconState) error) *EpochProcessing {
 	return &EpochProcessing{
 		Fn: fn,
 	}
@@ -50,58 +51,58 @@ func (b *EpochProcessing) Run(t *testing.T, root fs.FS, c spectest.TestCase) (er
 	return nil
 }
 
-var effectiveBalancesUpdateTest = NewEpochProcessing(func(s *state.CachingBeaconState) error {
+var effectiveBalancesUpdateTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	return statechange.ProcessEffectiveBalanceUpdates(s)
 })
 
-var eth1DataResetTest = NewEpochProcessing(func(s *state.CachingBeaconState) error {
+var eth1DataResetTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	statechange.ProcessEth1DataReset(s)
 	return nil
 })
 
-var historicalRootsUpdateTest = NewEpochProcessing(func(s *state.CachingBeaconState) error {
+var historicalRootsUpdateTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	return statechange.ProcessHistoricalRootsUpdate(s)
 })
 
-var inactivityUpdateTest = NewEpochProcessing(func(s *state.CachingBeaconState) error {
+var inactivityUpdateTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	return statechange.ProcessInactivityScores(s)
 })
 
-var justificationFinalizationTest = NewEpochProcessing(func(s *state.CachingBeaconState) error {
+var justificationFinalizationTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	return statechange.ProcessJustificationBitsAndFinality(s)
 })
 
-var participationFlagUpdatesTest = NewEpochProcessing(func(s *state.CachingBeaconState) error {
+var participationFlagUpdatesTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	statechange.ProcessParticipationFlagUpdates(s)
 	return nil
 })
-var participationRecordUpdatesTest = NewEpochProcessing(func(s *state.CachingBeaconState) error {
+var participationRecordUpdatesTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	return statechange.ProcessParticipationRecordUpdates(s)
 })
 
-var randaoMixesTest = NewEpochProcessing(func(s *state.CachingBeaconState) error {
+var randaoMixesTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	statechange.ProcessRandaoMixesReset(s)
 	return nil
 })
 
-var registryUpdatesTest = NewEpochProcessing(func(s *state.CachingBeaconState) error {
+var registryUpdatesTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	return statechange.ProcessRegistryUpdates(s)
 })
 
-var rewardsAndPenaltiesTest = NewEpochProcessing(func(s *state.CachingBeaconState) error {
+var rewardsAndPenaltiesTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	return statechange.ProcessRewardsAndPenalties(s)
 })
 
-var slashingsTest = NewEpochProcessing(func(s *state.CachingBeaconState) error {
+var slashingsTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	return statechange.ProcessSlashings(s)
 })
 
-var slashingsResetTest = NewEpochProcessing(func(s *state.CachingBeaconState) error {
+var slashingsResetTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	statechange.ProcessSlashingsReset(s)
 	return nil
 })
 
-var recordsResetTest = NewEpochProcessing(func(s *state.CachingBeaconState) error {
+var recordsResetTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	statechange.ProcessParticipationRecordUpdates(s)
 	return nil
 })
