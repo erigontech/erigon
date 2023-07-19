@@ -352,15 +352,15 @@ func doLocalityIdx(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
-	chainConfig := fromdb.ChainConfig(chainDB)
 
 	if rebuild {
 		panic("not implemented")
 	}
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
-		return err
-	}
+	//chainConfig := fromdb.ChainConfig(chainDB)
+	//if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
+	//	return err
+	//}
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
 		return err
