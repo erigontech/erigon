@@ -761,6 +761,9 @@ Loop:
 				var t1, t2, t3, t32, t4, t5, t6 time.Duration
 				commtitStart := time.Now()
 				if err := func() error {
+					if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+						return err
+					}
 					// prune befor flush, to speedup flush
 					tt := time.Now()
 					if applyTx.(*temporal.Tx).AggCtx().CanPrune(applyTx) {
@@ -808,9 +811,6 @@ Loop:
 						t5 = time.Since(tt)
 						applyTx, err = cfg.db.BeginRw(context.Background())
 						if err != nil {
-							return err
-						}
-						if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
 							return err
 						}
 						agg.StartWrites()
