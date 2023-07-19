@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
 func Test_BtreeIndex_Init(t *testing.T) {
@@ -204,4 +205,51 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	}
 
 	bt.Close()
+}
+
+func TestBpsTree_Seek(t *testing.T) {
+	keyCount, M := 120, 8
+	tmp := t.TempDir()
+
+	logger := log.New()
+	dataPath := generateCompressedKV(t, tmp, 10, 48 /*val size*/, keyCount, logger)
+
+	kv, err := compress.NewDecompressor(dataPath)
+	require.NoError(t, err)
+	defer kv.Close()
+
+	g := kv.MakeGetter()
+
+	g.Reset(0)
+	ps := make([]uint64, 0, keyCount)
+	keys := make([][]byte, 0, keyCount)
+
+	p := uint64(0)
+	i := 0
+	for g.HasNext() {
+		ps = append(ps, p)
+		k, _ := g.Next(nil)
+		_, p = g.Next(nil)
+		keys = append(keys, k)
+		fmt.Printf("%2d k=%x, p=%v\n", i, k, p)
+		i++
+	}
+
+	ef := eliasfano32.NewEliasFano(uint64(keyCount), ps[len(ps)-1])
+	for i := 0; i < len(ps); i++ {
+		ef.AddOffset(ps[i])
+	}
+	ef.Build()
+
+	efi, _ := eliasfano32.ReadEliasFano(ef.AppendBytes(nil))
+	fmt.Printf("efi=%v\n", efi.Count())
+
+	bp := NewBpsTree(kv.MakeGetter(), efi, uint64(M))
+	bp.FillStack()
+
+	it, err := bp.Seek(keys[len(keys)/2])
+	require.NoError(t, err)
+	require.NotNil(t, it)
+	k, _ := it.KV()
+	require.EqualValues(t, keys[len(keys)/2], k)
 }
