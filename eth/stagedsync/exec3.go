@@ -16,6 +16,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
@@ -188,10 +189,9 @@ func ExecV3(ctx context.Context,
 		defer func() { // need callback - because tx may be committed
 			applyTx.Rollback()
 		}()
-		//} else {
-		//	if blockSnapshots.Cfg().Enabled {
-		//defer blockSnapshots.EnableMadvNormal().DisableReadAhead()
-		//}
+	}
+	if initialCycle || useExternalTx {
+		defer cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 	}
 
 	var block, stageProgress uint64
@@ -552,28 +552,11 @@ func ExecV3(ctx context.Context,
 
 	stateStream := !initialCycle && cfg.stateStream && maxBlockNum-block < stateStreamLimit
 
-	var readAhead chan uint64
-	if !parallel {
-		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
-		// can't use OS-level ReadAhead - because Data >> RAM
-		// it also warmsup state a bit - by touching senders/coninbase accounts and code
-		var clean func()
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
-		defer clean()
-	}
-
 	var b *types.Block
 	var blockNum uint64
 	var err error
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
-		if !parallel {
-			select {
-			case readAhead <- blockNum:
-			default:
-			}
-		}
-
 		inputBlockNum.Store(blockNum)
 		doms.SetBlockNum(blockNum)
 
