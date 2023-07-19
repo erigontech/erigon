@@ -171,6 +171,10 @@ func ExecV3(ctx context.Context,
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
+		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+			return err
+		}
+
 		var err error
 		applyTx, err = chainDb.BeginRw(ctx)
 		if err != nil {
@@ -253,9 +257,6 @@ func ExecV3(ctx context.Context,
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 	if initialCycle && blocksFreezeCfg.Produce {
 		log.Warn(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
-		if err := agg.BuildMissedIndices(ctx, 100); err != nil {
-			return err
-		}
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
