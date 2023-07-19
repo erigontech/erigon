@@ -18,9 +18,7 @@ type HashFunc func([]byte) ([32]byte, error)
 
 // CachingBeaconState is a cached wrapper around a raw CachingBeaconState provider
 type CachingBeaconState struct {
-
-	// embedded CachingBeaconState
-	// TODO: perhaps refactor and make a method CachingBeaconState() which returns a pointer to raw.BeaconState
+	// embedded BeaconState
 	*raw.BeaconState
 
 	// Internals
