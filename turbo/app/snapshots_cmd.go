@@ -519,9 +519,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
-		return err
-	}
 	agg.CleanDir()
 	db.View(ctx, func(tx kv.Tx) error {
 		snapshots.LogStat()
