@@ -66,6 +66,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		fork:                         &cltypes.Fork{},
 		latestBlockHeader:            &cltypes.BeaconBlockHeader{},
 		eth1Data:                     &cltypes.Eth1Data{},
+		eth1DataVotes:                &solid.ListSSZ[*cltypes.Eth1Data]{},
 		currentSyncCommittee:         &solid.SyncCommittee{},
 		nextSyncCommittee:            &solid.SyncCommittee{},
 		latestExecutionPayloadHeader: &cltypes.Eth1Header{},

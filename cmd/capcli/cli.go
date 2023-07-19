@@ -3,10 +3,15 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/rpc"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
+	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"github.com/spf13/afero"
 	"google.golang.org/grpc"
 )
@@ -116,17 +121,74 @@ func (b *Blocks) Run(ctx *Context) error {
 			return err
 		}
 	}
-
 	return nil
 }
 
 type Migrate struct {
 	outputFolder
+	chainCfg
 
-	State  string   `arg:"" help:"state to start from (can be url to checkpoint)"`
+	State  string   `arg:"" help:"state to start from (can be url to checkpoint or a  file)"`
 	Blocks []string `arg:"" name:"blocks" help:"blocks to migrate, in order" type:"path"`
 }
 
+func resolveState(source string, chain chainCfg) (*state.BeaconState, error) {
+	beaconConfig, _, err := chain.configs()
+	if err != nil {
+		return nil, err
+	}
+	s := state.New(beaconConfig)
+	switch {
+	default:
+		var stateByte []byte
+		if _, stateByte, err = clparams.ParseGenesisSSZToGenesisConfig(
+			source,
+			beaconConfig.GetCurrentStateVersion(0)); err != nil {
+			return nil, err
+		}
+		if s.DecodeSSZ(stateByte, int(beaconConfig.GetCurrentStateVersion(0))); err != nil {
+			return nil, err
+		}
+		return s, nil
+	case strings.HasPrefix(strings.ToLower(source), "http://"), strings.HasPrefix(strings.ToLower(source), "https://"):
+	}
+	return nil, fmt.Errorf("unknown state format: '%s'", source)
+}
+
+func (m *Migrate) getBlock(ctx *Context, block string) (*cltypes.SignedBeaconBlock, error) {
+	afs := afero.NewOsFs()
+
+	bts, err := afero.ReadFile(afs, block)
+	if err != nil {
+		return nil, err
+	}
+	blk := &cltypes.SignedBeaconBlock{}
+	err = blk.DecodeSSZ(bts, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	return blk, nil
+}
+
 func (m *Migrate) Run(ctx *Context) error {
+	state, err := resolveState(m.State, m.chainCfg)
+	if err != nil {
+		return err
+	}
+	// get the machine
+	cl := &eth2.Impl{}
+
+	// TODO: two queues for download and transition
+	for _, v := range m.Blocks {
+		blk, err := m.getBlock(ctx, v)
+		if err != nil {
+			return err
+		}
+		err = machine.TransitionState(cl, state, blk)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
