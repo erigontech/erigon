@@ -3,7 +3,7 @@ FROM alpine:3.14
 RUN apk add --no-cache ca-certificates && \
     mkdir -p /etc/erigon
 
-# Copy node ru related binaries
+# Copy node running related binaries
 COPY erigon rpcdaemon caplin-phase1 caplin-regression sentry sentinel integration /usr/local/bin/
 
 # Copy debug / monitoring related binaries
