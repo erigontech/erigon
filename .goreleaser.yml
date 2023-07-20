@@ -574,7 +574,6 @@ announce:
     channel: '#code-releases'
 
 archives:
-  id: erigon-multiple-build
-  # Regarding with below flag, please see : https://goreleaser.com/errors/multiple-binaries-archive/
+- id: erigon-multiple-build
   allow_different_binary_count: true
 
