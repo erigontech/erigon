@@ -178,9 +178,23 @@ func (s *suite) maybeUndefined(ctx context.Context, text string, args []interfac
 }
 
 func (s *suite) matchStep(text string) *stepRunner {
+	var matches []*stepRunner
+
 	for _, r := range s.stepRunners {
 		for _, expr := range r.Exprs {
 			if m := expr.FindStringSubmatch(text); len(m) > 0 {
+				matches = append(matches, r)
+			}
+		}
+	}
+
+	if len(matches) == 1 {
+		return matches[0]
+	}
+
+	for _, r := range matches {
+		for _, expr := range r.Exprs {
+			if m := expr.FindStringSubmatch(text); m[0] == text {
 				return r
 			}
 		}
@@ -189,6 +203,18 @@ func (s *suite) matchStep(text string) *stepRunner {
 	for _, r := range stepRunnerRegistry {
 		for _, expr := range r.Exprs {
 			if m := expr.FindStringSubmatch(text); len(m) > 0 {
+				matches = append(matches, r)
+			}
+		}
+	}
+
+	if len(matches) == 1 {
+		return matches[0]
+	}
+
+	for _, r := range matches {
+		for _, expr := range r.Exprs {
+			if m := expr.FindStringSubmatch(text); m[0] == text {
 				return r
 			}
 		}

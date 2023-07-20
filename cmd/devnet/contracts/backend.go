@@ -9,6 +9,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
+	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -33,7 +34,13 @@ func (cb contractBackend) PendingCodeAt(ctx context.Context, account libcommon.A
 }
 
 func (cb contractBackend) PendingNonceAt(ctx context.Context, account libcommon.Address) (uint64, error) {
-	return 0, fmt.Errorf("TODO")
+	res, err := cb.node.GetTransactionCount(account, requests.BlockNumbers.Pending)
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to get transaction count for address 0x%x: %v", account, err)
+	}
+
+	return res.Uint64(), nil
 }
 
 func (cb contractBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
