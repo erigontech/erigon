@@ -1,6 +1,7 @@
 package statechange
 
 import (
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -8,10 +9,10 @@ import (
 )
 
 // weighJustificationAndFinalization checks justification and finality of epochs and adds records to the state as needed.
-func weighJustificationAndFinalization(s *state.BeaconState, previousEpochTargetBalance, currentEpochTargetBalance uint64) error {
+func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTargetBalance, currentEpochTargetBalance uint64) error {
 	totalActiveBalance := s.GetTotalActiveBalance()
-	currentEpoch := state.Epoch(s.BeaconState)
-	previousEpoch := state.PreviousEpoch(s.BeaconState)
+	currentEpoch := state.Epoch(s)
+	previousEpoch := state.PreviousEpoch(s)
 	oldPreviousJustifiedCheckpoint := s.PreviousJustifiedCheckpoint()
 	oldCurrentJustifiedCheckpoint := s.CurrentJustifiedCheckpoint()
 	justificationBits := s.JustificationBits()
@@ -23,7 +24,7 @@ func weighJustificationAndFinalization(s *state.BeaconState, previousEpochTarget
 	justificationBits[0] = false
 	// Update justified checkpoint if super majority is reached on previous epoch
 	if previousEpochTargetBalance*3 >= totalActiveBalance*2 {
-		checkPointRoot, err := state.GetBlockRoot(s.BeaconState, previousEpoch)
+		checkPointRoot, err := state.GetBlockRoot(s, previousEpoch)
 		if err != nil {
 			return err
 		}
@@ -32,7 +33,7 @@ func weighJustificationAndFinalization(s *state.BeaconState, previousEpochTarget
 		justificationBits[1] = true
 	}
 	if currentEpochTargetBalance*3 >= totalActiveBalance*2 {
-		checkPointRoot, err := state.GetBlockRoot(s.BeaconState, currentEpoch)
+		checkPointRoot, err := state.GetBlockRoot(s, currentEpoch)
 		if err != nil {
 			return err
 		}
@@ -58,9 +59,9 @@ func weighJustificationAndFinalization(s *state.BeaconState, previousEpochTarget
 	return nil
 }
 
-func ProcessJustificationBitsAndFinality(s *state.BeaconState) error {
-	currentEpoch := state.Epoch(s.BeaconState)
-	previousEpoch := state.PreviousEpoch(s.BeaconState)
+func ProcessJustificationBitsAndFinality(s abstract.BeaconState) error {
+	currentEpoch := state.Epoch(s)
+	previousEpoch := state.PreviousEpoch(s)
 	beaconConfig := s.BeaconConfig()
 	// Skip for first 2 epochs
 	if currentEpoch <= beaconConfig.GenesisEpoch+1 {

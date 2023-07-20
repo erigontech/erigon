@@ -3,8 +3,8 @@ package eth2
 import (
 	"encoding/binary"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -63,7 +63,7 @@ func computeSigningRootEpoch(epoch uint64, domain []byte) (libcommon.Hash, error
 }
 
 // transitionSlot is called each time there is a new slot to process
-func transitionSlot(s *state.BeaconState) error {
+func transitionSlot(s abstract.BeaconState) error {
 	slot := s.Slot()
 	previousStateRoot := s.PreviousStateRoot()
 	var err error

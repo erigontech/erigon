@@ -1,6 +1,7 @@
 package statechange
 
 import (
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"sort"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -15,15 +16,15 @@ func computeActivationExitEpoch(beaconConfig *clparams.BeaconChainConfig, epoch 
 }
 
 // ProcessRegistyUpdates updates every epoch the activation status of validators. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#registry-updates.
-func ProcessRegistryUpdates(s *state.BeaconState) error {
+func ProcessRegistryUpdates(s abstract.BeaconState) error {
 	beaconConfig := s.BeaconConfig()
-	currentEpoch := state.Epoch(s.BeaconState)
+	currentEpoch := state.Epoch(s)
 	// start also initializing the activation queue.
 	activationQueue := make([]uint64, 0)
 	// Process activation eligibility and ejections.
 	var err error
 	s.ForEachValidator(func(validator solid.Validator, validatorIndex, total int) bool {
-		if state.IsValidatorEligibleForActivationQueue(s.BeaconState, validator) {
+		if state.IsValidatorEligibleForActivationQueue(s, validator) {
 			s.SetActivationEligibilityEpochForValidatorAtIndex(validatorIndex, currentEpoch+1)
 		}
 		if validator.Active(currentEpoch) && validator.EffectiveBalance() <= beaconConfig.EjectionBalance {
@@ -32,7 +33,7 @@ func ProcessRegistryUpdates(s *state.BeaconState) error {
 			}
 		}
 		// Insert in the activation queue in case.
-		if state.IsValidatorEligibleForActivation(s.BeaconState, validator) {
+		if state.IsValidatorEligibleForActivation(s, validator) {
 			activationQueue = append(activationQueue, uint64(validatorIndex))
 		}
 		return true

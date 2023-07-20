@@ -22,7 +22,7 @@ func EncodeNumber(n uint64) []byte {
 }
 
 // WriteBeaconState writes beacon state for specific block to database.
-func WriteBeaconState(tx kv.Putter, state *state.BeaconState) error {
+func WriteBeaconState(tx kv.Putter, state *state.CachingBeaconState) error {
 	data, err := utils.EncodeSSZSnappy(state)
 	if err != nil {
 		return err
