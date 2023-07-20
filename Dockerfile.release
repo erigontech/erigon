@@ -1,0 +1,12 @@
+FROM alpine:3.14
+
+RUN apk add --no-cache ca-certificates && \
+    mkdir -p /etc/erigon
+
+# Copy node ru related binaries
+COPY erigon rpcdaemon caplin-phase1 caplin-regression sentry sentinel integration /usr/local/bin/
+
+# Copy debug / monitoring related binaries
+COPY abigen devnet downloader evm hack observer pics rpctest state txpool verkle  /usr/local/bin/
+
+EXPOSE 8545 8551 8546 30303 30303/udp 42069 42069/udp 8080 9090 6060
