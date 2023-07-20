@@ -329,6 +329,10 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	err = agg.BuildOptionalMissedIndices(ctx, indexWorkers)
+	if err != nil {
+		return err
+	}
 	err = agg.BuildMissedIndices(ctx, indexWorkers)
 	if err != nil {
 		return err
@@ -352,21 +356,24 @@ func doLocalityIdx(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
-	chainConfig := fromdb.ChainConfig(chainDB)
 
 	if rebuild {
 		panic("not implemented")
 	}
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
-		return err
-	}
+	//chainConfig := fromdb.ChainConfig(chainDB)
+	//if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
+	//	return err
+	//}
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
 		return err
 	}
 	err = agg.OpenFolder()
 	if err != nil {
+		return err
+	}
+	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
 	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
@@ -577,6 +584,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
+	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
+		return err
+	}
 	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
@@ -616,6 +626,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
+		return err
+	}
+	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
 	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {

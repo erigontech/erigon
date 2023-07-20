@@ -20,6 +20,8 @@ import (
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -171,18 +173,26 @@ func ExecV3(ctx context.Context,
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
+		agg.BuildOptionalMissedIndicesInBackground(ctx, estimate.IndexSnapshot.Workers())
+		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+			return err
+		}
+
 		var err error
 		applyTx, err = chainDb.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
+		if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+			return err
+		}
+
 		defer func() { // need callback - because tx may be committed
 			applyTx.Rollback()
 		}()
-		//} else {
-		//	if blockSnapshots.Cfg().Enabled {
-		//defer blockSnapshots.EnableMadvNormal().DisableReadAhead()
-		//}
+	}
+	if initialCycle || useExternalTx {
+		defer cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 	}
 
 	var block, stageProgress uint64
@@ -253,10 +263,6 @@ func ExecV3(ctx context.Context,
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 	if initialCycle && blocksFreezeCfg.Produce {
 		log.Warn(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
-		//if err := agg.BuildMissedIndices(ctx, 100); err != nil {
-		//	return err
-		//}
-		//agg.BuildOptionalMissedIndicesInBackground(ctx, 100)
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
@@ -269,9 +275,9 @@ func ExecV3(ctx context.Context,
 	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 	defer cfg.agg.CloseSharedDomains()
 	rs := state.NewStateV3(doms, logger)
-	fmt.Printf("inputTxNum == %d\n", inputTxNum)
-	doms.Commit(true, false)
-	doms.ClearRam()
+	//fmt.Printf("inputTxNum == %d\n", inputTxNum)
+	//doms.Commit(true, false)
+	//doms.ClearRam()
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -547,28 +553,11 @@ func ExecV3(ctx context.Context,
 
 	stateStream := !initialCycle && cfg.stateStream && maxBlockNum-block < stateStreamLimit
 
-	var readAhead chan uint64
-	if !parallel {
-		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
-		// can't use OS-level ReadAhead - because Data >> RAM
-		// it also warmsup state a bit - by touching senders/coninbase accounts and code
-		var clean func()
-		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
-		defer clean()
-	}
-
 	var b *types.Block
 	var blockNum uint64
 	var err error
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
-		if !parallel {
-			select {
-			case readAhead <- blockNum:
-			default:
-			}
-		}
-
 		inputBlockNum.Store(blockNum)
 		doms.SetBlockNum(blockNum)
 
@@ -757,7 +746,10 @@ Loop:
 				var t1, t2, t3, t32, t4, t5, t6 time.Duration
 				commtitStart := time.Now()
 				if err := func() error {
-					// prune befor flush, to speedup flush
+					if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+						return err
+					}
+
 					tt := time.Now()
 					if applyTx.(*temporal.Tx).AggCtx().CanPrune(applyTx) {
 						if err = agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit

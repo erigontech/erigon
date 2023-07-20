@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -30,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -402,6 +403,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		blocks[i] = block
 		receipts[i] = receipt
 		parent = block
+	}
+
+	if ethconfig.EnableHistoryV4InTest {
+		agg := tx.(*temporal.Tx).Agg()
+		agg.SharedDomains(agg.MakeContext()).ClearRam()
 	}
 
 	tx.Rollback()

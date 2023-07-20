@@ -515,7 +515,6 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 	}
 
 	var acc accounts.Account
-	//acc := accounts.NewAccount()
 	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
 		return nil, err
 	}
