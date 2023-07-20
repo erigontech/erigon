@@ -8,7 +8,6 @@ import (
 	ethereum "github.com/ledgerwatch/erigon"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -39,12 +38,12 @@ type EthGetLogs struct {
 	Result []types.Log `json:"result"`
 }
 
-func NewLog(hash libcommon.Hash, blockNum string, address libcommon.Address, topics []libcommon.Hash, data hexutility.Bytes, txIndex uint, blockHash libcommon.Hash, index hexutil.Uint, removed bool) types.Log {
+func NewLog(hash libcommon.Hash, blockNum uint64, address libcommon.Address, topics []libcommon.Hash, data hexutility.Bytes, txIndex uint, blockHash libcommon.Hash, index hexutil.Uint, removed bool) types.Log {
 	return types.Log{
 		Address:     address,
 		Topics:      topics,
 		Data:        data,
-		BlockNumber: devnetutils.HexToInt(blockNum),
+		BlockNumber: blockNum,
 		TxHash:      hash,
 		TxIndex:     txIndex,
 		BlockHash:   blockHash,

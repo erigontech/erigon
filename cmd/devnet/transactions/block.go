@@ -8,6 +8,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
@@ -18,9 +19,16 @@ import (
 // MaxNumberOfBlockChecks is the max number of blocks to look for a transaction in
 var MaxNumberOfEmptyBlockChecks = 25
 
-func SearchReservesForTransactionHash(hashes map[libcommon.Hash]bool, logger log.Logger) (*map[libcommon.Hash]string, error) {
-	logger.Info("Searching for transactions in reserved blocks...")
-	m, err := searchBlockForHashes(hashes, logger)
+func AwaitTransactions(ctx context.Context, hashes ...libcommon.Hash) (map[libcommon.Hash]string, error) {
+	devnet.Logger(ctx).Info("Awaiting transactions in confirmed blocks...")
+
+	hashmap := map[libcommon.Hash]bool{}
+
+	for _, hash := range hashes {
+		hashmap[hash] = true
+	}
+
+	m, err := searchBlockForHashes(ctx, hashmap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search reserves for hashes: %v", err)
 	}
@@ -28,19 +36,16 @@ func SearchReservesForTransactionHash(hashes map[libcommon.Hash]bool, logger log
 	return m, nil
 }
 
-func searchBlockForHashes(hashmap map[libcommon.Hash]bool, logger log.Logger) (*map[libcommon.Hash]string, error) {
+func searchBlockForHashes(ctx context.Context, hashmap map[libcommon.Hash]bool) (map[libcommon.Hash]string, error) {
+	logger := devnet.Logger(ctx)
+
 	if len(hashmap) == 0 {
 		return nil, fmt.Errorf("no hashes to search for")
 	}
 
 	txToBlock := make(map[libcommon.Hash]string, len(hashmap))
 
-	methodSub := (*services.Subscriptions)[requests.Methods.ETHNewHeads]
-	if methodSub == nil {
-		return nil, fmt.Errorf("client subscription should not be nil")
-	}
-
-	headsSub := (*services.Subscriptions)[requests.Methods.ETHNewHeads]
+	headsSub := services.GetSubscription(devnet.CurrentChainName(ctx), requests.Methods.ETHNewHeads)
 
 	// get a block from the new heads channel
 	if headsSub == nil {
@@ -51,7 +56,8 @@ func searchBlockForHashes(hashmap map[libcommon.Hash]bool, logger log.Logger) (*
 	for {
 		block := <-headsSub.SubChan
 		blockNum := block.(map[string]interface{})["number"].(string)
-		_, numFound, foundErr := txHashInBlock(methodSub.Client, hashmap, blockNum, txToBlock, logger)
+
+		_, numFound, foundErr := txHashInBlock(headsSub.Client, hashmap, blockNum, txToBlock, logger)
 
 		if foundErr != nil {
 			return nil, fmt.Errorf("failed to find hash in block with number %q: %v", foundErr, blockNum)
@@ -59,7 +65,7 @@ func searchBlockForHashes(hashmap map[libcommon.Hash]bool, logger log.Logger) (*
 
 		if len(hashmap) == 0 { // this means we have found all the txs we're looking for
 			logger.Info("All the transactions created have been included in blocks")
-			return &txToBlock, nil
+			return txToBlock, nil
 		}
 
 		if numFound == 0 {

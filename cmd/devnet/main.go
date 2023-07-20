@@ -13,10 +13,13 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
+	_ "github.com/ledgerwatch/erigon/cmd/devnet/accounts/steps"
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/admin"
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
+	account_services "github.com/ledgerwatch/erigon/cmd/devnet/services/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services/bor"
 	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
+	"github.com/ledgerwatch/erigon/core/types"
 
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
@@ -108,6 +111,11 @@ var (
 		Name:  "metrics.urls",
 		Usage: "internal flag",
 	}
+
+	WaitFlag = cli.BoolFlag{
+		Name:  "wait",
+		Usage: "Wait until interrupted after all scenarios have run",
+	}
 )
 
 type PanicHandler struct {
@@ -142,6 +150,7 @@ func main() {
 		&DiagnosticsURLFlag,
 		&insecureFlag,
 		&metricsURLsFlag,
+		&WaitFlag,
 		&logging.LogVerbosityFlag,
 		&logging.LogConsoleVerbosityFlag,
 		&logging.LogDirVerbosityFlag,
@@ -229,8 +238,6 @@ func action(ctx *cli.Context) error {
 		transactions.MaxNumberOfEmptyBlockChecks = 30
 	}
 
-	scenarioNames := ctx.String("scenarios")
-
 	scenarios.Scenarios{
 		"dynamic-tx-node-0": {
 			Context: runCtx.
@@ -262,11 +269,18 @@ func action(ctx *cli.Context) error {
 			},
 		},
 		"state-sync": {
-			Steps: []*scenarios.Step{},
+			Steps: []*scenarios.Step{
+				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
+				{Text: "CreateAccountWithFunds", Args: []any{networkname.DevChainName, "root-funder", 200.0}},
+				{Text: "CreateAccountWithFunds", Args: []any{networkname.BorDevnetChainName, "child-funder", 200.0}},
+				{Text: "DeployChildChainReceiver", Args: []any{"faucet-source"}},
+				{Text: "DeployRootChainSender", Args: []any{"faucet-source"}},
+				{Text: "ProcessTransfers", Args: []any{"faucet-source", 10, 2, 2}},
+			},
 		},
-	}.Run(runCtx, strings.Split(scenarioNames, ",")...)
+	}.Run(runCtx, strings.Split(ctx.String("scenarios"), ",")...)
 
-	if metrics && len(diagnosticsUrl) > 0 {
+	if ctx.Bool("wait") || (metrics && len(diagnosticsUrl) > 0) {
 		logger.Info("Waiting")
 		network.Wait()
 	} else {
@@ -281,6 +295,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 	dataDir := ctx.String(DataDirFlag.Name)
 	chain := ctx.String(ChainFlag.Name)
 
+	faucetSource := accounts.NewAccount("faucet-source")
+
 	switch chain {
 	case networkname.BorDevnetChainName:
 		if ctx.Bool(WithoutHeimdallFlag.Name) {
@@ -294,6 +310,12 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8545,
 					//Snapshots:          true,
+					Alloc: types.GenesisAlloc{
+						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
+					},
+					Services: []devnet.Service{
+						account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource.Address),
+					},
 					Nodes: []devnet.Node{
 						args.BlockProducer{
 							Node: args.Node{
@@ -313,8 +335,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					},
 				}}, nil
 		} else {
-			var services []devnet.Service
 			var heimdallGrpc string
+			var services []devnet.Service
 
 			if ctx.Bool(LocalHeimdallFlag.Name) {
 				config := *params.BorDevnetChainConfig
@@ -337,7 +359,10 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BasePrivateApiAddr: "localhost:10090",
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8545,
-					Services:           services,
+					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource.Address)),
+					Alloc: types.GenesisAlloc{
+						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
+					},
 					Nodes: []devnet.Node{
 						args.BlockProducer{
 							Node: args.Node{
@@ -372,7 +397,10 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BasePrivateApiAddr: "localhost:10190",
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8645,
-					Services:           services,
+					Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource.Address)),
+					Alloc: types.GenesisAlloc{
+						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
+					},
 					Nodes: []devnet.Node{
 						args.BlockProducer{
 							Node: args.Node{
@@ -400,6 +428,12 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 				BasePrivateApiAddr: "localhost:10090",
 				BaseRPCHost:        "localhost",
 				BaseRPCPort:        8545,
+				Alloc: types.GenesisAlloc{
+					faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
+				},
+				Services: []devnet.Service{
+					account_services.NewFaucet(networkname.DevChainName, faucetSource.Address),
+				},
 				Nodes: []devnet.Node{
 					args.BlockProducer{
 						Node: args.Node{

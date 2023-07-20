@@ -6,6 +6,6 @@ type Service interface {
 	Start(context context.Context) error
 	Stop()
 
-	NodeCreated(node Node)
-	NodeStarted(node Node)
+	NodeCreated(ctx context.Context, node Node)
+	NodeStarted(ctx context.Context, node Node)
 }

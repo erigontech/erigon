@@ -11,3 +11,7 @@ package contracts
 // childreceiver.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build childreceiver.sol
 //go:generate abigen -abi build/ChildReceiver.abi -bin build/ChildReceiver.bin -pkg contracts -type ChildReceiver -out ./gen_childreceiver.go
+
+// faucet.sol
+//go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build faucet.sol
+//go:generate abigen -abi build/Faucet.abi -bin build/Faucet.bin -pkg contracts -type Faucet -out ./gen_faucet.go

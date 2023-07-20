@@ -44,7 +44,7 @@ type EthError struct {
 
 type RequestGenerator interface {
 	PingErigonRpc() CallResult
-	GetBalance(address libcommon.Address, blockNum BlockNumber) (uint64, error)
+	GetBalance(address libcommon.Address, blockNum BlockNumber) (*big.Int, error)
 	AdminNodeInfo() (p2p.NodeInfo, error)
 	GetBlockByNumberDetails(blockNum string, withTxs bool) (map[string]interface{}, error)
 	GetBlockByNumber(blockNum uint64, withTxs bool) (EthBlockByNumber, error)

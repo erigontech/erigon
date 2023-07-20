@@ -3,17 +3,16 @@ package bor
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"strings"
 	"sync"
 
+	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
@@ -30,13 +29,17 @@ type Heimdall struct {
 	spans               map[uint64]*span.HeimdallSpan
 	logger              log.Logger
 	cancelFunc          context.CancelFunc
-	syncChan            chan<- *contracts.TestStateSenderStateSynced
+	syncChan            chan *contracts.TestStateSenderStateSynced
 	syncContractAddress libcommon.Address
 	syncContractBinding *contracts.TestStateSender
+	syncSubscription    ethereum.Subscription
 }
 
 func NewHeimdall(chainConfig *chain.Config, logger log.Logger) *Heimdall {
-	return &Heimdall{sync.Mutex{}, nil, chainConfig, nil, map[uint64]*span.HeimdallSpan{}, logger, nil, nil, libcommon.Address{}, nil}
+	return &Heimdall{
+		chainConfig: chainConfig,
+		spans:       map[uint64]*span.HeimdallSpan{},
+		logger:      logger}
 }
 
 func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*clerk.EventRecordWithTime, error) {
@@ -107,7 +110,11 @@ func (h *Heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
 func (h *Heimdall) Close() {
 }
 
-func (h *Heimdall) NodeCreated(node devnet.Node) {
+func (h *Heimdall) StateSenderAddress() libcommon.Address {
+	return h.syncContractAddress
+}
+
+func (h *Heimdall) NodeCreated(ctx context.Context, node devnet.Node) {
 	h.Lock()
 	defer h.Unlock()
 
@@ -117,7 +124,7 @@ func (h *Heimdall) NodeCreated(node devnet.Node) {
 	}
 }
 
-func (h *Heimdall) NodeStarted(node devnet.Node) {
+func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 	if !strings.HasPrefix(node.Name(), "bor") && node.IsBlockProducer() {
 		h.Lock()
 		defer h.Unlock()
@@ -129,34 +136,10 @@ func (h *Heimdall) NodeStarted(node devnet.Node) {
 		h.syncChan = make(chan *contracts.TestStateSenderStateSynced, 100)
 
 		go func() {
-			count, err := node.GetTransactionCount(node.Account().Address, requests.BlockNumbers.Latest)
-
-			if err != nil {
-				h.Lock()
-				defer h.Unlock()
-
-				h.syncChan = nil
-				h.logger.Error("failed to get transaction count", "address", node.Account().Address.Hex(), "err", err)
-				return
-			}
-
 			transactOpts, err := bind.NewKeyedTransactorWithChainID(accounts.SigKey(node.Account().Address), node.ChainID())
 
-			if err != nil {
-				h.Lock()
-				defer h.Unlock()
-
-				h.syncChan = nil
-				h.logger.Error("cannot create transactor ops", "chainId", node.ChainID(), "err", err)
-				return
-			}
-
-			transactOpts.GasLimit = uint64(200_000)
-			transactOpts.GasPrice = big.NewInt(880_000_000)
-			transactOpts.Nonce = count
-
 			// deploy the contract and get the contract handler
-			address, _, contract, err := contracts.DeployTestStateSender(transactOpts, contracts.NewBackend(node))
+			address, contract, err := contracts.DeployWithOps(devnet.WithCurrentNode(ctx, node), transactOpts, contracts.DeployTestStateSender)
 
 			if err != nil {
 				h.Lock()
@@ -172,7 +155,7 @@ func (h *Heimdall) NodeStarted(node devnet.Node) {
 			h.syncContractAddress = address
 			h.syncContractBinding = contract
 
-			_ /*subscription*/, err = contract.WatchStateSynced(&bind.WatchOpts{}, h.syncChan, nil, nil)
+			h.syncSubscription, err = contract.WatchStateSynced(&bind.WatchOpts{}, h.syncChan, nil, nil)
 
 			if err != nil {
 				h.Lock()
@@ -181,6 +164,13 @@ func (h *Heimdall) NodeStarted(node devnet.Node) {
 				h.syncChan = nil
 				h.logger.Error("failed to subscribe to sync events", "err", err)
 				return
+			}
+
+			for stateSyncedEvent := range h.syncChan {
+				h.logger.Info("Processing L1 sync event", "event", stateSyncedEvent)
+				if err := handleStateSynced(stateSyncedEvent); err != nil {
+					h.logger.Error("L1 sync event processing failed", "err", err)
+				}
 			}
 		}()
 	}
@@ -217,6 +207,16 @@ func (h *Heimdall) Start(ctx context.Context) error {
 	}
 	ctx, h.cancelFunc = context.WithCancel(ctx)
 	h.Unlock()
+
+	if h.syncSubscription != nil {
+		h.syncSubscription.Unsubscribe()
+		h.syncSubscription = nil
+	}
+
+	if h.syncChan != nil {
+		close(h.syncChan)
+		h.syncChan = nil
+	}
 
 	return heimdallgrpc.StartHeimdallServer(ctx, h, HeimdallGRpc(ctx), h.logger)
 }
