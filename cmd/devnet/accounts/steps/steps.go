@@ -67,7 +67,7 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 	}
 
 	if _, err = transactions.AwaitTransactions(chainCtx, hash); err != nil {
-		return 0, fmt.Errorf("failed to get transfer tx: %v", err)
+		return 0, fmt.Errorf("Failed to get transfer tx: %w", err)
 	}
 
 	//if fbal, err := faucet.Balance(chainCtx); err == nil {
@@ -77,6 +77,9 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 	node := devnet.SelectBlockProducer(chainCtx)
 	balance, err := node.GetBalance(account.Address, requests.BlockNumbers.Latest)
 	//fmt.Println(account.Address, balance)
+	if err != nil {
+		return 0, fmt.Errorf("Failed to get post transfer balance: %w", err)
+	}
 
 	return balance.Uint64(), nil
 }

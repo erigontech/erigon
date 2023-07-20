@@ -138,6 +138,15 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 		go func() {
 			transactOpts, err := bind.NewKeyedTransactorWithChainID(accounts.SigKey(node.Account().Address), node.ChainID())
 
+			if err != nil {
+				h.Lock()
+				defer h.Unlock()
+
+				h.syncChan = nil
+				h.logger.Error("Failed to deploy state sender", "err", err)
+				return
+			}
+
 			// deploy the contract and get the contract handler
 			address, contract, err := contracts.DeployWithOps(devnet.WithCurrentNode(ctx, node), transactOpts, contracts.DeployTestStateSender)
 
@@ -146,7 +155,7 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 				defer h.Unlock()
 
 				h.syncChan = nil
-				h.logger.Error("failed to deploy state sender", "err", err)
+				h.logger.Error("Failed to deploy state sender", "err", err)
 				return
 			}
 
@@ -162,7 +171,7 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 				defer h.Unlock()
 
 				h.syncChan = nil
-				h.logger.Error("failed to subscribe to sync events", "err", err)
+				h.logger.Error("Failed to subscribe to sync events", "err", err)
 				return
 			}
 
