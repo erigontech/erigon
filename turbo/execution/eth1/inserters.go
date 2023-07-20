@@ -10,7 +10,7 @@ import (
 )
 
 func (e *EthereumExecutionModule) InsertBodies(ctx context.Context, req *execution.InsertBodiesRequest) (*execution.EmptyMessage, error) {
-	tx, err := e.chainDb.BeginRw(ctx)
+	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBodies: could not begin transaction: %s", err)
 	}
@@ -28,7 +28,7 @@ func (e *EthereumExecutionModule) InsertBodies(ctx context.Context, req *executi
 }
 
 func (e *EthereumExecutionModule) InsertHeaders(ctx context.Context, req *execution.InsertHeadersRequest) (*execution.EmptyMessage, error) {
-	tx, err := e.chainDb.BeginRw(ctx)
+	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: could not begin transaction: %s", err)
 	}

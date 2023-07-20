@@ -51,17 +51,11 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.Ge
 	}
 	defer tx.Rollback()
 
-	chainTx, err := e.chainDb.BeginRo(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not open database: %s", err)
-	}
-	defer chainTx.Rollback()
-
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: %s", err)
 	}
-	body, err := e.getBody(ctx, chainTx, tx, blockHash, blockNumber)
+	body, err := e.getBody(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: coild not read body: %s", err)
 	}
@@ -84,17 +78,11 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 	}
 	defer tx.Rollback()
 
-	chainTx, err := e.chainDb.BeginRo(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not open database: %s", err)
-	}
-	defer chainTx.Rollback()
-
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: %s", err)
 	}
-	header, err := e.getHeader(ctx, chainTx, tx, blockHash, blockNumber)
+	header, err := e.getHeader(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: coild not read body: %s", err)
 	}

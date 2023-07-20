@@ -3,6 +3,7 @@ package eth1
 import (
 	"context"
 
+	"github.com/anacrolix/sync"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 
@@ -18,41 +19,32 @@ type EthereumExecutionModule struct {
 	blockReader services.FullBlockReader
 
 	// MDBX database
-	db      kv.RwDB // main database
-	chainDb kv.RwDB // this is a database used to queue insert headers/bodies requests
+	db   kv.RwDB // main database
+	lock sync.Mutex
 
 	execution.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(blockReader services.FullBlockReader, db, chainDb kv.RwDB) *EthereumExecutionModule {
+func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader: blockReader,
 		db:          db,
-		chainDb:     chainDb,
 	}
 }
 
-func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx, tx2 kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Header, error) {
-	header := rawdb.ReadHeader(tx, blockHash, blockNumber)
-	if header != nil {
-		return header, nil
-	}
+func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Header, error) {
 	if e.blockReader == nil {
-		return rawdb.ReadHeader(tx2, blockHash, blockNumber), nil
+		return rawdb.ReadHeader(tx, blockHash, blockNumber), nil
 	}
-	return e.blockReader.Header(ctx, tx2, blockHash, blockNumber)
+	return e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 }
 
-func (e *EthereumExecutionModule) getBody(ctx context.Context, tx, tx2 kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Body, error) {
-	body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
-	if body != nil {
-		return body, nil
-	}
+func (e *EthereumExecutionModule) getBody(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Body, error) {
 	if e.blockReader == nil {
-		body, _, _ := rawdb.ReadBody(tx2, blockHash, blockNumber)
+		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
 		return body, nil
 	}
-	return e.blockReader.BodyWithTransactions(ctx, tx2, blockHash, blockNumber)
+	return e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 }
 
 func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber uint64) (libcommon.Hash, error) {
