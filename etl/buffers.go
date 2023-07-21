@@ -48,6 +48,7 @@ type Buffer interface {
 	Get(i int, keyBuf, valBuf []byte) ([]byte, []byte)
 	Len() int
 	Reset()
+	SizeLimit() int
 	Write(io.Writer) error
 	Sort()
 	CheckFlushSize() bool
@@ -152,6 +153,7 @@ func (b *sortableBuffer) Reset() {
 	b.lens = b.lens[:0]
 	b.data = b.data[:0]
 }
+func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
 	if sort.IsSorted(b) {
 		return
@@ -206,9 +208,8 @@ func (b *appendSortableBuffer) Put(k, v []byte) {
 	b.entries[string(k)] = stored
 }
 
-func (b *appendSortableBuffer) Size() int {
-	return b.size
-}
+func (b *appendSortableBuffer) Size() int      { return b.size }
+func (b *appendSortableBuffer) SizeLimit() int { return b.optimalSize }
 
 func (b *appendSortableBuffer) Len() int {
 	return len(b.entries)
@@ -299,9 +300,8 @@ func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
 	b.entries[string(k)] = common.Copy(v)
 }
 
-func (b *oldestEntrySortableBuffer) Size() int {
-	return b.size
-}
+func (b *oldestEntrySortableBuffer) Size() int      { return b.size }
+func (b *oldestEntrySortableBuffer) SizeLimit() int { return b.optimalSize }
 
 func (b *oldestEntrySortableBuffer) Len() int {
 	return len(b.entries)

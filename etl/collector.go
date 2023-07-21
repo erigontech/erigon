@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -108,9 +109,10 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	if c.buf.Len() == 0 {
 		return nil
 	}
+
 	var provider dataProvider
-	c.buf.Sort()
 	if canStoreInRam && len(c.dataProviders) == 0 {
+		c.buf.Sort()
 		provider = KeepInRAM(c.buf)
 		c.allFlushed = true
 	} else {
@@ -120,6 +122,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		if err != nil {
 			return err
 		}
+		c.buf = getBufferByType(c.bufType, datasize.ByteSize(c.buf.SizeLimit()))
 	}
 	if provider != nil {
 		c.dataProviders = append(c.dataProviders, provider)
@@ -261,6 +264,12 @@ func (c *Collector) Close() {
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
 func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) error {
+	for _, provider := range providers {
+		if err := provider.Wait(); err != nil {
+			return err
+		}
+	}
+
 	h := &Heap{}
 	heap.Init(h)
 	for i, provider := range providers {
