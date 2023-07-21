@@ -505,7 +505,6 @@ Loop:
 		}
 		stageProgress = blockNum
 
-		// todo finishTx is required in place because currently we could aggregate only one block and e4 could do thas in the middle
 		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if shouldUpdateProgress {
 			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
