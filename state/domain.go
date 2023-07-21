@@ -932,6 +932,10 @@ func (sf StaticFiles) CleanupOnError() {
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
+	if d.filenameBase == "commitment" {
+		log.Warn("[dbg] buildFiles", "step", step, "txNum", step*d.aggregationStep)
+	}
+
 	start := time.Now()
 	defer func() {
 		d.stats.LastFileBuildingTook = time.Since(start)
@@ -1250,12 +1254,29 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 	return nil
 }
 
+func (d *Domain) canPrune(tx kv.Tx) bool {
+	dc := d.MakeContext()
+	defer dc.Close()
+	return d.canPruneFrom(tx) < dc.maxTxNumInFiles(false)
+}
+func (d *Domain) canPruneFrom(tx kv.Tx) uint64 {
+	fst, _ := kv.FirstKey(tx, d.indexKeysTable)
+	if len(fst) > 0 {
+		return binary.BigEndian.Uint64(fst)
+	}
+	return math.MaxUint64
+}
+
 // history prunes keys in range [txFrom; txTo), domain prunes whole step.
 func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
-	mxPruneTook.Update(d.stats.LastPruneTook.Seconds())
-	if d.filenameBase == "accounts" {
-		log.Warn("[dbg] prune", "step", step)
+	if !d.canPrune(d.tx) {
+		return nil
 	}
+
+	mxPruneTook.Update(d.stats.LastPruneTook.Seconds())
+	//if d.filenameBase == "commitment" {
+	//	log.Warn("[dbg] prune", "step", step, "txNum", step*d.aggregationStep)
+	//}
 	keysCursorForDeletes, err := d.tx.RwCursorDupSort(d.keysTable)
 	if err != nil {
 		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
@@ -1489,12 +1510,14 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 	}
 	if firstWarmIndexedTxNum > lastColdIndexedTxNum {
 		if firstWarmIndexedTxNum/dc.d.aggregationStep-lastColdIndexedTxNum/dc.d.aggregationStep > 0 && dc.d.withLocalityIndex {
-			log.Warn("[dbg] gap between warm and cold locality", "cold", lastColdIndexedTxNum/dc.d.aggregationStep, "warm", firstWarmIndexedTxNum/dc.d.aggregationStep, "nil", dc.hc.ic.coldLocality == nil, "name", dc.d.filenameBase)
-			if dc.hc.ic.coldLocality != nil && dc.hc.ic.coldLocality.file != nil {
-				log.Warn("[dbg] gap", "cold_f", dc.hc.ic.coldLocality.file.src.bm.FileName())
-			}
-			if dc.hc.ic.warmLocality != nil && dc.hc.ic.warmLocality.file != nil {
-				log.Warn("[dbg] gap", "warm_f", dc.hc.ic.warmLocality.file.src.bm.FileName())
+			if dc.d.filenameBase != "commitment" {
+				log.Warn("[dbg] gap between warm and cold locality", "cold", lastColdIndexedTxNum/dc.d.aggregationStep, "warm", firstWarmIndexedTxNum/dc.d.aggregationStep, "nil", dc.hc.ic.coldLocality == nil, "name", dc.d.filenameBase)
+				if dc.hc.ic.coldLocality != nil && dc.hc.ic.coldLocality.file != nil {
+					log.Warn("[dbg] gap", "cold_f", dc.hc.ic.coldLocality.file.src.bm.FileName())
+				}
+				if dc.hc.ic.warmLocality != nil && dc.hc.ic.warmLocality.file != nil {
+					log.Warn("[dbg] gap", "warm_f", dc.hc.ic.warmLocality.file.src.bm.FileName())
+				}
 			}
 		}
 
