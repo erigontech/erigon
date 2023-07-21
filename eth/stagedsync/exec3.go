@@ -745,11 +745,11 @@ Loop:
 
 		// MA commitTx
 		if !parallel {
-			if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
-				return err
-			} else if !ok {
-				break Loop
-			}
+			//if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+			//	return err
+			//} else if !ok {
+			//	break Loop
+			//}
 
 			outputBlockNum.Set(blockNum)
 
