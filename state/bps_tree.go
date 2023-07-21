@@ -27,8 +27,8 @@ type BpsTreeIterator struct {
 	i uint64
 }
 
-func (b *BpsTreeIterator) KV() ([]byte, []byte) {
-	return b.t.lookup(b.i)
+func (it *BpsTreeIterator) KV() ([]byte, []byte) {
+	return it.t.lookup(it.i)
 }
 
 func (it *BpsTreeIterator) Next() ([]byte, []byte) {
@@ -72,7 +72,7 @@ func (b *BpsTree) traverse(mx [][]Node, n, di, i uint64) {
 		return
 	}
 
-	for j := uint64(1); j <= b.M; j += b.M / 8 {
+	for j := uint64(1); j <= b.M; j += b.M / 2 {
 		ik := i*b.M + j
 		if ik >= n {
 			break
