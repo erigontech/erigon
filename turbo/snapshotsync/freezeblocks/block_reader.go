@@ -82,7 +82,7 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 
 func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots    { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
-func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not supported") }
+func (r *RemoteBlockReader) Files() (list []string)                { panic("not supported") }
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
@@ -220,7 +220,7 @@ func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
 }
 func (r *BlockReader) Snapshots() services.BlockSnapshots    { return r.sn }
 func (r *BlockReader) FrozenBlocks() uint64                  { return r.sn.BlocksAvailable() }
-func (r *BlockReader) FrozenFiles() []string                 { return r.sn.Files() }
+func (r *BlockReader) Files() []string                       { return r.sn.Files() }
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
 
 func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {

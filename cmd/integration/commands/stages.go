@@ -1312,7 +1312,9 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			}
 			_allSnapshotsSingleton.LogStat()
 			db.View(context.Background(), func(tx kv.Tx) error {
-				_aggSingleton.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+				ac := _aggSingleton.MakeContext()
+				defer ac.Close()
+				ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 					_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 					return histBlockNumProgress
 				})

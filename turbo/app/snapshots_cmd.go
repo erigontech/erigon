@@ -522,7 +522,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	agg.CleanDir()
 	db.View(ctx, func(tx kv.Tx) error {
 		snapshots.LogStat()
-		agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+		ac := agg.MakeContext()
+		defer ac.Close()
+		ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 			_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 			return histBlockNumProgress
 		})
@@ -547,7 +549,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
+			ac := agg.MakeContext()
+			defer ac.Close()
+			if err := rawdb.WriteSnapshots(tx, blockReader.Files(), ac.Files()); err != nil {
 				return err
 			}
 			for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
@@ -563,6 +567,30 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	if !kvcfg.HistoryV3.FromDB(db) {
 		return nil
+	}
+
+	logger.Info("Compute commitment")
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		if err := tx.(*mdbx.MdbxTx).WarmupDB(false); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err = func() error {
+		ac := agg.MakeContext()
+		defer ac.Close()
+		sd := agg.SharedDomains(ac)
+		defer sd.Close()
+		defer agg.StartWrites().FinishWrites()
+		if _, err = agg.ComputeCommitment(true, false); err != nil {
+			return err
+		}
+		return err
+	}(); err != nil {
+		return err
 	}
 
 	logger.Info("Prune state history")
@@ -635,13 +663,17 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteSnapshots(tx, snapshots.Files(), agg.Files())
+		ac := agg.MakeContext()
+		defer ac.Close()
+		return rawdb.WriteSnapshots(tx, snapshots.Files(), ac.Files())
 	}); err != nil {
 		return err
 	}
 	logger.Info("Prune state history")
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteSnapshots(tx, snapshots.Files(), agg.Files())
+		ac := agg.MakeContext()
+		defer ac.Close()
+		return rawdb.WriteSnapshots(tx, snapshots.Files(), ac.Files())
 	}); err != nil {
 		return err
 	}
