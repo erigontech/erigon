@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
@@ -568,7 +567,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	logger.Info("Compute commitment")
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+		if err := tx.(*mdbx.MdbxTx).WarmupDB(false); err != nil {
 			return err
 		}
 		return nil
