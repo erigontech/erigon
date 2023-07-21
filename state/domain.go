@@ -1274,9 +1274,9 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 	}
 
 	mxPruneTook.Update(d.stats.LastPruneTook.Seconds())
-	//if d.filenameBase == "commitment" {
-	//	log.Warn("[dbg] prune", "step", step, "txNum", step*d.aggregationStep)
-	//}
+	if d.filenameBase == "commitment" {
+		log.Warn("[dbg] prune", "step", step, "txNum", step*d.aggregationStep)
+	}
 	keysCursorForDeletes, err := d.tx.RwCursorDupSort(d.keysTable)
 	if err != nil {
 		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)

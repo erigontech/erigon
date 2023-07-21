@@ -862,6 +862,7 @@ func (ac *AggregatorV3Context) maxTxNumInFiles(cold bool) uint64 {
 	)
 }
 func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
+	//fmt.Printf("can prune: from=%d < current=%d, keep=%d\n", ac.CanPruneFrom(tx)/ac.a.aggregationStep, ac.maxTxNumInFiles(false)/ac.a.aggregationStep, ac.a.keepInDB)
 	return ac.CanPruneFrom(tx) < ac.maxTxNumInFiles(false)
 }
 func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
@@ -976,7 +977,7 @@ func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax 
 		"txs", fmt.Sprintf("%dm", ac.a.minimaxTxNumInFiles.Load()/1_000_000),
 		"txNum2blockNum", strings.Join(str, ","),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
-		"used_files", strings.Join(ac.Files(), ","),
+		//"used_files", strings.Join(ac.Files(), ","),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
