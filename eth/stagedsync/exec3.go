@@ -741,27 +741,28 @@ Loop:
 					break
 				}
 
+				if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+					return err
+				}
+
 				var t1, t2, t3, t32, t4, t5, t6 time.Duration
 				commtitStart := time.Now()
+				tt := time.Now()
+				if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+					return err
+				} else if !ok {
+					break Loop
+				}
+				t1 = time.Since(tt)
+
 				if err := func() error {
-					if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-						return err
-					}
-					// prune befor flush, to speedup flush
-					tt := time.Now()
+					tt = time.Now()
 					if applyTx.(*temporal.Tx).AggCtx().CanPrune(applyTx) {
 						if err = agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit
 							return err
 						}
 					}
 					t2 = time.Since(tt)
-
-					tt = time.Now()
-					_, err := agg.ComputeCommitment(true, false)
-					if err != nil {
-						return err
-					}
-					t1 = time.Since(tt)
 
 					tt = time.Now()
 					doms.ClearRam()
