@@ -285,6 +285,8 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	outputTxNum.Store(txn)
+	agg.SetTxNum(txn)
 	log.Info("SeekCommitment", "bn", bn, "txn", txn)
 	//fmt.Printf("inputTxNum == %d\n", inputTxNum)
 	//doms.Commit(true, false)
