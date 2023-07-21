@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
@@ -563,6 +564,19 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	if !kvcfg.HistoryV3.FromDB(db) {
 		return nil
+	}
+
+	logger.Info("Compute commitment")
+	if err = db.Update(ctx, func(tx kv.RwTx) error {
+		if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if _, err = agg.ComputeCommitment(true, false); err != nil {
+		return err
 	}
 
 	logger.Info("Prune state history")
