@@ -995,7 +995,9 @@ func (a *Aggregator) DeleteAccount(addr []byte) error {
 		return err
 	}
 	var e error
-	if err := a.storage.defaultDc.IteratePrefix(a.storage.tx, addr, func(k, _ []byte) {
+	ac := a.MakeContext()
+	defer ac.Close()
+	if err := ac.storage.IteratePrefix(a.storage.tx, addr, func(k, _ []byte) {
 		if !bytes.HasPrefix(k, addr) {
 			return
 		}
@@ -1053,10 +1055,10 @@ func (a *Aggregator) StartWrites() *Aggregator {
 	}
 	a.defaultCtx = &AggregatorContext{
 		a:          a,
-		accounts:   a.accounts.defaultDc,
-		storage:    a.storage.defaultDc,
-		code:       a.code.defaultDc,
-		commitment: a.commitment.defaultDc,
+		accounts:   a.accounts.MakeContext(),
+		storage:    a.storage.MakeContext(),
+		code:       a.code.MakeContext(),
+		commitment: a.commitment.MakeContext(),
 		logAddrs:   a.logAddrs.MakeContext(),
 		logTopics:  a.logTopics.MakeContext(),
 		tracesFrom: a.tracesFrom.MakeContext(),

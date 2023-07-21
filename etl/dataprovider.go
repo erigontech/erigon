@@ -24,17 +24,20 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 )
 
 type dataProvider interface {
 	Next(keyBuf, valBuf []byte) ([]byte, []byte, error)
 	Dispose() uint64 // Safe for repeated call, doesn't return error - means defer-friendly
+	Wait() error     // join point for async providers
 }
 
 type fileDataProvider struct {
 	file       *os.File
 	reader     io.Reader
 	byteReader io.ByteReader // Different interface to the same object as reader
+	wg         *errgroup.Group
 }
 
 // FlushToDisk - `doFsync` is true only for 'critical' collectors (which should not loose).
@@ -43,35 +46,39 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl lo
 		return nil, nil
 	}
 
-	// if we are going to create files in the system temp dir, we don't need any
-	// subfolders.
-	if tmpdir != "" {
-		if err := os.MkdirAll(tmpdir, 0755); err != nil {
-			return nil, err
+	provider := &fileDataProvider{reader: nil, wg: &errgroup.Group{}}
+	provider.wg.Go(func() error {
+		// if we are going to create files in the system temp dir, we don't need any
+		// subfolders.
+		if tmpdir != "" {
+			if err := os.MkdirAll(tmpdir, 0755); err != nil {
+				return err
+			}
 		}
-	}
 
-	bufferFile, err := os.CreateTemp(tmpdir, "erigon-sortable-buf-")
-	if err != nil {
-		return nil, err
-	}
-	if doFsync {
-		defer bufferFile.Sync() //nolint:errcheck
-	}
+		bufferFile, err := os.CreateTemp(tmpdir, "erigon-sortable-buf-")
+		if err != nil {
+			return err
+		}
+		provider.file = bufferFile
 
-	w := bufio.NewWriterSize(bufferFile, BufIOSize)
-	defer w.Flush() //nolint:errcheck
+		b.Sort()
 
-	defer func() {
-		b.Reset() // run it after buf.flush and file.sync
+		if doFsync {
+			defer bufferFile.Sync() //nolint:errcheck
+		}
+
+		w := bufio.NewWriterSize(bufferFile, BufIOSize)
+		defer w.Flush() //nolint:errcheck
+
+		if err = b.Write(w); err != nil {
+			return fmt.Errorf("error writing entries to disk: %w", err)
+		}
 		log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", bufferFile.Name())
-	}()
+		return nil
+	})
 
-	if err = b.Write(w); err != nil {
-		return nil, fmt.Errorf("error writing entries to disk: %w", err)
-	}
-
-	return &fileDataProvider{file: bufferFile, reader: nil}, nil
+	return provider, nil
 }
 
 func (p *fileDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {
@@ -88,6 +95,7 @@ func (p *fileDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {
 	return readElementFromDisk(p.reader, p.byteReader, keyBuf, valBuf)
 }
 
+func (p *fileDataProvider) Wait() error { return p.wg.Wait() }
 func (p *fileDataProvider) Dispose() uint64 {
 	info, _ := os.Stat(p.file.Name())
 	_ = p.file.Close()
@@ -161,6 +169,7 @@ func (p *memoryDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error)
 	return key, value, nil
 }
 
+func (p *memoryDataProvider) Wait() error { return nil }
 func (p *memoryDataProvider) Dispose() uint64 {
 	return 0 /* doesn't take space on disk */
 }

@@ -299,9 +299,7 @@ func (a *AggregatorV3) SetCompressWorkers(i int) {
 func (a *AggregatorV3) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *AggregatorV3) BackgroundProgress() string    { return a.ps.String() }
 
-func (a *AggregatorV3) Files() (res []string) {
-	ac := a.MakeContext()
-	defer ac.Close()
+func (ac *AggregatorV3Context) Files() (res []string) {
 	res = append(res, ac.accounts.Files()...)
 	res = append(res, ac.storage.Files()...)
 	res = append(res, ac.code.Files()...)
@@ -843,32 +841,33 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (a *AggregatorV3Context) maxTxNumInFiles(cold bool) uint64 {
+func (ac *AggregatorV3Context) maxTxNumInFiles(cold bool) uint64 {
 	return cmp.Min(
 		cmp.Min(
 			cmp.Min(
-				a.accounts.maxTxNumInFiles(cold),
-				a.code.maxTxNumInFiles(cold)),
+				ac.accounts.maxTxNumInFiles(cold),
+				ac.code.maxTxNumInFiles(cold)),
 			cmp.Min(
-				a.storage.maxTxNumInFiles(cold),
-				a.commitment.maxTxNumInFiles(cold)),
+				ac.storage.maxTxNumInFiles(cold),
+				ac.commitment.maxTxNumInFiles(cold)),
 		),
 		cmp.Min(
 			cmp.Min(
-				a.logAddrs.maxTxNumInFiles(cold),
-				a.logTopics.maxTxNumInFiles(cold)),
+				ac.logAddrs.maxTxNumInFiles(cold),
+				ac.logTopics.maxTxNumInFiles(cold)),
 			cmp.Min(
-				a.tracesFrom.maxTxNumInFiles(cold),
-				a.tracesTo.maxTxNumInFiles(cold)),
+				ac.tracesFrom.maxTxNumInFiles(cold),
+				ac.tracesTo.maxTxNumInFiles(cold)),
 		),
 	)
 }
-func (a *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
-	return a.CanPruneFrom(tx) < a.maxTxNumInFiles(false)
+func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
+	//fmt.Printf("can prune: from=%d < current=%d, keep=%d\n", ac.CanPruneFrom(tx)/ac.a.aggregationStep, ac.maxTxNumInFiles(false)/ac.a.aggregationStep, ac.a.keepInDB)
+	return ac.CanPruneFrom(tx) < ac.maxTxNumInFiles(false)
 }
-func (a *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, a.a.tracesTo.indexKeysTable)
-	fst2, _ := kv.FirstKey(tx, a.a.storage.History.indexKeysTable)
+func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
+	fst, _ := kv.FirstKey(tx, ac.a.tracesTo.indexKeysTable)
+	fst2, _ := kv.FirstKey(tx, ac.a.storage.History.indexKeysTable)
 	if len(fst) > 0 && len(fst2) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
 		fstInDb2 := binary.BigEndian.Uint64(fst2)
@@ -877,10 +876,10 @@ func (a *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
 	return math2.MaxUint64
 }
 
-func (a *AggregatorV3Context) PruneWithTiemout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
+func (ac *AggregatorV3Context) PruneWithTiemout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
 	t := time.Now()
-	for a.CanPrune(tx) && time.Since(t) < timeout {
-		if err := a.a.Prune(ctx, 0.01); err != nil { // prune part of retired data, before commit
+	for ac.CanPrune(tx) && time.Since(t) < timeout {
+		if err := ac.a.Prune(ctx, 0.01); err != nil { // prune part of retired data, before commit
 			return err
 		}
 	}
@@ -958,29 +957,27 @@ func (a *AggregatorV3) prune(ctx context.Context, txFrom, txTo, limit uint64) er
 	return nil
 }
 
-func (a *AggregatorV3) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) uint64) {
-	if a.minimaxTxNumInFiles.Load() == 0 {
+func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) uint64) {
+	if ac.a.minimaxTxNumInFiles.Load() == 0 {
 		return
 	}
-	ac := a.MakeContext()
-	defer ac.Close()
 
 	histBlockNumProgress := tx2block(ac.maxTxNumInFiles(false))
 	str := make([]string, 0, len(ac.accounts.files))
 	for _, item := range ac.accounts.files {
 		bn := tx2block(item.endTxNum)
-		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/a.aggregationStep, bn/1_000))
+		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/ac.a.aggregationStep, bn/1_000))
 	}
 
-	firstHistoryIndexBlockInDB := tx2block(a.accounts.FirstStepInDB(tx) * a.aggregationStep)
-
+	firstHistoryIndexBlockInDB := tx2block(ac.a.accounts.FirstStepInDB(tx) * ac.a.aggregationStep)
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	log.Info("[snapshots] History Stat",
 		"blocks", fmt.Sprintf("%dk", (histBlockNumProgress+1)/1000),
-		"txs", fmt.Sprintf("%dm", a.minimaxTxNumInFiles.Load()/1_000_000),
+		"txs", fmt.Sprintf("%dm", ac.a.minimaxTxNumInFiles.Load()/1_000_000),
 		"txNum2blockNum", strings.Join(str, ","),
 		"first_history_idx_in_db", firstHistoryIndexBlockInDB,
+		//"used_files", strings.Join(ac.Files(), ","),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
@@ -1250,12 +1247,11 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 
 	var predicates sync.WaitGroup
 	if r.accounts.any() {
-		predicates.Add(1)
-
 		log.Info(fmt.Sprintf("[snapshots] merge: %s", r.String()))
+		predicates.Add(1)
 		g.Go(func() (err error) {
+			defer predicates.Done()
 			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, workers, ac.a.ps)
-			predicates.Done()
 			return err
 		})
 	}
@@ -1263,8 +1259,8 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if r.storage.any() {
 		predicates.Add(1)
 		g.Go(func() (err error) {
+			defer predicates.Done()
 			mf.storage, mf.storageIdx, mf.storageHist, err = ac.a.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, workers, ac.a.ps)
-			predicates.Done()
 			return err
 		})
 	}

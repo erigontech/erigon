@@ -175,7 +175,6 @@ type Domain struct {
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
 	roFiles   atomic.Pointer[[]ctxItem]
-	defaultDc *DomainContext
 	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
 	valsTable string // key + invertedStep -> values
 	stats     DomainStats
@@ -225,27 +224,21 @@ func (d *Domain) FirstStepInDB(tx kv.Tx) (lstInDb uint64) {
 
 func (d *Domain) DiscardHistory() {
 	d.History.DiscardHistory()
-	d.defaultDc = d.MakeContext()
 	// can't discard domain wal - it required, but can discard history
 	d.wal = d.newWriter(d.tmpdir, true, false)
 }
 
 func (d *Domain) StartUnbufferedWrites() {
-	d.defaultDc = d.MakeContext()
 	d.wal = d.newWriter(d.tmpdir, false, false)
 	d.History.StartUnbufferedWrites()
 }
 
 func (d *Domain) StartWrites() {
-	d.defaultDc = d.MakeContext()
 	d.wal = d.newWriter(d.tmpdir, true, false)
 	d.History.StartWrites()
 }
 
 func (d *Domain) FinishWrites() {
-	if d.defaultDc != nil {
-		d.defaultDc.Close()
-	}
 	if d.wal != nil {
 		d.wal.close()
 		d.wal = nil
@@ -493,10 +486,12 @@ func (d *Domain) put(key, val []byte) error {
 // Deprecated
 func (d *Domain) Put(key1, key2, val []byte) error {
 	key := common.Append(key1, key2)
-	original, _, err := d.defaultDc.getLatest(key, d.tx)
+	dc := d.MakeContext()
+	original, _, err := dc.getLatest(key, d.tx)
 	if err != nil {
 		return err
 	}
+	dc.Close()
 	if bytes.Equal(original, val) {
 		return nil
 	}
@@ -510,7 +505,9 @@ func (d *Domain) Put(key1, key2, val []byte) error {
 // Deprecated
 func (d *Domain) Delete(key1, key2 []byte) error {
 	key := common.Append(key1, key2)
-	original, found, err := d.defaultDc.getLatest(key, d.tx)
+	dc := d.MakeContext()
+	original, found, err := dc.getLatest(key, d.tx)
+	dc.Close()
 	if err != nil {
 		return err
 	}
@@ -935,6 +932,10 @@ func (sf StaticFiles) CleanupOnError() {
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
+	if d.filenameBase == "commitment" {
+		log.Warn("[dbg] buildFiles", "step", step, "txNum", step*d.aggregationStep)
+	}
+
 	start := time.Now()
 	defer func() {
 		d.stats.LastFileBuildingTook = time.Since(start)
@@ -1253,11 +1254,28 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 	return nil
 }
 
+func (d *Domain) canPrune(tx kv.Tx) bool {
+	dc := d.MakeContext()
+	defer dc.Close()
+	return d.canPruneFrom(tx) < dc.maxTxNumInFiles(false)
+}
+func (d *Domain) canPruneFrom(tx kv.Tx) uint64 {
+	fst, _ := kv.FirstKey(tx, d.indexKeysTable)
+	if len(fst) > 0 {
+		return binary.BigEndian.Uint64(fst)
+	}
+	return math.MaxUint64
+}
+
 // history prunes keys in range [txFrom; txTo), domain prunes whole step.
 func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+	if !d.canPrune(d.tx) {
+		return nil
+	}
+
 	mxPruneTook.Update(d.stats.LastPruneTook.Seconds())
-	if d.filenameBase == "accounts" {
-		log.Warn("[dbg] prune", "step", step)
+	if d.filenameBase == "commitment" {
+		log.Warn("[dbg] prune", "step", step, "txNum", step*d.aggregationStep)
 	}
 	keysCursorForDeletes, err := d.tx.RwCursorDupSort(d.keysTable)
 	if err != nil {
@@ -1432,8 +1450,6 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 }
 
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
-	dc.d.stats.FilesQueries.Add(1)
-
 	if v, found, err = dc.getLatestFromWarmFiles(filekey); err != nil {
 		return nil, false, err
 	} else if found {
@@ -1467,6 +1483,7 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 			continue
 		}
 
+		//dc.d.stats.FilesQuerie.Add(1)
 		dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
 		if err != nil {
 			return nil, false, err
@@ -1493,12 +1510,14 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 	}
 	if firstWarmIndexedTxNum > lastColdIndexedTxNum {
 		if firstWarmIndexedTxNum/dc.d.aggregationStep-lastColdIndexedTxNum/dc.d.aggregationStep > 0 && dc.d.withLocalityIndex {
-			log.Warn("[dbg] gap between warm and cold locality", "cold", lastColdIndexedTxNum/dc.d.aggregationStep, "warm", firstWarmIndexedTxNum/dc.d.aggregationStep, "nil", dc.hc.ic.coldLocality == nil, "name", dc.d.filenameBase)
-			if dc.hc.ic.coldLocality != nil && dc.hc.ic.coldLocality.file != nil {
-				log.Warn("[dbg] gap", "cold_f", dc.hc.ic.coldLocality.file.src.bm.FileName())
-			}
-			if dc.hc.ic.warmLocality != nil && dc.hc.ic.warmLocality.file != nil {
-				log.Warn("[dbg] gap", "warm_f", dc.hc.ic.warmLocality.file.src.bm.FileName())
+			if dc.d.filenameBase != "commitment" {
+				log.Warn("[dbg] gap between warm and cold locality", "cold", lastColdIndexedTxNum/dc.d.aggregationStep, "warm", firstWarmIndexedTxNum/dc.d.aggregationStep, "nil", dc.hc.ic.coldLocality == nil, "name", dc.d.filenameBase)
+				if dc.hc.ic.coldLocality != nil && dc.hc.ic.coldLocality.file != nil {
+					log.Warn("[dbg] gap", "cold_f", dc.hc.ic.coldLocality.file.src.bm.FileName())
+				}
+				if dc.hc.ic.warmLocality != nil && dc.hc.ic.warmLocality.file != nil {
+					log.Warn("[dbg] gap", "warm_f", dc.hc.ic.warmLocality.file.src.bm.FileName())
+				}
 			}
 		}
 
@@ -1508,6 +1527,7 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 				continue
 			}
 			var ok bool
+			//dc.d.stats.FilesQuerie.Add(1)
 			dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
 			if err != nil {
 				return nil, false, err
@@ -1529,6 +1549,7 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	if !ok {
 		return nil, false, nil
 	}
+	//dc.d.stats.FilesQuerie.Add(1)
 	dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
 	if err != nil {
 		return nil, false, err
@@ -1689,7 +1710,7 @@ func (dc *DomainContext) getBeforeTxNum(key []byte, fromTxNum uint64, roTx kv.Tx
 }
 
 func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
-	dc.d.stats.TotalQueries.Add(1)
+	//dc.d.stats.TotalQueries.Add(1)
 
 	foundInvStep, err := roTx.GetOne(dc.d.keysTable, key) // reads first DupSort value
 	if err != nil {
