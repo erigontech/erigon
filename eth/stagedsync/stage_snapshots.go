@@ -116,10 +116,15 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	cfg.agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-		return histBlockNumProgress
-	})
+	{
+		ac := cfg.agg.MakeContext()
+		defer ac.Close()
+		ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+			_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+			return histBlockNumProgress
+		})
+		ac.Close()
+	}
 
 	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.dbEventNotifier, &cfg.chainConfig); err != nil {
 		return err
@@ -267,9 +272,12 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					}
 				}
 			}
-			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
+			ac := agg.MakeContext()
+			defer ac.Close()
+			if err := rawdb.WriteSnapshots(tx, blockReader.Files(), ac.Files()); err != nil {
 				return err
 			}
+			ac.Close()
 		}
 	}
 	return nil
@@ -297,7 +305,12 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	if freezingCfg.Enabled && freezingCfg.Produce {
 		//TODO: initialSync maybe save files progress here
 		if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
-			if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), cfg.agg.Files()); err != nil {
+			ac := cfg.agg.MakeContext()
+			defer ac.Close()
+			aggFiles := ac.Files()
+			ac.Close()
+
+			if err := rawdb.WriteSnapshots(tx, cfg.blockReader.Files(), aggFiles); err != nil {
 				return err
 			}
 		}

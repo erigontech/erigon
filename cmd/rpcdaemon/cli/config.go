@@ -347,7 +347,9 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		_ = agg.OpenFolder()
 
 		db.View(context.Background(), func(tx kv.Tx) error {
-			agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+			ac := agg.MakeContext()
+			defer ac.Close()
+			ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 				return histBlockNumProgress
 			})
@@ -372,7 +374,9 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
 					db.View(context.Background(), func(tx kv.Tx) error {
-						agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+						ac := agg.MakeContext()
+						defer ac.Close()
+						ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 							_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 							return histBlockNumProgress
 						})

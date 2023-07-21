@@ -82,7 +82,7 @@ func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash commo
 func (back *RemoteBackend) TxsV3Enabled() bool                 { panic("not implemented") }
 func (back *RemoteBackend) Snapshots() services.BlockSnapshots { panic("not implemented") }
 func (back *RemoteBackend) FrozenBlocks() uint64               { return back.blockReader.FrozenBlocks() }
-func (back *RemoteBackend) FrozenFiles() (list []string)       { return back.blockReader.FrozenFiles() }
+func (back *RemoteBackend) Files() (list []string)             { return back.blockReader.Files() }
 func (back *RemoteBackend) FreezingCfg() ethconfig.BlocksFreezing {
 	return back.blockReader.FreezingCfg()
 }
