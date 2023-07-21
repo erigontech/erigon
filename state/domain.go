@@ -175,7 +175,6 @@ type Domain struct {
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
 	roFiles   atomic.Pointer[[]ctxItem]
-	defaultDc *DomainContext
 	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
 	valsTable string // key + invertedStep -> values
 	stats     DomainStats
@@ -225,27 +224,21 @@ func (d *Domain) FirstStepInDB(tx kv.Tx) (lstInDb uint64) {
 
 func (d *Domain) DiscardHistory() {
 	d.History.DiscardHistory()
-	d.defaultDc = d.MakeContext()
 	// can't discard domain wal - it required, but can discard history
 	d.wal = d.newWriter(d.tmpdir, true, false)
 }
 
 func (d *Domain) StartUnbufferedWrites() {
-	d.defaultDc = d.MakeContext()
 	d.wal = d.newWriter(d.tmpdir, false, false)
 	d.History.StartUnbufferedWrites()
 }
 
 func (d *Domain) StartWrites() {
-	d.defaultDc = d.MakeContext()
 	d.wal = d.newWriter(d.tmpdir, true, false)
 	d.History.StartWrites()
 }
 
 func (d *Domain) FinishWrites() {
-	if d.defaultDc != nil {
-		d.defaultDc.Close()
-	}
 	if d.wal != nil {
 		d.wal.close()
 		d.wal = nil
@@ -493,10 +486,12 @@ func (d *Domain) put(key, val []byte) error {
 // Deprecated
 func (d *Domain) Put(key1, key2, val []byte) error {
 	key := common.Append(key1, key2)
-	original, _, err := d.defaultDc.getLatest(key, d.tx)
+	dc := d.MakeContext()
+	original, _, err := dc.getLatest(key, d.tx)
 	if err != nil {
 		return err
 	}
+	dc.Close()
 	if bytes.Equal(original, val) {
 		return nil
 	}
@@ -510,7 +505,9 @@ func (d *Domain) Put(key1, key2, val []byte) error {
 // Deprecated
 func (d *Domain) Delete(key1, key2 []byte) error {
 	key := common.Append(key1, key2)
-	original, found, err := d.defaultDc.getLatest(key, d.tx)
+	dc := d.MakeContext()
+	original, found, err := dc.getLatest(key, d.tx)
+	dc.Close()
 	if err != nil {
 		return err
 	}
