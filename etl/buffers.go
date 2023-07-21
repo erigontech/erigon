@@ -49,6 +49,7 @@ type Buffer interface {
 	Len() int
 	Reset()
 	SizeLimit() int
+	Prealloc(predictKeysAmount, predictDataAmount int)
 	Write(io.Writer) error
 	Sort()
 	CheckFlushSize() bool
@@ -148,6 +149,12 @@ func (b *sortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
 	return keyBuf, valBuf
 }
 
+func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) {
+	b.lens = make([]int, 0, predictKeysAmount)
+	b.offsets = make([]int, 0, predictKeysAmount)
+	b.data = make([]byte, 0, predictDataSize)
+}
+
 func (b *sortableBuffer) Reset() {
 	b.offsets = b.offsets[:0]
 	b.lens = b.lens[:0]
@@ -238,6 +245,10 @@ func (b *appendSortableBuffer) Reset() {
 	b.sortedBuf = nil
 	b.entries = make(map[string][]byte)
 	b.size = 0
+}
+func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) {
+	b.entries = make(map[string][]byte, predictKeysAmount)
+	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount*2)
 }
 
 func (b *appendSortableBuffer) Write(w io.Writer) error {
@@ -331,6 +342,10 @@ func (b *oldestEntrySortableBuffer) Reset() {
 	b.sortedBuf = nil
 	b.entries = make(map[string][]byte)
 	b.size = 0
+}
+func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) {
+	b.entries = make(map[string][]byte, predictKeysAmount)
+	b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount*2)
 }
 
 func (b *oldestEntrySortableBuffer) Write(w io.Writer) error {

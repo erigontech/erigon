@@ -116,13 +116,16 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		provider = KeepInRAM(c.buf)
 		c.allFlushed = true
 	} else {
+		fullBuf := c.buf
+		c.buf = getBufferByType(c.bufType, datasize.ByteSize(c.buf.SizeLimit()))
+		c.buf.Prealloc(fullBuf.Len()/8, fullBuf.SizeLimit()/8)
+
 		doFsync := !c.autoClean /* is critical collector */
 		var err error
-		provider, err = FlushToDisk(c.logPrefix, c.buf, c.tmpdir, doFsync, c.logLvl)
+		provider, err = FlushToDisk(c.logPrefix, fullBuf, c.tmpdir, doFsync, c.logLvl)
 		if err != nil {
 			return err
 		}
-		c.buf = getBufferByType(c.bufType, datasize.ByteSize(c.buf.SizeLimit()))
 	}
 	if provider != nil {
 		c.dataProviders = append(c.dataProviders, provider)
