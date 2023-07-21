@@ -67,7 +67,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		latestBlockHeader:            &cltypes.BeaconBlockHeader{},
 		eth1Data:                     &cltypes.Eth1Data{},
 		eth1DataVotes:                solid.NewStaticListSSZ[*cltypes.Eth1Data](int(cfg.EpochsPerEth1VotingPeriod)*int(cfg.SlotsPerEpoch), 72),
-		historicalSummaries:          solid.NewStaticListSSZ[*cltypes.HistoricalSummary](int(b.beaconConfig.HistoricalRootsLimit), 64),
+		historicalSummaries:          solid.NewStaticListSSZ[*cltypes.HistoricalSummary](int(cfg.HistoricalRootsLimit), 64),
 		currentSyncCommittee:         &solid.SyncCommittee{},
 		nextSyncCommittee:            &solid.SyncCommittee{},
 		latestExecutionPayloadHeader: &cltypes.Eth1Header{},
