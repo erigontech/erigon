@@ -5,13 +5,16 @@ import (
 	"encoding/binary"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -117,6 +120,39 @@ func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, 
 
 // DumpBorEvents - [from, to)
 func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	from := hexutility.EncodeTs(blockFrom)
+	if err := kv.BigChunks(db, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
+		blockNum := binary.BigEndian.Uint64(blockNumBytes)
+		if blockNum >= blockTo {
+			return false, nil
+		}
+		event, e := tx.GetOne(kv.BorEvents, eventIdBytes)
+		if e != nil {
+			return false, e
+		}
+		if err := collect(event); err != nil {
+			return false, err
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-logEvery.C:
+			var m runtime.MemStats
+			if lvl >= log.LvlInfo {
+				dbg.ReadMemStats(&m)
+			}
+			logger.Log(lvl, "[snapshots] Dumping bor events", "block num", blockNum,
+				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
+			)
+		default:
+		}
+		return true, nil
+	}); err != nil {
+		return err
+	}
 	return nil
 }
 
