@@ -4,15 +4,15 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
 )
 
 // Case defines an interface for storage of dominoes. it should be thread safe
 type Case interface {
 	// Checkpoint should get the state at or before the slot selected
-	Checkpoint(ctx context.Context, slot uint64) (*state.BeaconState, error)
+	Checkpoint(ctx context.Context, slot uint64) (abstract.BeaconState, error)
 	// Dominos should get a block
 	Domino(ctx context.Context, slot uint64) (*cltypes.SignedBeaconBlock, error)
 }
@@ -58,7 +58,7 @@ type Run struct {
 	c Case
 	m machine.Interface
 
-	s *state.BeaconState
+	s abstract.BeaconState
 }
 
 // Reset will reset the domino stack to the nearest checkpoint
@@ -76,7 +76,7 @@ func (r *Run) Reset(ctx context.Context, slot uint64) (err error) {
 	return nil
 }
 
-func (r *Run) State() *state.BeaconState {
+func (r *Run) State() abstract.BeaconState {
 	return r.s
 }
 

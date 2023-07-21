@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -132,7 +133,7 @@ type Migrate struct {
 	Blocks []string `arg:"" name:"blocks" help:"blocks to migrate, in order" type:"path"`
 }
 
-func resolveState(source string, chain chainCfg) (*state.BeaconState, error) {
+func resolveState(source string, chain chainCfg) (abstract.BeaconState, error) {
 	beaconConfig, _, err := chain.configs()
 	if err != nil {
 		return nil, err
