@@ -2,6 +2,7 @@ package devnet
 
 import (
 	context "context"
+	"fmt"
 	"math/big"
 	"sync"
 
@@ -34,6 +35,20 @@ type NodeSelectorFunc func(ctx context.Context, node Node) bool
 
 func (f NodeSelectorFunc) Test(ctx context.Context, node Node) bool {
 	return f(ctx, node)
+}
+
+func HTTPHost(n Node) string {
+	if n, ok := n.(*node); ok {
+		host := n.nodeCfg.Http.HttpListenAddress
+
+		if host == "" {
+			host = "localhost"
+		}
+
+		return fmt.Sprintf("%s:%d", host, n.nodeCfg.Http.HttpPort)
+	}
+
+	return ""
 }
 
 type node struct {

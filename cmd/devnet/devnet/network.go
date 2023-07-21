@@ -51,16 +51,14 @@ func (nw *Network) ChainID() *big.Int {
 }
 
 // Start starts the process for multiple erigon nodes running on the dev chain
-func (nw *Network) Start(ctx *cli.Context) error {
+func (nw *Network) Start(ctx context.Context) error {
 
 	type configurable interface {
 		Configure(baseNode args.Node, nodeNumber int) (int, interface{}, error)
 	}
 
-	serviceContext := WithCliContext(context.Background(), ctx)
-
 	for _, service := range nw.Services {
-		if err := service.Start(serviceContext); err != nil {
+		if err := service.Start(ctx); err != nil {
 			nw.Stop()
 			return err
 		}
@@ -75,8 +73,10 @@ func (nw *Network) Start(ctx *cli.Context) error {
 		Snapshots:      nw.Snapshots,
 	}
 
-	metricsEnabled := ctx.Bool("metrics")
-	metricsNode := ctx.Int("metrics.node")
+	cliCtx := CliContext(ctx)
+
+	metricsEnabled := cliCtx.Bool("metrics")
+	metricsNode := cliCtx.Int("metrics.node")
 	nw.namedNodes = map[string]Node{}
 
 	for i, node := range nw.Nodes {
@@ -86,7 +86,7 @@ func (nw *Network) Start(ctx *cli.Context) error {
 
 			if metricsEnabled && metricsNode == i {
 				base.Metrics = true
-				base.MetricsPort = ctx.Int("metrics.port")
+				base.MetricsPort = cliCtx.Int("metrics.port")
 			}
 
 			nodePort, args, err := configurable.Configure(base, i)
@@ -104,7 +104,7 @@ func (nw *Network) Start(ctx *cli.Context) error {
 			nw.namedNodes[node.Name()] = node
 
 			for _, service := range nw.Services {
-				service.NodeCreated(node)
+				service.NodeCreated(ctx, node)
 			}
 		}
 	}
@@ -118,7 +118,7 @@ func (nw *Network) Start(ctx *cli.Context) error {
 		}
 
 		for _, service := range nw.Services {
-			service.NodeStarted(node)
+			service.NodeStarted(ctx, node)
 		}
 
 		// get the enode of the node
@@ -198,7 +198,7 @@ func (nw *Network) startNode(n Node) error {
 
 	node := n.(*node)
 
-	args, err := devnetutils.AsArgs(node.args)
+	args, err := args.AsArgs(node.args)
 
 	if err != nil {
 		return err
