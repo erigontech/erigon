@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -10,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -122,6 +124,16 @@ func BorSnapshotsPrune(s *PruneState, initialCycle bool, cfg BorSnapshotsCfg, ct
 		if err := cfg.borRetire.PruneAncientBlocks(tx, 100); err != nil {
 			return err
 		}
+	}
+	if freezingCfg.Enabled && freezingCfg.Produce {
+		cfg.borRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
+			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
+				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
