@@ -598,7 +598,7 @@ func blocksReadAhead(ctx context.Context, cfg *ExecuteBlockCfg, workers int, his
 					}
 				}
 
-				if err := blocksReadAheadFunc(gCtx, tx, cfg, bn+readAheadBlocks, false); err != nil {
+				if err := blocksReadAheadFunc(gCtx, tx, cfg, bn+readAheadBlocks, histV3); err != nil {
 					return err
 				}
 			}

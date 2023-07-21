@@ -183,9 +183,15 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
+
 		if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
 			return err
 		}
+
+		//applyTx.(*temporal.Tx).AggCtx().LogStats(applyTx, func(endTxNumMinimax uint64) uint64 {
+		//	_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(applyTx, endTxNumMinimax)
+		//	return histBlockNumProgress
+		//})
 
 		defer func() { // need callback - because tx may be committed
 			applyTx.Rollback()
@@ -553,11 +559,27 @@ func ExecV3(ctx context.Context,
 
 	stateStream := !initialCycle && cfg.stateStream && maxBlockNum-block < stateStreamLimit
 
+	var readAhead chan uint64
+	if !parallel {
+		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
+		// can't use OS-level ReadAhead - because Data >> RAM
+		// it also warmsup state a bit - by touching senders/coninbase accounts and code
+		var clean func()
+		readAhead, clean = blocksReadAhead(ctx, &cfg, 4, true)
+		defer clean()
+	}
+
 	var b *types.Block
 	var blockNum uint64
 	var err error
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
+		if !parallel {
+			select {
+			case readAhead <- blockNum:
+			default:
+			}
+		}
 		inputBlockNum.Store(blockNum)
 		doms.SetBlockNum(blockNum)
 
@@ -723,48 +745,37 @@ Loop:
 
 		// MA commitTx
 		if !parallel {
-			//if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
-			//	return err
-			//} else if !ok {
-			//	break Loop
-			//}
+			if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+				return err
+			} else if !ok {
+				break Loop
+			}
 
 			outputBlockNum.Set(blockNum)
+
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
-					//if applyTx.(*temporal.Tx).AggCtx().CanPrune(applyTx) {
-					//	if err = agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit
-					//		return err
-					//	}
-					//}
 					break
+				}
+
+				if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+					return err
 				}
 
 				var t1, t2, t3, t32, t4, t5, t6 time.Duration
 				commtitStart := time.Now()
+				tt := time.Now()
+				if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+					return err
+				} else if !ok {
+					break Loop
+				}
+				t1 = time.Since(tt)
+
 				if err := func() error {
-					if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
-						return err
-					}
-
-					tt := time.Now()
-					if applyTx.(*temporal.Tx).AggCtx().CanPrune(applyTx) {
-						if err = agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit
-							return err
-						}
-					}
-					t2 = time.Since(tt)
-
-					tt = time.Now()
-					_, err := agg.ComputeCommitment(true, false)
-					if err != nil {
-						return err
-					}
-					t1 = time.Since(tt)
-
 					tt = time.Now()
 					doms.ClearRam()
 					if err := agg.Flush(ctx, applyTx); err != nil {
@@ -794,6 +805,21 @@ Loop:
 							agg.BuildFilesInBackground(outputTxNum.Load())
 						}
 						t5 = time.Since(tt)
+
+						tt = time.Now()
+						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+							if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+								return err
+							}
+							if tx.(*temporal.Tx).AggCtx().CanPrune(tx) {
+								return agg.Prune(ctx, 100)
+							}
+							return nil
+						}); err != nil {
+							return err
+						}
+						t6 = time.Since(tt)
+
 						applyTx, err = cfg.db.BeginRw(context.Background())
 						if err != nil {
 							return err
@@ -804,6 +830,11 @@ Loop:
 
 						doms = agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 						doms.SetTx(applyTx)
+
+						//applyTx.(*temporal.Tx).AggCtx().LogStats(applyTx, func(endTxNumMinimax uint64) uint64 {
+						//	_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(applyTx, endTxNumMinimax)
+						//	return histBlockNumProgress
+						//})
 					}
 
 					return nil
@@ -912,7 +943,15 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 		}
 		defer tx.Rollback()
 	}
-	return blockReader.BlockByNumber(context.Background(), tx, blockNum)
+	b, err = blockReader.BlockByNumber(context.Background(), tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	txs := b.Transactions()
+	for i := range txs {
+		_ = txs[i].Hash()
+	}
+	return b, err
 }
 
 func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
