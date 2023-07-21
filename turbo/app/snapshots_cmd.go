@@ -574,7 +574,18 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}); err != nil {
 		return err
 	}
-	if _, err = agg.ComputeCommitment(true, false); err != nil {
+
+	if err = func() error {
+		ac := agg.MakeContext()
+		defer ac.Close()
+		sd := agg.SharedDomains(ac)
+		defer sd.Close()
+		defer agg.StartWrites().FinishWrites()
+		if _, err = agg.ComputeCommitment(true, false); err != nil {
+			return err
+		}
+		return err
+	}(); err != nil {
 		return err
 	}
 
