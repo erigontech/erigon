@@ -1250,12 +1250,11 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 
 	var predicates sync.WaitGroup
 	if r.accounts.any() {
-		predicates.Add(1)
-
 		log.Info(fmt.Sprintf("[snapshots] merge: %s", r.String()))
+		predicates.Add(1)
 		g.Go(func() (err error) {
+			defer predicates.Done()
 			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, workers, ac.a.ps)
-			predicates.Done()
 			return err
 		})
 	}
@@ -1263,8 +1262,8 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if r.storage.any() {
 		predicates.Add(1)
 		g.Go(func() (err error) {
+			defer predicates.Done()
 			mf.storage, mf.storageIdx, mf.storageHist, err = ac.a.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, workers, ac.a.ps)
-			predicates.Done()
 			return err
 		})
 	}
