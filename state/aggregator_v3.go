@@ -281,7 +281,7 @@ func (a *AggregatorV3) SharedDomains(ac *AggregatorV3Context) *SharedDomains {
 		a.domains = NewSharedDomains(a.accounts, a.code, a.storage, a.commitment)
 	}
 	a.domains.SetContext(ac)
-	a.domains.roTx = a.rwTx
+	a.domains.SetTx(a.rwTx)
 	return a.domains
 }
 
