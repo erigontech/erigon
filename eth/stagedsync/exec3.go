@@ -182,9 +182,15 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
+
 		if err := applyTx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
 			return err
 		}
+
+		//applyTx.(*temporal.Tx).AggCtx().LogStats(applyTx, func(endTxNumMinimax uint64) uint64 {
+		//	_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(applyTx, endTxNumMinimax)
+		//	return histBlockNumProgress
+		//})
 
 		defer func() { // need callback - because tx may be committed
 			applyTx.Rollback()
@@ -737,11 +743,11 @@ Loop:
 		}
 
 		if !parallel {
-			//if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
-			//	return err
-			//} else if !ok {
-			//	break Loop
-			//}
+			if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+				return err
+			} else if !ok {
+				break Loop
+			}
 
 			outputBlockNum.Set(blockNum)
 			select {
@@ -773,14 +779,6 @@ Loop:
 
 				if err := func() error {
 					tt = time.Now()
-					if applyTx.(*temporal.Tx).AggCtx().CanPrune(applyTx) {
-						if err = agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit
-							return err
-						}
-					}
-					t2 = time.Since(tt)
-
-					tt = time.Now()
 					doms.ClearRam()
 					if err := agg.Flush(ctx, applyTx); err != nil {
 						return err
@@ -809,6 +807,21 @@ Loop:
 							agg.BuildFilesInBackground(outputTxNum.Load())
 						}
 						t5 = time.Since(tt)
+
+						tt = time.Now()
+						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+							if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
+								return err
+							}
+							if tx.(*temporal.Tx).AggCtx().CanPrune(tx) {
+								return agg.Prune(ctx, 100)
+							}
+							return nil
+						}); err != nil {
+							return err
+						}
+						t6 = time.Since(tt)
+
 						applyTx, err = cfg.db.BeginRw(context.Background())
 						if err != nil {
 							return err
@@ -819,6 +832,11 @@ Loop:
 
 						doms = agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 						doms.SetTx(applyTx)
+
+						//applyTx.(*temporal.Tx).AggCtx().LogStats(applyTx, func(endTxNumMinimax uint64) uint64 {
+						//	_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(applyTx, endTxNumMinimax)
+						//	return histBlockNumProgress
+						//})
 					}
 
 					return nil
