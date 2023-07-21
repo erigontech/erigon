@@ -27,7 +27,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		return fmt.Errorf("justified checkpoint state not accessible")
 	}
 	// Verify validity of slashings
-	valid, err := state.IsValidIndexedAttestation(s.BeaconState, attestation1)
+	valid, err := state.IsValidIndexedAttestation(s, attestation1)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 1 validity: %v", err)
 	}
@@ -35,7 +35,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		return fmt.Errorf("invalid indexed attestation 1")
 	}
 
-	valid, err = state.IsValidIndexedAttestation(s.BeaconState, attestation2)
+	valid, err = state.IsValidIndexedAttestation(s, attestation2)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 2 validity: %v", err)
 	}

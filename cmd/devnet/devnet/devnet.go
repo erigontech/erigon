@@ -27,12 +27,14 @@ func (d Devnet) Start(ctx *cli.Context, logger log.Logger) (Context, error) {
 
 	errors := make(chan error, len(d))
 
+	runCtx := WithDevnet(context.Background(), ctx, d, logger)
+
 	for _, network := range d {
 		wg.Add(1)
 
 		go func(nw *Network) {
 			defer wg.Done()
-			errors <- nw.Start(ctx)
+			errors <- nw.Start(runCtx)
 		}(network)
 	}
 
@@ -46,8 +48,6 @@ func (d Devnet) Start(ctx *cli.Context, logger log.Logger) (Context, error) {
 			return devnetContext{context.Background()}, err
 		}
 	}
-
-	runCtx := WithDevnet(context.Background(), ctx, d, logger)
 
 	return runCtx, nil
 }
@@ -89,7 +89,7 @@ func (d Devnet) SelectNetwork(ctx context.Context, selector interface{}) *Networ
 			return d[selector]
 		}
 	case string:
-		if exp, err := regexp.Compile(selector); err == nil {
+		if exp, err := regexp.Compile("^" + selector); err == nil {
 			for _, network := range d {
 				if exp.MatchString(network.Chain) {
 					return network

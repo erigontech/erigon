@@ -18,9 +18,17 @@ func init() {
 	)
 }
 
-var (
-	Subscriptions *map[requests.SubMethod]*Subscription
-)
+var subscriptions map[string]map[requests.SubMethod]*Subscription
+
+func GetSubscription(chainName string, method requests.SubMethod) *Subscription {
+	if methods, ok := subscriptions[chainName]; ok {
+		if subscription, ok := methods[method]; ok {
+			return subscription
+		}
+	}
+
+	return nil
+}
 
 // Subscription houses the client subscription, name and channel for its delivery
 type Subscription struct {
@@ -42,7 +50,7 @@ func InitSubscriptions(ctx context.Context, methods []requests.SubMethod) {
 	logger := devnet.Logger(ctx)
 
 	logger.Trace("CONNECTING TO WEBSOCKETS AND SUBSCRIBING TO METHODS...")
-	if err := subscribeAll(methods, logger); err != nil {
+	if err := subscribeAll(ctx, methods); err != nil {
 		logger.Error("failed to subscribe to all methods", "error", err)
 		return
 	}
@@ -65,12 +73,14 @@ func subscribe(client *rpc.Client, method requests.SubMethod, args ...interface{
 	}
 
 	methodSub.ClientSub = sub
+	methodSub.Client = client
 
 	return methodSub, nil
 }
 
-func subscribeToMethod(method requests.SubMethod, logger log.Logger) (*Subscription, error) {
-	client, err := rpc.DialWebsocket(context.Background(), "ws://localhost:8545", "", logger)
+func subscribeToMethod(target string, method requests.SubMethod, logger log.Logger) (*Subscription, error) {
+	client, err := rpc.DialWebsocket(context.Background(), "ws://"+target, "", logger)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial websocket: %v", err)
 	}
@@ -80,37 +90,44 @@ func subscribeToMethod(method requests.SubMethod, logger log.Logger) (*Subscript
 		return nil, fmt.Errorf("error subscribing to method: %v", err)
 	}
 
-	sub.Client = client
-
 	return sub, nil
 }
 
 // UnsubscribeAll closes all the client subscriptions and empties their global subscription channel
 func UnsubscribeAll() {
-	if Subscriptions == nil {
+	if subscriptions == nil {
 		return
 	}
-	for _, methodSub := range *Subscriptions {
-		if methodSub != nil {
-			methodSub.ClientSub.Unsubscribe()
-			for len(methodSub.SubChan) > 0 {
-				<-methodSub.SubChan
+
+	for _, methods := range subscriptions {
+
+		for _, methodSub := range methods {
+			if methodSub != nil {
+				methodSub.ClientSub.Unsubscribe()
+				for len(methodSub.SubChan) > 0 {
+					<-methodSub.SubChan
+				}
+				methodSub.SubChan = nil // avoid memory leak
 			}
-			methodSub.SubChan = nil // avoid memory leak
 		}
 	}
 }
 
 // subscribeAll subscribes to the range of methods provided
-func subscribeAll(methods []requests.SubMethod, logger log.Logger) error {
-	m := make(map[requests.SubMethod]*Subscription)
-	Subscriptions = &m
-	for _, method := range methods {
-		sub, err := subscribeToMethod(method, logger)
-		if err != nil {
-			return err
+func subscribeAll(ctx context.Context, methods []requests.SubMethod) error {
+	subscriptions = map[string]map[requests.SubMethod]*Subscription{}
+	logger := devnet.Logger(ctx)
+
+	for _, network := range devnet.Networks(ctx) {
+		subscriptions[network.Chain] = map[requests.SubMethod]*Subscription{}
+
+		for _, method := range methods {
+			sub, err := subscribeToMethod(devnet.HTTPHost(network.Nodes[0]), method, logger)
+			if err != nil {
+				return err
+			}
+			subscriptions[network.Chain][method] = sub
 		}
-		(*Subscriptions)[method] = sub
 	}
 
 	return nil

@@ -31,9 +31,6 @@ func init() {
 func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommon.Hash, error) {
 	logger := devnet.Logger(ctx)
 
-	// hashset to hold hashes for search after mining
-	hashes := make(map[libcommon.Hash]bool)
-
 	node := devnet.SelectNode(ctx)
 
 	deployerAddress := libcommon.HexToAddress(deployer)
@@ -48,8 +45,6 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 
 	hash := tx.Hash()
 
-	hashes[hash] = true
-
 	eventHash, err := EmitFallbackEvent(node, subscriptionContract, transactOpts, logger)
 
 	if err != nil {
@@ -57,17 +52,15 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 		return nil, err
 	}
 
-	hashes[eventHash] = true
-
-	txToBlockMap, err := transactions.SearchReservesForTransactionHash(hashes, logger)
+	txToBlockMap, err := transactions.AwaitTransactions(ctx, hash, eventHash)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to call contract tx: %v", err)
 	}
 
-	blockNum := (*txToBlockMap)[eventHash]
+	blockNum, _ := (&big.Int{}).SetString(txToBlockMap[eventHash], 16)
 
-	block, err := node.GetBlockByNumber(devnetutils.HexToInt(blockNum), true)
+	block, err := node.GetBlockByNumber(blockNum.Uint64(), true)
 
 	if err != nil {
 		return nil, err
@@ -75,7 +68,7 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 
 	logs, err := node.FilterLogs(ctx, ethereum.FilterQuery{
 		FromBlock: big.NewInt(0),
-		ToBlock:   big.NewInt(20),
+		ToBlock:   blockNum,
 		Addresses: []libcommon.Address{address}})
 
 	if err != nil || len(logs) == 0 {
@@ -83,7 +76,7 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 	}
 
 	// compare the log events
-	errs, ok := requests.Compare(requests.NewLog(eventHash, blockNum, address,
+	errs, ok := requests.Compare(requests.NewLog(eventHash, blockNum.Uint64(), address,
 		devnetutils.GenerateTopic("SubscriptionEvent()"), hexutility.Bytes{}, 1,
 		block.Result.Hash, hexutil.Uint(0), false), logs[0])
 

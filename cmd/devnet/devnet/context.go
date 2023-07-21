@@ -2,6 +2,7 @@ package devnet
 
 import (
 	context "context"
+	"math/big"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -82,6 +83,10 @@ func WithCurrentNetwork(ctx context.Context, selector interface{}) Context {
 }
 
 func WithCurrentNode(ctx context.Context, selector interface{}) Context {
+	if node, ok := selector.(Node); ok {
+		return devnetContext{context.WithValue(ctx, ckNode, &cnode{node: node})}
+	}
+
 	return devnetContext{context.WithValue(ctx, ckNode, &cnode{selector: selector})}
 }
 
@@ -93,6 +98,30 @@ func CliContext(ctx context.Context) *cli.Context {
 	return ctx.Value(ckCliContext).(*cli.Context)
 }
 
+func CurrentChainID(ctx context.Context) *big.Int {
+	if network := CurrentNetwork(ctx); network != nil {
+		return network.ChainID()
+	}
+
+	return &big.Int{}
+}
+
+func CurrentChainName(ctx context.Context) string {
+	if network := CurrentNetwork(ctx); network != nil {
+		return network.Chain
+	}
+
+	return ""
+}
+
+func Networks(ctx context.Context) []*Network {
+	if devnet, ok := ctx.Value(ckDevnet).(Devnet); ok {
+		return devnet
+	}
+
+	return nil
+}
+
 func CurrentNetwork(ctx context.Context) *Network {
 	if cn, ok := ctx.Value(ckNetwork).(*cnet); ok {
 		if cn.network == nil {
@@ -102,6 +131,12 @@ func CurrentNetwork(ctx context.Context) *Network {
 		}
 
 		return cn.network
+	}
+
+	if current := CurrentNode(ctx); current != nil {
+		if n, ok := current.(*node); ok {
+			return n.network
+		}
 	}
 
 	return nil

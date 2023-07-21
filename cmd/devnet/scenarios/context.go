@@ -3,6 +3,14 @@ package scenarios
 import (
 	"context"
 	"sync"
+
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
+)
+
+type ctxKey int
+
+const (
+	ckParams ctxKey = iota
 )
 
 func stepRunners(ctx context.Context) []*stepRunner {
@@ -102,4 +110,39 @@ func JoinContexts(ctx context.Context, others ...context.Context) context.Contex
 	}
 
 	return join
+}
+
+type Context interface {
+	devnet.Context
+	WithParam(name string, value interface{}) Context
+}
+
+type scenarioContext struct {
+	devnet.Context
+}
+
+func (c scenarioContext) WithParam(name string, value interface{}) Context {
+	return WithParam(c, name, value)
+}
+
+type Params map[string]interface{}
+
+func WithParam(ctx context.Context, name string, value interface{}) Context {
+	if params, ok := ctx.Value(ckParams).(Params); ok {
+		params[name] = value
+	}
+
+	ctx = context.WithValue(ctx, ckParams, Params{name: value})
+	return scenarioContext{devnet.AsContext(ctx)}
+}
+
+func Param[P any](ctx context.Context, name string) (P, bool) {
+	if params, ok := ctx.Value(ckParams).(Params); ok {
+		if param, ok := params[name]; ok {
+			return param.(P), true
+		}
+	}
+
+	var p P
+	return p, false
 }

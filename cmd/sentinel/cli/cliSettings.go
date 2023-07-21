@@ -52,7 +52,7 @@ type ConsensusClientCliCfg struct {
 	EngineAPIPort         int           `json:"engine_api_port"`
 	JwtSecret             []byte
 
-	InitalState *state.BeaconState
+	InitalState *state.CachingBeaconState
 }
 
 func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {

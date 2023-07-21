@@ -1,19 +1,20 @@
 package statechange
 
 import (
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
-func processSlashings(s *state.BeaconState, slashingMultiplier uint64) error {
+func processSlashings(s abstract.BeaconState, slashingMultiplier uint64) error {
 	// Get the current epoch
-	epoch := state.Epoch(s.BeaconState)
+	epoch := state.Epoch(s)
 	// Get the total active balance
 	totalBalance := s.GetTotalActiveBalance()
 	// Calculate the total slashing amount
 	// by summing all slashings and multiplying by the provided multiplier
-	slashing := state.GetTotalSlashingAmount(s.BeaconState) * slashingMultiplier
+	slashing := state.GetTotalSlashingAmount(s) * slashingMultiplier
 	// Adjust the total slashing amount to be no greater than the total active balance
 	if totalBalance < slashing {
 		slashing = totalBalance
@@ -32,7 +33,7 @@ func processSlashings(s *state.BeaconState, slashingMultiplier uint64) error {
 		// Calculate the penalty by dividing the penalty numerator by the total balance and multiplying by the increment
 		penalty := penaltyNumerator / totalBalance * increment
 		// Decrease the validator's balance by the calculated penalty
-		if err = state.DecreaseBalance(s.BeaconState, uint64(i), penalty); err != nil {
+		if err = state.DecreaseBalance(s, uint64(i), penalty); err != nil {
 			return false
 		}
 		return true
@@ -43,14 +44,14 @@ func processSlashings(s *state.BeaconState, slashingMultiplier uint64) error {
 	return nil
 }
 
-func processSlashings2(s *state.BeaconState, slashingMultiplier uint64) error {
+func processSlashings2(s abstract.BeaconState, slashingMultiplier uint64) error {
 	// Get the current epoch
-	epoch := state.Epoch(s.BeaconState)
+	epoch := state.Epoch(s)
 	// Get the total active balance
 	totalBalance := s.GetTotalActiveBalance()
 	// Calculate the total slashing amount
 	// by summing all slashings and multiplying by the provided multiplier
-	slashing := state.GetTotalSlashingAmount(s.BeaconState) * slashingMultiplier
+	slashing := state.GetTotalSlashingAmount(s) * slashingMultiplier
 	// Adjust the total slashing amount to be no greater than the total active balance
 	if totalBalance < slashing {
 		slashing = totalBalance
@@ -69,7 +70,7 @@ func processSlashings2(s *state.BeaconState, slashingMultiplier uint64) error {
 		// Calculate the penalty by dividing the penalty numerator by the total balance and multiplying by the increment
 		penalty := penaltyNumerator / totalBalance * increment
 		// Decrease the validator's balance by the calculated penalty
-		if err = state.DecreaseBalance(s.BeaconState, uint64(i), penalty); err != nil {
+		if err = state.DecreaseBalance(s, uint64(i), penalty); err != nil {
 			return false
 		}
 		return true
@@ -80,7 +81,7 @@ func processSlashings2(s *state.BeaconState, slashingMultiplier uint64) error {
 	return nil
 }
 
-func ProcessSlashings(state *state.BeaconState) error {
+func ProcessSlashings(state abstract.BeaconState) error {
 	// Depending on the version of the state, use different multipliers
 	switch state.Version() {
 	case clparams.Phase0Version:

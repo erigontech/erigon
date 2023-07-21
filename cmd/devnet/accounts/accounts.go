@@ -17,7 +17,9 @@ type Account struct {
 }
 
 func init() {
-	core.DevnetSignKey = SigKey
+	core.DevnetSignKey = func(addr libcommon.Address) *ecdsa.PrivateKey {
+		return SigKey(addr)
+	}
 }
 
 var accountsByAddress = map[libcommon.Address]*Account{}
@@ -42,13 +44,32 @@ func NewAccount(name string) *Account {
 	return account
 }
 
-func SigKey(address libcommon.Address) *ecdsa.PrivateKey {
-	if account, ok := accountsByAddress[address]; ok {
-		return account.sigKey
+func GetAccount(account string) *Account {
+	if account, ok := accountsByName[account]; ok {
+		return account
 	}
 
-	if address == core.DevnetEtherbase {
-		return core.DevnetSignPrivateKey
+	if account, ok := accountsByAddress[libcommon.HexToAddress(account)]; ok {
+		return account
+	}
+
+	return nil
+}
+
+func SigKey(source interface{}) *ecdsa.PrivateKey {
+	switch source := source.(type) {
+	case libcommon.Address:
+		if account, ok := accountsByAddress[source]; ok {
+			return account.sigKey
+		}
+
+		if source == core.DevnetEtherbase {
+			return core.DevnetSignPrivateKey
+		}
+	case string:
+		if account := GetAccount(source); account != nil {
+			return account.sigKey
+		}
 	}
 
 	return nil
