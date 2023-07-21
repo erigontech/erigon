@@ -625,7 +625,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	fmt.Printf("a: %d, %d, %d\n", estimate.CompressSnapshot.Workers(), estimate.IndexSnapshot.Workers(), estimate.AlmostAllCPUs())
 	if err = agg.MergeLoop(ctx, estimate.AlmostAllCPUs()); err != nil {
 		return err
 	}
