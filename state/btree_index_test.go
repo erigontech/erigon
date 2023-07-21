@@ -208,7 +208,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 }
 
 func TestBpsTree_Seek(t *testing.T) {
-	keyCount, M := 120, 8
+	keyCount, M := 1200, 16
 	tmp := t.TempDir()
 
 	logger := log.New()
@@ -231,7 +231,7 @@ func TestBpsTree_Seek(t *testing.T) {
 		k, _ := g.Next(nil)
 		_, p = g.Next(nil)
 		keys = append(keys, k)
-		fmt.Printf("%2d k=%x, p=%v\n", i, k, p)
+		//fmt.Printf("%2d k=%x, p=%v\n", i, k, p)
 		i++
 	}
 
