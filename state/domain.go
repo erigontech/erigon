@@ -1429,8 +1429,6 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 }
 
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
-	dc.d.stats.FilesQueries.Add(1)
-
 	if v, found, err = dc.getLatestFromWarmFiles(filekey); err != nil {
 		return nil, false, err
 	} else if found {
@@ -1464,6 +1462,7 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 			continue
 		}
 
+		//dc.d.stats.FilesQuerie.Add(1)
 		dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
 		if err != nil {
 			return nil, false, err
@@ -1505,6 +1504,7 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 				continue
 			}
 			var ok bool
+			//dc.d.stats.FilesQuerie.Add(1)
 			dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
 			if err != nil {
 				return nil, false, err
@@ -1526,6 +1526,7 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	if !ok {
 		return nil, false, nil
 	}
+	//dc.d.stats.FilesQuerie.Add(1)
 	dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
 	if err != nil {
 		return nil, false, err
@@ -1686,7 +1687,7 @@ func (dc *DomainContext) getBeforeTxNum(key []byte, fromTxNum uint64, roTx kv.Tx
 }
 
 func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
-	dc.d.stats.TotalQueries.Add(1)
+	//dc.d.stats.TotalQueries.Add(1)
 
 	foundInvStep, err := roTx.GetOne(dc.d.keysTable, key) // reads first DupSort value
 	if err != nil {
