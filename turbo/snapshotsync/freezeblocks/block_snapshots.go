@@ -851,6 +851,10 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 		if err := TransactionsIdx(ctx, chainConfig, sn.From, sn.To, dir, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
+	case snaptype.BorEvents:
+		if err := BorEventsIdx(ctx, sn.Path, sn.From, tmpDir, p, lvl, logger); err != nil {
+			return err
+		}
 	}
 	return nil
 }

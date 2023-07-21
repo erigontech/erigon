@@ -69,6 +69,7 @@ type FullBlockReader interface {
 	CanonicalReader
 
 	FrozenBlocks() uint64
+	FrozenBorBlocks() uint64
 	FrozenFiles() (list []string)
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
@@ -84,6 +85,14 @@ type BlockSnapshots interface {
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
+	PruneAncientBlocks(tx kv.RwTx, limit int) error
+	RetireBlocksInBackground(ctx context.Context, maxBlockNumInDB uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error)
+	HasNewFrozenFiles() bool
+	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
+}
+
+// BorRetire - freezing bor events and validator sets: moving old data from DB to snapshot files
+type BorRetire interface {
 	PruneAncientBlocks(tx kv.RwTx, limit int) error
 	RetireBlocksInBackground(ctx context.Context, maxBlockNumInDB uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error)
 	HasNewFrozenFiles() bool

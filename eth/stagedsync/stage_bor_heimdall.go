@@ -240,7 +240,7 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv
 			return err
 		}
 	}
-	for ; err == nil && k != nil; k, v, err = cursor.Next() {
+	for ; err == nil && k != nil; k, _, err = cursor.Next() {
 		if err = cursor.DeleteCurrent(); err != nil {
 			return err
 		}

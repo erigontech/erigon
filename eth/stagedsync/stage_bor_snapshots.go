@@ -18,7 +18,7 @@ type BorSnapshotsCfg struct {
 	chainConfig chain.Config
 	dirs        datadir.Dirs
 
-	blockRetire        services.BlockRetire
+	borRetire          services.BorRetire
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        services.FullBlockReader
 	dbEventNotifier    services.DBEventNotifier
@@ -29,7 +29,7 @@ type BorSnapshotsCfg struct {
 
 func StageBorSnapshotsCfg(db kv.RwDB,
 	chainConfig chain.Config, dirs datadir.Dirs,
-	blockRetire services.BlockRetire,
+	borRetire services.BorRetire,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader, dbEventNotifier services.DBEventNotifier,
 	historyV3 bool, agg *state.AggregatorV3,
@@ -38,7 +38,7 @@ func StageBorSnapshotsCfg(db kv.RwDB,
 		db:                 db,
 		chainConfig:        chainConfig,
 		dirs:               dirs,
-		blockRetire:        blockRetire,
+		borRetire:          borRetire,
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
 		dbEventNotifier:    dbEventNotifier,
@@ -118,7 +118,10 @@ func BorSnapshotsPrune(s *PruneState, initialCycle bool, cfg BorSnapshotsCfg, ct
 		defer tx.Rollback()
 	}
 	freezingCfg := cfg.blockReader.FreezingCfg()
-	if freezingCfg.Enabled && freezingCfg.Produce {
+	if freezingCfg.Enabled {
+		if err := cfg.borRetire.PruneAncientBlocks(tx, 100); err != nil {
+			return err
+		}
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
