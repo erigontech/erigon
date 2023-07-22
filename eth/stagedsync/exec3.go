@@ -281,6 +281,13 @@ func ExecV3(ctx context.Context,
 	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 	defer cfg.agg.CloseSharedDomains()
 	rs := state.NewStateV3(doms, logger)
+	bn, txn, err := doms.SeekCommitment(0, math.MaxUint64)
+	if err != nil {
+		return err
+	}
+	outputTxNum.Store(txn)
+	agg.SetTxNum(txn)
+	log.Info("SeekCommitment", "bn", bn, "txn", txn)
 	//fmt.Printf("inputTxNum == %d\n", inputTxNum)
 	//doms.Commit(true, false)
 	//doms.ClearRam()
@@ -402,6 +409,10 @@ func ExecV3(ctx context.Context,
 								return err
 							}
 						} else {
+							_, err := agg.ComputeCommitment(true, false)
+							if err != nil {
+								return err
+							}
 							if err = agg.Flush(ctx, tx); err != nil {
 								return err
 							}
@@ -571,7 +582,7 @@ func ExecV3(ctx context.Context,
 
 	var b *types.Block
 	var blockNum uint64
-	var err error
+	//var err error
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		if !parallel {
@@ -828,8 +839,8 @@ Loop:
 						applyWorker.ResetTx(applyTx)
 						agg.SetTx(applyTx)
 
-						doms = agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
-						doms.SetTx(applyTx)
+						//doms.SetTx(applyTx)
+						doms.SetContext(applyTx.(*temporal.Tx).AggCtx())
 
 						//applyTx.(*temporal.Tx).AggCtx().LogStats(applyTx, func(endTxNumMinimax uint64) uint64 {
 						//	_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(applyTx, endTxNumMinimax)
