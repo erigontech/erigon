@@ -599,6 +599,9 @@ func verifyAndSaveNewPoSHeader(
 	} else if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 		return nil, false, err
 	}
+	if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), headerNumber, block.RawBody()); err != nil {
+		return nil, false, err
+	}
 	return &engine_types.PayloadStatus{
 		Status:          status,
 		LatestValidHash: &latestValidHash,

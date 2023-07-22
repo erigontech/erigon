@@ -356,7 +356,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		}
 		return nil
 	}
-	forkValidator := engine_helpers.NewForkValidator(1, inMemoryExecution, dirs.Tmp, mock.BlockReader)
+	forkValidator := engine_helpers.NewForkValidator(1, inMemoryExecution, dirs.Tmp, mock.BlockReader, ctx)
 	networkID := uint64(1)
 	mock.sentriesClient, err = sentry.NewMultiClient(
 		mock.DB,

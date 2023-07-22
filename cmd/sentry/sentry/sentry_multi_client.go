@@ -520,9 +520,9 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 				propagate = *firstPosSeen >= segments[0].Number
 			}
 			if !cs.IsMock && propagate {
-				if cs.forkValidator != nil {
-					cs.forkValidator.TryAddingPoWBlock(request.Block)
-				}
+				// if cs.forkValidator != nil {
+				// 	cs.forkValidator.TryAddingPoWBlock(request.Block)
+				// }
 				cs.PropagateNewBlockHashes(ctx, []headerdownload.Announce{
 					{
 						Number: segments[0].Number,
