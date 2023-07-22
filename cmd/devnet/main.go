@@ -314,7 +314,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 					},
 					Services: []devnet.Service{
-						account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource.Address),
+						account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource),
 					},
 					Nodes: []devnet.Node{
 						args.BlockProducer{
@@ -359,7 +359,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BasePrivateApiAddr: "localhost:10090",
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8545,
-					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource.Address)),
+					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 					},
@@ -397,7 +397,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BasePrivateApiAddr: "localhost:10190",
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8645,
-					Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource.Address)),
+					Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 					},
@@ -407,6 +407,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
 							},
+							DevPeriod:    5,
 							AccountSlots: 200,
 						},
 						args.NonBlockProducer{
@@ -432,7 +433,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 				},
 				Services: []devnet.Service{
-					account_services.NewFaucet(networkname.DevChainName, faucetSource.Address),
+					account_services.NewFaucet(networkname.DevChainName, faucetSource),
 				},
 				Nodes: []devnet.Node{
 					args.BlockProducer{

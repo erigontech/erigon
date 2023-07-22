@@ -148,7 +148,7 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 			}
 
 			// deploy the contract and get the contract handler
-			address, contract, err := contracts.DeployWithOps(devnet.WithCurrentNode(ctx, node), transactOpts, contracts.DeployTestStateSender)
+			address, _ /*transaction*/, contract, err := contracts.DeployWithOps(devnet.WithCurrentNode(ctx, node), transactOpts, contracts.DeployTestStateSender)
 
 			if err != nil {
 				h.Lock()

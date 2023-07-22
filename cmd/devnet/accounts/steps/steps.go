@@ -2,16 +2,19 @@ package accounts_steps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
 
 func init() {
@@ -56,27 +59,95 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 		return 0, fmt.Errorf("Unknown account: %s", name)
 	}
 
-	//if fbal, err := faucet.Balance(chainCtx); err == nil {
-	//	fmt.Println(faucet.Address(), fbal)
-	//}
+	node := devnet.SelectBlockProducer(chainCtx)
 
-	_, hash, err := faucet.Send(chainCtx, account.Address, ethAmount)
+	if fbal, err := node.GetBalance(faucet.Source().Address, requests.BlockNumbers.Latest); err == nil {
+		fmt.Println(faucet.Source().Address, fbal)
+		if fbal.Uint64() > 0 {
+			txHash, err := transactions.Transfer(chainCtx, account.Address.Hex(), faucet.Source().Address.Hex(), 100, true)
+			if err != nil {
+				fmt.Println(err)
+			}
+			fmt.Println("TF", txHash)
+		}
+	}
+
+	balance, _ := node.GetBalance(account.Address, requests.BlockNumbers.Latest)
+	fmt.Println(chainName, account.Address, balance)
+	balance, _ = faucet.Balance(chainCtx)
+	fmt.Println(chainName, faucet.Address(), balance)
+
+	_, hash, err := faucet.Send(chainCtx, account, ethAmount)
 
 	if err != nil {
 		return 0, err
 	}
 
-	if _, err = transactions.AwaitTransactions(chainCtx, hash); err != nil {
+	blockMap, err := transactions.AwaitTransactions(chainCtx, hash)
+
+	if err != nil {
 		return 0, fmt.Errorf("Failed to get transfer tx: %w", err)
 	}
 
-	//if fbal, err := faucet.Balance(chainCtx); err == nil {
-	//	fmt.Println(faucet.Address(), fbal)
+	blockNum, _ := blockMap[hash]
+
+	logs, err := faucet.Contract().FilterSent(&bind.FilterOpts{
+		Start: blockNum,
+		End:   &blockNum,
+	})
+
+	//if err != nil {
+	//	return 0, fmt.Errorf("Failed to get post transfer logs: %w", err)
 	//}
 
-	node := devnet.SelectBlockProducer(chainCtx)
-	balance, err := node.GetBalance(account.Address, requests.BlockNumbers.Latest)
-	//fmt.Println(account.Address, balance)
+	for logs.Next() {
+		fmt.Println(logs.Event.Destination, logs.Event.Amount)
+	}
+
+	traceResults, err := node.TraceTransaction(hash)
+
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		for _, traceResult := range traceResults {
+			fmt.Printf("%+v [%+v]\n", traceResult, traceResult.Result)
+
+			accountResult, err := node.DebugAccountAt(traceResult.BlockHash, traceResult.TransactionPosition, faucet.Address())
+
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				fmt.Println(faucet.Address(), accountResult)
+			}
+
+			accountCode, err := node.GetCode(faucet.Address(), requests.BlockNumber(traceResult.BlockHash.Hex()))
+
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				fmt.Println(faucet.Address(), accountCode)
+			}
+
+			callResults, err := node.TraceCall(fmt.Sprintf("0x%x", blockNum), ethapi.CallArgs{
+				From: &traceResult.Action.From,
+				To:   &traceResult.Action.To,
+				Data: &traceResult.Action.Input,
+			}, requests.TraceOpts.StateDiff, requests.TraceOpts.Trace, requests.TraceOpts.VmTrace)
+
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				results, _ := json.MarshalIndent(callResults, "  ", "  ")
+				fmt.Println(string(results))
+			}
+		}
+	}
+
+	balance, err = node.GetBalance(account.Address, requests.BlockNumbers.Latest)
+	fmt.Println(chainName, account.Address, balance)
+	balance, _ = node.GetBalance(faucet.Address(), requests.BlockNumbers.Latest)
+	fmt.Println(chainName, faucet.Address(), balance)
+
 	if err != nil {
 		return 0, fmt.Errorf("Failed to get post transfer balance: %w", err)
 	}

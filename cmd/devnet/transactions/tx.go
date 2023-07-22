@@ -3,12 +3,14 @@ package transactions
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
+	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
@@ -55,27 +57,33 @@ func CheckTxPoolContent(ctx context.Context, expectedPendingSize, expectedQueued
 	logger.Info("Subpool sizes", "pending", pendingSize, "queued", queuedSize, "basefee", baseFeeSize)
 }
 
-func callSendTx(ctx context.Context, value uint64, toAddr, fromAddr string, logger log.Logger) (*libcommon.Hash, error) {
-	logger.Info("Sending tx", "value", value, "to", toAddr, "from", fromAddr)
+func Transfer(ctx context.Context, toAddr, fromAddr string, value uint64, wait bool) (libcommon.Hash, error) {
+	logger := devnet.Logger(ctx)
 
 	node := devnet.SelectNode(ctx)
 
 	// create a non-contract transaction and sign it
 	signedTx, _, err := CreateTransaction(node, toAddr, fromAddr, value)
+
 	if err != nil {
 		logger.Error("failed to create a transaction", "error", err)
-		return nil, err
+		return libcommon.Hash{}, err
 	}
+
+	logger.Info("Sending tx", "value", value, "to", toAddr, "from", fromAddr, "tx", signedTx.Hash())
 
 	// send the signed transaction
 	hash, err := node.SendTransaction(signedTx)
+
 	if err != nil {
 		logger.Error("failed to send transaction", "error", err)
-		return nil, err
+		return libcommon.Hash{}, err
 	}
 
-	if _, err = AwaitTransactions(ctx, *hash); err != nil {
-		return nil, fmt.Errorf("failed to call contract tx: %v", err)
+	if wait {
+		if _, err = AwaitTransactions(ctx, hash); err != nil {
+			return libcommon.Hash{}, fmt.Errorf("failed to call contract tx: %v", err)
+		}
 	}
 
 	return hash, nil
@@ -152,7 +160,7 @@ func CreateManyEIP1559TransactionsRefWithBaseFee(ctx context.Context, to, from s
 	toAddress := libcommon.HexToAddress(to)
 	fromAddress := libcommon.HexToAddress(from)
 
-	baseFeePerGas, err := BaseFeeFromBlock(ctx)
+	baseFeePerGas, err := blocks.BaseFeeFromBlock(ctx)
 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed BaseFeeFromBlock: %v", err)
@@ -173,7 +181,7 @@ func CreateManyEIP1559TransactionsRefWithBaseFee2(ctx context.Context, to, from 
 	toAddress := libcommon.HexToAddress(to)
 	fromAddress := libcommon.HexToAddress(from)
 
-	baseFeePerGas, err := BaseFeeFromBlock(ctx)
+	baseFeePerGas, err := blocks.BaseFeeFromBlock(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed BaseFeeFromBlock: %v", err)
 	}
@@ -191,20 +199,37 @@ func CreateManyEIP1559TransactionsRefWithBaseFee2(ctx context.Context, to, from 
 
 // createNonContractTx returns a signed transaction and the recipient address
 func CreateTransaction(node devnet.Node, to, from string, value uint64) (types.Transaction, libcommon.Address, error) {
-	toAddress := libcommon.HexToAddress(to)
-	fromAddress := libcommon.HexToAddress(from)
+	toAccount := accounts.GetAccount(to)
 
-	res, err := node.GetTransactionCount(fromAddress, requests.BlockNumbers.Latest)
+	var toAddress libcommon.Address
+
+	if toAccount == nil {
+		if strings.HasPrefix(to, "0x") {
+			toAddress = libcommon.HexToAddress(from)
+		}
+
+		return nil, libcommon.Address{}, fmt.Errorf("Unknown to account: %s", to)
+	} else {
+		toAddress = toAccount.Address
+	}
+
+	fromAccount := accounts.GetAccount(from)
+
+	if fromAccount == nil {
+		return nil, libcommon.Address{}, fmt.Errorf("Unknown from account: %s", from)
+	}
+
+	res, err := node.GetTransactionCount(fromAccount.Address, requests.BlockNumbers.Pending)
 
 	if err != nil {
-		return nil, libcommon.Address{}, fmt.Errorf("failed to get transaction count for address 0x%x: %v", fromAddress, err)
+		return nil, libcommon.Address{}, fmt.Errorf("failed to get transaction count for address 0x%x: %v", fromAccount.Address, err)
 	}
 
 	// create a new transaction using the parameters to send
 	transaction := types.NewTransaction(res.Uint64(), toAddress, uint256.NewInt(value), params.TxGas, uint256.NewInt(gasPrice), nil)
 
 	// sign the transaction using the developer 0signed private key
-	signedTx, err := types.SignTx(transaction, *types.LatestSignerForChainID(node.ChainID()), accounts.SigKey(fromAddress))
+	signedTx, err := types.SignTx(transaction, *types.LatestSignerForChainID(node.ChainID()), fromAccount.SigKey())
 
 	if err != nil {
 		return nil, libcommon.Address{}, fmt.Errorf("failed to sign non-contract transaction: %v", err)
@@ -216,7 +241,7 @@ func CreateTransaction(node devnet.Node, to, from string, value uint64) (types.T
 func signEIP1559TxsLowerAndHigherThanBaseFee2(ctx context.Context, amountLower, amountHigher int, baseFeePerGas uint64, toAddress libcommon.Address, fromAddress libcommon.Address) ([]types.Transaction, []types.Transaction, error) {
 	node := devnet.SelectNode(ctx)
 
-	res, err := node.GetTransactionCount(fromAddress, requests.BlockNumbers.Latest)
+	res, err := node.GetTransactionCount(fromAddress, requests.BlockNumbers.Pending)
 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get transaction count for address 0x%x: %v", fromAddress, err)
@@ -322,22 +347,6 @@ func signEIP1559TxsHigherThanBaseFee(ctx context.Context, n int, baseFeePerGas u
 	return signedTransactions, nil
 }
 
-func BaseFeeFromBlock(ctx context.Context) (uint64, error) {
-	var val uint64
-	res, err := devnet.SelectNode(ctx).GetBlockByNumberDetails("latest", false)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get base fee from block: %v\n", err)
-	}
-
-	if v, ok := res["baseFeePerGas"]; !ok {
-		return val, fmt.Errorf("baseFeePerGas field missing from response")
-	} else {
-		val = devnetutils.HexToInt(v.(string))
-	}
-
-	return val, err
-}
-
 func SendManyTransactions(ctx context.Context, signedTransactions []types.Transaction) ([]libcommon.Hash, error) {
 	logger := devnet.Logger(ctx)
 
@@ -350,7 +359,7 @@ func SendManyTransactions(ctx context.Context, signedTransactions []types.Transa
 			logger.Error("failed SendTransaction", "error", err)
 			//return nil, err
 		}
-		hashes[idx] = *hash
+		hashes[idx] = hash
 	}
 
 	return hashes, nil

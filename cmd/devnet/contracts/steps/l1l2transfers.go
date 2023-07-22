@@ -6,6 +6,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
+	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
@@ -35,9 +36,16 @@ func DeployRootChainSender(ctx context.Context, deployerName string) (context.Co
 
 	heimdall := services.Heimdall(ctx)
 
-	address, _, contract, err := contracts.DeployRootSender(auth, backend, heimdall.StateSenderAddress(), childStateReceiver)
+	waiter, cancel := blocks.BlockWaiter(ctx, contracts.DeploymentChecker)
+	defer cancel()
+
+	address, tx, contract, err := contracts.DeployRootSender(auth, backend, heimdall.StateSenderAddress(), childStateReceiver)
 
 	if err != nil {
+		return nil, err
+	}
+
+	if err = waiter.Await(tx.Hash()); err != nil {
 		return nil, err
 	}
 
@@ -48,7 +56,7 @@ func DeployRootChainSender(ctx context.Context, deployerName string) (context.Co
 func DeployChildChainReceiver(ctx context.Context, deployerName string) (context.Context, error) {
 	deployer := accounts.GetAccount(deployerName)
 
-	address, contract, err := contracts.Deploy(devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName), deployer.Address, contracts.DeployChildReceiver)
+	address, _ /*transaction*/, contract, err := contracts.Deploy(devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName), deployer.Address, contracts.DeployChildReceiver)
 
 	if err != nil {
 		return nil, err
