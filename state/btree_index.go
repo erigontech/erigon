@@ -1006,12 +1006,14 @@ func (b *BtIndex) dataLookup(kBuf, vBuf []byte, di uint64) ([]byte, []byte, erro
 		return kBuf, vBuf, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
 	}
 
-	key, kp := b.getter.Next(kBuf[:0])
-
+	//key, kp := b.getter.Next(kBuf[:0])
+	key, kp := b.getter.NextUncompressed()
+	fmt.Printf("b.getter: %s\n", b.getter.FileName())
 	if !b.getter.HasNext() {
 		return kBuf, vBuf, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
 	}
-	val, vp := b.getter.Next(vBuf[:0])
+	//val, vp := b.getter.Next(vBuf[:0])
+	val, vp := b.getter.NextUncompressed()
 	_, _ = kp, vp
 	return key, val, nil
 }
@@ -1037,7 +1039,8 @@ func (b *BtIndex) keyCmp(kBuf, k []byte, di uint64) (int, []byte, error) {
 	}
 
 	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
-	kBuf, _ = b.getter.Next(kBuf[:0])
+	//kBuf, _ = b.getter.Next(kBuf[:0])
+	kBuf, _ = b.getter.NextUncompressed()
 	return bytes.Compare(kBuf, k), kBuf, nil
 	//return -b.getter.Match(k), kBuf, nil
 }
