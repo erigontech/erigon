@@ -632,14 +632,14 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 					return err
 				}
 				if k != nil && bytes.HasPrefix(k, prefix) {
-					ci1.key = k
+					ci1.key = common.Copy(k)
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)
 					if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
 						return err
 					}
-					ci1.val = v
+					ci1.val = common.Copy(v)
 					heap.Fix(&cp, 0)
 				} else {
 					heap.Pop(&cp)
