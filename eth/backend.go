@@ -864,9 +864,9 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 	}
 
 	//if borcfg == nil {
-		if !cfg.Enabled {
-			return nil
-		}
+	if !cfg.Enabled {
+		return nil
+	}
 	//}
 
 	// Configure the local mining address
