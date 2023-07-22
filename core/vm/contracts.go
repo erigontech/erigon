@@ -194,7 +194,6 @@ func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uin
 	var output []byte
 	sp, isStateful := p.(StatefulPrecompiledContract)
 	if isStateful {
-		//TODO pass statereader
 		output, err = sp.RunStateful(input, state)
 	} else {
 		output, err = p.Run(input)
@@ -1133,36 +1132,18 @@ func (c *parentBeaconBlockRoot) RunStateful(input []byte, state evmtypes.IntraBl
 		return nil, errors.New("timestamp param too short")
 	}
 
-	//TODO (@bsomnath1) verify the conversions are to BE
 	timestampReduced := uint256.NewInt(0).SetBytes(timestampParam).Uint64() % params.HistoricalRootsModulus
-	// timestampIndex := uint256.NewInt(timestampReduced)
-	// recordedTimestamp :=
 	timestampIndex := libcommon.BigToHash(libcommon.Big256.SetUint64((timestampReduced)))
-	var recordedTimestamp, root *uint256.Int
+	recordedTimestamp := uint256.NewInt(0)
+	root := uint256.NewInt(0)
 	state.GetState(libcommon.BytesToAddress(params.HistoryStorageAddress), &timestampIndex, recordedTimestamp)
-	// recordedTimestamp, err := stateReader.ReadAccountStorage(libcommon.BytesToAddress(params.HistoryStorageAddress), 1, &timestampIndex)
 
-	if !bytes.Equal(recordedTimestamp.Bytes(), timestampParam) {
+	recordedTimestampBytes := recordedTimestamp.Bytes32()
+	if !bytes.Equal(recordedTimestampBytes[:], timestampParam) {
 		return make([]byte, 32), nil
 	}
 	timestampExtended := timestampReduced + params.HistoricalRootsModulus
 	rootIndex := libcommon.BigToHash(libcommon.Big256.SetUint64((timestampExtended)))
 	state.GetState(libcommon.BytesToAddress(params.HistoryStorageAddress), &rootIndex, root)
-	// root, err := stateReader.ReadAccountStorage(libcommon.BytesToAddress(params.HistoryStorageAddress), 1, &rootIndex)
 	return root.Bytes(), nil
-
-	/*	REF IMPL FROM EIP-4788 doc
-		timestamp_reduced = to_uint64_be(timestamp) % HISTORICAL_ROOTS_MODULUS
-		timestamp_index = to_uint256_be(timestamp_reduced)
-
-		recorded_timestamp = sload(HISTORY_STORAGE_ADDRESS, timestamp_index)
-		if recorded_timestamp != timestamp:
-			evm.returndata[:32].set(uint256(0))
-		else:
-			timestamp_extended = timestamp_reduced + HISTORICAL_ROOTS_MODULUS
-			root_index = to_uint256_be(timestamp_extended)
-			root = sload(HISTORY_STORAGE_ADDRESS, root_index)
-			evm.returndata[:32].set(root)
-
-	*/
 }
