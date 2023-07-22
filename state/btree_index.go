@@ -1008,7 +1008,6 @@ func (b *BtIndex) dataLookup(kBuf, vBuf []byte, di uint64) ([]byte, []byte, erro
 
 	//key, kp := b.getter.Next(kBuf[:0])
 	key, kp := b.getter.NextUncompressed()
-	fmt.Printf("b.getter: %s\n", b.getter.FileName())
 	if !b.getter.HasNext() {
 		return kBuf, vBuf, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
 	}

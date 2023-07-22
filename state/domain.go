@@ -1492,7 +1492,7 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 
 		//dc.d.stats.FilesQuerie.Add(1)
 		t := time.Now()
-		dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
+		_, v, ok, err := dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
 		LatestStateReadWarm.UpdateDuration(t)
 		if err != nil {
 			return nil, false, err
@@ -1500,7 +1500,7 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 		if !ok {
 			break
 		}
-		return common.Copy(dc.vBuf), true, nil
+		return v, true, nil
 	}
 	return nil, false, nil
 }
@@ -1538,7 +1538,7 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 			var ok bool
 			//dc.d.stats.FilesQuerie.Add(1)
 			t := time.Now()
-			dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
+			_, v, ok, err := dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
 			LatestStateReadGrind.UpdateDuration(t)
 			if err != nil {
 				return nil, false, err
@@ -1546,7 +1546,7 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 			if !ok {
 				continue
 			}
-			return common.Copy(dc.vBuf), true, nil
+			return v, true, nil
 		}
 	}
 	return nil, false, nil
@@ -1562,7 +1562,7 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	}
 	//dc.d.stats.FilesQuerie.Add(1)
 	t := time.Now()
-	dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
+	_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
 	LatestStateReadCold.UpdateDuration(t)
 	if err != nil {
 		return nil, false, err
@@ -1570,7 +1570,7 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	if !ok {
 		return nil, false, err
 	}
-	return common.Copy(dc.vBuf), true, nil
+	return v, true, nil
 }
 
 // historyBeforeTxNum searches history for a value of specified key before txNum
