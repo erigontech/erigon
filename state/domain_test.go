@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
 )
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
@@ -1027,18 +1026,25 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	}
 	require.EqualValues(t, []string{"key1", string(preval1), "key2", string(preval2), "key3" + string(l), string(preval3)}, words)
 	// Check index
-	require.Equal(t, 3, int(sf.valuesIdx.KeyCount()))
-
-	r := recsplit.NewIndexReader(sf.valuesIdx)
-	defer r.Close()
+	require.Equal(t, 3, int(sf.valuesBt.KeyCount()))
 	for i := 0; i < len(words); i += 2 {
-		offset := r.Lookup([]byte(words[i]))
-		g.Reset(offset)
-		w, _ := g.Next(nil)
-		require.Equal(t, words[i], string(w))
-		w, _ = g.Next(nil)
-		require.Equal(t, words[i+1], string(w))
+		c, _ := sf.valuesBt.Seek([]byte(words[i]))
+		require.Equal(t, words[i], string(c.Key()))
+		require.Equal(t, words[i+1], string(c.Value()))
 	}
+
+	//require.Equal(t, 3, int(sf.valuesIdx.KeyCount()))
+	//
+	//r := recsplit.NewIndexReader(sf.valuesIdx)
+	//defer r.Close()
+	//for i := 0; i < len(words); i += 2 {
+	//	offset := r.Lookup([]byte(words[i]))
+	//	g.Reset(offset)
+	//	w, _ := g.Next(nil)
+	//	require.Equal(t, words[i], string(w))
+	//	w, _ = g.Next(nil)
+	//	require.Equal(t, words[i+1], string(w))
+	//}
 }
 
 func TestDomainContext_IteratePrefix(t *testing.T) {
