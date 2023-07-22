@@ -358,7 +358,7 @@ Loop:
 }
 
 func (d *Domain) openFiles() (err error) {
-	var totalKeys uint64
+	//var totalKeys uint64
 
 	invalidFileItems := make([]*filesItem, 0)
 	d.files.Walk(func(items []*filesItem) bool {
@@ -376,16 +376,16 @@ func (d *Domain) openFiles() (err error) {
 				return false
 			}
 
-			if item.index == nil {
-				idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
-				if dir.FileExist(idxPath) {
-					if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-						d.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
-						return false
-					}
-					totalKeys += item.index.KeyCount()
-				}
-			}
+			//if item.index == nil {
+			//	idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
+			//	if dir.FileExist(idxPath) {
+			//		if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
+			//			d.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
+			//			return false
+			//		}
+			//		totalKeys += item.index.KeyCount()
+			//	}
+			//}
 			if item.bindex == nil {
 				bidxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 				if dir.FileExist(bidxPath) {
@@ -983,14 +983,14 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 
 	valuesIdxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, step, step+1)
-	valuesIdxPath := filepath.Join(d.dir, valuesIdxFileName)
-	{
-		p := ps.AddNew(valuesIdxFileName, uint64(valuesDecomp.Count()*2))
-		defer ps.Delete(p)
-		if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, valuesIdxPath, d.tmpdir, collation.valuesCount, false, p, d.logger, d.noFsync); err != nil {
-			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
-		}
-	}
+	//valuesIdxPath := filepath.Join(d.dir, valuesIdxFileName)
+	//{
+	//	p := ps.AddNew(valuesIdxFileName, uint64(valuesDecomp.Count()*2))
+	//	defer ps.Delete(p)
+	//	if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, valuesIdxPath, d.tmpdir, collation.valuesCount, false, p, d.logger, d.noFsync); err != nil {
+	//		return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
+	//	}
+	//}
 
 	var bt *BtIndex
 	{
