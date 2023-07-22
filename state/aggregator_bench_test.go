@@ -112,7 +112,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	dataPath := "../../data/storage.256-288.kv"
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err := BuildBtreeIndex(dataPath, indexPath, logger)
+	err := BuildBtreeIndex(dataPath, indexPath, true, logger)
 	require.NoError(b, err)
 
 	M := 1024
@@ -145,7 +145,7 @@ func benchInitBtreeIndex(b *testing.B, M uint64) (*BtIndex, [][]byte, string) {
 
 	dataPath := generateCompressedKV(b, tmp, 52, 10, 1000000, logger)
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bt")
-	bt, err := CreateBtreeIndex(indexPath, dataPath, M, logger)
+	bt, err := CreateBtreeIndex(indexPath, dataPath, M, false, logger)
 	require.NoError(b, err)
 
 	keys, err := pivotKeysFromKV(dataPath)

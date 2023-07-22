@@ -562,7 +562,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 		if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
 			return err
 		}
-		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
+		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: k, val: v, c: keysCursor, endTxNum: txNum, reverse: true})
 	}
 
 	sctx := sd.aggCtx.storage
@@ -578,7 +578,7 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 		key := cursor.Key()
 		if key != nil && bytes.HasPrefix(key, prefix) {
 			val := cursor.Value()
-			heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: common.Copy(key), val: common.Copy(val), btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
+			heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
 		}
 	}
 
@@ -632,14 +632,14 @@ func (sd *SharedDomains) IterateStoragePrefix(roTx kv.Tx, prefix []byte, it func
 					return err
 				}
 				if k != nil && bytes.HasPrefix(k, prefix) {
-					ci1.key = common.Copy(k)
+					ci1.key = k
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)
 					if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
 						return err
 					}
-					ci1.val = common.Copy(v)
+					ci1.val = v
 					heap.Fix(&cp, 0)
 				} else {
 					heap.Pop(&cp)

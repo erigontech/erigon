@@ -570,12 +570,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 			g.Reset(0)
 			if g.HasNext() {
 				key, _ := g.NextUncompressed()
-				var val []byte
-				if d.compressVals {
-					val, _ = g.Next(nil)
-				} else {
-					val, _ = g.NextUncompressed()
-				}
+				val, _ := g.NextUncompressed()
 				d.logger.Trace("mergeFiles", "key", key)
 				heap.Push(&cp, &CursorItem{
 					t:        FILE_CURSOR,
@@ -602,11 +597,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 				ci1 := cp[0]
 				if ci1.dg.HasNext() {
 					ci1.key, _ = ci1.dg.NextUncompressed()
-					if d.compressVals {
-						ci1.val, _ = ci1.dg.Next(ci1.val[:0])
-					} else {
-						ci1.val, _ = ci1.dg.NextUncompressed()
-					}
+					ci1.val, _ = ci1.dg.NextUncompressed()
 					heap.Fix(&cp, 0)
 				} else {
 					heap.Pop(&cp)
@@ -620,15 +611,8 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 						return nil, nil, nil, err
 					}
 					keyCount++ // Only counting keys, not values
-					switch d.compressVals {
-					case true:
-						if err = comp.AddWord(valBuf); err != nil {
-							return nil, nil, nil, err
-						}
-					default:
-						if err = comp.AddUncompressedWord(valBuf); err != nil {
-							return nil, nil, nil, err
-						}
+					if err = comp.AddUncompressedWord(valBuf); err != nil {
+						return nil, nil, nil, err
 					}
 				}
 				keyBuf = append(keyBuf[:0], lastKey...)
@@ -645,14 +629,8 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("merge: 2valTransform [%x] %w", valBuf, err)
 			}
-			if d.compressVals {
-				if err = comp.AddWord(valBuf); err != nil {
-					return nil, nil, nil, err
-				}
-			} else {
-				if err = comp.AddUncompressedWord(valBuf); err != nil {
-					return nil, nil, nil, err
-				}
+			if err = comp.AddUncompressedWord(valBuf); err != nil {
+				return nil, nil, nil, err
 			}
 		}
 		if err = comp.Compress(); err != nil {
@@ -671,12 +649,12 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 
 		p = ps.AddNew(datFileName, uint64(keyCount))
 		defer ps.Delete(p)
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, idxPath, d.dir, keyCount, false /* values */, p, d.logger, d.noFsync); err != nil {
+		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, idxPath, d.dir, keyCount, false, p, d.logger, d.noFsync); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 
 		btPath := strings.TrimSuffix(idxPath, "kvi") + "bt"
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, 2048, valuesIn.decompressor, p, d.tmpdir, d.logger)
+		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, 2048, valuesIn.decompressor, false, p, d.tmpdir, d.logger)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("create btindex %s [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}

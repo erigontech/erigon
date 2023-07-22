@@ -26,7 +26,7 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	require.NoError(t, err)
 	defer decomp.Close()
 
-	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, &background.Progress{}, tmp, logger)
+	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, false, &background.Progress{}, tmp, logger)
 	require.NoError(t, err)
 
 	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, decomp)
@@ -43,7 +43,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	t.Run("empty index", func(t *testing.T) {
 		dataPath := generateCompressedKV(t, tmp, 52, 180 /*val size*/, 0, logger)
 		indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-		err := BuildBtreeIndex(dataPath, indexPath, logger)
+		err := BuildBtreeIndex(dataPath, indexPath, false, logger)
 		require.NoError(t, err)
 
 		bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), false)
@@ -53,7 +53,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	dataPath := generateCompressedKV(t, tmp, 52, 180 /*val size*/, keyCount, logger)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err := BuildBtreeIndex(dataPath, indexPath, logger)
+	err := BuildBtreeIndex(dataPath, indexPath, false, logger)
 	require.NoError(t, err)
 
 	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), false)
@@ -64,14 +64,14 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
-		_, _, err := bt.dataLookup(nil, nil, bt.keyCount+1)
+		_, _, err := bt.dataLookup(bt.keyCount + 1)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(nil, nil, bt.keyCount)
+		_, _, err = bt.dataLookup(bt.keyCount)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
-		_, _, err = bt.dataLookup(nil, nil, bt.keyCount-1)
+		_, _, err = bt.dataLookup(bt.keyCount - 1)
 		require.NoError(t, err)
 
 		cur, err := bt.Seek(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
@@ -121,7 +121,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	require.NoError(t, err)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err = BuildBtreeIndex(dataPath, indexPath, logger)
+	err = BuildBtreeIndex(dataPath, indexPath, false, logger)
 	require.NoError(t, err)
 
 	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), false)
@@ -148,7 +148,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	dataPath := generateCompressedKV(t, tmp, 52, 48 /*val size*/, keyCount, logger)
 
 	indexPath := path.Join(tmp, filepath.Base(dataPath)+".bti")
-	err := BuildBtreeIndex(dataPath, indexPath, logger)
+	err := BuildBtreeIndex(dataPath, indexPath, false, logger)
 	require.NoError(t, err)
 
 	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), false)
@@ -159,14 +159,14 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
-		_, _, err := bt.dataLookup(nil, nil, bt.keyCount+1)
+		_, _, err := bt.dataLookup(bt.keyCount + 1)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(nil, nil, bt.keyCount)
+		_, _, err = bt.dataLookup(bt.keyCount)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
-		_, _, err = bt.dataLookup(nil, nil, bt.keyCount-1)
+		_, _, err = bt.dataLookup(bt.keyCount - 1)
 		require.NoError(t, err)
 
 		cur, err := bt.Seek(common.FromHex("0xffffffffffffff")) //seek beyeon the last key

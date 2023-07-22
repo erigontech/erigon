@@ -63,7 +63,7 @@ type History struct {
 
 	historyValsTable        string // key1+key2+txnNum -> oldValue , stores values BEFORE change
 	compressWorkers         int
-	compressVals            bool
+	compressHistoryVals     bool
 	integrityFileExtensions []string
 
 	// not large:
@@ -90,7 +90,7 @@ func NewHistory(cfg histCfg, dir, tmpdir string, aggregationStep uint64, filenam
 	h := History{
 		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		historyValsTable:        historyValsTable,
-		compressVals:            cfg.compressVals,
+		compressHistoryVals:     cfg.compressVals,
 		compressWorkers:         1,
 		integrityFileExtensions: integrityFileExtensions,
 		largeValues:             cfg.largeValues,
@@ -320,11 +320,11 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, p *background.Pr
 	p.Name.Store(&fName)
 	p.Total.Store(uint64(iiItem.decompressor.Count()) * 2)
 
-	count, err := iterateForVi(item, iiItem, p, h.compressVals, func(v []byte) error { return nil })
+	count, err := iterateForVi(item, iiItem, p, h.compressHistoryVals, func(v []byte) error { return nil })
 	if err != nil {
 		return err
 	}
-	return buildVi(ctx, item, iiItem, idxPath, h.tmpdir, count, p, h.compressVals, h.logger)
+	return buildVi(ctx, item, iiItem, idxPath, h.tmpdir, count, p, h.compressHistoryVals, h.logger)
 }
 
 func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
@@ -918,7 +918,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	efHistoryIdxPath := filepath.Join(h.dir, efHistoryIdxFileName)
 	p := ps.AddNew(efHistoryIdxFileName, uint64(len(keys)*2))
 	defer ps.Delete(p)
-	if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, efHistoryIdxPath, h.tmpdir, len(keys), false /* values */, p, h.logger, h.noFsync); err != nil {
+	if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, efHistoryIdxPath, h.tmpdir, len(keys), false, p, h.logger, h.noFsync); err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
 	}
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -1438,7 +1438,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
 		g := hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
-		if hc.h.compressVals {
+		if hc.h.compressHistoryVals {
 			v, _ := g.Next(nil)
 			return v, true, nil
 		}
@@ -1666,7 +1666,7 @@ func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.T
 		from: from, to: to, limit: limit,
 
 		hc:           hc,
-		compressVals: hc.h.compressVals,
+		compressVals: hc.h.compressHistoryVals,
 		startTxNum:   startTxNum,
 	}
 	for _, item := range hc.ic.files {
@@ -1948,7 +1948,7 @@ func (hc *HistoryContext) iterateChangedFrozen(fromTxNum, toTxNum int, asc order
 
 	hi := &HistoryChangesIterFiles{
 		hc:           hc,
-		compressVals: hc.h.compressVals,
+		compressVals: hc.h.compressHistoryVals,
 		startTxNum:   cmp.Max(0, uint64(fromTxNum)),
 		endTxNum:     toTxNum,
 		limit:        limit,
@@ -2336,7 +2336,7 @@ func (h *History) MakeSteps(toTxNum uint64) []*HistoryStep {
 			}
 
 			step := &HistoryStep{
-				compressVals: h.compressVals,
+				compressVals: h.compressHistoryVals,
 				indexItem:    item,
 				indexFile: ctxItem{
 					startTxNum: item.startTxNum,

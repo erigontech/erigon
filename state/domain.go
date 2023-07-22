@@ -998,7 +998,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		btPath := filepath.Join(d.dir, btFileName)
 		p := ps.AddNew(btFileName, uint64(valuesDecomp.Count()*2))
 		defer ps.Delete(p)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, p, d.tmpdir, d.logger)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, false, p, d.tmpdir, d.logger)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values bt idx: %w", d.filenameBase, err)
 		}
@@ -1039,7 +1039,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 			p := ps.AddNew(fitem.decompressor.FileName(), uint64(fitem.decompressor.Count()))
 			defer ps.Delete(p)
 
-			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, p, d.tmpdir, d.logger); err != nil {
+			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, false, p, d.tmpdir, d.logger); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", fitem.decompressor.FileName(), err)
 			}
 			return nil
@@ -1083,7 +1083,11 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 		}
 		g.Reset(0)
 		for g.HasNext() {
+			//if compressedFile {
 			word, valPos = g.Next(word[:0])
+			//} else {
+			//	word, valPos = g.NextUncompressed()
+			//}
 			if values {
 				if err = rs.AddKey(word, valPos); err != nil {
 					return fmt.Errorf("add idx key [%x]: %w", word, err)
@@ -1093,8 +1097,13 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 					return fmt.Errorf("add idx key [%x]: %w", word, err)
 				}
 			}
+
 			// Skip value
+			//if compressedFile {
 			keyPos = g.Skip()
+			//} else {
+			//	keyPos = g.SkipUncompressed()
+			//}
 
 			p.Processed.Add(1)
 		}
@@ -1437,13 +1446,12 @@ var COMPARE_INDEXES = false // if true, will compare values from Btree and INver
 
 func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint64) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
-	var k []byte
 	var ok bool
 	for i := len(dc.files) - 1; i >= 0; i-- {
 		if dc.files[i].endTxNum < fromTxNum {
 			break
 		}
-		k, v, ok, err = dc.statelessBtree(i).Get(filekey, k[:0], v[:0])
+		_, v, ok, err = dc.statelessBtree(i).Get(filekey)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1492,7 +1500,7 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 
 		//dc.d.stats.FilesQuerie.Add(1)
 		t := time.Now()
-		_, v, ok, err := dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
+		_, v, ok, err := dc.statelessBtree(i).Get(filekey)
 		LatestStateReadWarm.UpdateDuration(t)
 		if err != nil {
 			return nil, false, err
@@ -1538,7 +1546,7 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 			var ok bool
 			//dc.d.stats.FilesQuerie.Add(1)
 			t := time.Now()
-			_, v, ok, err := dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
+			_, v, ok, err := dc.statelessBtree(i).Get(filekey)
 			LatestStateReadGrind.UpdateDuration(t)
 			if err != nil {
 				return nil, false, err
@@ -1562,7 +1570,7 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	}
 	//dc.d.stats.FilesQuerie.Add(1)
 	t := time.Now()
-	_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
+	_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey)
 	LatestStateReadCold.UpdateDuration(t)
 	if err != nil {
 		return nil, false, err
@@ -1600,13 +1608,12 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 	}
 	if anyItem {
 		// If there were no changes but there were history files, the value can be obtained from value files
-		var k []byte
 		var ok bool
 		for i := len(dc.files) - 1; i >= 0; i-- {
 			if dc.files[i].startTxNum > topState.startTxNum {
 				continue
 			}
-			k, v, ok, err = dc.statelessBtree(i).Get(key, k[:0], v[:0])
+			_, v, ok, err = dc.statelessBtree(i).Get(key)
 			if err != nil {
 				return nil, false, err
 			}
@@ -1821,14 +1828,14 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 					return err
 				}
 				if k != nil && bytes.HasPrefix(k, prefix) {
-					ci1.key = common.Copy(k)
+					ci1.key = k
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)
 					if v, err = roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
 						return err
 					}
-					ci1.val = common.Copy(v)
+					ci1.val = v
 					heap.Push(&cp, ci1)
 				}
 			}

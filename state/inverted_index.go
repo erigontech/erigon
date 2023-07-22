@@ -1303,7 +1303,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 	idxPath := filepath.Join(ii.dir, idxFileName)
 	p := ps.AddNew(idxFileName, uint64(decomp.Count()*2))
 	defer ps.Delete(p)
-	if index, err = buildIndexThenOpen(ctx, decomp, idxPath, ii.tmpdir, len(keys), false /* values */, p, ii.logger, ii.noFsync); err != nil {
+	if index, err = buildIndexThenOpen(ctx, decomp, idxPath, ii.tmpdir, len(keys), false, p, ii.logger, ii.noFsync); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 

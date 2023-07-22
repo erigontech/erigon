@@ -559,9 +559,11 @@ func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCoun
 	}
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		err = comp.AddWord(k)
+		//err = comp.AddWord(k)
+		err = comp.AddUncompressedWord(k)
 		require.NoError(tb, err)
-		err = comp.AddWord(v)
+		//err = comp.AddWord(v)
+		err = comp.AddUncompressedWord(v)
 		require.NoError(tb, err)
 		return nil
 	}
