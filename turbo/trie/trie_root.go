@@ -456,7 +456,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				return err
 			}
 		}
-		if r.trace {
+		if r.trace && accountValue != nil {
 			fmt.Printf("accountHashedBranch %x =>b %d n %d\n", accountKey, accountValue.Balance.Uint64(), accountValue.Nonce)
 		}
 		if err := r.saveValueAccount(true, hasTree, accountValue, hash); err != nil {
