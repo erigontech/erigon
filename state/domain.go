@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -47,6 +48,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+)
+
+var (
+	LatestStateReadWarm  = metrics.GetOrCreateSummary(`latest_state_read{type="warm"}`)  //nolint
+	LatestStateReadCold  = metrics.GetOrCreateSummary(`latest_state_read{type="cold"}`)  //nolint
+	LatestStateReadGrind = metrics.GetOrCreateSummary(`latest_state_read{type="grind"}`) //nolint
 )
 
 // filesItem corresponding to a pair of files (.dat and .idx)
@@ -1484,7 +1491,9 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 		}
 
 		//dc.d.stats.FilesQuerie.Add(1)
+		t := time.Now()
 		dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
+		LatestStateReadWarm.UpdateDuration(t)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1528,7 +1537,9 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 			}
 			var ok bool
 			//dc.d.stats.FilesQuerie.Add(1)
+			t := time.Now()
 			dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(i).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
+			LatestStateReadGrind.UpdateDuration(t)
 			if err != nil {
 				return nil, false, err
 			}
@@ -1550,7 +1561,9 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 		return nil, false, nil
 	}
 	//dc.d.stats.FilesQuerie.Add(1)
+	t := time.Now()
 	dc.kBuf, dc.vBuf, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey, dc.kBuf[:0], dc.vBuf[:0])
+	LatestStateReadCold.UpdateDuration(t)
 	if err != nil {
 		return nil, false, err
 	}

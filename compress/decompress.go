@@ -422,6 +422,7 @@ type Getter struct {
 func (g *Getter) Trace(t bool)     { g.trace = t }
 func (g *Getter) FileName() string { return g.fName }
 
+func (g *Getter) touch() { _ = g.data[g.dataP] }
 func (g *Getter) nextPos(clean bool) uint64 {
 	if clean {
 		if g.dataBit > 0 {
@@ -436,6 +437,7 @@ func (g *Getter) nextPos(clean bool) uint64 {
 	var l byte
 	var pos uint64
 	for l == 0 {
+		g.touch()
 		code := uint16(g.data[g.dataP]) >> g.dataBit
 		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
 			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)
@@ -465,6 +467,7 @@ func (g *Getter) nextPattern() []byte {
 	var l byte
 	var pattern []byte
 	for l == 0 {
+		g.touch()
 		code := uint16(g.data[g.dataP]) >> g.dataBit
 		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
 			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)
