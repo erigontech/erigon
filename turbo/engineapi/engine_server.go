@@ -273,6 +273,8 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(blockHash libcommon.Hash,
 		forkchoiceMessage.FinalizedBlockHash == rawdb.ReadForkchoiceFinalized(tx) &&
 		forkchoiceMessage.HeadHash == rawdb.ReadForkchoiceHead(tx) &&
 		forkchoiceMessage.SafeBlockHash == rawdb.ReadForkchoiceSafe(tx) {
+		fmt.Println(forkchoiceMessage)
+
 		return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 	}
 
@@ -342,6 +344,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(blockHash libcommon.Hash,
 	// If header is already validated or has a missing parent, you can either return VALID or SYNCING.
 	if newPayload {
 		if header != nil && canonicalHash == blockHash {
+			s.logger.Info("A")
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 
@@ -364,6 +367,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(blockHash libcommon.Hash,
 		// because otherwise (when FCU points to the head) we want go to stage headers
 		// so that it calls writeForkChoiceHashes.
 		if blockHash != headHash && canonicalHash == blockHash {
+			s.logger.Info("B")
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}

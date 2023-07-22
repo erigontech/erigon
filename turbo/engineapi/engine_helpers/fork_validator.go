@@ -21,11 +21,11 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -51,6 +51,8 @@ type ForkValidator struct {
 	// this is the current point where we processed the chain so far.
 	currentHeight uint64
 	tmpDir        string
+	// block hashes that are deemed valid
+	validHashes *lru.Cache[libcommon.Hash, bool]
 
 	ctx context.Context
 
@@ -59,18 +61,28 @@ type ForkValidator struct {
 }
 
 func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
+	validHashes, err := lru.New[libcommon.Hash, bool]("validHashes", maxForkDepth*8)
+	if err != nil {
+		panic(err)
+	}
 	return &ForkValidator{
 		currentHeight: currentHeight,
+		validHashes:   validHashes,
 	}
 }
 
 func NewForkValidator(currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string, blockReader services.FullBlockReader, ctx context.Context) *ForkValidator {
+	validHashes, err := lru.New[libcommon.Hash, bool]("validHashes", maxForkDepth*8)
+	if err != nil {
+		panic(err)
+	}
 	return &ForkValidator{
 		validatePayload: validatePayload,
 		currentHeight:   currentHeight,
 		tmpDir:          tmpDir,
 		blockReader:     blockReader,
 		ctx:             ctx,
+		validHashes:     validHashes,
 	}
 }
 
@@ -151,10 +163,8 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		return
 	}
 
-	isHeaderAlreadyPresent := rawdb.ReadHeader(tx, header.Hash(), header.Number.Uint64()) != nil
-
 	// If the block is stored within the side fork it means it was already validated.
-	if isHeaderAlreadyPresent {
+	if _, ok := fv.validHashes.Get(header.Hash()); ok {
 		status = engine_types.ValidStatus
 		latestValidHash = header.Hash()
 		return
@@ -206,7 +216,11 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		if criticalError != nil {
 			return
 		}
+		fmt.Println(currentHash)
 		if header == nil || body == nil {
+			fmt.Println(currentHash)
+			fmt.Println(header)
+			fmt.Println(body)
 			// We miss some components so we did not check validity.
 			status = engine_types.AcceptedStatus
 			return
@@ -214,16 +228,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		headersChain = append([]*types.Header{header}, headersChain...)
 		bodiesChain = append([]*types.RawBody{body.RawBody()}, bodiesChain...)
 
-		has, err := tx.Has(kv.BlockBody, dbutils.BlockBodyKey(header.Number.Uint64(), header.Hash()))
-		if err != nil {
-			criticalError = err
-			return
-		}
-		// MakesBodyCanonical do not support PoS.
-		if has {
-			status = engine_types.AcceptedStatus
-			return
-		}
 		currentHash = header.ParentHash
 		unwindPoint = header.Number.Uint64() - 1
 		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
@@ -279,6 +283,7 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 	validationError = fv.validatePayload(tx, header, body, unwindPoint, headersChain, bodiesChain, notifications)
 	latestValidHash = header.Hash()
 	if validationError != nil {
+		rawdb.DeleteHeader(tx, header.Hash(), header.Number.Uint64())
 		latestValidHash = header.ParentHash
 		status = engine_types.InvalidStatus
 		if fv.extendingFork != nil {
@@ -287,6 +292,31 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 		}
 		fv.extendingForkHeadHash = libcommon.Hash{}
 		return
+	}
+	fv.validHashes.Add(header.Hash(), true)
+
+	// If we do not have the body we can recover it from the batch.
+	if body == nil {
+		var bodyFromDb *types.Body
+		bodyFromDb, criticalError = fv.blockReader.BodyWithTransactions(context.Background(), tx, header.Hash(), header.Number.Uint64())
+		if criticalError != nil {
+			return
+		}
+		if bodyFromDb == nil {
+			criticalError = fmt.Errorf("ForkValidator failed to recover block body: %d, %x", header.Number.Uint64(), header.Hash())
+			return
+		}
+		if criticalError = rawdb.WriteHeader(tx, header); criticalError != nil {
+			return
+		}
+
+	} else {
+		if criticalError = rawdb.WriteHeader(tx, header); criticalError != nil {
+			return
+		}
+		if _, criticalError = rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), header.Number.Uint64(), body); criticalError != nil {
+			return
+		}
 	}
 
 	status = engine_types.ValidStatus

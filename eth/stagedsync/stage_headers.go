@@ -290,7 +290,7 @@ func startHandlingForkChoice(
 ) (*engine_types.PayloadStatus, error) {
 	defer cfg.forkValidator.ClearWithUnwind(tx, cfg.notifications.Accumulator, cfg.notifications.StateChangesConsumer)
 	headerHash := forkChoice.HeadHash
-	logger.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
+	logger.Info(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
 	canonical, headerNumber, err := rawdb.IsCanonicalHashDeprecated(tx, headerHash)
 	if err != nil {
