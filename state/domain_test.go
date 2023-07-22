@@ -144,17 +144,24 @@ func TestDomain_CollationBuild(t *testing.T) {
 		}
 		require.Equal(t, []string{"key1", "value1.2", "key2", "value2.1"}, words)
 		// Check index
-		require.Equal(t, 2, int(sf.valuesIdx.KeyCount()))
+		//require.Equal(t, 2, int(sf.valuesIdx.KeyCount()))
+		require.Equal(t, 2, int(sf.valuesBt.KeyCount()))
 
-		r := recsplit.NewIndexReader(sf.valuesIdx)
-		defer r.Close()
+		//r := recsplit.NewIndexReader(sf.valuesIdx)
+		//defer r.Close()
+		//for i := 0; i < len(words); i += 2 {
+		//	offset := r.Lookup([]byte(words[i]))
+		//	g.Reset(offset)
+		//	w, _ := g.Next(nil)
+		//	require.Equal(t, words[i], string(w))
+		//	w, _ = g.Next(nil)
+		//	require.Equal(t, words[i+1], string(w))
+		//}
+
 		for i := 0; i < len(words); i += 2 {
-			offset := r.Lookup([]byte(words[i]))
-			g.Reset(offset)
-			w, _ := g.Next(nil)
-			require.Equal(t, words[i], string(w))
-			w, _ = g.Next(nil)
-			require.Equal(t, words[i+1], string(w))
+			c, _ := sf.valuesBt.Seek([]byte(words[i]))
+			require.Equal(t, words[i], string(c.Key()))
+			require.Equal(t, words[i+1], string(c.Value()))
 		}
 	}
 	{
@@ -173,18 +180,24 @@ func TestDomain_CollationBuild(t *testing.T) {
 		}
 		require.Equal(t, []string{"key1", "value1.4"}, words)
 		// Check index
-		require.Equal(t, 1, int(sf.valuesIdx.KeyCount()))
-
-		r := recsplit.NewIndexReader(sf.valuesIdx)
-		defer r.Close()
+		require.Equal(t, 1, int(sf.valuesBt.KeyCount()))
 		for i := 0; i < len(words); i += 2 {
-			offset := r.Lookup([]byte(words[i]))
-			g.Reset(offset)
-			w, _ := g.Next(nil)
-			require.Equal(t, words[i], string(w))
-			w, _ = g.Next(nil)
-			require.Equal(t, words[i+1], string(w))
+			c, _ := sf.valuesBt.Seek([]byte(words[i]))
+			require.Equal(t, words[i], string(c.Key()))
+			require.Equal(t, words[i+1], string(c.Value()))
 		}
+
+		//require.Equal(t, 1, int(sf.valuesIdx.KeyCount()))
+		//r := recsplit.NewIndexReader(sf.valuesIdx)
+		//defer r.Close()
+		//for i := 0; i < len(words); i += 2 {
+		//	offset := r.Lookup([]byte(words[i]))
+		//	g.Reset(offset)
+		//	w, _ := g.Next(nil)
+		//	require.Equal(t, words[i], string(w))
+		//	w, _ = g.Next(nil)
+		//	require.Equal(t, words[i+1], string(w))
+		//}
 	}
 }
 
