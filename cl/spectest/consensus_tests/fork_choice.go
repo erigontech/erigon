@@ -5,8 +5,8 @@ import (
 	"io/fs"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -136,7 +136,7 @@ type ForkChoicePayloadStatus struct {
 type ForkChoice struct {
 }
 
-func NewForkChoice(fn func(s *state.BeaconState) error) *ForkChoice {
+func NewForkChoice(fn func(s abstract.BeaconState) error) *ForkChoice {
 	return &ForkChoice{}
 }
 

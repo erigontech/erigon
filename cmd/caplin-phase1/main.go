@@ -63,7 +63,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	log.Info("[Phase1]", "chain", cliCtx.String(flags.Chain.Name))
 	log.Info("[Phase1] Running Caplin")
 	// Either start from genesis or a checkpoint
-	var state *state.BeaconState
+	var state *state.CachingBeaconState
 	if cfg.InitialSync {
 		state = cfg.InitalState
 	} else {

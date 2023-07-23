@@ -41,7 +41,8 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 		Label(label).
 		PageSize(targetPageSize.Bytes()).
 		MapSize(datasize.ByteSize(info.Geo.Upper)).
-		Flags(func(flags uint) uint { return flags | mdbx.NoMemInit | mdbx.WriteMap }).
+		GrowthStep(8 * datasize.GB).
+		Flags(func(flags uint) uint { return flags | mdbx.WriteMap }).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
 		MustOpen()
 	return src, dst
@@ -98,9 +99,9 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	}
 	total, _ = srcC.Count()
 
-	dstTx, err1 := dst.BeginRw(ctx)
-	if err1 != nil {
-		return err1
+	dstTx, err := dst.BeginRw(ctx)
+	if err != nil {
+		return err
 	}
 	defer dstTx.Rollback()
 	_ = dstTx.ClearBucket(table)
@@ -119,24 +120,26 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 
 		if isDupsort {
 			if err = casted.AppendDup(k, v); err != nil {
-				panic(err)
+				return err
 			}
 		} else {
 			if err = c.Append(k, v); err != nil {
-				panic(err)
+				return err
 			}
 		}
 
 		i++
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
-			logger.Info("Progress", "table", table, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", hex.EncodeToString(k),
-				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
-		default:
+		if i%100_000 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				logger.Info("Progress", "table", table, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", hex.EncodeToString(k),
+					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			default:
+			}
 		}
 	}
 	// migrate bucket sequences to native mdbx implementation
@@ -154,7 +157,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	return nil
 }
 
-const ReadAheadThreads = 128
+const ReadAheadThreads = 1024
 
 func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, readAheadThreads int) {
 	var ThreadsLimit = readAheadThreads

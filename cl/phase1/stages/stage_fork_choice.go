@@ -28,7 +28,7 @@ type StageForkChoiceCfg struct {
 	genesisCfg      *clparams.GenesisConfig
 	beaconCfg       *clparams.BeaconChainConfig
 	executionClient *execution_client.ExecutionClient
-	state           *state.BeaconState
+	state           *state.CachingBeaconState
 	gossipManager   *network2.GossipManager
 	forkChoice      *forkchoice.ForkChoiceStore
 	caplinFreezer   freezer.Freezer
@@ -45,7 +45,7 @@ var (
 )
 
 func StageForkChoice(db kv.RwDB, downloader *network2.ForwardBeaconDownloader, genesisCfg *clparams.GenesisConfig,
-	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, executionClient *execution_client.ExecutionClient, gossipManager *network2.GossipManager,
+	beaconCfg *clparams.BeaconChainConfig, state *state.CachingBeaconState, executionClient *execution_client.ExecutionClient, gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore, caplinFreezer freezer.Freezer) StageForkChoiceCfg {
 	return StageForkChoiceCfg{
 		db:              db,
@@ -144,7 +144,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 						cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
 						cfg.forkChoice.GetEth1Hash(headRoot),
 					); err != nil {
-						log.Warn("Could send not forkchoice", "err", err)
+						log.Warn("Could not set forkchoice", "err", err)
 					}
 				}
 			}

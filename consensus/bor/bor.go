@@ -677,11 +677,17 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			}
 		}
 
+		if number == 0 {
+			break
+		}
+
 		headers = append(headers, header)
 		number, hash = number-1, header.ParentHash
+
 		if number <= chain.FrozenBlocks() {
 			break
 		}
+
 		select {
 		case <-logEvery.C:
 			log.Info("Gathering headers for validator proposer prorities (backwards)", "blockNum", number)
@@ -758,8 +764,6 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 	return snap, err
 }
 
-// VerifyUncles implements consensus.Engine, always returning an error for any
-// uncles as this consensus mechanism doesn't permit uncles.
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
 func (c *Bor) VerifyUncles(_ consensus.ChainReader, _ *types.Header, uncles []*types.Header) error {
@@ -889,8 +893,8 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 
 	var succession int
 	// if signer is not empty
-	if !bytes.Equal(c.authorizedSigner.Load().signer.Bytes(), libcommon.Address{}.Bytes()) {
-		succession, err = snap.GetSignerSuccessionNumber(c.authorizedSigner.Load().signer)
+	if signer := c.authorizedSigner.Load().signer; !bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
+		succession, err = snap.GetSignerSuccessionNumber(signer)
 		if err != nil {
 			return err
 		}
@@ -1099,7 +1103,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 
 	// Wait until sealing is terminated or delay timeout.
-	c.logger.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay-in-sec", uint(delay), "delay", common.PrettyDuration(delay))
+	c.logger.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay", common.PrettyDuration(delay))
 
 	go func() {
 		select {
@@ -1109,19 +1113,22 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 		case <-time.After(delay):
 			if wiggle > 0 {
 				c.logger.Info(
-					"Sealing out-of-turn",
+					"Sealed out-of-turn",
 					"number", number,
 					"wiggle", common.PrettyDuration(wiggle),
-					"in-turn-signer", snap.ValidatorSet.GetProposer().Address.Hex(),
+					"delay", delay,
+					"headerDifficulty", header.Difficulty,
+					"signer", signer.Hex(),
+				)
+			} else {
+				c.logger.Info(
+					"Sealed in-turn",
+					"number", number,
+					"delay", delay,
+					"headerDifficulty", header.Difficulty,
+					"signer", signer.Hex(),
 				)
 			}
-
-			c.logger.Info(
-				"Sealing successful",
-				"number", number,
-				"delay", delay,
-				"headerDifficulty", header.Difficulty,
-			)
 		}
 		select {
 		case results <- block.WithSeal(header):
@@ -1132,17 +1139,34 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	return nil
 }
 
+// IsProposer returns true if this instance is the proposer for this block
+func (c *Bor) IsProposer(chain consensus.ChainHeaderReader, block *types.Block) (bool, error) {
+	header := block.Header()
+	number := header.Number.Uint64()
+
+	if number == 0 {
+		return false, nil
+	}
+
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
+	if err != nil {
+		return false, err
+	}
+
+	currentSigner := c.authorizedSigner.Load()
+
+	if !snap.ValidatorSet.HasAddress(currentSigner.signer) {
+		return false, nil
+	}
+
+	successionNumber, err := snap.GetSignerSuccessionNumber(currentSigner.signer)
+
+	return successionNumber == 0, err
+}
+
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 // that a new block should have based on the previous blocks in the chain and the
 // current signer.
-// func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, parent *types.Header) *big.Int {
-// 	snap, err := c.snapshot(chain, parent.Number.Uint64(), parent.Hash(), nil)
-// 	if err != nil {
-// 		return nil
-// 	}
-// 	return new(big.Int).SetUint64(snap.Difficulty(c.signer))
-// }
-
 func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ libcommon.Hash, _ uint64) *big.Int {
 	snap, err := c.snapshot(chain, parentNumber, parentHash, nil)
 	if err != nil {
@@ -1373,7 +1397,7 @@ func (c *Bor) CommitStates(
 
 	processTime := time.Since(processStart)
 
-	c.logger.Info("StateSyncData", "number", number, "lastStateID", lastStateID, "total records", len(eventRecords), "fetch time", int(fetchTime.Milliseconds()), "process time", int(processTime.Milliseconds()))
+	c.logger.Info("StateSyncData", "number", number, "lastStateID", lastStateID, "total records", len(eventRecords), "fetch time", fetchTime, "process time", processTime)
 
 	return nil
 }

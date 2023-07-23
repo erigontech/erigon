@@ -19,13 +19,13 @@ import (
 type StageBeaconStateCfg struct {
 	db              kv.RwDB
 	beaconCfg       *clparams.BeaconChainConfig
-	state           *state2.BeaconState
+	state           *state2.CachingBeaconState
 	executionClient *execution_client.ExecutionClient
 	enabled         bool
 }
 
 func StageBeaconState(db kv.RwDB,
-	beaconCfg *clparams.BeaconChainConfig, state *state2.BeaconState, executionClient *execution_client.ExecutionClient) StageBeaconStateCfg {
+	beaconCfg *clparams.BeaconChainConfig, state *state2.CachingBeaconState, executionClient *execution_client.ExecutionClient) StageBeaconStateCfg {
 	return StageBeaconStateCfg{
 		db:              db,
 		beaconCfg:       beaconCfg,
@@ -88,7 +88,7 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, tx kv.RwTx, ctx context.Cont
 		log.Info("Applied state transition", "from", slot, "to", slot+1)
 	}
 
-	log.Info("[BeaconState] Finished transitioning state", "from", fromSlot, "to", endSlot)
+	log.Info("[CachingBeaconState] Finished transitioning state", "from", fromSlot, "to", endSlot)
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err

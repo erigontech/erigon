@@ -77,7 +77,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			if chainConfig.Bor == nil {
 				return nil, nil
 			}
-			borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
+			borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
 			if borTx == nil {
 				return nil, nil
 			}
@@ -191,7 +191,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
-		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
+		borTx := rawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
 		if borTx == nil {
 			return nil, nil // not error
 		}
@@ -255,15 +255,15 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		if chainConfig.Bor == nil {
 			return nil, nil // not error
 		}
-		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
+		borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
 		if borTx == nil {
 			return nil, nil
 		}
-		derivedBorTxHash := types2.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
+		derivedBorTxHash := types2.ComputeBorTxHash(blockNum, hash)
+		return newRPCBorTransaction(borTx, derivedBorTxHash, hash, blockNum, uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
 	}
 
-	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
+	return newRPCTransaction(txs[txIndex], hash, blockNum, uint64(txIndex), block.BaseFee()), nil
 }
 
 // GetRawTransactionByBlockNumberAndIndex returns the bytes of the transaction for the given block number and index.
