@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type ExecutionClientDirect struct {
@@ -32,21 +33,21 @@ func NewExecutionClientDirect(server execution.ExecutionServer) *ExecutionClient
 	return &ExecutionClientDirect{server: server}
 }
 
-func (s *ExecutionClientDirect) AssembleBlock(ctx context.Context, in *execution.EmptyMessage, opts ...grpc.CallOption) (*types.ExecutionPayload, error) {
+func (s *ExecutionClientDirect) AssembleBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.ExecutionPayload, error) {
 	return s.server.AssembleBlock(ctx, in)
 }
 
 // Chain Putters.
-func (s *ExecutionClientDirect) InsertHeaders(ctx context.Context, in *execution.InsertHeadersRequest, opts ...grpc.CallOption) (*execution.EmptyMessage, error) {
+func (s *ExecutionClientDirect) InsertHeaders(ctx context.Context, in *execution.InsertHeadersRequest, opts ...grpc.CallOption) (*execution.InsertionResult, error) {
 	return s.server.InsertHeaders(ctx, in)
 }
 
-func (s *ExecutionClientDirect) InsertBodies(ctx context.Context, in *execution.InsertBodiesRequest, opts ...grpc.CallOption) (*execution.EmptyMessage, error) {
+func (s *ExecutionClientDirect) InsertBodies(ctx context.Context, in *execution.InsertBodiesRequest, opts ...grpc.CallOption) (*execution.InsertionResult, error) {
 	return s.server.InsertBodies(ctx, in)
 }
 
 // Chain Validation and ForkChoice.
-func (s *ExecutionClientDirect) ValidateChain(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*execution.ValidationReceipt, error) {
+func (s *ExecutionClientDirect) ValidateChain(ctx context.Context, in *execution.ValidationRequest, opts ...grpc.CallOption) (*execution.ValidationReceipt, error) {
 	return s.server.ValidateChain(ctx, in)
 
 }
