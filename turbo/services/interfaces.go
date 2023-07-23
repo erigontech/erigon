@@ -75,6 +75,7 @@ type FullBlockReader interface {
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
 
 	Snapshots() BlockSnapshots
+	BorSnapshots() BlockSnapshots
 }
 
 type BlockSnapshots interface {

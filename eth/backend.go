@@ -873,11 +873,11 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		}
 	}
 
-	if borcfg == nil {
-		if !cfg.Enabled {
-			return nil
-		}
+	//if borcfg == nil {
+	if !cfg.Enabled {
+		return nil
 	}
+	//}
 
 	// Configure the local mining address
 	eb, err := s.Etherbase()
@@ -1079,11 +1079,13 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 
 func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig ethconfig.BlocksFreezing, histV3 bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *libstate.AggregatorV3, error) {
 	allSnapshots := freezeblocks.NewRoSnapshots(snConfig, dirs.Snap, logger)
+	allBorSnapshots := freezeblocks.NewBorRoSnapshots(snConfig, dirs.Snap, logger)
 	var err error
 	if !snConfig.NoDownloader {
 		allSnapshots.OptimisticalyReopenWithDB(db)
+		allBorSnapshots.OptimisticalyReopenWithDB(db)
 	}
-	blockReader := freezeblocks.NewBlockReader(allSnapshots)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 	blockWriter := blockio.NewBlockWriter(histV3)
 
 	dir.MustExist(dirs.SnapHistory)

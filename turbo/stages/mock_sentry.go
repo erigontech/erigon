@@ -254,6 +254,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, logger)
 	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger)
+	allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger)
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
 		tb:          tb,
@@ -272,7 +273,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		},
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
-		BlockReader:    freezeblocks.NewBlockReader(allSnapshots),
+		BlockReader:    freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots),
 		HistoryV3:      cfg.HistoryV3,
 	}
 	if tb != nil {

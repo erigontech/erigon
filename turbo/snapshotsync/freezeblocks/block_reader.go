@@ -81,6 +81,7 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 }
 
 func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots    { panic("not implemented") }
+func (r *RemoteBlockReader) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
 func (r *RemoteBlockReader) FrozenBorBlocks() uint64               { panic("not supported") }
 func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not supported") }
@@ -208,20 +209,21 @@ func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash comm
 
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
-	sn             *RoSnapshots
-	TransactionsV3 bool
+	sn    *RoSnapshots
+	borSn *BorRoSnapshots
 }
 
-func NewBlockReader(snapshots services.BlockSnapshots) *BlockReader {
-	return &BlockReader{sn: snapshots.(*RoSnapshots), TransactionsV3: true}
+func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.BlockSnapshots) *BlockReader {
+	return &BlockReader{sn: snapshots.(*RoSnapshots), borSn: borSnapshots.(*BorRoSnapshots)}
 }
 
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
 	return CanDeleteTo(currentBlockInDB, r.sn.BlocksAvailable())
 }
 func (r *BlockReader) Snapshots() services.BlockSnapshots    { return r.sn }
+func (r *BlockReader) BorSnapshots() services.BlockSnapshots { return r.borSn }
 func (r *BlockReader) FrozenBlocks() uint64                  { return r.sn.BlocksAvailable() }
-func (r *BlockReader) FrozenBorBlocks() uint64               { return 0 }
+func (r *BlockReader) FrozenBorBlocks() uint64               { return r.borSn.BlocksAvailable() }
 func (r *BlockReader) FrozenFiles() []string                 { return r.sn.Files() }
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
 
