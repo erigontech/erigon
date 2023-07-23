@@ -54,7 +54,7 @@ func (d *deployer) deploy(ctx context.Context, node devnet.Node) {
 		return
 	}
 
-	if err = waiter.Await(transaction.Hash()); err != nil {
+	if _, err = waiter.Await(transaction.Hash()); err != nil {
 		d.faucet.Lock()
 		defer d.faucet.Unlock()
 

@@ -21,8 +21,13 @@ func (f BlockHandlerFunc) Handle(ctx context.Context, node devnet.Node, block *r
 	return f(ctx, node, block, transaction)
 }
 
+type waitResult struct {
+	err         error
+	blockNumber uint64
+}
+
 type blockWaiter struct {
-	err        chan error
+	result     chan waitResult
 	hash       chan libcommon.Hash
 	waitHash   *libcommon.Hash
 	headersSub ethereum.Subscription
@@ -31,12 +36,12 @@ type blockWaiter struct {
 }
 
 type Waiter interface {
-	Await(libcommon.Hash) error
+	Await(libcommon.Hash) (uint64, error)
 }
 
-type WaiterFunc func(libcommon.Hash) error
+type WaiterFunc func(libcommon.Hash) (uint64, error)
 
-func (f WaiterFunc) Await(hash libcommon.Hash) error {
+func (f WaiterFunc) Await(hash libcommon.Hash) (uint64, error) {
 	return f(hash)
 }
 
@@ -46,7 +51,7 @@ func BlockWaiter(ctx context.Context, handler BlockHandler) (Waiter, context.Can
 	node := devnet.SelectBlockProducer(ctx)
 
 	waiter := &blockWaiter{
-		err:     make(chan error, 1),
+		result:  make(chan waitResult, 1),
 		hash:    make(chan libcommon.Hash, 1),
 		handler: handler,
 		logger:  devnet.Logger(ctx),
@@ -59,16 +64,16 @@ func BlockWaiter(ctx context.Context, handler BlockHandler) (Waiter, context.Can
 	})
 
 	if err != nil {
-		close(waiter.err)
-		return WaiterFunc(func(libcommon.Hash) error {
-			return err
+		close(waiter.result)
+		return WaiterFunc(func(libcommon.Hash) (uint64, error) {
+			return 0, err
 		}), cancel
 	}
 
-	return WaiterFunc(func(hash libcommon.Hash) error {
+	return WaiterFunc(func(hash libcommon.Hash) (uint64, error) {
 		waiter.hash <- hash
-		err := <-waiter.err
-		return err
+		res := <-waiter.result
+		return res.blockNumber, res.err
 	}), cancel
 }
 
@@ -76,8 +81,8 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, header inte
 	select {
 	case <-ctx.Done():
 		c.headersSub.Unsubscribe()
-		c.err <- ctx.Err()
-		close(c.err)
+		c.result <- waitResult{err: ctx.Err()}
+		close(c.result)
 	default:
 	}
 
@@ -93,8 +98,16 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, header inte
 		for _, tx := range block.Transactions {
 			if libcommon.HexToHash(tx.Hash) == *c.waitHash {
 				c.headersSub.Unsubscribe()
-				c.err <- c.handler.Handle(ctx, node, block, &tx)
-				close(c.err)
+				res := waitResult{
+					err: c.handler.Handle(ctx, node, block, &tx),
+				}
+
+				if res.err == nil {
+					res.blockNumber = blockNum.Uint64()
+				}
+
+				c.result <- res
+				close(c.result)
 				break
 			}
 		}

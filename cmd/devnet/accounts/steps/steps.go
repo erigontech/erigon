@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -59,25 +60,9 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 		return 0, fmt.Errorf("Unknown account: %s", name)
 	}
 
-	node := devnet.SelectBlockProducer(chainCtx)
+	facuetStartingBalance, _ := faucet.Balance(chainCtx)
 
-	if fbal, err := node.GetBalance(faucet.Source().Address, requests.BlockNumbers.Latest); err == nil {
-		fmt.Println(faucet.Source().Address, fbal)
-		if fbal.Uint64() > 0 {
-			txHash, err := transactions.Transfer(chainCtx, account.Address.Hex(), faucet.Source().Address.Hex(), 100, true)
-			if err != nil {
-				fmt.Println(err)
-			}
-			fmt.Println("TF", txHash)
-		}
-	}
-
-	balance, _ := node.GetBalance(account.Address, requests.BlockNumbers.Latest)
-	fmt.Println(chainName, account.Address, balance)
-	balance, _ = faucet.Balance(chainCtx)
-	fmt.Println(chainName, faucet.Address(), balance)
-
-	_, hash, err := faucet.Send(chainCtx, account, ethAmount)
+	sent, hash, err := faucet.Send(chainCtx, account, ethAmount)
 
 	if err != nil {
 		return 0, err
@@ -96,37 +81,51 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 		End:   &blockNum,
 	})
 
-	//if err != nil {
-	//	return 0, fmt.Errorf("Failed to get post transfer logs: %w", err)
-	//}
-
-	for logs.Next() {
-		fmt.Println(logs.Event.Destination, logs.Event.Amount)
+	if err != nil {
+		return 0, fmt.Errorf("Failed to get post transfer logs: %w", err)
 	}
 
-	traceResults, err := node.TraceTransaction(hash)
+	sendConfirmed := false
 
-	if err != nil {
-		fmt.Println(err)
-	} else {
+	for logs.Next() {
+		if account.Address != logs.Event.Destination {
+			return 0, fmt.Errorf("Unexpected send destination: %s", logs.Event.Destination)
+		}
+
+		if sent.Cmp(logs.Event.Amount) != 0 {
+			return 0, fmt.Errorf("Unexpected send amount: %s", logs.Event.Amount)
+		}
+
+		sendConfirmed = true
+	}
+
+	node := devnet.SelectBlockProducer(chainCtx)
+
+	if !sendConfirmed {
+		logger := devnet.Logger(chainCtx)
+
+		traceResults, err := node.TraceTransaction(hash)
+
+		if err != nil {
+			return 0, fmt.Errorf("Send transaction failure: transaction trace failed: %w", err)
+		}
+
 		for _, traceResult := range traceResults {
-			fmt.Printf("%+v [%+v]\n", traceResult, traceResult.Result)
-
 			accountResult, err := node.DebugAccountAt(traceResult.BlockHash, traceResult.TransactionPosition, faucet.Address())
 
 			if err != nil {
-				fmt.Println(err)
-			} else {
-				fmt.Println(faucet.Address(), accountResult)
+				return 0, fmt.Errorf("Send transaction failure: account debug failed: %w", err)
 			}
+
+			logger.Info("Faucet account details", "address", faucet.Address(), "account", accountResult)
 
 			accountCode, err := node.GetCode(faucet.Address(), requests.BlockNumber(traceResult.BlockHash.Hex()))
 
 			if err != nil {
-				fmt.Println(err)
-			} else {
-				fmt.Println(faucet.Address(), accountCode)
+				return 0, fmt.Errorf("Send transaction failure: get account code failed: %w", err)
 			}
+
+			logger.Info("Faucet account code", "address", faucet.Address(), "code", accountCode)
 
 			callResults, err := node.TraceCall(fmt.Sprintf("0x%x", blockNum), ethapi.CallArgs{
 				From: &traceResult.Action.From,
@@ -135,21 +134,32 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 			}, requests.TraceOpts.StateDiff, requests.TraceOpts.Trace, requests.TraceOpts.VmTrace)
 
 			if err != nil {
-				fmt.Println(err)
-			} else {
-				results, _ := json.MarshalIndent(callResults, "  ", "  ")
-				fmt.Println(string(results))
+				return 0, fmt.Errorf("Send transaction failure: trace call failed: %w", err)
 			}
+
+			results, _ := json.MarshalIndent(callResults, "  ", "  ")
+			logger.Debug("Send transaction call trace", "hash", hash, "trace", string(results))
 		}
 	}
 
+	balance, err := faucet.Balance(chainCtx)
+
+	if err != nil {
+		return 0, fmt.Errorf("Failed to get post transfer faucet balance: %w", err)
+	}
+
+	if balance.Cmp((&big.Int{}).Sub(facuetStartingBalance, sent)) != 0 {
+		return 0, fmt.Errorf("Unexpected post transfer faucet balance got: %s:, expected: %s", balance, (&big.Int{}).Sub(facuetStartingBalance, sent))
+	}
+
 	balance, err = node.GetBalance(account.Address, requests.BlockNumbers.Latest)
-	fmt.Println(chainName, account.Address, balance)
-	balance, _ = node.GetBalance(faucet.Address(), requests.BlockNumbers.Latest)
-	fmt.Println(chainName, faucet.Address(), balance)
 
 	if err != nil {
 		return 0, fmt.Errorf("Failed to get post transfer balance: %w", err)
+	}
+
+	if balance.Cmp(sent) != 0 {
+		return 0, fmt.Errorf("Unexpected post transfer balance got: %s:, expected: %s", balance, sent)
 	}
 
 	return balance.Uint64(), nil

@@ -11,6 +11,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
+	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
@@ -114,6 +115,10 @@ func (h *Heimdall) StateSenderAddress() libcommon.Address {
 	return h.syncContractAddress
 }
 
+func (f *Heimdall) StateSenderContract() *contracts.TestStateSender {
+	return f.syncContractBinding
+}
+
 func (h *Heimdall) NodeCreated(ctx context.Context, node devnet.Node) {
 	h.Lock()
 	defer h.Unlock()
@@ -147,8 +152,12 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 				return
 			}
 
+			deployCtx := devnet.WithCurrentNode(ctx, node)
+			waiter, cancel := blocks.BlockWaiter(deployCtx, contracts.DeploymentChecker)
+			defer cancel()
+
 			// deploy the contract and get the contract handler
-			address, _ /*transaction*/, contract, err := contracts.DeployWithOps(devnet.WithCurrentNode(ctx, node), transactOpts, contracts.DeployTestStateSender)
+			address, transaction, contract, err := contracts.DeployWithOps(deployCtx, transactOpts, contracts.DeployTestStateSender)
 
 			if err != nil {
 				h.Lock()
@@ -163,6 +172,15 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 
 			h.syncContractAddress = address
 			h.syncContractBinding = contract
+
+			if _, err = waiter.Await(transaction.Hash()); err != nil {
+				h.Lock()
+				defer h.Unlock()
+
+				h.syncChan = nil
+				h.logger.Error("Failed to deploy state sender", "err", err)
+				return
+			}
 
 			h.syncSubscription, err = contract.WatchStateSynced(&bind.WatchOpts{}, h.syncChan, nil, nil)
 
@@ -181,6 +199,8 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 					h.logger.Error("L1 sync event processing failed", "err", err)
 				}
 			}
+
+			h.logger.Info("Sync event channel closed")
 		}()
 	}
 }

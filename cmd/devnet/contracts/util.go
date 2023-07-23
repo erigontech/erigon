@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"context"
-	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -74,21 +73,8 @@ func DeployWithOps[C any](ctx context.Context, auth *bind.TransactOpts, deploy f
 
 var DeploymentChecker = blocks.BlockHandlerFunc(
 	func(ctx context.Context, node devnet.Node, block *requests.BlockResult, transaction *requests.Transaction) error {
-		transactionHash := libcommon.HexToHash(transaction.Hash)
-		traceResults, err := node.TraceTransaction(transactionHash)
-
-		if err != nil {
-			return fmt.Errorf("Failed to trace deployment transaction: %w", err)
-		}
-
-		for _, traceResult := range traceResults {
-			if traceResult.TransactionHash == transactionHash {
-				if len(traceResult.Error) != 0 {
-					return fmt.Errorf("Deployment transaction error: %s", traceResult.Error)
-				}
-
-				break
-			}
+		if err := blocks.CompletionChecker(ctx, node, block, transaction); err != nil {
+			return nil
 		}
 
 		return nil

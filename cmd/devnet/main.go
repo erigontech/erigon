@@ -271,11 +271,12 @@ func action(ctx *cli.Context) error {
 		"state-sync": {
 			Steps: []*scenarios.Step{
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
-				{Text: "CreateAccountWithFunds", Args: []any{networkname.DevChainName, "root-funder", 200.0}},
 				{Text: "CreateAccountWithFunds", Args: []any{networkname.BorDevnetChainName, "child-funder", 200.0}},
-				{Text: "DeployChildChainReceiver", Args: []any{"faucet-source"}},
-				{Text: "DeployRootChainSender", Args: []any{"faucet-source"}},
-				{Text: "ProcessTransfers", Args: []any{"faucet-source", 10, 2, 2}},
+				{Text: "CreateAccountWithFunds", Args: []any{networkname.DevChainName, "root-funder", 200.0}},
+				{Text: "DeployChildChainReceiver", Args: []any{"child-funder"}},
+				{Text: "GenerateSyncEvents", Args: []any{"root-funder", 10, 2, 2}},
+				{Text: "DeployRootChainSender", Args: []any{"root-funder"}},
+				{Text: "ProcessTransfers", Args: []any{"root-funder", 10, 2, 2}},
 			},
 		},
 	}.Run(runCtx, strings.Split(ctx.String("scenarios"), ",")...)
@@ -406,6 +407,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 							Node: args.Node{
 								ConsoleVerbosity: "0",
 								DirVerbosity:     "5",
+								VMDebug:          true,
+								HttpCorsDomain:   "*",
 							},
 							DevPeriod:    5,
 							AccountSlots: 200,
@@ -413,7 +416,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 						args.NonBlockProducer{
 							Node: args.Node{
 								ConsoleVerbosity: "0",
-								DirVerbosity:     "5",
+								DirVerbosity:     "3",
 							},
 						},
 					},

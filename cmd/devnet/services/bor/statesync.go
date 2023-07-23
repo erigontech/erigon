@@ -4,7 +4,6 @@ import (
 	//	"encoding/hex"
 	//	"time"
 
-	//	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	//	"github.com/ledgerwatch/erigon/core/types"
 )
