@@ -39,7 +39,7 @@ func main() {
 			return
 		}
 	}
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()))
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()), nil /* BorSnapshots */)
 	execution.RegisterExecutionServer(s, NewEth1Execution(db, blockReader))
 	log.Info("Serving mock Execution layer.")
 	if err := s.Serve(lis); err != nil {

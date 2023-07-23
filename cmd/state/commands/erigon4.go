@@ -234,11 +234,16 @@ func Erigon4(genesis *types.Genesis, chainConfig *chain2.Config, logger log.Logg
 
 	var blockReader services.FullBlockReader
 	var allSnapshots = freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), logger)
+	var allBorSnapshots = freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), logger)
 	defer allSnapshots.Close()
+	defer allBorSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader = freezeblocks.NewBlockReader(allSnapshots)
+	if err := allBorSnapshots.ReopenFolder(); err != nil {
+		return fmt.Errorf("reopen bor snapshot segments: %w", err)
+	}
+	blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 	engine := initConsensusEngine(chainConfig, allSnapshots, logger)
 
 	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {

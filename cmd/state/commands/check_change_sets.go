@@ -78,7 +78,7 @@ func CheckChangeSets(genesis *types.Genesis, blockNum uint64, chaindata string, 
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader := freezeblocks.NewBlockReader(allSnapshots)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil /* BorSnapshots */)
 
 	chainDb := db
 	defer chainDb.Close()
