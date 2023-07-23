@@ -52,7 +52,7 @@ func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string, p
 	}, nil
 }
 
-func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) (invalid bool, err error) {
+func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}

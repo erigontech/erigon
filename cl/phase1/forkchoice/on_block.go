@@ -45,7 +45,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 
 	var invalidBlock bool
 	if newPayload && f.engine != nil {
-		if invalidBlock, err = f.engine.NewPayload(block.Block.Body.ExecutionPayload); err != nil {
+		if invalidBlock, err = f.engine.NewPayload(block.Block.Body.ExecutionPayload, &block.Block.ParentRoot); err != nil {
 			log.Warn("newPayload failed", "err", err)
 			return err
 		}
