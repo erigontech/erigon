@@ -273,8 +273,6 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(blockHash libcommon.Hash,
 		forkchoiceMessage.FinalizedBlockHash == rawdb.ReadForkchoiceFinalized(tx) &&
 		forkchoiceMessage.HeadHash == rawdb.ReadForkchoiceHead(tx) &&
 		forkchoiceMessage.SafeBlockHash == rawdb.ReadForkchoiceSafe(tx) {
-		fmt.Println(forkchoiceMessage)
-
 		return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 	}
 
