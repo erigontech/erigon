@@ -208,7 +208,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 			header *types.Header
 			body   *types.Body
 		)
-		body, _, criticalError = fv.blockReader.Body(fv.ctx, tx, currentHash, unwindPoint)
+		body, criticalError = fv.blockReader.BodyWithTransactions(fv.ctx, tx, currentHash, unwindPoint)
 		if criticalError != nil {
 			return
 		}
@@ -216,17 +216,18 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		if criticalError != nil {
 			return
 		}
-		fmt.Println(currentHash)
-		if header == nil || body == nil {
-			fmt.Println(currentHash)
-			fmt.Println(header)
-			fmt.Println(body)
+		if header == nil {
 			// We miss some components so we did not check validity.
 			status = engine_types.AcceptedStatus
 			return
 		}
 		headersChain = append([]*types.Header{header}, headersChain...)
-		bodiesChain = append([]*types.RawBody{body.RawBody()}, bodiesChain...)
+		if body == nil {
+			bodiesChain = append([]*types.RawBody{nil}, bodiesChain...)
+		} else {
+			bodiesChain = append([]*types.RawBody{body.RawBody()}, bodiesChain...)
+
+		}
 
 		currentHash = header.ParentHash
 		unwindPoint = header.Number.Uint64() - 1
@@ -283,7 +284,6 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 	validationError = fv.validatePayload(tx, header, body, unwindPoint, headersChain, bodiesChain, notifications)
 	latestValidHash = header.Hash()
 	if validationError != nil {
-		rawdb.DeleteHeader(tx, header.Hash(), header.Number.Uint64())
 		latestValidHash = header.ParentHash
 		status = engine_types.InvalidStatus
 		if fv.extendingFork != nil {
@@ -291,6 +291,7 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 			fv.extendingFork = nil
 		}
 		fv.extendingForkHeadHash = libcommon.Hash{}
+		fv.extendingForkNumber = 0
 		return
 	}
 	fv.validHashes.Add(header.Hash(), true)

@@ -50,7 +50,6 @@ func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash libcommo
 		} else {
 			var status engine_types.EngineStatus
 			if headBlockHash == pendingPayloadHash {
-				log.Info("X")
 				status = engine_types.ValidStatus
 			} else {
 				log.Warn("Failed to execute pending payload", "pendingPayload", pendingPayloadHash, "headBlock", headBlockHash)
