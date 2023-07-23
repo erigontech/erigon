@@ -9,9 +9,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 )
 
-func (e *EthereumExecutionModule) InsertBodies(ctx context.Context, req *execution.InsertBodiesRequest) (*execution.EmptyMessage, error) {
-	e.lock.Lock()
-	defer e.lock.Unlock()
+func (e *EthereumExecutionModule) InsertBodies(ctx context.Context, req *execution.InsertBodiesRequest) (*execution.InsertionResult, error) {
+	if !e.semaphore.TryAcquire(1) {
+		return &execution.InsertionResult{
+			Result: execution.ValidationStatus_Busy,
+		}, nil
+	}
+	defer e.semaphore.Release(1)
 	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBodies: could not begin transaction: %s", err)
@@ -26,12 +30,18 @@ func (e *EthereumExecutionModule) InsertBodies(ctx context.Context, req *executi
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBodies: could not commit: %s", err)
 	}
 
-	return &execution.EmptyMessage{}, tx.Commit()
+	return &execution.InsertionResult{
+		Result: execution.ValidationStatus_Success,
+	}, tx.Commit()
 }
 
-func (e *EthereumExecutionModule) InsertHeaders(ctx context.Context, req *execution.InsertHeadersRequest) (*execution.EmptyMessage, error) {
-	e.lock.Lock()
-	defer e.lock.Unlock()
+func (e *EthereumExecutionModule) InsertHeaders(ctx context.Context, req *execution.InsertHeadersRequest) (*execution.InsertionResult, error) {
+	if !e.semaphore.TryAcquire(1) {
+		return &execution.InsertionResult{
+			Result: execution.ValidationStatus_Busy,
+		}, nil
+	}
+	defer e.semaphore.Release(1)
 	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: could not begin transaction: %s", err)
@@ -42,7 +52,17 @@ func (e *EthereumExecutionModule) InsertHeaders(ctx context.Context, req *execut
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: cannot convert headers: %s", err)
 		}
+		// Parent's total difficulty
+		parentTd, err := rawdb.ReadTd(tx, header.ParentHash, header.Number.Uint64()-1)
+		if err != nil || parentTd == nil {
+			return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, header.Number.Uint64()-1, err)
+		}
+		// Sum TDs.
+		td := parentTd.Add(parentTd, header.Difficulty)
 		if err := rawdb.WriteHeader(tx, header); err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: could not insert: %s", err)
+		}
+		if err := rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: could not insert: %s", err)
 		}
 	}
@@ -50,5 +70,7 @@ func (e *EthereumExecutionModule) InsertHeaders(ctx context.Context, req *execut
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: could not commit: %s", err)
 	}
 
-	return &execution.EmptyMessage{}, tx.Commit()
+	return &execution.InsertionResult{
+		Result: execution.ValidationStatus_Success,
+	}, tx.Commit()
 }
