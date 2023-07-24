@@ -3,6 +3,7 @@
 package exp
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 
@@ -17,7 +18,13 @@ import (
 func Setup(address string, logger log.Logger) {
 	http.HandleFunc("/debug/metrics/prometheus", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		metrics2.WritePrometheus(w, true)
+
+		buffer := &bytes.Buffer{}
+		ioBuffer := NewIoWriterBuffer(buffer)
+		metrics2.WritePrometheus(ioBuffer, true)
+
+		buf := makePrometheusCompatible(buffer)
+
 		contentType := expfmt.Negotiate(r.Header)
 		enc := expfmt.NewEncoder(w, contentType)
 		mf, err := prometheus.DefaultGatherer.Gather()
@@ -27,6 +34,8 @@ func Setup(address string, logger log.Logger) {
 		for _, m := range mf {
 			enc.Encode(m)
 		}
+
+		w.Write(buf.Bytes())
 	})
 	//m.Handle("/debug/metrics", ExpHandler(metrics.DefaultRegistry))
 	//http.Handle("/debug/metrics/prometheus2", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
