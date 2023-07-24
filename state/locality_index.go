@@ -308,7 +308,6 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 	}
 
 	if !lc.file.src.bloom.ContainsHash(localityHash(key)) {
-		fmt.Printf("skip\n")
 		return 0, false, nil
 	}
 
