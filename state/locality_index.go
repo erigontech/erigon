@@ -322,7 +322,7 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 }
 
 func (li *LocalityIndex) exists(fromStep, toStep uint64) bool {
-	return dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep)))
+	return dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.lb", li.filenameBase, fromStep, toStep)))
 }
 func (li *LocalityIndex) missedIdxFiles(ii *HistoryContext) (toStep uint64, idxExists bool) {
 	if len(ii.files) == 0 {
@@ -452,9 +452,9 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			if err := dense.AddArray(i, inSteps); err != nil {
 				return nil, err
 			}
-			if err = rs.AddKey(k, i); err != nil {
-				return nil, err
-			}
+			//if err = rs.AddKey(k, i); err != nil {
+			//	return nil, err
+			//}
 			i++
 			p.Processed.Add(1)
 		}
@@ -463,9 +463,9 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		log.Warn(fmt.Sprintf("[dbg] bloom: %s, keys=%dk, size=%dmb, k=%d, probability=%f\n", fName, bloom.N()/1000, bloom.M()/8/1024/1024, bloom.K(), bloom.FalsePosititveProbability()))
 		bloom.WriteFile(idxPath + ".lb")
 
-		if err := dense.Build(); err != nil {
-			return nil, err
-		}
+		//if err := dense.Build(); err != nil {
+		//	return nil, err
+		//}
 
 		if err = rs.Build(); err != nil {
 			if rs.Collision() {
