@@ -51,9 +51,12 @@ import (
 )
 
 var (
-	LatestStateReadWarm  = metrics.GetOrCreateSummary(`latest_state_read{type="warm"}`)  //nolint
-	LatestStateReadCold  = metrics.GetOrCreateSummary(`latest_state_read{type="cold"}`)  //nolint
-	LatestStateReadGrind = metrics.GetOrCreateSummary(`latest_state_read{type="grind"}`) //nolint
+	LatestStateReadWarm          = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="yes"}`)  //nolint
+	LatestStateReadWarmNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="no"}`)   //nolint
+	LatestStateReadGrind         = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="yes"}`) //nolint
+	LatestStateReadGrindNotFound = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="no"}`)  //nolint
+	LatestStateReadCold          = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="yes"}`)  //nolint
+	LatestStateReadColdNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="no"}`)   //nolint
 )
 
 // filesItem corresponding to a pair of files (.dat and .idx)
@@ -1501,13 +1504,14 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 		//dc.d.stats.FilesQuerie.Add(1)
 		t := time.Now()
 		_, v, ok, err := dc.statelessBtree(i).Get(filekey)
-		LatestStateReadWarm.UpdateDuration(t)
 		if err != nil {
 			return nil, false, err
 		}
 		if !ok {
+			LatestStateReadWarmNotFound.UpdateDuration(t)
 			break
 		}
+		LatestStateReadWarm.UpdateDuration(t)
 		return v, true, nil
 	}
 	return nil, false, nil
@@ -1547,13 +1551,14 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 			//dc.d.stats.FilesQuerie.Add(1)
 			t := time.Now()
 			_, v, ok, err := dc.statelessBtree(i).Get(filekey)
-			LatestStateReadGrind.UpdateDuration(t)
 			if err != nil {
 				return nil, false, err
 			}
 			if !ok {
+				LatestStateReadGrindNotFound.UpdateDuration(t)
 				continue
 			}
+			LatestStateReadGrind.UpdateDuration(t)
 			return v, true, nil
 		}
 	}
@@ -1571,13 +1576,14 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	//dc.d.stats.FilesQuerie.Add(1)
 	t := time.Now()
 	_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey)
-	LatestStateReadCold.UpdateDuration(t)
 	if err != nil {
 		return nil, false, err
 	}
 	if !ok {
-		return nil, false, err
+		LatestStateReadColdNotFound.UpdateDuration(t)
+		return nil, false, nil
 	}
+	LatestStateReadCold.UpdateDuration(t)
 	return v, true, nil
 }
 
