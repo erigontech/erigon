@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/spaolacci/murmur3"
 )
 
 const LocalityIndexUint64Limit = 64 //bitmap spend 1 bit per file, stored as uint64
@@ -307,7 +308,8 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 		return 0, false, nil
 	}
 
-	if !lc.file.src.bloom.ContainsHash(localityHash(key)) {
+	hi, lo := lc.reader.Sum(key)
+	if !lc.file.src.bloom.ContainsHash(hi) {
 		return 0, false, nil
 	}
 
@@ -316,7 +318,7 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 	//	l, _, _ := lc.file.src.bm.LastAt(lc.reader.Lookup(key))
 	//	fmt.Printf("idx: %x, %d, last: %d\n", key, res, l)
 	//}
-	return lc.file.src.bm.LastAt(lc.reader.Lookup(key))
+	return lc.file.src.bm.LastAt(lc.reader.LookupHash(hi, lo))
 }
 
 func (li *LocalityIndex) exists(fromStep, toStep uint64) bool {
@@ -391,6 +393,9 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	if li.noFsync {
 		rs.DisableFsync()
 	}
+
+	hasher := murmur3.New128WithSeed(rs.Salt())
+
 	for {
 		p.Processed.Store(0)
 		i := uint64(0)
@@ -410,7 +415,10 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		}
 
 		//bloom, err := newColdBloomWithSize(128)
-		bloom, err := bloomfilter.NewOptimal(uint64(count), 0.01)
+		m := bloomfilter.OptimalM(uint64(count), 0.01)
+		k := bloomfilter.OptimalK(m, uint64(count))
+		bloom, err := bloomfilter.New(m, k)
+		//bloom, err := bloomfilter.NewOptimal(uint64(count), 0.01)
 		if err != nil {
 			return nil, err
 		}
@@ -432,7 +440,14 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 				}
 			}
 
-			bloom.AddHash(localityHash(k))
+			//bloom.AddHash(localityHash(k))
+
+			hasher.Reset()
+			hasher.Write(k) //nolint:errcheck
+			hi, _ := hasher.Sum128()
+			bloom.AddHash(hi)
+			//_ = hi
+
 			//wrintf("buld: %x, %d, %d\n", k, i, inFiles)
 			if err := dense.AddArray(i, inSteps); err != nil {
 				return nil, err

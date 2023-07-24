@@ -81,3 +81,11 @@ func (r *IndexReader) Close() {
 	}
 	r.index.readers.Put(r)
 }
+
+func (r *IndexReader) Sum(key []byte) (uint64, uint64) { return r.sum(key) }
+func (r *IndexReader) LookupHash(hi, lo uint64) uint64 {
+	if r.index != nil {
+		return r.index.Lookup(hi, lo)
+	}
+	return 0
+}
