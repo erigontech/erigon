@@ -305,7 +305,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
-	chainConfig := fromdb.ChainConfig(chainDB)
+	//chainConfig := fromdb.ChainConfig(chainDB)
 
 	if rebuild {
 		panic("not implemented")
