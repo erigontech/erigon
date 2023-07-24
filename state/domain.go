@@ -1033,11 +1033,39 @@ func (d *Domain) missedIdxFiles() (l []*filesItem) {
 	})
 	return l
 }
+func (d *Domain) missedIdxFilesBloom() (l []*filesItem) {
+	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
+		for _, item := range items {
+			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+			if !dir.FileExist(filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bl", d.filenameBase, fromStep, toStep))) {
+				l = append(l, item)
+			}
+		}
+		return true
+	})
+	return l
+}
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	d.History.BuildMissedIndices(ctx, g, ps)
 	for _, item := range d.missedIdxFiles() {
+		//TODO: build .kvi
+		fitem := item
+		g.Go(func() error {
+			idxPath := fitem.decompressor.FilePath()
+			idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
+
+			p := ps.AddNew(fitem.decompressor.FileName(), uint64(fitem.decompressor.Count()))
+			defer ps.Delete(p)
+
+			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, false, p, d.tmpdir, d.logger); err != nil {
+				return fmt.Errorf("failed to build btree index for %s:  %w", fitem.decompressor.FileName(), err)
+			}
+			return nil
+		})
+	}
+	for _, item := range d.missedIdxFilesBloom() {
 		//TODO: build .kvi
 		fitem := item
 		g.Go(func() error {

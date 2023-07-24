@@ -440,8 +440,6 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 				}
 			}
 
-			//bloom.AddHash(localityHash(k))
-
 			hasher.Reset()
 			hasher.Write(k) //nolint:errcheck
 			hi, _ := hasher.Sum128()
