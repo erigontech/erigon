@@ -63,4 +63,7 @@ type HttpCfg struct {
 
 	BatchLimit      int // Maximum number of requests in a batch
 	ReturnDataLimit int // Maximum number of bytes returned from calls (like eth_call)
+
+	// Ots API
+	OtsMaxPageSize uint64
 }
