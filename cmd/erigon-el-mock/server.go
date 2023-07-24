@@ -36,7 +36,7 @@ func NewEth1Execution(db kv.RwDB, blockReader services.FullBlockReader) *Eth1Exe
 	}
 }
 
-func (e *Eth1Execution) InsertHeaders(ctx context.Context, req *execution.InsertHeadersRequest) (*execution.EmptyMessage, error) {
+func (e *Eth1Execution) InsertHeaders(ctx context.Context, req *execution.InsertHeadersRequest) (*execution.InsertionResult, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	tx, err := e.db.BeginRw(ctx)
@@ -54,10 +54,12 @@ func (e *Eth1Execution) InsertHeaders(ctx context.Context, req *execution.Insert
 			return nil, err
 		}
 	}
-	return &execution.EmptyMessage{}, tx.Commit()
+	return &execution.InsertionResult{
+		Result: execution.ValidationStatus_Success,
+	}, tx.Commit()
 }
 
-func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertBodiesRequest) (*execution.EmptyMessage, error) {
+func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertBodiesRequest) (*execution.InsertionResult, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	tx, err := e.db.BeginRw(ctx)
@@ -94,7 +96,9 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 			return nil, err
 		}
 	}
-	return &execution.EmptyMessage{}, tx.Commit()
+	return &execution.InsertionResult{
+		Result: execution.ValidationStatus_Success,
+	}, tx.Commit()
 }
 
 type canonicalEntry struct {
