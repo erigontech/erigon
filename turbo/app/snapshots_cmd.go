@@ -305,7 +305,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
-	//chainConfig := fromdb.ChainConfig(chainDB)
 
 	if rebuild {
 		panic("not implemented")
@@ -318,6 +317,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	}
 	allSnapshots.LogStat()
 	indexWorkers := estimate.IndexSnapshot.Workers()
+	//chainConfig := fromdb.ChainConfig(chainDB)
 	//if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
 	//	return err
 	//}
