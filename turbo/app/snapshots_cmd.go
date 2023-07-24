@@ -498,9 +498,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
 
-	db := mdbx.NewMDBX(logger).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
-	defer db.Close()
-
+	//
 	cfg := ethconfig.NewSnapCfg(true, true, true)
 	snapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err := snapshots.ReopenFolder(); err != nil {
@@ -513,6 +511,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return nil
 	})
 	blockReader := freezeblocks.NewBlockReader(snapshots)
+
+	db := mdbx.NewMDBX(logger).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
+	defer db.Close()
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
 
 	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, nil, logger)
