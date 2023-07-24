@@ -409,7 +409,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			dense.DisableFsync()
 		}
 
-		bloom, err := newColdBloomWithSize(16)
+		bloom, err := newColdBloomWithSize(128)
 		if err != nil {
 			return nil, err
 		}
