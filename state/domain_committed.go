@@ -89,21 +89,13 @@ func NewUpdateTree() *UpdateTree {
 }
 
 func (t *UpdateTree) get(key []byte) (*commitmentItem, bool) {
-	c := &commitmentItem{plainKey: key,
-		hashedKey: t.hashAndNibblizeKey(key),
-		update:    commitment.Update{}}
+	c := &commitmentItem{plainKey: key, update: commitment.Update{}}
 	copy(c.update.CodeHashOrStorage[:], commitment.EmptyCodeHash)
 	if t.tree.Has(c) {
 		return t.tree.Get(c)
 	}
 	c.plainKey = common.Copy(c.plainKey)
 	return c, false
-}
-
-func (t *UpdateTree) TouchUpdate(key []byte, update commitment.Update) {
-	item, _ := t.get(key)
-	item.update.Merge(&update)
-	t.tree.ReplaceOrInsert(item)
 }
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
@@ -116,29 +108,7 @@ func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, v
 
 func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
 	if len(val) == 0 {
-		//c.update.Reset()
 		c.update.Flags = commitment.DeleteUpdate
-		//ks := common.Copy(c.plainKey)
-		//toDel := make([][]byte, 0)
-		//t.tree.AscendGreaterOrEqual(c, func(ci *commitmentItem) bool {
-		//	if !bytes.HasPrefix(ci.plainKey, ks) {
-		//		return false
-		//	}
-		//	if !bytes.Equal(ci.plainKey, ks) {
-		//		toDel = append(toDel, common.Copy(ci.plainKey))
-		//		fmt.Printf("delete %x\n", ci.plainKey)
-		//	}
-		//	return true
-		//})
-		//for _, k := range toDel {
-		//	_, suc := t.tree.Delete(&commitmentItem{plainKey: k})
-		//	fmt.Printf("delete %x %v\n", k, suc)
-		//}
-		//
-		//t.tree.Ascend(func(ci *commitmentItem) bool {
-		//	fmt.Printf("tree %x\n", ci.plainKey)
-		//	return true
-		//})
 		return
 	}
 	if c.update.Flags&commitment.DeleteUpdate != 0 {
@@ -215,33 +185,6 @@ func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
 		t.tree.Clear(true)
 	}
 	return plainKeys, updates
-}
-
-// TODO(awskii): let trie define hashing function
-func (t *UpdateTree) hashAndNibblizeKey(key []byte) []byte {
-	hashedKey := make([]byte, length.Hash)
-
-	t.keccak.Reset()
-	if len(key) < length.Addr {
-		t.keccak.Write(key)
-	} else {
-		t.keccak.Write(key[:length.Addr])
-	}
-	copy(hashedKey[:length.Hash], t.keccak.Sum(nil))
-
-	if len(key) > length.Addr {
-		hashedKey = append(hashedKey, make([]byte, length.Hash)...)
-		t.keccak.Reset()
-		t.keccak.Write(key[length.Addr:])
-		copy(hashedKey[length.Hash:], t.keccak.Sum(nil))
-	}
-
-	nibblized := make([]byte, len(hashedKey)*2)
-	for i, b := range hashedKey {
-		nibblized[i*2] = (b >> 4) & 0xf
-		nibblized[i*2+1] = b & 0xf
-	}
-	return nibblized
 }
 
 type DomainCommitted struct {
@@ -333,10 +276,6 @@ type commitmentItem struct {
 
 func commitmentItemLessPlain(i, j *commitmentItem) bool {
 	return bytes.Compare(i.plainKey, j.plainKey) < 0
-}
-
-func commitmentItemLessHashed(i, j *commitmentItem) bool {
-	return bytes.Compare(i.hashedKey, j.hashedKey) < 0
 }
 
 func (d *DomainCommitted) storeCommitmentState(blockNum uint64, rh []byte) error {
@@ -681,20 +620,20 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 		return rootHash, nil, err
 	}
 
-	//if len(touchedKeys) > 1 {
-	//d.patriciaTrie.Reset()
-	//}
+	if len(touchedKeys) > 1 {
+		d.patriciaTrie.Reset()
+	}
 	// data accessing functions should be set once before
 	d.patriciaTrie.SetTrace(trace)
 
 	switch d.mode {
 	case CommitmentModeDirect:
-		rootHash, branchNodeUpdates, err = d.patriciaTrie.ReviewKeys(touchedKeys, nil)
+		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessKeys(touchedKeys)
 		if err != nil {
 			return nil, nil, err
 		}
 	case CommitmentModeUpdate:
-		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessUpdates(touchedKeys, nil, updates)
+		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessUpdates(touchedKeys, updates)
 		if err != nil {
 			return nil, nil, err
 		}

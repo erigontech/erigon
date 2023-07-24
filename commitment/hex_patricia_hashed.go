@@ -1244,7 +1244,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rh[1:], nil // first byte is 128+hash_len
 }
 
-func (hph *HexPatriciaHashed) ReviewKeys(plainKeys, _ [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
+func (hph *HexPatriciaHashed) ProcessKeys(plainKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
 	branchNodeUpdates = make(map[string]BranchData)
 
 	pks := make(map[string]int, len(plainKeys))
@@ -1310,6 +1310,94 @@ func (hph *HexPatriciaHashed) ReviewKeys(plainKeys, _ [][]byte) (rootHash []byte
 				fmt.Printf("delete cell %x hash %x\n", plainKey, hashedKey)
 			}
 			hph.deleteCell(hashedKey)
+		}
+	}
+	// Folding everything up to the root
+	for hph.activeRows > 0 {
+		if branchData, updateKey, err := hph.fold(); err != nil {
+			return nil, nil, fmt.Errorf("final fold: %w", err)
+		} else if branchData != nil {
+			branchNodeUpdates[string(updateKey)] = branchData
+		}
+	}
+
+	rootHash, err = hph.RootHash()
+	if err != nil {
+		return nil, branchNodeUpdates, fmt.Errorf("root hash evaluation failed: %w", err)
+	}
+	return rootHash, branchNodeUpdates, nil
+}
+
+func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
+	branchNodeUpdates = make(map[string]BranchData)
+
+	for i, pk := range plainKeys {
+		updates[i].hashedKey = hph.hashAndNibblizeKey(pk)
+		updates[i].plainKey = pk
+	}
+
+	sort.Slice(updates, func(i, j int) bool {
+		return bytes.Compare(updates[i].hashedKey, updates[j].hashedKey) < 0
+	})
+
+	for i, update := range updates {
+		if hph.trace {
+			fmt.Printf("(%d/%d) key=[%x] %s hashedKey=[%x] currentKey=[%x]\n",
+				i+1, len(updates), update.plainKey, update.String(), update.hashedKey, hph.currentKey[:hph.currentKeyLen])
+		}
+		// Keep folding until the currentKey is the prefix of the key we modify
+		for hph.needFolding(update.hashedKey) {
+			if branchData, updateKey, err := hph.fold(); err != nil {
+				return nil, nil, fmt.Errorf("fold: %w", err)
+			} else if branchData != nil {
+				branchNodeUpdates[string(updateKey)] = branchData
+			}
+		}
+		// Now unfold until we step on an empty cell
+		for unfolding := hph.needUnfolding(update.hashedKey); unfolding > 0; unfolding = hph.needUnfolding(update.hashedKey) {
+			if err := hph.unfold(update.hashedKey, unfolding); err != nil {
+				return nil, nil, fmt.Errorf("unfold: %w", err)
+			}
+		}
+
+		// Update the cell
+		if update.Flags == DeleteUpdate {
+			hph.deleteCell(update.hashedKey)
+			if hph.trace {
+				fmt.Printf("delete cell %x hash %x\n", update.plainKey, update.hashedKey)
+			}
+		} else {
+			cell := hph.updateCell(update.plainKey, update.hashedKey)
+			if hph.trace && len(update.plainKey) == hph.accountKeyLen {
+				fmt.Printf("accountFn updated key %x =>", update.plainKey)
+			}
+			if update.Flags&BalanceUpdate != 0 {
+				if hph.trace {
+					fmt.Printf(" balance=%d", &update.Balance)
+				}
+				cell.Balance.Set(&update.Balance)
+			}
+			if update.Flags&NonceUpdate != 0 {
+				if hph.trace {
+					fmt.Printf(" nonce=%d", update.Nonce)
+				}
+				cell.Nonce = update.Nonce
+			}
+			if update.Flags&CodeUpdate != 0 {
+				if hph.trace {
+					fmt.Printf(" codeHash=%x", update.CodeHashOrStorage)
+				}
+				copy(cell.CodeHash[:], update.CodeHashOrStorage[:update.ValLength])
+			}
+			if hph.trace {
+				fmt.Printf("\n")
+			}
+			if update.Flags&StorageUpdate != 0 {
+				cell.setStorage(update.CodeHashOrStorage[:update.ValLength])
+				if hph.trace {
+					fmt.Printf("\rstorage set %x => %x\n", update.plainKey, update.CodeHashOrStorage[:update.ValLength])
+				}
+			}
 		}
 	}
 	// Folding everything up to the root
@@ -1761,96 +1849,6 @@ func commonPrefixLen(b1, b2 []byte) int {
 		}
 	}
 	return i
-}
-
-func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
-	branchNodeUpdates = make(map[string]BranchData)
-
-	for i, pk := range plainKeys {
-		updates[i].hashedKey = hph.hashAndNibblizeKey(pk)
-		updates[i].plainKey = pk
-	}
-
-	sort.Slice(updates, func(i, j int) bool {
-		return bytes.Compare(updates[i].hashedKey, updates[j].hashedKey) < 0
-	})
-
-	for i, update := range updates {
-		plainKey := updates[i].plainKey
-		hashedKey := updates[i].hashedKey
-		if hph.trace {
-			fmt.Printf("plainKey=[%x] %s, hashedKey=[%x], currentKey=[%x]\n", plainKey, updates[i].String(), hashedKey, hph.currentKey[:hph.currentKeyLen])
-		}
-		// Keep folding until the currentKey is the prefix of the key we modify
-		for hph.needFolding(hashedKey) {
-			if branchData, updateKey, err := hph.fold(); err != nil {
-				return nil, nil, fmt.Errorf("fold: %w", err)
-			} else if branchData != nil {
-				branchNodeUpdates[string(updateKey)] = branchData
-			}
-		}
-		// Now unfold until we step on an empty cell
-		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
-			if err := hph.unfold(hashedKey, unfolding); err != nil {
-				return nil, nil, fmt.Errorf("unfold: %w", err)
-			}
-		}
-
-		//update := updates[i]
-		// Update the cell
-		if update.Flags == DeleteUpdate {
-			hph.deleteCell(hashedKey)
-			if hph.trace {
-				fmt.Printf("delete cell %x hash %x\n", plainKey, hashedKey)
-			}
-		} else {
-			cell := hph.updateCell(plainKey, hashedKey)
-			if hph.trace && len(plainKey) == hph.accountKeyLen {
-				fmt.Printf("accountFn updated key %x =>", plainKey)
-			}
-			if update.Flags&BalanceUpdate != 0 {
-				if hph.trace {
-					fmt.Printf(" balance=%d", &update.Balance)
-				}
-				cell.Balance.Set(&update.Balance)
-			}
-			if update.Flags&NonceUpdate != 0 {
-				if hph.trace {
-					fmt.Printf(" nonce=%d", update.Nonce)
-				}
-				cell.Nonce = update.Nonce
-			}
-			if update.Flags&CodeUpdate != 0 {
-				if hph.trace {
-					fmt.Printf(" codeHash=%x", update.CodeHashOrStorage)
-				}
-				copy(cell.CodeHash[:], update.CodeHashOrStorage[:update.ValLength])
-			}
-			if hph.trace {
-				fmt.Printf("\n")
-			}
-			if update.Flags&StorageUpdate != 0 {
-				cell.setStorage(update.CodeHashOrStorage[:update.ValLength])
-				if hph.trace {
-					fmt.Printf("\rstorage set %x => %x\n", plainKey, update.CodeHashOrStorage[:update.ValLength])
-				}
-			}
-		}
-	}
-	// Folding everything up to the root
-	for hph.activeRows > 0 {
-		if branchData, updateKey, err := hph.fold(); err != nil {
-			return nil, nil, fmt.Errorf("final fold: %w", err)
-		} else if branchData != nil {
-			branchNodeUpdates[string(updateKey)] = branchData
-		}
-	}
-
-	rootHash, err = hph.RootHash()
-	if err != nil {
-		return nil, branchNodeUpdates, fmt.Errorf("root hash evaluation failed: %w", err)
-	}
-	return rootHash, branchNodeUpdates, nil
 }
 
 // nolint

@@ -48,7 +48,7 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 			t.Fatal(err)
 		}
 
-		rootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+		rootHash, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,7 +58,7 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 			t.Fatalf("invalid root hash length: expected 32 bytes, got %v", len(rootHash))
 		}
 
-		rootHashAnother, branchNodeUpdates, err := hphAnother.ReviewKeys(plainKeys, hashedKeys)
+		rootHashAnother, branchNodeUpdates, err := hphAnother.ProcessKeys(plainKeys)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -151,7 +151,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 		err := ms.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		rootHashReview, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+		rootHashReview, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
 		require.NoError(t, err)
 
 		ms.applyBranchNodeUpdates(branchNodeUpdates)
@@ -160,7 +160,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 		err = ms2.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		rootHashAnother, branchUpdatesAnother, err := hphAnother.ReviewKeys(plainKeys, hashedKeys)
+		rootHashAnother, branchUpdatesAnother, err := hphAnother.ProcessKeys(plainKeys)
 		require.NoError(t, err)
 		ms2.applyBranchNodeUpdates(branchUpdatesAnother)
 
@@ -205,7 +205,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 			t.Fatal(err)
 		}
 
-		rootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+		rootHash, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
 		require.NoError(t, err)
 
 		ms.applyBranchNodeUpdates(branchNodeUpdates)

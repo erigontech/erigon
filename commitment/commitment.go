@@ -25,9 +25,9 @@ type Trie interface {
 	Reset()
 
 	// Reads updates from storage
-	ReviewKeys(pk, hk [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)
+	ProcessKeys(pk [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)
 
-	ProcessUpdates(pk, hk [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)
+	ProcessUpdates(pk [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)
 
 	ResetFns(
 		branchFn func(prefix []byte) ([]byte, error),

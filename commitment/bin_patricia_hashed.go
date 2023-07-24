@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"sort"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -1274,9 +1275,19 @@ func (bph *BinPatriciaHashed) RootHash() ([]byte, error) {
 	return hash[1:], nil // first byte is 128+hash_len
 }
 
-func (bph *BinPatriciaHashed) ReviewKeys(plainKeys, hashedKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
+func (bph *BinPatriciaHashed) ProcessKeys(plainKeys [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
 	branchNodeUpdates = make(map[string]BranchData)
 
+	pks := make(map[string]int, len(plainKeys))
+	hashedKeys := make([][]byte, len(plainKeys))
+	for i, pk := range plainKeys {
+		hashedKeys[i] = hexToBin(pk)
+		pks[string(hashedKeys[i])] = i
+	}
+
+	sort.Slice(hashedKeys, func(i, j int) bool {
+		return bytes.Compare(hashedKeys[i], hashedKeys[j]) < 0
+	})
 	stagedBinaryCell := new(BinaryCell)
 	for i, hashedKey := range hashedKeys {
 		plainKey := plainKeys[i]
@@ -1515,16 +1526,25 @@ func (bph *BinPatriciaHashed) SetState(buf []byte) error {
 	return nil
 }
 
-func (bph *BinPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
+func (bph *BinPatriciaHashed) ProcessUpdates(plainKeys [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error) {
 	branchNodeUpdates = make(map[string]BranchData)
 
+	for i, pk := range plainKeys {
+		updates[i].hashedKey = hexToBin(pk)
+		updates[i].plainKey = pk
+	}
+
+	sort.Slice(updates, func(i, j int) bool {
+		return bytes.Compare(updates[i].hashedKey, updates[j].hashedKey) < 0
+	})
+
 	for i, plainKey := range plainKeys {
-		hashedKey := hashedKeys[i]
+		update := updates[i]
 		if bph.trace {
-			fmt.Printf("plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", plainKey, hashedKey, bph.currentKey[:bph.currentKeyLen])
+			fmt.Printf("plainKey=[%x], hashedKey=[%x], currentKey=[%x]\n", update.plainKey, update.hashedKey, bph.currentKey[:bph.currentKeyLen])
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify
-		for bph.needFolding(hashedKey) {
+		for bph.needFolding(update.hashedKey) {
 			if branchData, updateKey, err := bph.fold(); err != nil {
 				return nil, nil, fmt.Errorf("fold: %w", err)
 			} else if branchData != nil {
@@ -1532,21 +1552,20 @@ func (bph *BinPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 			}
 		}
 		// Now unfold until we step on an empty cell
-		for unfolding := bph.needUnfolding(hashedKey); unfolding > 0; unfolding = bph.needUnfolding(hashedKey) {
-			if err := bph.unfold(hashedKey, unfolding); err != nil {
+		for unfolding := bph.needUnfolding(update.hashedKey); unfolding > 0; unfolding = bph.needUnfolding(update.hashedKey) {
+			if err := bph.unfold(update.hashedKey, unfolding); err != nil {
 				return nil, nil, fmt.Errorf("unfold: %w", err)
 			}
 		}
 
-		update := updates[i]
 		// Update the cell
 		if update.Flags == DeleteUpdate {
-			bph.deleteBinaryCell(hashedKey)
+			bph.deleteBinaryCell(update.hashedKey)
 			if bph.trace {
-				fmt.Printf("key %x deleted\n", plainKey)
+				fmt.Printf("key %x deleted\n", update.plainKey)
 			}
 		} else {
-			cell := bph.updateBinaryCell(plainKey, hashedKey)
+			cell := bph.updateBinaryCell(update.plainKey, update.hashedKey)
 			if bph.trace {
 				fmt.Printf("accountFn updated key %x =>", plainKey)
 			}

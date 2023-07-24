@@ -1379,14 +1379,6 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		return fin
 	}
 
-	//ac := a.MakeContext()
-	//defer ac.Close()
-	//if _, err := a.SharedmDomains(ac).Commit(true, false); err != nil {
-	//	log.Warn("ComputeCommitment before aggregation has failed", "err", err)
-	//	return fin
-	//}
-	//ac.Close()
-
 	step := a.minimaxTxNumInFiles.Load() / a.aggregationStep
 	a.wg.Add(1)
 	go func() {

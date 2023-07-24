@@ -1439,7 +1439,8 @@ func (d *Domain) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) err
 func (d *Domain) Rotate() flusher {
 	hf := d.History.Rotate()
 	if d.wal != nil {
-		hf.d = d.wal
+		w := d.wal
+		hf.d = w
 		d.wal = d.newWriter(d.wal.tmpdir, d.wal.buffered, d.wal.discard)
 	}
 	return hf

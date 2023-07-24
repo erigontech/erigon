@@ -51,7 +51,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	firstRootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	firstRootHash, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 
 	t.Logf("root hash %x\n", firstRootHash)
@@ -70,7 +70,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	secondRootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	secondRootHash, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 	require.NotEqualValues(t, firstRootHash, secondRootHash)
 
@@ -87,7 +87,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	thirdRootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	thirdRootHash, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 	require.NotEqualValues(t, secondRootHash, thirdRootHash)
 
@@ -113,7 +113,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	hashBeforeEmptyUpdate, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	hashBeforeEmptyUpdate, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 	require.NotEmpty(t, hashBeforeEmptyUpdate)
 
@@ -130,7 +130,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	hashAfterEmptyUpdate, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	hashAfterEmptyUpdate, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
@@ -167,7 +167,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		rh, branchNodeUpdates, err := trieOne.ReviewKeys(plainKeys, hashedKeys)
+		rh, branchNodeUpdates, err := trieOne.ProcessKeys(plainKeys)
 		require.NoError(t, err)
 		ms.applyBranchNodeUpdates(branchNodeUpdates)
 		renderUpdates(branchNodeUpdates)
@@ -180,7 +180,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 
 		fmt.Printf("\n2. Trie batch update generated following branch updates\n")
 		// batch update
-		rh, branchNodeUpdatesTwo, err := trieTwo.ReviewKeys(plainKeys, hashedKeys)
+		rh, branchNodeUpdatesTwo, err := trieTwo.ProcessKeys(plainKeys)
 		require.NoError(t, err)
 		ms2.applyBranchNodeUpdates(branchNodeUpdatesTwo)
 		renderUpdates(branchNodeUpdatesTwo)
@@ -201,7 +201,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sequentialRoot, branchNodeUpdates, err := trieOne.ReviewKeys(plainKeys, hashedKeys)
+	sequentialRoot, branchNodeUpdates, err := trieOne.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 	roots = append(roots, sequentialRoot)
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
@@ -220,7 +220,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 
 	fmt.Printf("\n2. Trie batch update generated following branch updates\n")
 	// batch update
-	batchRoot, branchNodeUpdatesTwo, err := trieTwo.ReviewKeys(plainKeys, hashedKeys)
+	batchRoot, branchNodeUpdatesTwo, err := trieTwo.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 	renderUpdates(branchNodeUpdatesTwo)
 
@@ -274,7 +274,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		sequentialRoot, branchNodeUpdates, err := trieOne.ReviewKeys(plainKeys[i:i+1], hashedKeys[i:i+1])
+		sequentialRoot, branchNodeUpdates, err := trieOne.ProcessKeys(plainKeys[i : i+1])
 		require.NoError(t, err)
 		roots = append(roots, sequentialRoot)
 
@@ -287,7 +287,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 
 	fmt.Printf("\n2. Trie batch update generated following branch updates\n")
 	// batch update
-	batchRoot, branchNodeUpdatesTwo, err := trieTwo.ReviewKeys(plainKeys, hashedKeys)
+	batchRoot, branchNodeUpdatesTwo, err := trieTwo.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 	renderUpdates(branchNodeUpdatesTwo)
 
@@ -359,7 +359,7 @@ func Test_Sepolia(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		rootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+		rootHash, branchNodeUpdates, err := hph.ProcessKeys(plainKeys)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -485,7 +485,7 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	rhBefore, branchUpdates, err := before.ReviewKeys(plainKeys, hashedKeys)
+	rhBefore, branchUpdates, err := before.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 	ms.applyBranchNodeUpdates(branchUpdates)
 
@@ -509,11 +509,11 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 	err = ms.applyPlainUpdates(nextPK, nextUpdates)
 	require.NoError(t, err)
 
-	rh2Before, branchUpdates, err := before.ReviewKeys(nextPK, nextHashed)
+	rh2Before, branchUpdates, err := before.ProcessKeys(nextPK)
 	require.NoError(t, err)
 	ms.applyBranchNodeUpdates(branchUpdates)
 
-	rh2After, branchUpdates, err := after.ReviewKeys(nextPK, nextHashed)
+	rh2After, branchUpdates, err := after.ProcessKeys(nextPK)
 	require.NoError(t, err)
 
 	_ = branchUpdates
@@ -533,7 +533,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	beforeRestore, branchNodeUpdatesOne, err := trieOne.ReviewKeys(plainKeys, hashedKeys)
+	beforeRestore, branchNodeUpdatesOne, err := trieOne.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 
 	renderUpdates(branchNodeUpdatesOne)
@@ -572,12 +572,12 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	beforeRestore, branchNodeUpdatesOne, err = trieOne.ReviewKeys(plainKeys, hashedKeys)
+	beforeRestore, branchNodeUpdatesOne, err = trieOne.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 
 	renderUpdates(branchNodeUpdatesOne)
 
-	twoAfterRestore, branchNodeUpdatesTwo, err := trieTwo.ReviewKeys(plainKeys, hashedKeys)
+	twoAfterRestore, branchNodeUpdatesTwo, err := trieTwo.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 
 	_ = branchNodeUpdatesTwo
@@ -617,7 +617,7 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 
 	_ = updates
 
-	beforeRestore, branchNodeUpdatesTwo, err := trieTwo.ReviewKeys(plainKeys, hashedKeys)
+	beforeRestore, branchNodeUpdatesTwo, err := trieTwo.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 	renderUpdates(branchNodeUpdatesTwo)
 	ms2.applyBranchNodeUpdates(branchNodeUpdatesTwo)
@@ -682,7 +682,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 			require.NoError(t, err)
 		}
 
-		sequentialRoot, branchNodeUpdates, err := sequential.ReviewKeys(plainKeys[i:i+1], hashedKeys[i:i+1])
+		sequentialRoot, branchNodeUpdates, err := sequential.ProcessKeys(plainKeys[i : i+1])
 		require.NoError(t, err)
 		roots = append(roots, sequentialRoot)
 
@@ -700,7 +700,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 
 	fmt.Printf("\n2. Trie batch update generated following branch updates\n")
 	// batch update
-	batchRoot, branchNodeUpdatesTwo, err := batch.ReviewKeys(plainKeys, hashedKeys)
+	batchRoot, branchNodeUpdatesTwo, err := batch.ProcessKeys(plainKeys)
 	require.NoError(t, err)
 	renderUpdates(branchNodeUpdatesTwo)
 	ms2.applyBranchNodeUpdates(branchNodeUpdatesTwo)
