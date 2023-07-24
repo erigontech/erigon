@@ -28,7 +28,6 @@ import (
 	"sync/atomic"
 
 	_ "github.com/FastFilter/xorfilter"
-	"github.com/c2h5oh/datasize"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -446,7 +445,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		}
 		it.Close()
 
-		fmt.Printf("bloom: %s, keys=%dk, size=%s, probability=%f\n", fName, bloom.N()/1000, datasize.ByteSize(bloom.M()/8).String(), bloom.FalsePosititveProbability())
+		fmt.Printf("bloom: %s, keys=%dk, size=%smb, probability=%f\n", fName, bloom.N()/1000, bloom.M()/8/1024/1024, bloom.FalsePosititveProbability())
 		bloom.WriteFile(idxPath + ".lb")
 
 		if err := dense.Build(); err != nil {
