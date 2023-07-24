@@ -446,7 +446,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		}
 		it.Close()
 
-		fmt.Printf("bloom: %s, keys=%dk, size=%s, probability=%f\n", fName, bloom.N()/1000, datasize.ByteSize(bloom.M()/8), bloom.FalsePosititveProbability())
+		fmt.Printf("bloom: %s, keys=%dk, size=%s, probability=%f\n", fName, bloom.N()/1000, datasize.ByteSize(bloom.M()/8).String(), bloom.FalsePosititveProbability())
 		bloom.WriteFile(idxPath + ".lb")
 
 		if err := dense.Build(); err != nil {
