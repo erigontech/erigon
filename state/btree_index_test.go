@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
@@ -16,6 +17,23 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
+func Test_BtreeIndex_Init2(t *testing.T) {
+	//mainnnet: storage.128-160.kv  110mil keys, 100mb bloomfilter of 0.01 (1%) miss-probability
+	//no much reason to merge bloomfilter - can merge them on starup
+	//1B keys: 1Gb
+
+	sizes := []int{54, 74, 135, 139, 109, 105, 144}
+	sum := 0
+	sumB := 0
+	for _, sz := range sizes {
+		sum += sz
+		sumB += int(bloomfilter.OptimalM(uint64(sz*1_000_000), 0.001))
+	}
+	large := bloomfilter.OptimalM(uint64(sum*1_000_000), 0.001)
+	fmt.Printf("see: %d\n", bloomfilter.OptimalM(uint64(1_000_000_000), 0.001)/8/1024/1024)
+	fmt.Printf("see: %d vs %d\n", sumB/8/1024/1024, large/8/1024/1024)
+
+}
 func Test_BtreeIndex_Init(t *testing.T) {
 	logger := log.New()
 	tmp := t.TempDir()

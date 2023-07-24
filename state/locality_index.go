@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"container/heap"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -395,7 +394,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	}
 
 	hasher := murmur3.New128WithSeed(rs.Salt())
-
+	var bloom *bloomfilter.Filter
 	for {
 		p.Processed.Store(0)
 		i := uint64(0)
@@ -414,11 +413,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			dense.DisableFsync()
 		}
 
-		//bloom, err := newColdBloomWithSize(128)
-		m := bloomfilter.OptimalM(uint64(count), 0.01)
-		k := bloomfilter.OptimalK(m, uint64(count))
-		bloom, err := bloomfilter.New(m, k)
-		//bloom, err := bloomfilter.NewOptimal(uint64(count), 0.01)
+		bloom, err = bloomfilter.NewOptimal(uint64(count), 0.01)
 		if err != nil {
 			return nil, err
 		}
@@ -457,9 +452,6 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		}
 		it.Close()
 
-		log.Warn(fmt.Sprintf("[dbg] bloom: %s, keys=%dk, size=%dmb, k=%d, probability=%f\n", fName, bloom.N()/1000, bloom.M()/8/1024/1024, bloom.K(), bloom.FalsePosititveProbability()))
-		bloom.WriteFile(idxPath + ".lb")
-
 		if err := dense.Build(); err != nil {
 			return nil, err
 		}
@@ -475,6 +467,10 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			break
 		}
 	}
+	log.Warn(fmt.Sprintf("[dbg] bloom: %s, keys=%dk, size=%dmb, k=%d, probability=%f\n", fName, bloom.N()/1000, bloom.M()/8/1024/1024, bloom.K(), bloom.FalsePosititveProbability()))
+	if _, err := bloom.WriteFile(idxPath + ".lb"); err != nil {
+		return nil, err
+	}
 
 	idx, err := recsplit.OpenIndex(idxPath)
 	if err != nil {
@@ -484,22 +480,11 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	if err != nil {
 		return nil, err
 	}
-	bloom, _, err := bloomfilter.ReadFile(idxPath + ".lb")
+	bloom, _, err = bloomfilter.ReadFile(idxPath + ".lb")
 	if err != nil {
 		return nil, err
 	}
 	return &LocalityIndexFiles{index: idx, bm: bm, bloom: bloom, fromStep: fromStep, toStep: toStep}, nil
-}
-
-func localityHash(k []byte) uint64 {
-	if len(k) <= 20 {
-		return binary.BigEndian.Uint64(k)
-	}
-	lo := binary.BigEndian.Uint32(k[20:])
-	if lo == 0 {
-		lo = binary.BigEndian.Uint32(k[len(k)-4:])
-	}
-	return uint64(binary.BigEndian.Uint32(k))<<32 | uint64(lo)
 }
 
 func (li *LocalityIndex) integrateFiles(sf *LocalityIndexFiles) {
