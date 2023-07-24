@@ -322,7 +322,7 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 }
 
 func (li *LocalityIndex) exists(fromStep, toStep uint64) bool {
-	return dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.lb", li.filenameBase, fromStep, toStep)))
+	return dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep)))
 }
 func (li *LocalityIndex) missedIdxFiles(ii *HistoryContext) (toStep uint64, idxExists bool) {
 	if len(ii.files) == 0 {
