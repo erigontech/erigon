@@ -468,7 +468,11 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	if err != nil {
 		return nil, err
 	}
-	return &LocalityIndexFiles{index: idx, bm: bm, fromStep: fromStep, toStep: toStep}, nil
+	bloom, _, err := bloomfilter.ReadFile(idxPath + ".lb")
+	if err != nil {
+		return nil, err
+	}
+	return &LocalityIndexFiles{index: idx, bm: bm, bloom: bloom, fromStep: fromStep, toStep: toStep}, nil
 }
 
 func localityHash(k []byte) uint64 {
@@ -499,6 +503,7 @@ func (li *LocalityIndex) integrateFiles(sf *LocalityIndexFiles) {
 			endTxNum:   sf.toStep * li.aggregationStep,
 			index:      sf.index,
 			bm:         sf.bm,
+			bloom:      sf.bloom,
 			frozen:     false,
 		}
 	}
@@ -517,6 +522,7 @@ func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, fromStep, toSte
 type LocalityIndexFiles struct {
 	index *recsplit.Index
 	bm    *bitmapdb.FixedSizeBitmaps
+	bloom *bloomfilter.Filter
 
 	fromStep, toStep uint64
 }
@@ -527,6 +533,9 @@ func (sf LocalityIndexFiles) Close() {
 	}
 	if sf.bm != nil {
 		sf.bm.Close()
+	}
+	if sf.bloom != nil {
+		sf.bloom = nil
 	}
 }
 
