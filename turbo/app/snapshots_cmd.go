@@ -506,6 +506,12 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err := snapshots.ReopenFolder(); err != nil {
 		return err
 	}
+	snapshots.Txs.View(func(segments []*freezeblocks.TxnSegment) error {
+		for _, s := range segments {
+			fmt.Printf("%s, %d\n", s.Seg.FileName(), s.Seg.Count())
+		}
+		return nil
+	})
 	blockReader := freezeblocks.NewBlockReader(snapshots)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
 
