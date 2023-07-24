@@ -43,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 
@@ -74,11 +75,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
+	txpool2 "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/caplin-phase1/caplin1"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -114,6 +117,12 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
+type StartableEngineRPC interface {
+	Start(httpConfig httpcfg.HttpCfg,
+		filters *rpchelper.Filters, stateCache kvcache.Cache, agg *libstate.AggregatorV3, engineReader consensus.EngineReader,
+		eth rpchelper.ApiBackend, txPool txpool2.TxpoolClient, mining txpool2.MiningClient)
+}
+
 // Config contains the configuration options of the ETH protocol.
 // Deprecated: use ethconfig.Config instead.
 type Config = ethconfig.Config
@@ -139,7 +148,7 @@ type Ethereum struct {
 	genesisHash  libcommon.Hash
 
 	ethBackendRPC      *privateapi.EthBackendServer
-	engineBackendRPC   *engineapi.EngineServer
+	engineBackendRPC   StartableEngineRPC
 	miningRPC          txpool_proto.MiningServer
 	stateChangesClient txpool.StateChangesClient
 
@@ -558,7 +567,22 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader, logger, latestBlockBuiltStore)
 	// intiialize engine backend
-	backend.engineBackendRPC = engineapi.NewEngineServer(ctx, logger, chainConfig, assembleBlockPOS, backend.chainDB, blockReader, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
+	var engine *execution_client.ExecutionClientDirect
+
+	if config.ExperimentalConsensusSeparation {
+		log.Info("Using experimental Engine API")
+		engineBackendRPC := engineapi.NewEngineServerExperimental(ctx, logger, chainConfig, assembleBlockPOS, backend.chainDB, blockReader, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
+		backend.engineBackendRPC = engineBackendRPC
+		engine, err = execution_client.NewExecutionClientDirect(ctx,
+			engineBackendRPC,
+		)
+	} else {
+		engineBackendRPC := engineapi.NewEngineServer(ctx, logger, chainConfig, assembleBlockPOS, backend.chainDB, blockReader, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
+		backend.engineBackendRPC = engineBackendRPC
+		engine, err = execution_client.NewExecutionClientDirect(ctx,
+			engineBackendRPC,
+		)
+	}
 
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi, logger)
 
@@ -629,10 +653,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if len(jwt) != 32 {
 			return nil, fmt.Errorf("could not load jwt for Caplin: %s", err)
 		}
-
-		engine, err := execution_client.NewExecutionClientDirect(ctx,
-			backend.engineBackendRPC,
-		)
 
 		if err != nil {
 			return nil, err
