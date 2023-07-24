@@ -133,6 +133,9 @@ func (i *filesItem) closeFilesAndRemove() {
 		}
 		i.bindex = nil
 	}
+	if i.bloom != nil {
+		i.bloom = nil
+	}
 }
 
 type DomainStats struct {

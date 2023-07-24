@@ -192,6 +192,9 @@ func (li *LocalityIndex) closeFiles() {
 		li.file.bm.Close()
 		li.file.bm = nil
 	}
+	if li.file.bloom != nil {
+		li.file.bloom = nil
+	}
 }
 func (li *LocalityIndex) reCalcRoFiles() {
 	if li == nil {
@@ -305,6 +308,7 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 	}
 
 	if !lc.file.src.bloom.ContainsHash(localityHash(key)) {
+		fmt.Printf("skip\n")
 		return 0, false, nil
 	}
 
@@ -476,7 +480,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 }
 
 func localityHash(k []byte) uint64 {
-	if len(k) == 20 {
+	if len(k) <= 20 {
 		return binary.BigEndian.Uint64(k)
 	}
 	lo := binary.BigEndian.Uint32(k[20:])
