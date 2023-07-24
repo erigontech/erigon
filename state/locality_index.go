@@ -20,12 +20,15 @@ import (
 	"bytes"
 	"container/heap"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"sync/atomic"
 
+	_ "github.com/FastFilter/xorfilter"
+	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -164,6 +167,15 @@ func (li *LocalityIndex) openFiles() (err error) {
 			}
 		}
 	}
+	if li.file.bloom == nil {
+		idxPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li.lb", li.filenameBase, fromStep, toStep))
+		if dir.FileExist(idxPath) {
+			li.file.bloom, _, err = bloomfilter.ReadFile(idxPath)
+			if err != nil {
+				return fmt.Errorf("LocalityIndex.openFiles: %w, %s", err, idxPath)
+			}
+		}
+	}
 	li.reCalcRoFiles()
 	return nil
 }
@@ -291,6 +303,11 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 	if lc.reader.Empty() {
 		return 0, false, nil
 	}
+
+	if !lc.file.src.bloom.ContainsHash(localityHash(key)) {
+		return 0, false, nil
+	}
+
 	//if bytes.HasPrefix(key, common.FromHex("f29a")) {
 	//	res, _ := lc.file.src.bm.At(lc.reader.Lookup(key))
 	//	l, _, _ := lc.file.src.bm.LastAt(lc.reader.Lookup(key))
@@ -319,6 +336,15 @@ func (li *LocalityIndex) missedIdxFiles(ii *HistoryContext) (toStep uint64, idxE
 	fName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, 0, toStep)
 	return toStep, dir.FileExist(filepath.Join(li.dir, fName))
 }
+
+// newStateBloomWithSize creates a brand new state bloom for state generation.
+// The bloom filter will be created by the passing bloom filter size. According
+// to the https://hur.st/bloomfilter/?n=600000000&p=&m=2048MB&k=4, the parameters
+// are picked so that the false-positive rate for mainnet is low enough.
+func newColdBloomWithSize(megabytes uint64) (*bloomfilter.Filter, error) {
+	return bloomfilter.New(megabytes*1024*1024*8, 4)
+}
+
 func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, ps *background.ProgressSet, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
 	if toStep < fromStep {
 		return nil, fmt.Errorf("LocalityIndex.buildFiles: fromStep(%d) < toStep(%d)", fromStep, toStep)
@@ -380,6 +406,11 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			dense.DisableFsync()
 		}
 
+		bloom, err := newColdBloomWithSize(16)
+		if err != nil {
+			return nil, err
+		}
+
 		it = makeIter()
 		defer it.Close()
 		for it.HasNext() {
@@ -397,6 +428,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 				}
 			}
 
+			bloom.AddHash(localityHash(k))
 			//wrintf("buld: %x, %d, %d\n", k, i, inFiles)
 			if err := dense.AddArray(i, inSteps); err != nil {
 				return nil, err
@@ -408,6 +440,9 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			p.Processed.Add(1)
 		}
 		it.Close()
+
+		fmt.Printf("boolm-probability: %s, %dk, %f\n", li.filenameBase, bloom.N()/1000, bloom.FalsePosititveProbability())
+		bloom.WriteFile(idxPath + ".lb")
 
 		if err := dense.Build(); err != nil {
 			return nil, err
@@ -434,6 +469,17 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		return nil, err
 	}
 	return &LocalityIndexFiles{index: idx, bm: bm, fromStep: fromStep, toStep: toStep}, nil
+}
+
+func localityHash(k []byte) uint64 {
+	if len(k) == 20 {
+		return binary.BigEndian.Uint64(k)
+	}
+	lo := binary.BigEndian.Uint32(k[20:])
+	if lo == 0 {
+		lo = binary.BigEndian.Uint32(k[len(k)-4:])
+	}
+	return uint64(binary.BigEndian.Uint32(k))<<32 | uint64(lo)
 }
 
 func (li *LocalityIndex) integrateFiles(sf *LocalityIndexFiles) {

@@ -11,6 +11,7 @@ require (
 )
 
 require (
+	github.com/FastFilter/xorfilter v0.1.3
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/metrics v1.23.1
 	github.com/anacrolix/dht/v2 v2.19.2-0.20221121215055-066ad8494444
@@ -25,6 +26,7 @@ require (
 	github.com/google/btree v1.1.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/golang-lru/v2 v2.0.4
+	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.2.2
 	github.com/matryer/moq v0.3.2
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58

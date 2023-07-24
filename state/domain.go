@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
+	bloomfilter "github.com/holiman/bloomfilter/v2"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -65,6 +66,7 @@ type filesItem struct {
 	index        *recsplit.Index
 	bindex       *BtIndex
 	bm           *bitmapdb.FixedSizeBitmaps
+	bloom        *bloomfilter.Filter
 	startTxNum   uint64
 	endTxNum     uint64
 
