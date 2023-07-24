@@ -444,7 +444,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		}
 		it.Close()
 
-		fmt.Printf("boolm-probability: %s, %dk, %f\n", li.filenameBase, bloom.N()/1000, bloom.FalsePosititveProbability())
+		fmt.Printf("boolm-probability: %s, %dk, %f\n", fName, bloom.N()/1000, bloom.FalsePosititveProbability())
 		bloom.WriteFile(idxPath + ".lb")
 
 		if err := dense.Build(); err != nil {
