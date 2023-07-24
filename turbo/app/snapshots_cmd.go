@@ -498,7 +498,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
 
-	//
 	cfg := ethconfig.NewSnapCfg(true, true, true)
 	snapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err := snapshots.ReopenFolder(); err != nil {
@@ -506,7 +505,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 	snapshots.Txs.View(func(segments []*freezeblocks.TxnSegment) error {
 		for _, s := range segments {
-			fmt.Printf("%s, %d\n", s.Seg.FileName(), s.Seg.Count())
+			fmt.Printf("%s, %dk\n", s.Seg.FileName(), s.Seg.Count()/1_000)
 		}
 		return nil
 	})
