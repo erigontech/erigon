@@ -446,15 +446,14 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			hasher.Write(k) //nolint:errcheck
 			hi, _ := hasher.Sum128()
 			bloom.AddHash(hi)
-			//_ = hi
 
 			//wrintf("buld: %x, %d, %d\n", k, i, inFiles)
 			if err := dense.AddArray(i, inSteps); err != nil {
 				return nil, err
 			}
-			//if err = rs.AddKey(k, i); err != nil {
-			//	return nil, err
-			//}
+			if err = rs.AddKey(k, i); err != nil {
+				return nil, err
+			}
 			i++
 			p.Processed.Add(1)
 		}
@@ -463,20 +462,20 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		log.Warn(fmt.Sprintf("[dbg] bloom: %s, keys=%dk, size=%dmb, k=%d, probability=%f\n", fName, bloom.N()/1000, bloom.M()/8/1024/1024, bloom.K(), bloom.FalsePosititveProbability()))
 		bloom.WriteFile(idxPath + ".lb")
 
-		//if err := dense.Build(); err != nil {
-		//	return nil, err
-		//}
-		break
-		//if err = rs.Build(); err != nil {
-		//	if rs.Collision() {
-		//		li.logger.Debug("Building recsplit. Collision happened. It's ok. Restarting...")
-		//		rs.ResetNextSalt()
-		//	} else {
-		//		return nil, fmt.Errorf("build idx: %w", err)
-		//	}
-		//} else {
-		//	break
-		//}
+		if err := dense.Build(); err != nil {
+			return nil, err
+		}
+
+		if err = rs.Build(); err != nil {
+			if rs.Collision() {
+				li.logger.Debug("Building recsplit. Collision happened. It's ok. Restarting...")
+				rs.ResetNextSalt()
+			} else {
+				return nil, fmt.Errorf("build idx: %w", err)
+			}
+		} else {
+			break
+		}
 	}
 
 	idx, err := recsplit.OpenIndex(idxPath)
