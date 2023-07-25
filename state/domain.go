@@ -598,8 +598,7 @@ func (h *domainWAL) addValue(key1, key2, value []byte) error {
 	copy(fullkey, key1)
 	copy(fullkey[len(key1):], key2)
 
-	istep := ^(h.d.txNum / h.d.aggregationStep)
-	binary.BigEndian.PutUint64(fullkey[kl:], istep)
+	binary.BigEndian.PutUint64(fullkey[kl:], ^(h.d.txNum / h.d.aggregationStep))
 
 	if h.largeValues {
 		if !h.buffered {
@@ -1080,22 +1079,6 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 			_, err := buildIndexThenOpen(ctx, fitem.decompressor, idxPath, d.tmpdir, false, ps, d.logger, d.noFsync)
 			if err != nil {
 				return fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
-			}
-			return nil
-		})
-	}
-	for _, item := range d.missedIdxFilesBloom() {
-		fitem := item
-		g.Go(func() error {
-
-			idxPath := fitem.decompressor.FilePath()
-			idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
-
-			p := ps.AddNew(fitem.decompressor.FileName(), uint64(fitem.decompressor.Count()))
-			defer ps.Delete(p)
-
-			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, false, p, d.tmpdir, d.logger); err != nil {
-				return fmt.Errorf("failed to build btree index for %s:  %w", fitem.decompressor.FileName(), err)
 			}
 			return nil
 		})
