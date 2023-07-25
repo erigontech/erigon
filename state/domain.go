@@ -724,6 +724,7 @@ type DomainContext struct {
 	idxReaders []*recsplit.IndexReader
 	hc         *HistoryContext
 	keyBuf     [60]byte // 52b key and 8b for inverted step
+	valKeyBuf  [60]byte // 52b key and 8b for inverted step
 	numBuf     [8]byte
 
 	kBuf, vBuf []byte
@@ -1817,16 +1818,16 @@ func (dc *DomainContext) statelessBtree(i int) *BtIndex {
 }
 
 func (dc *DomainContext) getBeforeTxNum(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	dc.d.stats.TotalQueries.Add(1)
+	//dc.d.stats.TotalQueries.Add(1)
 
-	invertedStep := dc.numBuf
-	binary.BigEndian.PutUint64(invertedStep[:], ^(fromTxNum / dc.d.aggregationStep))
+	invertedStep := dc.numBuf[:]
+	binary.BigEndian.PutUint64(invertedStep, ^(fromTxNum / dc.d.aggregationStep))
 	keyCursor, err := roTx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
 		return nil, false, err
 	}
 	defer keyCursor.Close()
-	foundInvStep, err := keyCursor.SeekBothRange(key, invertedStep[:])
+	foundInvStep, err := keyCursor.SeekBothRange(key, invertedStep)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1837,9 +1838,9 @@ func (dc *DomainContext) getBeforeTxNum(key []byte, fromTxNum uint64, roTx kv.Tx
 		}
 		return v, found, nil
 	}
-	copy(dc.keyBuf[:], key)
-	copy(dc.keyBuf[len(key):], foundInvStep)
-	v, err := roTx.GetOne(dc.d.valsTable, dc.keyBuf[:len(key)+8])
+	copy(dc.valKeyBuf[:], key)
+	copy(dc.valKeyBuf[len(key):], foundInvStep)
+	v, err := roTx.GetOne(dc.d.valsTable, dc.valKeyBuf[:len(key)+8])
 	if err != nil {
 		return nil, false, err
 	}
@@ -1866,9 +1867,9 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 	if !dc.d.largeValues {
 		panic("implement me")
 	}
-	copy(dc.keyBuf[:], key)
-	copy(dc.keyBuf[len(key):], foundInvStep)
-	v, err := roTx.GetOne(dc.d.valsTable, dc.keyBuf[:len(key)+8])
+	copy(dc.valKeyBuf[:], key)
+	copy(dc.valKeyBuf[len(key):], foundInvStep)
+	v, err := roTx.GetOne(dc.d.valsTable, dc.valKeyBuf[:len(key)+8])
 	if err != nil {
 		return nil, false, err
 	}
