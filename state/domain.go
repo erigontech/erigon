@@ -504,7 +504,7 @@ func (d *Domain) put(key, val []byte) error {
 func (d *Domain) Put(key1, key2, val []byte) error {
 	key := common.Append(key1, key2)
 	dc := d.MakeContext()
-	original, _, err := dc.getLatest(key, d.tx)
+	original, _, err := dc.GetLatest(key, nil, d.tx)
 	if err != nil {
 		return err
 	}
@@ -523,7 +523,7 @@ func (d *Domain) Put(key1, key2, val []byte) error {
 func (d *Domain) Delete(key1, key2 []byte) error {
 	key := common.Append(key1, key2)
 	dc := d.MakeContext()
-	original, found, err := dc.getLatest(key, d.tx)
+	original, found, err := dc.GetLatest(key, nil, d.tx)
 	dc.Close()
 	if err != nil {
 		return err
@@ -1832,8 +1832,13 @@ func (dc *DomainContext) getBeforeTxNum(key []byte, fromTxNum uint64, roTx kv.Tx
 	return v, true, nil
 }
 
-func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
-	//dc.d.stats.TotalQueries.Add(1)
+func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
+	key := key1
+	if len(key2) > 0 {
+		key = dc.keyBuf[:len(key1)+len(key2)]
+		copy(key, key1)
+		copy(key[len(key1):], key2)
+	}
 
 	t := time.Now()
 	foundInvStep, err := roTx.GetOne(dc.d.keysTable, key) // reads first DupSort value
@@ -1860,22 +1865,6 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 		return nil, false, err
 	}
 	return v, found, nil
-}
-
-func (dc *DomainContext) GetLatest2(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
-	copy(dc.keyBuf[:], key1)
-	copy(dc.keyBuf[len(key1):], key2)
-	return dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
-}
-
-func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
-	key := key1
-	if len(key2) > 0 {
-		key = dc.keyBuf[:len(key1)+len(key2)]
-		copy(key, key1)
-		copy(key[len(key1):], key2)
-	}
-	return dc.getLatest(key, roTx)
 }
 
 func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v []byte)) error {
