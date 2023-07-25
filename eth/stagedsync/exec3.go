@@ -201,7 +201,7 @@ func ExecV3(ctx context.Context,
 		defer cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 	}
 
-	var block, stageProgress uint64
+	var blockNum, stageProgress uint64
 	var maxTxNum uint64
 	outputTxNum := atomic.Uint64{}
 	blockComplete := atomic.Bool{}
@@ -210,7 +210,7 @@ func ExecV3(ctx context.Context,
 	var inputTxNum uint64
 	if execStage.BlockNumber > 0 {
 		stageProgress = execStage.BlockNumber
-		block = execStage.BlockNumber + 1
+		blockNum = execStage.BlockNumber + 1
 	} else if !useExternalTx {
 		//found, _downloadedBlockNum, err := rawdbv3.TxNums.FindBlockNum(applyTx, agg.EndTxNumMinimax())
 		//if err != nil {
@@ -234,7 +234,7 @@ func ExecV3(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		if block > 0 {
+		if blockNum > 0 {
 			_outputTxNum, err := rawdbv3.TxNums.Max(applyTx, execStage.BlockNumber)
 			if err != nil {
 				return err
@@ -250,7 +250,7 @@ func ExecV3(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			if block > 0 {
+			if blockNum > 0 {
 				_outputTxNum, err := rawdbv3.TxNums.Max(tx, execStage.BlockNumber)
 				if err != nil {
 					return err
@@ -276,21 +276,19 @@ func ExecV3(ctx context.Context,
 	inputBlockNum := &atomic.Uint64{}
 	var count uint64
 	var lock sync.RWMutex
+	var err error
 
 	// MA setio
 	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 	defer cfg.agg.CloseSharedDomains()
 	rs := state.NewStateV3(doms, logger)
-	bn, txn, err := doms.SeekCommitment(0, math.MaxUint64)
+	blockNum, inputTxNum, err = doms.SeekCommitment(0, math.MaxUint64)
 	if err != nil {
 		return err
 	}
-	outputTxNum.Store(txn)
-	agg.SetTxNum(txn)
-	log.Info("SeekCommitment", "bn", bn, "txn", txn)
-	//fmt.Printf("inputTxNum == %d\n", inputTxNum)
-	//doms.Commit(true, false)
-	//doms.ClearRam()
+	agg.SetTxNum(inputTxNum)
+	log.Info("SeekCommitment", "bn", blockNum, "txn", inputTxNum)
+	defer agg.ComputeCommitment(true, false)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -308,7 +306,7 @@ func ExecV3(ctx context.Context,
 	applyWorker.DiscardReadList()
 
 	commitThreshold := batchSize.Bytes()
-	progress := NewProgress(block, commitThreshold, workerCount, execStage.LogPrefix(), logger)
+	progress := NewProgress(blockNum, commitThreshold, workerCount, execStage.LogPrefix(), logger)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
@@ -474,6 +472,7 @@ func ExecV3(ctx context.Context,
 						if err := agg.Flush(ctx, tx); err != nil {
 							return err
 						}
+						doms.ClearRam()
 						t3 = time.Since(tt)
 
 						if err = execStage.Update(tx, outputBlockNum.Get()); err != nil {
@@ -535,7 +534,7 @@ func ExecV3(ctx context.Context,
 		})
 	}
 
-	if block < cfg.blockReader.FrozenBlocks() {
+	if blockNum < cfg.blockReader.FrozenBlocks() {
 		defer agg.KeepStepsInDB(0).KeepStepsInDB(1)
 	}
 
@@ -568,7 +567,7 @@ func ExecV3(ctx context.Context,
 	slowDownLimit := time.NewTicker(time.Second)
 	defer slowDownLimit.Stop()
 
-	stateStream := !initialCycle && cfg.stateStream && maxBlockNum-block < stateStreamLimit
+	stateStream := !initialCycle && cfg.stateStream && maxBlockNum-blockNum < stateStreamLimit
 
 	var readAhead chan uint64
 	if !parallel {
@@ -581,10 +580,9 @@ func ExecV3(ctx context.Context,
 	}
 
 	var b *types.Block
-	var blockNum uint64
 	//var err error
 Loop:
-	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
+	for ; blockNum <= maxBlockNum; blockNum++ {
 		if !parallel {
 			select {
 			case readAhead <- blockNum:
@@ -788,10 +786,10 @@ Loop:
 
 				if err := func() error {
 					tt = time.Now()
-					doms.ClearRam()
 					if err := agg.Flush(ctx, applyTx); err != nil {
 						return err
 					}
+					doms.ClearRam()
 					t3 = time.Since(tt)
 
 					if err = execStage.Update(applyTx, outputBlockNum.Get()); err != nil {
@@ -839,7 +837,6 @@ Loop:
 						applyWorker.ResetTx(applyTx)
 						agg.SetTx(applyTx)
 
-						//doms.SetTx(applyTx)
 						doms.SetContext(applyTx.(*temporal.Tx).AggCtx())
 
 						//applyTx.(*temporal.Tx).AggCtx().LogStats(applyTx, func(endTxNumMinimax uint64) uint64 {
@@ -914,7 +911,7 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.Aggreg
 	if bytes.Equal(rh, header.Root.Bytes()) {
 		return true, nil
 	}
-	/* uncomment it when need to debug state-root missmatch
+	/* uncomment it when need to debug state-root missmatch*/
 	if err := agg.Flush(context.Background(), applyTx); err != nil {
 		panic(err)
 	}
@@ -923,11 +920,11 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.Aggreg
 		panic(err)
 	}
 	if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
-		log.Error(fmt.Sprintf("block hash mismatch - but new-algorithm hash is bad! (means latest state is correct): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, maxBlockNum))
+		log.Error(fmt.Sprintf("block hash mismatch - but new-algorithm hash is bad! (means latest state is correct): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
 	} else {
-		log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, maxBlockNum))
+		log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
 	}
-	*/
+	//*/
 	logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 	if badBlockHalt {
 		return false, fmt.Errorf("wrong trie root")
