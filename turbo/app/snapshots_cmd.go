@@ -521,6 +521,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.CleanDir()
+	agg.KeepStepsInDB(0)
 	db.View(ctx, func(tx kv.Tx) error {
 		snapshots.LogStat()
 		ac := agg.MakeContext()
