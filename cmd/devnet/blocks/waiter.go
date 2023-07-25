@@ -163,7 +163,7 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers cha
 
 					c.result <- res
 					defer close(c.result)
-					break
+					return
 				}
 			}
 		}

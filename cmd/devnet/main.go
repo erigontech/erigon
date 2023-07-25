@@ -271,12 +271,13 @@ func action(ctx *cli.Context) error {
 		"state-sync": {
 			Steps: []*scenarios.Step{
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
-				{Text: "CreateAccountWithFunds", Args: []any{networkname.BorDevnetChainName, "child-funder", 200.0}},
 				{Text: "CreateAccountWithFunds", Args: []any{networkname.DevChainName, "root-funder", 200.0}},
+				{Text: "CreateAccountWithFunds", Args: []any{networkname.BorDevnetChainName, "child-funder", 200.0}},
 				{Text: "DeployChildChainReceiver", Args: []any{"child-funder"}},
 				{Text: "DeployRootChainSender", Args: []any{"root-funder"}},
 				{Text: "GenerateSyncEvents", Args: []any{"root-funder", 10, 2, 2}},
-				{Text: "ProcessTransfers", Args: []any{"root-funder", 10, 2, 2, true}},
+				{Text: "ProcessTransfers", Args: []any{"root-funder", 10, 2, 2}},
+				{Text: "BatchProcessTransfers", Args: []any{"root-funder", 1, 10, 2, 2}},
 			},
 		},
 	}.Run(runCtx, strings.Split(ctx.String("scenarios"), ",")...)
@@ -360,6 +361,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BasePrivateApiAddr: "localhost:10090",
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8545,
+					BorStateSyncDelay:  30 * time.Second,
 					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
