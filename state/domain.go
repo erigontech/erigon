@@ -1583,51 +1583,53 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 	if !haveWarmIdx && len(dc.files) > 0 {
 		firstWarmIndexedTxNum = dc.files[len(dc.files)-1].endTxNum
 	}
-	t := time.Now()
-	if firstWarmIndexedTxNum > lastColdIndexedTxNum {
-		if firstWarmIndexedTxNum/dc.d.aggregationStep-lastColdIndexedTxNum/dc.d.aggregationStep > 0 && dc.d.withLocalityIndex {
-			if dc.d.filenameBase != "commitment" {
-				log.Warn("[dbg] gap between warm and cold locality", "cold", lastColdIndexedTxNum/dc.d.aggregationStep, "warm", firstWarmIndexedTxNum/dc.d.aggregationStep, "nil", dc.hc.ic.coldLocality == nil, "name", dc.d.filenameBase)
-				if dc.hc.ic.coldLocality != nil && dc.hc.ic.coldLocality.file != nil {
-					log.Warn("[dbg] gap", "cold_f", dc.hc.ic.coldLocality.file.src.bm.FileName())
-				}
-				if dc.hc.ic.warmLocality != nil && dc.hc.ic.warmLocality.file != nil {
-					log.Warn("[dbg] gap", "warm_f", dc.hc.ic.warmLocality.file.src.bm.FileName())
-				}
-			}
-		}
+	if firstWarmIndexedTxNum <= lastColdIndexedTxNum {
+		return nil, false, nil
+	}
 
-		for i := len(dc.files) - 1; i >= 0; i-- {
-			isUseful := dc.files[i].startTxNum >= lastColdIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
-			if !isUseful {
-				continue
+	t := time.Now()
+	if firstWarmIndexedTxNum/dc.d.aggregationStep-lastColdIndexedTxNum/dc.d.aggregationStep > 0 && dc.d.withLocalityIndex {
+		if dc.d.filenameBase != "commitment" {
+			log.Warn("[dbg] gap between warm and cold locality", "cold", lastColdIndexedTxNum/dc.d.aggregationStep, "warm", firstWarmIndexedTxNum/dc.d.aggregationStep, "nil", dc.hc.ic.coldLocality == nil, "name", dc.d.filenameBase)
+			if dc.hc.ic.coldLocality != nil && dc.hc.ic.coldLocality.file != nil {
+				log.Warn("[dbg] gap", "cold_f", dc.hc.ic.coldLocality.file.src.bm.FileName())
 			}
-			reader := dc.statelessIdxReader(i)
-			if reader.Empty() {
-				continue
+			if dc.hc.ic.warmLocality != nil && dc.hc.ic.warmLocality.file != nil {
+				log.Warn("[dbg] gap", "warm_f", dc.hc.ic.warmLocality.file.src.bm.FileName())
 			}
-			offset := reader.Lookup(filekey)
-			g := dc.statelessGetter(i)
-			g.Reset(offset)
-			k, _ := g.NextUncompressed()
-			if !bytes.Equal(filekey, k) {
-				continue
-			}
-			v, _ = g.NextUncompressed()
-			LatestStateReadWarm.UpdateDuration(t)
-			//var ok bool
-			//dc.d.stats.FilesQuerie.Add(1)
-			//_, v, ok, err := dc.statelessBtree(i).Get(filekey)
-			//if err != nil {
-			//	return nil, false, err
-			//}
-			//if !ok {
-			//	LatestStateReadGrindNotFound.UpdateDuration(t)
-			//	continue
-			//}
-			LatestStateReadGrind.UpdateDuration(t)
-			return v, true, nil
 		}
+	}
+
+	for i := len(dc.files) - 1; i >= 0; i-- {
+		isUseful := dc.files[i].startTxNum >= lastColdIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
+		if !isUseful {
+			continue
+		}
+		reader := dc.statelessIdxReader(i)
+		if reader.Empty() {
+			continue
+		}
+		offset := reader.Lookup(filekey)
+		g := dc.statelessGetter(i)
+		g.Reset(offset)
+		k, _ := g.NextUncompressed()
+		if !bytes.Equal(filekey, k) {
+			continue
+		}
+		v, _ = g.NextUncompressed()
+		LatestStateReadWarm.UpdateDuration(t)
+		//var ok bool
+		//dc.d.stats.FilesQuerie.Add(1)
+		//_, v, ok, err := dc.statelessBtree(i).Get(filekey)
+		//if err != nil {
+		//	return nil, false, err
+		//}
+		//if !ok {
+		//	LatestStateReadGrindNotFound.UpdateDuration(t)
+		//	continue
+		//}
+		LatestStateReadGrind.UpdateDuration(t)
+		return v, true, nil
 	}
 	LatestStateReadGrindNotFound.UpdateDuration(t)
 	return nil, false, nil
