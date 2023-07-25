@@ -873,7 +873,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 			return err
 		}
 
-		pos = getter.Skip()
+		pos, _ = getter.Skip()
 		if pos-kp == 1 {
 			ks[len(key)]++
 			emptys++
@@ -922,7 +922,7 @@ func BuildBtreeIndex(dataPath, indexPath string, logger log.Logger) error {
 			return err
 		}
 
-		pos = getter.Skip()
+		pos, _ = getter.Skip()
 	}
 	decomp.Close()
 

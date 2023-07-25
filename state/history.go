@@ -456,9 +456,9 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 					return err
 				}
 				if compressVals {
-					valOffset = g2.Skip()
+					valOffset, _ = g2.Skip()
 				} else {
-					valOffset = g2.SkipUncompressed()
+					valOffset, _ = g2.SkipUncompressed()
 				}
 			}
 
@@ -937,7 +937,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 				if err = rs.AddKey(historyKey, valOffset); err != nil {
 					return HistoryFiles{}, fmt.Errorf("add %s history idx [%x]: %w", h.filenameBase, historyKey, err)
 				}
-				valOffset = g.Skip()
+				valOffset, _ = g.Skip()
 			}
 		}
 		if err = rs.Build(); err != nil {

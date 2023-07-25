@@ -123,6 +123,10 @@ func TestCompressDict1(t *testing.T) {
 		require.False(t, g.MatchPrefix([]byte("long")))
 		require.True(t, g.MatchPrefix([]byte("")))
 		require.True(t, g.MatchPrefix([]byte{}))
+
+		require.Equal(t, 1, g.MatchPrefixCmp([]byte("long")))
+		require.Equal(t, 0, g.MatchPrefixCmp([]byte("")))
+		require.Equal(t, 0, g.MatchPrefixCmp([]byte{}))
 		word, _ := g.Next(nil)
 		require.Nil(t, word)
 
@@ -132,6 +136,12 @@ func TestCompressDict1(t *testing.T) {
 		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
 		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
 		require.True(t, g.MatchPrefix([]byte{}))
+
+		require.Equal(t, 0, g.MatchPrefixCmp([]byte("long")))
+		require.Equal(t, 1, g.MatchPrefixCmp([]byte("longlong")))
+		require.Equal(t, 1, g.MatchPrefixCmp([]byte("wordnotmatch")))
+		require.Equal(t, 1, g.MatchPrefixCmp([]byte("longnotmatch")))
+		require.Equal(t, 0, g.MatchPrefixCmp([]byte{}))
 		_, _ = g.Next(nil)
 
 		// next word is `word`
@@ -142,6 +152,14 @@ func TestCompressDict1(t *testing.T) {
 		require.True(t, g.MatchPrefix(nil))
 		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
 		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
+
+		require.Equal(t, -1, g.MatchPrefixCmp([]byte("long")))
+		require.Equal(t, -1, g.MatchPrefixCmp([]byte("longlong")))
+		require.Equal(t, 0, g.MatchPrefixCmp([]byte("word")))
+		require.Equal(t, 0, g.MatchPrefixCmp([]byte("")))
+		require.Equal(t, 0, g.MatchPrefixCmp(nil))
+		require.Equal(t, 1, g.MatchPrefixCmp([]byte("wordnotmatch")))
+		require.Equal(t, -1, g.MatchPrefixCmp([]byte("longnotmatch")))
 		_, _ = g.Next(nil)
 
 		// next word is `longlongword %d`
@@ -154,8 +172,89 @@ func TestCompressDict1(t *testing.T) {
 		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
 		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
 		require.True(t, g.MatchPrefix([]byte{}))
-		word, _ = g.Next(nil)
+
+		require.Equal(t, 0, g.MatchPrefixCmp([]byte(fmt.Sprintf("%d", i))))
+		require.Equal(t, 0, g.MatchPrefixCmp([]byte(expectPrefix)))
+		require.Equal(t, 0, g.MatchPrefixCmp([]byte(expectPrefix+"long")))
+		require.Equal(t, 0, g.MatchPrefixCmp([]byte(expectPrefix+"longword ")))
+		require.Equal(t, 1, g.MatchPrefixCmp([]byte("wordnotmatch")))
+		require.Equal(t, 1, g.MatchPrefixCmp([]byte("longnotmatch")))
+		require.Equal(t, 0, g.MatchPrefixCmp([]byte{}))
+		savePos := g.dataP
+		word, nextPos := g.Next(nil)
 		expected := fmt.Sprintf("%d longlongword %d", i, i)
+		g.Reset(savePos)
+		require.Equal(t, 0, g.MatchCmp([]byte(expected)))
+		g.Reset(nextPos)
+		if string(word) != expected {
+			t.Errorf("expected %s, got (hex) [%s]", expected, word)
+		}
+		i++
+	}
+
+	if cs := checksum(d.filePath); cs != 3153486123 {
+		// it's ok if hash changed, but need re-generate all existing snapshot hashes
+		// in https://github.com/ledgerwatch/erigon-snapshot
+		t.Errorf("result file hash changed, %d", cs)
+	}
+}
+
+func TestCompressDictCmp(t *testing.T) {
+	d := prepareDict(t)
+	defer d.Close()
+	g := d.MakeGetter()
+	i := 0
+	g.Reset(0)
+	for g.HasNext() {
+		// next word is `nil`
+		savePos := g.dataP
+		require.Equal(t, 1, g.MatchCmp([]byte("long")))
+		require.Equal(t, 0, g.MatchCmp([]byte(""))) // moves offset
+		g.Reset(savePos)
+		require.Equal(t, 0, g.MatchCmp([]byte{})) // moves offset
+		g.Reset(savePos)
+
+		word, _ := g.Next(nil)
+		require.Nil(t, word)
+
+		// next word is `long`
+		savePos = g.dataP
+		require.Equal(t, 0, g.MatchCmp([]byte("long"))) // moves offset
+		g.Reset(savePos)
+		require.Equal(t, 1, g.MatchCmp([]byte("longlong")))
+		require.Equal(t, 1, g.MatchCmp([]byte("wordnotmatch")))
+		require.Equal(t, 1, g.MatchCmp([]byte("longnotmatch")))
+		require.Equal(t, -1, g.MatchCmp([]byte{}))
+		_, _ = g.Next(nil)
+
+		// next word is `word`
+		savePos = g.dataP
+		require.Equal(t, -1, g.MatchCmp([]byte("long")))
+		require.Equal(t, -1, g.MatchCmp([]byte("longlong")))
+		require.Equal(t, 0, g.MatchCmp([]byte("word"))) // moves offset
+		g.Reset(savePos)
+		require.Equal(t, -1, g.MatchCmp([]byte("")))
+		require.Equal(t, -1, g.MatchCmp(nil))
+		require.Equal(t, 1, g.MatchCmp([]byte("wordnotmatch")))
+		require.Equal(t, -1, g.MatchCmp([]byte("longnotmatch")))
+		_, _ = g.Next(nil)
+
+		// next word is `longlongword %d`
+		expectPrefix := fmt.Sprintf("%d long", i)
+
+		require.Equal(t, -1, g.MatchCmp([]byte(fmt.Sprintf("%d", i))))
+		require.Equal(t, -1, g.MatchCmp([]byte(expectPrefix)))
+		require.Equal(t, -1, g.MatchCmp([]byte(expectPrefix+"long")))
+		require.Equal(t, -1, g.MatchCmp([]byte(expectPrefix+"longword ")))
+		require.Equal(t, 1, g.MatchCmp([]byte("wordnotmatch")))
+		require.Equal(t, 1, g.MatchCmp([]byte("longnotmatch")))
+		require.Equal(t, -1, g.MatchCmp([]byte{}))
+		savePos = g.dataP
+		word, nextPos := g.Next(nil)
+		expected := fmt.Sprintf("%d longlongword %d", i, i)
+		g.Reset(savePos)
+		require.Equal(t, 0, g.MatchCmp([]byte(expected)))
+		g.Reset(nextPos)
 		if string(word) != expected {
 			t.Errorf("expected %s, got (hex) [%s]", expected, word)
 		}
