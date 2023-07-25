@@ -692,15 +692,11 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		}
 
 		idxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
-		//idxPath := filepath.Join(d.dir, idxFileName)
-		//p = ps.AddNew("merge "+idxFileName, uint64(keyCount*2))
-		//defer ps.Delete(p)
-		//ps.Delete(p)
-
-		//		if valuesIn.index, err = buildIndex(valuesIn.decompressor, idxPath, d.dir, keyCount, false /* values */); err != nil {
-		//if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, idxPath, d.tmpdir, keyCount, false, p, d.logger, d.noFsync); err != nil {
-		//	return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-		//}
+		idxPath := filepath.Join(d.dir, idxFileName)
+		//		if valuesIn.index, err = buildIndex(valuesIn.decompressor, idxPath, d.dir,  false /* values */); err != nil {
+		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, idxPath, d.tmpdir, false, ps, d.logger, d.noFsync); err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+		}
 
 		btFileName := strings.TrimSuffix(idxFileName, "kvi") + "bt"
 		p = ps.AddNew(btFileName, uint64(keyCount*2))

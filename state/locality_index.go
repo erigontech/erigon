@@ -486,9 +486,11 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	if err != nil {
 		return nil, err
 	}
-	bloom, _, err = bloomfilter.ReadFile(idxPath + ".lb")
-	if err != nil {
-		return nil, err
+	if dir.FileExist(idxPath + ".lb") {
+		bloom, _, err = bloomfilter.ReadFile(idxPath + ".lb")
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &LocalityIndexFiles{index: idx, bm: bm, bloom: bloom, fromStep: fromStep, toStep: toStep}, nil
 }

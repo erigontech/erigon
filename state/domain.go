@@ -1799,6 +1799,9 @@ func (dc *DomainContext) statelessIdxReader(i int) *recsplit.IndexReader {
 	}
 	r := dc.idxReaders[i]
 	if r == nil {
+		if dc.files[i].src.index == nil {
+			fmt.Printf("a: %s\n", dc.files[i].src.decompressor.FileName())
+		}
 		r = dc.files[i].src.index.GetReaderFromPool()
 		dc.idxReaders[i] = r
 	}
@@ -1878,9 +1881,13 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 }
 
 func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
-	copy(dc.keyBuf[:], key1)
-	copy(dc.keyBuf[len(key1):], key2)
-	return dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
+	key := key1
+	if len(key2) > 0 {
+		key = dc.keyBuf[:len(key1)+len(key2)]
+		copy(key, key1)
+		copy(key[len(key1):], key2)
+	}
+	return dc.getLatest(key, roTx)
 }
 
 func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v []byte)) error {
