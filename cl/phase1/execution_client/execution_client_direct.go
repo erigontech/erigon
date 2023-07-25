@@ -71,7 +71,7 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block) (invalid
 	}
 
 	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon
-	log.Debug("[ExecutionClientRpc] Calling EL")
+	log.Info("[ExecutionClientRpc] Calling EL")
 
 	// determine the engine method
 	switch payload.Version() {
@@ -104,7 +104,7 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(finalized libcommon.Hash, head
 		FinalizedBlockHash: finalized,
 	}
 	forkChoiceResp := &engine_types.ForkChoiceUpdatedResponse{}
-	log.Debug("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
+	log.Info("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
 
 	_, err := cc.api.ForkchoiceUpdatedV1(cc.ctx, &forkChoiceRequest, nil)
 	if err != nil {
