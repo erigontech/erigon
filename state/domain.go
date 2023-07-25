@@ -1855,26 +1855,26 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 	if err != nil {
 		return nil, false, err
 	}
-	if foundInvStep == nil {
-		LatestStateReadHotNotFound.UpdateDuration(t)
-
-		v, found, err := dc.getLatestFromFiles(key)
+	if foundInvStep != nil {
+		if !dc.d.largeValues {
+			panic("implement me")
+		}
+		copy(dc.valKeyBuf[:], key)
+		copy(dc.valKeyBuf[len(key):], foundInvStep)
+		v, err := roTx.GetOne(dc.d.valsTable, dc.valKeyBuf[:len(key)+8])
 		if err != nil {
 			return nil, false, err
 		}
-		return v, found, nil
+		LatestStateReadHot.UpdateDuration(t)
+		return v, true, nil
 	}
-	if !dc.d.largeValues {
-		panic("implement me")
-	}
-	copy(dc.valKeyBuf[:], key)
-	copy(dc.valKeyBuf[len(key):], foundInvStep)
-	v, err := roTx.GetOne(dc.d.valsTable, dc.valKeyBuf[:len(key)+8])
+	LatestStateReadHotNotFound.UpdateDuration(t)
+
+	v, found, err := dc.getLatestFromFiles(key)
 	if err != nil {
 		return nil, false, err
 	}
-	LatestStateReadHot.UpdateDuration(t)
-	return v, true, nil
+	return v, found, nil
 }
 
 func (dc *DomainContext) GetLatest2(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
