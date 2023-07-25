@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
@@ -37,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/etl"
 )
 
 // Defines how to evaluate commitments
@@ -79,12 +81,16 @@ type ValueMerger func(prev, current []byte) (merged []byte, err error)
 type UpdateTree struct {
 	tree   *btree.BTreeG[*commitmentItem]
 	keccak hash.Hash
+	keys   etl.Buffer
+	mode   CommitmentMode
 }
 
-func NewUpdateTree() *UpdateTree {
+func NewUpdateTree(m CommitmentMode) *UpdateTree {
 	return &UpdateTree{
 		tree:   btree.NewG[*commitmentItem](64, commitmentItemLessPlain),
 		keccak: sha3.NewLegacyKeccak256(),
+		keys:   etl.NewOldestEntryBuffer(datasize.MB * 32),
+		mode:   m,
 	}
 }
 
@@ -101,9 +107,15 @@ func (t *UpdateTree) get(key []byte) (*commitmentItem, bool) {
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *commitmentItem, val []byte)) {
-	item, _ := t.get(key)
-	fn(item, val)
-	t.tree.ReplaceOrInsert(item)
+	switch t.mode {
+	case CommitmentModeUpdate:
+		item, _ := t.get(key)
+		fn(item, val)
+		t.tree.ReplaceOrInsert(item)
+	case CommitmentModeDirect:
+		t.keys.Put(key, nil)
+	default:
+	}
 }
 
 func (t *UpdateTree) TouchAccount(c *commitmentItem, val []byte) {
@@ -172,19 +184,34 @@ func (t *UpdateTree) TouchCode(c *commitmentItem, val []byte) {
 
 // Returns list of both plain and hashed keys. If .mode is CommitmentModeUpdate, updates also returned.
 func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
-	plainKeys := make([][]byte, t.tree.Len())
-	updates := make([]commitment.Update, t.tree.Len())
+	switch t.mode {
+	case CommitmentModeDirect:
+		plainKeys := make([][]byte, t.keys.Len())
+		t.keys.Sort()
 
-	i := 0
-	t.tree.Ascend(func(item *commitmentItem) bool {
-		plainKeys[i], updates[i] = item.plainKey, item.update
-		i++
-		return true
-	})
-	if clear {
-		t.tree.Clear(true)
+		keyBuf := make([]byte, 0)
+		for i := 0; i < len(plainKeys); i++ {
+			key, _ := t.keys.Get(i, keyBuf, nil)
+			plainKeys[i] = common.Copy(key)
+		}
+		t.keys.Reset()
+		return plainKeys, nil
+	case CommitmentModeUpdate:
+		plainKeys := make([][]byte, t.tree.Len())
+		updates := make([]commitment.Update, t.tree.Len())
+		i := 0
+		t.tree.Ascend(func(item *commitmentItem) bool {
+			plainKeys[i], updates[i] = item.plainKey, item.update
+			i++
+			return true
+		})
+		if clear {
+			t.tree.Clear(true)
+		}
+		return plainKeys, updates
+	default:
+		return nil, nil
 	}
-	return plainKeys, updates
 }
 
 type DomainCommitted struct {
@@ -199,6 +226,18 @@ type DomainCommitted struct {
 	comKeys uint64
 	comTook time.Duration
 	discard bool
+}
+
+func NewCommittedDomain(d *Domain, mode CommitmentMode, trieVariant commitment.TrieVariant) *DomainCommitted {
+	return &DomainCommitted{
+		Domain:       d,
+		mode:         mode,
+		trace:        false,
+		updates:      NewUpdateTree(mode),
+		discard:      dbg.DiscardCommitment(),
+		patriciaTrie: commitment.InitializeTrie(trieVariant),
+		branchMerger: commitment.NewHexBranchMerger(8192),
+	}
 }
 
 func (d *DomainCommitted) PatriciaState() ([]byte, error) {
@@ -231,18 +270,6 @@ func (d *DomainCommitted) ResetFns(
 
 func (d *DomainCommitted) Hasher() hash.Hash {
 	return d.updates.keccak
-}
-
-func NewCommittedDomain(d *Domain, mode CommitmentMode, trieVariant commitment.TrieVariant) *DomainCommitted {
-	return &DomainCommitted{
-		Domain:       d,
-		mode:         mode,
-		trace:        false,
-		updates:      NewUpdateTree(),
-		discard:      dbg.DiscardCommitment(),
-		patriciaTrie: commitment.InitializeTrie(trieVariant),
-		branchMerger: commitment.NewHexBranchMerger(8192),
-	}
 }
 
 func (d *DomainCommitted) SetCommitmentMode(m CommitmentMode) { d.mode = m }
@@ -644,6 +671,7 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 
 func (d *DomainCommitted) Close() {
 	d.Domain.Close()
+	d.updates.keys.Reset()
 	d.updates.tree.Clear(true)
 }
 
