@@ -113,6 +113,7 @@ func BorSnapshotsPrune(s *PruneState, initialCycle bool, cfg BorSnapshotsCfg, ct
 	if cfg.chainConfig.Bor == nil {
 		return
 	}
+	logger.Info("BorSnapshotsPrune1")
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -121,13 +122,16 @@ func BorSnapshotsPrune(s *PruneState, initialCycle bool, cfg BorSnapshotsCfg, ct
 		}
 		defer tx.Rollback()
 	}
+	logger.Info("BorSnapshotsPrune2")
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.Enabled {
 		if err := cfg.borRetire.PruneAncientBlocks(tx, 100); err != nil {
 			return err
 		}
 	}
+	logger.Info("BorSnapshotsPrune3")
 	if freezingCfg.Enabled && freezingCfg.Produce {
+		logger.Info("BorSnapshotsPrune4")
 		cfg.borRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
 			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
 				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
@@ -137,6 +141,7 @@ func BorSnapshotsPrune(s *PruneState, initialCycle bool, cfg BorSnapshotsCfg, ct
 			return nil
 		})
 	}
+	logger.Info("BorSnapshotsPrune5")
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
