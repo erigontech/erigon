@@ -414,7 +414,6 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		}
 
 		if count > 0 {
-			fmt.Printf("a: %d\n", count)
 			bloom, err = bloomfilter.NewOptimal(uint64(count), 0.01)
 			if err != nil {
 				return nil, err
