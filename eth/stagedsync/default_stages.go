@@ -56,7 +56,7 @@ func DefaultStages(ctx context.Context,
 				return nil
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return BorSnapshotsPrune(p, firstCycle, borSnapshots, ctx, tx)
+				return BorSnapshotsPrune(p, firstCycle, borSnapshots, ctx, tx, logger)
 			},
 		},
 		{
@@ -411,7 +411,7 @@ var DefaultPruneOrder = PruneOrder{
 	stages.AccountHistoryIndex,
 	stages.CallTraces,
 
-	// Unwinding of IHashes needs to happen after unwinding HashState
+	// Pruning of IHashes needs to happen after pruning HashState
 	stages.HashState,
 	stages.IntermediateHashes,
 

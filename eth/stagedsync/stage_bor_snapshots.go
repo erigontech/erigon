@@ -108,7 +108,8 @@ func DownloadAndIndexBorSnapshotsIfNeed(s *StageState, ctx context.Context, tx k
 /* ====== PRUNING ====== */
 // snapshots pruning sections works more as a retiring of blocks
 // retiring blocks means moving block data from db into snapshots
-func BorSnapshotsPrune(s *PruneState, initialCycle bool, cfg BorSnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
+func BorSnapshotsPrune(s *PruneState, initialCycle bool, cfg BorSnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
+	logger.Info("BorSnapshotsPrune")
 	if cfg.chainConfig.Bor == nil {
 		return
 	}
