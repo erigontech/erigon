@@ -36,9 +36,10 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64,
 			if event.Time.Unix() <= to {
 				events = append(events, event)
 			}
-		} else {
-			//removalKeys = append(removalKeys, key)
 		}
+		//else {
+		//removalKeys = append(removalKeys, key)
+		//}
 	}
 
 	if len(events) == 0 {

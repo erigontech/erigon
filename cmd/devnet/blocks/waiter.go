@@ -118,12 +118,13 @@ func BlockWaiter(ctx context.Context, handler BlockHandler) (Waiter, context.Can
 func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers chan types.Header) {
 	blockMap := map[libcommon.Hash]*requests.BlockResult{}
 
+	defer close(c.result)
+
 	for header := range headers {
 		select {
 		case <-ctx.Done():
 			c.headersSub.Unsubscribe()
 			c.result <- waitResult{blockMap: blockMap, err: ctx.Err()}
-			defer close(c.result)
 			return
 		default:
 		}
@@ -162,7 +163,6 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers cha
 					}
 
 					c.result <- res
-					defer close(c.result)
 					return
 				}
 			}
