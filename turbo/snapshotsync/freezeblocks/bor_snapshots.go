@@ -486,6 +486,7 @@ Loop:
 			s.logger.Warn("invalid segment name", "err", err, "name", fName)
 			continue
 		}
+		fmt.Printf("Parsed file name: %v\n", f)
 
 		switch f.T {
 		case snaptype.BorEvents:
