@@ -167,16 +167,6 @@ func (br *BorRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64
 	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
-	/*
-		TODO: Insert merger code
-	*/
-	if err := snapshots.ReopenFolder(); err != nil {
-		return fmt.Errorf("reopen: %w", err)
-	}
-	snapshots.LogStat()
-	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
-		notifier.OnNewSnapshot()
-	}
 	return nil
 }
 
@@ -579,6 +569,7 @@ func (s *BorRoSnapshots) ReopenFolder() error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
+	fmt.Printf("ReopenFolder %v\n", list)
 	return s.ReopenList(list, false)
 }
 func (s *BorRoSnapshots) ReopenWithDB(db kv.RoDB) error {
