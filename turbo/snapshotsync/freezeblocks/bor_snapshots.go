@@ -126,6 +126,10 @@ func NewBorRetire(workers int, dirs datadir.Dirs, blockReader services.FullBlock
 	return &BorRetire{workers: workers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, db: db, notifier: notifier, logger: logger}
 }
 
+func (br *BorRetire) HasNewFrozenFiles() bool {
+	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
+}
+
 func (br *BorRetire) snapshots() *BorRoSnapshots {
 	return br.blockReader.BorSnapshots().(*BorRoSnapshots)
 }
