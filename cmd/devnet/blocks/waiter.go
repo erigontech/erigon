@@ -129,39 +129,42 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers cha
 
 		blockNum := header.Number
 
-		if block, err := node.GetBlockByNumber(blockNum.Uint64(), true); err == nil {
+		block, err := node.GetBlockByNumber(blockNum.Uint64(), true)
 
-			if len(block.Transactions) > 0 && c.waitHashes == nil {
-				c.waitHashes = <-c.hashes
-			}
+		if err != nil {
+			c.logger.Error("Block waiter failed to get block", "err", err)
+			continue
+		}
 
-			for _, tx := range block.Transactions {
-				txHash := libcommon.HexToHash(tx.Hash)
+		if len(block.Transactions) > 0 && c.waitHashes == nil {
+			c.waitHashes = <-c.hashes
+		}
 
-				if _, ok := c.waitHashes[txHash]; ok {
-					c.logger.Info("Tx included into block", "txHash", txHash, "blockNum", block.BlockNumber)
-					blockMap[txHash] = block
-					delete(c.waitHashes, txHash)
+		for i := range block.Transactions {
+			tx := &block.Transactions[i]
 
-					if len(c.waitHashes) == 0 {
-						c.headersSub.Unsubscribe()
-						tx := &tx
-						res := waitResult{
-							err: c.handler.Handle(ctx, node, block, tx),
-						}
+			txHash := libcommon.HexToHash(tx.Hash)
 
-						if res.err == nil {
-							res.blockMap = blockMap
-						}
+			if _, ok := c.waitHashes[txHash]; ok {
+				c.logger.Info("Tx included into block", "txHash", txHash, "blockNum", block.BlockNumber)
+				blockMap[txHash] = block
+				delete(c.waitHashes, txHash)
 
-						c.result <- res
-						close(c.result)
-						break
+				if len(c.waitHashes) == 0 {
+					c.headersSub.Unsubscribe()
+					res := waitResult{
+						err: c.handler.Handle(ctx, node, block, tx),
 					}
+
+					if res.err == nil {
+						res.blockMap = blockMap
+					}
+
+					c.result <- res
+					close(c.result)
+					break
 				}
 			}
-		} else {
-			c.logger.Error("Block waiter failed to get block", "err", err)
 		}
 	}
 }
