@@ -413,9 +413,12 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			dense.DisableFsync()
 		}
 
-		bloom, err = bloomfilter.NewOptimal(uint64(count), 0.01)
-		if err != nil {
-			return nil, err
+		if count > 0 {
+			fmt.Printf("a: %d\n", count)
+			bloom, err = bloomfilter.NewOptimal(uint64(count), 0.01)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		it = makeIter()
@@ -467,9 +470,12 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			break
 		}
 	}
-	log.Warn(fmt.Sprintf("[dbg] bloom: %s, keys=%dk, size=%dmb, k=%d, probability=%f\n", fName, bloom.N()/1000, bloom.M()/8/1024/1024, bloom.K(), bloom.FalsePosititveProbability()))
-	if _, err := bloom.WriteFile(idxPath + ".lb"); err != nil {
-		return nil, err
+
+	if bloom != nil {
+		log.Warn(fmt.Sprintf("[dbg] bloom: %s, keys=%dk, size=%dmb, k=%d, probability=%f\n", fName, bloom.N()/1000, bloom.M()/8/1024/1024, bloom.K(), bloom.FalsePosititveProbability()))
+		if _, err := bloom.WriteFile(idxPath + ".lb"); err != nil {
+			return nil, err
+		}
 	}
 
 	idx, err := recsplit.OpenIndex(idxPath)

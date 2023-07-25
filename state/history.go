@@ -916,9 +916,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 	efHistoryIdxFileName := fmt.Sprintf("%s.%d-%d.efi", h.filenameBase, step, step+1)
 	efHistoryIdxPath := filepath.Join(h.dir, efHistoryIdxFileName)
-	p := ps.AddNew(efHistoryIdxFileName, uint64(len(keys)*2))
-	defer ps.Delete(p)
-	if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, efHistoryIdxPath, h.tmpdir, len(keys), false, p, h.logger, h.noFsync); err != nil {
+	if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, efHistoryIdxPath, h.tmpdir, false, ps, h.logger, h.noFsync); err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
 	}
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{

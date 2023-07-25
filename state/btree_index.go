@@ -792,9 +792,13 @@ func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *
 func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor, compressed bool, p *background.Progress, tmpdir string, logger log.Logger) error {
 	defer kv.EnableReadAhead().DisableReadAhead()
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".bl"
-	bloom, err := bloomfilter.NewOptimal(uint64(kv.Count()/2), 0.01)
-	if err != nil {
-		return err
+	var bloom *bloomfilter.Filter
+	var err error
+	if kv.Count() > 0 {
+		bloom, err = bloomfilter.NewOptimal(uint64(kv.Count()/2), 0.01)
+		if err != nil {
+			return err
+		}
 	}
 	hasher := murmur3.New128WithSeed(0)
 
@@ -847,8 +851,10 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	}
 	iw.Close()
 
-	if _, err := bloom.WriteFile(bloomPath); err != nil {
-		return err
+	if bloom != nil {
+		if _, err := bloom.WriteFile(bloomPath); err != nil {
+			return err
+		}
 	}
 	return nil
 }

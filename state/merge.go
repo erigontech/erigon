@@ -853,9 +853,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 
 	idxFileName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep)
 	idxPath := filepath.Join(ii.dir, idxFileName)
-	p = ps.AddNew("merge "+idxFileName, uint64(outItem.decompressor.Count()*2))
-	defer ps.Delete(p)
-	if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, idxPath, ii.tmpdir, keyCount, false, p, ii.logger, ii.noFsync); err != nil {
+	if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, idxPath, ii.tmpdir, false, ps, ii.logger, ii.noFsync); err != nil {
 		return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", ii.filenameBase, startTxNum, endTxNum, err)
 	}
 	closeItem = false
