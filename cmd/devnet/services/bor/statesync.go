@@ -29,15 +29,15 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64,
 
 	events := make([]*EventRecordWithBlock, 0, len(h.pendingSyncRecords))
 
-	var removalKeys []syncRecordKey
+	//var removalKeys []syncRecordKey
 
-	for key, event := range h.pendingSyncRecords {
+	for _ /*key*/, event := range h.pendingSyncRecords {
 		if event.ID >= fromID {
 			if event.Time.Unix() <= to {
 				events = append(events, event)
 			}
 		} else {
-			removalKeys = append(removalKeys, key)
+			//removalKeys = append(removalKeys, key)
 		}
 	}
 
@@ -60,9 +60,9 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64,
 		eventsWithTime[i] = &event.EventRecordWithTime
 	}
 
-	for _, removalKey := range removalKeys {
-		delete(h.pendingSyncRecords, removalKey)
-	}
+	//for _, removalKey := range removalKeys {
+	//	delete(h.pendingSyncRecords, removalKey)
+	//}
 
 	h.logger.Info("Processed sync request",
 		"from", fromID, "to", time.Unix(to, 0),
