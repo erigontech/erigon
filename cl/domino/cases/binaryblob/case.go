@@ -38,7 +38,10 @@ func (c *Case) stupidSeek(slot uint64) (fs.FileInfo, error) {
 		if err != nil {
 			continue
 		}
-		newDiff := int(math.Abs(float64(int(slot) - i)))
+		if uint64(i) > slot {
+			break
+		}
+		newDiff := int(slot) - i
 		if newDiff < diff {
 			file = v
 		}
