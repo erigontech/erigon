@@ -1572,7 +1572,7 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 		if !bytes.Equal(filekey, k) {
 			continue
 		}
-		v, _ := dc.files[i].getter.NextUncompressed()
+		v, _ := g.NextUncompressed()
 		//_, v, ok, err := dc.statelessBtree(i).Get(filekey)
 		//if err != nil {
 		//	return nil, false, err
@@ -1630,7 +1630,7 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 			if !bytes.Equal(filekey, k) {
 				continue
 			}
-			v, _ = dc.files[i].getter.NextUncompressed()
+			v, _ = g.NextUncompressed()
 			LatestStateReadWarm.UpdateDuration(t)
 			//var ok bool
 			//dc.d.stats.FilesQuerie.Add(1)
