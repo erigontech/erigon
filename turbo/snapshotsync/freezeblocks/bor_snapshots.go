@@ -282,6 +282,7 @@ func (br *BorRetire) RetireBlocksInBackground(ctx context.Context, forwardProgre
 		defer br.working.Store(false)
 
 		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
+		br.logger.Info("Bor CanRetire", "from", blockFrom, "to", blockTo, "ok", ok, "forwardProgress", forwardProgress, "frozenBorBlocks", br.blockReader.FrozenBorBlocks())
 		if !ok {
 			return
 		}
