@@ -106,13 +106,5 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(finalized libcommon.Hash, head
 	if err != nil {
 		return fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
-	// Ignore timeouts
-	if err != nil && err.Error() == errContextExceeded {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
 	return checkPayloadStatus(forkChoiceResp.PayloadStatus)
 }
