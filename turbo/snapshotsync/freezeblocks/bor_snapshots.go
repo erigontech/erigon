@@ -274,6 +274,7 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSe
 
 func (br *BorRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) {
 	ok := br.working.CompareAndSwap(false, true)
+	br.logger.Info("Bor RetireBlocksInBackground", "ok", ok)
 	if !ok {
 		// go-routine is still working
 		return
