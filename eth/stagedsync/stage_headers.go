@@ -599,6 +599,7 @@ func verifyAndSaveNewPoSHeader(
 	} else if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 		return nil, false, err
 	}
+
 	return &engine_types.PayloadStatus{
 		Status:          status,
 		LatestValidHash: &latestValidHash,
