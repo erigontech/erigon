@@ -270,6 +270,7 @@ func doRam(cliCtx *cli.Context) error {
 	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
+	defer logger.Info("Done")
 	args := cliCtx.Args()
 	if args.Len() != 1 {
 		return fmt.Errorf("expecting .seg file path")
@@ -295,6 +296,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -490,7 +492,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
-	defer logger.Info("Retire Done")
+	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
