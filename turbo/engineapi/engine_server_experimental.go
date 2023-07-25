@@ -700,12 +700,6 @@ func (e *EngineServerExperimental) NewPayloadV3(ctx context.Context, payload *en
 // Can also be used to ping the execution layer (heartbeats).
 // See https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.1/src/engine/specification.md#engine_exchangetransitionconfigurationv1
 func (e *EngineServerExperimental) ExchangeTransitionConfigurationV1(ctx context.Context, beaconConfig *engine_types.TransitionConfiguration) (*engine_types.TransitionConfiguration, error) {
-	tx, err := e.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	terminalTotalDifficulty := e.config.TerminalTotalDifficulty
 
 	if terminalTotalDifficulty == nil {
