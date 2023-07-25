@@ -1877,13 +1877,13 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 	return v, true, nil
 }
 
-func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
+func (dc *DomainContext) GetLatest2(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
 	copy(dc.keyBuf[:], key1)
 	copy(dc.keyBuf[len(key1):], key2)
 	return dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
 }
 
-func (dc *DomainContext) GetLatest2(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
+func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
 	key := key1
 	if len(key2) > 0 {
 		key = dc.keyBuf[:len(key1)+len(key2)]
