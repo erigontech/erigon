@@ -520,6 +520,7 @@ Loop:
 					return err
 				}
 			}
+			fmt.Printf("f=%v\n", f)
 
 			if !exists {
 				// it's possible to iterate over .seg file even if you don't have index
