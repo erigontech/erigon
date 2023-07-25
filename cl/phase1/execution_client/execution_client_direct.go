@@ -70,7 +70,6 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block) (invalid
 	}
 
 	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon
-	log.Info("[ExecutionClientRpc] Calling EL")
 
 	// determine the engine method
 	switch payload.Version() {
