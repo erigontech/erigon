@@ -59,7 +59,7 @@ type wait struct {
 }
 
 func (w wait) Await(hash libcommon.Hash) (*requests.BlockResult, error) {
-	w.waiter.hashes <- map[libcommon.Hash]struct{}{hash: struct{}{}}
+	w.waiter.hashes <- map[libcommon.Hash]struct{}{hash: {}}
 	res := <-w.waiter.result
 
 	if len(res.blockMap) > 0 {
@@ -145,8 +145,9 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers cha
 
 					if len(c.waitHashes) == 0 {
 						c.headersSub.Unsubscribe()
+						tx := &tx
 						res := waitResult{
-							err: c.handler.Handle(ctx, node, block, &tx),
+							err: c.handler.Handle(ctx, node, block, tx),
 						}
 
 						if res.err == nil {

@@ -51,7 +51,7 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64,
 	})
 
 	if len(events) > limit {
-		events = events[0 : int(limit)-1]
+		events = events[0 : limit-1]
 	}
 
 	eventsWithTime := make([]*clerk.EventRecordWithTime, len(events))

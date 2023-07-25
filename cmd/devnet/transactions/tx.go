@@ -206,9 +206,9 @@ func CreateTransaction(node devnet.Node, to, from string, value uint64) (types.T
 	if toAccount == nil {
 		if strings.HasPrefix(to, "0x") {
 			toAddress = libcommon.HexToAddress(from)
+		} else {
+			return nil, libcommon.Address{}, fmt.Errorf("Unknown to account: %s", to)
 		}
-
-		return nil, libcommon.Address{}, fmt.Errorf("Unknown to account: %s", to)
 	} else {
 		toAddress = toAccount.Address
 	}
