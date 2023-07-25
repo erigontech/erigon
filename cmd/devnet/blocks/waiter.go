@@ -141,7 +141,7 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers cha
 		}
 
 		for i := range block.Transactions {
-			tx := &block.Transactions[i]
+			tx := &block.Transactions[i] // avoid implicit memory aliasing
 
 			txHash := libcommon.HexToHash(tx.Hash)
 
