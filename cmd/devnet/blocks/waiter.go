@@ -106,7 +106,7 @@ func BlockWaiter(ctx context.Context, handler BlockHandler) (Waiter, context.Can
 	waiter.headersSub, err = node.Subscribe(ctx, requests.Methods.ETHNewHeads, headers)
 
 	if err != nil {
-		close(waiter.result)
+		defer close(waiter.result)
 		return waitError{err}, cancel
 	}
 
@@ -123,7 +123,8 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers cha
 		case <-ctx.Done():
 			c.headersSub.Unsubscribe()
 			c.result <- waitResult{blockMap: blockMap, err: ctx.Err()}
-			close(c.result)
+			defer close(c.result)
+			return
 		default:
 		}
 
@@ -161,7 +162,7 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers cha
 					}
 
 					c.result <- res
-					close(c.result)
+					defer close(c.result)
 					break
 				}
 			}
