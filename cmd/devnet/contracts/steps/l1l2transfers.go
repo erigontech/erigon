@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
+	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
@@ -47,7 +48,7 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 
 	stateSender := heimdall.StateSenderContract()
 
-	receiver, _ := scenarios.Param[libcommon.Address](ctx, "childStateReceiverAddress")
+	receiver, _ := scenarios.Param[libcommon.Address](ctx, "childReceiverAddress")
 
 	Uint256, _ := abi.NewType("uint256", "", nil)
 	Address, _ := abi.NewType("address", "", nil)
@@ -70,7 +71,13 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 		return err
 	}
 
-	blockNum, err := waiter.Await(transaction.Hash())
+	block, err := waiter.Await(transaction.Hash())
+
+	if err != nil {
+		return fmt.Errorf("Failed to wait for sync block: %w", err)
+	}
+
+	blockNum := block.BlockNumber.Uint64()
 
 	logs, err := stateSender.FilterStateSynced(&bind.FilterOpts{
 		Start: blockNum,
@@ -115,7 +122,7 @@ func DeployRootChainSender(ctx context.Context, deployerName string) (context.Co
 		return nil, err
 	}
 
-	childStateReceiver, _ := scenarios.Param[libcommon.Address](ctx, "childStateReceiverAddress")
+	childStateReceiver, _ := scenarios.Param[libcommon.Address](ctx, "childReceiverAddress")
 
 	heimdall := services.Heimdall(ctx)
 
@@ -157,7 +164,7 @@ func DeployChildChainReceiver(ctx context.Context, deployerName string) (context
 		WithParam("childReceiver", contract), nil
 }
 
-func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers int, minTransfer int, maxTransfer int) error {
+func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers int, minTransfer int, maxTransfer int, wait bool) error {
 	source := accounts.GetAccount(sourceName)
 	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
 
@@ -170,7 +177,22 @@ func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers 
 	sender, _ := scenarios.Param[*contracts.RootSender](ctx, "rootSender")
 	stateSender := services.Heimdall(ctx).StateSenderContract()
 
-	receiver, _ := scenarios.Param[libcommon.Address](ctx, "childStateReceiverAddress")
+	receiver, _ := scenarios.Param[*contracts.ChildReceiver](ctx, "childReceiver")
+	receiverAddress, _ := scenarios.Param[libcommon.Address](ctx, "childReceiverAddress")
+
+	var receiverSubscription event.Subscription
+	var receivedChan chan *contracts.ChildReceiverReceived
+
+	if wait {
+		receivedChan := make(chan *contracts.ChildReceiverReceived)
+		receiverSubscription, err = receiver.WatchReceived(&bind.WatchOpts{}, receivedChan)
+
+		if err != nil {
+			return fmt.Errorf("Receiver subscription failed: %w", err)
+		}
+
+		defer receiverSubscription.Unsubscribe()
+	}
 
 	Uint256, _ := abi.NewType("uint256", "", nil)
 	Address, _ := abi.NewType("address", "", nil)
@@ -193,7 +215,7 @@ func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers 
 				return err
 			}
 
-			blockNum, terr := waiter.Await(transaction.Hash())
+			block, terr := waiter.Await(transaction.Hash())
 
 			if terr != nil {
 				node := devnet.SelectBlockProducer(ctx)
@@ -205,7 +227,7 @@ func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers 
 				}
 
 				for _, traceResult := range traceResults {
-					callResults, err := node.TraceCall(fmt.Sprintf("0x%x", blockNum), ethapi.CallArgs{
+					callResults, err := node.TraceCall(string(block.BlockNumber), ethapi.CallArgs{
 						From: &traceResult.Action.From,
 						To:   &traceResult.Action.To,
 						Data: &traceResult.Action.Input,
@@ -222,6 +244,8 @@ func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers 
 				return terr
 			}
 
+			blockNum := block.BlockNumber.Uint64()
+
 			logs, err := stateSender.FilterStateSynced(&bind.FilterOpts{
 				Start: blockNum,
 				End:   &blockNum,
@@ -232,8 +256,8 @@ func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers 
 			}
 
 			for logs.Next() {
-				if logs.Event.ContractAddress != receiver {
-					return fmt.Errorf("Receiver address mismatched: expected: %s, got: %s", receiver, logs.Event.ContractAddress)
+				if logs.Event.ContractAddress != receiverAddress {
+					return fmt.Errorf("Receiver address mismatched: expected: %s, got: %s", receiverAddress, logs.Event.ContractAddress)
 				}
 
 				values, err := args.Unpack(logs.Event.Data)
@@ -271,6 +295,20 @@ func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers 
 		}
 
 		auth.Nonce = (&big.Int{}).Add(auth.Nonce, big.NewInt(1))
+	}
+
+	if wait {
+		receivedCount := 0
+
+		devnet.Logger(ctx).Info("Waiting for receive events")
+
+		for received := range receivedChan {
+			fmt.Println(received)
+			receivedCount++
+			if receivedCount == numberOfTransfers {
+				break
+			}
+		}
 	}
 
 	return nil

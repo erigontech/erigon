@@ -61,7 +61,7 @@ type RequestGenerator interface {
 	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error)
 	SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
 	TxpoolContent() (int, int, int, error)
-	Subscribe(ctx context.Context, method SubMethod, handler SubscriptionHandler, args ...interface{}) (ethereum.Subscription, error)
+	Subscribe(ctx context.Context, method SubMethod, subChan interface{}, args ...interface{}) (ethereum.Subscription, error)
 	TraceCall(blockRef string, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)
 	TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error)
 	DebugAccountAt(blockHash libcommon.Hash, txIndex uint64, account libcommon.Address) (*AccountResult, error)
@@ -77,7 +77,6 @@ type requestGenerator struct {
 	subscriptionClient *rpc.Client
 	logger             log.Logger
 	target             string
-	subscriptions      map[SubMethod]*Subscription
 }
 
 type (
@@ -250,98 +249,8 @@ func post(client *http.Client, url, method, request string, response interface{}
 	return nil
 }
 
-type SubscriptionHandler func(interface{})
-
-type handlerSubscription struct {
-	*Subscription
-	err chan error
-}
-
-func (h *handlerSubscription) Unsubscribe() {
-	h.Lock()
-	defer h.Unlock()
-
-	delete(h.handlers, h)
-
-	if len(h.handlers) == 0 {
-		delete(h.reqGen.subscriptions, h.Name)
-		h.clientSub.Unsubscribe()
-		close(h.subChan)
-		h.subChan = nil
-	}
-}
-
-func (h *handlerSubscription) Err() <-chan error {
-	return h.err
-}
-
-// Subscription houses the client subscription, name and channel for its delivery
-type Subscription struct {
-	sync.Mutex
-	Name      SubMethod
-	handlers  map[*handlerSubscription]SubscriptionHandler
-	clientSub *rpc.ClientSubscription
-	subErr    error
-	reqGen    *requestGenerator
-	subChan   chan interface{}
-}
-
-// NewSubscription returns a new Subscription instance
-func newSubscription(req *requestGenerator, name SubMethod) *Subscription {
-	sub := &Subscription{
-		Name:     name,
-		handlers: map[*handlerSubscription]SubscriptionHandler{},
-		reqGen:   req,
-		subChan:  make(chan interface{}),
-	}
-
-	go func() {
-		for value := range sub.subChan {
-			sub.Lock()
-			handlers := make([]SubscriptionHandler, 0, len(sub.handlers))
-			for _, handler := range sub.handlers {
-				handlers = append(handlers, handler)
-			}
-			sub.Unlock()
-
-			for _, handler := range handlers {
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							sub.reqGen.logger.Error("Subscription Handler Crashed", "err", r)
-						}
-					}()
-
-					handler(value)
-				}()
-			}
-		}
-	}()
-
-	return sub
-}
-
-func (s *Subscription) sub(clientSub *rpc.ClientSubscription) {
-	s.clientSub = clientSub
-
-	go func() {
-		s.subErr = <-s.clientSub.Err()
-
-		s.Lock()
-		handlerSubs := make([]*handlerSubscription, 0, len(s.handlers))
-		for handlerSub := range s.handlers {
-			handlerSubs = append(handlerSubs, handlerSub)
-		}
-		s.Unlock()
-
-		for _, handlerSub := range handlerSubs {
-			handlerSub.err <- s.subErr
-		}
-	}()
-}
-
 // subscribe connects to a websocket client and returns the subscription handler and a channel buffer
-func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, handler SubscriptionHandler, args ...interface{}) (ethereum.Subscription, error) {
+func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan interface{}, args ...interface{}) (ethereum.Subscription, error) {
 	var err error
 
 	if req.subscriptionClient == nil {
@@ -352,71 +261,23 @@ func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, ha
 		}
 	}
 
-	if req.subscriptions == nil {
-		req.subscriptions = map[SubMethod]*Subscription{}
-	}
-
-	req.Lock()
-	subscription, ok := req.subscriptions[method]
-
-	err = func() error {
-		defer req.Unlock()
-		if !ok {
-			subscription = newSubscription(req, method)
-
-			namespace, subMethod, err := devnetutils.NamespaceAndSubMethodFromMethod(string(method))
-
-			if err != nil {
-				return fmt.Errorf("cannot get namespace and submethod from method: %v", err)
-			}
-
-			arr := append([]interface{}{subMethod}, args...)
-
-			sub, err := req.subscriptionClient.Subscribe(ctx, namespace, subscription.subChan, arr...)
-
-			if err != nil {
-				return fmt.Errorf("client failed to subscribe: %v", err)
-			}
-
-			subscription.sub(sub)
-			req.subscriptions[method] = subscription
-		}
-		return nil
-	}()
+	namespace, subMethod, err := devnetutils.NamespaceAndSubMethodFromMethod(string(method))
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot get namespace and submethod from method: %v", err)
 	}
 
-	h := &handlerSubscription{
-		Subscription: subscription,
-		err:          make(chan error, 1),
-	}
+	args = append([]interface{}{subMethod}, args...)
 
-	subscription.Lock()
-
-	if subscription.subErr != nil {
-		h.err <- subscription.subErr
-	} else {
-		subscription.handlers[h] = handler
-	}
-
-	subscription.Unlock()
-
-	return h, nil
+	return req.subscriptionClient.Subscribe(ctx, namespace, subChan, args...)
 }
 
 // UnsubscribeAll closes all the client subscriptions and empties their global subscription channel
 func (req *requestGenerator) UnsubscribeAll() {
-	if req.subscriptions == nil {
+	if req.subscriptionClient == nil {
 		return
 	}
-
-	for _, methodSub := range req.subscriptions {
-		if methodSub != nil {
-			for handlerSub := range methodSub.handlers {
-				handlerSub.Unsubscribe()
-			}
-		}
-	}
+	subscriptionClient := req.subscriptionClient
+	req.subscriptionClient = nil
+	subscriptionClient.Close()
 }

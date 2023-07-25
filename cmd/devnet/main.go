@@ -274,9 +274,9 @@ func action(ctx *cli.Context) error {
 				{Text: "CreateAccountWithFunds", Args: []any{networkname.BorDevnetChainName, "child-funder", 200.0}},
 				{Text: "CreateAccountWithFunds", Args: []any{networkname.DevChainName, "root-funder", 200.0}},
 				{Text: "DeployChildChainReceiver", Args: []any{"child-funder"}},
-				{Text: "GenerateSyncEvents", Args: []any{"root-funder", 10, 2, 2}},
 				{Text: "DeployRootChainSender", Args: []any{"root-funder"}},
-				{Text: "ProcessTransfers", Args: []any{"root-funder", 10, 2, 2}},
+				{Text: "GenerateSyncEvents", Args: []any{"root-funder", 10, 2, 2}},
+				{Text: "ProcessTransfers", Args: []any{"root-funder", 10, 2, 2, true}},
 			},
 		},
 	}.Run(runCtx, strings.Split(ctx.String("scenarios"), ",")...)

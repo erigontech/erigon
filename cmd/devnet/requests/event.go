@@ -64,11 +64,7 @@ func (reqGen *requestGenerator) FilterLogs(ctx context.Context, query ethereum.F
 }
 
 func (reqGen *requestGenerator) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
-	return reqGen.Subscribe(ctx, Methods.ETHLogs, func(value interface{}) {
-		if log, ok := value.(types.Log); ok {
-			ch <- log
-		}
-	}, query)
+	return reqGen.Subscribe(ctx, Methods.ETHLogs, ch, query)
 }
 
 // ParseResponse converts any of the models interfaces to a string for readability

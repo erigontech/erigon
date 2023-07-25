@@ -2,12 +2,12 @@ package blocks
 
 import (
 	"context"
-	"math/big"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -21,28 +21,71 @@ func (f BlockHandlerFunc) Handle(ctx context.Context, node devnet.Node, block *r
 	return f(ctx, node, block, transaction)
 }
 
+type BlockMap map[libcommon.Hash]*requests.BlockResult
+
 type waitResult struct {
-	err         error
-	blockNumber uint64
+	err      error
+	blockMap BlockMap
 }
 
 type blockWaiter struct {
 	result     chan waitResult
-	hash       chan libcommon.Hash
-	waitHash   *libcommon.Hash
+	hashes     chan map[libcommon.Hash]struct{}
+	waitHashes map[libcommon.Hash]struct{}
 	headersSub ethereum.Subscription
 	handler    BlockHandler
 	logger     log.Logger
 }
 
 type Waiter interface {
-	Await(libcommon.Hash) (uint64, error)
+	Await(libcommon.Hash) (*requests.BlockResult, error)
+	AwaitMany(...libcommon.Hash) (BlockMap, error)
 }
 
-type WaiterFunc func(libcommon.Hash) (uint64, error)
+type waitError struct {
+	err error
+}
 
-func (f WaiterFunc) Await(hash libcommon.Hash) (uint64, error) {
-	return f(hash)
+func (w waitError) Await(libcommon.Hash) (*requests.BlockResult, error) {
+	return nil, w.err
+}
+
+func (w waitError) AwaitMany(...libcommon.Hash) (BlockMap, error) {
+	return nil, w.err
+}
+
+type wait struct {
+	waiter *blockWaiter
+}
+
+func (w wait) Await(hash libcommon.Hash) (*requests.BlockResult, error) {
+	w.waiter.hashes <- map[libcommon.Hash]struct{}{hash: struct{}{}}
+	res := <-w.waiter.result
+
+	if len(res.blockMap) > 0 {
+		for _, block := range res.blockMap {
+			return block, res.err
+		}
+	}
+
+	return nil, res.err
+}
+
+func (w wait) AwaitMany(hashes ...libcommon.Hash) (BlockMap, error) {
+	if len(hashes) == 0 {
+		return nil, nil
+	}
+
+	hashMap := map[libcommon.Hash]struct{}{}
+
+	for _, hash := range hashes {
+		hashMap[hash] = struct{}{}
+	}
+
+	w.waiter.hashes <- hashMap
+
+	res := <-w.waiter.result
+	return res.blockMap, res.err
 }
 
 func BlockWaiter(ctx context.Context, handler BlockHandler) (Waiter, context.CancelFunc) {
@@ -52,66 +95,72 @@ func BlockWaiter(ctx context.Context, handler BlockHandler) (Waiter, context.Can
 
 	waiter := &blockWaiter{
 		result:  make(chan waitResult, 1),
-		hash:    make(chan libcommon.Hash, 1),
+		hashes:  make(chan map[libcommon.Hash]struct{}, 1),
 		handler: handler,
 		logger:  devnet.Logger(ctx),
 	}
 
 	var err error
 
-	waiter.headersSub, err = node.Subscribe(ctx, requests.Methods.ETHNewHeads, func(header interface{}) {
-		waiter.receive(ctx, node, header)
-	})
+	headers := make(chan types.Header)
+	waiter.headersSub, err = node.Subscribe(ctx, requests.Methods.ETHNewHeads, headers)
 
 	if err != nil {
 		close(waiter.result)
-		return WaiterFunc(func(libcommon.Hash) (uint64, error) {
-			return 0, err
-		}), cancel
+		return waitError{err}, cancel
 	}
 
-	return WaiterFunc(func(hash libcommon.Hash) (uint64, error) {
-		waiter.hash <- hash
-		res := <-waiter.result
-		return res.blockNumber, res.err
-	}), cancel
+	go waiter.receive(ctx, node, headers)
+
+	return wait{waiter}, cancel
 }
 
-func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, header interface{}) {
-	select {
-	case <-ctx.Done():
-		c.headersSub.Unsubscribe()
-		c.result <- waitResult{err: ctx.Err()}
-		close(c.result)
-	default:
-	}
+func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers chan types.Header) {
+	blockMap := map[libcommon.Hash]*requests.BlockResult{}
 
-	blockNum, _ := (&big.Int{}).SetString(header.(map[string]interface{})["number"].(string)[2:], 16)
-
-	if block, err := node.GetBlockByNumber(blockNum.Uint64(), true); err == nil {
-
-		if len(block.Transactions) > 0 && c.waitHash == nil {
-			waitHash := <-c.hash
-			c.waitHash = &waitHash
+	for header := range headers {
+		select {
+		case <-ctx.Done():
+			c.headersSub.Unsubscribe()
+			c.result <- waitResult{blockMap: blockMap, err: ctx.Err()}
+			close(c.result)
+		default:
 		}
 
-		for _, tx := range block.Transactions {
-			if libcommon.HexToHash(tx.Hash) == *c.waitHash {
-				c.headersSub.Unsubscribe()
-				res := waitResult{
-					err: c.handler.Handle(ctx, node, block, &tx),
-				}
+		blockNum := header.Number
 
-				if res.err == nil {
-					res.blockNumber = blockNum.Uint64()
-				}
+		if block, err := node.GetBlockByNumber(blockNum.Uint64(), true); err == nil {
 
-				c.result <- res
-				close(c.result)
-				break
+			if len(block.Transactions) > 0 && c.waitHashes == nil {
+				c.waitHashes = <-c.hashes
 			}
+
+			for _, tx := range block.Transactions {
+				txHash := libcommon.HexToHash(tx.Hash)
+
+				if _, ok := c.waitHashes[txHash]; ok {
+					c.logger.Info("Tx included into block", "txHash", txHash, "blockNum", block.BlockNumber)
+					blockMap[txHash] = block
+					delete(c.waitHashes, txHash)
+
+					if len(c.waitHashes) == 0 {
+						c.headersSub.Unsubscribe()
+						res := waitResult{
+							err: c.handler.Handle(ctx, node, block, &tx),
+						}
+
+						if res.err == nil {
+							res.blockMap = blockMap
+						}
+
+						c.result <- res
+						close(c.result)
+						break
+					}
+				}
+			}
+		} else {
+			c.logger.Error("Block waiter failed to get block", "err", err)
 		}
-	} else {
-		c.logger.Error("Block waiter failed to get block", "err", err)
 	}
 }

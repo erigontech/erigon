@@ -2,11 +2,11 @@ package accounts
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"strings"
 	"sync"
 
-	ethereum "github.com/ledgerwatch/erigon"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
@@ -28,9 +28,7 @@ type Faucet struct {
 
 type deployer struct {
 	sync.WaitGroup
-	faucet      *Faucet
-	receiveHash libcommon.Hash
-	headersSub  ethereum.Subscription
+	faucet *Faucet
 }
 
 func (d *deployer) deploy(ctx context.Context, node devnet.Node) {
@@ -39,8 +37,8 @@ func (d *deployer) deploy(ctx context.Context, node devnet.Node) {
 	// deploy the contract and get the contract handler
 	deployCtx := devnet.WithCurrentNode(ctx, node)
 
-	waiter, cancel := blocks.BlockWaiter(deployCtx, contracts.DeploymentChecker)
-	defer cancel()
+	waiter, deployCancel := blocks.BlockWaiter(deployCtx, contracts.DeploymentChecker)
+	defer deployCancel()
 
 	address, transaction, contract, err := contracts.DeployWithOps(deployCtx, d.faucet.transactOpts, contracts.DeployFaucet)
 
@@ -54,7 +52,9 @@ func (d *deployer) deploy(ctx context.Context, node devnet.Node) {
 		return
 	}
 
-	if _, err = waiter.Await(transaction.Hash()); err != nil {
+	block, err := waiter.Await(transaction.Hash())
+
+	if err != nil {
 		d.faucet.Lock()
 		defer d.faucet.Unlock()
 
@@ -64,7 +64,7 @@ func (d *deployer) deploy(ctx context.Context, node devnet.Node) {
 		return
 	}
 
-	logger.Info("Faucet deployed", "addr", "chain", d.faucet.chainName, address)
+	logger.Info("Faucet deployed", "chain", d.faucet.chainName, "block", block.BlockNumber, "addr", address)
 
 	d.faucet.contractAddress = address
 	d.faucet.contract = contract
@@ -74,39 +74,34 @@ func (d *deployer) deploy(ctx context.Context, node devnet.Node) {
 	//	fmt.Println(f.source, sbal)
 	//}
 
-	d.headersSub, err = node.Subscribe(deployCtx, requests.Methods.ETHNewHeads, func(header interface{}) {
-		d.receiptCheck(ctx, node, header)
-	})
+	waiter, receiveCancel := blocks.BlockWaiter(deployCtx, blocks.CompletionChecker)
+	defer receiveCancel()
 
-	if err != nil {
-		logger.Error("Failed to init faucet deployment check", "err", err)
-		return
-	}
-
-	_, d.receiveHash, err = d.faucet.Receive(deployCtx, d.faucet.source, 20000)
+	received, receiveHash, err := d.faucet.Receive(deployCtx, d.faucet.source, 20000)
 
 	if err != nil {
 		logger.Error("Failed to receive faucet funds", "err", err)
 		return
 	}
-}
 
-func (d *deployer) receiptCheck(ctx context.Context, node devnet.Node, header interface{}) {
-	blockNum, _ := (&big.Int{}).SetString(header.(map[string]interface{})["number"].(string)[2:], 16)
+	block, err = waiter.Await(receiveHash)
 
-	if res, err := node.GetBlockByNumber(blockNum.Uint64(), true); err == nil {
-		for _, tx := range res.Transactions {
-			if libcommon.HexToHash(tx.Hash) == d.receiveHash {
-				d.headersSub.Unsubscribe()
-				d.Done()
+	if err != nil {
+		d.faucet.Lock()
+		defer d.faucet.Unlock()
 
-				d.faucet.Lock()
-				d.faucet.deployer = nil
-				d.faucet.Unlock()
-				break
-			}
-		}
+		d.faucet.deployer = nil
+		d.faucet.transactOpts = nil
+		logger.Error("failed to deploy faucet", "chain", d.faucet.chainName, "err", err)
+		return
 	}
+
+	logger.Info("Faucet funded", "chain", d.faucet.chainName, "block", block.BlockNumber, "addr", address, "received", received)
+
+	d.faucet.Lock()
+	defer d.faucet.Unlock()
+	d.faucet.deployer = nil
+	d.Done()
 }
 
 func NewFaucet(chainName string, source *accounts.Account) *Faucet {
@@ -156,6 +151,10 @@ func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth fl
 		f.deployer.Wait()
 	}
 
+	if f.transactOpts == nil {
+		return nil, libcommon.Hash{}, fmt.Errorf("Faucet not initialized")
+	}
+
 	node := devnet.SelectNode(ctx)
 
 	count, err := node.GetTransactionCount(f.source.Address, requests.BlockNumbers.Pending)
@@ -191,7 +190,7 @@ func (f *Faucet) Receive(ctx context.Context, source *accounts.Account, eth floa
 		return nil, libcommon.Hash{}, err
 	}
 
-	f.transactOpts.Nonce = count
+	transactOpts.Nonce = count
 
 	transactOpts.Value = accounts.EtherAmount(eth)
 

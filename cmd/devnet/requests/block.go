@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/math"
 )
 
 type EthBlockNumber struct {
@@ -16,6 +17,14 @@ type EthBlockNumber struct {
 }
 
 type BlockNumber string
+
+func (bn BlockNumber) Uint64() uint64 {
+	if b, ok := math.ParseBig256(string(bn)); ok {
+		return b.Uint64()
+	}
+
+	return 0
+}
 
 func AsBlockNumber(n *big.Int) BlockNumber {
 	return BlockNumber(hexutil.EncodeBig(n))

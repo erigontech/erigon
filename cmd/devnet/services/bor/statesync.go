@@ -1,94 +1,149 @@
 package bor
 
 import (
-	//	"encoding/hex"
-	//	"time"
+	"context"
+	"encoding/hex"
+	"fmt"
+	"sort"
+	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
-	//	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 )
 
-// HandleStateSyncEvent - handle state sync event from rootchain
-// 1. check if this deposit event has to be broadcasted to heimdall
-// 2. create and broadcast  record transaction to heimdall
+// Maximum allowed event record data size
+const LegacyMaxStateSyncSize = 100000
 
-func handleStateSynced(event *contracts.TestStateSenderStateSynced) error {
-	/*	start := time.Now()
+// New max state sync size after hardfork
+const MaxStateSyncSize = 30000
 
-		var vLog = types.Log{}
-		if err := jsoniter.ConfigFastest.Unmarshal([]byte(logBytes), &vLog); err != nil {
-			cp.Logger.Error("Error while unmarshalling event from rootchain", "error", err)
-			return err
+type EventRecordWithBlock struct {
+	clerk.EventRecordWithTime
+	BlockNumber uint64
+}
+
+func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64, limit int) (uint64, []*clerk.EventRecordWithTime, error) {
+	h.Lock()
+	defer h.Unlock()
+
+	events := make([]*EventRecordWithBlock, 0, len(h.pendingSyncRecords))
+
+	var removalKeys []syncRecordKey
+
+	for key, event := range h.pendingSyncRecords {
+		if event.ID >= fromID {
+			if event.Time.Unix() <= to {
+				events = append(events, event)
+			}
+		} else {
+			removalKeys = append(removalKeys, key)
 		}
+	}
 
-		defer util.LogElapsedTimeForStateSyncedEvent(event, "sendStateSyncedToHeimdall", start)
-		isOld, _ := cp.isOldTx(cp.cliCtx, vLog.TxHash.String(), uint64(vLog.Index), util.ClerkEvent, event)
+	if len(events) == 0 {
+		h.logger.Info("Processed sync request", "from", fromID, "to", time.Unix(to, 0), "pending", len(h.pendingSyncRecords), "filtered", len(events))
+		return 0, nil, nil
+	}
 
-		if isOld {
-			cp.Logger.Info("Ignoring task to send deposit to heimdall as already processed",
-				"event", eventName,
-				"id", event.Id,
-				"contract", event.ContractAddress,
-				"data", hex.EncodeToString(event.Data),
-				"borChainId", chainParams.BorChainID,
-				"txHash", hmTypes.BytesToHeimdallHash(vLog.TxHash.Bytes()),
-				"logIndex", uint64(vLog.Index),
-				"blockNumber", vLog.BlockNumber,
-			)
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].ID < events[j].ID
+	})
 
-			return nil
-		}
+	if len(events) > limit {
+		events = events[0 : int(limit)-1]
+	}
 
-		cp.Logger.Debug(
-			"⬜ New event found",
-			"event", eventName,
+	eventsWithTime := make([]*clerk.EventRecordWithTime, len(events))
+
+	for i, event := range events {
+		eventsWithTime[i] = &event.EventRecordWithTime
+	}
+
+	for _, removalKey := range removalKeys {
+		delete(h.pendingSyncRecords, removalKey)
+	}
+
+	h.logger.Info("Processed sync request",
+		"from", fromID, "to", time.Unix(to, 0),
+		"pending", len(h.pendingSyncRecords), "filtered", len(events),
+		"sent", fmt.Sprintf("%d-%d", events[0].ID, events[len(events)-1].ID))
+
+	return events[len(events)-1].BlockNumber, eventsWithTime, nil
+}
+
+// handleStateSyncEvent - handle state sync event from rootchain
+func (h *Heimdall) handleStateSynced(event *contracts.TestStateSenderStateSynced) error {
+	h.Lock()
+	defer h.Unlock()
+
+	isOld, _ := h.isOldTx(event.Raw.TxHash, uint64(event.Raw.Index), BridgeEvents.ClerkEvent, event)
+
+	if isOld {
+		h.logger.Info("Ignoring send event as already processed",
+			"event", "StateSynced",
 			"id", event.Id,
 			"contract", event.ContractAddress,
 			"data", hex.EncodeToString(event.Data),
-			"borChainId", chainParams.BorChainID,
-			"txHash", hmTypes.BytesToHeimdallHash(vLog.TxHash.Bytes()),
-			"logIndex", uint64(vLog.Index),
-			"blockNumber", vLog.BlockNumber,
+			"borChainId", h.chainConfig.ChainID,
+			"txHash", event.Raw.TxHash,
+			"logIndex", uint64(event.Raw.Index),
+			"blockNumber", event.Raw.BlockNumber,
 		)
 
-		_, maxStateSyncSizeCheckSpan := tracing.StartSpan(sendStateSyncedToHeimdallCtx, "maxStateSyncSizeCheck")
-		if util.GetBlockHeight(cp.cliCtx) > helper.GetSpanOverrideHeight() && len(event.Data) > helper.MaxStateSyncSize {
-			cp.Logger.Info(`Data is too large to process, Resetting to ""`, "data", hex.EncodeToString(event.Data))
-			event.Data = hmTypes.HexToHexBytes("")
-		} else if len(event.Data) > helper.LegacyMaxStateSyncSize {
-			cp.Logger.Info(`Data is too large to process, Resetting to ""`, "data", hex.EncodeToString(event.Data))
-			event.Data = hmTypes.HexToHexBytes("")
-		}
-		tracing.EndSpan(maxStateSyncSizeCheckSpan)
+		return nil
+	}
 
-		msg := clerkTypes.NewMsgEventRecord(
-			hmTypes.BytesToHeimdallAddress(helper.GetAddress()),
-			hmTypes.BytesToHeimdallHash(vLog.TxHash.Bytes()),
-			uint64(vLog.Index),
-			vLog.BlockNumber,
-			event.Id.Uint64(),
-			hmTypes.BytesToHeimdallAddress(event.ContractAddress.Bytes()),
-			event.Data,
-			chainParams.BorChainID,
-		)
+	h.logger.Info(
+		"⬜ New send event",
+		"event", "StateSynced",
+		"id", event.Id,
+		"contract", event.ContractAddress,
+		"data", hex.EncodeToString(event.Data),
+		"borChainId", h.chainConfig.ChainID,
+		"txHash", event.Raw.TxHash,
+		"logIndex", uint64(event.Raw.Index),
+		"blockNumber", event.Raw.BlockNumber,
+	)
 
-		// Check if we have the same transaction in mempool or not
-		// Don't drop the transaction. Keep retrying after `util.RetryStateSyncTaskDelay = 24 seconds`,
-		// until the transaction in mempool is processed or cancelled.
-		inMempool, _ := cp.checkTxAgainstMempool(msg, event)
+	if event.Raw.BlockNumber > h.getSpanOverrideHeight() && len(event.Data) > MaxStateSyncSize {
+		h.logger.Info(`Data is too large to process, Resetting to ""`, "data", hex.EncodeToString(event.Data))
+		event.Data = []byte{}
+	} else if len(event.Data) > LegacyMaxStateSyncSize {
+		h.logger.Info(`Data is too large to process, Resetting to ""`, "data", hex.EncodeToString(event.Data))
+		event.Data = []byte{}
+	}
 
-		if inMempool {
-			cp.Logger.Info("Similar transaction already in mempool, retrying in sometime", "event", eventName, "retry delay", util.RetryStateSyncTaskDelay)
-			return tasks.NewErrRetryTaskLater("transaction already in mempool", util.RetryStateSyncTaskDelay)
-		}
+	h.pendingSyncRecords[syncRecordKey{event.Raw.TxHash, uint64(event.Raw.Index)}] = &EventRecordWithBlock{
+		EventRecordWithTime: clerk.EventRecordWithTime{
+			EventRecord: clerk.EventRecord{
+				ID:       event.Id.Uint64(),
+				Contract: event.ContractAddress,
+				Data:     event.Data,
+				TxHash:   event.Raw.TxHash,
+				LogIndex: uint64(event.Raw.Index),
+				ChainID:  h.chainConfig.ChainID.String(),
+			},
+			Time: time.Now(),
+		},
+		BlockNumber: event.Raw.BlockNumber,
+	}
 
-		// return broadcast to heimdall
-		err = cp.txBroadcaster.BroadcastToHeimdall(msg, event)
-
-		if err != nil {
-			cp.Logger.Error("Error while broadcasting clerk Record to heimdall", "error", err)
-			return err
-		}
-	*/
 	return nil
+}
+
+func (h *Heimdall) isOldTx(txHash libcommon.Hash, logIndex uint64, eventType BridgeEvent, event interface{}) (bool, error) {
+
+	// define the endpoint based on the type of event
+	var status bool
+
+	switch eventType {
+	case BridgeEvents.StakingEvent:
+	case BridgeEvents.TopupEvent:
+	case BridgeEvents.ClerkEvent:
+		_, status = h.pendingSyncRecords[syncRecordKey{txHash, logIndex}]
+	case BridgeEvents.SlashingEvent:
+	}
+
+	return status, nil
 }
