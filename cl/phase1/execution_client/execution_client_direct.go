@@ -8,7 +8,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
@@ -103,10 +102,8 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(finalized libcommon.Hash, head
 		SafeBlockHash:      head,
 		FinalizedBlockHash: finalized,
 	}
-	forkChoiceResp := &engine_types.ForkChoiceUpdatedResponse{}
-	log.Info("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
 
-	_, err := cc.api.ForkchoiceUpdatedV1(cc.ctx, &forkChoiceRequest, nil)
+	forkChoiceResp, err := cc.api.ForkchoiceUpdatedV2(cc.ctx, &forkChoiceRequest, nil)
 	if err != nil {
 		return fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
