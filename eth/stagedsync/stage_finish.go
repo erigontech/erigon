@@ -211,8 +211,18 @@ func ReadLogs(tx kv.Tx, from uint64, isUnwind bool, blockReader services.FullBlo
 				return nil, err
 			}
 		}
+
 		txIndex := uint64(binary.BigEndian.Uint32(k[8:]))
-		txHash := block.Transactions()[txIndex].Hash()
+
+		var txHash libcommon.Hash
+
+		// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
+		if txIndex == uint64(len(block.Transactions())) {
+			txHash = types.ComputeBorTxHash(blockNum, block.Hash())
+		} else {
+			txHash = block.Transactions()[txIndex].Hash()
+		}
+
 		var ll types.Logs
 		reader.Reset(v)
 		if err := cbor.Unmarshal(&ll, reader); err != nil {
