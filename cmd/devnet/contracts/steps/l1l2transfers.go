@@ -103,7 +103,7 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 
 	for logs.Next() {
 		if logs.Event.ContractAddress != receiverAddress {
-			return fmt.Errorf("Receiver address mismatched: expected: %s, got: %s", receiver, logs.Event.ContractAddress)
+			return fmt.Errorf("Receiver address mismatched: expected: %s, got: %s", receiverAddress, logs.Event.ContractAddress)
 		}
 
 		if !bytes.Equal(logs.Event.Data, sendData) {
