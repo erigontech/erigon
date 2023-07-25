@@ -52,6 +52,8 @@ import (
 )
 
 var (
+	LatestStateReadHot           = metrics.GetOrCreateSummary(`latest_state_read{type="hot",found="yes"}`)   //nolint
+	LatestStateReadHotNotFound   = metrics.GetOrCreateSummary(`latest_state_read{type="hot",found="no"}`)    //nolint
 	LatestStateReadWarm          = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="yes"}`)  //nolint
 	LatestStateReadWarmNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="no"}`)   //nolint
 	LatestStateReadGrind         = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="yes"}`) //nolint
@@ -1847,11 +1849,14 @@ func (dc *DomainContext) getBeforeTxNum(key []byte, fromTxNum uint64, roTx kv.Tx
 func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
 	//dc.d.stats.TotalQueries.Add(1)
 
+	t := time.Now()
 	foundInvStep, err := roTx.GetOne(dc.d.keysTable, key) // reads first DupSort value
 	if err != nil {
 		return nil, false, err
 	}
 	if foundInvStep == nil {
+		LatestStateReadHotNotFound.UpdateDuration(t)
+
 		v, found, err := dc.getLatestFromFiles(key)
 		if err != nil {
 			return nil, false, err
@@ -1867,6 +1872,7 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 	if err != nil {
 		return nil, false, err
 	}
+	LatestStateReadHot.UpdateDuration(t)
 	return v, true, nil
 }
 
