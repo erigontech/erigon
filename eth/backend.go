@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params/networkname"
@@ -640,20 +639,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			HeadSlot:       state.FinalizedCheckpoint().Epoch() * beaconCfg.SlotsPerEpoch,
 			HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
 		}, logger)
-		if err != nil {
-			return nil, err
-		}
-		// read jwt secret
-		rawJwt, err := os.ReadFile(stack.Config().Http.JWTSecretPath)
-		if err != nil {
-			return nil, fmt.Errorf("could not load jwt for Caplin: %s", err)
-		}
-
-		jwt := common.FromHex(strings.TrimSpace(string(rawJwt)))
-		if len(jwt) != 32 {
-			return nil, fmt.Errorf("could not load jwt for Caplin: %s", err)
-		}
-
 		if err != nil {
 			return nil, err
 		}
