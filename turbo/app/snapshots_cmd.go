@@ -270,6 +270,7 @@ func doRam(cliCtx *cli.Context) error {
 	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
+	defer logger.Info("Done")
 	args := cliCtx.Args()
 	if args.Len() != 1 {
 		return fmt.Errorf("expecting .seg file path")
@@ -295,17 +296,17 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 	//from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).Readonly().MustOpen()
+	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
-	chainConfig := fromdb.ChainConfig(chainDB)
 
 	if rebuild {
 		panic("not implemented")
@@ -318,9 +319,10 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	}
 	allSnapshots.LogStat()
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
-		return err
-	}
+	//chainConfig := fromdb.ChainConfig(chainDB)
+	//if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
+	//	return err
+	//}
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
 		return err
@@ -352,7 +354,7 @@ func doLocalityIdx(cliCtx *cli.Context) error {
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 	//from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).Readonly().MustOpen()
+	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
@@ -490,14 +492,13 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if logger, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
-	defer logger.Info("Retire Done")
+	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
-
 	db := mdbx.NewMDBX(logger).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
 	defer db.Close()
 
@@ -520,6 +521,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.CleanDir()
+	agg.KeepStepsInDB(0)
 	db.View(ctx, func(tx kv.Tx) error {
 		snapshots.LogStat()
 		ac := agg.MakeContext()

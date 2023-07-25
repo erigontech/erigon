@@ -525,20 +525,21 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 }
 
 func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	addrLoc := append(address.Bytes(), key.Bytes()...)
-	enc, err := r.rs.domains.LatestStorage(addrLoc)
+	var composite [20 + 32]byte
+	copy(composite[:], address[:])
+	copy(composite[20:], key.Bytes())
+	enc, err := r.rs.domains.LatestStorage(composite[:])
 	if err != nil {
 		return nil, err
 	}
-
 	if !r.discardReadList {
-		r.readLists[string(kv.StorageDomain)].Push(string(addrLoc), enc)
+		r.readLists[string(kv.StorageDomain)].Push(string(composite[:]), enc)
 	}
 	if r.trace {
 		if enc == nil {
-			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", addrLoc, r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", composite, r.txNum)
 		} else {
-			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", addrLoc, enc, r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", composite, enc, r.txNum)
 		}
 	}
 	return enc, nil
