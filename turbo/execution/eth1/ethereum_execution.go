@@ -55,6 +55,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		logger:            logger,
 		forkValidator:     forkValidator,
 		builders:          make(map[uint64]*builder.BlockBuilder),
+		builderFunc:       builderFunc,
 		config:            config,
 		semaphore:         semaphore.NewWeighted(1),
 	}
@@ -84,7 +85,7 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 
 // Remaining
 
-func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *types2.H256) (*execution.ForkChoiceReceipt, error) {
+func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *execution.ForkChoice) (*execution.ForkChoiceReceipt, error) {
 	type canonicalEntry struct {
 		hash   libcommon.Hash
 		number uint64
@@ -103,7 +104,7 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *typ
 	}
 	defer tx.Rollback()
 
-	blockHash := gointerfaces.ConvertH256ToHash(req)
+	blockHash := gointerfaces.ConvertH256ToHash(req.HeadBlockHash)
 	// Step one, find reconnection point, and mark all of those headers as canonical.
 	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, blockHash)
 	if err != nil {

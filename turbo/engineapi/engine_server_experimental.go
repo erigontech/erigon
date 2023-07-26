@@ -3,18 +3,19 @@ package engineapi
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
-	"reflect"
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
@@ -27,11 +28,9 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
@@ -44,11 +43,8 @@ type EngineServerExperimental struct {
 	hd     *headerdownload.HeaderDownload
 	config *chain.Config
 	// Block proposing for proof-of-stake
-	payloadId      uint64
-	lastParameters *core.BlockBuilderParameters
-	builders       map[uint64]*builder.BlockBuilder
-	builderFunc    builder.BlockBuilderFunc
-	proposing      bool
+	proposing        bool
+	executionService execution.ExecutionClient
 
 	ctx    context.Context
 	lock   sync.Mutex
@@ -58,18 +54,17 @@ type EngineServerExperimental struct {
 	blockReader services.FullBlockReader
 }
 
-func NewEngineServerExperimental(ctx context.Context, logger log.Logger, config *chain.Config, builderFunc builder.BlockBuilderFunc,
+func NewEngineServerExperimental(ctx context.Context, logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
 	db kv.RoDB, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, proposing bool) *EngineServerExperimental {
 	return &EngineServerExperimental{
-		ctx:         ctx,
-		logger:      logger,
-		config:      config,
-		builderFunc: builderFunc,
-		db:          db,
-		blockReader: blockReader,
-		proposing:   proposing,
-		hd:          hd,
-		builders:    make(map[uint64]*builder.BlockBuilder),
+		ctx:              ctx,
+		logger:           logger,
+		config:           config,
+		executionService: executionService,
+		db:               db,
+		blockReader:      blockReader,
+		proposing:        proposing,
+		hd:               hd,
 	}
 }
 
@@ -379,90 +374,28 @@ func (s *EngineServerExperimental) getPayload(ctx context.Context, payloadId uin
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.logger.Debug("[GetPayload] lock acquired")
-
-	builder, ok := s.builders[payloadId]
-	if !ok {
-		log.Warn("Payload not stored", "payloadId", payloadId)
+	resp, err := s.executionService.GetAssembledBlock(ctx, &execution.GetAssembledBlockRequest{
+		Id: payloadId,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Busy {
+		log.Warn("Cannot build payload, execution is busy", "payloadId", payloadId)
 		return nil, &engine_helpers.UnknownPayloadErr
 	}
+	// If the service is busy or there is no data for the given id then respond accordingly.
+	if resp.Data == nil {
+		log.Warn("Payload not stored", "payloadId", payloadId)
+		return nil, &engine_helpers.UnknownPayloadErr
 
-	blockWithReceipts, err := builder.Stop()
-	if err != nil {
-		s.logger.Error("Failed to build PoS block", "err", err)
-		return nil, err
 	}
-	block := blockWithReceipts.Block
-	header := block.Header()
-
-	baseFee := new(uint256.Int)
-	baseFee.SetFromBig(header.BaseFee)
-
-	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
-	if err != nil {
-		return nil, err
-	}
-	txs := []hexutility.Bytes{}
-	for _, tx := range encodedTransactions {
-		txs = append(txs, tx)
-	}
-
-	payload := &engine_types.ExecutionPayload{
-		ParentHash:    header.ParentHash,
-		FeeRecipient:  header.Coinbase,
-		Timestamp:     hexutil.Uint64(header.Time),
-		PrevRandao:    header.MixDigest,
-		StateRoot:     block.Root(),
-		ReceiptsRoot:  block.ReceiptHash(),
-		LogsBloom:     block.Bloom().Bytes(),
-		GasLimit:      hexutil.Uint64(block.GasLimit()),
-		GasUsed:       hexutil.Uint64(block.GasUsed()),
-		BlockNumber:   hexutil.Uint64(block.NumberU64()),
-		ExtraData:     block.Extra(),
-		BaseFeePerGas: (*hexutil.Big)(header.BaseFee),
-		BlockHash:     block.Hash(),
-		Transactions:  txs,
-	}
-	if block.Withdrawals() != nil {
-		payload.Withdrawals = block.Withdrawals()
-	}
-
-	if header.DataGasUsed != nil && header.ExcessDataGas != nil {
-		payload.DataGasUsed = (*hexutil.Uint64)(header.DataGasUsed)
-		payload.ExcessDataGas = (*hexutil.Uint64)(header.ExcessDataGas)
-	}
-
-	blockValue := blockValue(blockWithReceipts, baseFee)
-
-	blobsBundle := &engine_types.BlobsBundleV1{}
-	for i, tx := range block.Transactions() {
-		if tx.Type() != types.BlobTxType {
-			continue
-		}
-		blobTx, ok := tx.(*types.BlobTxWrapper)
-		if !ok {
-			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobTx)
-		}
-		versionedHashes, commitments, proofs, blobs := blobTx.GetDataHashes(), blobTx.Commitments, blobTx.Proofs, blobTx.Blobs
-		lenCheck := len(versionedHashes)
-		if lenCheck != len(commitments) || lenCheck != len(proofs) || lenCheck != len(blobs) {
-			return nil, fmt.Errorf("tx %d in block %s has inconsistent commitments (%d) / proofs (%d) / blobs (%d) / "+
-				"versioned hashes (%d)", i, block.Hash(), len(commitments), len(proofs), len(blobs), lenCheck)
-		}
-		for _, commitment := range commitments {
-			blobsBundle.Commitments = append(blobsBundle.Commitments, commitment)
-		}
-		for _, proof := range proofs {
-			blobsBundle.Proofs = append(blobsBundle.Proofs, proof)
-		}
-		for _, blob := range blobs {
-			blobsBundle.Blobs = append(blobsBundle.Blobs, blob)
-		}
-	}
+	data := resp.Data
 
 	return &engine_types.GetPayloadResponse{
-		ExecutionPayload: payload,
-		BlockValue:       (*hexutil.Big)(blockValue.ToBig()),
-		BlobsBundle:      blobsBundle,
+		ExecutionPayload: engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
+		BlockValue:       (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
+		BlobsBundle:      engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
 	}, nil
 }
 
@@ -532,48 +465,30 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 
-	param := core.BlockBuilderParameters{
-		ParentHash:            forkChoice.HeadHash,
-		Timestamp:             uint64(payloadAttributes.Timestamp),
-		PrevRandao:            payloadAttributes.PrevRandao,
-		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
-		PayloadId:             s.payloadId,
+	req := &execution.AssembleBlockRequest{
+		ParentHash:           gointerfaces.ConvertHashToH256(forkChoice.HeadHash),
+		Timestamp:            uint64(payloadAttributes.Timestamp),
+		MixDigest:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
+		SuggestedFeeRecipent: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 	}
+
 	if version >= clparams.CapellaVersion {
-		param.Withdrawals = payloadAttributes.Withdrawals
+		req.Withdrawals = ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
 	}
-	if err := s.checkWithdrawalsPresence(uint64(payloadAttributes.Timestamp), param.Withdrawals); err != nil {
+
+	resp, err := s.executionService.AssembleBlock(ctx, req)
+	if err != nil {
 		return nil, err
 	}
-
-	// First check if we're already building a block with the requested parameters
-	if reflect.DeepEqual(s.lastParameters, &param) {
-		s.logger.Info("[ForkChoiceUpdated] duplicate build request")
-		return &engine_types.ForkChoiceUpdatedResponse{
-			PayloadStatus: &engine_types.PayloadStatus{
-				Status:          engine_types.ValidStatus,
-				LatestValidHash: &headHash,
-			},
-			PayloadId: convertPayloadId(s.payloadId),
-		}, nil
+	if resp.Busy {
+		return nil, errors.New("[ForkChoiceUpdated]: execution service is busy, cannot assemble blocks")
 	}
-
-	// Initiate payload building
-	s.evictOldBuilders()
-
-	s.payloadId++
-	param.PayloadId = s.payloadId
-	s.lastParameters = &param
-
-	s.builders[s.payloadId] = builder.NewBlockBuilder(s.builderFunc, &param)
-	s.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", s.payloadId)
-
 	return &engine_types.ForkChoiceUpdatedResponse{
 		PayloadStatus: &engine_types.PayloadStatus{
 			Status:          engine_types.ValidStatus,
 			LatestValidHash: &headHash,
 		},
-		PayloadId: convertPayloadId(s.payloadId),
+		PayloadId: convertPayloadId(resp.Id),
 	}, nil
 }
 
@@ -632,15 +547,6 @@ func (s *EngineServerExperimental) getPayloadBodiesByRange(ctx context.Context, 
 	}
 
 	return bodies, nil
-}
-
-func (s *EngineServerExperimental) evictOldBuilders() {
-	ids := common.SortedKeys(s.builders)
-
-	// remove old builders so that at most MaxBuilders - 1 remain
-	for i := 0; i <= len(s.builders)-engine_helpers.MaxBuilders; i++ {
-		delete(s.builders, ids[i])
-	}
 }
 
 func (e *EngineServerExperimental) GetPayloadV1(ctx context.Context, payloadId hexutility.Bytes) (*engine_types.ExecutionPayload, error) {
