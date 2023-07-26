@@ -1210,7 +1210,10 @@ func (ic *InvertedIndexContext) frozenTo() uint64 {
 }
 
 func (d *Domain) cleanAfterFreeze(mergedDomain, mergedHist, mergedIdx *filesItem) {
-	d.History.cleanAfterFreeze(mergedHist, mergedIdx)
+	if mergedHist != nil && mergedHist.frozen {
+		d.History.cleanAfterFreeze(mergedHist.endTxNum)
+	}
+	return // TODO: Domain has no `frozen` flag, need re-visit this place and implement
 	if mergedDomain == nil {
 		return
 	}
@@ -1249,8 +1252,85 @@ func (d *Domain) cleanAfterFreeze(mergedDomain, mergedHist, mergedIdx *filesItem
 }
 
 // cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
-func (h *History) cleanAfterFreeze(mergedHist, mergedIdx *filesItem) {
-	h.InvertedIndex.cleanAfterFreeze(mergedIdx)
+func (h *History) cleanAfterFreeze(frozenTo uint64) {
+	if frozenTo == 0 {
+		return
+	}
+	//if h.filenameBase == "accounts" {
+	//	log.Warn("[history] History.cleanAfterFreeze", "frozenTo", frozenTo/h.aggregationStep, "stack", dbg.Stack())
+	//}
+	var outs []*filesItem
+	// `kill -9` may leave some garbage
+	// but it may be useful for merges, until merge `frozen` file
+	h.files.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			if item.frozen || item.endTxNum > frozenTo {
+				continue
+			}
+			outs = append(outs, item)
+		}
+		return true
+	})
+
+	for _, out := range outs {
+		if out == nil {
+			panic("must not happen: " + h.filenameBase)
+		}
+		out.canDelete.Store(true)
+
+		//if out.refcount.Load() == 0 {
+		//	if h.filenameBase == "accounts" {
+		//		log.Warn("[history] History.cleanAfterFreeze: immediately delete", "name", out.decompressor.FileName())
+		//	}
+		//} else {
+		//	if h.filenameBase == "accounts" {
+		//		log.Warn("[history] History.cleanAfterFreeze: mark as 'canDelete=true'", "name", out.decompressor.FileName())
+		//	}
+		//}
+
+		// if it has no readers (invisible even for us) - it's safe to remove file right here
+		if out.refcount.Load() == 0 {
+			out.closeFilesAndRemove()
+		}
+		h.files.Delete(out)
+	}
+	h.InvertedIndex.cleanAfterFreeze(frozenTo)
+}
+
+// cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
+func (ii *InvertedIndex) cleanAfterFreeze(frozenTo uint64) {
+	if frozenTo == 0 {
+		return
+	}
+	var outs []*filesItem
+	// `kill -9` may leave some garbage
+	// but it may be useful for merges, until merge `frozen` file
+	ii.files.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			if item.frozen || item.endTxNum > frozenTo {
+				continue
+			}
+			outs = append(outs, item)
+		}
+		return true
+	})
+
+	for _, out := range outs {
+		if out == nil {
+			panic("must not happen: " + ii.filenameBase)
+		}
+		out.canDelete.Store(true)
+		if out.refcount.Load() == 0 {
+			// if it has no readers (invisible even for us) - it's safe to remove file right here
+			out.closeFilesAndRemove()
+		}
+		ii.files.Delete(out)
+	}
+}
+
+// cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
+func (h *History) cleanAfterFreeze2(mergedHist, mergedIdx *filesItem) {
+	h.InvertedIndex.cleanAfterFreeze2(mergedIdx)
 	if mergedHist == nil {
 		return
 	}
@@ -1305,7 +1385,7 @@ func (h *History) cleanAfterFreeze(mergedHist, mergedIdx *filesItem) {
 }
 
 // cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
-func (ii *InvertedIndex) cleanAfterFreeze(mergedIdx *filesItem) {
+func (ii *InvertedIndex) cleanAfterFreeze2(mergedIdx *filesItem) {
 	if mergedIdx == nil {
 		return
 	}

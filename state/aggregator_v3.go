@@ -1331,17 +1331,17 @@ func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
 	a.storage.cleanAfterFreeze(in.storage, in.storageHist, in.storageIdx)
 	a.code.cleanAfterFreeze(in.code, in.codeHist, in.codeIdx)
 	a.commitment.cleanAfterFreeze(in.commitment, in.commitmentHist, in.commitmentIdx)
-	if in.logAddrs != nil {
-		a.logAddrs.cleanAfterFreeze(in.logAddrs)
+	if in.logAddrs != nil && in.logAddrs.frozen {
+		a.logAddrs.cleanAfterFreeze(in.logAddrs.endTxNum)
 	}
-	if in.logTopics != nil {
-		a.logTopics.cleanAfterFreeze(in.logTopics)
+	if in.logTopics != nil && in.logTopics.frozen {
+		a.logTopics.cleanAfterFreeze(in.logTopics.endTxNum)
 	}
-	if in.tracesFrom != nil {
-		a.tracesFrom.cleanAfterFreeze(in.tracesFrom)
+	if in.tracesFrom != nil && in.tracesFrom.frozen {
+		a.tracesFrom.cleanAfterFreeze(in.tracesFrom.endTxNum)
 	}
-	if in.tracesTo != nil {
-		a.tracesTo.cleanAfterFreeze(in.tracesTo)
+	if in.tracesTo != nil && in.tracesTo.frozen {
+		a.tracesTo.cleanAfterFreeze(in.tracesTo.endTxNum)
 	}
 }
 
