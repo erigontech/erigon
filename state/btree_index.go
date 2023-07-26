@@ -790,7 +790,8 @@ func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *
 }
 
 func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor, compressed bool, ps *background.ProgressSet, tmpdir string, logger log.Logger) error {
-	p := ps.AddNew(kv.FileName(), uint64(kv.Count()/2))
+	_, indexFileName := filepath.Split(indexPath)
+	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
 
 	defer kv.EnableReadAhead().DisableReadAhead()
