@@ -952,7 +952,7 @@ func (sf StaticFiles) CleanupOnError() {
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
 	if d.filenameBase == AggTraceFileLife {
-		d.logger.Warn("[dbg] buildFiles", "step", step)
+		d.logger.Warn("[dbg.agg] buildFiles", "step", step, "domain", d.filenameBase)
 	}
 
 	start := time.Now()
