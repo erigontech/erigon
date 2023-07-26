@@ -78,6 +78,27 @@ var cmdStageSnapshots = &cobra.Command{
 	},
 }
 
+var cmdStageBorSnapshots = &cobra.Command{
+	Use:   "stage_bor_snapshots",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := stageBorSnapshots(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
 var cmdStageHeaders = &cobra.Command{
 	Use:   "stage_headers",
 	Short: "",
@@ -456,6 +477,11 @@ func init() {
 	withReset(cmdStageSnapshots)
 	rootCmd.AddCommand(cmdStageSnapshots)
 
+	withConfig(cmdStageBorSnapshots)
+	withDataDir(cmdStageBorSnapshots)
+	withReset(cmdStageBorSnapshots)
+	rootCmd.AddCommand(cmdStageBorSnapshots)
+
 	withConfig(cmdStageHeaders)
 	withDataDir(cmdStageHeaders)
 	withUnwind(cmdStageHeaders)
@@ -602,6 +628,22 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 			return fmt.Errorf("re-read Snapshots progress: %w", err)
 		}
 		logger.Info("Progress", "snapshots", progress)
+		return nil
+	})
+}
+
+func stageBorSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if reset {
+			if err := stages.SaveStageProgress(tx, stages.BorSnapshots, 0); err != nil {
+				return fmt.Errorf("saving BorSnapshots progress failed: %w", err)
+			}
+		}
+		progress, err := stages.GetStageProgress(tx, stages.BorSnapshots)
+		if err != nil {
+			return fmt.Errorf("re-read BorSnapshots progress: %w", err)
+		}
+		logger.Info("Progress", "borSnapshots", progress)
 		return nil
 	})
 }
@@ -1487,8 +1529,9 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 
 	notifications := &shards.Notifications{}
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, db, notifications.Events, logger)
+	borRetire := freezeblocks.NewBorRetire(1, dirs, blockReader, blockWriter, db, notifications.Events, logger)
 
-	stages := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, heimdallClient, logger)
+	stages := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, borRetire, agg, nil, heimdallClient, logger)
 	sync := stagedsync.New(stages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger)
 
 	miner := stagedsync.NewMiningState(&cfg.Miner)

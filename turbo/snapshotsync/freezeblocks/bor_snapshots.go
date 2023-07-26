@@ -251,36 +251,13 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 	return nil
 }
 
-func BorEventsIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BorEventsIdx(ctx context.Context, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			_, fName := filepath.Split(segmentFilePath)
-			err = fmt.Errorf("BorEventsIdx: at=%s, %v, %s", fName, rec, dbg.Stack())
+			err = fmt.Errorf("BorEventsIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
 		}
 	}()
-
-	num := make([]byte, 8)
-
-	d, err := compress.NewDecompressor(segmentFilePath)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-
-	_, fname := filepath.Split(segmentFilePath)
-	p.Name.Store(&fname)
-	p.Total.Store(uint64(d.Count()))
-
-	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
-		p.Processed.Add(1)
-		n := binary.PutUvarint(num, i)
-		if err := idx.AddKey(num[:n], offset); err != nil {
-			return err
-		}
-		return nil
-	}, logger); err != nil {
-		return fmt.Errorf("EventNumberIdx: %w", err)
-	}
+	// Calculate how many records there will be in the index
 	return nil
 }
 
