@@ -789,7 +789,7 @@ func (c Collation) Close() {
 		c.valuesComp.Close()
 	}
 	if c.historyComp != nil {
-		c.historyComp.Close()
+		c.HistoryCollation.Close()
 	}
 }
 
@@ -813,32 +813,29 @@ func (d *Domain) writeCollationPair(valuesComp *compress.Compressor, pairs chan 
 // collate gathers domain changes over the specified step, using read-only transaction,
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
-func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (Collation, error) {
+func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (coll Collation, err error) {
+	mxRunningCollations.Inc()
 	started := time.Now()
 	defer func() {
 		d.stats.LastCollationTook = time.Since(started)
+		mxRunningCollations.Dec()
+		mxCollateTook.UpdateDuration(started)
 	}()
-	mxRunningCollations.Inc()
-	defer mxRunningCollations.Dec()
-	defer mxCollateTook.UpdateDuration(started)
 
-	hCollation, err := d.History.collate(step, txFrom, txTo, roTx)
+	coll.HistoryCollation, err = d.History.collate(step, txFrom, txTo, roTx)
 	if err != nil {
 		return Collation{}, err
 	}
 
-	var valuesComp *compress.Compressor
-	closeComp := true
+	closeCollation := true
 	defer func() {
-		if closeComp {
-			if valuesComp != nil {
-				valuesComp.Close()
-			}
+		if closeCollation {
+			coll.Close()
 		}
 	}()
 
-	valuesPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, step, step+1))
-	if valuesComp, err = compress.NewCompressor(context.Background(), "collate values", valuesPath, d.tmpdir, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
+	coll.valuesPath = filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, step, step+1))
+	if coll.valuesComp, err = compress.NewCompressor(context.Background(), "collate values", coll.valuesPath, d.tmpdir, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
 
@@ -856,7 +853,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	eg, _ := errgroup.WithContext(ctx)
 	defer eg.Wait()
 	eg.Go(func() (errInternal error) {
-		errInternal = d.writeCollationPair(valuesComp, pairs)
+		errInternal = d.writeCollationPair(coll.valuesComp, pairs)
 		return errInternal
 	})
 
@@ -871,6 +868,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		if !d.largeValues {
 			panic("implement me")
 		}
+
 		for k, stepInDB, err := keysCursor.First(); k != nil; k, stepInDB, err = keysCursor.Next() {
 			if err != nil {
 				return err
@@ -902,13 +900,9 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		return Collation{}, fmt.Errorf("collate over %s keys cursor: %w", d.filenameBase, err)
 	}
 
-	closeComp = false
-	return Collation{
-		HistoryCollation: hCollation,
-		valuesPath:       valuesPath,
-		valuesComp:       valuesComp,
-		valuesCount:      valuesComp.Count() / 2,
-	}, nil
+	closeCollation = false
+	coll.valuesCount = coll.valuesComp.Count() / 2
+	return coll, nil
 }
 
 type StaticFiles struct {

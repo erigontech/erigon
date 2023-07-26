@@ -130,7 +130,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	if err != nil {
 		return nil, err
 	}
-	a.commitment = NewCommittedDomain(commitd, CommitmentModeUpdate, commitment.VariantHexPatriciaTrie)
+	a.commitment = NewCommittedDomain(commitd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
 	if a.logAddrs, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
@@ -515,6 +515,17 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	defer roTx.Rollback()
 	//log.Warn("[dbg] collate", "step", step)
 
+	closeCollations := true
+	collations := make([]Collation, 0)
+	defer func() {
+		if !closeCollations {
+			return
+		}
+		for _, c := range collations {
+			c.Close()
+		}
+	}()
+
 	g, ctx := errgroup.WithContext(ctx)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
 		d := d
@@ -522,9 +533,10 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 		var err error
 		collation, err = d.collate(ctx, step, txFrom, txTo, roTx)
 		if err != nil {
-			collation.Close() // TODO: it must be handled inside collateStream func - by defer
 			return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
 		}
+		collations = append(collations, collation)
+
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
@@ -556,6 +568,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			return nil
 		})
 	}
+	closeCollations = false
 
 	// indices are built concurrently
 	for _, d := range []*InvertedIndex{a.logTopics, a.logAddrs, a.tracesFrom, a.tracesTo} {

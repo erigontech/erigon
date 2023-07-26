@@ -97,7 +97,13 @@ func (p *fileDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {
 
 func (p *fileDataProvider) Wait() error { return p.wg.Wait() }
 func (p *fileDataProvider) Dispose() uint64 {
-	info, _ := os.Stat(p.file.Name())
+	if p.file == nil {
+		return 0
+	}
+	info, err := os.Stat(p.file.Name())
+	if err != nil {
+		panic(err)
+	}
 	_ = p.file.Close()
 	_ = os.Remove(p.file.Name())
 	if info == nil {
