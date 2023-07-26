@@ -605,6 +605,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 		comp.Close()
 		comp = nil
 		valuesIn = newFilesItem(r.valuesStartTxNum, r.valuesEndTxNum, d.aggregationStep)
+		valuesIn.frozen = false
 		if valuesIn.decompressor, err = compress.NewDecompressor(datPath); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
@@ -617,7 +618,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 		}
 
 		btPath := strings.TrimSuffix(idxPath, "kvi") + "bt"
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, 2048, valuesIn.decompressor, false, p, d.tmpdir, d.logger)
+		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, 2048, valuesIn.decompressor, false, ps, d.tmpdir, d.logger)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("create btindex %s [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}

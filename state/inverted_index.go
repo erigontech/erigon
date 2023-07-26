@@ -31,9 +31,9 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -227,24 +227,29 @@ Loop:
 		}
 
 		addNewFile := true
-		var subSets []*filesItem
-		ii.files.Walk(func(items []*filesItem) bool {
-			for _, item := range items {
-				if item.isSubsetOf(newFile) {
-					subSets = append(subSets, item)
-					continue
-				}
-
-				if newFile.isSubsetOf(item) {
-					if item.frozen {
-						addNewFile = false
-						garbageFiles = append(garbageFiles, newFile)
+		/*
+			var subSets []*filesItem
+			ii.files.Walk(func(items []*filesItem) bool {
+				for _, item := range items {
+					if item.isSubsetOf(newFile) {
+						fmt.Printf("skip is subset %s.%d-%d.ef of %s.%d-%d.ef\n", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep, ii.filenameBase, newFile.startTxNum/ii.aggregationStep, newFile.endTxNum/ii.aggregationStep)
+						subSets = append(subSets, item)
+						continue
 					}
-					continue
+
+					if newFile.isSubsetOf(item) {
+						//if item.frozen {
+						//fmt.Printf("skip2 is subperset %s.%d-%d.ef of %s.%d-%d.ef, %t, %t\n", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep, ii.filenameBase, newFile.startTxNum/ii.aggregationStep, newFile.endTxNum/ii.aggregationStep, item.frozen, newFile.frozen)
+						//addNewFile = false
+						//garbageFiles = append(garbageFiles, newFile)
+						//}
+						return false
+					}
 				}
-			}
-			return true
-		})
+				return true
+			})
+		*/
+
 		//for _, subSet := range subSets {
 		//	ii.files.Delete(subSet)
 		//}
@@ -252,17 +257,24 @@ Loop:
 			ii.files.Set(newFile)
 		}
 	}
-
 	return garbageFiles
 }
 
-func ctxFiles(files *btree2.BTreeG[*filesItem]) (roItems []ctxItem) {
+func ctxFiles(files *btree2.BTreeG[*filesItem], requireHashIndex, requireBTreeIndex bool) (roItems []ctxItem) {
 	roFiles := make([]ctxItem, 0, files.Len())
 	files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.canDelete.Load() {
 				continue
 			}
+
+			// TODO: need somehow handle this case, but indices do not open in tests TestFindMergeRangeCornerCases
+			//if requireHashIndex && item.index == nil {
+			//	continue
+			//}
+			//if requireBTreeIndex && item.bindex == nil {
+			//	continue
+			//}
 
 			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 			// see super-set file, just drop sub-set files from list
@@ -286,7 +298,7 @@ func ctxFiles(files *btree2.BTreeG[*filesItem]) (roItems []ctxItem) {
 }
 
 func (ii *InvertedIndex) reCalcRoFiles() {
-	roFiles := ctxFiles(ii.files)
+	roFiles := ctxFiles(ii.files, true, false)
 	ii.roFiles.Store(&roFiles)
 }
 
@@ -303,12 +315,12 @@ func (ii *InvertedIndex) missedIdxFiles() (l []*filesItem) {
 	return l
 }
 
-func (ii *InvertedIndex) buildEfi(ctx context.Context, item *filesItem, p *background.Progress) (err error) {
+func (ii *InvertedIndex) buildEfi(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
 	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 	fName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep)
 	idxPath := filepath.Join(ii.dir, fName)
-	p.Name.Store(&fName)
-	p.Total.Store(uint64(item.decompressor.Count()))
+	p := ps.AddNew(fName, uint64(item.decompressor.Count()))
+	defer ps.Delete(p)
 	//ii.logger.Info("[snapshots] build idx", "file", fName)
 	return buildIndex(ctx, item.decompressor, idxPath, ii.tmpdir, item.decompressor.Count()/2, false, p, ii.logger, ii.noFsync)
 }
@@ -319,9 +331,7 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 	for _, item := range missedFiles {
 		item := item
 		g.Go(func() error {
-			p := ps.AddNew(item.decompressor.FileName(), uint64(item.decompressor.Count()))
-			defer ps.Delete(p)
-			return ii.buildEfi(ctx, item, p)
+			return ii.buildEfi(ctx, item, ps)
 		})
 	}
 
@@ -515,18 +525,8 @@ func (ii *invertedIndexWAL) close() {
 }
 
 // 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
-var WALCollectorRAM = etl.BufferOptimalSize / 8
-
-func init() {
-	v, _ := os.LookupEnv("ERIGON_WAL_COLLETOR_RAM")
-	if v != "" {
-		var err error
-		WALCollectorRAM, err = datasize.ParseString(v)
-		if err != nil {
-			panic(err)
-		}
-	}
-}
+var WALCollectorRAM = dbg.EnvDataSize("AGG_WAL_RAM", etl.BufferOptimalSize/8)
+var AggTraceFileLife = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
 
 func (ii *InvertedIndex) newWriter(tmpdir string, buffered, discard bool) *invertedIndexWAL {
 	w := &invertedIndexWAL{ii: ii,
@@ -595,6 +595,9 @@ func (ic *InvertedIndexContext) Close() {
 		refCnt := item.src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && item.src.canDelete.Load() {
+			if ic.ii.filenameBase == AggTraceFileLife {
+				ic.ii.logger.Warn(fmt.Sprintf("[dbg.agg] real remove at ctx close: %s", item.src.decompressor.FileName()))
+			}
 			item.src.closeFilesAndRemove()
 		}
 	}
@@ -1324,6 +1327,11 @@ func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress
 	// Here we can make a choise: to index "cold non-indexed file" by warm locality index, or not?
 	// Let's don't index. Because: speed of new files build is very important - to speed-up pruning
 	fromStep, toStep := ic.minWarmStep(), step+1
+	defer func() {
+		if ic.ii.filenameBase == AggTraceFileLife {
+			ii.logger.Warn(fmt.Sprintf("[dbg.agg] BuildWarmLocality done: %s.%d-%d", ii.filenameBase, fromStep, toStep))
+		}
+	}()
 	return ii.warmLocalityIdx.buildFiles(ctx, fromStep, toStep, false, ps, func() *LocalityIterator {
 		return ic.iterateKeysLocality(ctx, fromStep, toStep, decomp)
 	})

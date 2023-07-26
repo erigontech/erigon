@@ -156,7 +156,7 @@ func (dc *DomainContext) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRange
 		}
 		endStep := item.endTxNum / dc.d.aggregationStep
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := cmp.Min(spanStep*dc.d.aggregationStep, maxSpan)
+		span := spanStep * dc.d.aggregationStep
 		start := item.endTxNum - span
 		if start < item.startTxNum {
 			if !r.values || start < r.valuesStartTxNum {
@@ -245,41 +245,6 @@ func (ic *InvertedIndexContext) findMergeRange(maxEndTxNum, maxSpan uint64) (boo
 	return minFound, startTxNum, endTxNum
 }
 
-/*
-func (ii *InvertedIndex) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan uint64, workers int, ictx *InvertedIndexContext, ps *background.ProgressSet) (err error) {
-	closeAll := true
-	for updated, startTx, endTx := ii.findMergeRange(maxSpan, maxTxNum); updated; updated, startTx, endTx = ii.findMergeRange(maxTxNum, maxSpan) {
-		staticFiles, _ := ictx.staticFilesInRange(startTx, endTx)
-		defer func() {
-			if closeAll {
-				for _, i := range staticFiles {
-					i.decompressor.Close()
-					i.index.Close()
-				}
-			}
-		}()
-
-		mergedIndex, err := ii.mergeFiles(ctx, staticFiles, startTx, endTx, workers, ps)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if closeAll {
-				mergedIndex.decompressor.Close()
-				mergedIndex.index.Close()
-			}
-		}()
-
-		ii.integrateMergedFiles(staticFiles, mergedIndex)
-		if mergedIndex.frozen {
-			ii.cleanAfterFreeze(mergedIndex.endTxNum)
-		}
-	}
-	closeAll = false
-	return nil
-}
-*/
-
 type HistoryRanges struct {
 	historyStartTxNum uint64
 	historyEndTxNum   uint64
@@ -316,6 +281,11 @@ func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context, 
 		if to == 0 || ic.ii.coldLocalityIdx.exists(from, to) {
 			return nil
 		}
+		defer func() {
+			if ic.ii.filenameBase == AggTraceFileLife {
+				ic.ii.logger.Warn(fmt.Sprintf("[dbg.agg] BuildColdLocality done: %s.%d-%d", ic.ii.filenameBase, from, to))
+			}
+		}()
 		if err = ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, from, to, true, ps,
 			func() *LocalityIterator { return ic.iterateKeysLocality(ctx, from, to, nil) },
 		); err != nil {
@@ -687,6 +657,7 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		comp = nil
 		ps.Delete(p)
 		valuesIn = newFilesItem(r.valuesStartTxNum, r.valuesEndTxNum, d.aggregationStep)
+		valuesIn.frozen = false
 		if valuesIn.decompressor, err = compress.NewDecompressor(datPath); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
@@ -699,10 +670,8 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		}
 
 		btFileName := strings.TrimSuffix(idxFileName, "kvi") + "bt"
-		p = ps.AddNew(btFileName, uint64(keyCount*2))
-		defer ps.Delete(p)
 		btPath := filepath.Join(d.dir, btFileName)
-		err = BuildBtreeIndexWithDecompressor(btPath, valuesIn.decompressor, false, p, d.tmpdir, d.logger)
+		err = BuildBtreeIndexWithDecompressor(btPath, valuesIn.decompressor, false, ps, d.tmpdir, d.logger)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
@@ -1080,17 +1049,24 @@ func (d *Domain) integrateMergedFiles(valuesOuts, indexOuts, historyOuts []*file
 
 		// `kill -9` may leave some garbage
 		// but it still may be useful for merges, until we finish merge frozen file
-		if historyIn != nil && historyIn.frozen {
-			d.files.Walk(func(items []*filesItem) bool {
-				for _, item := range items {
-					if item.frozen || item.endTxNum > valuesIn.endTxNum {
-						continue
-					}
-					valuesOuts = append(valuesOuts, item)
+		d.files.Walk(func(items []*filesItem) bool {
+			for _, item := range items {
+				if item.frozen {
+					continue
 				}
-				return true
-			})
-		}
+				if item.startTxNum < valuesIn.startTxNum {
+					continue
+				}
+				if item.endTxNum > valuesIn.endTxNum {
+					continue
+				}
+				if item.startTxNum == valuesIn.startTxNum && item.endTxNum == valuesIn.endTxNum {
+					continue
+				}
+				valuesOuts = append(valuesOuts, item)
+			}
+			return true
+		})
 	}
 	for _, out := range valuesOuts {
 		if out == nil {
@@ -1125,6 +1101,10 @@ func (ii *InvertedIndex) integrateMergedFiles(outs []*filesItem, in *filesItem) 
 			panic("must not happen: " + ii.filenameBase)
 		}
 		ii.files.Delete(out)
+
+		if ii.filenameBase == AggTraceFileLife {
+			ii.logger.Warn(fmt.Sprintf("[dbg.agg] mark can delete: %s, triggered by merge of: %s", out.decompressor.FileName(), in.decompressor.FileName()))
+		}
 		out.canDelete.Store(true)
 	}
 	ii.reCalcRoFiles()
@@ -1196,20 +1176,23 @@ func (ic *InvertedIndexContext) frozenTo() uint64 {
 	return 0
 }
 
-func (d *Domain) cleanAfterFreeze(frozenTo uint64) {
-	if frozenTo == 0 {
+func (d *Domain) cleanAfterFreeze(mergedDomain, mergedHist, mergedIdx *filesItem) {
+	if mergedHist != nil && mergedHist.frozen {
+		d.History.cleanAfterFreeze(mergedHist.endTxNum)
+	}
+	if mergedDomain == nil {
 		return
 	}
-
 	var outs []*filesItem
+	mergedFrom, mergedTo := mergedDomain.startTxNum, mergedDomain.endTxNum
 	// `kill -9` may leave some garbage
 	// but it may be useful for merges, until merge `frozen` file
 	d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			if item.frozen || item.endTxNum > frozenTo {
-				continue
+			if item.startTxNum > mergedFrom && item.endTxNum < mergedTo {
+				outs = append(outs, item)
 			}
-			outs = append(outs, item)
+			//TODO: domain doesn't have .frozen flag. Somehow need delete all earlier sub-sets, but keep largest one.
 		}
 		return true
 	})
@@ -1219,16 +1202,24 @@ func (d *Domain) cleanAfterFreeze(frozenTo uint64) {
 			panic("must not happen: " + d.filenameBase)
 		}
 		d.files.Delete(out)
+		out.canDelete.Store(true)
 		if out.refcount.Load() == 0 {
+			if d.filenameBase == AggTraceFileLife && out.decompressor != nil {
+				d.logger.Info(fmt.Sprintf("[dbg.agg] cleanAfterFreeze remove: %s\n", out.decompressor.FileName()))
+			}
 			// if it has no readers (invisible even for us) - it's safe to remove file right here
 			out.closeFilesAndRemove()
+		} else {
+			if d.filenameBase == AggTraceFileLife && out.decompressor != nil {
+				d.logger.Warn(fmt.Sprintf("[dbg.agg] cleanAfterFreeze mark as delete: %s, refcnt=%d", out.decompressor.FileName(), out.refcount.Load()))
+			}
 		}
-		out.canDelete.Store(true)
 	}
-	d.History.cleanAfterFreeze(frozenTo)
 }
 
-// cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
+// cleanAfterFreeze - sometime inverted_index may be already merged, but history not yet. and power-off happening.
+// in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
+// all earlier small files, by mark tem as `canDelete=true`
 func (h *History) cleanAfterFreeze(frozenTo uint64) {
 	if frozenTo == 0 {
 		return
@@ -1300,6 +1291,100 @@ func (ii *InvertedIndex) cleanAfterFreeze(frozenTo uint64) {
 		if out.refcount.Load() == 0 {
 			// if it has no readers (invisible even for us) - it's safe to remove file right here
 			out.closeFilesAndRemove()
+		}
+		ii.files.Delete(out)
+	}
+}
+
+// cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
+func (h *History) cleanAfterFreeze2(mergedHist, mergedIdx *filesItem) {
+	h.InvertedIndex.cleanAfterFreeze2(mergedIdx)
+	if mergedHist == nil {
+		return
+	}
+	mergedFrom, mergedTo := mergedHist.startTxNum, mergedHist.endTxNum
+	if mergedTo == 0 {
+		return
+	}
+	//if h.filenameBase == "accounts" {
+	//	log.Warn("[history] History.cleanAfterFreeze", "mergedTo", mergedTo/h.aggregationStep, "stack", dbg.Stack())
+	//}
+	var outs []*filesItem
+	// `kill -9` may leave some garbage
+	// but it may be useful for merges, until merge `frozen` file
+	h.files.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			if item.frozen {
+				continue
+			}
+			if item.startTxNum == mergedFrom && item.endTxNum == mergedTo {
+				continue
+			}
+			if item.startTxNum >= mergedTo {
+				continue
+			}
+			outs = append(outs, item)
+		}
+		return true
+	})
+
+	for _, out := range outs {
+		if out == nil {
+			panic("must not happen: " + h.filenameBase)
+		}
+		out.canDelete.Store(true)
+
+		// if it has no readers (invisible even for us) - it's safe to remove file right here
+		if out.refcount.Load() == 0 {
+			out.closeFilesAndRemove()
+		}
+		h.files.Delete(out)
+	}
+}
+
+// cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
+func (ii *InvertedIndex) cleanAfterFreeze2(mergedIdx *filesItem) {
+	if mergedIdx == nil {
+		return
+	}
+	mergedFrom, mergedTo := mergedIdx.startTxNum, mergedIdx.endTxNum
+	if mergedTo == 0 {
+		return
+	}
+	var outs []*filesItem
+	// `kill -9` may leave some garbage
+	// but it may be useful for merges, until merge `frozen` file
+	ii.files.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			if item.frozen {
+				continue
+			}
+			if item.startTxNum == mergedFrom && item.endTxNum == mergedTo {
+				continue
+			}
+			if item.startTxNum >= mergedTo {
+				continue
+			}
+			outs = append(outs, item)
+		}
+		return true
+	})
+
+	for _, out := range outs {
+		if out == nil {
+			panic("must not happen: " + ii.filenameBase)
+		}
+		out.canDelete.Store(true)
+		if out.refcount.Load() == 0 {
+			// if it has no readers (invisible even for us) - it's safe to remove file right here
+			if ii.filenameBase == AggTraceFileLife && out.decompressor != nil {
+				ii.logger.Warn(fmt.Sprintf("[dbg.agg] cleanAfterFreeze remove: %s", out.decompressor.FileName()))
+			}
+			out.closeFilesAndRemove()
+		} else {
+			if ii.filenameBase == AggTraceFileLife && out.decompressor != nil {
+				ii.logger.Warn(fmt.Sprintf("[dbg.agg] cleanAfterFreeze mark as delete: %s, refcnt=%d", out.decompressor.FileName(), out.refcount.Load()))
+			}
 		}
 		ii.files.Delete(out)
 	}

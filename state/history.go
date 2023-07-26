@@ -802,7 +802,7 @@ func (sf HistoryFiles) Close() {
 	}
 }
 func (h *History) reCalcRoFiles() {
-	roFiles := ctxFiles(h.files)
+	roFiles := ctxFiles(h.files, true, false)
 	h.roFiles.Store(&roFiles)
 }
 

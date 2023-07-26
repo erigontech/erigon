@@ -44,7 +44,7 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	require.NoError(t, err)
 	defer decomp.Close()
 
-	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, false, &background.Progress{}, tmp, logger)
+	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, false, background.NewProgressSet(), tmp, logger)
 	require.NoError(t, err)
 
 	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, decomp)

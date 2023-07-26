@@ -121,15 +121,15 @@ func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode Co
 	if err != nil {
 		return nil, err
 	}
-	cfg := domainCfg{histCfg{withLocalityIndex: true, compressVals: false, largeValues: AccDomainLargeValues}}
+	cfg := domainCfg{histCfg{withLocalityIndex: false, compressVals: false, largeValues: AccDomainLargeValues}}
 	if a.accounts, err = NewDomain(cfg, dir, tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
 		return nil, err
 	}
-	cfg = domainCfg{histCfg{withLocalityIndex: true, compressVals: false, largeValues: StorageDomainLargeValues}}
+	cfg = domainCfg{histCfg{withLocalityIndex: false, compressVals: false, largeValues: StorageDomainLargeValues}}
 	if a.storage, err = NewDomain(cfg, dir, tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
 		return nil, err
 	}
-	cfg = domainCfg{histCfg{withLocalityIndex: true, compressVals: true, largeValues: true}}
+	cfg = domainCfg{histCfg{withLocalityIndex: false, compressVals: true, largeValues: true}}
 	if a.code, err = NewDomain(cfg, dir, tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
 		return nil, err
 	}
@@ -599,7 +599,6 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, maxEndTxNum uint64, work
 		}
 	}()
 	a.integrateMergedFiles(outs, in)
-	a.cleanAfterNewFreeze(in)
 	closeAll = false
 
 	for _, s := range []DomainStats{a.accounts.stats, a.code.stats, a.storage.stats} {
@@ -851,13 +850,6 @@ func (a *Aggregator) integrateMergedFiles(outs SelectedStaticFiles, in MergedFil
 	a.storage.integrateMergedFiles(outs.storage, outs.storageIdx, outs.storageHist, in.storage, in.storageIdx, in.storageHist)
 	a.code.integrateMergedFiles(outs.code, outs.codeIdx, outs.codeHist, in.code, in.codeIdx, in.codeHist)
 	a.commitment.integrateMergedFiles(outs.commitment, outs.commitmentIdx, outs.commitmentHist, in.commitment, in.commitmentIdx, in.commitmentHist)
-}
-
-func (a *Aggregator) cleanAfterNewFreeze(in MergedFiles) {
-	a.accounts.cleanAfterFreeze(in.accountsHist.endTxNum)
-	a.storage.cleanAfterFreeze(in.storageHist.endTxNum)
-	a.code.cleanAfterFreeze(in.codeHist.endTxNum)
-	a.commitment.cleanAfterFreeze(in.commitment.endTxNum)
 }
 
 // ComputeCommitment evaluates commitment for processed state.

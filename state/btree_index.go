@@ -781,15 +781,18 @@ func CreateBtreeIndex(indexPath, dataPath string, M uint64, compressed bool, log
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf
 var DefaultBtreeM = uint64(2048)
 
-func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *compress.Decompressor, compressed bool, p *background.Progress, tmpdir string, logger log.Logger) (*BtIndex, error) {
-	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, p, tmpdir, logger)
+func CreateBtreeIndexWithDecompressor(indexPath string, M uint64, decompressor *compress.Decompressor, compressed bool, ps *background.ProgressSet, tmpdir string, logger log.Logger) (*BtIndex, error) {
+	err := BuildBtreeIndexWithDecompressor(indexPath, decompressor, compressed, ps, tmpdir, logger)
 	if err != nil {
 		return nil, err
 	}
 	return OpenBtreeIndexWithDecompressor(indexPath, M, decompressor)
 }
 
-func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor, compressed bool, p *background.Progress, tmpdir string, logger log.Logger) error {
+func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor, compressed bool, ps *background.ProgressSet, tmpdir string, logger log.Logger) error {
+	p := ps.AddNew(kv.FileName(), uint64(kv.Count()/2))
+	defer ps.Delete(p)
+
 	defer kv.EnableReadAhead().DisableReadAhead()
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".bl"
 	var bloom *bloomfilter.Filter
