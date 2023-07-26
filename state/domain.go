@@ -189,7 +189,12 @@ type Domain struct {
 
 	*History
 	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
-	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
+
+	// roFiles derivative from field `file`, but without garbage:
+	//  - no files with `canDelete=true`
+	//  - no overlaps
+	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
+	//
 	// MakeContext() using this field in zero-copy way
 	roFiles   atomic.Pointer[[]ctxItem]
 	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
@@ -199,6 +204,8 @@ type Domain struct {
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 	logger       log.Logger
+
+	warmDir string
 }
 
 type domainCfg struct {
@@ -206,7 +213,10 @@ type domainCfg struct {
 }
 
 func NewDomain(cfg domainCfg, dir, tmpdir string, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
+	baseDir := filepath.Dir(dir)
+	baseDir = filepath.Dir(baseDir)
 	d := &Domain{
+		warmDir:   filepath.Join(baseDir, "warm"),
 		keysTable: keysTable,
 		valsTable: valsTable,
 		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
@@ -216,7 +226,7 @@ func NewDomain(cfg domainCfg, dir, tmpdir string, aggregationStep uint64, filena
 	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
-	if d.History, err = NewHistory(cfg.histCfg, dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, []string{"kv"}, logger); err != nil {
+	if d.History, err = NewHistory(cfg.histCfg, dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, []string{}, logger); err != nil {
 		return nil, err
 	}
 
@@ -327,6 +337,7 @@ Loop:
 
 		startTxNum, endTxNum := startStep*d.aggregationStep, endStep*d.aggregationStep
 		var newFile = newFilesItem(startTxNum, endTxNum, d.aggregationStep)
+		newFile.frozen = false
 
 		for _, ext := range d.integrityFileExtensions {
 			requiredFile := fmt.Sprintf("%s.%d-%d.%s", d.filenameBase, startStep, endStep, ext)
@@ -452,7 +463,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcRoFiles() {
-	roFiles := ctxFiles(d.files)
+	roFiles := ctxFiles(d.files, true, true)
 	d.roFiles.Store(&roFiles)
 }
 
@@ -995,7 +1006,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		btPath := filepath.Join(d.dir, btFileName)
 		p := ps.AddNew(btFileName, uint64(valuesDecomp.Count()*2))
 		defer ps.Delete(p)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, false, p, d.tmpdir, d.logger)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, false, ps, d.tmpdir, d.logger)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values bt idx: %w", d.filenameBase, err)
 		}
@@ -1055,11 +1066,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 		g.Go(func() error {
 			idxPath := fitem.decompressor.FilePath()
 			idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
-
-			p := ps.AddNew(fitem.decompressor.FileName(), uint64(fitem.decompressor.Count()))
-			defer ps.Delete(p)
-
-			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, false, p, d.tmpdir, d.logger); err != nil {
+			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, false, ps, d.tmpdir, d.logger); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", fitem.decompressor.FileName(), err)
 			}
 			return nil
@@ -1164,6 +1171,7 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 	d.History.integrateFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, d.aggregationStep)
+	fi.frozen = false
 	fi.decompressor = sf.valuesDecomp
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
@@ -1538,7 +1546,6 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 			continue
 		}
 
-		//dc.d.stats.FilesQuerie.Add(1)
 		reader := dc.statelessIdxReader(i)
 		if reader.Empty() {
 			continue
@@ -1578,6 +1585,7 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 	if !haveWarmIdx && len(dc.files) > 0 {
 		firstWarmIndexedTxNum = dc.files[len(dc.files)-1].endTxNum
 	}
+
 	if firstWarmIndexedTxNum <= lastColdIndexedTxNum {
 		return nil, false, nil
 	}
@@ -1640,31 +1648,43 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 	}
 	//dc.d.stats.FilesQuerie.Add(1)
 	t := time.Now()
-	reader := dc.statelessIdxReader(int(exactColdShard))
-	if reader.Empty() {
-		LatestStateReadColdNotFound.UpdateDuration(t)
-		return nil, false, nil
-	}
-	offset := reader.Lookup(filekey)
-	g := dc.statelessGetter(int(exactColdShard))
-	g.Reset(offset)
-	k, _ := g.NextUncompressed()
-	if !bytes.Equal(filekey, k) {
-		LatestStateReadColdNotFound.UpdateDuration(t)
-		return nil, false, nil
-	}
-	v, _ = g.NextUncompressed()
+	exactTxNum := exactColdShard * StepsInColdFile * dc.d.aggregationStep
+	//fmt.Printf("exactColdShard: %d, exactTxNum=%d\n", exactColdShard, exactTxNum)
+	for i := len(dc.files) - 1; i >= 0; i-- {
+		isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
+		//fmt.Printf("read3: %s, %t, %d-%d\n", dc.files[i].src.decompressor.FileName(), isUseful, dc.files[i].startTxNum, dc.files[i].endTxNum)
+		if !isUseful {
+			continue
+		}
 
-	//_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey)
-	//if err != nil {
-	//	return nil, false, err
-	//}
-	//if !ok {
-	//	LatestStateReadColdNotFound.UpdateDuration(t)
-	//	return nil, false, nil
-	//}
-	LatestStateReadCold.UpdateDuration(t)
-	return v, true, nil
+		reader := dc.statelessIdxReader(i)
+		if reader.Empty() {
+			LatestStateReadColdNotFound.UpdateDuration(t)
+			return nil, false, nil
+		}
+		offset := reader.Lookup(filekey)
+		g := dc.statelessGetter(i)
+		g.Reset(offset)
+		k, _ := g.NextUncompressed()
+		if !bytes.Equal(filekey, k) {
+			LatestStateReadColdNotFound.UpdateDuration(t)
+			return nil, false, nil
+		}
+		v, _ = g.NextUncompressed()
+
+		//_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey)
+		//if err != nil {
+		//	return nil, false, err
+		//}
+		//if !ok {
+		//	LatestStateReadColdNotFound.UpdateDuration(t)
+		//	return nil, false, nil
+		//}
+		LatestStateReadCold.UpdateDuration(t)
+		return v, true, nil
+	}
+	LatestStateReadColdNotFound.UpdateDuration(t)
+	return nil, false, nil
 }
 
 // historyBeforeTxNum searches history for a value of specified key before txNum
@@ -1779,6 +1799,10 @@ func (dc *DomainContext) statelessIdxReader(i int) *recsplit.IndexReader {
 	}
 	r := dc.idxReaders[i]
 	if r == nil {
+		if dc.files[i].src.index == nil {
+			fmt.Printf("nil!! %t\n", dc.files[i].src.decompressor != nil)
+			fmt.Printf("nil2!! %s\n", dc.files[i].src.decompressor.FileName())
+		}
 		r = dc.files[i].src.index.GetReaderFromPool()
 		dc.idxReaders[i] = r
 	}

@@ -244,32 +244,6 @@ func (a *AggregatorV3) Close() {
 	a.tracesTo.Close()
 }
 
-// CleanDir - call it manually on startup of Main application (don't call it from utilities or nother processes)
-//   - remove files ignored during opening of aggregator
-//   - remove files which marked as deleted but have no readers (usually last reader removing files marked as deleted)
-func (a *AggregatorV3) CleanDir() {
-	a.accounts.deleteGarbageFiles()
-	a.storage.deleteGarbageFiles()
-	a.code.deleteGarbageFiles()
-	a.code.deleteGarbageFiles()
-	a.commitment.deleteGarbageFiles()
-	a.logAddrs.deleteGarbageFiles()
-	a.logTopics.deleteGarbageFiles()
-	a.tracesFrom.deleteGarbageFiles()
-	a.tracesTo.deleteGarbageFiles()
-
-	ac := a.MakeContext()
-	defer ac.Close()
-	ac.a.accounts.cleanAfterFreeze(ac.accounts.frozenTo())
-	ac.a.storage.cleanAfterFreeze(ac.storage.frozenTo())
-	ac.a.code.cleanAfterFreeze(ac.code.frozenTo())
-	ac.a.commitment.cleanAfterFreeze(ac.code.frozenTo())
-	ac.a.logAddrs.cleanAfterFreeze(ac.logAddrs.frozenTo())
-	ac.a.logTopics.cleanAfterFreeze(ac.logTopics.frozenTo())
-	ac.a.tracesFrom.cleanAfterFreeze(ac.tracesFrom.frozenTo())
-	ac.a.tracesTo.cleanAfterFreeze(ac.tracesTo.frozenTo())
-}
-
 func (a *AggregatorV3) CloseSharedDomains() {
 	if a.domains != nil {
 		a.domains.Close()
@@ -1340,6 +1314,7 @@ func (a *AggregatorV3) integrateMergedFiles(outs SelectedStaticFilesV3, in Merge
 	defer a.filesMutationLock.Unlock()
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcMaxTxNum()
+
 	a.accounts.integrateMergedFiles(outs.accounts, outs.accountsIdx, outs.accountsHist, in.accounts, in.accountsIdx, in.accountsHist)
 	a.storage.integrateMergedFiles(outs.storage, outs.storageIdx, outs.storageHist, in.storage, in.storageIdx, in.storageHist)
 	a.code.integrateMergedFiles(outs.code, outs.codeIdx, outs.codeHist, in.code, in.codeIdx, in.codeHist)
@@ -1352,29 +1327,21 @@ func (a *AggregatorV3) integrateMergedFiles(outs SelectedStaticFilesV3, in Merge
 	return frozen
 }
 func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
-	if in.accounts != nil && in.accounts.frozen {
-		a.accounts.cleanAfterFreeze(in.accounts.endTxNum)
+	a.accounts.cleanAfterFreeze(in.accounts, in.accountsHist, in.accountsIdx)
+	a.storage.cleanAfterFreeze(in.storage, in.storageHist, in.storageIdx)
+	a.code.cleanAfterFreeze(in.code, in.codeHist, in.codeIdx)
+	a.commitment.cleanAfterFreeze(in.commitment, in.commitmentHist, in.commitmentIdx)
+	if in.logAddrs != nil {
+		a.logAddrs.cleanAfterFreeze(in.logAddrs)
 	}
-	if in.storage != nil && in.storage.frozen {
-		a.storage.cleanAfterFreeze(in.storage.endTxNum)
+	if in.logTopics != nil {
+		a.logTopics.cleanAfterFreeze(in.logTopics)
 	}
-	if in.code != nil && in.code.frozen {
-		a.code.cleanAfterFreeze(in.code.endTxNum)
+	if in.tracesFrom != nil {
+		a.tracesFrom.cleanAfterFreeze(in.tracesFrom)
 	}
-	if in.commitment != nil && in.commitment.frozen {
-		a.commitment.cleanAfterFreeze(in.commitment.endTxNum)
-	}
-	if in.logAddrs != nil && in.logAddrs.frozen {
-		a.logAddrs.cleanAfterFreeze(in.logAddrs.endTxNum)
-	}
-	if in.logTopics != nil && in.logTopics.frozen {
-		a.logTopics.cleanAfterFreeze(in.logTopics.endTxNum)
-	}
-	if in.tracesFrom != nil && in.tracesFrom.frozen {
-		a.tracesFrom.cleanAfterFreeze(in.tracesFrom.endTxNum)
-	}
-	if in.tracesTo != nil && in.tracesTo.frozen {
-		a.tracesTo.cleanAfterFreeze(in.tracesTo.endTxNum)
+	if in.tracesTo != nil {
+		a.tracesTo.cleanAfterFreeze(in.tracesTo)
 	}
 }
 

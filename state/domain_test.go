@@ -564,6 +564,9 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 			valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
 			valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1, background.NewProgressSet())
 			require.NoError(t, err)
+			if valuesIn != nil && valuesIn.decompressor != nil {
+				fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
+			}
 			d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
 			return false
 		}(); stop {

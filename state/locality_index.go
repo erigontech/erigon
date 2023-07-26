@@ -308,9 +308,10 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 	}
 
 	hi, lo := lc.reader.Sum(key)
-	if !lc.file.src.bloom.ContainsHash(hi) {
-		return 0, false, nil
-	}
+	//if !lc.file.src.bloom.ContainsHash(hi) {
+	//	fmt.Printf("idx1: %x\n", key)
+	//	return 0, false, nil
+	//}
 
 	//if bytes.HasPrefix(key, common.FromHex("f29a")) {
 	//	res, _ := lc.file.src.bm.At(lc.reader.Lookup(key))
@@ -321,7 +322,8 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 }
 
 func (li *LocalityIndex) exists(fromStep, toStep uint64) bool {
-	return dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep)))
+	return dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep))) &&
+		dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li.lb", li.filenameBase, fromStep, toStep)))
 }
 func (li *LocalityIndex) missedIdxFiles(ii *HistoryContext) (toStep uint64, idxExists bool) {
 	if len(ii.files) == 0 {
@@ -404,6 +406,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			maxPossibleValue = int(it.FilesAmount())
 			baseDataID = uint64(0)
 		}
+		fmt.Printf("[dbg] locality: %s\n", fName)
 		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, maxPossibleValue, baseDataID, uint64(count), li.logger)
 		if err != nil {
 			return nil, err
@@ -460,7 +463,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 
 		if err = rs.Build(); err != nil {
 			if rs.Collision() {
-				li.logger.Debug("Building recsplit. Collision happened. It's ok. Restarting...")
+				li.logger.Warn("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
 			} else {
 				return nil, fmt.Errorf("build idx: %w", err)
@@ -471,7 +474,6 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	}
 
 	if bloom != nil {
-		log.Warn(fmt.Sprintf("[dbg] bloom: %s, keys=%dk, size=%dmb, k=%d, probability=%f\n", fName, bloom.N()/1000, bloom.M()/8/1024/1024, bloom.K(), bloom.FalsePosititveProbability()))
 		if _, err := bloom.WriteFile(idxPath + ".lb"); err != nil {
 			return nil, err
 		}
