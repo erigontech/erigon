@@ -172,12 +172,13 @@ func ExecV3(ctx context.Context,
 	}()
 
 	useExternalTx := applyTx != nil
-	if !useExternalTx && !parallel {
+	if initialCycle || useExternalTx {
 		agg.BuildOptionalMissedIndicesInBackground(ctx, estimate.IndexSnapshot.Workers())
 		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
-
+	}
+	if !useExternalTx && !parallel {
 		var err error
 		applyTx, err = chainDb.BeginRw(ctx)
 		if err != nil {
