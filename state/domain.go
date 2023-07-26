@@ -1004,8 +1004,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	{
 		btFileName := strings.TrimSuffix(valuesIdxFileName, "kvi") + "bt"
 		btPath := filepath.Join(d.dir, btFileName)
-		p := ps.AddNew(btFileName, uint64(valuesDecomp.Count()*2))
-		defer ps.Delete(p)
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, false, ps, d.tmpdir, d.logger)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values bt idx: %w", d.filenameBase, err)
