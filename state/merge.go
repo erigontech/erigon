@@ -245,41 +245,6 @@ func (ic *InvertedIndexContext) findMergeRange(maxEndTxNum, maxSpan uint64) (boo
 	return minFound, startTxNum, endTxNum
 }
 
-/*
-func (ii *InvertedIndex) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan uint64, workers int, ictx *InvertedIndexContext, ps *background.ProgressSet) (err error) {
-	closeAll := true
-	for updated, startTx, endTx := ii.findMergeRange(maxSpan, maxTxNum); updated; updated, startTx, endTx = ii.findMergeRange(maxTxNum, maxSpan) {
-		staticFiles, _ := ictx.staticFilesInRange(startTx, endTx)
-		defer func() {
-			if closeAll {
-				for _, i := range staticFiles {
-					i.decompressor.Close()
-					i.index.Close()
-				}
-			}
-		}()
-
-		mergedIndex, err := ii.mergeFiles(ctx, staticFiles, startTx, endTx, workers, ps)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if closeAll {
-				mergedIndex.decompressor.Close()
-				mergedIndex.index.Close()
-			}
-		}()
-
-		ii.integrateMergedFiles(staticFiles, mergedIndex)
-		if mergedIndex.frozen {
-			ii.cleanAfterFreeze(mergedIndex.endTxNum)
-		}
-	}
-	closeAll = false
-	return nil
-}
-*/
-
 type HistoryRanges struct {
 	historyStartTxNum uint64
 	historyEndTxNum   uint64
@@ -317,7 +282,9 @@ func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context, 
 			return nil
 		}
 		defer func() {
-			log.Warn(fmt.Sprintf("[dbg] BuildColdLocality done: %s.%d-%d\n", ic.ii.filenameBase, from, to))
+			if ic.ii.filenameBase == AggTraceFileLife {
+				ic.ii.logger.Warn(fmt.Sprintf("[dbg.agg] BuildColdLocality done: %s.%d-%d", ic.ii.filenameBase, from, to))
+			}
 		}()
 		if err = ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, from, to, true, ps,
 			func() *LocalityIterator { return ic.iterateKeysLocality(ctx, from, to, nil) },
@@ -1213,7 +1180,6 @@ func (d *Domain) cleanAfterFreeze(mergedDomain, mergedHist, mergedIdx *filesItem
 	if mergedHist != nil && mergedHist.frozen {
 		d.History.cleanAfterFreeze(mergedHist.endTxNum)
 	}
-	return // TODO: Domain has no `frozen` flag, need re-visit this place and implement
 	if mergedDomain == nil {
 		return
 	}
@@ -1251,7 +1217,9 @@ func (d *Domain) cleanAfterFreeze(mergedDomain, mergedHist, mergedIdx *filesItem
 	}
 }
 
-// cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
+// cleanAfterFreeze - sometime inverted_index may be already merged, but history not yet. and power-off happening.
+// in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
+// all earlier small files, by mark tem as `canDelete=true`
 func (h *History) cleanAfterFreeze(frozenTo uint64) {
 	if frozenTo == 0 {
 		return
@@ -1365,16 +1333,6 @@ func (h *History) cleanAfterFreeze2(mergedHist, mergedIdx *filesItem) {
 			panic("must not happen: " + h.filenameBase)
 		}
 		out.canDelete.Store(true)
-
-		//if out.refcount.Load() == 0 {
-		//	if h.filenameBase == "accounts" {
-		//		log.Warn("[history] History.cleanAfterFreeze: immediately delete", "name", out.decompressor.FileName())
-		//	}
-		//} else {
-		//	if h.filenameBase == "accounts" {
-		//		log.Warn("[history] History.cleanAfterFreeze: mark as 'canDelete=true'", "name", out.decompressor.FileName())
-		//	}
-		//}
 
 		// if it has no readers (invisible even for us) - it's safe to remove file right here
 		if out.refcount.Load() == 0 {
