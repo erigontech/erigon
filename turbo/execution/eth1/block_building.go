@@ -2,16 +2,22 @@ package eth1
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 
+	"github.com/golang/gddo/log"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 )
 
 func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
@@ -34,7 +40,14 @@ func (e *EthereumExecutionModule) evictOldBuilders() {
 }
 
 // Missing: NewPayload, AssembleBlock
-func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execution.AssembleBlockRequest) (*execution.PayloadId, error) {
+func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execution.AssembleBlockRequest) (*execution.AssembleBlockResponse, error) {
+	if !e.semaphore.TryAcquire(1) {
+		return &execution.AssembleBlockResponse{
+			Id:   0,
+			Busy: true,
+		}, nil
+	}
+	defer e.semaphore.Release(1)
 	param := core.BlockBuilderParameters{
 		ParentHash:            gointerfaces.ConvertH256ToHash(req.ParentHash),
 		Timestamp:             req.Timestamp,
@@ -50,8 +63,9 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	// First check if we're already building a block with the requested parameters
 	if reflect.DeepEqual(e.lastParameters, &param) {
 		e.logger.Info("[ForkChoiceUpdated] duplicate build request")
-		return &execution.PayloadId{
-			Id: e.nextPayloadId,
+		return &execution.AssembleBlockResponse{
+			Id:   e.nextPayloadId,
+			Busy: false,
 		}, nil
 	}
 
@@ -65,11 +79,110 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param)
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
-	return &execution.PayloadId{
-		Id: e.nextPayloadId,
+	return &execution.AssembleBlockResponse{
+		Id:   e.nextPayloadId,
+		Busy: false,
 	}, nil
 }
 
-func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *execution.PayloadId) (*execution.GetAssembledBlockResponse, error) {
+// The expected value to be received by the feeRecipient in wei
+func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int {
+	blockValue := uint256.NewInt(0)
+	txs := br.Block.Transactions()
+	for i := range txs {
+		gas := new(uint256.Int).SetUint64(br.Receipts[i].GasUsed)
+		effectiveTip := txs[i].GetEffectiveGasTip(baseFee)
+		txValue := new(uint256.Int).Mul(gas, effectiveTip)
+		blockValue.Add(blockValue, txValue)
+	}
+	return blockValue
+}
+
+func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *execution.GetAssembledBlockRequest) (*execution.GetAssembledBlockResponse, error) {
+	payloadId := req.Id
+	builder, ok := e.builders[payloadId]
+	if !ok {
+		log.Warn("Payload not stored", "payloadId", payloadId)
+		return nil, &engine_helpers.UnknownPayloadErr
+	}
+
+	blockWithReceipts, err := builder.Stop()
+	if err != nil {
+		e.logger.Error("Failed to build PoS block", "err", err)
+		return nil, err
+	}
+	block := blockWithReceipts.Block
+	header := block.Header()
+
+	baseFee := new(uint256.Int)
+	baseFee.SetFromBig(header.BaseFee)
+
+	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
+	if err != nil {
+		return nil, err
+	}
+	txs := []hexutility.Bytes{}
+	for _, tx := range encodedTransactions {
+		txs = append(txs, tx)
+	}
+
+	payload := &engine_types.ExecutionPayload{
+		ParentHash:    header.ParentHash,
+		FeeRecipient:  header.Coinbase,
+		Timestamp:     hexutil.Uint64(header.Time),
+		PrevRandao:    header.MixDigest,
+		StateRoot:     block.Root(),
+		ReceiptsRoot:  block.ReceiptHash(),
+		LogsBloom:     block.Bloom().Bytes(),
+		GasLimit:      hexutil.Uint64(block.GasLimit()),
+		GasUsed:       hexutil.Uint64(block.GasUsed()),
+		BlockNumber:   hexutil.Uint64(block.NumberU64()),
+		ExtraData:     block.Extra(),
+		BaseFeePerGas: (*hexutil.Big)(header.BaseFee),
+		BlockHash:     block.Hash(),
+		Transactions:  txs,
+	}
+	if block.Withdrawals() != nil {
+		payload.Withdrawals = block.Withdrawals()
+	}
+
+	if header.DataGasUsed != nil && header.ExcessDataGas != nil {
+		payload.DataGasUsed = (*hexutil.Uint64)(header.DataGasUsed)
+		payload.ExcessDataGas = (*hexutil.Uint64)(header.ExcessDataGas)
+	}
+
+	blockValue := blockValue(blockWithReceipts, baseFee)
+
+	blobsBundle := &engine_types.BlobsBundleV1{}
+	for i, tx := range block.Transactions() {
+		if tx.Type() != types.BlobTxType {
+			continue
+		}
+		blobTx, ok := tx.(*types.BlobTxWrapper)
+		if !ok {
+			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobTx)
+		}
+		versionedHashes, commitments, proofs, blobs := blobTx.GetDataHashes(), blobTx.Commitments, blobTx.Proofs, blobTx.Blobs
+		lenCheck := len(versionedHashes)
+		if lenCheck != len(commitments) || lenCheck != len(proofs) || lenCheck != len(blobs) {
+			return nil, fmt.Errorf("tx %d in block %s has inconsistent commitments (%d) / proofs (%d) / blobs (%d) / "+
+				"versioned hashes (%d)", i, block.Hash(), len(commitments), len(proofs), len(blobs), lenCheck)
+		}
+		for _, commitment := range commitments {
+			blobsBundle.Commitments = append(blobsBundle.Commitments, commitment)
+		}
+		for _, proof := range proofs {
+			blobsBundle.Proofs = append(blobsBundle.Proofs, proof)
+		}
+		for _, blob := range blobs {
+			blobsBundle.Blobs = append(blobsBundle.Blobs, blob)
+		}
+	}
+
+	return &engine_types.GetPayloadResponse{
+		ExecutionPayload: payload,
+		BlockValue:       (*hexutil.Big)(blockValue.ToBig()),
+		BlobsBundle:      blobsBundle,
+	}, nil
 
 }
