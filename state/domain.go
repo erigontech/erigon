@@ -205,7 +205,7 @@ type Domain struct {
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 	logger       log.Logger
 
-	warmDir string
+	dir string
 }
 
 type domainCfg struct {
@@ -216,7 +216,7 @@ func NewDomain(cfg domainCfg, dir, tmpdir string, aggregationStep uint64, filena
 	baseDir := filepath.Dir(dir)
 	baseDir = filepath.Dir(baseDir)
 	d := &Domain{
-		warmDir:   filepath.Join(baseDir, "warm"),
+		dir:       filepath.Join(baseDir, "warm"),
 		keysTable: keysTable,
 		valsTable: valsTable,
 		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
@@ -281,12 +281,12 @@ func (d *Domain) OpenList(coldNames, warmNames []string) error {
 	if err := d.History.OpenList(coldNames, warmNames); err != nil {
 		return err
 	}
-	return d.openList(coldNames)
+	return d.openList(warmNames)
 }
 
-func (d *Domain) openList(coldNames []string) error {
-	d.closeWhatNotInList(coldNames)
-	d.garbageFiles = d.scanStateFiles(coldNames)
+func (d *Domain) openList(names []string) error {
+	d.closeWhatNotInList(names)
+	d.garbageFiles = d.scanStateFiles(names)
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
@@ -312,7 +312,7 @@ func (d *Domain) GetAndResetStats() DomainStats {
 func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
 	var err error
-Loop:
+
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 3 {
@@ -339,14 +339,14 @@ Loop:
 		var newFile = newFilesItem(startTxNum, endTxNum, d.aggregationStep)
 		newFile.frozen = false
 
-		for _, ext := range d.integrityFileExtensions {
-			requiredFile := fmt.Sprintf("%s.%d-%d.%s", d.filenameBase, startStep, endStep, ext)
-			if !dir.FileExist(filepath.Join(d.dir, requiredFile)) {
-				d.logger.Debug(fmt.Sprintf("[snapshots] skip %s because %s doesn't exists", name, requiredFile))
-				garbageFiles = append(garbageFiles, newFile)
-				continue Loop
-			}
-		}
+		//for _, ext := range d.integrityFileExtensions {
+		//	requiredFile := fmt.Sprintf("%s.%d-%d.%s", d.filenameBase, startStep, endStep, ext)
+		//	if !dir.FileExist(filepath.Join(d.dir, requiredFile)) {
+		//		d.logger.Debug(fmt.Sprintf("[snapshots] skip %s because %s doesn't exists", name, requiredFile))
+		//		garbageFiles = append(garbageFiles, newFile)
+		//		continue Loop
+		//	}
+		//}
 
 		if _, has := d.files.Get(newFile); has {
 			continue

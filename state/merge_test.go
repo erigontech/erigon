@@ -16,11 +16,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 		ii.scanStateFiles([]string{
 			"test.0-2.ef",
-			"test.0-2.efi",
 			"test.2-3.ef",
-			"test.2-3.efi",
 			"test.3-4.ef",
-			"test.3-4.efi",
 		})
 		ii.reCalcRoFiles()
 

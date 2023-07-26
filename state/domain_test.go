@@ -370,6 +370,7 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 }
 
 func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
+	fmt.Printf("txs: %d\n", txs)
 	t.Helper()
 	require := require.New(t)
 	ctx := context.Background()
