@@ -3,6 +3,7 @@ package eth1
 import (
 	"context"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
@@ -11,10 +12,12 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -32,17 +35,27 @@ type EthereumExecutionModule struct {
 	forkValidator     *engine_helpers.ForkValidator
 
 	logger log.Logger
+	// Block building
+	nextPayloadId  uint64
+	lastParameters *core.BlockBuilderParameters
+	builderFunc    builder.BlockBuilderFunc
+	builders       map[uint64]*builder.BlockBuilder
+
+	// configuration
+	config *chain.Config
 
 	execution.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator, logger log.Logger) *EthereumExecutionModule {
+func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator, config *chain.Config, builderFunc builder.BlockBuilderFunc, logger log.Logger) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:       blockReader,
 		db:                db,
 		executionPipeline: executionPipeline,
 		logger:            logger,
 		forkValidator:     forkValidator,
+		builders:          make(map[uint64]*builder.BlockBuilder),
+		config:            config,
 		semaphore:         semaphore.NewWeighted(1),
 	}
 }
@@ -228,5 +241,3 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}), // TODO: implement
 	}, nil
 }
-
-// Missing: NewPayload, AssembleBlock
