@@ -172,12 +172,13 @@ func ExecV3(ctx context.Context,
 	}()
 
 	useExternalTx := applyTx != nil
-	if !useExternalTx && !parallel {
+	if initialCycle || useExternalTx {
 		agg.BuildOptionalMissedIndicesInBackground(ctx, estimate.IndexSnapshot.Workers())
 		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
-
+	}
+	if !useExternalTx && !parallel {
 		var err error
 		applyTx, err = chainDb.BeginRw(ctx)
 		if err != nil {
@@ -311,7 +312,7 @@ func ExecV3(ctx context.Context,
 
 	commitThreshold := batchSize.Bytes()
 	progress := NewProgress(blockNum, commitThreshold, workerCount, execStage.LogPrefix(), logger)
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery := time.NewTicker(2 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
 	defer pruneEvery.Stop()
@@ -587,6 +588,7 @@ func ExecV3(ctx context.Context,
 	//var err error
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
+		time.Sleep(50 * time.Microsecond)
 		if !parallel {
 			select {
 			case readAhead <- blockNum:
