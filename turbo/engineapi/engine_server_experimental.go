@@ -1,6 +1,7 @@
 package engineapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -473,7 +474,7 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 	}
 
 	if version >= clparams.CapellaVersion {
-		req.Withdrawals = ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
+		req.Withdrawals = engine_types.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
 	}
 
 	resp, err := s.executionService.AssembleBlock(ctx, req)
@@ -488,7 +489,7 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 			Status:          engine_types.ValidStatus,
 			LatestValidHash: &headHash,
 		},
-		PayloadId: convertPayloadId(resp.Id),
+		PayloadId: engine_types.ConvertPayloadId(resp.Id),
 	}, nil
 }
 
@@ -514,6 +515,25 @@ func (s *EngineServerExperimental) getPayloadBodiesByHash(ctx context.Context, r
 	}
 
 	return bodies, nil
+}
+
+func extractPayloadBodyFromBlock(block *types.Block) (*engine_types.ExecutionPayloadBodyV1, error) {
+	if block == nil {
+		return nil, nil
+	}
+
+	txs := block.Transactions()
+	bdTxs := make([]hexutility.Bytes, len(txs))
+	for idx, tx := range txs {
+		var buf bytes.Buffer
+		if err := tx.MarshalBinary(&buf); err != nil {
+			return nil, err
+		} else {
+			bdTxs[idx] = buf.Bytes()
+		}
+	}
+
+	return &engine_types.ExecutionPayloadBodyV1{Transactions: bdTxs, Withdrawals: block.Withdrawals()}, nil
 }
 
 func (s *EngineServerExperimental) getPayloadBodiesByRange(ctx context.Context, start, count uint64, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
@@ -642,6 +662,20 @@ func (e *EngineServerExperimental) GetPayloadBodiesByRangeV1(ctx context.Context
 	return e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count), clparams.CapellaVersion)
 }
 
+var ourCapabilities = []string{
+	"engine_forkchoiceUpdatedV1",
+	"engine_forkchoiceUpdatedV2",
+	"engine_newPayloadV1",
+	"engine_newPayloadV2",
+	// "engine_newPayloadV3",
+	"engine_getPayloadV1",
+	"engine_getPayloadV2",
+	// "engine_getPayloadV3",
+	"engine_exchangeTransitionConfigurationV1",
+	"engine_getPayloadBodiesByHashV1",
+	"engine_getPayloadBodiesByRangeV1",
+}
+
 func (e *EngineServerExperimental) ExchangeCapabilities(fromCl []string) []string {
 	missingOurs := compareCapabilities(fromCl, ourCapabilities)
 	missingCl := compareCapabilities(ourCapabilities, fromCl)
@@ -651,4 +685,22 @@ func (e *EngineServerExperimental) ExchangeCapabilities(fromCl []string) []strin
 	}
 
 	return ourCapabilities
+}
+
+func compareCapabilities(from []string, to []string) []string {
+	result := make([]string, 0)
+	for _, f := range from {
+		found := false
+		for _, t := range to {
+			if f == t {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, f)
+		}
+	}
+
+	return result
 }

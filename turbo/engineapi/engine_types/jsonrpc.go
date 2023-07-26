@@ -1,6 +1,7 @@
 package engine_types
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 
@@ -133,7 +134,7 @@ func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 		Transactions:  transactions,
 	}
 	if payload.Version >= 2 {
-		res.Withdrawals = convertWithdrawalsFromRpc(payload.Withdrawals)
+		res.Withdrawals = ConvertWithdrawalsFromRpc(payload.Withdrawals)
 	}
 	if payload.Version >= 3 {
 		dataGasUsed := *payload.DataGasUsed
@@ -165,7 +166,23 @@ func ConvertBlobsFromRpc(bundle *types2.BlobsBundleV1) *BlobsBundleV1 {
 	return res
 }
 
-func convertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
+func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types2.Withdrawal, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types2.Withdrawal{
+			Index:          w.Index,
+			ValidatorIndex: w.Validator,
+			Address:        gointerfaces.ConvertAddressToH160(w.Address),
+			Amount:         w.Amount,
+		})
+	}
+	return out
+}
+
+func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 	if in == nil {
 		return nil
 	}
@@ -179,4 +196,11 @@ func convertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 		})
 	}
 	return out
+}
+
+func ConvertPayloadId(payloadId uint64) *hexutility.Bytes {
+	encodedPayloadId := make([]byte, 8)
+	binary.BigEndian.PutUint64(encodedPayloadId, payloadId)
+	ret := hexutility.Bytes(encodedPayloadId)
+	return &ret
 }
