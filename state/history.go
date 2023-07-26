@@ -304,7 +304,7 @@ func (h *History) missedIdxFiles() (l []*filesItem) {
 	return l
 }
 
-func (h *History) buildVi(ctx context.Context, item *filesItem, p *background.Progress) (err error) {
+func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
 	search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
 	iiItem, ok := h.InvertedIndex.files.Get(search)
 	if !ok {
@@ -315,11 +315,10 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, p *background.Pr
 	fName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep)
 	idxPath := filepath.Join(h.dir, fName)
 
+	p := ps.AddNew(fName, uint64(item.decompressor.Count()*2))
+	defer ps.Delete(p)
+
 	//h.logger.Info("[snapshots] build idx", "file", fName)
-
-	p.Name.Store(&fName)
-	p.Total.Store(uint64(iiItem.decompressor.Count()) * 2)
-
 	count, err := iterateForVi(item, iiItem, p, h.compressHistoryVals, func(v []byte) error { return nil })
 	if err != nil {
 		return err
@@ -333,9 +332,7 @@ func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps 
 	for _, item := range missedFiles {
 		item := item
 		g.Go(func() error {
-			p := ps.AddNew(item.decompressor.FileName(), uint64(item.decompressor.Count()))
-			defer ps.Delete(p)
-			return h.buildVi(ctx, item, p)
+			return h.buildVi(ctx, item, ps)
 		})
 	}
 }
