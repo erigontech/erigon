@@ -5,19 +5,16 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/golang/gddo/log"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 )
 
 func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
@@ -99,11 +96,18 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 }
 
 func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *execution.GetAssembledBlockRequest) (*execution.GetAssembledBlockResponse, error) {
+	if !e.semaphore.TryAcquire(1) {
+		return &execution.GetAssembledBlockResponse{
+			Busy: true,
+		}, nil
+	}
+	defer e.semaphore.Release(1)
 	payloadId := req.Id
 	builder, ok := e.builders[payloadId]
 	if !ok {
-		log.Warn("Payload not stored", "payloadId", payloadId)
-		return nil, &engine_helpers.UnknownPayloadErr
+		return &execution.GetAssembledBlockResponse{
+			Busy: false,
+		}, nil
 	}
 
 	blockWithReceipts, err := builder.Stop()
@@ -121,39 +125,38 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 	if err != nil {
 		return nil, err
 	}
-	txs := []hexutility.Bytes{}
-	for _, tx := range encodedTransactions {
-		txs = append(txs, tx)
-	}
 
-	payload := &engine_types.ExecutionPayload{
-		ParentHash:    header.ParentHash,
-		FeeRecipient:  header.Coinbase,
-		Timestamp:     hexutil.Uint64(header.Time),
-		PrevRandao:    header.MixDigest,
-		StateRoot:     block.Root(),
-		ReceiptsRoot:  block.ReceiptHash(),
-		LogsBloom:     block.Bloom().Bytes(),
-		GasLimit:      hexutil.Uint64(block.GasLimit()),
-		GasUsed:       hexutil.Uint64(block.GasUsed()),
-		BlockNumber:   hexutil.Uint64(block.NumberU64()),
+	payload := &types2.ExecutionPayload{
+		Version:       1,
+		ParentHash:    gointerfaces.ConvertHashToH256(header.ParentHash),
+		Coinbase:      gointerfaces.ConvertAddressToH160(header.Coinbase),
+		Timestamp:     header.Time,
+		PrevRandao:    gointerfaces.ConvertHashToH256(header.MixDigest),
+		StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),
+		ReceiptRoot:   gointerfaces.ConvertHashToH256(block.ReceiptHash()),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(block.Bloom().Bytes()),
+		GasLimit:      block.GasLimit(),
+		GasUsed:       block.GasUsed(),
+		BlockNumber:   block.NumberU64(),
 		ExtraData:     block.Extra(),
-		BaseFeePerGas: (*hexutil.Big)(header.BaseFee),
-		BlockHash:     block.Hash(),
-		Transactions:  txs,
+		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
+		BlockHash:     gointerfaces.ConvertHashToH256(block.Hash()),
+		Transactions:  encodedTransactions,
 	}
 	if block.Withdrawals() != nil {
-		payload.Withdrawals = block.Withdrawals()
+		payload.Version = 2
+		payload.Withdrawals = ConvertWithdrawalsToRpc(block.Withdrawals())
 	}
 
 	if header.DataGasUsed != nil && header.ExcessDataGas != nil {
-		payload.DataGasUsed = (*hexutil.Uint64)(header.DataGasUsed)
-		payload.ExcessDataGas = (*hexutil.Uint64)(header.ExcessDataGas)
+		payload.Version = 3
+		payload.DataGasUsed = header.DataGasUsed
+		payload.ExcessDataGas = header.ExcessDataGas
 	}
 
 	blockValue := blockValue(blockWithReceipts, baseFee)
 
-	blobsBundle := &engine_types.BlobsBundleV1{}
+	blobsBundle := &types2.BlobsBundleV1{}
 	for i, tx := range block.Transactions() {
 		if tx.Type() != types.BlobTxType {
 			continue
@@ -169,20 +172,22 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 				"versioned hashes (%d)", i, block.Hash(), len(commitments), len(proofs), len(blobs), lenCheck)
 		}
 		for _, commitment := range commitments {
-			blobsBundle.Commitments = append(blobsBundle.Commitments, commitment)
+			blobsBundle.Commitments = append(blobsBundle.Commitments, commitment[:])
 		}
 		for _, proof := range proofs {
-			blobsBundle.Proofs = append(blobsBundle.Proofs, proof)
+			blobsBundle.Proofs = append(blobsBundle.Proofs, proof[:])
 		}
 		for _, blob := range blobs {
-			blobsBundle.Blobs = append(blobsBundle.Blobs, blob)
+			blobsBundle.Blobs = append(blobsBundle.Blobs, blob[:])
 		}
 	}
 
-	return &engine_types.GetPayloadResponse{
-		ExecutionPayload: payload,
-		BlockValue:       (*hexutil.Big)(blockValue.ToBig()),
-		BlobsBundle:      blobsBundle,
+	return &execution.GetAssembledBlockResponse{
+		Data: &execution.AssembledBlockData{
+			ExecutionPayload: payload,
+			BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),
+			BlobsBundle:      blobsBundle,
+		},
+		Busy: false,
 	}, nil
-
 }
