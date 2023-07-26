@@ -951,8 +951,8 @@ func (sf StaticFiles) CleanupOnError() {
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
-	if d.filenameBase == "commitment" {
-		log.Warn("[dbg] buildFiles", "step", step, "txNum", step*d.aggregationStep)
+	if d.filenameBase == AggTraceFileLife {
+		d.logger.Warn("[dbg] buildFiles", "step", step)
 	}
 
 	start := time.Now()
