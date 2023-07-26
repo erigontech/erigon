@@ -406,7 +406,9 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			maxPossibleValue = int(it.FilesAmount())
 			baseDataID = uint64(0)
 		}
-		fmt.Printf("[dbg] locality: %s\n", fName)
+		if li.filenameBase == "accounts" {
+			fmt.Printf("[dbg] locality: %s\n", fName)
+		}
 		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, maxPossibleValue, baseDataID, uint64(count), li.logger)
 		if err != nil {
 			return nil, err
