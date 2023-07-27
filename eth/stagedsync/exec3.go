@@ -172,7 +172,7 @@ func ExecV3(ctx context.Context,
 	}()
 
 	useExternalTx := applyTx != nil
-	if initialCycle || useExternalTx {
+	if initialCycle || !useExternalTx {
 		agg.BuildOptionalMissedIndicesInBackground(ctx, estimate.IndexSnapshot.Workers())
 		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
