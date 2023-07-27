@@ -530,13 +530,13 @@ func TestDecompressRandomMatchBool(t *testing.T) {
 		pos := g.dataP
 		if INPUT_FLAGS[input_idx] == 0 { // []byte input
 			notExpected := string(WORDS[word_idx]) + "z"
-			ok, _ := g.Match([]byte(notExpected))
+			ok := g.Match([]byte(notExpected))
 			if ok {
 				t.Fatalf("not expected match: %v\n got: %v\n", []byte(notExpected), WORDS[word_idx])
 			}
 
 			expected := WORDS[word_idx]
-			ok, _ = g.Match(expected)
+			ok = g.Match(expected)
 			if !ok {
 				g.Reset(pos)
 				word, _ := g.Next(nil)
@@ -548,13 +548,13 @@ func TestDecompressRandomMatchBool(t *testing.T) {
 			word_idx++
 		} else { // nil input
 			notExpected := []byte{0}
-			ok, _ := g.Match(notExpected)
+			ok := g.Match(notExpected)
 			if ok {
 				t.Fatal("not expected match []byte{0} with nil\n")
 			}
 
 			expected := []byte{}
-			ok, _ = g.Match(nil)
+			ok = g.Match(nil)
 			if !ok {
 				g.Reset(pos)
 				word, _ := g.Next(nil)
