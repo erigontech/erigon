@@ -53,7 +53,7 @@ var cmdResetState = &cobra.Command{
 			}
 			return
 		}
-		
+
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
@@ -67,7 +67,7 @@ var cmdResetState = &cobra.Command{
 
 var cmdClearBadBlocks = &cobra.Command{
 	Use:   "clear_bad_blocks",
-	Short: "Clear bad blocks",
+	Short: "Clear table with bad block hashes to allow to process this blocks one more time",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
 		ctx, _ := common.RootContext()
