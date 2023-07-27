@@ -646,7 +646,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 				if err = agg.Prune(ctx, 10); err != nil {
 					return err
 				}
-				log.Warn(fmt.Sprintf("[snapshots] DB has: %s", agg.StepsRangeInDBAsStr(tx)))
 			}
 			return err
 		}); err != nil {
