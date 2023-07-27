@@ -728,7 +728,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	if ii.noFsync {
 		comp.DisableFsync()
 	}
-	p := ps.AddNew("merge "+datFileName, 1)
+	p := ps.AddNew(datFileName, 1)
 	defer ps.Delete(p)
 
 	var cp CursorHeap
@@ -888,7 +888,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 		if h.noFsync {
 			comp.DisableFsync()
 		}
-		p := ps.AddNew("merge "+datFileName, 1)
+		p := ps.AddNew(datFileName, 1)
 		defer ps.Delete(p)
 		var cp CursorHeap
 		heap.Init(&cp)
@@ -969,7 +969,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 		}
 		ps.Delete(p)
 
-		p = ps.AddNew("merge "+idxFileName, uint64(decomp.Count()/2))
+		p = ps.AddNew(idxFileName, uint64(decomp.Count()/2))
 		defer ps.Delete(p)
 		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
 			KeyCount:   keyCount,
