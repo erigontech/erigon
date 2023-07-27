@@ -1,6 +1,7 @@
 package freezeblocks
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -21,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -28,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -228,7 +231,17 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 		if e != nil {
 			return false, e
 		}
-		if err := collect(event); err != nil {
+		snapshotRecord := make([]byte, len(event)+length.BlockNum+length.BlockNum+length.Hash)
+		copy(snapshotRecord, eventIdBytes)
+		copy(snapshotRecord[length.BlockNum:], blockNumBytes)
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return false, err
+		}
+		txnHash := types.ComputeBorTxHash(blockNum, blockHash)
+		copy(snapshotRecord[length.BlockNum+length.BlockNum:], txnHash[:])
+		copy(snapshotRecord[length.BlockNum+length.BlockNum+length.Hash:], event)
+		if err := collect(snapshotRecord); err != nil {
 			return false, err
 		}
 		select {
@@ -251,13 +264,84 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 	return nil
 }
 
-func BorEventsIdx(ctx context.Context, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("BorEventsIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
 		}
 	}()
 	// Calculate how many records there will be in the index
+	d, err := compress.NewDecompressor(segmentFilePath)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	g := d.MakeGetter()
+	var blockNumBuf [length.BlockNum]byte
+	var first bool = true
+	var firstEventID uint64
+	word := make([]byte, 0, 4096)
+	var blockCount int
+	for g.HasNext() {
+		word, _ = g.Next(word[:0])
+		if first || !bytes.Equal(blockNumBuf[:], word[length.BlockNum:length.BlockNum+length.BlockNum]) {
+			blockCount++
+		}
+		if first {
+			firstEventID = binary.BigEndian.Uint64(word[:length.BlockNum])
+			first = false
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(blockFrom, blockTo, snaptype.BorEvents2Block.String()))
+
+	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   blockCount,
+		Enums:      true,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		IndexFile:  idxFilePath,
+		BaseDataID: firstEventID,
+	}, logger)
+	if err != nil {
+		return err
+	}
+	rs.LogLvl(log.LvlDebug)
+
+	defer d.EnableMadvNormal().DisableReadAhead()
+RETRY:
+	g.Reset(0)
+	first = true
+	var i uint64
+	for g.HasNext() {
+		word, _ = g.Next(word[:0])
+		i++
+		if first || !bytes.Equal(blockNumBuf[:], word[length.BlockNum:length.BlockNum+length.BlockNum]) {
+			blockNum := binary.BigEndian.Uint64(word[length.BlockNum : length.BlockNum+length.BlockNum])
+			if err = rs.AddKey(word[length.BlockNum+length.BlockNum:length.BlockNum+length.BlockNum+length.Hash], blockNum); err != nil {
+				return err
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+	if err = rs.Build(); err != nil {
+		if errors.Is(err, recsplit.ErrCollision) {
+			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+			rs.ResetNextSalt()
+			goto RETRY
+		}
+		return err
+	}
+
 	return nil
 }
 

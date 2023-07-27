@@ -853,7 +853,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 		}
 	case snaptype.BorEvents:
 		dir, _ := filepath.Split(sn.Path)
-		if err := BorEventsIdx(ctx, sn.From, sn.To, dir, tmpDir, p, lvl, logger); err != nil {
+		if err := BorEventsIdx(ctx, sn.Path, sn.From, sn.To, dir, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
 	}
