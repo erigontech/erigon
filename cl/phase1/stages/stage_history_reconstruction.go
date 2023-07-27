@@ -24,7 +24,7 @@ type StageHistoryReconstructionCfg struct {
 	genesisCfg      *clparams.GenesisConfig
 	beaconCfg       *clparams.BeaconChainConfig
 	downloader      *network.BackwardBeaconDownloader
-	state           *state.BeaconState
+	state           *state.CachingBeaconState
 	executionClient *execution_client2.ExecutionClient
 	beaconDBCfg     *rawdb2.BeaconDataConfig
 	tmpdir          string
@@ -32,7 +32,7 @@ type StageHistoryReconstructionCfg struct {
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(db kv.RwDB, downloader *network.BackwardBeaconDownloader, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, beaconDBCfg *rawdb2.BeaconDataConfig, state *state.BeaconState, tmpdir string, executionClient *execution_client2.ExecutionClient) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(db kv.RwDB, downloader *network.BackwardBeaconDownloader, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, beaconDBCfg *rawdb2.BeaconDataConfig, state *state.CachingBeaconState, tmpdir string, executionClient *execution_client2.ExecutionClient) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		db:              db,
 		genesisCfg:      genesisCfg,

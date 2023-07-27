@@ -19,6 +19,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"embed"
 	"encoding/binary"
 	"encoding/json"
@@ -445,6 +446,13 @@ func ChiadoGenesisBlock() *types.Genesis {
 //	DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
 var DevnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
 var DevnetEtherbase = libcommon.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
+
+// DevnetSignKey is defined like this to allow the devnet process to pre-allocate keys
+// for nodes and then pass the address via --miner.etherbase - the function will be called
+// to retieve the mining key
+var DevnetSignKey = func(address libcommon.Address) *ecdsa.PrivateKey {
+	return DevnetSignPrivateKey
+}
 
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genesis {

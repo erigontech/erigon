@@ -14,7 +14,7 @@ const (
 	testExitEpoch = 53
 )
 
-func getTestStateBalances(t *testing.T) *state2.BeaconState {
+func getTestStateBalances(t *testing.T) *state2.CachingBeaconState {
 	numVals := uint64(2048)
 	b := state2.New(&clparams.MainnetBeaconConfig)
 	for i := uint64(0); i < numVals; i++ {
@@ -30,7 +30,7 @@ func TestIncreaseBalance(t *testing.T) {
 	testInd := uint64(42)
 	amount := uint64(100)
 	beforeBalance, _ := s.ValidatorBalance(int(testInd))
-	state2.IncreaseBalance(s.BeaconState, testInd, amount)
+	state2.IncreaseBalance(s, testInd, amount)
 	afterBalance, _ := s.ValidatorBalance(int(testInd))
 	require.Equal(t, afterBalance, beforeBalance+amount)
 }
@@ -65,7 +65,7 @@ func TestDecreaseBalance(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
 			s := getTestStateBalances(t)
-			require.NoError(t, state2.DecreaseBalance(s.BeaconState, testInd, tc.delta))
+			require.NoError(t, state2.DecreaseBalance(s, testInd, tc.delta))
 			afterBalance, _ := s.ValidatorBalance(int(testInd))
 			require.Equal(t, afterBalance, tc.expectedBalance)
 		})

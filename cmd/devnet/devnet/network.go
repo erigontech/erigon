@@ -1,12 +1,14 @@
 package devnet
 
 import (
-	go_context "context"
+	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/params"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/log/v3"
@@ -26,32 +29,55 @@ type Network struct {
 	DataDir            string
 	Chain              string
 	Logger             log.Logger
+	BasePort           int
 	BasePrivateApiAddr string
 	BaseRPCHost        string
 	BaseRPCPort        int
 	Snapshots          bool
 	Nodes              []Node
+	Services           []Service
+	Alloc              types.GenesisAlloc
 	wg                 sync.WaitGroup
 	peers              []string
+	namedNodes         map[string]Node
+}
+
+func (nw *Network) ChainID() *big.Int {
+	if len(nw.Nodes) > 0 {
+		return nw.Nodes[0].ChainID()
+	}
+
+	return &big.Int{}
 }
 
 // Start starts the process for multiple erigon nodes running on the dev chain
-func (nw *Network) Start(ctx *cli.Context) error {
+func (nw *Network) Start(ctx context.Context) error {
 
 	type configurable interface {
 		Configure(baseNode args.Node, nodeNumber int) (int, interface{}, error)
 	}
 
+	for _, service := range nw.Services {
+		if err := service.Start(ctx); err != nil {
+			nw.Stop()
+			return err
+		}
+	}
+
 	baseNode := args.Node{
 		DataDir:        nw.DataDir,
 		Chain:          nw.Chain,
+		Port:           nw.BasePort,
 		HttpPort:       nw.BaseRPCPort,
 		PrivateApiAddr: nw.BasePrivateApiAddr,
 		Snapshots:      nw.Snapshots,
 	}
 
-	metricsEnabled := ctx.Bool("metrics")
-	metricsNode := ctx.Int("metrics.node")
+	cliCtx := CliContext(ctx)
+
+	metricsEnabled := cliCtx.Bool("metrics")
+	metricsNode := cliCtx.Int("metrics.node")
+	nw.namedNodes = map[string]Node{}
 
 	for i, node := range nw.Nodes {
 		if configurable, ok := node.(configurable); ok {
@@ -60,13 +86,13 @@ func (nw *Network) Start(ctx *cli.Context) error {
 
 			if metricsEnabled && metricsNode == i {
 				base.Metrics = true
-				base.MetricsPort = ctx.Int("metrics.port")
+				base.MetricsPort = cliCtx.Int("metrics.port")
 			}
 
 			nodePort, args, err := configurable.Configure(base, i)
 
 			if err == nil {
-				node, err = nw.startNode(fmt.Sprintf("http://%s:%d", nw.BaseRPCHost, nodePort), args, i)
+				node, err = nw.createNode(fmt.Sprintf("%s:%d", nw.BaseRPCHost, nodePort), args)
 			}
 
 			if err != nil {
@@ -75,54 +101,111 @@ func (nw *Network) Start(ctx *cli.Context) error {
 			}
 
 			nw.Nodes[i] = node
+			nw.namedNodes[node.Name()] = node
 
-			// get the enode of the node
-			// - note this has the side effect of waiting for the node to start
-			enode, err := getEnode(node)
+			for _, service := range nw.Services {
+				service.NodeCreated(ctx, node)
+			}
+		}
+	}
 
-			if err != nil {
-				if errors.Is(err, devnetutils.ErrInvalidEnodeString) {
-					continue
-				}
+	for _, node := range nw.Nodes {
+		err := nw.startNode(node)
 
-				nw.Stop()
-				return err
+		if err != nil {
+			nw.Stop()
+			return err
+		}
+
+		for _, service := range nw.Services {
+			service.NodeStarted(ctx, node)
+		}
+
+		// get the enode of the node
+		// - note this has the side effect of waiting for the node to start
+		enode, err := getEnode(node)
+
+		if err != nil {
+			if errors.Is(err, devnetutils.ErrInvalidEnodeString) {
+				continue
 			}
 
-			nw.peers = append(nw.peers, enode)
-			baseNode.StaticPeers = strings.Join(nw.peers, ",")
-
-			// TODO do we need to call AddPeer to the nodes to make them aware of this one
-			// the current model only works for an appending node network where the peers gossip
-			// connections - not sure if this is the case ?
+			nw.Stop()
+			return err
 		}
+
+		nw.peers = append(nw.peers, enode)
+		baseNode.StaticPeers = strings.Join(nw.peers, ",")
+
+		// TODO do we need to call AddPeer to the nodes to make them aware of this one
+		// the current model only works for an appending node network where the peers gossip
+		// connections - not sure if this is the case ?
 	}
 
 	return nil
 }
 
-// startNode starts an erigon node on the dev chain
-func (nw *Network) startNode(nodeAddr string, cfg interface{}, nodeNumber int) (Node, error) {
+var blockProducerFunds = (&big.Int{}).Mul(big.NewInt(1000), big.NewInt(params.Ether))
 
-	args, err := devnetutils.AsArgs(cfg)
-
-	if err != nil {
-		return nil, err
-	}
-
-	nw.wg.Add(1)
-
-	node := node{
+func (nw *Network) createNode(nodeAddr string, cfg interface{}) (Node, error) {
+	n := &node{
 		sync.Mutex{},
 		requests.NewRequestGenerator(nodeAddr, nw.Logger),
 		cfg,
 		&nw.wg,
+		nw,
 		make(chan error),
+		nil,
+		nil,
 		nil,
 	}
 
+	if n.IsBlockProducer() {
+		if nw.Alloc == nil {
+			nw.Alloc = types.GenesisAlloc{
+				n.Account().Address: types.GenesisAccount{Balance: blockProducerFunds},
+			}
+		} else {
+			nw.Alloc[n.Account().Address] = types.GenesisAccount{Balance: blockProducerFunds}
+		}
+	}
+
+	return n, nil
+}
+
+func copyFlags(flags []cli.Flag) []cli.Flag {
+	copies := make([]cli.Flag, len(flags))
+
+	for i, flag := range flags {
+		flagValue := reflect.ValueOf(flag).Elem()
+		copyValue := reflect.New(flagValue.Type()).Elem()
+
+		for f := 0; f < flagValue.NumField(); f++ {
+			if flagValue.Type().Field(f).PkgPath == "" {
+				copyValue.Field(f).Set(flagValue.Field(f))
+			}
+		}
+
+		copies[i] = copyValue.Addr().Interface().(cli.Flag)
+	}
+
+	return copies
+}
+
+// startNode starts an erigon node on the dev chain
+func (nw *Network) startNode(n Node) error {
+	nw.wg.Add(1)
+
+	node := n.(*node)
+
+	args, err := args.AsArgs(node.args)
+
+	if err != nil {
+		return err
+	}
+
 	go func() {
-		nw.Logger.Info("Running node", "number", nodeNumber, "args", args)
+		nw.Logger.Info("Running node", "name", node.Name(), "args", args)
 
 		// catch any errors and avoid panics if an error occurs
 		defer func() {
@@ -131,23 +214,25 @@ func (nw *Network) startNode(nodeAddr string, cfg interface{}, nodeNumber int) (
 				return
 			}
 
-			nw.Logger.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
+			nw.Logger.Error("catch panic", "node", node.Name(), "err", panicResult, "stack", dbg.Stack())
 			nw.Stop()
 			os.Exit(1)
 		}()
 
-		app := erigonapp.MakeApp(fmt.Sprintf("node-%d", nodeNumber), node.run, erigoncli.DefaultFlags)
+		// cli flags are not thread safe and assume only one copy of a flag
+		// variable is needed per process - which does not work here
+		app := erigonapp.MakeApp(node.Name(), node.run, copyFlags(erigoncli.DefaultFlags))
 
 		if err := app.Run(args); err != nil {
-			nw.Logger.Warn("App run returned error", "node", fmt.Sprintf("node-%d", nodeNumber), "err", err)
+			nw.Logger.Warn("App run returned error", "node", node.Name(), "err", err)
 		}
 	}()
 
 	if err = <-node.startErr; err != nil {
-		return nil, err
+		return err
 	}
 
-	return &node, nil
+	return nil
 }
 
 // getEnode returns the enode of the netowrk node
@@ -194,10 +279,6 @@ func getEnode(n Node) (string, error) {
 	}
 }
 
-func (nw *Network) Run(ctx go_context.Context, scenario scenarios.Scenario) error {
-	return scenarios.Run(WithNetwork(ctx, nw), &scenario)
-}
-
 func (nw *Network) Stop() {
 	type stoppable interface {
 		Stop()
@@ -213,6 +294,13 @@ func (nw *Network) Stop() {
 
 	nw.Logger.Info("Waiting for nodes to stop")
 	nw.Wait()
+
+	nw.Logger.Info("Stopping services")
+	for _, service := range nw.Services {
+		service.Stop()
+	}
+
+	// TODO should we wait for services
 }
 
 func (nw *Network) Wait() {
@@ -223,7 +311,7 @@ func (nw *Network) FirstNode() Node {
 	return nw.Nodes[0]
 }
 
-func (nw *Network) SelectNode(ctx go_context.Context, selector interface{}) Node {
+func (nw *Network) SelectNode(ctx context.Context, selector interface{}) Node {
 	switch selector := selector.(type) {
 	case int:
 		if selector < len(nw.Nodes) {

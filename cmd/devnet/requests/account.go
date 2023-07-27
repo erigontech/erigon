@@ -2,6 +2,7 @@ package requests
 
 import (
 	"fmt"
+	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -23,19 +24,15 @@ type EthTransaction struct {
 	Value    hexutil.Big        `json:"value"`
 }
 
-func (reqGen *requestGenerator) GetBalance(address libcommon.Address, blockNum BlockNumber) (uint64, error) {
+func (reqGen *requestGenerator) GetBalance(address libcommon.Address, blockNum BlockNumber) (*big.Int, error) {
 	var b EthBalance
 
 	method, body := reqGen.getBalance(address, blockNum)
 	if res := reqGen.call(method, body, &b); res.Err != nil {
-		return 0, fmt.Errorf("failed to get balance: %v", res.Err)
+		return &big.Int{}, fmt.Errorf("failed to get balance: %v", res.Err)
 	}
 
-	if !b.Balance.ToInt().IsUint64() {
-		return 0, fmt.Errorf("balance is not uint64")
-	}
-
-	return b.Balance.ToInt().Uint64(), nil
+	return b.Balance.ToInt(), nil
 }
 
 func (req *requestGenerator) getBalance(address libcommon.Address, blockNum BlockNumber) (RPCMethod, string) {

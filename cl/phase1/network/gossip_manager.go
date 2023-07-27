@@ -129,11 +129,13 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 		// Do forkchoice if possible
 		if g.forkChoice.Engine() != nil {
 			finalizedCheckpoint := g.forkChoice.FinalizedCheckpoint()
+			log.Info("Caplin is sending forkchoice")
 			// Run forkchoice
 			if err := g.forkChoice.Engine().ForkChoiceUpdate(
 				g.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
 				g.forkChoice.GetEth1Hash(headRoot),
 			); err != nil {
+				log.Warn("Could not set forkchoice", "err", err)
 				l["at"] = "sending forkchoice"
 				return err
 			}

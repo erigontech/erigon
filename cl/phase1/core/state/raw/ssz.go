@@ -10,7 +10,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
 // BlockRoot computes the block root for the state.
@@ -83,25 +82,10 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 
 // SSZ size of the Beacon State
 func (b *BeaconState) EncodingSizeSSZ() (size int) {
-	if b.historicalRoots == nil {
-		b.historicalRoots = solid.NewHashList(int(b.beaconConfig.HistoricalRootsLimit))
-	}
 	size = int(b.baseOffsetSSZ()) + b.historicalRoots.EncodingSizeSSZ()
-	if b.eth1DataVotes == nil {
-		b.eth1DataVotes = solid.NewStaticListSSZ[*cltypes.Eth1Data](int(b.beaconConfig.Eth1DataVotesLength()), 72)
-	}
 	size += b.eth1DataVotes.EncodingSizeSSZ()
-	if b.validators == nil {
-		b.validators = solid.NewValidatorSet(int(b.beaconConfig.ValidatorRegistryLimit))
-	}
 	size += b.validators.EncodingSizeSSZ()
 	size += b.balances.Length() * 8
-	if b.previousEpochAttestations == nil {
-		b.previousEpochAttestations = solid.NewDynamicListSSZ[*solid.PendingAttestation](int(b.BeaconConfig().PreviousEpochAttestationsLength()))
-	}
-	if b.currentEpochAttestations == nil {
-		b.currentEpochAttestations = solid.NewDynamicListSSZ[*solid.PendingAttestation](int(b.BeaconConfig().CurrentEpochAttestationsLength()))
-	}
 	if b.version == clparams.Phase0Version {
 		size += b.previousEpochAttestations.EncodingSizeSSZ()
 		size += b.currentEpochAttestations.EncodingSizeSSZ()
@@ -111,9 +95,6 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	}
 
 	size += b.inactivityScores.Length() * 8
-	if b.historicalSummaries == nil {
-		b.historicalSummaries = solid.NewStaticListSSZ[*cltypes.HistoricalSummary](int(b.beaconConfig.HistoricalRootsLimit), 64)
-	}
 	size += b.historicalSummaries.EncodingSizeSSZ()
 	return
 }
