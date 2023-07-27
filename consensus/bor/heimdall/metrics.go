@@ -4,7 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
+	metrics2 "github.com/VictoriaMetrics/metrics"
+	"github.com/ledgerwatch/erigon/metrics/methelp"
+	metrics "github.com/ledgerwatch/erigon/metrics/methelp"
 )
 
 type (
@@ -12,8 +14,8 @@ type (
 	requestType    string
 
 	meter struct {
-		request map[bool]*metrics.Counter // map[isSuccessful]metrics.Meter
-		timer   metrics.Summary
+		request map[bool]*metrics2.Counter // map[isSuccessful]metrics.Meter
+		timer   *metrics2.Summary
 	}
 )
 
@@ -36,32 +38,32 @@ func getRequestType(ctx context.Context) (requestType, bool) {
 var (
 	requestMeters = map[requestType]meter{
 		stateSyncRequest: {
-			request: map[bool]*metrics.Counter{
+			request: map[bool]*metrics2.Counter{
 				true:  metrics.GetOrCreateCounter("client_requests_statesync_valid"),
 				false: metrics.GetOrCreateCounter("client_requests_statesync_invalid"),
 			},
-			timer: *metrics.GetOrCreateSummary("client_requests_statesync_duration"),
+			timer: metrics.GetOrCreateSummary("client_requests_statesync_duration"),
 		},
 		spanRequest: {
-			request: map[bool]*metrics.Counter{
+			request: map[bool]*metrics2.Counter{
 				true:  metrics.GetOrCreateCounter("client_requests_span_valid"),
 				false: metrics.GetOrCreateCounter("client_requests_span_invalid"),
 			},
-			timer: *metrics.GetOrCreateSummary("client_requests_span_duration"),
+			timer: metrics.GetOrCreateSummary("client_requests_span_duration"),
 		},
 		checkpointRequest: {
-			request: map[bool]*metrics.Counter{
+			request: map[bool]*metrics2.Counter{
 				true:  metrics.GetOrCreateCounter("client_requests_checkpoint_valid"),
 				false: metrics.GetOrCreateCounter("client_requests_checkpoint_invalid"),
 			},
-			timer: *metrics.GetOrCreateSummary("client_requests_checkpoint_duration"),
+			timer: methelp.GetOrCreateSummary("client_requests_checkpoint_duration"),
 		},
 		checkpointCountRequest: {
-			request: map[bool]*metrics.Counter{
+			request: map[bool]*metrics2.Counter{
 				true:  metrics.GetOrCreateCounter("client_requests_checkpointcount_valid"),
 				false: metrics.GetOrCreateCounter("client_requests_checkpointcount_invalid"),
 			},
-			timer: *metrics.GetOrCreateSummary("client_requests_checkpointcount_duration"),
+			timer: metrics.GetOrCreateSummary("client_requests_checkpointcount_duration"),
 		},
 	}
 )
