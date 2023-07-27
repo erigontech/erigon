@@ -2,48 +2,119 @@ package stages
 
 import (
 	"context"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
+	"github.com/ledgerwatch/erigon/cl/utils"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 )
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarly used to process side forks and memory execution.
-func ConsensusStages(ctx context.Context, historyReconstruction StageHistoryReconstructionCfg, beaconState StageBeaconStateCfg, forkchoice StageForkChoiceCfg) []*stagedsync.Stage {
+func ConsensusStages(ctx context.Context,
+	forkchoice StageForkChoiceCfg,
+) []*stagedsync.Stage {
 	return []*stagedsync.Stage{
+		//{
+		//	ID:          stages.BeaconHistoryReconstruction,
+		//	Description: "Download beacon blocks backwards.",
+		//	Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
+		//		return SpawnStageHistoryReconstruction(historyReconstruction, s, tx, ctx, logger)
+		//	},
+		//	Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
+		//		return nil
+		//	},
+		//},
+		//{
+		//	ID:          stages.BeaconState,
+		//	Description: "Execute Consensus Layer transition",
+		//	Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
+		//		return SpawnStageBeaconState(beaconState, tx, ctx)
+		//	},
+		//	Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
+		//		return nil
+		//	},
+		//},
+		//{
+		//	ID:          stages.BeaconBlocks,
+		//	Description: "Download beacon blocks forward.",
+		//	Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
+		//		return SpawnStageForkChoice(forkchoice, s, tx, ctx)
+		//	},
+		//	Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
+		//		return nil
+		//	},
+		//},
 		{
-			ID:          stages.BeaconHistoryReconstruction,
-			Description: "Download beacon blocks backwards.",
+			ID:          "wait_for_peers",
+			Description: "wait for enough peers",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnStageHistoryReconstruction(historyReconstruction, s, tx, ctx, logger)
+				return SpawnStageWaitForPeers(forkchoice, s, tx, ctx)
 			},
 			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
 				return nil
 			},
 		},
 		{
-			ID:          stages.BeaconState,
-			Description: "Execute Consensus Layer transition",
+			ID:          "catch_up_blocks",
+			Description: "catch up blocks",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnStageBeaconState(beaconState, tx, ctx)
+				cfg := forkchoice
+				firstTime := false
+				for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
+					if !firstTime {
+						firstTime = true
+						log.Debug("Caplin may have missed some slots, started downloading chain")
+					}
+					ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+					cfg.downloader.RequestMore(ctx)
+					cancel()
+					if utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == cfg.forkChoice.HighestSeen() {
+						break
+					}
+				}
+				if firstTime {
+					log.Debug("Finished catching up", "slot", cfg.downloader.GetHighestProcessedSlot())
+				}
+				return nil
 			},
 			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
 				return nil
 			},
 		},
 		{
-			ID:          stages.BeaconBlocks,
-			Description: "Download beacon blocks forward.",
+			ID:          "fork_choice",
+			Description: "fork choice stage",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnStageForkChoice(forkchoice, s, tx, ctx)
+				cfg := forkchoice
+				maxBlockBehindBeforeDownload := int64(32)
+				overtimeMargin := uint64(6) // how much time has passed before trying download the next block in seconds
+
+				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+				overtime := utils.GetCurrentSlotOverTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+				seenSlot := cfg.forkChoice.HighestSeen()
+				if targetSlot == seenSlot || (targetSlot == seenSlot+1 && overtime < overtimeMargin) {
+					time.Sleep(time.Second)
+					return nil
+				}
+				highestSeen := cfg.forkChoice.HighestSeen()
+				startDownloadSlot := highestSeen - uint64(maxBlockBehindBeforeDownload)
+				// Detect underflow
+				if startDownloadSlot > highestSeen {
+					startDownloadSlot = 0
+				}
+				cfg.downloader.SetHighestProcessedRoot(libcommon.Hash{})
+				cfg.downloader.SetHighestProcessedSlot(
+					utils.Max64(startDownloadSlot, cfg.forkChoice.FinalizedSlot()))
+				return nil
 			},
 			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
 				return nil
@@ -52,15 +123,9 @@ func ConsensusStages(ctx context.Context, historyReconstruction StageHistoryReco
 	}
 }
 
-var ConsensusUnwindOrder = stagedsync.UnwindOrder{
-	stages.BeaconState,
-	stages.BeaconBlocks,
-}
+var ConsensusUnwindOrder = stagedsync.UnwindOrder{}
 
-var ConsensusPruneOrder = stagedsync.PruneOrder{
-	stages.BeaconState,
-	stages.BeaconBlocks,
-}
+var ConsensusPruneOrder = stagedsync.PruneOrder{}
 
 func NewConsensusStagedSync(ctx context.Context,
 	db kv.RwDB,
@@ -79,9 +144,7 @@ func NewConsensusStagedSync(ctx context.Context,
 	return stagedsync.New(
 		ConsensusStages(
 			ctx,
-			StageHistoryReconstruction(db, backwardDownloader, genesisCfg, beaconCfg, beaconDBCfg, state, tmpdir, executionClient),
-			StageBeaconState(db, beaconCfg, state, executionClient),
-			StageForkChoice(db, forwardDownloader, genesisCfg, beaconCfg, state, executionClient, gossipManager, forkChoice, nil),
+			StageForkChoice(db, forwardDownloader, genesisCfg, beaconCfg, state, executionClient, gossipManager, forkChoice, nil, nil),
 		),
 		ConsensusUnwindOrder,
 		ConsensusPruneOrder,

@@ -645,7 +645,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 
-		go caplin1.RunCaplinPhase1(ctx, client, beaconCfg, genesisCfg, engine, state, nil)
+		go caplin1.RunCaplinPhase1(ctx, client, beaconCfg, genesisCfg, engine, state, nil, "")
 	}
 
 	if currentBlock == nil {
