@@ -13,16 +13,13 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spaolacci/murmur3"
-
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -794,16 +791,16 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	defer ps.Delete(p)
 
 	defer kv.EnableReadAhead().DisableReadAhead()
-	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".bl"
-	var bloom *bloomFilter
-	var err error
-	if kv.Count() > 0 {
-		bloom, err = NewBloom(uint64(kv.Count()/2), bloomPath)
-		if err != nil {
-			return err
-		}
-	}
-	hasher := murmur3.New128WithSeed(0)
+	//bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".bl"
+	//var bloom *bloomFilter
+	//var err error
+	//if kv.Count() > 0 {
+	//	bloom, err = NewBloom(uint64(kv.Count()/2), bloomPath)
+	//	if err != nil {
+	//		return err
+	//	}
+	//}
+	//hasher := murmur3.New128WithSeed(0)
 
 	args := BtIndexWriterArgs{
 		IndexFile: indexPath,
@@ -834,10 +831,12 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 		if err != nil {
 			return err
 		}
-		hasher.Reset()
-		hasher.Write(key) //nolint:errcheck
-		hi, _ := hasher.Sum128()
-		bloom.AddHash(hi)
+
+		//hasher.Reset()
+		//hasher.Write(key) //nolint:errcheck
+		//hi, _ := hasher.Sum128()
+		//bloom.AddHash(hi)
+
 		//if compressed {
 		pos, _ = getter.Skip()
 		//} else {
@@ -854,11 +853,11 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	}
 	iw.Close()
 
-	if bloom != nil {
-		if _, err := bloom.WriteFile(bloomPath); err != nil {
-			return err
-		}
-	}
+	//if bloom != nil {
+	//	if _, err := bloom.WriteFile(bloomPath); err != nil {
+	//		return err
+	//	}
+	//}
 	return nil
 }
 
