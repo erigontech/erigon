@@ -594,7 +594,7 @@ func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCoun
 		keys, _ := getter.Next(key[:0])
 		err = iw.AddKey(keys[:], pos)
 
-		pos = getter.Skip()
+		pos, _ = getter.Skip()
 		require.NoError(tb, err)
 	}
 	decomp.Close()

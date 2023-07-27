@@ -12,6 +12,7 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -37,18 +38,18 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ExecutionClient interface {
 	// Chain Putters.
-	InsertHeaders(ctx context.Context, in *InsertHeadersRequest, opts ...grpc.CallOption) (*EmptyMessage, error)
-	InsertBodies(ctx context.Context, in *InsertBodiesRequest, opts ...grpc.CallOption) (*EmptyMessage, error)
+	InsertHeaders(ctx context.Context, in *InsertHeadersRequest, opts ...grpc.CallOption) (*InsertionResult, error)
+	InsertBodies(ctx context.Context, in *InsertBodiesRequest, opts ...grpc.CallOption) (*InsertionResult, error)
 	// Chain Validation and ForkChoice.
-	ValidateChain(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*ValidationReceipt, error)
+	ValidateChain(ctx context.Context, in *ValidationRequest, opts ...grpc.CallOption) (*ValidationReceipt, error)
 	UpdateForkChoice(ctx context.Context, in *ForkChoice, opts ...grpc.CallOption) (*ForkChoiceReceipt, error)
-	AssembleBlock(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*types.ExecutionPayload, error)
+	AssembleBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.ExecutionPayload, error)
 	// Chain Getters.
 	GetHeader(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*GetHeaderResponse, error)
 	GetBody(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*GetBodyResponse, error)
 	IsCanonicalHash(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*IsCanonicalResponse, error)
 	GetHeaderHashNumber(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*GetHeaderHashNumberResponse, error)
-	GetForkChoice(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*ForkChoice, error)
+	GetForkChoice(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ForkChoice, error)
 }
 
 type executionClient struct {
@@ -59,8 +60,8 @@ func NewExecutionClient(cc grpc.ClientConnInterface) ExecutionClient {
 	return &executionClient{cc}
 }
 
-func (c *executionClient) InsertHeaders(ctx context.Context, in *InsertHeadersRequest, opts ...grpc.CallOption) (*EmptyMessage, error) {
-	out := new(EmptyMessage)
+func (c *executionClient) InsertHeaders(ctx context.Context, in *InsertHeadersRequest, opts ...grpc.CallOption) (*InsertionResult, error) {
+	out := new(InsertionResult)
 	err := c.cc.Invoke(ctx, Execution_InsertHeaders_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -68,8 +69,8 @@ func (c *executionClient) InsertHeaders(ctx context.Context, in *InsertHeadersRe
 	return out, nil
 }
 
-func (c *executionClient) InsertBodies(ctx context.Context, in *InsertBodiesRequest, opts ...grpc.CallOption) (*EmptyMessage, error) {
-	out := new(EmptyMessage)
+func (c *executionClient) InsertBodies(ctx context.Context, in *InsertBodiesRequest, opts ...grpc.CallOption) (*InsertionResult, error) {
+	out := new(InsertionResult)
 	err := c.cc.Invoke(ctx, Execution_InsertBodies_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -77,7 +78,7 @@ func (c *executionClient) InsertBodies(ctx context.Context, in *InsertBodiesRequ
 	return out, nil
 }
 
-func (c *executionClient) ValidateChain(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*ValidationReceipt, error) {
+func (c *executionClient) ValidateChain(ctx context.Context, in *ValidationRequest, opts ...grpc.CallOption) (*ValidationReceipt, error) {
 	out := new(ValidationReceipt)
 	err := c.cc.Invoke(ctx, Execution_ValidateChain_FullMethodName, in, out, opts...)
 	if err != nil {
@@ -95,7 +96,7 @@ func (c *executionClient) UpdateForkChoice(ctx context.Context, in *ForkChoice, 
 	return out, nil
 }
 
-func (c *executionClient) AssembleBlock(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*types.ExecutionPayload, error) {
+func (c *executionClient) AssembleBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.ExecutionPayload, error) {
 	out := new(types.ExecutionPayload)
 	err := c.cc.Invoke(ctx, Execution_AssembleBlock_FullMethodName, in, out, opts...)
 	if err != nil {
@@ -140,7 +141,7 @@ func (c *executionClient) GetHeaderHashNumber(ctx context.Context, in *types.H25
 	return out, nil
 }
 
-func (c *executionClient) GetForkChoice(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*ForkChoice, error) {
+func (c *executionClient) GetForkChoice(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ForkChoice, error) {
 	out := new(ForkChoice)
 	err := c.cc.Invoke(ctx, Execution_GetForkChoice_FullMethodName, in, out, opts...)
 	if err != nil {
@@ -154,18 +155,18 @@ func (c *executionClient) GetForkChoice(ctx context.Context, in *EmptyMessage, o
 // for forward compatibility
 type ExecutionServer interface {
 	// Chain Putters.
-	InsertHeaders(context.Context, *InsertHeadersRequest) (*EmptyMessage, error)
-	InsertBodies(context.Context, *InsertBodiesRequest) (*EmptyMessage, error)
+	InsertHeaders(context.Context, *InsertHeadersRequest) (*InsertionResult, error)
+	InsertBodies(context.Context, *InsertBodiesRequest) (*InsertionResult, error)
 	// Chain Validation and ForkChoice.
-	ValidateChain(context.Context, *types.H256) (*ValidationReceipt, error)
+	ValidateChain(context.Context, *ValidationRequest) (*ValidationReceipt, error)
 	UpdateForkChoice(context.Context, *ForkChoice) (*ForkChoiceReceipt, error)
-	AssembleBlock(context.Context, *EmptyMessage) (*types.ExecutionPayload, error)
+	AssembleBlock(context.Context, *emptypb.Empty) (*types.ExecutionPayload, error)
 	// Chain Getters.
 	GetHeader(context.Context, *GetSegmentRequest) (*GetHeaderResponse, error)
 	GetBody(context.Context, *GetSegmentRequest) (*GetBodyResponse, error)
 	IsCanonicalHash(context.Context, *types.H256) (*IsCanonicalResponse, error)
 	GetHeaderHashNumber(context.Context, *types.H256) (*GetHeaderHashNumberResponse, error)
-	GetForkChoice(context.Context, *EmptyMessage) (*ForkChoice, error)
+	GetForkChoice(context.Context, *emptypb.Empty) (*ForkChoice, error)
 	mustEmbedUnimplementedExecutionServer()
 }
 
@@ -173,19 +174,19 @@ type ExecutionServer interface {
 type UnimplementedExecutionServer struct {
 }
 
-func (UnimplementedExecutionServer) InsertHeaders(context.Context, *InsertHeadersRequest) (*EmptyMessage, error) {
+func (UnimplementedExecutionServer) InsertHeaders(context.Context, *InsertHeadersRequest) (*InsertionResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InsertHeaders not implemented")
 }
-func (UnimplementedExecutionServer) InsertBodies(context.Context, *InsertBodiesRequest) (*EmptyMessage, error) {
+func (UnimplementedExecutionServer) InsertBodies(context.Context, *InsertBodiesRequest) (*InsertionResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InsertBodies not implemented")
 }
-func (UnimplementedExecutionServer) ValidateChain(context.Context, *types.H256) (*ValidationReceipt, error) {
+func (UnimplementedExecutionServer) ValidateChain(context.Context, *ValidationRequest) (*ValidationReceipt, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateChain not implemented")
 }
 func (UnimplementedExecutionServer) UpdateForkChoice(context.Context, *ForkChoice) (*ForkChoiceReceipt, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateForkChoice not implemented")
 }
-func (UnimplementedExecutionServer) AssembleBlock(context.Context, *EmptyMessage) (*types.ExecutionPayload, error) {
+func (UnimplementedExecutionServer) AssembleBlock(context.Context, *emptypb.Empty) (*types.ExecutionPayload, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AssembleBlock not implemented")
 }
 func (UnimplementedExecutionServer) GetHeader(context.Context, *GetSegmentRequest) (*GetHeaderResponse, error) {
@@ -200,7 +201,7 @@ func (UnimplementedExecutionServer) IsCanonicalHash(context.Context, *types.H256
 func (UnimplementedExecutionServer) GetHeaderHashNumber(context.Context, *types.H256) (*GetHeaderHashNumberResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetHeaderHashNumber not implemented")
 }
-func (UnimplementedExecutionServer) GetForkChoice(context.Context, *EmptyMessage) (*ForkChoice, error) {
+func (UnimplementedExecutionServer) GetForkChoice(context.Context, *emptypb.Empty) (*ForkChoice, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetForkChoice not implemented")
 }
 func (UnimplementedExecutionServer) mustEmbedUnimplementedExecutionServer() {}
@@ -253,7 +254,7 @@ func _Execution_InsertBodies_Handler(srv interface{}, ctx context.Context, dec f
 }
 
 func _Execution_ValidateChain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(types.H256)
+	in := new(ValidationRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -265,7 +266,7 @@ func _Execution_ValidateChain_Handler(srv interface{}, ctx context.Context, dec 
 		FullMethod: Execution_ValidateChain_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExecutionServer).ValidateChain(ctx, req.(*types.H256))
+		return srv.(ExecutionServer).ValidateChain(ctx, req.(*ValidationRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -289,7 +290,7 @@ func _Execution_UpdateForkChoice_Handler(srv interface{}, ctx context.Context, d
 }
 
 func _Execution_AssembleBlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(EmptyMessage)
+	in := new(emptypb.Empty)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -301,7 +302,7 @@ func _Execution_AssembleBlock_Handler(srv interface{}, ctx context.Context, dec 
 		FullMethod: Execution_AssembleBlock_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExecutionServer).AssembleBlock(ctx, req.(*EmptyMessage))
+		return srv.(ExecutionServer).AssembleBlock(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -379,7 +380,7 @@ func _Execution_GetHeaderHashNumber_Handler(srv interface{}, ctx context.Context
 }
 
 func _Execution_GetForkChoice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(EmptyMessage)
+	in := new(emptypb.Empty)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -391,7 +392,7 @@ func _Execution_GetForkChoice_Handler(srv interface{}, ctx context.Context, dec 
 		FullMethod: Execution_GetForkChoice_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExecutionServer).GetForkChoice(ctx, req.(*EmptyMessage))
+		return srv.(ExecutionServer).GetForkChoice(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }

@@ -839,7 +839,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 		hi, _ := hasher.Sum128()
 		bloom.AddHash(hi)
 		//if compressed {
-		pos = getter.Skip()
+		pos, _ = getter.Skip()
 		//} else {
 		//	pos = getter.SkipUncompressed()
 		//}
@@ -901,7 +901,7 @@ func BuildBtreeIndex(dataPath, indexPath string, compressed bool, logger log.Log
 		}
 
 		//if compressed {
-		//	pos = getter.Skip()
+		//	pos, _ = getter.Skip()
 		//} else {
 		pos = getter.SkipUncompressed()
 		//}

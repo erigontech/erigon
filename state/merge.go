@@ -1008,9 +1008,9 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 						return nil, nil, err
 					}
 					if h.compressHistoryVals {
-						valOffset = g2.Skip()
+						valOffset, _ = g2.Skip()
 					} else {
-						valOffset = g2.SkipUncompressed()
+						valOffset, _ = g2.SkipUncompressed()
 					}
 				}
 				p.Processed.Add(1)

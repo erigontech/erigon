@@ -1198,7 +1198,7 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 
 			// Skip value
 			//if compressedFile {
-			keyPos = g.Skip()
+			keyPos, _ = g.Skip()
 			//} else {
 			//	keyPos = g.SkipUncompressed()
 			//}
