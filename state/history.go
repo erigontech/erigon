@@ -543,23 +543,29 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 		return nil
 	}
 
-	lk := len(key1) + len(key2)
 	ii := h.h.InvertedIndex
 	if h.largeValues {
-		historyKey := append(append(append(h.historyKey[:0], key1...), key2...), ii.txNumBytes[:]...)
-		if h.buffered {
-			if err := h.historyVals.Collect(historyKey, original); err != nil {
+		lk := len(key1) + len(key2)
+		historyKey := h.historyKey[:lk+8]
+		copy(historyKey, key1)
+		if len(key2) > 0 {
+			copy(historyKey[len(key1):], key2)
+		}
+		copy(historyKey[lk:], h.h.InvertedIndex.txNumBytes[:])
+
+		if !h.buffered {
+			if err := h.h.tx.Put(h.h.historyValsTable, historyKey, original); err != nil {
 				return err
 			}
-			if err := ii.wal.indexKeys.Collect(ii.txNumBytes[:], historyKey[:lk]); err != nil {
+			if err := ii.tx.Put(ii.indexKeysTable, ii.txNumBytes[:], historyKey[:lk]); err != nil {
 				return err
 			}
 			return nil
 		}
-		if err := h.h.tx.Put(h.h.historyValsTable, historyKey, original); err != nil {
+		if err := h.historyVals.Collect(historyKey, original); err != nil {
 			return err
 		}
-		if err := ii.tx.Put(ii.indexKeysTable, ii.txNumBytes[:], historyKey[:lk]); err != nil {
+		if err := ii.wal.indexKeys.Collect(ii.txNumBytes[:], historyKey[:lk]); err != nil {
 			return err
 		}
 		return nil
@@ -569,24 +575,29 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 		panic("History value is too large while largeValues=false")
 	}
 
-	historyKey := append(append(append(append(h.historyKey[:0], key1...), key2...), ii.txNumBytes[:]...), original...)
+	lk := len(key1) + len(key2)
+	historyKey := h.historyKey[:lk+8+len(original)]
+	copy(historyKey, key1)
+	copy(historyKey[len(key1):], key2)
+	copy(historyKey[lk:], h.h.InvertedIndex.txNumBytes[:])
+	copy(historyKey[lk+8:], original)
 	historyKey1 := historyKey[:lk]
 	historyVal := historyKey[lk:]
 	invIdxVal := historyKey[:lk]
 
-	if h.buffered {
-		if err := h.historyVals.Collect(historyKey1, historyVal); err != nil {
+	if !h.buffered {
+		if err := h.h.tx.Put(h.h.historyValsTable, historyKey1, historyVal); err != nil {
 			return err
 		}
-		if err := ii.wal.indexKeys.Collect(ii.txNumBytes[:], invIdxVal); err != nil {
+		if err := ii.tx.Put(ii.indexKeysTable, ii.txNumBytes[:], invIdxVal); err != nil {
 			return err
 		}
 		return nil
 	}
-	if err := h.h.tx.Put(h.h.historyValsTable, historyKey1, historyVal); err != nil {
+	if err := h.historyVals.Collect(historyKey1, historyVal); err != nil {
 		return err
 	}
-	if err := ii.tx.Put(ii.indexKeysTable, ii.txNumBytes[:], invIdxVal); err != nil {
+	if err := ii.wal.indexKeys.Collect(ii.txNumBytes[:], invIdxVal); err != nil {
 		return err
 	}
 	return nil
