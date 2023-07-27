@@ -903,7 +903,7 @@ func BuildBtreeIndex(dataPath, indexPath string, compressed bool, logger log.Log
 		//if compressed {
 		//	pos, _ = getter.Skip()
 		//} else {
-		pos = getter.SkipUncompressed()
+		pos, _ = getter.SkipUncompressed()
 		//}
 	}
 	decomp.Close()

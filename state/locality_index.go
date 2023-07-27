@@ -567,9 +567,9 @@ func (si *LocalityIterator) advance() {
 		key := top.key
 		var offset uint64
 		if si.compressVals {
-			offset = top.g.Skip()
+			offset, _ = top.g.Skip()
 		} else {
-			offset = top.g.SkipUncompressed()
+			offset, _ = top.g.SkipUncompressed()
 		}
 		si.progress += offset - top.lastOffset
 		top.lastOffset = offset
