@@ -911,16 +911,8 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	defer keysCursor.Close()
 
 	var (
-		pos   uint64
-		pairs = make(chan kvpair, 1024)
+		pos uint64
 	)
-
-	eg, _ := errgroup.WithContext(ctx)
-	defer eg.Wait()
-	eg.Go(func() (errInternal error) {
-		errInternal = d.writeCollationPair(coll.valuesComp, pairs)
-		return errInternal
-	})
 
 	var (
 		stepBytes = make([]byte, 8)
@@ -928,8 +920,6 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 	if err := func() error {
-		defer close(pairs)
-
 		if !d.domainLargeValues {
 			panic(fmt.Sprintf("implement me: %s", d.filenameBase))
 		}
@@ -949,7 +939,14 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			if err != nil {
 				return fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
 			}
-			pairs <- kvpair{k: k, v: v}
+
+			if err = coll.valuesComp.AddUncompressedWord(k); err != nil {
+				return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
+			}
+			mxCollationSize.Inc()
+			if err = coll.valuesComp.AddUncompressedWord(v); err != nil {
+				return fmt.Errorf("add %s values val [%x]=>[%x]: %w", d.filenameBase, k, v, err)
+			}
 
 			select {
 			case <-ctx.Done():
@@ -960,9 +957,6 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		return nil
 	}(); err != nil {
 		return Collation{}, fmt.Errorf("iterate over %s keys cursor: %w", d.filenameBase, err)
-	}
-	if err := eg.Wait(); err != nil {
-		return Collation{}, fmt.Errorf("collate over %s keys cursor: %w", d.filenameBase, err)
 	}
 
 	closeCollation = false
