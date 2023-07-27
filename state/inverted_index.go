@@ -556,16 +556,17 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 		if err := ii.index.Collect(indexKey, ii.ii.txNumBytes[:]); err != nil {
 			return err
 		}
-		return nil
-	}
-	if err := ii.ii.tx.Put(ii.ii.indexKeysTable, ii.ii.txNumBytes[:], key); err != nil {
-		return err
-	}
-	if err := ii.ii.tx.Put(ii.ii.indexTable, indexKey, ii.ii.txNumBytes[:]); err != nil {
-		return err
+	} else {
+		if err := ii.ii.tx.Put(ii.ii.indexKeysTable, ii.ii.txNumBytes[:], key); err != nil {
+			return err
+		}
+		if err := ii.ii.tx.Put(ii.ii.indexTable, indexKey, ii.ii.txNumBytes[:]); err != nil {
+			return err
+		}
 	}
 	return nil
 }
+
 func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 	var ic = InvertedIndexContext{
 		ii:           ii,
