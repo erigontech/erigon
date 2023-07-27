@@ -248,11 +248,14 @@ type Domain struct {
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 	logger       log.Logger
 
+	domainLargeValues bool
+
 	dir string
 }
 
 type domainCfg struct {
-	histCfg
+	hist              histCfg
+	domainLargeValues bool
 }
 
 func NewDomain(cfg domainCfg, dir, tmpdir string, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
@@ -265,11 +268,13 @@ func NewDomain(cfg domainCfg, dir, tmpdir string, aggregationStep uint64, filena
 		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:     DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 		logger:    logger,
+
+		domainLargeValues: cfg.domainLargeValues,
 	}
 	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
-	if d.History, err = NewHistory(cfg.histCfg, dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, []string{}, logger); err != nil {
+	if d.History, err = NewHistory(cfg.hist, dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, []string{}, logger); err != nil {
 		return nil, err
 	}
 
@@ -603,7 +608,7 @@ func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 		buffered:    buffered,
 		discard:     discard,
 		aux:         make([]byte, 0, 128),
-		largeValues: d.largeValues,
+		largeValues: d.domainLargeValues,
 	}
 
 	if buffered {
@@ -928,8 +933,8 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	if err := func() error {
 		defer close(pairs)
 
-		if !d.largeValues {
-			panic("implement me")
+		if !d.domainLargeValues {
+			panic(fmt.Sprintf("implement me: %s", d.filenameBase))
 		}
 
 		for k, stepInDB, err := keysCursor.First(); k != nil; k, stepInDB, err = keysCursor.Next() {
@@ -1247,7 +1252,7 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 	var valsC kv.RwCursor
 	var valsCDup kv.RwCursorDupSort
 
-	if d.largeValues {
+	if d.domainLargeValues {
 		valsC, err = d.tx.RwCursor(d.valsTable)
 		if err != nil {
 			return err
@@ -1305,7 +1310,7 @@ func (d *Domain) unwind(ctx context.Context, step, txFrom, txTo, limit uint64, f
 		}
 
 		seek := common.Append(k, stepBytes)
-		if d.largeValues {
+		if d.domainLargeValues {
 			kk, vv, err := valsC.SeekExact(seek)
 			if err != nil {
 				return err
@@ -1404,7 +1409,7 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 	var k, v []byte
 	var valsC kv.RwCursor
 	var valsCDup kv.RwCursorDupSort
-	if d.largeValues {
+	if d.domainLargeValues {
 		valsC, err = d.tx.RwCursor(d.valsTable)
 		if err != nil {
 			return err
@@ -1910,7 +1915,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		return nil, false, err
 	}
 	if foundInvStep != nil {
-		if !dc.d.largeValues {
+		if !dc.d.domainLargeValues {
 			panic("implement me")
 		}
 		copy(dc.valKeyBuf[:], key)

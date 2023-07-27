@@ -76,10 +76,10 @@ type InvertedIndex struct {
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 
 	// fields for history write
-	txNum      uint64
-	txNumBytes [8]byte
-	wal        *invertedIndexWAL
-	logger     log.Logger
+	txNum                    uint64
+	txNumBytes, invStepBytes [8]byte
+	wal                      *invertedIndexWAL
+	logger                   log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
@@ -450,6 +450,7 @@ func (ii *InvertedIndex) SetTx(tx kv.RwTx) {
 func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 	ii.txNum = txNum
 	binary.BigEndian.PutUint64(ii.txNumBytes[:], ii.txNum)
+	binary.BigEndian.PutUint64(ii.invStepBytes[:], ^(ii.txNum / ii.aggregationStep))
 }
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd

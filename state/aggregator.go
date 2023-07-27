@@ -121,19 +121,27 @@ func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode Co
 	if err != nil {
 		return nil, err
 	}
-	cfg := domainCfg{histCfg{withLocalityIndex: false, compressVals: false, largeValues: AccDomainLargeValues}}
+	cfg := domainCfg{
+		domainLargeValues: AccDomainLargeValues,
+		hist:              histCfg{withLocalityIndex: false, compressVals: false, historyLargeValues: false}}
 	if a.accounts, err = NewDomain(cfg, dir, tmpdir, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
 		return nil, err
 	}
-	cfg = domainCfg{histCfg{withLocalityIndex: false, compressVals: false, largeValues: StorageDomainLargeValues}}
+	cfg = domainCfg{
+		domainLargeValues: StorageDomainLargeValues,
+		hist:              histCfg{withLocalityIndex: false, compressVals: false, historyLargeValues: false}}
 	if a.storage, err = NewDomain(cfg, dir, tmpdir, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
 		return nil, err
 	}
-	cfg = domainCfg{histCfg{withLocalityIndex: false, compressVals: true, largeValues: true}}
+	cfg = domainCfg{
+		domainLargeValues: true,
+		hist:              histCfg{withLocalityIndex: false, compressVals: true, historyLargeValues: true}}
 	if a.code, err = NewDomain(cfg, dir, tmpdir, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
 		return nil, err
 	}
-	cfg = domainCfg{histCfg{withLocalityIndex: false, compressVals: false, largeValues: true}}
+	cfg = domainCfg{
+		domainLargeValues: true,
+		hist:              histCfg{withLocalityIndex: false, compressVals: false, historyLargeValues: true}}
 	commitd, err := NewDomain(cfg, dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger)
 	if err != nil {
 		return nil, err
