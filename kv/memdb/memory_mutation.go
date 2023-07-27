@@ -378,6 +378,14 @@ func isTablePurelyDupsort(bucket string) bool {
 	return !config.AutoDupSortKeysConversion && config.Flags == kv.DupSort
 }
 
+func (m *MemoryMutation) MemDB() kv.RwDB {
+	return m.memDb
+}
+
+func (m *MemoryMutation) MemTx() kv.RwTx {
+	return m.memTx
+}
+
 // Cursor creates a new cursor (the real fun begins here)
 func (m *MemoryMutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 	c := &memoryMutationCursor{}
