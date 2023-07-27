@@ -173,6 +173,7 @@ func ExecV3(ctx context.Context,
 
 	useExternalTx := applyTx != nil
 	if initialCycle || !useExternalTx {
+		defer cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 		agg.BuildOptionalMissedIndicesInBackground(ctx, estimate.IndexSnapshot.Workers())
 		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
@@ -197,9 +198,6 @@ func ExecV3(ctx context.Context,
 		defer func() { // need callback - because tx may be committed
 			applyTx.Rollback()
 		}()
-	}
-	if initialCycle || useExternalTx {
-		defer cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 	}
 
 	var blockNum, stageProgress uint64
@@ -268,7 +266,7 @@ func ExecV3(ctx context.Context,
 	agg.SetTxNum(inputTxNum)
 
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
-	if initialCycle && blocksFreezeCfg.Produce {
+	if (initialCycle || !useExternalTx) && blocksFreezeCfg.Produce {
 		log.Warn(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
