@@ -552,6 +552,7 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 		if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
 			return err
 		}
+
 		if err := ii.index.Collect(indexKey, ii.ii.txNumBytes[:]); err != nil {
 			return err
 		}
@@ -565,7 +566,6 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 	}
 	return nil
 }
-
 func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 	var ic = InvertedIndexContext{
 		ii:           ii,
