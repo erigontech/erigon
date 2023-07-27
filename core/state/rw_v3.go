@@ -155,7 +155,7 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 			}
 		case kv.CodeDomain:
 			for i, key := range list.Keys {
-				if err := domains.UpdateAccountCode([]byte(key), list.Vals[i], nil); err != nil {
+				if err := domains.UpdateAccountCode([]byte(key), list.Vals[i]); err != nil {
 					return err
 				}
 			}
@@ -419,7 +419,7 @@ func (w *StateWriterBufferedV3) PrevAndDels() (map[string][]byte, map[string]*ac
 
 func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	value := accounts.SerialiseV3(account)
-	w.writeLists[string(kv.AccountsDomain)].Push(string(address.Bytes()), value)
+	w.writeLists[string(kv.AccountsDomain)].Push(string(address[:]), value)
 
 	if w.trace {
 		fmt.Printf("V3 account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address.Bytes(), &account.Balance, account.Nonce, account.Root, account.CodeHash)
@@ -428,7 +428,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 }
 
 func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	w.writeLists[string(kv.CodeDomain)].Push(string(address.Bytes()), code)
+	w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), code)
 	if len(code) > 0 {
 		if w.trace {
 			fmt.Printf("V3 code [%x] => [%x] value: %x\n", address.Bytes(), codeHash, code)

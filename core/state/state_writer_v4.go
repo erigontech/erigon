@@ -31,7 +31,7 @@ func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, accoun
 
 func (w *WriterV4) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	w.domains.SetTx(w.tx.(kv.RwTx))
-	return w.domains.UpdateAccountCode(address.Bytes(), code, nil)
+	return w.domains.UpdateAccountCode(address.Bytes(), code)
 }
 
 func (w *WriterV4) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
