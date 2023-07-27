@@ -29,12 +29,16 @@ type ExecutionClientDirect struct {
 	server execution.ExecutionServer
 }
 
-func NewExecutionClientDirect(server execution.ExecutionServer) *ExecutionClientDirect {
+func NewExecutionClientDirect(server execution.ExecutionServer) execution.ExecutionClient {
 	return &ExecutionClientDirect{server: server}
 }
 
-func (s *ExecutionClientDirect) AssembleBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.ExecutionPayload, error) {
+func (s *ExecutionClientDirect) AssembleBlock(ctx context.Context, in *execution.AssembleBlockRequest, opts ...grpc.CallOption) (*execution.AssembleBlockResponse, error) {
 	return s.server.AssembleBlock(ctx, in)
+}
+
+func (s *ExecutionClientDirect) GetAssembledBlock(ctx context.Context, in *execution.GetAssembledBlockRequest, opts ...grpc.CallOption) (*execution.GetAssembledBlockResponse, error) {
+	return s.server.GetAssembledBlock(ctx, in)
 }
 
 // Chain Putters.
@@ -71,4 +75,8 @@ func (s *ExecutionClientDirect) IsCanonicalHash(ctx context.Context, in *types.H
 
 func (s *ExecutionClientDirect) GetHeaderHashNumber(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*execution.GetHeaderHashNumberResponse, error) {
 	return s.server.GetHeaderHashNumber(ctx, in)
+}
+
+func (s *ExecutionClientDirect) GetForkChoice(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*execution.ForkChoice, error) {
+	return s.server.GetForkChoice(ctx, in)
 }
