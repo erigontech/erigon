@@ -169,7 +169,6 @@ func (p *memoryDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error)
 }
 
 func (p *memoryDataProvider) Wait() error { return nil }
-func (p *memoryDataProvider) Wait() error { return nil }
 func (p *memoryDataProvider) Dispose()    {}
 
 func (p *memoryDataProvider) String() string {
