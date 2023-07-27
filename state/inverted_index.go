@@ -76,10 +76,10 @@ type InvertedIndex struct {
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 
 	// fields for history write
-	txNum                    uint64
-	txNumBytes, invStepBytes [8]byte
-	wal                      *invertedIndexWAL
-	logger                   log.Logger
+	txNum      uint64
+	txNumBytes [8]byte
+	wal        *invertedIndexWAL
+	logger     log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 }
@@ -450,7 +450,6 @@ func (ii *InvertedIndex) SetTx(tx kv.RwTx) {
 func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 	ii.txNum = txNum
 	binary.BigEndian.PutUint64(ii.txNumBytes[:], ii.txNum)
-	binary.BigEndian.PutUint64(ii.invStepBytes[:], ^(ii.txNum / ii.aggregationStep))
 }
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
@@ -553,17 +552,16 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 		if err := ii.indexKeys.Collect(ii.ii.txNumBytes[:], key); err != nil {
 			return err
 		}
-
 		if err := ii.index.Collect(indexKey, ii.ii.txNumBytes[:]); err != nil {
 			return err
 		}
-	} else {
-		if err := ii.ii.tx.Put(ii.ii.indexKeysTable, ii.ii.txNumBytes[:], key); err != nil {
-			return err
-		}
-		if err := ii.ii.tx.Put(ii.ii.indexTable, indexKey, ii.ii.txNumBytes[:]); err != nil {
-			return err
-		}
+		return nil
+	}
+	if err := ii.ii.tx.Put(ii.ii.indexKeysTable, ii.ii.txNumBytes[:], key); err != nil {
+		return err
+	}
+	if err := ii.ii.tx.Put(ii.ii.indexTable, indexKey, ii.ii.txNumBytes[:]); err != nil {
+		return err
 	}
 	return nil
 }

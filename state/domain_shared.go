@@ -152,34 +152,35 @@ func (sd *SharedDomains) ClearRam() {
 
 func (sd *SharedDomains) put(table kv.Domain, key, val []byte) {
 	sd.muMaps.Lock()
-	sd.puts(table, string(key), val)
+	sd.puts(table, key, val)
 	sd.muMaps.Unlock()
 }
 
-func (sd *SharedDomains) puts(table kv.Domain, key string, val []byte) {
+func (sd *SharedDomains) puts(table kv.Domain, key []byte, val []byte) {
+	keyS := string(key)
 	switch table {
 	case kv.AccountsDomain:
-		if old, ok := sd.account[key]; ok {
+		if old, ok := sd.account[keyS]; ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
-		sd.account[key] = val
+		sd.account[keyS] = val
 	case kv.CodeDomain:
-		if old, ok := sd.code[key]; ok {
+		if old, ok := sd.code[keyS]; ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
-		sd.code[key] = val
+		sd.code[keyS] = val
 	case kv.StorageDomain:
-		if old, ok := sd.storage.Set(key, val); ok {
+		if old, ok := sd.storage.Set(keyS, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
 		}
 	case kv.CommitmentDomain:
-		if old, ok := sd.commitment.Set(key, val); ok {
+		if old, ok := sd.commitment.Set(keyS, val); ok {
 			sd.estSize.Add(uint64(len(val) - len(old)))
 		} else {
 			sd.estSize.Add(uint64(len(key) + len(val)))
@@ -385,7 +386,7 @@ func (sd *SharedDomains) UpdateAccountData(addr []byte, account, prevAccount []b
 	return sd.Account.PutWithPrev(addr, nil, account, prevAccount)
 }
 
-func (sd *SharedDomains) UpdateAccountCode(addr []byte, code, codeHash []byte) error {
+func (sd *SharedDomains) UpdateAccountCode(addr, code []byte) error {
 	sd.Commitment.TouchPlainKey(addr, code, sd.Commitment.TouchCode)
 	prevCode, _ := sd.LatestCode(addr)
 	if bytes.Equal(prevCode, code) {

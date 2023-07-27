@@ -631,77 +631,74 @@ type domainWAL struct {
 	largeValues bool
 }
 
-func (h *domainWAL) close() {
-	if h == nil { // allow dobule-close
+func (d *domainWAL) close() {
+	if d == nil { // allow dobule-close
 		return
 	}
-	if h.keys != nil {
-		h.keys.Close()
+	if d.keys != nil {
+		d.keys.Close()
 	}
-	if h.values != nil {
-		h.values.Close()
+	if d.values != nil {
+		d.values.Close()
 	}
 }
 
-func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
-	if h.discard || !h.buffered {
+func (d *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
+	if d.discard || !d.buffered {
 		return nil
 	}
-	if err := h.keys.Load(tx, h.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := d.keys.Load(tx, d.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := h.values.Load(tx, h.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := d.values.Load(tx, d.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (h *domainWAL) addValue(key1, key2, value []byte) error {
-	if h.discard {
+func (d *domainWAL) addValue(key1, key2, value []byte) error {
+	if d.discard {
 		return nil
 	}
 
-	offt, kl := 8, len(key1)+len(key2)
-	fullkey := h.aux[:kl+offt]
+	kl := len(key1) + len(key2)
+	fullkey := d.aux[:kl+8]
 	copy(fullkey, key1)
 	copy(fullkey[len(key1):], key2)
+	binary.BigEndian.PutUint64(fullkey[kl:], ^(d.d.txNum / d.d.aggregationStep))
 
-	binary.BigEndian.PutUint64(fullkey[kl:], ^(h.d.txNum / h.d.aggregationStep))
-
-	if h.largeValues {
-		if !h.buffered {
-			if err := h.d.tx.Put(h.d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
+	if d.largeValues {
+		if d.buffered {
+			if err := d.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
 				return err
 			}
-			if err := h.d.tx.Put(h.d.valsTable, fullkey, value); err != nil {
+			if err := d.values.Collect(fullkey, value); err != nil {
 				return err
 			}
 			return nil
 		}
-
-		if err := h.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
+		if err := d.d.tx.Put(d.d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
 			return err
 		}
-		if err := h.values.Collect(fullkey, value); err != nil {
-			return err
-		}
-
-		return nil
-	}
-
-	if !h.buffered {
-		if err := h.d.tx.Put(h.d.keysTable, fullkey[kl:], fullkey[:kl]); err != nil {
-			return err
-		}
-		if err := h.d.tx.Put(h.d.valsTable, fullkey[:kl], common.Append(fullkey[kl:], value)); err != nil {
+		if err := d.d.tx.Put(d.d.valsTable, fullkey, value); err != nil {
 			return err
 		}
 		return nil
 	}
-	if err := h.keys.Collect(fullkey[kl:], fullkey[:kl]); err != nil {
+
+	if d.buffered {
+		if err := d.keys.Collect(fullkey[kl:], fullkey[:kl]); err != nil {
+			return err
+		}
+		if err := d.values.Collect(fullkey[:kl], common.Append(fullkey[kl:], value)); err != nil {
+			return err
+		}
+		return nil
+	}
+	if err := d.d.tx.Put(d.d.keysTable, fullkey[kl:], fullkey[:kl]); err != nil {
 		return err
 	}
-	if err := h.values.Collect(fullkey[:kl], common.Append(fullkey[kl:], value)); err != nil {
+	if err := d.d.tx.Put(d.d.valsTable, fullkey[:kl], common.Append(fullkey[kl:], value)); err != nil {
 		return err
 	}
 	return nil

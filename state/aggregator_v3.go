@@ -1442,9 +1442,10 @@ func (a *AggregatorV3) PutIdx(idx kv.InvertedIdx, key []byte) error {
 		return a.logAddrs.Add(key)
 	case kv.LogTopicIndex:
 		return a.logTopics.Add(key)
-	default:
-		panic(idx)
+		//default:
+		//	panic(idx)
 	}
+	return nil
 }
 
 // ComputeCommitment evaluates commitment for processed state.
