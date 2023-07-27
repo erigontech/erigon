@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/exp/slices"
@@ -1088,18 +1089,19 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 	}
 	defer c.Close()
 
-	aux := make([]byte, 8)
-	binary.BigEndian.PutUint64(aux[len(key):], beforeTxNum)
-
-	val, err := c.SeekBothRange(key, aux[len(key):])
+	var val []byte
+	var txNum uint64
+	aux := hexutility.EncodeTs(beforeTxNum)
+	val, err = c.SeekBothRange(key, aux)
 	if err != nil {
 		return nil, err
 	}
 	if val == nil {
-		return nil, err
+		return nil, nil
 	}
+	txNum = binary.BigEndian.Uint64(val[:8])
+	val = val[8:]
 
-	txNum := binary.BigEndian.Uint64(val[:8])
 	switch {
 	case txNum <= beforeTxNum:
 		nk, nv, err := c.Next()
@@ -1107,7 +1109,7 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 			return nil, err
 		}
 
-		res = append(res, HistoryRecord{beforeTxNum, val[8:]})
+		res = append(res, HistoryRecord{beforeTxNum, val})
 		if nk != nil && bytes.Equal(nk[:len(nk)-8], key) {
 			res = append(res, HistoryRecord{binary.BigEndian.Uint64(nv[:8]), nv[8:]})
 			if err := c.DeleteCurrent(); err != nil {
@@ -1127,7 +1129,7 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 			}
 			// this case will be removed by pruning. Or need to implement cleaning through txTo
 		}
-		res = append(res, HistoryRecord{beforeTxNum, val[8:]})
+		res = append(res, HistoryRecord{beforeTxNum, val})
 	}
 	return res, nil
 }
