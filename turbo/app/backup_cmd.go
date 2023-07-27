@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 )
 
@@ -77,7 +76,12 @@ CloudDrives (and ssd) have bad-latency and good-parallel-throughput - then havin
 )
 
 func doBackup(cliCtx *cli.Context) error {
-	defer log.Info("backup done")
+	logger, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
+		return err
+	}
+
+	defer logger.Info("backup done")
 
 	ctx := cliCtx.Context
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -133,9 +137,9 @@ func doBackup(cliCtx *cli.Context) error {
 		if err := os.MkdirAll(to, 0740); err != nil { //owner: rw, group: r, others: -
 			return fmt.Errorf("mkdir: %w, %s", err, to)
 		}
-		log.Info("[backup] start", "label", label)
-		fromDB, toDB := backup.OpenPair(from, to, label, targetPageSize)
-		if err := backup.Kv2kv(ctx, fromDB, toDB, nil, readAheadThreads); err != nil {
+		logger.Info("[backup] start", "label", label)
+		fromDB, toDB := backup.OpenPair(from, to, label, targetPageSize, logger)
+		if err := backup.Kv2kv(ctx, fromDB, toDB, nil, readAheadThreads, logger); err != nil {
 			return err
 		}
 	}

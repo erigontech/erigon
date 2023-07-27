@@ -28,7 +28,7 @@ type StageForkChoiceCfg struct {
 	genesisCfg      *clparams.GenesisConfig
 	beaconCfg       *clparams.BeaconChainConfig
 	executionClient *execution_client.ExecutionClient
-	state           *state.BeaconState
+	state           *state.CachingBeaconState
 	gossipManager   *network2.GossipManager
 	forkChoice      *forkchoice.ForkChoiceStore
 	caplinFreezer   freezer.Freezer
@@ -45,7 +45,7 @@ var (
 )
 
 func StageForkChoice(db kv.RwDB, downloader *network2.ForwardBeaconDownloader, genesisCfg *clparams.GenesisConfig,
-	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, executionClient *execution_client.ExecutionClient, gossipManager *network2.GossipManager,
+	beaconCfg *clparams.BeaconChainConfig, state *state.CachingBeaconState, executionClient *execution_client.ExecutionClient, gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore, caplinFreezer freezer.Freezer) StageForkChoiceCfg {
 	return StageForkChoiceCfg{
 		db:              db,
@@ -111,7 +111,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 
 			sendForckchoice :=
 				utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == block.Block.Slot
-			if err := cfg.forkChoice.OnBlock(block, false, true); err != nil {
+			if err := cfg.forkChoice.OnBlock(block, sendForckchoice, true); err != nil {
 				log.Warn("Could not download block", "reason", err, "slot", block.Block.Slot)
 				return highestSlotProcessed, libcommon.Hash{}, err
 			}
@@ -139,12 +139,13 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 				// Do forkchoice if possible
 				if cfg.forkChoice.Engine() != nil {
 					finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
+					log.Info("Caplin is sending forkchoice")
 					// Run forkchoice
 					if err := cfg.forkChoice.Engine().ForkChoiceUpdate(
 						cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
 						cfg.forkChoice.GetEth1Hash(headRoot),
 					); err != nil {
-						log.Warn("Could send not forkchoice", "err", err)
+						log.Warn("Could not set forkchoice", "err", err)
 					}
 				}
 			}

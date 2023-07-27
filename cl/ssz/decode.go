@@ -3,6 +3,7 @@ package ssz2
 import (
 	"encoding/binary"
 	"fmt"
+	"reflect"
 
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 )
@@ -71,7 +72,7 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 				}
 				// If the object is static (fixed size), decode it from the buf and update the position
 				if err = obj.DecodeSSZ(buf[position:], version); err != nil {
-					return
+					return fmt.Errorf("static element %d: %w", i, err)
 				}
 				position += obj.EncodingSizeSSZ()
 			} else {
@@ -103,7 +104,7 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 			return ssz.ErrLowBufferSize
 		}
 		if err = obj.DecodeSSZ(buf[offsets[i]:endOffset], version); err != nil {
-			return
+			return fmt.Errorf("dynamic element (sz:%d) %d/%s: %w", endOffset-offsets[i], i, reflect.TypeOf(obj), err)
 		}
 	}
 

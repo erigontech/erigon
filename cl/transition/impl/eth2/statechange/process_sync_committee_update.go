@@ -1,12 +1,13 @@
 package statechange
 
 import (
+	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
 // ProcessSyncCommitteeUpdate implements processing for the sync committee update. unfortunately there is no easy way to test it.
-func ProcessSyncCommitteeUpdate(s *state.BeaconState) error {
-	if (state.Epoch(s.BeaconState)+1)%s.BeaconConfig().EpochsPerSyncCommitteePeriod != 0 {
+func ProcessSyncCommitteeUpdate(s abstract.BeaconState) error {
+	if (state.Epoch(s)+1)%s.BeaconConfig().EpochsPerSyncCommitteePeriod != 0 {
 		return nil
 	}
 	// Set new current sync committee.

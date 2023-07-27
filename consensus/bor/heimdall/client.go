@@ -44,6 +44,7 @@ type HeimdallClient struct {
 	urlString string
 	client    http.Client
 	closeCh   chan struct{}
+	logger    log.Logger
 }
 
 type Request struct {
@@ -52,9 +53,10 @@ type Request struct {
 	start  time.Time
 }
 
-func NewHeimdallClient(urlString string) *HeimdallClient {
+func NewHeimdallClient(urlString string, logger log.Logger) *HeimdallClient {
 	return &HeimdallClient{
 		urlString: urlString,
+		logger:    logger,
 		client: http.Client{
 			Timeout: apiHeimdallTimeout,
 		},
@@ -80,11 +82,11 @@ func (h *HeimdallClient) StateSyncEvents(ctx context.Context, fromID uint64, to 
 			return nil, err
 		}
 
-		log.Debug("Fetching state sync events", "queryParams", url.RawQuery)
+		h.logger.Debug("Fetching state sync events", "queryParams", url.RawQuery)
 
 		ctx = withRequestType(ctx, stateSyncRequest)
 
-		response, err := FetchWithRetry[StateSyncEventsResponse](ctx, h.client, url, h.closeCh)
+		response, err := FetchWithRetry[StateSyncEventsResponse](ctx, h.client, url, h.closeCh, h.logger)
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +120,7 @@ func (h *HeimdallClient) Span(ctx context.Context, spanID uint64) (*span.Heimdal
 
 	ctx = withRequestType(ctx, spanRequest)
 
-	response, err := FetchWithRetry[SpanResponse](ctx, h.client, url, h.closeCh)
+	response, err := FetchWithRetry[SpanResponse](ctx, h.client, url, h.closeCh, h.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +137,7 @@ func (h *HeimdallClient) FetchCheckpoint(ctx context.Context, number int64) (*ch
 
 	ctx = withRequestType(ctx, checkpointRequest)
 
-	response, err := FetchWithRetry[checkpoint.CheckpointResponse](ctx, h.client, url, h.closeCh)
+	response, err := FetchWithRetry[checkpoint.CheckpointResponse](ctx, h.client, url, h.closeCh, h.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +154,7 @@ func (h *HeimdallClient) FetchCheckpointCount(ctx context.Context) (int64, error
 
 	ctx = withRequestType(ctx, checkpointCountRequest)
 
-	response, err := FetchWithRetry[checkpoint.CheckpointCountResponse](ctx, h.client, url, h.closeCh)
+	response, err := FetchWithRetry[checkpoint.CheckpointCountResponse](ctx, h.client, url, h.closeCh, h.logger)
 	if err != nil {
 		return 0, err
 	}
@@ -161,7 +163,7 @@ func (h *HeimdallClient) FetchCheckpointCount(ctx context.Context) (int64, error
 }
 
 // FetchWithRetry returns data from heimdall with retry
-func FetchWithRetry[T any](ctx context.Context, client http.Client, url *url.URL, closeCh chan struct{}) (*T, error) {
+func FetchWithRetry[T any](ctx context.Context, client http.Client, url *url.URL, closeCh chan struct{}, logger log.Logger) (*T, error) {
 	// request data once
 	request := &Request{client: client, url: url, start: time.Now()}
 	result, err := Fetch[T](ctx, request)
@@ -173,7 +175,7 @@ func FetchWithRetry[T any](ctx context.Context, client http.Client, url *url.URL
 	// attempt counter
 	attempt := 1
 
-	log.Warn("an error while trying fetching from Heimdall", "attempt", attempt, "error", err)
+	logger.Warn("an error while trying fetching from Heimdall", "attempt", attempt, "error", err)
 
 	// create a new ticker for retrying the request
 	ticker := time.NewTicker(retryCall)
@@ -183,17 +185,17 @@ func FetchWithRetry[T any](ctx context.Context, client http.Client, url *url.URL
 
 retryLoop:
 	for {
-		log.Info("Retrying again in 5 seconds to fetch data from Heimdall", "path", url.Path, "attempt", attempt)
+		logger.Info("Retrying again in 5 seconds to fetch data from Heimdall", "path", url.Path, "attempt", attempt)
 
 		attempt++
 
 		select {
 		case <-ctx.Done():
-			log.Debug("Shutdown detected, terminating request by context.Done")
+			logger.Debug("Shutdown detected, terminating request by context.Done")
 
 			return nil, ctx.Err()
 		case <-closeCh:
-			log.Debug("Shutdown detected, terminating request by closing")
+			logger.Debug("Shutdown detected, terminating request by closing")
 
 			return nil, ErrShutdownDetected
 		case <-ticker.C:
@@ -202,7 +204,7 @@ retryLoop:
 
 			if err != nil {
 				if attempt%logEach == 0 {
-					log.Warn("an error while trying fetching from Heimdall", "attempt", attempt, "error", err)
+					logger.Warn("an error while trying fetching from Heimdall", "attempt", attempt, "error", err)
 				}
 
 				continue retryLoop

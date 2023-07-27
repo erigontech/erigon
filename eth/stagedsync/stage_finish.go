@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
@@ -22,16 +23,15 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
 
 type FinishCfg struct {
 	db            kv.RwDB
 	tmpDir        string
-	forkValidator *engineapi.ForkValidator
+	forkValidator *engine_helpers.ForkValidator
 }
 
-func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engineapi.ForkValidator) FinishCfg {
+func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engine_helpers.ForkValidator) FinishCfg {
 	return FinishCfg{
 		db:            db,
 		tmpDir:        tmpDir,
@@ -211,8 +211,18 @@ func ReadLogs(tx kv.Tx, from uint64, isUnwind bool, blockReader services.FullBlo
 				return nil, err
 			}
 		}
+
 		txIndex := uint64(binary.BigEndian.Uint32(k[8:]))
-		txHash := block.Transactions()[txIndex].Hash()
+
+		var txHash libcommon.Hash
+
+		// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
+		if txIndex == uint64(len(block.Transactions())) {
+			txHash = types.ComputeBorTxHash(blockNum, block.Hash())
+		} else {
+			txHash = block.Transactions()[txIndex].Hash()
+		}
+
 		var ll types.Logs
 		reader.Reset(v)
 		if err := cbor.Unmarshal(&ll, reader); err != nil {

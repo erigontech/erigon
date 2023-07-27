@@ -249,8 +249,8 @@ func (b *Eth1Block) Version() clparams.StateVersion {
 // Body returns the equivalent raw body (only eth1 body section).
 func (b *Eth1Block) Body() *types.RawBody {
 	withdrawals := make([]*types.Withdrawal, b.Withdrawals.Len())
-	b.Withdrawals.Range(func(_ int, w *types.Withdrawal, _ int) bool {
-		withdrawals = append(withdrawals, w)
+	b.Withdrawals.Range(func(idx int, w *types.Withdrawal, _ int) bool {
+		withdrawals[idx] = w
 		return true
 	})
 	return &types.RawBody{

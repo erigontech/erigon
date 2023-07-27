@@ -68,7 +68,7 @@ Scenarios are similarly specified in code in `main.go` in the `action` function.
             {Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
             {Text: "PingErigonRpc"},
             {Text: "CheckTxPoolContent", Args: []any{0, 0, 0}},
-            {Text: "SendTxWithDynamicFee", Args: []any{recipientAddress, services.DevAddress, sendValue}},
+            {Text: "SendTxWithDynamicFee", Args: []any{recipientAddress, accounts.DevAddress, sendValue}},
             {Text: "AwaitBlocks", Args: []any{2 * time.Second}},
         },
     })
@@ -95,36 +95,36 @@ func PingErigonRpc(ctx context.Context) error {
 The devnet currently supports the following context methods:
 
 ```go
-func Logger(ctx go_context.Context) log.Logger
+func Logger(ctx context.Context) log.Logger
 ```
 
 Fetch the devnet logger - which can be used for logging step processing.
 
 ```go
-func SelectNode(ctx go_context.Context, selector ...interface{}) 
+func SelectNode(ctx context.Context, selector ...interface{}) 
 ```
 
 This method selects a node on the network the selector argument can be either an `int` index or an implementation of the `network.NodeSelector` interface.  If no selector is specified a either the `current node` will be returned or a node will be selected at random from the network.
 
 ```go
-func SelectMiner(ctx go_context.Context, selector ...interface{})
+func SelectMiner(ctx context.Context, selector ...interface{})
 ```
 
 This method selects a mining node on the network the selector argument can be either an `int` index or an implementation of the `network.NodeSelector` interface.  If no selector is specified a either the `current node` will be returned or a miner will be selected at random from the network.
 
 ```go
-func SelectNonMiner(ctx go_context.Context, selector ...interface{})
+func SelectNonMiner(ctx context.Context, selector ...interface{})
 ```
 
 This method selects a non mining node on the network the selector argument can be either an `int` index or an implementation of the `network.NodeSelector` interface.  If no selector is specified a either the `current node` will be returned or a non-miner will be selected at random from the network.
 
 ```go
-func WithCurrentNode(ctx go_context.Context, selector interface{}) Context
+func WithCurrentNode(ctx context.Context, selector interface{}) Context
 ```
 This method sets the `current node` on the network.  This can be called to create a context with a fixed node which can be passed to subsequent step functions so that they will operate on a defined network node.
 
 ```go
-func CurrentNode(ctx go_context.Context) Node
+func CurrentNode(ctx context.Context) Node
 ```
 
 This method returns the current node from the network context.

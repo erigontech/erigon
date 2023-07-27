@@ -9,22 +9,23 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/abi"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type ChainSpanner struct {
-	validatorSet abi.ABI
-	chainConfig  *chain.Config
-	logger       log.Logger
+	validatorSet    abi.ABI
+	chainConfig     *chain.Config
+	logger          log.Logger
+	withoutHeimdall bool
 }
 
-func NewChainSpanner(validatorSet abi.ABI, chainConfig *chain.Config, logger log.Logger) *ChainSpanner {
+func NewChainSpanner(validatorSet abi.ABI, chainConfig *chain.Config, withoutHeimdall bool, logger log.Logger) *ChainSpanner {
 	return &ChainSpanner{
-		validatorSet: validatorSet,
-		chainConfig:  chainConfig,
-		logger:       logger,
+		validatorSet:    validatorSet,
+		chainConfig:     chainConfig,
+		logger:          logger,
+		withoutHeimdall: withoutHeimdall,
 	}
 }
 
@@ -68,7 +69,8 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 
 func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
 	// Use signer as validator in case of bor devent
-	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
+	if c.withoutHeimdall {
+		c.logger.Info("Spanner returning pre-set validator set")
 		validators := []*valset.Validator{
 			{
 				ID:               1,
@@ -91,7 +93,7 @@ func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon
 
 func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
 	// Use signer as validator in case of bor devent
-	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
+	if c.withoutHeimdall {
 		validators := []*valset.Validator{
 			{
 				ID:               1,

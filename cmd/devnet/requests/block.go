@@ -3,6 +3,7 @@ package requests
 import (
 	"bytes"
 	"fmt"
+	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -107,19 +108,19 @@ func (reqGen *requestGenerator) GetBlockByNumberDetails(blockNum string, withTxs
 	return m, nil
 }
 
-func (reqGen *requestGenerator) GetTransactionCount(address libcommon.Address, blockNum BlockNumber) (EthGetTransactionCount, error) {
+func (reqGen *requestGenerator) GetTransactionCount(address libcommon.Address, blockNum BlockNumber) (*big.Int, error) {
 	var b EthGetTransactionCount
 
 	method, body := reqGen.getTransactionCount(address, blockNum)
 	if res := reqGen.call(method, body, &b); res.Err != nil {
-		return b, fmt.Errorf("error getting transaction count: %v", res.Err)
+		return nil, fmt.Errorf("error getting transaction count: %v", res.Err)
 	}
 
 	if b.Error != nil {
-		return b, fmt.Errorf("error populating response object: %v", b.Error)
+		return nil, fmt.Errorf("error populating response object: %v", b.Error)
 	}
 
-	return b, nil
+	return big.NewInt(int64(b.Result)), nil
 }
 
 func (req *requestGenerator) getTransactionCount(address libcommon.Address, blockNum BlockNumber) (RPCMethod, string) {

@@ -25,10 +25,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
-	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
@@ -63,9 +61,9 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Phase1]", "chain", cliCtx.String(flags.Chain.Name))
-	log.Info("[Phase1] Running Caplin", "cfg", cfg)
+	log.Info("[Phase1] Running Caplin")
 	// Either start from genesis or a checkpoint
-	var state *state.BeaconState
+	var state *state.CachingBeaconState
 	if cfg.InitialSync {
 		state = cfg.InitalState
 	} else {
@@ -105,14 +103,15 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
 		return err
 	}
-	var engine execution_client.ExecutionEngine
-	if cfg.ErigonPrivateApi != "" {
-		cc, err := grpc.Dial(cfg.ErigonPrivateApi, grpc.WithInsecure())
+	var executionEngine execution_client.ExecutionEngine
+	if cfg.RunEngineAPI {
+		fmt.Println(cfg.EngineAPIAddr)
+		cc, err := execution_client.NewExecutionClientRPC(ctx, cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
 		if err != nil {
-			log.Error("could not connect to erigon private api", "err", err)
+			log.Error("could not start engine api", "err", err)
 		}
-		defer cc.Close()
-		engine = execution_client.NewExecutionEnginePhase1FromClient(ctx, remote.NewETHBACKENDClient(cc))
+		log.Info("Started Engine API RPC Client", "addr", cfg.EngineAPIAddr)
+		executionEngine = cc
 	}
 
 	if !cfg.NoBeaconApi {
@@ -134,5 +133,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		}
 	}
 
-	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, engine, state, caplinFreezer)
+	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, executionEngine, state, caplinFreezer)
 }

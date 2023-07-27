@@ -40,7 +40,7 @@ func createSentinel(cfg *sentinel.SentinelConfig, db kv.RoDB, logger log.Logger)
 		//sentinel.ProposerSlashingSsz,
 		//sentinel.AttesterSlashingSsz,
 	}
-	// gossipTopics = append(gossipTopics, sentinel.GossipSidecarTopics(params.MaxBlobsPerBlock)...)
+	// gossipTopics = append(gossipTopics, sentinel.GossipSidecarTopics(chain.MaxBlobsPerBlock)...)
 
 	for _, v := range gossipTopics {
 		if err := sent.Unsubscribe(v); err != nil {
