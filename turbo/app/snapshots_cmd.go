@@ -258,7 +258,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		t := time.Now()
 		g := decompressor.MakeGetter()
 		for g.HasNext() {
-			_ = g.Skip()
+			g.Skip()
 		}
 		log.Info("decompress skip speed", "took", time.Since(t))
 	}()
