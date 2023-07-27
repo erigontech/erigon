@@ -315,15 +315,8 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 	fName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, fromStep, toStep)
 	idxPath := filepath.Join(h.dir, fName)
 
-	p := ps.AddNew(fName, uint64(item.decompressor.Count()*2))
-	defer ps.Delete(p)
-
 	//h.logger.Info("[snapshots] build idx", "file", fName)
-	count, err := iterateForVi(item, iiItem, p, h.compressHistoryVals)
-	if err != nil {
-		return err
-	}
-	return buildVi(ctx, item, iiItem, idxPath, h.tmpdir, count, p, h.compressHistoryVals, h.logger)
+	return buildVi(ctx, item, iiItem, idxPath, h.tmpdir, ps, h.compressHistoryVals, h.logger)
 }
 
 func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
@@ -337,67 +330,32 @@ func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps 
 	}
 }
 
-func iterateForVi(historyItem, iiItem *filesItem, p *background.Progress, compressVals bool) (count int, err error) {
+func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath, tmpdir string, ps *background.ProgressSet, compressVals bool, logger log.Logger) error {
 	defer iiItem.decompressor.EnableReadAhead().DisableReadAhead()
 	defer historyItem.decompressor.EnableReadAhead().DisableReadAhead()
 
-	var cp CursorHeap
-	heap.Init(&cp)
+	_, fName := filepath.Split(historyIdxPath)
+	p := ps.AddNew(fName, uint64(iiItem.decompressor.Count()*2))
+	defer ps.Delete(p)
+
+	var count uint64
 	g := iiItem.decompressor.MakeGetter()
 	g.Reset(0)
-	if g.HasNext() {
-		g2 := historyItem.decompressor.MakeGetter()
-		key, _ := g.NextUncompressed()
-		val, _ := g.NextUncompressed()
-		heap.Push(&cp, &CursorItem{
-			t:        FILE_CURSOR,
-			dg:       g,
-			dg2:      g2,
-			key:      key,
-			val:      val,
-			endTxNum: iiItem.endTxNum,
-			reverse:  false,
-		})
-	}
-
-	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
-	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
-	// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
-	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
-	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
-	var valBuf []byte
-	for cp.Len() > 0 {
-		lastKey := common.Copy(cp[0].key)
-		// Advance all the items that have this key (including the top)
-		//var mergeOnce bool
-		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-			ci1 := cp[0]
-			keysCount := eliasfano32.Count(ci1.val)
-			for i := uint64(0); i < keysCount; i++ {
-				if compressVals {
-					valBuf, _ = ci1.dg2.Next(valBuf[:0])
-				} else {
-					valBuf, _ = ci1.dg2.NextUncompressed()
-				}
-			}
-			count += int(keysCount)
-			if ci1.dg.HasNext() {
-				ci1.key, _ = ci1.dg.NextUncompressed()
-				ci1.val, _ = ci1.dg.NextUncompressed()
-				heap.Fix(&cp, 0)
-			} else {
-				heap.Remove(&cp, 0)
-			}
-
-			p.Processed.Add(1)
+	for g.HasNext() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
 		}
-	}
-	return count, nil
-}
 
-func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath, tmpdir string, count int, p *background.Progress, compressVals bool, logger log.Logger) error {
+		g.SkipUncompressed() // key
+		valBuf, _ := g.NextUncompressed()
+		count += eliasfano32.Count(valBuf)
+		p.Processed.Add(1)
+	}
+
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:    count,
+		KeyCount:    int(count),
 		Enums:       false,
 		BucketSize:  2000,
 		LeafSize:    8,
@@ -414,10 +372,6 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 	var txKey [8]byte
 	var valOffset uint64
 
-	defer iiItem.decompressor.EnableReadAhead().DisableReadAhead()
-	defer historyItem.decompressor.EnableReadAhead().DisableReadAhead()
-
-	g := iiItem.decompressor.MakeGetter()
 	g2 := historyItem.decompressor.MakeGetter()
 	var keyBuf, valBuf []byte
 	for {
@@ -425,12 +379,6 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 		g2.Reset(0)
 		valOffset = 0
 		for g.HasNext() {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-
 			keyBuf, _ = g.NextUncompressed()
 			valBuf, _ = g.NextUncompressed()
 			ef, _ := eliasfano32.ReadEliasFano(valBuf)
@@ -450,6 +398,11 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 			}
 
 			p.Processed.Add(1)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 		}
 		if err = rs.Build(); err != nil {
 			if rs.Collision() {
