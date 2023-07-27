@@ -133,7 +133,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	}
 	cfg = domainCfg{
 		domainLargeValues: true,
-		hist:              histCfg{withLocalityIndex: false, compressVals: false, historyLargeValues: true}}
+		hist:              histCfg{withLocalityIndex: false, compressVals: false, historyLargeValues: false}}
 	commitd, err := NewDomain(cfg, dir, tmpdir, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger)
 	if err != nil {
 		return nil, err
