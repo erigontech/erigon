@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 )
 
 func (e *EthereumExecutionModule) InsertBodies(ctx context.Context, req *execution.InsertBodiesRequest) (*execution.InsertionResult, error) {
@@ -22,8 +23,14 @@ func (e *EthereumExecutionModule) InsertBodies(ctx context.Context, req *executi
 	}
 	defer tx.Rollback()
 	for _, grpcBody := range req.Bodies {
-		if _, err := rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(grpcBody.BlockHash), grpcBody.BlockNumber, ConvertRawBlockBodyFromRpc(grpcBody)); err != nil {
+		var ok bool
+		if ok, err = rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(grpcBody.BlockHash), grpcBody.BlockNumber, eth1_utils.ConvertRawBlockBodyFromRpc(grpcBody)); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBodies: could not insert: %s", err)
+		}
+		if e.historyV3 && ok {
+			if err := rawdb.AppendCanonicalTxNums(tx, grpcBody.BlockNumber); err != nil {
+				return nil, fmt.Errorf("ethereumExecutionModule.InsertBodies: could not insert: %s", err)
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -48,7 +55,7 @@ func (e *EthereumExecutionModule) InsertHeaders(ctx context.Context, req *execut
 	}
 	defer tx.Rollback()
 	for _, grpcHeader := range req.Headers {
-		header, err := HeaderRpcToHeader(grpcHeader)
+		header, err := eth1_utils.HeaderRpcToHeader(grpcHeader)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: cannot convert headers: %s", err)
 		}

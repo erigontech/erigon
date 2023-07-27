@@ -42,12 +42,14 @@ type EthereumExecutionModule struct {
 	builders       map[uint64]*builder.BlockBuilder
 
 	// configuration
-	config *chain.Config
+	config    *chain.Config
+	historyV3 bool
 
 	execution.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator, config *chain.Config, builderFunc builder.BlockBuilderFunc, logger log.Logger) *EthereumExecutionModule {
+func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
+	config *chain.Config, builderFunc builder.BlockBuilderFunc, logger log.Logger, historyV3 bool) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:       blockReader,
 		db:                db,
