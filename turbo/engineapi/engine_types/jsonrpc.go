@@ -1,11 +1,14 @@
 package engine_types
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -102,4 +105,102 @@ func (e StringifiedError) MarshalJSON() ([]byte, error) {
 
 func (e StringifiedError) Error() error {
 	return e.err
+}
+
+func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
+	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
+	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
+
+	// Convert slice of hexutility.Bytes to a slice of slice of bytes
+	transactions := make([]hexutility.Bytes, len(payload.Transactions))
+	for i, transaction := range payload.Transactions {
+		transactions[i] = transaction
+	}
+
+	res := &ExecutionPayload{
+		ParentHash:    gointerfaces.ConvertH256ToHash(payload.ParentHash),
+		FeeRecipient:  gointerfaces.ConvertH160toAddress(payload.Coinbase),
+		StateRoot:     gointerfaces.ConvertH256ToHash(payload.StateRoot),
+		ReceiptsRoot:  gointerfaces.ConvertH256ToHash(payload.ReceiptRoot),
+		LogsBloom:     bloom[:],
+		PrevRandao:    gointerfaces.ConvertH256ToHash(payload.PrevRandao),
+		BlockNumber:   hexutil.Uint64(payload.BlockNumber),
+		GasLimit:      hexutil.Uint64(payload.GasLimit),
+		GasUsed:       hexutil.Uint64(payload.GasUsed),
+		Timestamp:     hexutil.Uint64(payload.Timestamp),
+		ExtraData:     payload.ExtraData,
+		BaseFeePerGas: (*hexutil.Big)(baseFee),
+		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
+		Transactions:  transactions,
+	}
+	if payload.Version >= 2 {
+		res.Withdrawals = ConvertWithdrawalsFromRpc(payload.Withdrawals)
+	}
+	if payload.Version >= 3 {
+		dataGasUsed := *payload.DataGasUsed
+		res.DataGasUsed = (*hexutil.Uint64)(&dataGasUsed)
+		excessDataGas := *payload.ExcessDataGas
+		res.ExcessDataGas = (*hexutil.Uint64)(&excessDataGas)
+	}
+	return res
+}
+
+func ConvertBlobsFromRpc(bundle *types2.BlobsBundleV1) *BlobsBundleV1 {
+	if bundle == nil {
+		return nil
+	}
+	res := &BlobsBundleV1{
+		Commitments: make([]types.KZGCommitment, len(bundle.Commitments)),
+		Proofs:      make([]types.KZGProof, len(bundle.Proofs)),
+		Blobs:       make([]types.Blob, len(bundle.Blobs)),
+	}
+	for i, commitment := range bundle.Commitments {
+		copy(res.Commitments[i][:], commitment)
+	}
+	for i, proof := range bundle.Proofs {
+		copy(res.Proofs[i][:], proof)
+	}
+	for i, blob := range bundle.Blobs {
+		copy(res.Blobs[i][:], blob)
+	}
+	return res
+}
+
+func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types2.Withdrawal, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types2.Withdrawal{
+			Index:          w.Index,
+			ValidatorIndex: w.Validator,
+			Address:        gointerfaces.ConvertAddressToH160(w.Address),
+			Amount:         w.Amount,
+		})
+	}
+	return out
+}
+
+func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
+	if in == nil {
+		return nil
+	}
+	out := make([]*types.Withdrawal, 0, len(in))
+	for _, w := range in {
+		out = append(out, &types.Withdrawal{
+			Index:     w.Index,
+			Validator: w.ValidatorIndex,
+			Address:   gointerfaces.ConvertH160toAddress(w.Address),
+			Amount:    w.Amount,
+		})
+	}
+	return out
+}
+
+func ConvertPayloadId(payloadId uint64) *hexutility.Bytes {
+	encodedPayloadId := make([]byte, 8)
+	binary.BigEndian.PutUint64(encodedPayloadId, payloadId)
+	ret := hexutility.Bytes(encodedPayloadId)
+	return &ret
 }

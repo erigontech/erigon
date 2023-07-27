@@ -25,7 +25,7 @@ func TestInsertGetterHeader(t *testing.T) {
 	tx, _ := db.BeginRw(context.TODO())
 	rawdb.WriteTd(tx, libcommon.Hash{}, 1, libcommon.Big0)
 	tx.Commit()
-	e := eth1.NewEthereumExecutionModule(nil, db, nil, nil, nil)
+	e := eth1.NewEthereumExecutionModule(nil, db, nil, nil, nil, nil, nil)
 	_, err := e.InsertHeaders(context.TODO(), &execution.InsertHeadersRequest{
 		Headers: []*execution.Header{
 			eth1.HeaderToHeaderRPC(header),
@@ -46,7 +46,7 @@ func TestInsertGetterBody(t *testing.T) {
 	body := &types.RawBody{
 		Transactions: txs,
 	}
-	e := eth1.NewEthereumExecutionModule(nil, memdb.NewTestDB(t), nil, nil, nil)
+	e := eth1.NewEthereumExecutionModule(nil, memdb.NewTestDB(t), nil, nil, nil, nil, nil)
 	_, err := e.InsertBodies(context.TODO(), &execution.InsertBodiesRequest{
 		Bodies: []*execution.BlockBody{
 			eth1.ConvertRawBlockBodyToRpc(body, bn, bhash),
