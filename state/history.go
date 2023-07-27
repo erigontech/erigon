@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/exp/slices"
@@ -72,7 +73,7 @@ type History struct {
 	// large:
 	//   keys: txNum -> key1+key2
 	//   vals: key1+key2+txNum -> value (not DupSort)
-	largeValues bool // can't use DupSort optimization (aka. prefix-compression) if values size > 4kb
+	historyLargeValues bool // can't use DupSort optimization (aka. prefix-compression) if values size > 4kb
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 
@@ -81,9 +82,9 @@ type History struct {
 }
 
 type histCfg struct {
-	compressVals      bool
-	largeValues       bool
-	withLocalityIndex bool
+	compressVals       bool
+	historyLargeValues bool
+	withLocalityIndex  bool
 }
 
 func NewHistory(cfg histCfg, dir, tmpdir string, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityFileExtensions []string, logger log.Logger) (*History, error) {
@@ -93,7 +94,7 @@ func NewHistory(cfg histCfg, dir, tmpdir string, aggregationStep uint64, filenam
 		compressHistoryVals:     cfg.compressVals,
 		compressWorkers:         1,
 		integrityFileExtensions: integrityFileExtensions,
-		largeValues:             cfg.largeValues,
+		historyLargeValues:      cfg.historyLargeValues,
 		logger:                  logger,
 	}
 	h.roFiles.Store(&[]ctxItem{})
@@ -517,7 +518,7 @@ func (h *History) newWriter(tmpdir string, buffered, discard bool) *historyWAL {
 
 		autoIncrementBuf: make([]byte, 8),
 		historyKey:       make([]byte, 128),
-		largeValues:      h.largeValues,
+		largeValues:      h.historyLargeValues,
 	}
 	if buffered {
 		w.historyVals = etl.NewCollector(h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), h.logger)
@@ -550,7 +551,7 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 		if len(key2) > 0 {
 			copy(historyKey[len(key1):], key2)
 		}
-		copy(historyKey[lk:], h.h.InvertedIndex.txNumBytes[:])
+		copy(historyKey[lk:], h.h.txNumBytes[:])
 
 		if !h.buffered {
 			if err := h.h.tx.Put(h.h.historyValsTable, historyKey, original); err != nil {
@@ -578,7 +579,7 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 	historyKey := h.historyKey[:lk+8+len(original)]
 	copy(historyKey, key1)
 	copy(historyKey[len(key1):], key2)
-	copy(historyKey[lk:], h.h.InvertedIndex.txNumBytes[:])
+	copy(historyKey[lk:], h.h.txNumBytes[:])
 	copy(historyKey[lk+8:], original)
 	historyKey1 := historyKey[:lk]
 	historyVal := historyKey[lk:]
@@ -668,7 +669,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 
 	var c kv.Cursor
 	var cd kv.CursorDupSort
-	if h.largeValues {
+	if h.historyLargeValues {
 		c, err = roTx.Cursor(h.historyValsTable)
 		if err != nil {
 			return HistoryCollation{}, err
@@ -690,7 +691,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 			txNum := it.Next()
 			binary.BigEndian.PutUint64(keyBuf[len(key):], txNum)
 			//TODO: use cursor range
-			if h.largeValues {
+			if h.historyLargeValues {
 				val, err := roTx.GetOne(h.historyValsTable, keyBuf)
 				if err != nil {
 					return HistoryCollation{}, fmt.Errorf("getBeforeTxNum %s history val [%x]: %w", h.filenameBase, k, err)
@@ -999,7 +1000,7 @@ func (h *History) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) er
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
-	if h.largeValues {
+	if h.historyLargeValues {
 		k, err := kv.FirstKey(tx, h.historyValsTable)
 		if err != nil {
 			return false, err
@@ -1030,7 +1031,7 @@ type HistoryRecord struct {
 func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]HistoryRecord, error) {
 	res := make([]HistoryRecord, 0, 2)
 
-	if h.largeValues {
+	if h.historyLargeValues {
 		c, err := tx.RwCursor(h.historyValsTable)
 		if err != nil {
 			return nil, err
@@ -1088,18 +1089,19 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 	}
 	defer c.Close()
 
-	aux := make([]byte, 8)
-	binary.BigEndian.PutUint64(aux[len(key):], beforeTxNum)
-
-	val, err := c.SeekBothRange(key, aux[len(key):])
+	var val []byte
+	var txNum uint64
+	aux := hexutility.EncodeTs(beforeTxNum)
+	val, err = c.SeekBothRange(key, aux)
 	if err != nil {
 		return nil, err
 	}
 	if val == nil {
-		return nil, err
+		return nil, nil
 	}
+	txNum = binary.BigEndian.Uint64(val[:8])
+	val = val[8:]
 
-	txNum := binary.BigEndian.Uint64(val[:8])
 	switch {
 	case txNum <= beforeTxNum:
 		nk, nv, err := c.Next()
@@ -1107,7 +1109,7 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 			return nil, err
 		}
 
-		res = append(res, HistoryRecord{beforeTxNum, val[8:]})
+		res = append(res, HistoryRecord{beforeTxNum, val})
 		if nk != nil && bytes.Equal(nk[:len(nk)-8], key) {
 			res = append(res, HistoryRecord{binary.BigEndian.Uint64(nv[:8]), nv[8:]})
 			if err := c.DeleteCurrent(); err != nil {
@@ -1127,7 +1129,7 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 			}
 			// this case will be removed by pruning. Or need to implement cleaning through txTo
 		}
-		res = append(res, HistoryRecord{beforeTxNum, val[8:]})
+		res = append(res, HistoryRecord{beforeTxNum, val})
 	}
 	return res, nil
 }
@@ -1148,7 +1150,7 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 	var k, v []byte
 	var valsC kv.RwCursor
 	var valsCDup kv.RwCursorDupSort
-	if h.largeValues {
+	if h.historyLargeValues {
 		valsC, err = h.tx.RwCursor(h.historyValsTable)
 		if err != nil {
 			return err
@@ -1171,7 +1173,7 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 		}
 		limit--
 
-		if h.largeValues {
+		if h.historyLargeValues {
 			seek := append(common.Copy(v), k...)
 			if err := valsC.Delete(seek); err != nil {
 				return err
@@ -1464,7 +1466,7 @@ func (hc *HistoryContext) GetNoStateWithRecent(key []byte, txNum uint64, roTx kv
 }
 
 func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
-	if hc.h.largeValues {
+	if hc.h.historyLargeValues {
 		c, err := tx.Cursor(hc.h.historyValsTable)
 		if err != nil {
 			return nil, false, err
@@ -1537,7 +1539,7 @@ func (hc *HistoryContext) getRecentFromDB(key []byte, beforeTxNum uint64, tx kv.
 		return 0, nil, nil, false
 	}
 
-	if hc.h.largeValues {
+	if hc.h.historyLargeValues {
 		c, err := tx.Cursor(hc.h.historyValsTable)
 		if err != nil {
 			return 0, false, nil, nil, err
@@ -1635,7 +1637,7 @@ func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.T
 	}
 
 	dbit := &StateAsOfIterDB{
-		largeValues: hc.h.largeValues,
+		largeValues: hc.h.historyLargeValues,
 		roTx:        roTx,
 		valsTable:   hc.h.historyValsTable,
 		from:        from, to: to, limit: limit,
@@ -1935,7 +1937,7 @@ func (hc *HistoryContext) iterateChangedRecent(fromTxNum, toTxNum int, asc order
 	dbi := &HistoryChangesIterDB{
 		endTxNum:    toTxNum,
 		roTx:        roTx,
-		largeValues: hc.h.largeValues,
+		largeValues: hc.h.historyLargeValues,
 		valsTable:   hc.h.historyValsTable,
 		limit:       limit,
 	}
@@ -2339,7 +2341,7 @@ func (hs *HistoryStep) Clone() *HistoryStep {
 
 func (hc *HistoryContext) idxRangeRecent(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
 	var dbIt iter.U64
-	if hc.h.largeValues {
+	if hc.h.historyLargeValues {
 		if asc {
 			from := make([]byte, len(key)+8)
 			copy(from, key)

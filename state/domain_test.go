@@ -67,7 +67,9 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 		}
 	}).MustOpen()
 	t.Cleanup(db.Close)
-	cfg := domainCfg{histCfg{withLocalityIndex: true, compressVals: false, largeValues: AccDomainLargeValues}}
+	cfg := domainCfg{
+		domainLargeValues: AccDomainLargeValues,
+		hist:              histCfg{withLocalityIndex: true, compressVals: false, historyLargeValues: AccDomainLargeValues}}
 	d, err := NewDomain(cfg, coldDir, coldDir, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
@@ -1062,7 +1064,7 @@ func TestDomainContext_IteratePrefix(t *testing.T) {
 
 	d.SetTx(tx)
 
-	d.largeValues = true
+	d.historyLargeValues = true
 	d.StartUnbufferedWrites()
 	defer d.FinishWrites()
 
