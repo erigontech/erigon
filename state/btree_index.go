@@ -18,7 +18,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
-	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 
@@ -796,10 +795,10 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 
 	defer kv.EnableReadAhead().DisableReadAhead()
 	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".bl"
-	var bloom *bloomfilter.Filter
+	var bloom *bloomFilter
 	var err error
 	if kv.Count() > 0 {
-		bloom, err = bloomfilter.NewOptimal(uint64(kv.Count()/2), 0.01)
+		bloom, err = NewBloom(uint64(kv.Count()/2), bloomPath)
 		if err != nil {
 			return err
 		}

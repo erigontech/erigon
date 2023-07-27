@@ -319,7 +319,7 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 	defer ps.Delete(p)
 
 	//h.logger.Info("[snapshots] build idx", "file", fName)
-	count, err := iterateForVi(item, iiItem, p, h.compressHistoryVals, func(v []byte) error { return nil })
+	count, err := iterateForVi(item, iiItem, p, h.compressHistoryVals)
 	if err != nil {
 		return err
 	}
@@ -337,7 +337,10 @@ func (h *History) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps 
 	}
 }
 
-func iterateForVi(historyItem, iiItem *filesItem, p *background.Progress, compressVals bool, f func(v []byte) error) (count int, err error) {
+func iterateForVi(historyItem, iiItem *filesItem, p *background.Progress, compressVals bool) (count int, err error) {
+	defer iiItem.decompressor.EnableReadAhead().DisableReadAhead()
+	defer historyItem.decompressor.EnableReadAhead().DisableReadAhead()
+
 	var cp CursorHeap
 	heap.Init(&cp)
 	g := iiItem.decompressor.MakeGetter()
@@ -375,9 +378,6 @@ func iterateForVi(historyItem, iiItem *filesItem, p *background.Progress, compre
 					valBuf, _ = ci1.dg2.Next(valBuf[:0])
 				} else {
 					valBuf, _ = ci1.dg2.NextUncompressed()
-				}
-				if err = f(valBuf); err != nil {
-					return count, err
 				}
 			}
 			count += int(keysCount)

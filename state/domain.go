@@ -68,7 +68,7 @@ type filesItem struct {
 	index        *recsplit.Index
 	bindex       *BtIndex
 	bm           *bitmapdb.FixedSizeBitmaps
-	bloom        *bloomfilter.Filter
+	bloom        *bloomFilter
 	startTxNum   uint64
 	endTxNum     uint64
 
@@ -81,6 +81,47 @@ type filesItem struct {
 	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isSubsetOfFrozenFile()`
 	// other processes (which also reading files, may have same logic)
 	canDelete atomic.Bool
+}
+type bloomFilter struct {
+	*bloomfilter.Filter
+	fileName, filePath string
+	f                  *os.File
+}
+
+func NewBloom(keysCount uint64, filePath string) (*bloomFilter, error) {
+	m := bloomfilter.OptimalM(keysCount, 0.01)
+	//k := bloomfilter.OptimalK(m, keysCount)
+	//TODO: make filters compatible by usinig same seed/keys
+	bloom, err := bloomfilter.New(m, 4)
+	if err != nil {
+		return nil, err
+	}
+
+	_, fileName := filepath.Split(filePath)
+	return &bloomFilter{filePath: filePath, fileName: fileName, Filter: bloom}, nil
+}
+func (b *bloomFilter) Build() error {
+	//TODO: fsync and tmp-file rename
+	if _, err := b.Filter.WriteFile(b.filePath); err != nil {
+		return err
+	}
+	return nil
+}
+
+func OpenBloom(filePath string) (*bloomFilter, error) {
+	_, fileName := filepath.Split(filePath)
+	f := &bloomFilter{filePath: filePath, fileName: fileName}
+	var err error
+	f.Filter, _, err = bloomfilter.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("OpenBloom: %w, %s", err, fileName)
+	}
+	return f, nil
+}
+func (b *bloomFilter) Close() {
+	if b.f != nil {
+		b.f.Close()
+	}
 }
 
 func newFilesItem(startTxNum, endTxNum uint64, stepSize uint64) *filesItem {
@@ -136,6 +177,10 @@ func (i *filesItem) closeFilesAndRemove() {
 		i.bm = nil
 	}
 	if i.bloom != nil {
+		i.bloom.Close()
+		if err := os.Remove(i.bloom.filePath); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
+		}
 		i.bloom = nil
 	}
 }
@@ -421,8 +466,7 @@ func (d *Domain) openFiles() (err error) {
 			if item.bloom == nil {
 				idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.li.lb", d.filenameBase, fromStep, toStep))
 				if dir.FileExist(idxPath) {
-					if item.bloom, _, err = bloomfilter.ReadFile(idxPath); err != nil {
-						d.logger.Debug("Domain.openFiles: %w, %s", err, idxPath)
+					if item.bloom, err = OpenBloom(idxPath); err != nil {
 						return false
 					}
 				}

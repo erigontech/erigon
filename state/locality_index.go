@@ -170,9 +170,9 @@ func (li *LocalityIndex) openFiles() (err error) {
 	if li.file.bloom == nil {
 		idxPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li.lb", li.filenameBase, fromStep, toStep))
 		if dir.FileExist(idxPath) {
-			li.file.bloom, _, err = bloomfilter.ReadFile(idxPath)
+			li.file.bloom, err = OpenBloom(idxPath)
 			if err != nil {
-				return fmt.Errorf("LocalityIndex.openFiles: %w, %s", err, idxPath)
+				return err
 			}
 		}
 	}
@@ -395,7 +395,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	}
 
 	hasher := murmur3.New128WithSeed(rs.Salt())
-	var bloom *bloomfilter.Filter
+	var bloom *bloomFilter
 	for {
 		p.Processed.Store(0)
 		i := uint64(0)
@@ -415,7 +415,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		}
 
 		if count > 0 {
-			bloom, err = bloomfilter.NewOptimal(uint64(count), 0.01)
+			bloom, err = NewBloom(uint64(count), idxPath+".lb")
 			if err != nil {
 				return nil, err
 			}
@@ -472,9 +472,10 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	}
 
 	if bloom != nil {
-		if _, err := bloom.WriteFile(idxPath + ".lb"); err != nil {
+		if err := bloom.Build(); err != nil {
 			return nil, err
 		}
+		bloom.Close() //TODO: move to defer, and move building and opennig to different funcs
 	}
 
 	idx, err := recsplit.OpenIndex(idxPath)
@@ -486,7 +487,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		return nil, err
 	}
 	if dir.FileExist(idxPath + ".lb") {
-		bloom, _, err = bloomfilter.ReadFile(idxPath + ".lb")
+		bloom, err = OpenBloom(idxPath + ".lb")
 		if err != nil {
 			return nil, err
 		}
@@ -530,7 +531,7 @@ func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, fromStep, toSte
 type LocalityIndexFiles struct {
 	index *recsplit.Index
 	bm    *bitmapdb.FixedSizeBitmaps
-	bloom *bloomfilter.Filter
+	bloom *bloomFilter
 
 	fromStep, toStep uint64
 }
