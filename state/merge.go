@@ -1015,7 +1015,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 				}
 				p.Processed.Add(1)
 			}
-			if err = rs.Build(); err != nil {
+			if err = rs.Build(ctx); err != nil {
 				if rs.Collision() {
 					log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 					rs.ResetNextSalt()

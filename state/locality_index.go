@@ -459,7 +459,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 			return nil, err
 		}
 
-		if err = rs.Build(); err != nil {
+		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
 				li.logger.Warn("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()

@@ -18,6 +18,7 @@ package recsplit
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
@@ -535,8 +536,7 @@ func (rs *RecSplit) loadFuncOffset(k, _ []byte, _ etl.CurrentTableReader, _ etl.
 
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file
-func (rs *RecSplit) Build() error {
-
+func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.built {
 		return fmt.Errorf("already built")
 	}
@@ -571,7 +571,7 @@ func (rs *RecSplit) Build() error {
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] calculating", "file", rs.indexFileName)
 	}
-	if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{}); err != nil {
+	if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	if len(rs.currentBucket) > 0 {
