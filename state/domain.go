@@ -133,7 +133,7 @@ func (i *filesItem) closeFilesAndRemove() {
 		if err := os.Remove(i.bm.FilePath()); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
 		}
-		i.bindex = nil
+		i.bm = nil
 	}
 	if i.bloom != nil {
 		i.bloom = nil
@@ -394,6 +394,7 @@ func (d *Domain) openFiles() (err error) {
 				continue
 			}
 			if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
+				d.logger.Debug("Domain.openFiles: %w, %s", err, datPath)
 				return false
 			}
 
@@ -401,7 +402,7 @@ func (d *Domain) openFiles() (err error) {
 				idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
 				if dir.FileExist(idxPath) {
 					if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-						d.logger.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
+						d.logger.Debug("Domain.openFiles: %w, %s", err, idxPath)
 						return false
 					}
 					//totalKeys += item.index.KeyCount()
@@ -411,11 +412,20 @@ func (d *Domain) openFiles() (err error) {
 				bidxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 				if dir.FileExist(bidxPath) {
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(bidxPath, DefaultBtreeM, item.decompressor); err != nil {
-						d.logger.Debug("InvertedIndex.openFiles: %w, %s", err, bidxPath)
+						d.logger.Debug("Domain.openFiles: %w, %s", err, bidxPath)
 						return false
 					}
 				}
 				//totalKeys += item.bindex.KeyCount()
+			}
+			if item.bloom == nil {
+				idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.li.lb", d.filenameBase, fromStep, toStep))
+				if dir.FileExist(idxPath) {
+					if item.bloom, _, err = bloomfilter.ReadFile(idxPath); err != nil {
+						d.logger.Debug("Domain.openFiles: %w, %s", err, idxPath)
+						return false
+					}
+				}
 			}
 		}
 		return true
@@ -1797,10 +1807,6 @@ func (dc *DomainContext) statelessIdxReader(i int) *recsplit.IndexReader {
 	}
 	r := dc.idxReaders[i]
 	if r == nil {
-		if dc.files[i].src.index == nil {
-			fmt.Printf("nil!! %t\n", dc.files[i].src.decompressor != nil)
-			fmt.Printf("nil2!! %s\n", dc.files[i].src.decompressor.FileName())
-		}
 		r = dc.files[i].src.index.GetReaderFromPool()
 		dc.idxReaders[i] = r
 	}
