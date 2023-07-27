@@ -969,7 +969,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 		}
 		ps.Delete(p)
 
-		p = ps.AddNew("merge "+idxFileName, uint64(2*keyCount))
+		p = ps.AddNew("merge "+idxFileName, uint64(decomp.Count()/2))
 		defer ps.Delete(p)
 		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
 			KeyCount:   keyCount,

@@ -490,11 +490,6 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	defer a.recalcMaxTxNum()
 	var static AggV3StaticFiles
 
-	roTx, err := a.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer roTx.Rollback()
 	//log.Warn("[dbg] collate", "step", step)
 
 	closeCollations := true
@@ -511,17 +506,23 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	g, ctx := errgroup.WithContext(ctx)
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
 		d := d
-		var collation Collation
-		var err error
-		collation, err = d.collate(ctx, step, txFrom, txTo, roTx)
-		if err != nil {
-			return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
-		}
-		collations = append(collations, collation)
 
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
+
+			var collation Collation
+			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
+				collation, err = d.collate(ctx, step, txFrom, txTo, tx)
+				return err
+			})
+			if err != nil {
+				return err
+			}
+			if err != nil {
+				return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
+			}
+			collations = append(collations, collation)
 			mxCollationSize.Set(uint64(collation.valuesComp.Count()))
 			mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 
@@ -555,15 +556,17 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	// indices are built concurrently
 	for _, d := range []*InvertedIndex{a.logTopics, a.logAddrs, a.tracesFrom, a.tracesTo} {
 		d := d
-		var collation map[string]*roaring64.Bitmap
-		var err error
-		collation, err = d.collate(ctx, step, step+1, roTx)
-		if err != nil {
-			return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
-		}
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
+			var collation map[string]*roaring64.Bitmap
+			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
+				collation, err = d.collate(ctx, step, step+1, tx)
+				return err
+			})
+			if err != nil {
+				return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
+			}
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
 				sf.CleanupOnError()
