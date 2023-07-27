@@ -308,10 +308,9 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 	}
 
 	hi, lo := lc.reader.Sum(key)
-	//if !lc.file.src.bloom.ContainsHash(hi) {
-	//	fmt.Printf("idx1: %x\n", key)
-	//	return 0, false, nil
-	//}
+	if !lc.file.src.bloom.ContainsHash(hi) {
+		return 0, false, nil
+	}
 
 	//if bytes.HasPrefix(key, common.FromHex("f29a")) {
 	//	res, _ := lc.file.src.bm.At(lc.reader.Lookup(key))
@@ -405,9 +404,6 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		if convertStepsToFileNums {
 			maxPossibleValue = int(it.FilesAmount())
 			baseDataID = uint64(0)
-		}
-		if li.filenameBase == "accounts" {
-			fmt.Printf("[dbg] locality: %s\n", fName)
 		}
 		dense, err := bitmapdb.NewFixedSizeBitmapsWriter(filePath, maxPossibleValue, baseDataID, uint64(count), li.logger)
 		if err != nil {
