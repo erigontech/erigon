@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/go-stack/stack"
 	"github.com/google/btree"
@@ -48,6 +49,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
+	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -637,6 +639,16 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs types.TxSlots) {
 	}
 }
 
+func toBlobs(_blobs [][]byte) []gokzg4844.Blob {
+	blobs := make([]gokzg4844.Blob, len(_blobs))
+	for i, _blob := range _blobs {
+		var b gokzg4844.Blob
+		copy(b[:], _blob)
+		blobs[i] = b
+	}
+	return blobs
+}
+
 func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
 	isShanghai := p.isShanghai()
 	if isShanghai {
@@ -657,6 +669,26 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		if blobCount > chain.MaxBlobsPerBlock {
 			return txpoolcfg.TooManyBlobs
+		}
+		equalNumber := len(txn.BlobHashes) == len(txn.Blobs) &&
+			len(txn.Blobs) == len(txn.Commitments) &&
+			len(txn.Commitments) == len(txn.Proofs)
+
+		if !equalNumber {
+			return txpoolcfg.UnequalBlobTxExt
+		}
+
+		for i := 0; i < len(txn.Commitments); i++ {
+			if libkzg.KZGToVersionedHash(txn.Commitments[i]) != libkzg.VersionedHash(txn.BlobHashes[i]) {
+				return txpoolcfg.BlobHashCheckFail
+			}
+		}
+
+		// https://github.com/ethereum/consensus-specs/blob/017a8495f7671f5fff2075a9bfc9238c1a0982f8/specs/deneb/polynomial-commitments.md#verify_blob_kzg_proof_batch
+		kzgCtx := libkzg.Ctx()
+		err := kzgCtx.VerifyBlobKZGProofBatch(toBlobs(txn.Blobs), txn.Commitments, txn.Proofs)
+		if err != nil {
+			return txpoolcfg.UnmatchedBlobTxExt
 		}
 	}
 

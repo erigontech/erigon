@@ -29,8 +29,8 @@ import (
 
 type dataProvider interface {
 	Next(keyBuf, valBuf []byte) ([]byte, []byte, error)
-	Dispose() uint64 // Safe for repeated call, doesn't return error - means defer-friendly
-	Wait() error     // join point for async providers
+	Dispose()    // Safe for repeated call, doesn't return error - means defer-friendly
+	Wait() error // join point for async providers
 }
 
 type fileDataProvider struct {
@@ -48,6 +48,8 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl lo
 
 	provider := &fileDataProvider{reader: nil, wg: &errgroup.Group{}}
 	provider.wg.Go(func() error {
+		b.Sort()
+
 		// if we are going to create files in the system temp dir, we don't need any
 		// subfolders.
 		if tmpdir != "" {
@@ -61,8 +63,6 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl lo
 			return err
 		}
 		provider.file = bufferFile
-
-		b.Sort()
 
 		if doFsync {
 			defer bufferFile.Sync() //nolint:errcheck
@@ -96,20 +96,13 @@ func (p *fileDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {
 }
 
 func (p *fileDataProvider) Wait() error { return p.wg.Wait() }
-func (p *fileDataProvider) Dispose() uint64 {
-	if p.file == nil {
-		return 0
+func (p *fileDataProvider) Dispose() {
+	if p.file != nil { //invariant: safe to call multiple time
+		p.Wait()
+		_ = p.file.Close()
+		_ = os.Remove(p.file.Name())
+		p.file = nil
 	}
-	info, err := os.Stat(p.file.Name())
-	if err != nil {
-		panic(err)
-	}
-	_ = p.file.Close()
-	_ = os.Remove(p.file.Name())
-	if info == nil {
-		return 0
-	}
-	return uint64(info.Size())
 }
 
 func (p *fileDataProvider) String() string {
@@ -176,9 +169,8 @@ func (p *memoryDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error)
 }
 
 func (p *memoryDataProvider) Wait() error { return nil }
-func (p *memoryDataProvider) Dispose() uint64 {
-	return 0 /* doesn't take space on disk */
-}
+func (p *memoryDataProvider) Wait() error { return nil }
+func (p *memoryDataProvider) Dispose()    {}
 
 func (p *memoryDataProvider) String() string {
 	return fmt.Sprintf("%T(buffer.Len: %d)", p, p.buffer.Len())

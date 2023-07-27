@@ -188,7 +188,8 @@ func TestFileDataProviders(t *testing.T) {
 	for _, p := range collector.dataProviders {
 		fp, ok := p.(*fileDataProvider)
 		assert.True(t, ok)
-		require.NoError(t, fp.wg.Wait())
+		err := fp.Wait()
+		require.NoError(t, err)
 		_, err = os.Stat(fp.file.Name())
 		assert.NoError(t, err)
 	}

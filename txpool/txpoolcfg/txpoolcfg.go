@@ -89,6 +89,9 @@ const (
 	CreateBlobTxn       DiscardReason = 24 // Blob transactions cannot have the form of a create transaction
 	NoBlobs             DiscardReason = 25 // Blob transactions must have at least one blob
 	TooManyBlobs        DiscardReason = 26 // There's a limit on how many blobs a block (and thus any transaction) may have
+	UnequalBlobTxExt    DiscardReason = 27 // blob_versioned_hashes, blobs, commitments and proofs must have equal number
+	BlobHashCheckFail   DiscardReason = 28 // KZGcommitment's versioned hash has to be equal to blob_versioned_hash at the same index
+	UnmatchedBlobTxExt  DiscardReason = 29 // KZGcommitments must match the corresponding blobs and proofs
 )
 
 func (r DiscardReason) String() string {
