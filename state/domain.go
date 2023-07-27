@@ -119,6 +119,7 @@ func OpenBloom(filePath string) (*bloomFilter, error) {
 func (b *bloomFilter) Close() {
 	if b.f != nil {
 		b.f.Close()
+		b.f = nil
 	}
 }
 
