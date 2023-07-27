@@ -52,8 +52,6 @@ import (
 )
 
 var (
-	LatestStateReadHot           = metrics.GetOrCreateSummary(`latest_state_read{type="hot",found="yes"}`)   //nolint
-	LatestStateReadHotNotFound   = metrics.GetOrCreateSummary(`latest_state_read{type="hot",found="no"}`)    //nolint
 	LatestStateReadWarm          = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="yes"}`)  //nolint
 	LatestStateReadWarmNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="no"}`)   //nolint
 	LatestStateReadGrind         = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="yes"}`) //nolint
@@ -1907,7 +1905,6 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		copy(key[len(key1):], key2)
 	}
 
-	t := time.Now()
 	foundInvStep, err := roTx.GetOne(dc.d.keysTable, key) // reads first DupSort value
 	if err != nil {
 		return nil, false, err
@@ -1922,10 +1919,8 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		if err != nil {
 			return nil, false, err
 		}
-		LatestStateReadHot.UpdateDuration(t)
 		return v, true, nil
 	}
-	LatestStateReadHotNotFound.UpdateDuration(t)
 
 	v, found, err := dc.getLatestFromFiles(key)
 	if err != nil {
