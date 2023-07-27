@@ -42,17 +42,19 @@ type syncRecordKey struct {
 
 type Heimdall struct {
 	sync.Mutex
-	currentSpan         *span.HeimdallSpan
-	chainConfig         *chain.Config
-	validatorSet        *valset.ValidatorSet
-	spans               map[uint64]*span.HeimdallSpan
-	logger              log.Logger
-	cancelFunc          context.CancelFunc
-	syncChan            chan *contracts.TestStateSenderStateSynced
-	syncContractAddress libcommon.Address
-	syncContractBinding *contracts.TestStateSender
-	syncSubscription    ethereum.Subscription
-	pendingSyncRecords  map[syncRecordKey]*EventRecordWithBlock
+	currentSpan        *span.HeimdallSpan
+	chainConfig        *chain.Config
+	validatorSet       *valset.ValidatorSet
+	spans              map[uint64]*span.HeimdallSpan
+	logger             log.Logger
+	cancelFunc         context.CancelFunc
+	syncChan           chan *contracts.TestStateSenderStateSynced
+	syncSenderAddress  libcommon.Address
+	syncSenderBinding  *contracts.TestStateSender
+	rootChainAddress   libcommon.Address
+	rootChainBinding   *contracts.TestRootChain
+	syncSubscription   ethereum.Subscription
+	pendingSyncRecords map[syncRecordKey]*EventRecordWithBlock
 }
 
 func NewHeimdall(chainConfig *chain.Config, logger log.Logger) *Heimdall {
@@ -134,11 +136,11 @@ func (h *Heimdall) Close() {
 }
 
 func (h *Heimdall) StateSenderAddress() libcommon.Address {
-	return h.syncContractAddress
+	return h.syncSenderAddress
 }
 
 func (f *Heimdall) StateSenderContract() *contracts.TestStateSender {
-	return f.syncContractBinding
+	return f.syncSenderBinding
 }
 
 func (h *Heimdall) NodeCreated(ctx context.Context, node devnet.Node) {
@@ -178,8 +180,7 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 			waiter, cancel := blocks.BlockWaiter(deployCtx, contracts.DeploymentChecker)
 			defer cancel()
 
-			// deploy the contract and get the contract handler
-			address, transaction, contract, err := contracts.DeployWithOps(deployCtx, transactOpts, contracts.DeployTestStateSender)
+			address, syncTx, syncContract, err := contracts.DeployWithOps(deployCtx, transactOpts, contracts.DeployTestStateSender)
 
 			if err != nil {
 				h.Lock()
@@ -190,23 +191,38 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 				return
 			}
 
-			h.syncContractAddress = address
-			h.syncContractBinding = contract
+			h.syncSenderAddress = address
+			h.syncSenderBinding = syncContract
 
-			block, err := waiter.Await(transaction.Hash())
+			address, rootChainTx, rootChainContract, err := contracts.DeployWithOps(deployCtx, transactOpts, contracts.DeployTestRootChain)
 
 			if err != nil {
 				h.Lock()
 				defer h.Unlock()
 
 				h.syncChan = nil
-				h.logger.Error("Failed to deploy state sender", "err", err)
+				h.logger.Error("Failed to deploy root chain", "err", err)
 				return
 			}
 
-			h.logger.Info("StateSender deployed", "chain", h.chainConfig.ChainName, "block", block.BlockNumber, "addr", address)
+			h.rootChainAddress = address
+			h.rootChainBinding = rootChainContract
 
-			h.syncSubscription, err = contract.WatchStateSynced(&bind.WatchOpts{}, h.syncChan, nil, nil)
+			blocks, err := waiter.AwaitMany(syncTx.Hash(), rootChainTx.Hash())
+
+			if err != nil {
+				h.Lock()
+				defer h.Unlock()
+
+				h.syncChan = nil
+				h.logger.Error("Failed to deploy root contracts", "err", err)
+				return
+			}
+
+			h.logger.Info("RootChain deployed", "chain", h.chainConfig.ChainName, "block", blocks[syncTx.Hash()].BlockNumber, "addr", h.rootChainAddress)
+			h.logger.Info("StateSender deployed", "chain", h.chainConfig.ChainName, "block", blocks[syncTx.Hash()].BlockNumber, "addr", h.syncSenderAddress)
+
+			h.syncSubscription, err = syncContract.WatchStateSynced(&bind.WatchOpts{}, h.syncChan, nil, nil)
 
 			if err != nil {
 				h.Lock()

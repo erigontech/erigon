@@ -69,73 +69,74 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 		{Name: "amount", Type: Uint256},
 	}
 
-	//for i := 0; i < numberOfTransfers; i++ {
-	sendData, err := args.Pack(sender.Address, big.NewInt(int64(minTransfer)))
+	for i := 0; i < numberOfTransfers; i++ {
+		sendData, err := args.Pack(sender.Address, big.NewInt(int64(minTransfer)))
 
-	if err != nil {
-		return err
-	}
-
-	transaction, err := stateSender.SyncState(auth, receiverAddress, sendData)
-
-	if err != nil {
-		return err
-	}
-
-	block, err := waiter.Await(transaction.Hash())
-
-	if err != nil {
-		return fmt.Errorf("Failed to wait for sync block: %w", err)
-	}
-
-	blockNum := block.BlockNumber.Uint64()
-
-	logs, err := stateSender.FilterStateSynced(&bind.FilterOpts{
-		Start: blockNum,
-		End:   &blockNum,
-	}, nil, nil)
-
-	if err != nil {
-		return fmt.Errorf("Failed to get post sync logs: %w", err)
-	}
-
-	sendConfirmed := false
-
-	for logs.Next() {
-		if logs.Event.ContractAddress != receiverAddress {
-			return fmt.Errorf("Receiver address mismatched: expected: %s, got: %s", receiverAddress, logs.Event.ContractAddress)
+		if err != nil {
+			return err
 		}
 
-		if !bytes.Equal(logs.Event.Data, sendData) {
-			return fmt.Errorf("Send data mismatched: expected: %s, got: %s", sendData, logs.Event.Data)
+		transaction, err := stateSender.SyncState(auth, receiverAddress, sendData)
+
+		if err != nil {
+			return err
 		}
 
-		sendConfirmed = true
-	}
+		block, err := waiter.Await(transaction.Hash())
 
-	if !sendConfirmed {
-		return fmt.Errorf("No post sync log received")
-	}
-
-	//	auth.Nonce = (&big.Int{}).Add(auth.Nonce, big.NewInt(1))
-	//}
-
-	receivedCount := 0
-
-	devnet.Logger(ctx).Info("Waiting for receive events")
-
-	for received := range receivedChan {
-		if received.Source != sender.Address {
-			return fmt.Errorf("Source address mismatched: expected: %s, got: %s", sender.Address, received.Source)
+		if err != nil {
+			return fmt.Errorf("Failed to wait for sync block: %w", err)
 		}
 
-		if received.Amount.Cmp(big.NewInt(int64(minTransfer))) != 0 {
-			return fmt.Errorf("Amount mismatched: expected: %s, got: %s", big.NewInt(int64(minTransfer)), received.Amount)
+		blockNum := block.BlockNumber.Uint64()
+
+		logs, err := stateSender.FilterStateSynced(&bind.FilterOpts{
+			Start: blockNum,
+			End:   &blockNum,
+		}, nil, nil)
+
+		if err != nil {
+			return fmt.Errorf("Failed to get post sync logs: %w", err)
 		}
 
-		receivedCount++
-		if receivedCount == 1 /*numberOfTransfers*/ {
-			break
+		sendConfirmed := false
+
+		for logs.Next() {
+			if logs.Event.ContractAddress != receiverAddress {
+				return fmt.Errorf("Receiver address mismatched: expected: %s, got: %s", receiverAddress, logs.Event.ContractAddress)
+			}
+
+			if !bytes.Equal(logs.Event.Data, sendData) {
+				return fmt.Errorf("Send data mismatched: expected: %s, got: %s", sendData, logs.Event.Data)
+			}
+
+			sendConfirmed = true
+		}
+
+		if !sendConfirmed {
+			return fmt.Errorf("No post sync log received")
+		}
+
+		//	auth.Nonce = (&big.Int{}).Add(auth.Nonce, big.NewInt(1))
+		//}
+
+		receivedCount := 0
+
+		devnet.Logger(ctx).Info("Waiting for receive events")
+
+		for received := range receivedChan {
+			if received.Source != sender.Address {
+				return fmt.Errorf("Source address mismatched: expected: %s, got: %s", sender.Address, received.Source)
+			}
+
+			if received.Amount.Cmp(big.NewInt(int64(minTransfer))) != 0 {
+				return fmt.Errorf("Amount mismatched: expected: %s, got: %s", big.NewInt(int64(minTransfer)), received.Amount)
+			}
+
+			receivedCount++
+			if receivedCount == numberOfTransfers {
+				break
+			}
 		}
 	}
 
