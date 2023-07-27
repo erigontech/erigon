@@ -1795,7 +1795,7 @@ RETRY:
 		return fmt.Errorf("TransactionsIdx: at=%d-%d, post index building, expect: %d, got %d", blockFrom, blockTo, expectedCount, i)
 	}
 
-	if err := txnHashIdx.Build(); err != nil {
+	if err := txnHashIdx.Build(ctx); err != nil {
 		if errors.Is(err, recsplit.ErrCollision) {
 			logger.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
 			txnHashIdx.ResetNextSalt()
@@ -1804,7 +1804,7 @@ RETRY:
 		}
 		return fmt.Errorf("txnHashIdx: %w", err)
 	}
-	if err := txnHash2BlockNumIdx.Build(); err != nil {
+	if err := txnHash2BlockNumIdx.Build(ctx); err != nil {
 		if errors.Is(err, recsplit.ErrCollision) {
 			logger.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
 			txnHashIdx.ResetNextSalt()
@@ -1928,7 +1928,7 @@ RETRY:
 		default:
 		}
 	}
-	if err = rs.Build(); err != nil {
+	if err = rs.Build(ctx); err != nil {
 		if errors.Is(err, recsplit.ErrCollision) {
 			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
 			rs.ResetNextSalt()
