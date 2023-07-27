@@ -424,11 +424,9 @@ func (g *Getter) FileName() string { return g.fName }
 
 func (g *Getter) touch() { _ = g.data[g.dataP] }
 func (g *Getter) nextPos(clean bool) uint64 {
-	if clean {
-		if g.dataBit > 0 {
-			g.dataP++
-			g.dataBit = 0
-		}
+	if clean && g.dataBit > 0 {
+		g.dataP++
+		g.dataBit = 0
 	}
 	table := g.posDict
 	if table.bitLen == 0 {
@@ -544,11 +542,6 @@ func (g *Getter) HasNext() bool {
 // and appends it to the given buf, returning the result of appending
 // After extracting next word, it moves to the beginning of the next one
 func (g *Getter) Next(buf []byte) ([]byte, uint64) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-		}
-	}()
 	savePos := g.dataP
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
@@ -605,11 +598,6 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 }
 
 func (g *Getter) NextUncompressed() ([]byte, uint64) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-		}
-	}()
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	if wordLen == 0 {
