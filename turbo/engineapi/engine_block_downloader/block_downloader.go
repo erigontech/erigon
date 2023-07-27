@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -46,7 +45,7 @@ type EngineBlockDownloader struct {
 
 	// current status of the downloading process, aka: is it doing anything?
 	status          atomic.Value // it is a headerdownload.SyncStatus
-	startDownloadCh chan libcommon.Hash
+	startDownloadCh chan downloadRequest
 
 	// data reader
 	blockPropagator adapter.BlockPropagator
@@ -67,7 +66,9 @@ type EngineBlockDownloader struct {
 	logger log.Logger
 }
 
-func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, executionModule execution.ExecutionClient, hd *headerdownload.HeaderDownload, bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator, blockReader services.FullBlockReader, bodyReqSend RequestBodyFunction, tmpdir string, timeout int) *EngineBlockDownloader {
+func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, executionModule execution.ExecutionClient,
+	hd *headerdownload.HeaderDownload, bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
+	blockReader services.FullBlockReader, bodyReqSend RequestBodyFunction, tmpdir string, timeout int) *EngineBlockDownloader {
 	var s atomic.Value
 	s.Store(headerdownload.Idle)
 	return &EngineBlockDownloader{
@@ -80,7 +81,7 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, executionM
 		blockPropagator: blockPropagator,
 		timeout:         timeout,
 		blockReader:     blockReader,
-		startDownloadCh: make(chan libcommon.Hash),
+		startDownloadCh: make(chan downloadRequest),
 		bodyReqSend:     bodyReqSend,
 		executionModule: executionModule,
 	}
@@ -279,54 +280,4 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 		blockHashesBatch = append(blockHashesBatch, blockHash)
 	}
 	return eth1_utils.InsertBodiesAndWait(e.ctx, e.executionModule, bodiesBatch, blockNumbersBatch, blockHashesBatch)
-}
-
-func (e *EngineBlockDownloader) Loop() {
-	for {
-		select {
-		case hashToDownload := <-e.startDownloadCh:
-			/* Start download process*/
-			// First we schedule the headers download process
-			if !e.scheduleHeadersDownload(0, hashToDownload, 0, hashToDownload) {
-				log.Warn("[EngineBlockDownloader] could not begin header download")
-				// could it be scheduled? if not nevermind.
-				e.status.Store(headerdownload.Idle)
-				continue
-			}
-			// see the outcome of header download
-			headersStatus := e.waitForEndOfHeadersDownload()
-			if headersStatus != engine_helpers.Synced {
-				// Could not sync. Set to idle
-				e.status.Store(headerdownload.Idle)
-				log.Warn("[EngineBlockDownloader] Header download did not yield success")
-				continue
-			}
-			tx, err := e.db.BeginRo(e.ctx)
-			if err != nil {
-				log.Warn("[EngineBlockDownloader] Could not begin tx: %s", err)
-				continue
-			}
-
-			memoryMutation := memdb.NewMemoryBatch(tx, e.tmpdir)
-			defer memoryMutation.Rollback()
-
-			startBlock, endBlock, startHash, err := e.loadDownloadedHeaders(memoryMutation)
-			if err != nil {
-				continue
-			}
-			if err := e.downloadAndLoadBodiesSyncronously(memoryMutation, startBlock, endBlock); err != nil {
-				log.Warn("[EngineBlockDownloader] Could not download bodies: %s", err)
-				continue
-			}
-			tx.Rollback() // Discard the original db tx
-			if err := e.insertHeadersAndBodies(memoryMutation, startBlock, startHash); err != nil {
-				log.Warn("[EngineBlockDownloader] Could not insert headers and bodies: %s", err)
-				continue
-			}
-		case <-e.ctx.Done():
-			return
-		}
-
-	}
-
 }
