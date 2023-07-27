@@ -253,7 +253,7 @@ type HeaderDownload struct {
 	stats                  Stats
 
 	consensusHeaderReader consensus.ChainHeaderReader
-	headerReader          services.HeaderReader
+	headerReader          services.HeaderAndCanonicalReader
 
 	// Proof of Stake (PoS)
 	firstSeenHeightPoS   *uint64

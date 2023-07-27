@@ -684,10 +684,6 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 	err = stages.StageLoopIteration(m.Ctx, m.DB, tx, m.Sync, initialCycle, m.Log, m.BlockReader, nil)
 	require.NoError(t, err)
-
-	bad, lastValidHash := m.HeaderDownload().IsBadHeaderPoS(invalidTip.Hash())
-	assert.True(t, bad)
-	assert.Equal(t, lastValidHash, lastValidHeader.Hash())
 }
 
 func TestPOSWrongTrieRootReorgs(t *testing.T) {

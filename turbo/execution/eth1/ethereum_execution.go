@@ -3,6 +3,7 @@ package eth1
 import (
 	"context"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
@@ -11,10 +12,12 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -32,17 +35,28 @@ type EthereumExecutionModule struct {
 	forkValidator     *engine_helpers.ForkValidator
 
 	logger log.Logger
+	// Block building
+	nextPayloadId  uint64
+	lastParameters *core.BlockBuilderParameters
+	builderFunc    builder.BlockBuilderFunc
+	builders       map[uint64]*builder.BlockBuilder
+
+	// configuration
+	config *chain.Config
 
 	execution.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator, logger log.Logger) *EthereumExecutionModule {
+func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator, config *chain.Config, builderFunc builder.BlockBuilderFunc, logger log.Logger) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:       blockReader,
 		db:                db,
 		executionPipeline: executionPipeline,
 		logger:            logger,
 		forkValidator:     forkValidator,
+		builders:          make(map[uint64]*builder.BlockBuilder),
+		builderFunc:       builderFunc,
+		config:            config,
 		semaphore:         semaphore.NewWeighted(1),
 	}
 }
@@ -71,7 +85,7 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 
 // Remaining
 
-func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *types2.H256) (*execution.ForkChoiceReceipt, error) {
+func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *execution.ForkChoice) (*execution.ForkChoiceReceipt, error) {
 	type canonicalEntry struct {
 		hash   libcommon.Hash
 		number uint64
@@ -90,7 +104,7 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *typ
 	}
 	defer tx.Rollback()
 
-	blockHash := gointerfaces.ConvertH256ToHash(req)
+	blockHash := gointerfaces.ConvertH256ToHash(req.HeadBlockHash)
 	// Step one, find reconnection point, and mark all of those headers as canonical.
 	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, blockHash)
 	if err != nil {
@@ -228,5 +242,3 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}), // TODO: implement
 	}, nil
 }
-
-// Missing: NewPayload, AssembleBlock

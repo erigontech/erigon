@@ -297,24 +297,7 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 	fv.validHashes.Add(header.Hash(), true)
 
 	// If we do not have the body we can recover it from the batch.
-	if body == nil {
-		var bodyFromDb *types.Body
-		bodyFromDb, criticalError = fv.blockReader.BodyWithTransactions(context.Background(), tx, header.Hash(), header.Number.Uint64())
-		if criticalError != nil {
-			return
-		}
-		if bodyFromDb == nil {
-			criticalError = fmt.Errorf("ForkValidator failed to recover block body: %d, %x", header.Number.Uint64(), header.Hash())
-			return
-		}
-		if criticalError = rawdb.WriteHeader(tx, header); criticalError != nil {
-			return
-		}
-
-	} else {
-		if criticalError = rawdb.WriteHeader(tx, header); criticalError != nil {
-			return
-		}
+	if body != nil {
 		if _, criticalError = rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), header.Number.Uint64(), body); criticalError != nil {
 			return
 		}

@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230723163836-9e08d02f75b8
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230726204453-940c82dc2341
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230622075030-1d69651854c2
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -18,6 +18,7 @@ require (
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/fastcache v1.12.1
 	github.com/VictoriaMetrics/metrics v1.23.1
+	github.com/alecthomas/kong v0.8.0
 	github.com/anacrolix/sync v0.4.0
 	github.com/anacrolix/torrent v1.52.0
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
@@ -74,6 +75,7 @@ require (
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/rs/cors v1.9.0
 	github.com/shirou/gopsutil/v3 v3.23.4
+	github.com/spf13/afero v1.9.5
 	github.com/spf13/cobra v1.7.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.4
