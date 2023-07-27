@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/VictoriaMetrics/metrics"
 )
@@ -59,7 +58,7 @@ func (c *collector) addFloatCounter(name string, m *metrics.FloatCounter) {
 }
 
 func (c *collector) addHistogram(name string, m *metrics.Histogram) {
-	c.buff.WriteString(fmt.Sprintf(typeSummaryTpl, mutateKey(name)))
+	c.buff.WriteString(fmt.Sprintf(typeSummaryTpl, name))
 
 	c.writeSummarySum(name, fmt.Sprintf("%f", m.GetSum()))
 	c.writeSummaryCounter(name, len(m.GetDecimalBuckets()))
@@ -71,7 +70,7 @@ func (c *collector) addTimer(name string, m *metrics.Summary) {
 	ps := m.GetQuantileValues()
 
 	var sum float64 = 0
-	c.buff.WriteString(fmt.Sprintf(typeSummaryTpl, mutateKey(name)))
+	c.buff.WriteString(fmt.Sprintf(typeSummaryTpl, name))
 	for i := range pv {
 		c.writeSummaryPercentile(name, strconv.FormatFloat(pv[i], 'f', -1, 64), ps[i])
 		sum += ps[i]
@@ -84,31 +83,25 @@ func (c *collector) addTimer(name string, m *metrics.Summary) {
 }
 
 func (c *collector) writeGaugeCounter(name string, value interface{}) {
-	name = mutateKey(name)
 	c.buff.WriteString(fmt.Sprintf(typeGaugeTpl, name))
 	c.buff.WriteString(fmt.Sprintf(keyValueTpl, name, value))
 }
 
 func (c *collector) writeSummaryCounter(name string, value interface{}) {
-	name = mutateKey(name + "_count")
+	name = name + "_count"
 	c.buff.WriteString(fmt.Sprintf(keyCounterTpl, name, value))
 }
 
 func (c *collector) writeSummaryPercentile(name, p string, value interface{}) {
-	name = mutateKey(name)
 	c.buff.WriteString(fmt.Sprintf(keyQuantileTagValueTpl, name, p, value))
 }
 
 func (c *collector) writeSummarySum(name string, value string) {
-	name = mutateKey(name + "_sum")
+	name = name + "_sum"
 	c.buff.WriteString(fmt.Sprintf(keyCounterTpl, name, value))
 }
 
 func (c *collector) writeSummaryTime(name string, value string) {
-	name = mutateKey(name + "_time")
+	name = name + "_time"
 	c.buff.WriteString(fmt.Sprintf(keyCounterTpl, name, value))
-}
-
-func mutateKey(key string) string {
-	return strings.Replace(key, "/", "_", -1)
 }
