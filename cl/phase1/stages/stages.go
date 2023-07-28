@@ -4,16 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/core/rawdb"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"golang.org/x/sync/errgroup"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -22,6 +17,7 @@ import (
 func ConsensusStages(ctx context.Context,
 	forkchoice StageForkChoiceCfg,
 ) []*stagedsync.Stage {
+
 	return []*stagedsync.Stage{
 		//{
 		//	ID:          stages.BeaconHistoryReconstruction,
@@ -64,55 +60,112 @@ func ConsensusStages(ctx context.Context,
 			},
 		},
 		{
-			ID:          "catch_up_blocks",
-			Description: "catch up blocks",
+			ID:          "catch_up_epochs",
+			Description: "catch up epochs",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				cfg := forkchoice
-				firstTime := false
-				for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
-					if !firstTime {
-						firstTime = true
-						log.Debug("Caplin may have missed some slots, started downloading chain")
-					}
-					ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
-					cfg.downloader.RequestMore(ctx)
-					cancel()
-					if utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) == cfg.forkChoice.HighestSeen() {
-						break
-					}
+				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) - 1
+				seenSlot := cfg.forkChoice.HighestSeen()
+				seenEpoch := seenSlot / cfg.beaconCfg.SlotsPerEpoch
+				if seenEpoch >= targetEpoch {
+					return nil
 				}
-				if firstTime {
-					log.Debug("Finished catching up", "slot", cfg.downloader.GetHighestProcessedSlot())
+				totalEpochs := targetEpoch - seenEpoch
+				logger.Info("we are epochs behind - downloading epochs from reqresp", "from", seenEpoch, "to", targetEpoch, "total", totalEpochs)
+				// now we download the missing blocks
+
+				type resp struct {
+					blocks []*cltypes.SignedBeaconBlock
 				}
-				return nil
+
+				chans := make([]chan resp, 0, totalEpochs)
+				ctx, cn := context.WithCancel(ctx)
+				egg, ctx := errgroup.WithContext(ctx)
+				egg.SetLimit(8)
+				defer cn()
+				for i := seenEpoch; i < targetEpoch; i = i + 1 {
+					ii := i
+					o := make(chan resp, 0)
+					chans = append(chans, o)
+					egg.Go(func() error {
+						log.Debug("request epoch from reqresp", "epoch", ii)
+						blocks, err := cfg.source.GetRange(ctx, ii*cfg.beaconCfg.SlotsPerEpoch, cfg.beaconCfg.SlotsPerEpoch)
+						if err != nil {
+							return err
+						}
+						log.Debug("got epoch from reqresp", "epoch", ii)
+						o <- resp{blocks}
+						return nil
+					})
+				}
+				errchan := make(chan error)
+				go func() {
+					defer func() {
+						close(errchan)
+					}()
+					for _, v := range chans {
+						select {
+						case <-ctx.Done():
+							return
+						default:
+						}
+						epochResp := <-v
+						for _, block := range epochResp.blocks {
+							if block.Block.Slot <= seenSlot {
+								continue
+							}
+							if err := cfg.forkChoice.OnBlock(block, false, true); err != nil {
+								log.Warn("fail to process block", "reason", err, "slot", block.Block.Slot)
+								err2 := cfg.source.PurgeRange(context.Background(), block.Block.Slot, totalEpochs)
+								if err2 != nil {
+									log.Error("failed to purge range", "err", err2)
+								}
+								errchan <- err
+								return
+							}
+						}
+					}
+				}()
+				err := egg.Wait()
+				if err != nil {
+					return err
+				}
+				return <-errchan
 			},
 			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
 				return nil
 			},
 		},
 		{
-			ID:          "update_downloader",
-			Description: "update downloader stage",
+			ID:          "catch_up_blocks",
+			Description: "catch up blocks",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				cfg := forkchoice
-				maxBlockBehindBeforeDownload := int64(32)
-				overtimeMargin := uint64(6) // how much time has passed before trying download the next block in seconds
-
 				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-				overtime := utils.GetCurrentSlotOverTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 				seenSlot := cfg.forkChoice.HighestSeen()
-				if targetSlot == seenSlot || (targetSlot == seenSlot+1 && overtime < overtimeMargin) {
+				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch)
+				seenEpoch := seenSlot / cfg.beaconCfg.SlotsPerEpoch
+				if seenEpoch < targetEpoch {
 					return nil
 				}
-				highestSeen := cfg.forkChoice.HighestSeen()
-				startDownloadSlot := highestSeen - uint64(maxBlockBehindBeforeDownload)
-				// Detect underflow
-				if startDownloadSlot > highestSeen {
-					startDownloadSlot = 0
+				if seenSlot >= targetSlot {
+					return nil
 				}
-				cfg.downloader.SetHighestProcessedRoot(libcommon.Hash{})
-				cfg.downloader.SetHighestProcessedSlot(
-					utils.Max64(startDownloadSlot, cfg.forkChoice.FinalizedSlot()))
+				logger.Info("we are blocks behind - downloading blocks from reqresp", "from", seenSlot, "to", targetSlot)
+				blocks, err := cfg.source.GetRange(ctx, seenSlot+1, targetSlot-seenSlot)
+				if err != nil {
+					return err
+				}
+				for _, block := range blocks {
+					if err := cfg.forkChoice.OnBlock(block, false, true); err != nil {
+						log.Warn("fail to process block", "reason", err, "slot", block.Block.Slot)
+						err2 := cfg.source.PurgeRange(context.Background(), block.Block.Slot, targetSlot)
+						if err2 != nil {
+							log.Error("failed to purge range", "err", err2)
+						}
+						return err
+					}
+				}
 				return nil
 			},
 			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
@@ -124,26 +177,16 @@ func ConsensusStages(ctx context.Context,
 			Description: "fork choice stage",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				cfg := forkchoice
-				maxBlockBehindBeforeDownload := int64(32)
-				overtimeMargin := uint64(6) // how much time has passed before trying download the next block in seconds
-
 				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-				overtime := utils.GetCurrentSlotOverTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 				seenSlot := cfg.forkChoice.HighestSeen()
-
-				if targetSlot == seenSlot || (targetSlot == seenSlot+1 && overtime < overtimeMargin) {
-					time.Sleep(time.Second)
+				if seenSlot != targetSlot {
 					return nil
 				}
-				highestSeen := cfg.forkChoice.HighestSeen()
-				startDownloadSlot := highestSeen - uint64(maxBlockBehindBeforeDownload)
-				// Detect underflow
-				if startDownloadSlot > highestSeen {
-					startDownloadSlot = 0
-				}
-				cfg.downloader.SetHighestProcessedRoot(libcommon.Hash{})
-				cfg.downloader.SetHighestProcessedSlot(
-					utils.Max64(startDownloadSlot, cfg.forkChoice.FinalizedSlot()))
+				nextSlot := targetSlot + 1
+				nextSlotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, nextSlot)
+				nextSlotDur := nextSlotTime.Sub(time.Now())
+				logger.Info("sleeping until next slot", "slot", nextSlot, "time", nextSlotTime, "dur", nextSlotDur)
+				time.Sleep(nextSlotDur)
 				return nil
 			},
 			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
@@ -151,33 +194,4 @@ func ConsensusStages(ctx context.Context,
 			},
 		},
 	}
-}
-
-var ConsensusUnwindOrder = stagedsync.UnwindOrder{}
-
-var ConsensusPruneOrder = stagedsync.PruneOrder{}
-
-func NewConsensusStagedSync(ctx context.Context,
-	db kv.RwDB,
-	forwardDownloader *network2.ForwardBeaconDownloader,
-	backwardDownloader *network2.BackwardBeaconDownloader,
-	genesisCfg *clparams.GenesisConfig,
-	beaconCfg *clparams.BeaconChainConfig,
-	state *state.CachingBeaconState,
-	tmpdir string,
-	executionClient *execution_client.ExecutionClient,
-	beaconDBCfg *rawdb.BeaconDataConfig,
-	gossipManager *network2.GossipManager,
-	forkChoice *forkchoice.ForkChoiceStore,
-	logger log.Logger,
-) (*stagedsync.Sync, error) {
-	return stagedsync.New(
-		ConsensusStages(
-			ctx,
-			StageForkChoice(db, forwardDownloader, genesisCfg, beaconCfg, state, executionClient, gossipManager, forkChoice, nil, nil),
-		),
-		ConsensusUnwindOrder,
-		ConsensusPruneOrder,
-		logger,
-	), nil
 }

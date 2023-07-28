@@ -10,6 +10,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/cl/clpersist"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
@@ -35,7 +36,6 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	engine execution_client.ExecutionEngine, state *state.CachingBeaconState,
 	caplinFreezer freezer.Freezer, datadir string) error {
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
-	downloader := network.NewForwardBeaconDownloader(ctx, beaconRpc)
 
 	logger := log.New("app", "caplin")
 
@@ -71,7 +71,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 			for {
 				select {
 				case <-logIntervalPeers.C:
-					if peerCount, err := downloader.Peers(); err == nil {
+					if peerCount, err := beaconRpc.Peers(); err == nil {
 						logger.Info("P2P", "peers", peerCount)
 					}
 				case <-ctx.Done():
@@ -96,17 +96,21 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	}
 
 	// start the downloader service
-	go initDownloader(downloader, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
+	//go initDownloader(beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
 
-	forkChoiceConfig := stages.StageForkChoice(nil, downloader, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
+	beaconSource := clpersist.NewBeaconRpcSource(beaconRpc)
+	cachingSource := clpersist.NewCachingSource(beaconSource)
+	source := clpersist.NewMutexSource(cachingSource)
+
+	forkChoiceConfig := stages.StageForkChoice(nil, beaconRpc, source, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
 
 	sync := stagedsync.New(
 		stages.ConsensusStages(
 			ctx,
 			forkChoiceConfig,
 		),
-		stages.ConsensusUnwindOrder,
-		stages.ConsensusPruneOrder,
+		nil,
+		nil,
 		logger,
 	)
 	db := memdb.New(os.TempDir())
