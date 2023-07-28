@@ -64,7 +64,7 @@ func ConsensusStages(ctx context.Context,
 			Description: "catch up epochs",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				cfg := forkchoice
-				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) - 1
+				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch)
 				seenSlot := cfg.forkChoice.HighestSeen()
 				seenEpoch := seenSlot / cfg.beaconCfg.SlotsPerEpoch
 				if seenEpoch >= targetEpoch {
@@ -146,7 +146,7 @@ func ConsensusStages(ctx context.Context,
 				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 
 				seenEpoch := seenSlot / cfg.beaconCfg.SlotsPerEpoch
-				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) - 1
+				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch)
 
 				if seenEpoch < targetEpoch {
 					return nil
