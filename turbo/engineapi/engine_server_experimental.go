@@ -43,7 +43,7 @@ import (
 
 type EngineServerExperimental struct {
 	hd              *headerdownload.HeaderDownload
-	blockDownloader engine_block_downloader.EngineBlockDownloader
+	blockDownloader *engine_block_downloader.EngineBlockDownloader
 	config          *chain.Config
 	// Block proposing for proof-of-stake
 	proposing        bool
@@ -60,12 +60,13 @@ type EngineServerExperimental struct {
 
 func NewEngineServerExperimental(ctx context.Context, logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
 	db kv.RoDB, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload,
-	blockDownloader engine_block_downloader.EngineBlockDownloader, test bool, proposing bool) *EngineServerExperimental {
+	blockDownloader *engine_block_downloader.EngineBlockDownloader, test bool, proposing bool) *EngineServerExperimental {
 	return &EngineServerExperimental{
 		ctx:              ctx,
 		logger:           logger,
 		config:           config,
 		executionService: executionService,
+		blockDownloader:  blockDownloader,
 		db:               db,
 		blockReader:      blockReader,
 		proposing:        proposing,

@@ -1,4 +1,4 @@
-package eth1_chainr_reader
+package eth1_chain_reader
 
 import (
 	"context"
@@ -32,7 +32,7 @@ func (c ChainReaderEth1) Config() *chain.Config {
 }
 
 func (c ChainReaderEth1) CurrentHeader() *types.Header {
-
+	panic("ChainReaderEth1.CurrentHeader not implemented")
 }
 
 func (ChainReaderEth1) FrozenBlocks() uint64 {
@@ -100,5 +100,27 @@ func (c ChainReaderEth1) GetHeaderByNumber(number uint64) *types.Header {
 }
 
 func (c ChainReaderEth1) GetTd(hash libcommon.Hash, number uint64) *big.Int {
+	resp, err := c.executionModule.GetTD(c.ctx, &execution.GetSegmentRequest{
+		BlockNumber: &number,
+		BlockHash:   gointerfaces.ConvertHashToH256(hash),
+	})
+	if err != nil {
+		log.Error("GetHeaderByHash failed", "err", err)
+		return nil
+	}
+	if resp == nil || resp.Td == nil {
+		return nil
+	}
+	return eth1_utils.ConvertBigIntFromRpc(resp.Td)
+}
 
+func (c ChainReaderEth1) HeaderNumber(hash libcommon.Hash) (*uint64, error) {
+	resp, err := c.executionModule.GetHeaderHashNumber(c.ctx, gointerfaces.ConvertHashToH256(hash))
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
+	}
+	return resp.BlockNumber, nil
 }
