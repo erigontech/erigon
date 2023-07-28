@@ -141,13 +141,17 @@ func ConsensusStages(ctx context.Context,
 			Description: "catch up blocks",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				cfg := forkchoice
-				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+
 				seenSlot := cfg.forkChoice.HighestSeen()
-				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch)
+				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+
 				seenEpoch := seenSlot / cfg.beaconCfg.SlotsPerEpoch
+				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) - 1
+
 				if seenEpoch < targetEpoch {
 					return nil
 				}
+
 				if seenSlot >= targetSlot {
 					return nil
 				}
