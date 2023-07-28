@@ -805,7 +805,7 @@ func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeR
 			return err
 		}
 
-		for _, t := range snaptype.AllSnapshotTypes {
+		for _, t := range []snaptype.Type{snaptype.BorEvents} {
 			segName := snaptype.SegmentFileName(r.from, r.to, t)
 			f, _ := snaptype.ParseFileName(snapDir, segName)
 			if err := m.merge(ctx, toMerge[t], f.Path, logEvery); err != nil {
@@ -826,7 +826,7 @@ func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeR
 			m.notifier.OnNewSnapshot()
 			time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
 		}
-		for _, t := range snaptype.AllSnapshotTypes {
+		for _, t := range []snaptype.Type{snaptype.BorEvents} {
 			m.removeOldFiles(toMerge[t], snapDir)
 		}
 	}
@@ -848,7 +848,7 @@ func (m *BorMerger) merge(ctx context.Context, toMerge []string, targetFile stri
 		expectedTotal += d.Count()
 	}
 
-	f, err := compress.NewCompressor(ctx, "Snapshots merge", targetFile, m.tmpDir, compress.MinPatternScore, m.compressWorkers, log.LvlTrace, m.logger)
+	f, err := compress.NewCompressor(ctx, "Bor Snapshots merge", targetFile, m.tmpDir, compress.MinPatternScore, m.compressWorkers, log.LvlTrace, m.logger)
 	if err != nil {
 		return err
 	}
@@ -869,7 +869,7 @@ func (m *BorMerger) merge(ctx context.Context, toMerge []string, targetFile stri
 		}
 	}
 	if f.Count() != expectedTotal {
-		return fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
+		return fmt.Errorf("unexpected amount after bor segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
 	}
 	if err = f.Compress(); err != nil {
 		return err
@@ -883,8 +883,8 @@ func (m *BorMerger) removeOldFiles(toDel []string, snapDir string) {
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
-		isTxnType := strings.HasSuffix(withoutExt, snaptype.Transactions.String())
-		if isTxnType {
+		isEventsType := strings.HasSuffix(withoutExt, snaptype.BorEvents.String())
+		if isEventsType {
 			_ = os.Remove(withoutExt + "-to-block.idx")
 		}
 	}
