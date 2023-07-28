@@ -122,11 +122,11 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 		// Verify the header's EIP-1559 attributes.
 		return err
 	}
-	if header.DataGasUsed != nil {
-		return fmt.Errorf("invalid dataGasUsed before fork: have %v, expected 'nil'", header.DataGasUsed)
+	if header.BlobGasUsed != nil {
+		return fmt.Errorf("invalid blobGasUsed before fork: have %v, expected 'nil'", header.BlobGasUsed)
 	}
-	if header.ExcessDataGas != nil {
-		return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
+	if header.ExcessBlobGas != nil {
+		return fmt.Errorf("invalid excessBlobGas before fork: have %v, expected 'nil'", header.ExcessBlobGas)
 	}
 
 	// Retrieve the snapshot needed to verify this header and cache it

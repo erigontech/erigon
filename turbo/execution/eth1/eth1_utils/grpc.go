@@ -46,8 +46,8 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 		OmmerHash:       gointerfaces.ConvertHashToH256(header.UncleHash),
 		BaseFeePerGas:   baseFeeReply,
 		WithdrawalHash:  withdrawalHashReply,
-		ExcessDataGas:   header.ExcessDataGas,
-		DataGasUsed:     header.DataGasUsed,
+		ExcessBlobGas:   header.ExcessBlobGas,
+		BlobGasUsed:     header.BlobGasUsed,
 	}
 }
 
@@ -78,8 +78,8 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		Extra:         header.ExtraData,
 		MixDigest:     gointerfaces.ConvertH256ToHash(header.PrevRandao),
 		Nonce:         blockNonce,
-		DataGasUsed:   header.DataGasUsed,
-		ExcessDataGas: header.ExcessDataGas,
+		BlobGasUsed:   header.BlobGasUsed,
+		ExcessBlobGas: header.ExcessBlobGas,
 	}
 	if header.BaseFeePerGas != nil {
 		h.BaseFee = gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()

@@ -32,8 +32,8 @@ type Eth1Block struct {
 	BlockHash     libcommon.Hash
 	Transactions  *solid.TransactionsSSZ
 	Withdrawals   *solid.ListSSZ[*types.Withdrawal]
-	DataGasUsed   uint64
-	ExcessDataGas uint64
+	BlobGasUsed   uint64
+	ExcessBlobGas uint64
 	// internals
 	version clparams.StateVersion
 }
@@ -72,9 +72,9 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 		Withdrawals:   solid.NewStaticListSSZFromList(body.Withdrawals, 16, 44),
 	}
 
-	if header.DataGasUsed != nil && header.ExcessDataGas != nil {
-		block.DataGasUsed = *header.DataGasUsed
-		block.ExcessDataGas = *header.ExcessDataGas
+	if header.BlobGasUsed != nil && header.ExcessBlobGas != nil {
+		block.BlobGasUsed = *header.BlobGasUsed
+		block.ExcessBlobGas = *header.ExcessBlobGas
 		block.version = clparams.DenebVersion
 	} else if header.WithdrawalsHash != nil {
 		block.version = clparams.CapellaVersion
@@ -102,10 +102,10 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 		}
 	}
 
-	var dataGasUsed, excessDataGas uint64
+	var blobGasUsed, excessBlobGas uint64
 	if b.version >= clparams.DenebVersion {
-		dataGasUsed = b.DataGasUsed
-		excessDataGas = b.ExcessDataGas
+		blobGasUsed = b.BlobGasUsed
+		excessBlobGas = b.ExcessBlobGas
 	}
 
 	return &Eth1Header{
@@ -124,8 +124,8 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 		BlockHash:        b.BlockHash,
 		TransactionsRoot: transactionsRoot,
 		WithdrawalsRoot:  withdrawalsRoot,
-		DataGasUsed:      dataGasUsed,
-		ExcessDataGas:    excessDataGas,
+		BlobGasUsed:      blobGasUsed,
+		ExcessBlobGas:    excessBlobGas,
 		version:          b.version,
 	}, nil
 }
@@ -149,7 +149,7 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 	}
 
 	if b.version >= clparams.DenebVersion {
-		size += 8 * 2 // DataGasUsed + ExcessDataGas
+		size += 8 * 2 // BlobGasUsed + ExcessBlobGas
 	}
 
 	return
@@ -181,7 +181,7 @@ func (b *Eth1Block) getSchema() []interface{} {
 		s = append(s, b.Withdrawals)
 	}
 	if b.version >= clparams.DenebVersion {
-		s = append(s, &b.DataGasUsed, &b.ExcessDataGas)
+		s = append(s, &b.BlobGasUsed, &b.ExcessBlobGas)
 	}
 	return s
 }
@@ -228,10 +228,10 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 	}
 
 	if b.version >= clparams.DenebVersion {
-		dataGasUsed := b.DataGasUsed
-		header.DataGasUsed = &dataGasUsed
-		excessDataGas := b.ExcessDataGas
-		header.ExcessDataGas = &excessDataGas
+		blobGasUsed := b.BlobGasUsed
+		header.BlobGasUsed = &blobGasUsed
+		excessBlobGas := b.ExcessBlobGas
+		header.ExcessBlobGas = &excessBlobGas
 	}
 
 	// If the header hash does not match the block hash, return an error.

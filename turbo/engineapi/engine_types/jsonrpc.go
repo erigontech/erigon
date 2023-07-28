@@ -30,8 +30,8 @@ type ExecutionPayload struct {
 	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
 	Transactions  []hexutility.Bytes  `json:"transactions"  gencodec:"required"`
 	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
-	DataGasUsed   *hexutil.Uint64     `json:"dataGasUsed"`
-	ExcessDataGas *hexutil.Uint64     `json:"excessDataGas"`
+	BlobGasUsed   *hexutil.Uint64     `json:"blobGasUsed"`
+	ExcessBlobGas *hexutil.Uint64     `json:"excessBlobGas"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -137,10 +137,10 @@ func ConvertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 		res.Withdrawals = ConvertWithdrawalsFromRpc(payload.Withdrawals)
 	}
 	if payload.Version >= 3 {
-		dataGasUsed := *payload.DataGasUsed
-		res.DataGasUsed = (*hexutil.Uint64)(&dataGasUsed)
-		excessDataGas := *payload.ExcessDataGas
-		res.ExcessDataGas = (*hexutil.Uint64)(&excessDataGas)
+		blobGasUsed := *payload.BlobGasUsed
+		res.BlobGasUsed = (*hexutil.Uint64)(&blobGasUsed)
+		excessBlobGas := *payload.ExcessBlobGas
+		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
 	return res
 }

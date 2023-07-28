@@ -163,16 +163,16 @@ func (s *EngineServerExperimental) newPayload(ctx context.Context, req *engine_t
 	}
 
 	if version >= clparams.DenebVersion {
-		header.DataGasUsed = (*uint64)(req.DataGasUsed)
-		header.ExcessDataGas = (*uint64)(req.ExcessDataGas)
+		header.BlobGasUsed = (*uint64)(req.BlobGasUsed)
+		header.ExcessBlobGas = (*uint64)(req.ExcessBlobGas)
 	}
 
-	if !s.config.IsCancun(header.Time) && (header.DataGasUsed != nil || header.ExcessDataGas != nil) {
-		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas present before Cancun"}
+	if !s.config.IsCancun(header.Time) && (header.BlobGasUsed != nil || header.ExcessBlobGas != nil) {
+		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas present before Cancun"}
 	}
 
-	if s.config.IsCancun(header.Time) && (header.DataGasUsed == nil || header.ExcessDataGas == nil) {
-		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas missing"}
+	if s.config.IsCancun(header.Time) && (header.BlobGasUsed == nil || header.ExcessBlobGas == nil) {
+		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas missing"}
 	}
 
 	blockHash := req.BlockHash
@@ -616,7 +616,7 @@ func (e *EngineServerExperimental) NewPayloadV2(ctx context.Context, payload *en
 	return e.newPayload(ctx, payload, clparams.CapellaVersion)
 }
 
-// NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & excess data gas.
+// NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv3
 func (e *EngineServerExperimental) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
 	return e.newPayload(ctx, payload, clparams.DenebVersion)

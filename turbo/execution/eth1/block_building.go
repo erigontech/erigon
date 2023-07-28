@@ -149,10 +149,10 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		payload.Withdrawals = eth1_utils.ConvertWithdrawalsToRpc(block.Withdrawals())
 	}
 
-	if header.DataGasUsed != nil && header.ExcessDataGas != nil {
+	if header.BlobGasUsed != nil && header.ExcessBlobGas != nil {
 		payload.Version = 3
-		payload.DataGasUsed = header.DataGasUsed
-		payload.ExcessDataGas = header.ExcessDataGas
+		payload.BlobGasUsed = header.BlobGasUsed
+		payload.ExcessBlobGas = header.ExcessBlobGas
 	}
 
 	blockValue := blockValue(blockWithReceipts, baseFee)
