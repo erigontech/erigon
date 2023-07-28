@@ -364,7 +364,6 @@ RETRY:
 
 func (br *BorRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) {
 	ok := br.working.CompareAndSwap(false, true)
-	br.logger.Info("Bor RetireBlocksInBackground", "ok", ok)
 	if !ok {
 		// go-routine is still working
 		return
@@ -373,7 +372,6 @@ func (br *BorRetire) RetireBlocksInBackground(ctx context.Context, forwardProgre
 		defer br.working.Store(false)
 
 		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
-		br.logger.Info("Bor CanRetire", "from", blockFrom, "to", blockTo, "ok", ok, "forwardProgress", forwardProgress, "frozenBorBlocks", br.blockReader.FrozenBorBlocks())
 		if !ok {
 			return
 		}
@@ -564,7 +562,6 @@ Loop:
 			s.logger.Warn("invalid segment name", "err", err, "name", fName)
 			continue
 		}
-		fmt.Printf("Parsed file name: %v\n", f)
 
 		switch f.T {
 		case snaptype.BorEvents:
@@ -598,7 +595,6 @@ Loop:
 					return err
 				}
 			}
-			fmt.Printf("f=%v\n", f)
 
 			if !exists {
 				// it's possible to iterate over .seg file even if you don't have index
@@ -649,7 +645,6 @@ func (s *BorRoSnapshots) ReopenFolder() error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
-	fmt.Printf("ReopenFolder %v\n", list)
 	return s.ReopenList(list, false)
 }
 func (s *BorRoSnapshots) ReopenWithDB(db kv.RoDB) error {
