@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,15 +40,15 @@ import (
 )
 
 type BorEventSegment struct {
-	seg                 *compress.Decompressor // value: event_rlp
-	IdxTxnHash2BlockNum *recsplit.Index        // bor_transaction_hash  -> block_number
-	ranges              Range
+	seg           *compress.Decompressor // value: event_rlp
+	IdxBorTxnHash *recsplit.Index        // bor_transaction_hash  -> bor_event_segment_offset
+	ranges        Range
 }
 
 func (sn *BorEventSegment) closeIdx() {
-	if sn.IdxTxnHash2BlockNum != nil {
-		sn.IdxTxnHash2BlockNum.Close()
-		sn.IdxTxnHash2BlockNum = nil
+	if sn.IdxBorTxnHash != nil {
+		sn.IdxBorTxnHash.Close()
+		sn.IdxBorTxnHash = nil
 	}
 }
 func (sn *BorEventSegment) closeSeg() {
@@ -77,21 +76,21 @@ func (sn *BorEventSegment) reopenIdx(dir string) (err error) {
 		return nil
 	}
 
-	fileName := snaptype.IdxFileName(sn.ranges.from, sn.ranges.to, snaptype.BorEvents2Block.String())
-	sn.IdxTxnHash2BlockNum, err = recsplit.OpenIndex(path.Join(dir, fileName))
+	fileName := snaptype.IdxFileName(sn.ranges.from, sn.ranges.to, snaptype.BorEvents.String())
+	sn.IdxBorTxnHash, err = recsplit.OpenIndex(path.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
-	if sn.IdxTxnHash2BlockNum.ModTime().Before(sn.seg.ModTime()) {
+	if sn.IdxBorTxnHash.ModTime().Before(sn.seg.ModTime()) {
 		// Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-		sn.IdxTxnHash2BlockNum.Close()
-		sn.IdxTxnHash2BlockNum = nil
+		sn.IdxBorTxnHash.Close()
+		sn.IdxBorTxnHash = nil
 	}
 	return nil
 }
 
 func (sn *BorEventSegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if sn.IdxTxnHash2BlockNum != nil {
+	if sn.IdxBorTxnHash != nil {
 		return nil
 	}
 	err = sn.reopenIdx(dir)
@@ -248,16 +247,15 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 		if e != nil {
 			return false, e
 		}
-		snapshotRecord := make([]byte, len(event)+length.BlockNum+length.BlockNum+length.Hash)
-		copy(snapshotRecord, eventIdBytes)
-		copy(snapshotRecord[length.BlockNum:], blockNumBytes)
+		snapshotRecord := make([]byte, len(event)+length.Hash+length.BlockNum)
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
 			return false, err
 		}
 		txnHash := types.ComputeBorTxHash(blockNum, blockHash)
-		copy(snapshotRecord[length.BlockNum+length.BlockNum:], txnHash[:])
-		copy(snapshotRecord[length.BlockNum+length.BlockNum+length.Hash:], event)
+		copy(snapshotRecord, txnHash[:])
+		copy(snapshotRecord[length.Hash:], blockNumBytes)
+		copy(snapshotRecord[length.Hash+length.BlockNum:], event)
 		if err := collect(snapshotRecord); err != nil {
 			return false, err
 		}
@@ -296,16 +294,15 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockT
 	g := d.MakeGetter()
 	var blockNumBuf [length.BlockNum]byte
 	var first bool = true
-	var firstEventID uint64
 	word := make([]byte, 0, 4096)
 	var blockCount int
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
-		if first || !bytes.Equal(blockNumBuf[:], word[length.BlockNum:length.BlockNum+length.BlockNum]) {
+		if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
 			blockCount++
+			copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
 		}
 		if first {
-			firstEventID = binary.BigEndian.Uint64(word[:length.BlockNum])
 			first = false
 		}
 		select {
@@ -314,7 +311,7 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockT
 		default:
 		}
 	}
-	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(blockFrom, blockTo, snaptype.BorEvents2Block.String()))
+	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(blockFrom, blockTo, snaptype.BorEvents.String()))
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   blockCount,
@@ -323,7 +320,7 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockT
 		LeafSize:   8,
 		TmpDir:     tmpDir,
 		IndexFile:  idxFilePath,
-		BaseDataID: firstEventID,
+		BaseDataID: 0,
 	}, logger)
 	if err != nil {
 		return err
@@ -334,21 +331,22 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockT
 RETRY:
 	g.Reset(0)
 	first = true
-	var i uint64
+	var i, offset, nextPos uint64
 	for g.HasNext() {
-		word, _ = g.Next(word[:0])
+		word, nextPos = g.Next(word[:0])
 		i++
-		if first || !bytes.Equal(blockNumBuf[:], word[length.BlockNum:length.BlockNum+length.BlockNum]) {
-			blockNum := binary.BigEndian.Uint64(word[length.BlockNum : length.BlockNum+length.BlockNum])
-			if err = rs.AddKey(word[length.BlockNum+length.BlockNum:length.BlockNum+length.BlockNum+length.Hash], blockNum); err != nil {
+		if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
+			if err = rs.AddKey(word[:length.Hash], offset); err != nil {
 				return err
 			}
+			copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
+		offset = nextPos
 	}
 	if err = rs.Build(); err != nil {
 		if errors.Is(err, recsplit.ErrCollision) {
@@ -508,7 +506,7 @@ func (s *BorRoSnapshots) EnableMadvNormal() *BorRoSnapshots {
 func (s *BorRoSnapshots) idxAvailability() uint64 {
 	var events uint64
 	for _, seg := range s.Events.segments {
-		if seg.IdxTxnHash2BlockNum == nil {
+		if seg.IdxBorTxnHash == nil {
 			break
 		}
 		events = seg.ranges.to - 1
@@ -699,7 +697,7 @@ func (s *BorRoSnapshots) PrintDebug() {
 	defer s.Events.lock.RUnlock()
 	fmt.Println("    == BorSnapshots, Event")
 	for _, sn := range s.Events.segments {
-		fmt.Printf("%d,  %t\n", sn.ranges.from, sn.IdxTxnHash2BlockNum == nil)
+		fmt.Printf("%d,  %t\n", sn.ranges.from, sn.IdxBorTxnHash == nil)
 	}
 }
 
@@ -883,10 +881,6 @@ func (m *BorMerger) removeOldFiles(toDel []string, snapDir string) {
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
-		isEventsType := strings.HasSuffix(withoutExt, snaptype.BorEvents.String())
-		if isEventsType {
-			_ = os.Remove(withoutExt + "-to-block.idx")
-		}
 	}
 	tmpFiles, err := snaptype.TmpFiles(snapDir)
 	if err != nil {

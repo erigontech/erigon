@@ -3,10 +3,12 @@ package freezeblocks
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -205,6 +207,14 @@ func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash comm
 		return nil, err
 	}
 	return bodyRlp, nil
+}
+
+func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+	return 0, false, nil
+}
+
+func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Getter, blockNum uint64) ([]rlp.RawValue, error) {
+	return nil, nil
 }
 
 // BlockReader can read blocks from db and snapshots
@@ -894,4 +904,54 @@ func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ances
 		number--
 	}
 	return hash, number
+}
+
+func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+	n, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
+	if err != nil {
+		return 0, false, err
+	}
+	if n != nil {
+		return *n, true, nil
+	}
+
+	view := r.borSn.View()
+	defer view.Close()
+
+	blockNum, ok, err := r.borBlockByEventHash(txnHash, view.Events(), nil)
+	if err != nil {
+		return 0, false, err
+	}
+	if !ok {
+		return 0, false, nil
+	}
+	return blockNum, true, nil
+}
+
+func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEventSegment, buf []byte) (blockNum uint64, ok bool, err error) {
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		if sn.IdxBorTxnHash == nil {
+			continue
+		}
+
+		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
+		blockEventId := reader.Lookup(txnHash[:])
+		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
+		gg := sn.seg.MakeGetter()
+		gg.Reset(offset)
+		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
+		if !gg.MatchPrefix(txnHash[:]) {
+			continue
+		}
+		buf, _ = gg.Next(buf[:0])
+		blockNum = binary.BigEndian.Uint64(buf[length.Hash:])
+		ok = true
+		return
+	}
+	return
+}
+
+func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Getter, blockNum uint64) ([]rlp.RawValue, error) {
+	return nil, nil
 }

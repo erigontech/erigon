@@ -265,6 +265,13 @@ func (back *RemoteBackend) CanonicalHash(ctx context.Context, tx kv.Getter, bloc
 func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, error) {
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
 }
+func (back *RemoteBackend) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+	return back.blockReader.EventLookup(ctx, tx, txnHash)
+}
+
+func (back *RemoteBackend) EventsByBlock(ctx context.Context, tx kv.Getter, blockNum uint64) ([]rlp.RawValue, error) {
+	return back.blockReader.EventsByBlock(ctx, tx, blockNum)
+}
 
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {
 	nodes, err := back.remoteEthBackend.NodeInfo(ctx, &remote.NodesInfoRequest{Limit: limit})

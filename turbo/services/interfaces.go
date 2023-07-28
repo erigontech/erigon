@@ -33,6 +33,11 @@ type HeaderReader interface {
 	HeadersRange(ctx context.Context, walker func(header *types.Header) error) error
 }
 
+type BorEventReader interface {
+	EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error)
+	EventsByBlock(ctx context.Context, tx kv.Getter, blockNum uint64) ([]rlp.RawValue, error)
+}
+
 type CanonicalReader interface {
 	CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, error)
 	BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error)
@@ -65,6 +70,7 @@ type FullBlockReader interface {
 	BlockReader
 	BodyReader
 	HeaderReader
+	BorEventReader
 	TxnReader
 	CanonicalReader
 
