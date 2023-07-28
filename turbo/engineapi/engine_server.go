@@ -120,7 +120,7 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*type
 }
 
 // EngineNewPayload validates and possibly executes payload
-func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload, expectedBlobVersionedHashes *[]libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, version clparams.StateVersion) (*engine_types.PayloadStatus, error) {
+func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload, expectedBlobVersionedHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, version clparams.StateVersion) (*engine_types.PayloadStatus, error) {
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
 
@@ -610,7 +610,7 @@ func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.E
 
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv3
-func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload, expectedBlobVersionedHashes *[]libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
+func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload, expectedBlobVersionedHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
 	return e.newPayload(ctx, payload, expectedBlobVersionedHashes, parentBeaconBlockRoot, clparams.DenebVersion)
 }
 
