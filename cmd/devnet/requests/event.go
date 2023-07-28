@@ -60,19 +60,11 @@ func (reqGen *requestGenerator) FilterLogs(ctx context.Context, query ethereum.F
 		return nil, fmt.Errorf("failed to fetch logs: %v", res.Err)
 	}
 
-	if len(b.Result) == 0 {
-		return nil, fmt.Errorf("logs result should not be empty")
-	}
-
 	return b.Result, nil
 }
 
 func (reqGen *requestGenerator) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
-	return reqGen.subscribe(Methods.ETHLogs, func(value interface{}) {
-		if log, ok := value.(types.Log); ok {
-			ch <- log
-		}
-	}, query)
+	return reqGen.Subscribe(ctx, Methods.ETHLogs, ch, query)
 }
 
 // ParseResponse converts any of the models interfaces to a string for readability
@@ -100,6 +92,11 @@ func hashSlicesAreEqual(s1, s2 []libcommon.Hash) bool {
 }
 
 func (req *requestGenerator) getLogs(query ethereum.FilterQuery) (RPCMethod, string) {
+	if len(query.Addresses) == 0 {
+		const template = `{"jsonrpc":"2.0","method":%q,"params":[{"fromBlock":"0x%x","toBlock":"0x%x"}],"id":%d}`
+		return Methods.ETHGetLogs, fmt.Sprintf(template, Methods.ETHGetLogs, query.FromBlock.Uint64(), query.ToBlock.Uint64(), req.reqID)
+	}
+
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[{"fromBlock":"0x%x","toBlock":"0x%x","address":"0x%x"}],"id":%d}`
 	return Methods.ETHGetLogs, fmt.Sprintf(template, Methods.ETHGetLogs, query.FromBlock.Uint64(), query.ToBlock.Uint64(), query.Addresses[0], req.reqID)
 }

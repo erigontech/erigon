@@ -32,6 +32,7 @@ type Node struct {
 	PrivateApiAddr            string `arg:"--private.api.addr" default:"localhost:9090" json:"private.api.addr"`
 	HttpPort                  int    `arg:"--http.port" default:"8545" json:"http.port"`
 	HttpVHosts                string `arg:"--http.vhosts" json:"http.vhosts"`
+	HttpCorsDomain            string `arg:"--http.corsdomain" json:"http.corsdomain"`
 	AuthRpcPort               int    `arg:"--authrpc.port" default:"8551" json:"authrpc.port"`
 	AuthRpcVHosts             string `arg:"--authrpc.vhosts" json:"authrpc.vhosts"`
 	WSPort                    int    `arg:"-" default:"8546" json:"-"` // flag not defined
@@ -43,6 +44,7 @@ type Node struct {
 	StaticPeers               string `arg:"--staticpeers" json:"staticpeers,omitempty"`
 	WithoutHeimdall           bool   `arg:"--bor.withoutheimdall" flag:"" default:"false" json:"bor.withoutheimdall,omitempty"`
 	HeimdallGRpc              string `arg:"--bor.heimdallgRPC" json:"bor.heimdallgRPC,omitempty"`
+	VMDebug                   bool   `arg:"--vmdebug" flag:"" default:"false" json:"dmdebug"`
 }
 
 func (node *Node) configure(base Node, nodeNumber int) error {
