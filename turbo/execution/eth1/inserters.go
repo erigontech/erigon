@@ -27,6 +27,7 @@ func (e *EthereumExecutionModule) InsertBodies(ctx context.Context, req *executi
 		if ok, err = rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(grpcBody.BlockHash), grpcBody.BlockNumber, eth1_utils.ConvertRawBlockBodyFromRpc(grpcBody)); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBodies: could not insert: %s", err)
 		}
+		// TODO: Replace.
 		if e.historyV3 && ok {
 			if err := rawdb.AppendCanonicalTxNums(tx, grpcBody.BlockNumber); err != nil {
 				return nil, fmt.Errorf("ethereumExecutionModule.InsertBodies: could not insert: %s", err)
