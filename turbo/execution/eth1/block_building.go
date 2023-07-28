@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 )
 
 func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
@@ -50,7 +51,7 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		Timestamp:             req.Timestamp,
 		PrevRandao:            gointerfaces.ConvertH256ToHash(req.MixDigest),
 		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.SuggestedFeeRecipent),
-		Withdrawals:           ConvertWithdrawalsFromRpc(req.Withdrawals),
+		Withdrawals:           eth1_utils.ConvertWithdrawalsFromRpc(req.Withdrawals),
 	}
 
 	if err := e.checkWithdrawalsPresence(param.Timestamp, param.Withdrawals); err != nil {
@@ -145,7 +146,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 	}
 	if block.Withdrawals() != nil {
 		payload.Version = 2
-		payload.Withdrawals = ConvertWithdrawalsToRpc(block.Withdrawals())
+		payload.Withdrawals = eth1_utils.ConvertWithdrawalsToRpc(block.Withdrawals())
 	}
 
 	if header.BlobGasUsed != nil && header.ExcessBlobGas != nil {

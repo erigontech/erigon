@@ -148,7 +148,7 @@ func TestBackwardBlockProviderWithMultipleChunksBlockNotFound(t *testing.T) {
 
 func TestSearchTransactionsBefore(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB)
+	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
 
 	addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
 	t.Run("small page size", func(t *testing.T) {

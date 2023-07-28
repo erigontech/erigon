@@ -88,3 +88,9 @@ make all
 4. Build integration: cd erigon; make integration
 5. Run: ./build/bin/integration mdbx_to_mdbx --chaindata /existing/erigon/path/chaindata/ --chaindata.to /path/to/copy-to/chaindata/
 ```
+
+## Clear bad blocks table in the case some block was marked as invalid after some error 
+It allows to process this blocks again
+```
+1. ./build/bin/integration clear_bad_blocks --datadir=<datadir>
+```

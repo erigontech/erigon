@@ -13,6 +13,7 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 )
 
 func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv.Tx, req *execution.GetSegmentRequest) (blockHash libcommon.Hash, blockNumber uint64, err error) {
@@ -64,7 +65,7 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.Ge
 	}
 	rawBody := body.RawBody()
 
-	return &execution.GetBodyResponse{Body: ConvertRawBlockBodyToRpc(rawBody, blockNumber, blockHash)}, nil
+	return &execution.GetBodyResponse{Body: eth1_utils.ConvertRawBlockBodyToRpc(rawBody, blockNumber, blockHash)}, nil
 }
 
 func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.GetSegmentRequest) (*execution.GetHeaderResponse, error) {
@@ -90,7 +91,7 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 		return &execution.GetHeaderResponse{Header: nil}, nil
 	}
 
-	return &execution.GetHeaderResponse{Header: HeaderToHeaderRPC(header)}, nil
+	return &execution.GetHeaderResponse{Header: eth1_utils.HeaderToHeaderRPC(header)}, nil
 }
 
 func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *types2.H256) (*execution.GetHeaderHashNumberResponse, error) {

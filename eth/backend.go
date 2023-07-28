@@ -569,7 +569,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	// intiialize engine backend
 	var engine *execution_client.ExecutionClientDirect
 
-	executionRpc := direct.NewExecutionClientDirect(eth1.NewEthereumExecutionModule(blockReader, chainKv, nil, backend.forkValidator, chainConfig, assembleBlockPOS, logger))
+	executionRpc := direct.NewExecutionClientDirect(eth1.NewEthereumExecutionModule(blockReader, chainKv, nil, backend.forkValidator, chainConfig, assembleBlockPOS, logger, config.HistoryV3))
 	if config.ExperimentalConsensusSeparation {
 		log.Info("Using experimental Engine API")
 		engineBackendRPC := engineapi.NewEngineServerExperimental(ctx, logger, chainConfig, executionRpc, backend.chainDB, blockReader, backend.sentriesClient.Hd, config.Miner.EnabledPOS)

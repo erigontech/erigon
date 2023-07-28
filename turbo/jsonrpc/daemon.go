@@ -32,7 +32,7 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 	adminImpl := NewAdminAPI(eth)
 	parityImpl := NewParityAPIImpl(base, db)
 	borImpl := NewBorAPI(base, db, borDb) // bor (consensus) specific
-	otsImpl := NewOtterscanAPI(base, db)
+	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
 	gqlImpl := NewGraphQLAPI(base, db)
 
 	if cfg.GraphQLEnabled {
