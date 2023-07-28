@@ -91,6 +91,35 @@ func ConsensusStages(ctx context.Context,
 			},
 		},
 		{
+			ID:          "update_downloader",
+			Description: "update downloader stage",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
+				cfg := forkchoice
+				maxBlockBehindBeforeDownload := int64(32)
+				overtimeMargin := uint64(6) // how much time has passed before trying download the next block in seconds
+
+				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+				overtime := utils.GetCurrentSlotOverTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+				seenSlot := cfg.forkChoice.HighestSeen()
+				if targetSlot == seenSlot || (targetSlot == seenSlot+1 && overtime < overtimeMargin) {
+					return nil
+				}
+				highestSeen := cfg.forkChoice.HighestSeen()
+				startDownloadSlot := highestSeen - uint64(maxBlockBehindBeforeDownload)
+				// Detect underflow
+				if startDownloadSlot > highestSeen {
+					startDownloadSlot = 0
+				}
+				cfg.downloader.SetHighestProcessedRoot(libcommon.Hash{})
+				cfg.downloader.SetHighestProcessedSlot(
+					utils.Max64(startDownloadSlot, cfg.forkChoice.FinalizedSlot()))
+				return nil
+			},
+			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
+				return nil
+			},
+		},
+		{
 			ID:          "fork_choice",
 			Description: "fork choice stage",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
@@ -101,6 +130,7 @@ func ConsensusStages(ctx context.Context,
 				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 				overtime := utils.GetCurrentSlotOverTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 				seenSlot := cfg.forkChoice.HighestSeen()
+
 				if targetSlot == seenSlot || (targetSlot == seenSlot+1 && overtime < overtimeMargin) {
 					time.Sleep(time.Second)
 					return nil
