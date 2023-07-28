@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
@@ -41,10 +42,12 @@ import (
 )
 
 type EngineServerExperimental struct {
-	hd     *headerdownload.HeaderDownload
-	config *chain.Config
+	hd              *headerdownload.HeaderDownload
+	blockDownloader *engine_block_downloader.EngineBlockDownloader
+	config          *chain.Config
 	// Block proposing for proof-of-stake
 	proposing        bool
+	test             bool
 	executionService execution.ExecutionClient
 
 	ctx    context.Context
@@ -56,12 +59,14 @@ type EngineServerExperimental struct {
 }
 
 func NewEngineServerExperimental(ctx context.Context, logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
-	db kv.RoDB, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, proposing bool) *EngineServerExperimental {
+	db kv.RoDB, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload,
+	blockDownloader *engine_block_downloader.EngineBlockDownloader, test bool, proposing bool) *EngineServerExperimental {
 	return &EngineServerExperimental{
 		ctx:              ctx,
 		logger:           logger,
 		config:           config,
 		executionService: executionService,
+		blockDownloader:  blockDownloader,
 		db:               db,
 		blockReader:      blockReader,
 		proposing:        proposing,

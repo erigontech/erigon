@@ -2,12 +2,14 @@ package eth1
 
 import (
 	"context"
+	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 
@@ -70,6 +72,11 @@ func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, block
 	return e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 }
 
+func (e *EthereumExecutionModule) getTD(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*big.Int, error) {
+	return rawdb.ReadTd(tx, blockHash, blockNumber)
+
+}
+
 func (e *EthereumExecutionModule) getBody(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Body, error) {
 	if e.blockReader == nil {
 		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
@@ -105,6 +112,7 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 		return nil, err
 	}
 	defer tx.Rollback()
+	// defer e.forkValidator.ClearWithUnwind(tx, e.notifications.Accumulator, e.notifications.StateChangesConsumer)
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.HeadBlockHash)
 	// Step one, find reconnection point, and mark all of those headers as canonical.
@@ -155,6 +163,11 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 	}
 	if currentParentNumber != fcuHeader.Number.Uint64()-1 {
 		e.executionPipeline.UnwindTo(currentParentNumber, libcommon.Hash{})
+		if e.historyV3 {
+			if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber); err != nil {
+				return nil, err
+			}
+		}
 	}
 	// Run the unwind
 	if err := e.executionPipeline.RunUnwind(e.db, tx); err != nil {
@@ -164,6 +177,11 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 	for _, canonicalSegment := range newCanonicals {
 		if err := rawdb.WriteCanonicalHash(tx, canonicalSegment.hash, canonicalSegment.number); err != nil {
 			return nil, err
+		}
+		if e.historyV3 {
+			if err := rawdb.AppendCanonicalTxNums(tx, canonicalSegment.number); err != nil {
+				return nil, err
+			}
 		}
 	}
 	// Set Progress for headers and bodies accordingly.
