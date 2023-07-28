@@ -1,5 +1,5 @@
 /*
-   Copyright 2021 Erigon contributors
+   Copyright 2021 The Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -158,4 +158,12 @@ const (
 	// EIP-3860 to limit size of initcode
 	MaxInitCodeSize = 2 * MaxCodeSize // Maximum initcode to permit in a creation transaction and create instructions
 	InitCodeWordGas = 2
+
+	// EIP-4844: Shard Blob Transactions
+	FieldElementsPerBlob         = 4096 // each field element is 32 bytes
+	BlobSize                     = FieldElementsPerBlob * 32
+	BlobGasPerBlob        uint64 = 0x20000
+	TargetBlobGasPerBlock uint64 = 0x60000
+	MaxBlobGasPerBlock    uint64 = 0xC0000
+	MaxBlobsPerBlock      uint64 = MaxBlobGasPerBlock / BlobGasPerBlob
 )
