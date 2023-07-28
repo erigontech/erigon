@@ -29,10 +29,10 @@ var (
 )
 
 // ChildReceiverABI is the input ABI used to generate the binding from.
-const ChildReceiverABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"},{\"internalType\":\"bytes\",\"name\":\"data\",\"type\":\"bytes\"}],\"name\":\"onStateReceive\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"name\":\"received\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]"
+const ChildReceiverABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"_source\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"_amount\",\"type\":\"uint256\"}],\"name\":\"received\",\"type\":\"event\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"},{\"internalType\":\"bytes\",\"name\":\"data\",\"type\":\"bytes\"}],\"name\":\"onStateReceive\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"name\":\"senders\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]"
 
 // ChildReceiverBin is the compiled bytecode used for deploying new contracts.
-var ChildReceiverBin = "0x608060405234801561000f575f80fd5b5061024f8061001d5f395ff3fe608060405234801561000f575f80fd5b5060043610610034575f3560e01c806326c53bea14610038578063df0cb9341461004d575b5f80fd5b61004b61004636600461011c565b61007e565b005b61006c61005b3660046101a8565b5f6020819052908152604090205481565b60405190815260200160405180910390f35b33611001146100c45760405162461bcd60e51b815260206004820152600e60248201526d24b73b30b634b21039b2b73232b960911b604482015260640160405180910390fd5b5f806100d2838501856101ca565b6001600160a01b0382165f9081526020819052604090205491935091506100f982826101f4565b6001600160a01b039093165f908152602081905260409020929092555050505050565b5f805f6040848603121561012e575f80fd5b83359250602084013567ffffffffffffffff8082111561014c575f80fd5b818601915086601f83011261015f575f80fd5b81358181111561016d575f80fd5b87602082850101111561017e575f80fd5b6020830194508093505050509250925092565b6001600160a01b03811681146101a5575f80fd5b50565b5f602082840312156101b8575f80fd5b81356101c381610191565b9392505050565b5f80604083850312156101db575f80fd5b82356101e681610191565b946020939093013593505050565b8082018082111561021357634e487b7160e01b5f52601160045260245ffd5b9291505056fea26469706673582212201705ad1c9386134a9251fae64a8f0fb87fd97ed9ae1272f231b78cfce026e93564736f6c63430008140033"
+var ChildReceiverBin = "0x608060405234801561001057600080fd5b5061029c806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c806326c53bea1461003b578063982fb9d814610050575b600080fd5b61004e61004936600461015b565b610082565b005b61007061005e3660046101ef565b60006020819052908152604090205481565b60405190815260200160405180910390f35b33611001146100c85760405162461bcd60e51b815260206004820152600e60248201526d24b73b30b634b21039b2b73232b960911b604482015260640160405180910390fd5b6000806100d783850185610213565b6001600160a01b03821660009081526020819052604090205491935091506100ff828261023f565b6001600160a01b038416600081815260208181526040918290209390935580519182529181018490527ff11e547d796cc64acdf758e7cee90439494fd886a19159454aa61e473fdbafef910160405180910390a1505050505050565b60008060006040848603121561017057600080fd5b83359250602084013567ffffffffffffffff8082111561018f57600080fd5b818601915086601f8301126101a357600080fd5b8135818111156101b257600080fd5b8760208285010111156101c457600080fd5b6020830194508093505050509250925092565b6001600160a01b03811681146101ec57600080fd5b50565b60006020828403121561020157600080fd5b813561020c816101d7565b9392505050565b6000806040838503121561022657600080fd5b8235610231816101d7565b946020939093013593505050565b8082018082111561026057634e487b7160e01b600052601160045260246000fd5b9291505056fea2646970667358221220bb3a513950ddc3581a83b932be35476871cfca25f2faf93bb137e0f50d8c5ad864736f6c63430008140033"
 
 // DeployChildReceiver deploys a new Ethereum contract, binding an instance of ChildReceiver to it.
 func DeployChildReceiver(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *ChildReceiver, error) {
@@ -190,12 +190,12 @@ func (_ChildReceiver *ChildReceiverTransactorRaw) Transact(opts *bind.TransactOp
 	return _ChildReceiver.Contract.contract.Transact(opts, method, params...)
 }
 
-// Received is a free data retrieval call binding the contract method 0xdf0cb934.
+// Senders is a free data retrieval call binding the contract method 0x982fb9d8.
 //
-// Solidity: function received(address ) view returns(uint256)
-func (_ChildReceiver *ChildReceiverCaller) Received(opts *bind.CallOpts, arg0 libcommon.Address) (*big.Int, error) {
+// Solidity: function senders(address ) view returns(uint256)
+func (_ChildReceiver *ChildReceiverCaller) Senders(opts *bind.CallOpts, arg0 libcommon.Address) (*big.Int, error) {
 	var out []interface{}
-	err := _ChildReceiver.contract.Call(opts, &out, "received", arg0)
+	err := _ChildReceiver.contract.Call(opts, &out, "senders", arg0)
 
 	if err != nil {
 		return *new(*big.Int), err
@@ -207,18 +207,18 @@ func (_ChildReceiver *ChildReceiverCaller) Received(opts *bind.CallOpts, arg0 li
 
 }
 
-// Received is a free data retrieval call binding the contract method 0xdf0cb934.
+// Senders is a free data retrieval call binding the contract method 0x982fb9d8.
 //
-// Solidity: function received(address ) view returns(uint256)
-func (_ChildReceiver *ChildReceiverSession) Received(arg0 libcommon.Address) (*big.Int, error) {
-	return _ChildReceiver.Contract.Received(&_ChildReceiver.CallOpts, arg0)
+// Solidity: function senders(address ) view returns(uint256)
+func (_ChildReceiver *ChildReceiverSession) Senders(arg0 libcommon.Address) (*big.Int, error) {
+	return _ChildReceiver.Contract.Senders(&_ChildReceiver.CallOpts, arg0)
 }
 
-// Received is a free data retrieval call binding the contract method 0xdf0cb934.
+// Senders is a free data retrieval call binding the contract method 0x982fb9d8.
 //
-// Solidity: function received(address ) view returns(uint256)
-func (_ChildReceiver *ChildReceiverCallerSession) Received(arg0 libcommon.Address) (*big.Int, error) {
-	return _ChildReceiver.Contract.Received(&_ChildReceiver.CallOpts, arg0)
+// Solidity: function senders(address ) view returns(uint256)
+func (_ChildReceiver *ChildReceiverCallerSession) Senders(arg0 libcommon.Address) (*big.Int, error) {
+	return _ChildReceiver.Contract.Senders(&_ChildReceiver.CallOpts, arg0)
 }
 
 // OnStateReceive is a paid mutator transaction binding the contract method 0x26c53bea.
@@ -279,4 +279,139 @@ func ParseOnStateReceive(calldata []byte) (*OnStateReceiveParams, error) {
 	return &OnStateReceiveParams{
 		Param_arg0: out0, Param_data: out1,
 	}, nil
+}
+
+// ChildReceiverReceivedIterator is returned from FilterReceived and is used to iterate over the raw logs and unpacked data for Received events raised by the ChildReceiver contract.
+type ChildReceiverReceivedIterator struct {
+	Event *ChildReceiverReceived // Event containing the contract specifics and raw log
+
+	contract *bind.BoundContract // Generic contract to use for unpacking event data
+	event    string              // Event name to use for unpacking event data
+
+	logs chan types.Log        // Log channel receiving the found contract events
+	sub  ethereum.Subscription // Subscription for errors, completion and termination
+	done bool                  // Whether the subscription completed delivering logs
+	fail error                 // Occurred error to stop iteration
+}
+
+// Next advances the iterator to the subsequent event, returning whether there
+// are any more events found. In case of a retrieval or parsing error, false is
+// returned and Error() can be queried for the exact failure.
+func (it *ChildReceiverReceivedIterator) Next() bool {
+	// If the iterator failed, stop iterating
+	if it.fail != nil {
+		return false
+	}
+	// If the iterator completed, deliver directly whatever's available
+	if it.done {
+		select {
+		case log := <-it.logs:
+			it.Event = new(ChildReceiverReceived)
+			if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+				it.fail = err
+				return false
+			}
+			it.Event.Raw = log
+			return true
+
+		default:
+			return false
+		}
+	}
+	// Iterator still in progress, wait for either a data or an error event
+	select {
+	case log := <-it.logs:
+		it.Event = new(ChildReceiverReceived)
+		if err := it.contract.UnpackLog(it.Event, it.event, log); err != nil {
+			it.fail = err
+			return false
+		}
+		it.Event.Raw = log
+		return true
+
+	case err := <-it.sub.Err():
+		it.done = true
+		it.fail = err
+		return it.Next()
+	}
+}
+
+// Error returns any retrieval or parsing error occurred during filtering.
+func (it *ChildReceiverReceivedIterator) Error() error {
+	return it.fail
+}
+
+// Close terminates the iteration process, releasing any pending underlying
+// resources.
+func (it *ChildReceiverReceivedIterator) Close() error {
+	it.sub.Unsubscribe()
+	return nil
+}
+
+// ChildReceiverReceived represents a Received event raised by the ChildReceiver contract.
+type ChildReceiverReceived struct {
+	Source libcommon.Address
+	Amount *big.Int
+	Raw    types.Log // Blockchain specific contextual infos
+}
+
+// FilterReceived is a free log retrieval operation binding the contract event 0xf11e547d796cc64acdf758e7cee90439494fd886a19159454aa61e473fdbafef.
+//
+// Solidity: event received(address _source, uint256 _amount)
+func (_ChildReceiver *ChildReceiverFilterer) FilterReceived(opts *bind.FilterOpts) (*ChildReceiverReceivedIterator, error) {
+
+	logs, sub, err := _ChildReceiver.contract.FilterLogs(opts, "received")
+	if err != nil {
+		return nil, err
+	}
+	return &ChildReceiverReceivedIterator{contract: _ChildReceiver.contract, event: "received", logs: logs, sub: sub}, nil
+}
+
+// WatchReceived is a free log subscription operation binding the contract event 0xf11e547d796cc64acdf758e7cee90439494fd886a19159454aa61e473fdbafef.
+//
+// Solidity: event received(address _source, uint256 _amount)
+func (_ChildReceiver *ChildReceiverFilterer) WatchReceived(opts *bind.WatchOpts, sink chan<- *ChildReceiverReceived) (event.Subscription, error) {
+
+	logs, sub, err := _ChildReceiver.contract.WatchLogs(opts, "received")
+	if err != nil {
+		return nil, err
+	}
+	return event.NewSubscription(func(quit <-chan struct{}) error {
+		defer sub.Unsubscribe()
+		for {
+			select {
+			case log := <-logs:
+				// New log arrived, parse the event and forward to the user
+				event := new(ChildReceiverReceived)
+				if err := _ChildReceiver.contract.UnpackLog(event, "received", log); err != nil {
+					return err
+				}
+				event.Raw = log
+
+				select {
+				case sink <- event:
+				case err := <-sub.Err():
+					return err
+				case <-quit:
+					return nil
+				}
+			case err := <-sub.Err():
+				return err
+			case <-quit:
+				return nil
+			}
+		}
+	}), nil
+}
+
+// ParseReceived is a log parse operation binding the contract event 0xf11e547d796cc64acdf758e7cee90439494fd886a19159454aa61e473fdbafef.
+//
+// Solidity: event received(address _source, uint256 _amount)
+func (_ChildReceiver *ChildReceiverFilterer) ParseReceived(log types.Log) (*ChildReceiverReceived, error) {
+	event := new(ChildReceiverReceived)
+	if err := _ChildReceiver.contract.UnpackLog(event, "received", log); err != nil {
+		return nil, err
+	}
+	event.Raw = log
+	return event, nil
 }

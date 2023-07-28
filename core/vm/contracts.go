@@ -106,20 +106,6 @@ var PrecompiledContractsBerlin = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{9}): &blake2F{},
 }
 
-// PrecompiledContractsBLS contains the set of pre-compiled Ethereum
-// contracts specified in EIP-2537. These are exported for testing purposes.
-var PrecompiledContractsBLS = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{10}): &bls12381G1Add{},
-	libcommon.BytesToAddress([]byte{11}): &bls12381G1Mul{},
-	libcommon.BytesToAddress([]byte{12}): &bls12381G1MultiExp{},
-	libcommon.BytesToAddress([]byte{13}): &bls12381G2Add{},
-	libcommon.BytesToAddress([]byte{14}): &bls12381G2Mul{},
-	libcommon.BytesToAddress([]byte{15}): &bls12381G2MultiExp{},
-	libcommon.BytesToAddress([]byte{16}): &bls12381Pairing{},
-	libcommon.BytesToAddress([]byte{17}): &bls12381MapG1{},
-	libcommon.BytesToAddress([]byte{18}): &bls12381MapG2{},
-}
-
 var PrecompiledContractsCancun = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{1}):                    &ecrecover{},
 	libcommon.BytesToAddress([]byte{2}):                    &sha256hash{},
@@ -136,6 +122,20 @@ var PrecompiledContractsCancun = map[libcommon.Address]PrecompiledContract{
 
 var StatefulPrecompile = map[libcommon.Address]bool{
 	libcommon.BytesToAddress(params.HistoryStorageAddress): true,
+}
+
+// PrecompiledContractsBLS contains the set of pre-compiled Ethereum
+// contracts specified in EIP-2537. These are exported for testing purposes.
+var PrecompiledContractsBLS = map[libcommon.Address]PrecompiledContract{
+	libcommon.BytesToAddress([]byte{0x0c}): &bls12381G1Add{},
+	libcommon.BytesToAddress([]byte{0x0d}): &bls12381G1Mul{},
+	libcommon.BytesToAddress([]byte{0x0e}): &bls12381G1MultiExp{},
+	libcommon.BytesToAddress([]byte{0x0f}): &bls12381G2Add{},
+	libcommon.BytesToAddress([]byte{0x10}): &bls12381G2Mul{},
+	libcommon.BytesToAddress([]byte{0x11}): &bls12381G2MultiExp{},
+	libcommon.BytesToAddress([]byte{0x12}): &bls12381Pairing{},
+	libcommon.BytesToAddress([]byte{0x13}): &bls12381MapG1{},
+	libcommon.BytesToAddress([]byte{0x14}): &bls12381MapG2{},
 }
 
 var (

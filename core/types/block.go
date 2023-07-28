@@ -97,9 +97,9 @@ type Header struct {
 	BaseFee         *big.Int        `json:"baseFeePerGas"`   // EIP-1559
 	WithdrawalsHash *libcommon.Hash `json:"withdrawalsRoot"` // EIP-4895
 
-	// DataGasUsed & ExcessDataGas were added by EIP-4844 and are ignored in legacy headers.
-	DataGasUsed   *uint64 `json:"dataGasUsed"`
-	ExcessDataGas *uint64 `json:"excessDataGas"`
+	// BlobGasUsed & ExcessBlobGas were added by EIP-4844 and are ignored in legacy headers.
+	BlobGasUsed   *uint64 `json:"blobGasUsed"`
+	ExcessBlobGas *uint64 `json:"excessBlobGas"`
 
 	ParentBeaconBlockRoot *libcommon.Hash `json:parentBeaconBlockRoot` // EIP-4788
 
@@ -160,13 +160,13 @@ func (h *Header) EncodingSize() int {
 		encodingSize += 33
 	}
 
-	if h.DataGasUsed != nil {
+	if h.BlobGasUsed != nil {
 		encodingSize++
-		encodingSize += rlp.IntLenExcludingHead(*h.DataGasUsed)
+		encodingSize += rlp.IntLenExcludingHead(*h.BlobGasUsed)
 	}
-	if h.ExcessDataGas != nil {
+	if h.ExcessBlobGas != nil {
 		encodingSize++
-		encodingSize += rlp.IntLenExcludingHead(*h.ExcessDataGas)
+		encodingSize += rlp.IntLenExcludingHead(*h.ExcessBlobGas)
 	}
 
 	if h.ParentBeaconBlockRoot != nil {
@@ -315,13 +315,13 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		}
 	}
 
-	if h.DataGasUsed != nil {
-		if err := rlp.EncodeInt(*h.DataGasUsed, w, b[:]); err != nil {
+	if h.BlobGasUsed != nil {
+		if err := rlp.EncodeInt(*h.BlobGasUsed, w, b[:]); err != nil {
 			return err
 		}
 	}
-	if h.ExcessDataGas != nil {
-		if err := rlp.EncodeInt(*h.ExcessDataGas, w, b[:]); err != nil {
+	if h.ExcessBlobGas != nil {
+		if err := rlp.EncodeInt(*h.ExcessBlobGas, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -481,31 +481,31 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	h.WithdrawalsHash = new(libcommon.Hash)
 	h.WithdrawalsHash.SetBytes(b)
 
-	var dataGasUsed uint64
-	if dataGasUsed, err = s.Uint(); err != nil {
+	var blobGasUsed uint64
+	if blobGasUsed, err = s.Uint(); err != nil {
 		if errors.Is(err, rlp.EOL) {
-			h.DataGasUsed = nil
+			h.BlobGasUsed = nil
 			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no DataGasUsed): %w", err)
+				return fmt.Errorf("close header struct (no BlobGasUsed): %w", err)
 			}
 			return nil
 		}
-		return fmt.Errorf("read DataGasUsed: %w", err)
+		return fmt.Errorf("read BlobGasUsed: %w", err)
 	}
-	h.DataGasUsed = &dataGasUsed
+	h.BlobGasUsed = &blobGasUsed
 
-	var excessDataGas uint64
-	if excessDataGas, err = s.Uint(); err != nil {
+	var excessBlobGas uint64
+	if excessBlobGas, err = s.Uint(); err != nil {
 		if errors.Is(err, rlp.EOL) {
-			h.ExcessDataGas = nil
+			h.ExcessBlobGas = nil
 			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no ExcessDataGas): %w", err)
+				return fmt.Errorf("close header struct (no ExcessBlobGas): %w", err)
 			}
 			return nil
 		}
-		return fmt.Errorf("read ExcessDataGas: %w", err)
+		return fmt.Errorf("read ExcessBlobGas: %w", err)
 	}
-	h.ExcessDataGas = &excessDataGas
+	h.ExcessBlobGas = &excessBlobGas
 
 	// ParentBeaconBlockRoot
 	if b, err = s.Bytes(); err != nil {
@@ -550,8 +550,8 @@ type headerMarshaling struct {
 	Time          hexutil.Uint64
 	Extra         hexutility.Bytes
 	BaseFee       *hexutil.Big
-	DataGasUsed   *hexutil.Uint64
-	ExcessDataGas *hexutil.Uint64
+	BlobGasUsed   *hexutil.Uint64
+	ExcessBlobGas *hexutil.Uint64
 	Hash          libcommon.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
 }
 
@@ -574,10 +574,10 @@ func (h *Header) Size() common.StorageSize {
 	if h.WithdrawalsHash != nil {
 		s += common.StorageSize(32)
 	}
-	if h.DataGasUsed != nil {
+	if h.BlobGasUsed != nil {
 		s += common.StorageSize(8)
 	}
-	if h.ExcessDataGas != nil {
+	if h.ExcessBlobGas != nil {
 		s += common.StorageSize(8)
 	}
 	if h.ParentBeaconBlockRoot != nil {
@@ -1248,13 +1248,13 @@ func CopyHeader(h *Header) *Header {
 		cpy.WithdrawalsHash = new(libcommon.Hash)
 		cpy.WithdrawalsHash.SetBytes(h.WithdrawalsHash.Bytes())
 	}
-	if h.DataGasUsed != nil {
-		dataGasUsed := *h.DataGasUsed
-		cpy.DataGasUsed = &dataGasUsed
+	if h.BlobGasUsed != nil {
+		blobGasUsed := *h.BlobGasUsed
+		cpy.BlobGasUsed = &blobGasUsed
 	}
-	if h.ExcessDataGas != nil {
-		excessDataGas := *h.ExcessDataGas
-		cpy.ExcessDataGas = &excessDataGas
+	if h.ExcessBlobGas != nil {
+		excessBlobGas := *h.ExcessBlobGas
+		cpy.ExcessBlobGas = &excessBlobGas
 	}
 	if h.ParentBeaconBlockRoot != nil {
 		cpy.ParentBeaconBlockRoot = new(libcommon.Hash)

@@ -245,11 +245,11 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	cancun := chain.Config().IsCancun(header.Time)
 
 	if !cancun {
-		if header.DataGasUsed != nil {
-			return fmt.Errorf("invalid dataGasUsed before fork: have %v, expected 'nil'", header.DataGasUsed)
+		if header.BlobGasUsed != nil {
+			return fmt.Errorf("invalid blobGasUsed before fork: have %v, expected 'nil'", header.BlobGasUsed)
 		}
-		if header.ExcessDataGas != nil {
-			return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
+		if header.ExcessBlobGas != nil {
+			return fmt.Errorf("invalid excessBlobGas before fork: have %v, expected 'nil'", header.ExcessBlobGas)
 		}
 	}
 

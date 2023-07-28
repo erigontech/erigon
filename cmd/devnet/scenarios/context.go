@@ -130,6 +130,11 @@ type Params map[string]interface{}
 func WithParam(ctx context.Context, name string, value interface{}) Context {
 	if params, ok := ctx.Value(ckParams).(Params); ok {
 		params[name] = value
+		if ctx, ok := ctx.(scenarioContext); ok {
+			return ctx
+		}
+
+		return scenarioContext{devnet.AsContext(ctx)}
 	}
 
 	ctx = context.WithValue(ctx, ckParams, Params{name: value})

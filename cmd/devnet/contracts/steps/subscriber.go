@@ -58,9 +58,9 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 		return nil, fmt.Errorf("failed to call contract tx: %v", err)
 	}
 
-	blockNum, _ := (&big.Int{}).SetString(txToBlockMap[eventHash], 16)
+	blockNum := txToBlockMap[eventHash]
 
-	block, err := node.GetBlockByNumber(blockNum.Uint64(), true)
+	block, err := node.GetBlockByNumber(blockNum, true)
 
 	if err != nil {
 		return nil, err
@@ -68,7 +68,7 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 
 	logs, err := node.FilterLogs(ctx, ethereum.FilterQuery{
 		FromBlock: big.NewInt(0),
-		ToBlock:   blockNum,
+		ToBlock:   big.NewInt(int64(blockNum)),
 		Addresses: []libcommon.Address{address}})
 
 	if err != nil || len(logs) == 0 {
@@ -76,9 +76,9 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 	}
 
 	// compare the log events
-	errs, ok := requests.Compare(requests.NewLog(eventHash, blockNum.Uint64(), address,
+	errs, ok := requests.Compare(requests.NewLog(eventHash, blockNum, address,
 		devnetutils.GenerateTopic("SubscriptionEvent()"), hexutility.Bytes{}, 1,
-		block.Result.Hash, hexutil.Uint(0), false), logs[0])
+		block.Hash, hexutil.Uint(0), false), logs[0])
 
 	if !ok {
 		logger.Error("Log result is incorrect", "errors", errs)

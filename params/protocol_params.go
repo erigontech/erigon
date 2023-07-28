@@ -165,8 +165,8 @@ const (
 	RefundQuotientEIP3529 uint64 = 5
 
 	// EIP-4844: Shard Blob Transactions
-	MinDataGasPrice                   = 1
-	DataGasPriceUpdateFraction        = 3338477
+	MinBlobGasPrice                   = 1
+	BlobGasPriceUpdateFraction        = 3338477
 	PointEvaluationGas         uint64 = 50000
 
 	//EIP-4788: Parent Beacon Root Precompile

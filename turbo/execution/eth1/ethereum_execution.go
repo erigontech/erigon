@@ -3,18 +3,23 @@ package eth1
 import (
 	"context"
 
-	"github.com/anacrolix/sync"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/builder"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -25,20 +30,36 @@ type EthereumExecutionModule struct {
 
 	// MDBX database
 	db                kv.RwDB // main database
-	lock              sync.Mutex
+	semaphore         *semaphore.Weighted
 	executionPipeline *stagedsync.Sync
+	forkValidator     *engine_helpers.ForkValidator
 
 	logger log.Logger
+	// Block building
+	nextPayloadId  uint64
+	lastParameters *core.BlockBuilderParameters
+	builderFunc    builder.BlockBuilderFunc
+	builders       map[uint64]*builder.BlockBuilder
+
+	// configuration
+	config    *chain.Config
+	historyV3 bool
 
 	execution.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, logger log.Logger) *EthereumExecutionModule {
+func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
+	config *chain.Config, builderFunc builder.BlockBuilderFunc, logger log.Logger, historyV3 bool) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:       blockReader,
 		db:                db,
 		executionPipeline: executionPipeline,
 		logger:            logger,
+		forkValidator:     forkValidator,
+		builders:          make(map[uint64]*builder.BlockBuilder),
+		builderFunc:       builderFunc,
+		config:            config,
+		semaphore:         semaphore.NewWeighted(1),
 	}
 }
 
@@ -66,20 +87,26 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 
 // Remaining
 
-func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *types2.H256) (*execution.ForkChoiceReceipt, error) {
+func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *execution.ForkChoice) (*execution.ForkChoiceReceipt, error) {
 	type canonicalEntry struct {
 		hash   libcommon.Hash
 		number uint64
 	}
-	e.lock.Lock()
-	defer e.lock.Unlock()
+	if !e.semaphore.TryAcquire(1) {
+		return &execution.ForkChoiceReceipt{
+			LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+			Status:          execution.ValidationStatus_Busy,
+		}, nil
+	}
+	defer e.semaphore.Release(1)
+
 	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	blockHash := gointerfaces.ConvertH256ToHash(req)
+	blockHash := gointerfaces.ConvertH256ToHash(req.HeadBlockHash)
 	// Step one, find reconnection point, and mark all of those headers as canonical.
 	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, blockHash)
 	if err != nil {
@@ -169,4 +196,51 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *typ
 	}, tx.Commit()
 }
 
-// Missing: NewPayload, AssembleBlock
+func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execution.ValidationRequest) (*execution.ValidationReceipt, error) {
+	if !e.semaphore.TryAcquire(1) {
+		return &execution.ValidationReceipt{
+			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+			ValidationStatus: execution.ValidationStatus_Busy,
+		}, nil
+	}
+	defer e.semaphore.Release(1)
+	tx, err := e.db.BeginRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
+	header, err := e.blockReader.Header(ctx, tx, blockHash, req.Number)
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := e.blockReader.BodyWithTransactions(ctx, tx, blockHash, req.Number)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil || body == nil {
+		return &execution.ValidationReceipt{
+			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+			MissingHash:      req.Hash,
+			ValidationStatus: execution.ValidationStatus_MissingSegment,
+		}, nil
+	}
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), false)
+	if criticalError != nil {
+		return nil, criticalError
+	}
+	validationStatus := execution.ValidationStatus_Success
+	if status == engine_types.AcceptedStatus {
+		validationStatus = execution.ValidationStatus_MissingSegment
+	}
+	if status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil {
+		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain %x is invalid. reason %s", blockHash, err)
+		validationStatus = execution.ValidationStatus_BadBlock
+	}
+	return &execution.ValidationReceipt{
+		ValidationStatus: validationStatus,
+		LatestValidHash:  gointerfaces.ConvertHashToH256(lvh),
+		MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}), // TODO: implement
+	}, nil
+}

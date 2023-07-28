@@ -1,4 +1,4 @@
-package eth1
+package eth1_utils
 
 import (
 	"encoding/binary"
@@ -46,10 +46,17 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 		OmmerHash:       gointerfaces.ConvertHashToH256(header.UncleHash),
 		BaseFeePerGas:   baseFeeReply,
 		WithdrawalHash:  withdrawalHashReply,
-		ExcessDataGas:   header.ExcessDataGas,
-		DataGasUsed:     header.DataGasUsed,
+		ExcessBlobGas:   header.ExcessBlobGas,
+		BlobGasUsed:     header.BlobGasUsed,
 	}
+}
 
+func HeadersToHeadersRPC(headers []*types.Header) []*execution.Header {
+	ret := []*execution.Header{}
+	for _, header := range headers {
+		ret = append(ret, HeaderToHeaderRPC(header))
+	}
+	return ret
 }
 
 func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
@@ -71,8 +78,8 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		Extra:         header.ExtraData,
 		MixDigest:     gointerfaces.ConvertH256ToHash(header.PrevRandao),
 		Nonce:         blockNonce,
-		DataGasUsed:   header.DataGasUsed,
-		ExcessDataGas: header.ExcessDataGas,
+		BlobGasUsed:   header.BlobGasUsed,
+		ExcessBlobGas: header.ExcessBlobGas,
 	}
 	if header.BaseFeePerGas != nil {
 		h.BaseFee = gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
@@ -130,6 +137,15 @@ func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash l
 		Transactions: in.Transactions,
 		Withdrawals:  ConvertWithdrawalsToRpc(in.Withdrawals),
 	}
+}
+
+func ConvertRawBlockBodiesToRpc(in []*types.RawBody, blockNumbers []uint64, blockHashes []libcommon.Hash) []*execution.BlockBody {
+	ret := []*execution.BlockBody{}
+
+	for i, body := range in {
+		ret = append(ret, ConvertRawBlockBodyToRpc(body, blockNumbers[i], blockHashes[i]))
+	}
+	return ret
 }
 
 func ConvertRawBlockBodyFromRpc(in *execution.BlockBody) *types.RawBody {
