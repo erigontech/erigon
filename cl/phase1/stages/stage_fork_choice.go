@@ -139,6 +139,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 				// Do forkchoice if possible
 				if cfg.forkChoice.Engine() != nil {
 					finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
+					log.Info("Caplin is sending forkchoice")
 					// Run forkchoice
 					if err := cfg.forkChoice.Engine().ForkChoiceUpdate(
 						cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),

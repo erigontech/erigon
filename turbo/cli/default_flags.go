@@ -156,4 +156,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.LightClientDiscoveryTCPPortFlag,
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
+
+	&utils.OtsSearchMaxCapFlag,
 }

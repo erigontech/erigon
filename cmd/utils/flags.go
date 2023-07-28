@@ -781,6 +781,12 @@ var (
 		Usage: "Port for sentinel",
 		Value: 7777,
 	}
+
+	OtsSearchMaxCapFlag = cli.Uint64Flag{
+		Name:  "ots.search.max.pagesize",
+		Usage: "Max allowed page size for search methods",
+		Value: 25,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}

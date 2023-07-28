@@ -22,7 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client/rpc_helper"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 )
 
 const fcuTimeout = 12 * time.Second
@@ -155,7 +155,7 @@ func (ec *ExecutionClient) InsertBodies(bodies []*types.RawBody, blockHashes []l
 			BlockHash:    gointerfaces.ConvertHashToH256(blockHashes[i]),
 			BlockNumber:  blockNumbers[i],
 			Transactions: body.Transactions,
-			Withdrawals:  engineapi.ConvertWithdrawalsToRpc(body.Withdrawals),
+			Withdrawals:  engine_types.ConvertWithdrawalsToRpc(body.Withdrawals),
 		})
 	}
 	_, err := ec.client.InsertBodies(ec.ctx, &execution.InsertBodiesRequest{Bodies: grpcBodies})
@@ -246,6 +246,6 @@ func (ec *ExecutionClient) ReadBody(number uint64, blockHash libcommon.Hash) (*t
 	return &types.RawBody{
 		Transactions: resp.Body.Transactions,
 		Uncles:       uncles,
-		Withdrawals:  engineapi.ConvertWithdrawalsFromRpc(resp.Body.Withdrawals),
+		Withdrawals:  engine_types.ConvertWithdrawalsFromRpc(resp.Body.Withdrawals),
 	}, nil
 }
