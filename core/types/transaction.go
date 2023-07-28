@@ -32,6 +32,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -67,7 +68,7 @@ type Transaction interface {
 	Cost() *uint256.Int
 	GetDataHashes() []libcommon.Hash
 	GetGas() uint64
-	GetDataGas() uint64
+	GetBlobGas() uint64
 	GetValue() *uint256.Int
 	Time() time.Time
 	GetTo() *libcommon.Address
@@ -519,7 +520,7 @@ type Message struct {
 	gasPrice         uint256.Int
 	feeCap           uint256.Int
 	tip              uint256.Int
-	maxFeePerDataGas uint256.Int
+	maxFeePerBlobGas uint256.Int
 	data             []byte
 	accessList       types2.AccessList
 	checkNonce       bool
@@ -527,7 +528,10 @@ type Message struct {
 	dataHashes       []libcommon.Hash
 }
 
-func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList types2.AccessList, checkNonce bool, isFree bool, maxFeePerDataGas *uint256.Int) Message {
+func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
+	gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList types2.AccessList, checkNonce bool,
+	isFree bool, maxFeePerBlobGas *uint256.Int,
+) Message {
 	m := Message{
 		from:       from,
 		to:         to,
@@ -548,8 +552,8 @@ func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amo
 	if feeCap != nil {
 		m.feeCap.Set(feeCap)
 	}
-	if maxFeePerDataGas != nil {
-		m.maxFeePerDataGas.Set(maxFeePerDataGas)
+	if maxFeePerBlobGas != nil {
+		m.maxFeePerBlobGas.Set(maxFeePerBlobGas)
 	}
 	return m
 }
@@ -589,9 +593,10 @@ func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
 	m.gasLimit = gas
 }
 
-func (m Message) DataGas() uint64 { return chain.DataGasPerBlob * uint64(len(m.dataHashes)) }
-func (m Message) MaxFeePerDataGas() *uint256.Int {
-	return &m.maxFeePerDataGas
+func (m Message) BlobGas() uint64 { return fixedgas.BlobGasPerBlob * uint64(len(m.dataHashes)) }
+
+func (m Message) MaxFeePerBlobGas() *uint256.Int {
+	return &m.maxFeePerBlobGas
 }
 
 func (m Message) DataHashes() []libcommon.Hash { return m.dataHashes }

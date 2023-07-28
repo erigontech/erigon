@@ -52,7 +52,7 @@ func (ct CommonTx) GetTo() *libcommon.Address {
 	return ct.To
 }
 
-func (ct CommonTx) GetDataGas() uint64 {
+func (ct CommonTx) GetBlobGas() uint64 {
 	return 0
 }
 

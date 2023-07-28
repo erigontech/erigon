@@ -243,11 +243,11 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	}
 
 	if !chain.Config().IsCancun(header.Time) {
-		if header.DataGasUsed != nil {
-			return fmt.Errorf("invalid dataGasUsed before fork: have %v, expected 'nil'", header.DataGasUsed)
+		if header.BlobGasUsed != nil {
+			return fmt.Errorf("invalid blobGasUsed before fork: have %v, expected 'nil'", header.BlobGasUsed)
 		}
-		if header.ExcessDataGas != nil {
-			return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
+		if header.ExcessBlobGas != nil {
+			return fmt.Errorf("invalid excessBlobGas before fork: have %v, expected 'nil'", header.ExcessBlobGas)
 		}
 	} else if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil {
 		// Verify the header's EIP-4844 attributes.

@@ -22,31 +22,32 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 )
 
-// CalcExcessDataGas implements calc_excess_data_gas from EIP-4844
-func CalcExcessDataGas(parent *types.Header) uint64 {
-	var excessDataGas, dataGasUsed uint64
-	if parent.ExcessDataGas != nil {
-		excessDataGas = *parent.ExcessDataGas
+// CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844
+func CalcExcessBlobGas(parent *types.Header) uint64 {
+	var excessBlobGas, blobGasUsed uint64
+	if parent.ExcessBlobGas != nil {
+		excessBlobGas = *parent.ExcessBlobGas
 	}
-	if parent.DataGasUsed != nil {
-		dataGasUsed = *parent.DataGasUsed
+	if parent.BlobGasUsed != nil {
+		blobGasUsed = *parent.BlobGasUsed
 	}
 
-	if excessDataGas+dataGasUsed < chain.TargetDataGasPerBlock {
+	if excessBlobGas+blobGasUsed < fixedgas.TargetBlobGasPerBlock {
 		return 0
 	}
-	return excessDataGas + dataGasUsed - chain.TargetDataGasPerBlock
+	return excessBlobGas + blobGasUsed - fixedgas.TargetBlobGasPerBlock
 }
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
 // as described in the EIP-4844 spec.
-func FakeExponential(factor, denom *uint256.Int, excessDataGas uint64) (*uint256.Int, error) {
-	numerator := uint256.NewInt(excessDataGas)
+func FakeExponential(factor, denom *uint256.Int, excessBlobGas uint64) (*uint256.Int, error) {
+	numerator := uint256.NewInt(excessBlobGas)
 	output := uint256.NewInt(0)
 	numeratorAccum := new(uint256.Int)
 	_, overflow := numeratorAccum.MulOverflow(factor, denom)
@@ -73,20 +74,19 @@ func FakeExponential(factor, denom *uint256.Int, excessDataGas uint64) (*uint256
 
 // VerifyEip4844Header verifies that the header is not malformed
 func VerifyEip4844Header(config *chain.Config, parent, header *types.Header) error {
-	if header.DataGasUsed == nil {
-		return fmt.Errorf("header is missing dataGasUsed")
+	if header.BlobGasUsed == nil {
+		return fmt.Errorf("header is missing blobGasUsed")
 	}
-	if header.ExcessDataGas == nil {
-		return fmt.Errorf("header is missing excessDataGas")
+	if header.ExcessBlobGas == nil {
+		return fmt.Errorf("header is missing excessBlobGas")
 	}
 	return nil
 }
 
-// GetDataGasPrice implements get_data_gas_price from EIP-4844
-func GetDataGasPrice(excessDataGas uint64) (*uint256.Int, error) {
-	return FakeExponential(uint256.NewInt(params.MinDataGasPrice), uint256.NewInt(params.DataGasPriceUpdateFraction), excessDataGas)
+func GetBlobGasPrice(excessBlobGas uint64) (*uint256.Int, error) {
+	return FakeExponential(uint256.NewInt(params.MinBlobGasPrice), uint256.NewInt(params.BlobGasPriceUpdateFraction), excessBlobGas)
 }
 
-func GetDataGasUsed(numBlobs int) uint64 {
-	return uint64(numBlobs) * chain.DataGasPerBlob
+func GetBlobGasUsed(numBlobs int) uint64 {
+	return uint64(numBlobs) * fixedgas.BlobGasPerBlob
 }

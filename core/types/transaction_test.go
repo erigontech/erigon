@@ -32,8 +32,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -698,7 +698,7 @@ func newRandBlobTx() *BlobTx {
 		FeeCap:     uint256.NewInt(rand.Uint64()),
 		AccessList: randAccessList(),
 	},
-		MaxFeePerDataGas:    uint256.NewInt(rand.Uint64()),
+		MaxFeePerBlobGas:    uint256.NewInt(rand.Uint64()),
 		BlobVersionedHashes: randHashes(randIntInRange(0, 6)),
 	}
 	return stx
@@ -715,7 +715,7 @@ func printSTX(stx *BlobTx) {
 	fmt.Printf("Value: %v\n", stx.Value)
 	fmt.Printf("Data: %v\n", stx.Data)
 	fmt.Printf("AccessList: %v\n", stx.AccessList)
-	fmt.Printf("MaxFeePerDataGas: %v\n", stx.MaxFeePerDataGas)
+	fmt.Printf("MaxFeePerBlobGas: %v\n", stx.MaxFeePerBlobGas)
 	fmt.Printf("BlobVersionedHashes: %v\n", stx.BlobVersionedHashes)
 	fmt.Printf("V: %v\n", stx.V)
 	fmt.Printf("R: %v\n", stx.R)
@@ -764,8 +764,8 @@ func newRandProofs(size int) KZGProofs {
 func newRandBlobs(size int) Blobs {
 	var result Blobs
 	for i := 0; i < size; i++ {
-		var arr [chain.BlobSize]byte
-		for j := 0; j < chain.BlobSize; j++ {
+		var arr [fixedgas.BlobSize]byte
+		for j := 0; j < fixedgas.BlobSize; j++ {
 			arr[j] = randByte()
 		}
 		result = append(result, arr)
