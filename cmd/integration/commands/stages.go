@@ -120,6 +120,27 @@ var cmdStageHeaders = &cobra.Command{
 	},
 }
 
+var cmdStageBorHeimdall = &cobra.Command{
+	Use:   "stage_bor_heimdall",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := stageBorHeimdall(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
 var cmdStageBodies = &cobra.Command{
 	Use:   "stage_bodies",
 	Short: "",
@@ -490,6 +511,13 @@ func init() {
 	withHeimdall(cmdStageHeaders)
 	rootCmd.AddCommand(cmdStageHeaders)
 
+	withConfig(cmdStageBorHeimdall)
+	withDataDir(cmdStageBorHeimdall)
+	withReset(cmdStageBorHeimdall)
+	withChain(cmdStageBorHeimdall)
+	withHeimdall(cmdStageBorHeimdall)
+	rootCmd.AddCommand(cmdStageBorHeimdall)
+
 	withConfig(cmdStageBodies)
 	withDataDir(cmdStageBodies)
 	withUnwind(cmdStageBodies)
@@ -718,6 +746,18 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		}
 
 		logger.Info("Progress", "headers", progress)
+		return nil
+	})
+}
+
+func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if reset {
+			if err := reset2.ResetBorHeimdall(ctx, db, tx); err != nil {
+				return err
+			}
+			return nil
+		}
 		return nil
 	})
 }
