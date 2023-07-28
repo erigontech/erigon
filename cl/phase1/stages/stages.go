@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"golang.org/x/sync/errgroup"
 
@@ -108,42 +107,26 @@ func ConsensusStages(ctx context.Context,
 		},
 		{
 			ID:          "process_gossip",
-			Description: "try all gossip received blocks to see if any stick",
+			Description: "try all gossip received blocks in the mean time to see if any stick",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				cfg := forkchoice
+				//			cfg := forkchoice
+				////////if err := g.forkChoice.OnBlock(block, true, true); err != nil {
+				////////	// if we are within a quarter of an epoch within chain tip we ban it
+				////////	if currentSlotByTime < g.forkChoice.HighestSeen()+(g.beaconConfig.SlotsPerEpoch/4) {
+				////////		g.sentinel.BanPeer(g.ctx, data.Peer)
+				////////	}
+				////////	return err
+				////////}
+				////////block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
+				////////	if err = g.forkChoice.OnAttestation(a, true); err != nil {
+				////////		return false
+				////////	}
+				////////	return true
+				////////})
+				////////if err != nil {
+				////////	return err
+				////////}
 
-				if err := g.forkChoice.OnBlock(block, true, true); err != nil {
-					// if we are within a quarter of an epoch within chain tip we ban it
-					if currentSlotByTime < g.forkChoice.HighestSeen()+(g.beaconConfig.SlotsPerEpoch/4) {
-						g.sentinel.BanPeer(g.ctx, data.Peer)
-					}
-					l["at"] = "block process"
-					return err
-				}
-				block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
-					if err = g.forkChoice.OnAttestation(a, true); err != nil {
-						return false
-					}
-					return true
-				})
-				if err != nil {
-					l["at"] = "attestation process"
-					return err
-				}
-				// Now check the head
-				headRoot, headSlot, err := g.forkChoice.GetHead()
-				if err != nil {
-					l["slot"] = block.Block.Slot
-					l["at"] = "fetch head data"
-					return err
-				}
-
-				// Log final result
-				log.Debug("New gossip block imported",
-					"slot", block.Block.Slot,
-					"head", headSlot,
-					"headRoot", headRoot,
-				)
 				return nil
 			},
 			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
@@ -204,17 +187,22 @@ func ConsensusStages(ctx context.Context,
 				nextSlotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, nextSlot)
 				nextSlotDur := nextSlotTime.Sub(time.Now())
 
+				// Now check the head
+				headRoot, _, err := cfg.forkChoice.GetHead()
+				if err != nil {
+					return err
+				}
+
 				// Do forkchoice if possible
-				if g.forkChoice.Engine() != nil {
-					finalizedCheckpoint := g.forkChoice.FinalizedCheckpoint()
+				if cfg.forkChoice.Engine() != nil {
+					finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
 					log.Info("Caplin is sending forkchoice")
 					// Run forkchoice
-					if err := g.forkChoice.Engine().ForkChoiceUpdate(
-						g.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
-						g.forkChoice.GetEth1Hash(headRoot),
+					if err := cfg.forkChoice.Engine().ForkChoiceUpdate(
+						cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
+						cfg.forkChoice.GetEth1Hash(headRoot),
 					); err != nil {
 						log.Warn("Could not set forkchoice", "err", err)
-						l["at"] = "sending forkchoice"
 						return err
 					}
 				}
