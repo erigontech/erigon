@@ -684,7 +684,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		headers = append(headers, header)
 		number, hash = number-1, header.ParentHash
 
-		if number <= chain.FrozenBlocks() {
+		if number < chain.FrozenBlocks() {
 			break
 		}
 
@@ -694,7 +694,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		default:
 		}
 	}
-	if snap == nil && number <= chain.FrozenBlocks() {
+	if snap == nil && number < chain.FrozenBlocks() {
 		// Special handling of the headers in the snapshot
 		zeroHeader := chain.GetHeaderByNumber(0)
 		if zeroHeader != nil {
@@ -758,7 +758,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			return nil, err
 		}
 
-		c.logger.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+		c.logger.Info("Stored proposer snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
 
 	return snap, err
