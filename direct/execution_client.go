@@ -65,6 +65,14 @@ func (s *ExecutionClientDirect) GetHeader(ctx context.Context, in *execution.Get
 	return s.server.GetHeader(ctx, in)
 }
 
+func (s *ExecutionClientDirect) CurrentHeader(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*execution.GetHeaderResponse, error) {
+	return s.server.CurrentHeader(ctx, in)
+}
+
+func (s *ExecutionClientDirect) GetTD(ctx context.Context, in *execution.GetSegmentRequest, opts ...grpc.CallOption) (*execution.GetTDResponse, error) {
+	return s.server.GetTD(ctx, in)
+}
+
 func (s *ExecutionClientDirect) GetBody(ctx context.Context, in *execution.GetSegmentRequest, opts ...grpc.CallOption) (*execution.GetBodyResponse, error) {
 	return s.server.GetBody(ctx, in)
 }
