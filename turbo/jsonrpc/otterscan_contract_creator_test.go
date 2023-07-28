@@ -10,7 +10,7 @@ import (
 
 func TestGetContractCreator(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB)
+	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
 
 	addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
 	expectCreator := libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
