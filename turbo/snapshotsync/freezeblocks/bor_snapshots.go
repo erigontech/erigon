@@ -153,11 +153,11 @@ func (br *BorRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	return nil
 }
 
-func (br *BorRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) error {
+func (br *BlockRetire) RetireBorBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) error {
 	chainConfig := fromdb.ChainConfig(br.db)
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
-	snapshots := br.snapshots()
+	snapshots := br.borSnapshots()
 	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
 
 	if err := DumpBorBlocks(ctx, chainConfig, blockFrom, blockTo, snaptype.Erigon2SegmentSize, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
@@ -357,30 +357,6 @@ RETRY:
 		return err
 	}
 
-	return nil
-}
-
-func (br *BorRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) {
-	ok := br.working.CompareAndSwap(false, true)
-	if !ok {
-		// go-routine is still working
-		return
-	}
-	go func() {
-		defer br.working.Store(false)
-
-		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
-		if !ok {
-			return
-		}
-
-		err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots)
-		if err != nil {
-			br.logger.Warn("[bor snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
-		}
-	}()
-}
-func (br *BorRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
 	return nil
 }
 

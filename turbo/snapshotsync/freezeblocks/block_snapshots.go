@@ -1045,6 +1045,9 @@ func NewBlockRetire(workers int, dirs datadir.Dirs, blockReader services.FullBlo
 	return &BlockRetire{workers: workers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, db: db, notifier: notifier, logger: logger}
 }
 func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
+func (br *BlockRetire) borSnapshots() *BorRoSnapshots {
+	return br.blockReader.BorSnapshots().(*BorRoSnapshots)
+}
 func (br *BlockRetire) HasNewFrozenFiles() bool {
 	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
@@ -1142,7 +1145,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	}
 	return nil
 }
-func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
+func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, includeBor bool) error {
 	if br.blockReader.FreezingCfg().KeepBlocks {
 		return nil
 	}
@@ -1154,10 +1157,16 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	if err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
 		return nil
 	}
+	if includeBor {
+		canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks())
+		if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
+			return nil
+		}
+	}
 	return nil
 }
 
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) {
+func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, includeBor bool, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) {
 	ok := br.working.CompareAndSwap(false, true)
 	if !ok {
 		// go-routine is still working
@@ -1174,6 +1183,18 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 		err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots)
 		if err != nil {
 			br.logger.Warn("[snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
+		}
+
+		if includeBor {
+			blockFrom, blockTo, ok = CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
+			if !ok {
+				return
+			}
+
+			err = br.RetireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots)
+			if err != nil {
+				br.logger.Warn("[bor snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
+			}
 		}
 	}()
 }

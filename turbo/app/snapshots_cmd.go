@@ -450,7 +450,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 				return err
 			}
 			for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
-				if err := br.PruneAncientBlocks(tx, 100); err != nil {
+				if err := br.PruneAncientBlocks(tx, 100, false /* includeBor */); err != nil {
 					return err
 				}
 			}
