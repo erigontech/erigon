@@ -116,7 +116,7 @@ var PrecompiledContractsCancun = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{7}):                    &bn256ScalarMulIstanbul{},
 	libcommon.BytesToAddress([]byte{8}):                    &bn256PairingIstanbul{},
 	libcommon.BytesToAddress([]byte{9}):                    &blake2F{},
-	libcommon.BytesToAddress([]byte{20}):                   &pointEvaluation{},
+	libcommon.BytesToAddress([]byte{0x0a}):                 &pointEvaluation{},
 	libcommon.BytesToAddress(params.HistoryStorageAddress): &parentBeaconBlockRoot{},
 }
 
