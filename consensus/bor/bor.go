@@ -493,12 +493,10 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	if number > zerothSpanEnd && isSprintStart(number+1, sprintLength) {
 		ctx := context.Background()
 
-		tx, err := c.ChainDB.BeginRw(ctx)
+		tx, err := c.ChainDB.BeginRo(ctx)
 		if err != nil {
 			return err
 		}
-
-		tx.Rollback()
 
 		stateReader := state.NewPlainStateReader(tx)
 
