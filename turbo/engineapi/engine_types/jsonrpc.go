@@ -44,7 +44,7 @@ type PayloadAttributes struct {
 	PrevRandao            common.Hash         `json:"prevRandao"            gencodec:"required"`
 	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
 	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
-	ParentBeaconBlockRoot common.Hash         `json:"parentBeaconBlockRoot" gencodec:"required"`
+	ParentBeaconBlockRoot common.Hash         `json:"parentBeaconBlockRoot"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL

@@ -1145,5 +1145,6 @@ func (c *parentBeaconBlockRoot) RunStateful(input []byte, state evmtypes.IntraBl
 	timestampExtended := timestampReduced + params.HistoricalRootsModulus
 	rootIndex := libcommon.BigToHash(libcommon.Big256.SetUint64((timestampExtended)))
 	state.GetState(libcommon.BytesToAddress(params.HistoryStorageAddress), &rootIndex, root)
-	return root.Bytes(), nil
+	res := root.Bytes32()
+	return res[:], nil
 }
