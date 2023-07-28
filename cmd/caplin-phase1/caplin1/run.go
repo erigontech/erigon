@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"os"
-	"runtime"
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/clpersist"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -19,11 +16,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/spf13/afero"
 
 	"github.com/Giulio2002/bls"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/rpc"
@@ -129,68 +124,4 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 		}
 	}
 	return err
-	// return stages.SpawnStageForkChoice(
-	//
-	//	forkChoiceConfig,
-	//	&stagedsync.StageState{ID: "Caplin"}, nil, ctx)
-}
-
-func initDownloader(downloader *network.ForwardBeaconDownloader, genesisCfg *clparams.GenesisConfig,
-	beaconCfg *clparams.BeaconChainConfig, beaconState *state.CachingBeaconState, executionClient *execution_client.ExecutionClient, gossipManager *network.GossipManager,
-	forkChoice *forkchoice.ForkChoiceStore, caplinFreezer freezer.Freezer,
-	dataDirFs afero.Fs,
-) {
-	downloader.SetHighestProcessedRoot(common.Hash{})
-	downloader.SetHighestProcessedSlot(beaconState.Slot())
-	downloader.SetProcessFunction(func(highestSlotProcessed uint64, _ common.Hash, newBlocks []*cltypes.SignedBeaconBlock) (uint64, common.Hash, error) {
-		for _, block := range newBlocks {
-			if err := freezer.PutObjectSSZIntoFreezer("signedBeaconBlock", "caplin_core", block.Block.Slot, block, caplinFreezer); err != nil {
-				return highestSlotProcessed, common.Hash{}, err
-			}
-			// we send fork choice if we are in the same slot...
-			// except we should only send within 4 seconds.... so.... TODO: that
-			sendForkChoice := utils.GetCurrentSlot(genesisCfg.GenesisTime, beaconCfg.SecondsPerSlot) == block.Block.Slot
-			if err := forkChoice.OnBlock(block, sendForkChoice, true); err != nil {
-				log.Warn("Could not download block", "reason", err, "slot", block.Block.Slot)
-				return highestSlotProcessed, common.Hash{}, err
-			}
-			highestSlotProcessed = utils.Max64(block.Block.Slot, highestSlotProcessed)
-			if sendForkChoice {
-				var m runtime.MemStats
-				dbg.ReadMemStats(&m)
-				// Import the head
-				headRoot, headSlot, err := forkChoice.GetHead()
-
-				log.Debug("New block imported",
-					"slot", block.Block.Slot,
-					"head", headSlot,
-					"headRoot", headRoot,
-					"alloc/sys", common.ByteCount(m.Alloc)+"/"+common.ByteCount(m.Sys),
-					"numGC", m.NumGC,
-				)
-				if err != nil {
-					log.Debug("Could not fetch head data",
-						"slot", block.Block.Slot,
-						"err", err)
-					continue
-				}
-
-				// Do forkchoice if possible
-				if forkChoice.Engine() != nil {
-					finalizedCheckpoint := forkChoice.FinalizedCheckpoint()
-					log.Info("Caplin is sending forkchoice")
-					// Run forkchoice
-					if err := forkChoice.Engine().ForkChoiceUpdate(
-						forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
-						forkChoice.GetEth1Hash(headRoot),
-					); err != nil {
-						log.Warn("Could not set forkchoice", "err", err)
-					}
-				}
-			}
-		}
-		// Checks done, update all internals accordingly
-		return highestSlotProcessed, common.Hash{}, nil
-	})
-
 }

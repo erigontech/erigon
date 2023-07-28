@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"golang.org/x/sync/errgroup"
 
@@ -19,36 +20,6 @@ func ConsensusStages(ctx context.Context,
 ) []*stagedsync.Stage {
 
 	return []*stagedsync.Stage{
-		//{
-		//	ID:          stages.BeaconHistoryReconstruction,
-		//	Description: "Download beacon blocks backwards.",
-		//	Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-		//		return SpawnStageHistoryReconstruction(historyReconstruction, s, tx, ctx, logger)
-		//	},
-		//	Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
-		//		return nil
-		//	},
-		//},
-		//{
-		//	ID:          stages.BeaconState,
-		//	Description: "Execute Consensus Layer transition",
-		//	Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-		//		return SpawnStageBeaconState(beaconState, tx, ctx)
-		//	},
-		//	Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
-		//		return nil
-		//	},
-		//},
-		//{
-		//	ID:          stages.BeaconBlocks,
-		//	Description: "Download beacon blocks forward.",
-		//	Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-		//		return SpawnStageForkChoice(forkchoice, s, tx, ctx)
-		//	},
-		//	Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
-		//		return nil
-		//	},
-		//},
 		{
 			ID:          "wait_for_peers",
 			Description: "wait for enough peers",
@@ -77,7 +48,6 @@ func ConsensusStages(ctx context.Context,
 				type resp struct {
 					blocks []*cltypes.SignedBeaconBlock
 				}
-
 				chans := make([]chan resp, 0, totalEpochs)
 				ctx, cn := context.WithCancel(ctx)
 				egg, ctx := errgroup.WithContext(ctx)
@@ -137,6 +107,50 @@ func ConsensusStages(ctx context.Context,
 			},
 		},
 		{
+			ID:          "process_gossip",
+			Description: "try all gossip received blocks to see if any stick",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
+				cfg := forkchoice
+
+				if err := g.forkChoice.OnBlock(block, true, true); err != nil {
+					// if we are within a quarter of an epoch within chain tip we ban it
+					if currentSlotByTime < g.forkChoice.HighestSeen()+(g.beaconConfig.SlotsPerEpoch/4) {
+						g.sentinel.BanPeer(g.ctx, data.Peer)
+					}
+					l["at"] = "block process"
+					return err
+				}
+				block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
+					if err = g.forkChoice.OnAttestation(a, true); err != nil {
+						return false
+					}
+					return true
+				})
+				if err != nil {
+					l["at"] = "attestation process"
+					return err
+				}
+				// Now check the head
+				headRoot, headSlot, err := g.forkChoice.GetHead()
+				if err != nil {
+					l["slot"] = block.Block.Slot
+					l["at"] = "fetch head data"
+					return err
+				}
+
+				// Log final result
+				log.Debug("New gossip block imported",
+					"slot", block.Block.Slot,
+					"head", headSlot,
+					"headRoot", headRoot,
+				)
+				return nil
+			},
+			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
+				return nil
+			},
+		},
+		{
 			ID:          "catch_up_blocks",
 			Description: "catch up blocks",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
@@ -189,6 +203,21 @@ func ConsensusStages(ctx context.Context,
 				nextSlot := targetSlot + 1
 				nextSlotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, nextSlot)
 				nextSlotDur := nextSlotTime.Sub(time.Now())
+
+				// Do forkchoice if possible
+				if g.forkChoice.Engine() != nil {
+					finalizedCheckpoint := g.forkChoice.FinalizedCheckpoint()
+					log.Info("Caplin is sending forkchoice")
+					// Run forkchoice
+					if err := g.forkChoice.Engine().ForkChoiceUpdate(
+						g.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
+						g.forkChoice.GetEth1Hash(headRoot),
+					); err != nil {
+						log.Warn("Could not set forkchoice", "err", err)
+						l["at"] = "sending forkchoice"
+						return err
+					}
+				}
 				logger.Info("sleeping until next slot", "slot", nextSlot, "time", nextSlotTime, "dur", nextSlotDur)
 				time.Sleep(nextSlotDur)
 				return nil

@@ -3,9 +3,9 @@ package network
 import (
 	"context"
 	"runtime"
+	"sync"
 
 	"github.com/VictoriaMetrics/metrics"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 
@@ -30,6 +30,10 @@ type GossipManager struct {
 	// configs
 	beaconConfig  *clparams.BeaconChainConfig
 	genesisConfig *clparams.GenesisConfig
+
+	mu        sync.RWMutex
+	subs      map[int]chan *cltypes.SignedBeaconBlock
+	totalSubs int
 }
 
 func NewGossipReceiver(ctx context.Context, s sentinel.SentinelClient, forkChoice *forkchoice.ForkChoiceStore,
@@ -42,6 +46,24 @@ func NewGossipReceiver(ctx context.Context, s sentinel.SentinelClient, forkChoic
 		genesisConfig: genesisConfig,
 		recorder:      recorder,
 	}
+}
+
+// this subscribes to signed beacon blocks..... i wish this was better
+func (g *GossipManager) SubscribeSignedBeaconBlocks(ctx context.Context) <-chan *cltypes.SignedBeaconBlock {
+	out := make(chan *cltypes.SignedBeaconBlock, 8)
+	g.mu.Lock()
+	g.totalSubs++
+	idx := g.totalSubs
+	g.subs[idx] = out
+	g.mu.Unlock()
+	go func() {
+		<-ctx.Done()
+		g.mu.Lock()
+		delete(g.subs, idx)
+		g.mu.Unlock()
+	}()
+	return out
+
 }
 
 func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
@@ -101,51 +123,15 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 
 		peers.Get()
 
-		if err := g.forkChoice.OnBlock(block, true, true); err != nil {
-			// if we are within a quarter of an epoch within chain tip we ban it
-			if currentSlotByTime < g.forkChoice.HighestSeen()+(g.beaconConfig.SlotsPerEpoch/4) {
-				g.sentinel.BanPeer(g.ctx, data.Peer)
-			}
-			l["at"] = "block process"
-			return err
-		}
-		block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
-			if err = g.forkChoice.OnAttestation(a, true); err != nil {
-				return false
-			}
-			return true
-		})
-		if err != nil {
-			l["at"] = "attestation process"
-			return err
-		}
-		// Now check the head
-		headRoot, headSlot, err := g.forkChoice.GetHead()
-		if err != nil {
-			l["slot"] = block.Block.Slot
-			l["at"] = "fetch head data"
-			return err
-		}
-		// Do forkchoice if possible
-		if g.forkChoice.Engine() != nil {
-			finalizedCheckpoint := g.forkChoice.FinalizedCheckpoint()
-			log.Info("Caplin is sending forkchoice")
-			// Run forkchoice
-			if err := g.forkChoice.Engine().ForkChoiceUpdate(
-				g.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
-				g.forkChoice.GetEth1Hash(headRoot),
-			); err != nil {
-				log.Warn("Could not set forkchoice", "err", err)
-				l["at"] = "sending forkchoice"
-				return err
+		g.mu.RLock()
+		for _, v := range g.subs {
+			select {
+			case v <- block:
+			default:
 			}
 		}
-		// Log final result
-		log.Debug("New gossip block imported",
-			"slot", block.Block.Slot,
-			"head", headSlot,
-			"headRoot", headRoot,
-		)
+		g.mu.RUnlock()
+
 	case sentinel.GossipType_VoluntaryExitGossipType:
 		object = &cltypes.SignedVoluntaryExit{}
 		if err := object.DecodeSSZ(data.Data, int(version)); err != nil {
