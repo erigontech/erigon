@@ -40,7 +40,9 @@ import (
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -568,15 +570,32 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	// intiialize engine backend
 	var engine *execution_client.ExecutionClientDirect
 
+	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, backend.notifications.Events, logger)
+
+	pipelineStages := stages2.NewPipelineStages(ctx, chainKv, &ethconfig.Defaults, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.agg, backend.forkValidator, logger)
+	pipelineStagedSync := stagedsync.New(pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
+	executionRpc := direct.NewExecutionClientDirect(eth1.NewEthereumExecutionModule(blockReader, chainKv, pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, logger, config.HistoryV3))
 	if config.ExperimentalConsensusSeparation {
 		log.Info("Using experimental Engine API")
-		engineBackendRPC := engineapi.NewEngineServerExperimental(ctx, logger, chainConfig, assembleBlockPOS, backend.chainDB, blockReader, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
+		engineBackendRPC := engineapi.NewEngineServerExperimental(
+			ctx,
+			logger,
+			chainConfig,
+			executionRpc,
+			backend.chainDB,
+			blockReader,
+			backend.sentriesClient.Hd,
+			engine_block_downloader.NewEngineBlockDownloader(ctx, logger, executionRpc, backend.sentriesClient.Hd,
+				backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, blockReader, backend.sentriesClient.SendBodyRequest,
+				tmpdir, config.Sync.BodyDownloadTimeoutSeconds),
+			false,
+			config.Miner.EnabledPOS)
 		backend.engineBackendRPC = engineBackendRPC
 		engine, err = execution_client.NewExecutionClientDirect(ctx,
 			engineBackendRPC,
 		)
 	} else {
-		engineBackendRPC := engineapi.NewEngineServer(ctx, logger, chainConfig, assembleBlockPOS, backend.chainDB, blockReader, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
+		engineBackendRPC := engineapi.NewEngineServer(ctx, logger, chainConfig, executionRpc, backend.chainDB, blockReader, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
 		backend.engineBackendRPC = engineBackendRPC
 		engine, err = execution_client.NewExecutionClientDirect(ctx,
 			engineBackendRPC,
@@ -724,7 +743,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	backend.ethBackendRPC, backend.miningRPC, backend.stateChangesClient = ethBackendRPC, miningRPC, stateDiffClient
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, backend.notifications.Events, logger)
 
 	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.agg, backend.forkValidator, logger)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder

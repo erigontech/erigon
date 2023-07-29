@@ -14,11 +14,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type HeimdallGRPCServer struct {
 	proto.UnimplementedHeimdallServer
-	heimdall bor.IHeimdallClient
+	heimdall bor.HeimdallServer
 	logger   log.Logger
 }
 
@@ -152,15 +153,58 @@ func (h *HeimdallGRPCServer) FetchCheckpoint(ctx context.Context, in *proto.Fetc
 }
 
 func (h *HeimdallGRPCServer) StateSyncEvents(req *proto.StateSyncEventsRequest, reply proto.Heimdall_StateSyncEventsServer) error {
-	//TODO
-	//fromId := req.FromID
+	fromId := req.FromID
+
+	for {
+		height, events, err := h.heimdall.StateSyncEvents(context.Background(), fromId, int64(req.ToTime), int(req.Limit))
+
+		if err != nil {
+			h.logger.Error("Error while fetching event records", "error", err)
+			return status.Errorf(codes.Internal, err.Error())
+		}
+
+		eventRecords := make([]*proto.EventRecord, len(events))
+
+		for i, event := range events {
+			eventRecords[i] = &proto.EventRecord{
+				ID:       event.ID,
+				Contract: event.Contract.Hex(),
+				Data:     event.Data.String(),
+				TxHash:   event.TxHash.Hex(),
+				LogIndex: event.LogIndex,
+				ChainID:  event.ChainID,
+				Time:     timestamppb.New(event.Time),
+			}
+		}
+
+		if len(eventRecords) == 0 {
+			break
+		}
+
+		err = reply.Send(&proto.StateSyncEventsResponse{
+			Height: fmt.Sprint(height),
+			Result: eventRecords,
+		})
+
+		if err != nil {
+			h.logger.Error("Error while sending event record", "error", err)
+			return status.Errorf(codes.Internal, err.Error())
+		}
+
+		if len(eventRecords) < int(req.Limit) {
+			break
+		}
+
+		fromId += req.Limit
+	}
+
 	return nil
 }
 
 // StartHeimdallServer creates a heimdall GRPC server - which is implemented via the passed in client
 // interface.  It is intended for use in testing where more than a single test validator is required rather
 // than to replace the maticnetwork implementation
-func StartHeimdallServer(shutDownCtx context.Context, heimdall bor.IHeimdallClient, addr string, logger log.Logger) error {
+func StartHeimdallServer(shutDownCtx context.Context, heimdall bor.HeimdallServer, addr string, logger log.Logger) error {
 	grpcServer := grpc.NewServer(withLoggingUnaryInterceptor(logger))
 	proto.RegisterHeimdallServer(grpcServer,
 		&HeimdallGRPCServer{

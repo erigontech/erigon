@@ -37,6 +37,9 @@ type Network struct {
 	Nodes              []Node
 	Services           []Service
 	Alloc              types.GenesisAlloc
+	BorStateSyncDelay  time.Duration
+	BorPeriod          time.Duration
+	BorMinBlockSize    int
 	wg                 sync.WaitGroup
 	peers              []string
 	namedNodes         map[string]Node

@@ -63,10 +63,10 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block) (invalid
 	}
 	// Process Deneb
 	if payload.Version() >= clparams.DenebVersion {
-		request.DataGasUsed = new(hexutil.Uint64)
-		request.ExcessDataGas = new(hexutil.Uint64)
-		*request.DataGasUsed = hexutil.Uint64(payload.DataGasUsed)
-		*request.ExcessDataGas = hexutil.Uint64(payload.ExcessDataGas)
+		request.BlobGasUsed = new(hexutil.Uint64)
+		request.ExcessBlobGas = new(hexutil.Uint64)
+		*request.BlobGasUsed = hexutil.Uint64(payload.BlobGasUsed)
+		*request.ExcessBlobGas = hexutil.Uint64(payload.ExcessBlobGas)
 	}
 
 	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon

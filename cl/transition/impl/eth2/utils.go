@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -41,7 +42,7 @@ func txPeekBlobVersionedHashes(txBytes []byte) []libcommon.Hash {
 		value: 32 bytes
 		data: 4 bytes - offset to C (relative to A)
 		access_list: 4 bytes - offset to D (relative to A)
-		max_fee_per_data_gas: 32 bytes
+		max_fee_per_blob_gas: 32 bytes
 		blob_versioned_hashes: 4 bytes - offset to E (relative to A)
 	*/
 	// field offset: 32 + 8 + 32 + 32 + 8 + 4 + 32 + 4 + 4 + 32 = 188

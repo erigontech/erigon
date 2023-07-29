@@ -11,15 +11,34 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
+	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/log/v3"
 )
+
+type BridgeEvent string
+
+var BridgeEvents = struct {
+	StakingEvent  BridgeEvent
+	TopupEvent    BridgeEvent
+	ClerkEvent    BridgeEvent
+	SlashingEvent BridgeEvent
+}{
+	StakingEvent:  "staking",
+	TopupEvent:    "topup",
+	ClerkEvent:    "clerk",
+	SlashingEvent: "slashing",
+}
+
+type syncRecordKey struct {
+	hash  libcommon.Hash
+	index uint64
+}
 
 type Heimdall struct {
 	sync.Mutex
@@ -33,17 +52,15 @@ type Heimdall struct {
 	syncContractAddress libcommon.Address
 	syncContractBinding *contracts.TestStateSender
 	syncSubscription    ethereum.Subscription
+	pendingSyncRecords  map[syncRecordKey]*EventRecordWithBlock
 }
 
 func NewHeimdall(chainConfig *chain.Config, logger log.Logger) *Heimdall {
 	return &Heimdall{
-		chainConfig: chainConfig,
-		spans:       map[uint64]*span.HeimdallSpan{},
-		logger:      logger}
-}
-
-func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*clerk.EventRecordWithTime, error) {
-	return nil, nil
+		chainConfig:        chainConfig,
+		spans:              map[uint64]*span.HeimdallSpan{},
+		pendingSyncRecords: map[syncRecordKey]*EventRecordWithBlock{},
+		logger:             logger}
 }
 
 func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan, error) {
@@ -99,6 +116,12 @@ func (h *Heimdall) currentSprintLength() int {
 	return int(h.chainConfig.Bor.CalculateSprint(256))
 }
 
+func (h *Heimdall) getSpanOverrideHeight() uint64 {
+	return 0
+	//MainChain: 8664000
+	//MumbaiChain: 10205000
+}
+
 func (h *Heimdall) FetchCheckpoint(ctx context.Context, number int64) (*checkpoint.Checkpoint, error) {
 	return nil, fmt.Errorf("TODO")
 }
@@ -112,6 +135,10 @@ func (h *Heimdall) Close() {
 
 func (h *Heimdall) StateSenderAddress() libcommon.Address {
 	return h.syncContractAddress
+}
+
+func (f *Heimdall) StateSenderContract() *contracts.TestStateSender {
+	return f.syncContractBinding
 }
 
 func (h *Heimdall) NodeCreated(ctx context.Context, node devnet.Node) {
@@ -147,8 +174,12 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 				return
 			}
 
+			deployCtx := devnet.WithCurrentNode(ctx, node)
+			waiter, cancel := blocks.BlockWaiter(deployCtx, contracts.DeploymentChecker)
+			defer cancel()
+
 			// deploy the contract and get the contract handler
-			address, contract, err := contracts.DeployWithOps(devnet.WithCurrentNode(ctx, node), transactOpts, contracts.DeployTestStateSender)
+			address, transaction, contract, err := contracts.DeployWithOps(deployCtx, transactOpts, contracts.DeployTestStateSender)
 
 			if err != nil {
 				h.Lock()
@@ -159,10 +190,21 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 				return
 			}
 
-			h.logger.Info("StateSender deployed", "addr", address)
-
 			h.syncContractAddress = address
 			h.syncContractBinding = contract
+
+			block, err := waiter.Await(transaction.Hash())
+
+			if err != nil {
+				h.Lock()
+				defer h.Unlock()
+
+				h.syncChan = nil
+				h.logger.Error("Failed to deploy state sender", "err", err)
+				return
+			}
+
+			h.logger.Info("StateSender deployed", "chain", h.chainConfig.ChainName, "block", block.BlockNumber, "addr", address)
 
 			h.syncSubscription, err = contract.WatchStateSynced(&bind.WatchOpts{}, h.syncChan, nil, nil)
 
@@ -176,11 +218,12 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 			}
 
 			for stateSyncedEvent := range h.syncChan {
-				h.logger.Info("Processing L1 sync event", "event", stateSyncedEvent)
-				if err := handleStateSynced(stateSyncedEvent); err != nil {
-					h.logger.Error("L1 sync event processing failed", "err", err)
+				if err := h.handleStateSynced(stateSyncedEvent); err != nil {
+					h.logger.Error("L1 sync event processing failed", "event", stateSyncedEvent.Raw.Index, "err", err)
 				}
 			}
+
+			h.logger.Info("Sync event channel closed")
 		}()
 	}
 }
