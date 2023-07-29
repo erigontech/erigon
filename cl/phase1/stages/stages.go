@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -164,6 +165,9 @@ func ConsensusStages(ctx context.Context,
 				logger.Info("waiting for blocks...", "from", seenSlot, "to", targetSlot)
 				blocks, err := cfg.source.GetRange(ctx, seenSlot+1, targetSlot-seenSlot)
 				if err != nil {
+					if errors.Is(err, context.Canceled) {
+						return nil
+					}
 					return err
 				}
 				for _, block := range blocks {
