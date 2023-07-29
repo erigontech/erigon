@@ -26,6 +26,9 @@ const (
 	Execution_ValidateChain_FullMethodName       = "/execution.Execution/ValidateChain"
 	Execution_UpdateForkChoice_FullMethodName    = "/execution.Execution/UpdateForkChoice"
 	Execution_AssembleBlock_FullMethodName       = "/execution.Execution/AssembleBlock"
+	Execution_GetAssembledBlock_FullMethodName   = "/execution.Execution/GetAssembledBlock"
+	Execution_CurrentHeader_FullMethodName       = "/execution.Execution/CurrentHeader"
+	Execution_GetTD_FullMethodName               = "/execution.Execution/GetTD"
 	Execution_GetHeader_FullMethodName           = "/execution.Execution/GetHeader"
 	Execution_GetBody_FullMethodName             = "/execution.Execution/GetBody"
 	Execution_IsCanonicalHash_FullMethodName     = "/execution.Execution/IsCanonicalHash"
@@ -43,8 +46,13 @@ type ExecutionClient interface {
 	// Chain Validation and ForkChoice.
 	ValidateChain(ctx context.Context, in *ValidationRequest, opts ...grpc.CallOption) (*ValidationReceipt, error)
 	UpdateForkChoice(ctx context.Context, in *ForkChoice, opts ...grpc.CallOption) (*ForkChoiceReceipt, error)
-	AssembleBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.ExecutionPayload, error)
+	// Block Assembly
+	// EAGAIN design here, AssembleBlock initiates the asynchronous request, and GetAssembleBlock just return it if ready.
+	AssembleBlock(ctx context.Context, in *AssembleBlockRequest, opts ...grpc.CallOption) (*AssembleBlockResponse, error)
+	GetAssembledBlock(ctx context.Context, in *GetAssembledBlockRequest, opts ...grpc.CallOption) (*GetAssembledBlockResponse, error)
 	// Chain Getters.
+	CurrentHeader(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GetHeaderResponse, error)
+	GetTD(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*GetTDResponse, error)
 	GetHeader(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*GetHeaderResponse, error)
 	GetBody(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*GetBodyResponse, error)
 	IsCanonicalHash(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*IsCanonicalResponse, error)
@@ -96,9 +104,36 @@ func (c *executionClient) UpdateForkChoice(ctx context.Context, in *ForkChoice, 
 	return out, nil
 }
 
-func (c *executionClient) AssembleBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.ExecutionPayload, error) {
-	out := new(types.ExecutionPayload)
+func (c *executionClient) AssembleBlock(ctx context.Context, in *AssembleBlockRequest, opts ...grpc.CallOption) (*AssembleBlockResponse, error) {
+	out := new(AssembleBlockResponse)
 	err := c.cc.Invoke(ctx, Execution_AssembleBlock_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *executionClient) GetAssembledBlock(ctx context.Context, in *GetAssembledBlockRequest, opts ...grpc.CallOption) (*GetAssembledBlockResponse, error) {
+	out := new(GetAssembledBlockResponse)
+	err := c.cc.Invoke(ctx, Execution_GetAssembledBlock_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *executionClient) CurrentHeader(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GetHeaderResponse, error) {
+	out := new(GetHeaderResponse)
+	err := c.cc.Invoke(ctx, Execution_CurrentHeader_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *executionClient) GetTD(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*GetTDResponse, error) {
+	out := new(GetTDResponse)
+	err := c.cc.Invoke(ctx, Execution_GetTD_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -160,8 +195,13 @@ type ExecutionServer interface {
 	// Chain Validation and ForkChoice.
 	ValidateChain(context.Context, *ValidationRequest) (*ValidationReceipt, error)
 	UpdateForkChoice(context.Context, *ForkChoice) (*ForkChoiceReceipt, error)
-	AssembleBlock(context.Context, *emptypb.Empty) (*types.ExecutionPayload, error)
+	// Block Assembly
+	// EAGAIN design here, AssembleBlock initiates the asynchronous request, and GetAssembleBlock just return it if ready.
+	AssembleBlock(context.Context, *AssembleBlockRequest) (*AssembleBlockResponse, error)
+	GetAssembledBlock(context.Context, *GetAssembledBlockRequest) (*GetAssembledBlockResponse, error)
 	// Chain Getters.
+	CurrentHeader(context.Context, *emptypb.Empty) (*GetHeaderResponse, error)
+	GetTD(context.Context, *GetSegmentRequest) (*GetTDResponse, error)
 	GetHeader(context.Context, *GetSegmentRequest) (*GetHeaderResponse, error)
 	GetBody(context.Context, *GetSegmentRequest) (*GetBodyResponse, error)
 	IsCanonicalHash(context.Context, *types.H256) (*IsCanonicalResponse, error)
@@ -186,8 +226,17 @@ func (UnimplementedExecutionServer) ValidateChain(context.Context, *ValidationRe
 func (UnimplementedExecutionServer) UpdateForkChoice(context.Context, *ForkChoice) (*ForkChoiceReceipt, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateForkChoice not implemented")
 }
-func (UnimplementedExecutionServer) AssembleBlock(context.Context, *emptypb.Empty) (*types.ExecutionPayload, error) {
+func (UnimplementedExecutionServer) AssembleBlock(context.Context, *AssembleBlockRequest) (*AssembleBlockResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AssembleBlock not implemented")
+}
+func (UnimplementedExecutionServer) GetAssembledBlock(context.Context, *GetAssembledBlockRequest) (*GetAssembledBlockResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetAssembledBlock not implemented")
+}
+func (UnimplementedExecutionServer) CurrentHeader(context.Context, *emptypb.Empty) (*GetHeaderResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CurrentHeader not implemented")
+}
+func (UnimplementedExecutionServer) GetTD(context.Context, *GetSegmentRequest) (*GetTDResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTD not implemented")
 }
 func (UnimplementedExecutionServer) GetHeader(context.Context, *GetSegmentRequest) (*GetHeaderResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetHeader not implemented")
@@ -290,7 +339,7 @@ func _Execution_UpdateForkChoice_Handler(srv interface{}, ctx context.Context, d
 }
 
 func _Execution_AssembleBlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(emptypb.Empty)
+	in := new(AssembleBlockRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -302,7 +351,61 @@ func _Execution_AssembleBlock_Handler(srv interface{}, ctx context.Context, dec 
 		FullMethod: Execution_AssembleBlock_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ExecutionServer).AssembleBlock(ctx, req.(*emptypb.Empty))
+		return srv.(ExecutionServer).AssembleBlock(ctx, req.(*AssembleBlockRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Execution_GetAssembledBlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAssembledBlockRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ExecutionServer).GetAssembledBlock(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Execution_GetAssembledBlock_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ExecutionServer).GetAssembledBlock(ctx, req.(*GetAssembledBlockRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Execution_CurrentHeader_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ExecutionServer).CurrentHeader(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Execution_CurrentHeader_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ExecutionServer).CurrentHeader(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Execution_GetTD_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSegmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ExecutionServer).GetTD(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Execution_GetTD_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ExecutionServer).GetTD(ctx, req.(*GetSegmentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -423,6 +526,18 @@ var Execution_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AssembleBlock",
 			Handler:    _Execution_AssembleBlock_Handler,
+		},
+		{
+			MethodName: "GetAssembledBlock",
+			Handler:    _Execution_GetAssembledBlock_Handler,
+		},
+		{
+			MethodName: "CurrentHeader",
+			Handler:    _Execution_CurrentHeader_Handler,
+		},
+		{
+			MethodName: "GetTD",
+			Handler:    _Execution_GetTD_Handler,
 		},
 		{
 			MethodName: "GetHeader",

@@ -31,8 +31,8 @@ import (
 	"github.com/ledgerwatch/secp256k1"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/crypto"
@@ -103,7 +103,7 @@ type TxSlot struct {
 	Size           uint32   // Size of the payload
 
 	// EIP-4844: Shard Blob Transactions
-	DataFeeCap  uint256.Int // max_fee_per_data_gas
+	BlobFeeCap  uint256.Int // max_fee_per_blob_gas
 	BlobHashes  []common.Hash
 	Blobs       [][]byte
 	Commitments []gokzg4844.KZGCommitment
@@ -211,12 +211,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 		blobPos := dataPos
 		for blobPos < dataPos+dataLen {
-			blobPos, err = rlp.StringOfLen(payload, blobPos, chain.BlobSize)
+			blobPos, err = rlp.StringOfLen(payload, blobPos, fixedgas.BlobSize)
 			if err != nil {
 				return 0, fmt.Errorf("%w: blob: %s", ErrParseTxn, err) //nolint
 			}
-			slot.Blobs = append(slot.Blobs, payload[blobPos:blobPos+chain.BlobSize])
-			blobPos += chain.BlobSize
+			slot.Blobs = append(slot.Blobs, payload[blobPos:blobPos+fixedgas.BlobSize])
+			blobPos += fixedgas.BlobSize
 		}
 		if blobPos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in blobs", ErrParseTxn)
@@ -424,9 +424,9 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 		p = dataPos + dataLen
 	}
 	if slot.Type == BlobTxType {
-		p, err = rlp.U256(payload, p, &slot.DataFeeCap)
+		p, err = rlp.U256(payload, p, &slot.BlobFeeCap)
 		if err != nil {
-			return 0, fmt.Errorf("%w: data fee cap: %s", ErrParseTxn, err) //nolint
+			return 0, fmt.Errorf("%w: blob fee cap: %s", ErrParseTxn, err) //nolint
 		}
 		dataPos, dataLen, err = rlp.List(payload, p)
 		if err != nil {

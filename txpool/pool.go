@@ -527,7 +527,7 @@ func (p *TxPool) IsLocal(idHash []byte) bool {
 func (p *TxPool) AddNewGoodPeer(peerID types.PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
 func (p *TxPool) Started() bool                      { return p.started.Load() }
 
-func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableDataGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
+func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -568,12 +568,12 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 			continue
 		}
 
-		// Skip transactions that require more data gas than is available
+		// Skip transactions that require more blob gas than is available
 		blobCount := uint64(len(mt.Tx.BlobHashes))
-		if blobCount*chain.DataGasPerBlob > availableDataGas {
+		if blobCount*fixedgas.BlobGasPerBlob > availableBlobGas {
 			continue
 		}
-		availableDataGas -= blobCount * chain.DataGasPerBlob
+		availableBlobGas -= blobCount * fixedgas.BlobGasPerBlob
 
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
@@ -610,13 +610,13 @@ func (p *TxPool) ResetYieldedStatus() {
 	}
 }
 
-func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableDataGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
-	return p.best(n, txs, tx, onTopOf, availableGas, availableDataGas, toSkip)
+func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
+	return p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas, toSkip)
 }
 
-func (p *TxPool) PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableDataGas uint64) (bool, error) {
+func (p *TxPool) PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
-	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, availableDataGas, set)
+	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas, set)
 	return onTime, err
 }
 
@@ -667,7 +667,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		if blobCount == 0 {
 			return txpoolcfg.NoBlobs
 		}
-		if blobCount > chain.MaxBlobsPerBlock {
+		if blobCount > fixedgas.MaxBlobsPerBlock {
 			return txpoolcfg.TooManyBlobs
 		}
 		equalNumber := len(txn.BlobHashes) == len(txn.Blobs) &&
@@ -743,7 +743,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 
 var maxUint256 = new(uint256.Int).SetAllOne()
 
-// Sender should have enough balance for: gasLimit x feeCap + dataGas x dataFeeCap + transferred_value
+// Sender should have enough balance for: gasLimit x feeCap + blobGas x blobFeeCap + transferred_value
 // See YP, Eq (61) in Section 6.2 "Execution"
 func requiredBalance(txn *types.TxSlot) *uint256.Int {
 	// See https://github.com/ethereum/EIPs/pull/3594
@@ -755,13 +755,13 @@ func requiredBalance(txn *types.TxSlot) *uint256.Int {
 	// and https://eips.ethereum.org/EIPS/eip-4844#gas-accounting
 	blobCount := uint64(len(txn.BlobHashes))
 	if blobCount != 0 {
-		maxDataGasCost := uint256.NewInt(chain.DataGasPerBlob)
-		maxDataGasCost.Mul(maxDataGasCost, uint256.NewInt(blobCount))
-		_, overflow = maxDataGasCost.MulOverflow(maxDataGasCost, &txn.DataFeeCap)
+		maxBlobGasCost := uint256.NewInt(fixedgas.BlobGasPerBlob)
+		maxBlobGasCost.Mul(maxBlobGasCost, uint256.NewInt(blobCount))
+		_, overflow = maxBlobGasCost.MulOverflow(maxBlobGasCost, &txn.BlobFeeCap)
 		if overflow {
 			return maxUint256
 		}
-		_, overflow = total.AddOverflow(total, maxDataGasCost)
+		_, overflow = total.AddOverflow(total, maxBlobGasCost)
 		if overflow {
 			return maxUint256
 		}
@@ -1123,8 +1123,8 @@ func (p *TxPool) setBaseFee(baseFee uint64) (uint64, bool) {
 	return p.pendingBaseFee.Load(), changed
 }
 
-// TODO(eip-4844) logic similar to base fee for data gasprice
-// DataFeeCap must be >= data gasprice
+// TODO(eip-4844) logic similar to base fee for blob gasprice
+// BlobFeeCap must be >= blob gasprice
 
 func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoolcfg.DiscardReason {
 	// Insert to pending pool, if pool doesn't have txn with same Nonce and bigger Tip
