@@ -60,7 +60,7 @@ func ConsensusStages(ctx context.Context,
 				egg, ctx := errgroup.WithContext(ctx)
 				egg.SetLimit(8)
 				defer cn()
-				for i := seenEpoch; i < targetEpoch; i = i + 1 {
+				for i := seenEpoch; i <= targetEpoch; i = i + 1 {
 					ii := i
 					o := make(chan resp, 0)
 					chans = append(chans, o)
@@ -113,37 +113,10 @@ func ConsensusStages(ctx context.Context,
 				return nil
 			},
 		},
-		{
-			ID:          "process_gossip",
-			Description: "try all gossip received blocks in the mean time to see if any stick",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				cfg := forkchoice
-				//			targetSlot := utils.GetCurreforkChoice.ntSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-				//			slotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, targetSlot)
-				for {
-					select {
-					case sbb := <-gossipBlocks:
-						if err := cfg.forkChoice.OnBlock(sbb.Data, true, true); err != nil {
-							//TODO: rules for pruning
-							//if uint64(slotTime.Unix()) < cfg.forkChoice.HighestSeen()+(cfg.beaconCfg.SlotsPerEpoch/4) {
-							//	cfg.rpc.BanPeer(sbb.Peer)
-							//}
-							return err
-						}
-					default:
-						// nothing to read, so return and move to next stage
-						return nil
-					}
-				}
-			},
-			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
-				return nil
-			},
-		},
+
 		{
 			ID: "catch_up_blocks",
 			Description: `this stage runs if the current node is not at head, otherwise it moves on.
-			that means that we missed the blocks from gossip in the previous stage.
 			`,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				cfg := forkchoice
@@ -152,16 +125,43 @@ func ConsensusStages(ctx context.Context,
 				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 
 				seenEpoch := seenSlot / cfg.beaconCfg.SlotsPerEpoch
-				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch)
-
+				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) - 1
 				if seenEpoch < targetEpoch {
 					return nil
 				}
-
 				if seenSlot >= targetSlot {
 					return nil
 				}
-				logger.Info("we are blocks behind - downloading blocks from reqresp", "from", seenSlot, "to", targetSlot)
+
+				ctx, cn := context.WithCancel(ctx)
+				defer cn()
+
+				go func() {
+					cfg := forkchoice
+					for {
+						select {
+						case sbb := <-gossipBlocks:
+							if err := cfg.forkChoice.OnBlock(sbb.Data, true, true); err != nil {
+								//TODO: rules for pruning
+								//if uint64(slotTime.Unix()) < cfg.forkChoice.HighestSeen()+(cfg.beaconCfg.SlotsPerEpoch/4) {
+								//	cfg.rpc.BanPeer(sbb.Peer)
+								//}
+								logger.Info("gossip block unused", "err", err)
+							} else {
+								logger.Info("gossip block processed", "slot", sbb.Data.Block.Slot)
+							}
+							seenSlot := cfg.forkChoice.HighestSeen()
+							targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+							if seenSlot >= targetSlot {
+								cn()
+								return
+							}
+						case <-ctx.Done():
+							return
+						}
+					}
+				}()
+				logger.Info("waiting for blocks...", "from", seenSlot, "to", targetSlot)
 				blocks, err := cfg.source.GetRange(ctx, seenSlot+1, targetSlot-seenSlot)
 				if err != nil {
 					return err
@@ -174,6 +174,8 @@ func ConsensusStages(ctx context.Context,
 							log.Error("failed to purge range", "err", err2)
 						}
 						return err
+					} else {
+						log.Info("block processed", "slot", block.Block.Slot)
 					}
 				}
 				return nil
@@ -215,13 +217,13 @@ func ConsensusStages(ctx context.Context,
 				// Do forkchoice if possible
 				if cfg.forkChoice.Engine() != nil {
 					finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
-					log.Info("Caplin is sending forkchoice")
+					logger.Info("Caplin is sending forkchoice")
 					// Run forkchoice
 					if err := cfg.forkChoice.Engine().ForkChoiceUpdate(
 						cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
 						cfg.forkChoice.GetEth1Hash(headRoot),
 					); err != nil {
-						log.Warn("Could not set forkchoice", "err", err)
+						logger.Warn("Could not set forkchoice", "err", err)
 						return err
 					}
 				}

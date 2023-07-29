@@ -51,7 +51,8 @@ func NewGossipReceiver(ctx context.Context, s sentinel.SentinelClient, forkChoic
 
 // this subscribes to signed beacon blocks..... i wish this was better
 func (g *GossipManager) SubscribeSignedBeaconBlocks(ctx context.Context) <-chan *peers.PeeredObject[*cltypes.SignedBeaconBlock] {
-	out := make(chan *peers.PeeredObject[*cltypes.SignedBeaconBlock], 8)
+	// a really big limit because why not....
+	out := make(chan *peers.PeeredObject[*cltypes.SignedBeaconBlock], 512)
 	g.mu.Lock()
 	g.totalSubs++
 	idx := g.totalSubs
