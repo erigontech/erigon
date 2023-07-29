@@ -27,6 +27,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -87,9 +88,9 @@ func ExecuteBlockEphemerally(
 	header := block.Header()
 
 	usedGas := new(uint64)
-	usedDataGas := new(uint64)
+	usedBlobGas := new(uint64)
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit()).AddDataGas(chain.MaxDataGasPerBlock)
+	gp.AddGas(block.GasLimit()).AddBlobGas(fixedgas.MaxBlobGasPerBlock)
 
 	var (
 		rejectedTxs []*RejectedTx
@@ -119,7 +120,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, usedDataGas, *vmConfig)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, usedBlobGas, *vmConfig)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -149,8 +150,8 @@ func ExecuteBlockEphemerally(
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 
-	if header.DataGasUsed != nil && *usedDataGas != *header.DataGasUsed {
-		return nil, fmt.Errorf("data gas used by execution: %d, in header: %d", *usedDataGas, *header.DataGasUsed)
+	if header.BlobGasUsed != nil && *usedBlobGas != *header.BlobGasUsed {
+		return nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", *usedBlobGas, *header.BlobGasUsed)
 	}
 
 	var bloom types.Bloom
@@ -219,7 +220,7 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig *chain
 		nil, nil,
 		data, nil, false,
 		true, // isFree
-		nil,  // maxFeePerDataGas
+		nil,  // maxFeePerBlobGas
 	)
 	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall}
 	// Create a new context to be used in the EVM environment
@@ -260,7 +261,7 @@ func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config
 		nil, nil,
 		data, nil, false,
 		true, // isFree
-		nil,  // maxFeePerDataGas
+		nil,  // maxFeePerBlobGas
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment

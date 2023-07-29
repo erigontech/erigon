@@ -143,6 +143,10 @@ func (f *Heimdall) StateSenderContract() *contracts.TestStateSender {
 	return f.syncSenderBinding
 }
 
+func (f *Heimdall) StateSenderContract() *contracts.TestStateSender {
+	return f.syncContractBinding
+}
+
 func (h *Heimdall) NodeCreated(ctx context.Context, node devnet.Node) {
 	h.Lock()
 	defer h.Unlock()

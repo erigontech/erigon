@@ -36,9 +36,9 @@ var (
 	// transaction with a tip higher than the total fee cap.
 	ErrTipAboveFeeCap = errors.New("tip higher than fee cap")
 
-	// ErrMaxFeePerDataGas is returned if the transaction specified a
-	// max_fee_per_data_gas that is below the current data gas price.
-	ErrMaxFeePerDataGas = errors.New("max fee per data gas too low")
+	// ErrMaxFeePerBlobGas is returned if the transaction specified a
+	// max_fee_per_blob_gas that is below the current blob gas price.
+	ErrMaxFeePerBlobGas = errors.New("max fee per blob gas too low")
 
 	// ErrTipVeryHigh is a sanity error to avoid extremely big numbers specified
 	// in the tip field.
@@ -77,9 +77,9 @@ var (
 	// by a transaction is higher than what's left in the block.
 	ErrGasLimitReached = errors.New("gas limit reached")
 
-	// ErrDataGasLimitReached is returned by the gas pool if the amount of data gas required
+	// ErrBlobGasLimitReached is returned by the gas pool if the amount of blob gas required
 	// by a transaction is higher than what's left in the block.
-	ErrDataGasLimitReached = errors.New("data gas limit reached")
+	ErrBlobGasLimitReached = errors.New("blob gas limit reached")
 
 	// ErrMaxInitCodeSizeExceeded is returned if creation transaction provides the init code bigger
 	// than init code size limit.

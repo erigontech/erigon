@@ -405,6 +405,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		BatchLimit:           ctx.Int(utils.RpcBatchLimit.Name),
 		ReturnDataLimit:      ctx.Int(utils.RpcReturnDataLimit.Name),
 
+		OtsMaxPageSize: ctx.Uint64(utils.OtsSearchMaxCapFlag.Name),
+
 		TxPoolApiAddr: ctx.String(utils.TxpoolApiAddrFlag.Name),
 
 		StateCache: kvcache.DefaultCoherentConfig,

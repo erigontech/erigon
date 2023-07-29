@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
@@ -41,10 +42,12 @@ import (
 )
 
 type EngineServerExperimental struct {
-	hd     *headerdownload.HeaderDownload
-	config *chain.Config
+	hd              *headerdownload.HeaderDownload
+	blockDownloader *engine_block_downloader.EngineBlockDownloader
+	config          *chain.Config
 	// Block proposing for proof-of-stake
 	proposing        bool
+	test             bool
 	executionService execution.ExecutionClient
 
 	ctx    context.Context
@@ -56,12 +59,14 @@ type EngineServerExperimental struct {
 }
 
 func NewEngineServerExperimental(ctx context.Context, logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
-	db kv.RoDB, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, proposing bool) *EngineServerExperimental {
+	db kv.RoDB, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload,
+	blockDownloader *engine_block_downloader.EngineBlockDownloader, test bool, proposing bool) *EngineServerExperimental {
 	return &EngineServerExperimental{
 		ctx:              ctx,
 		logger:           logger,
 		config:           config,
 		executionService: executionService,
+		blockDownloader:  blockDownloader,
 		db:               db,
 		blockReader:      blockReader,
 		proposing:        proposing,
@@ -163,16 +168,16 @@ func (s *EngineServerExperimental) newPayload(ctx context.Context, req *engine_t
 	}
 
 	if version >= clparams.DenebVersion {
-		header.DataGasUsed = (*uint64)(req.DataGasUsed)
-		header.ExcessDataGas = (*uint64)(req.ExcessDataGas)
+		header.BlobGasUsed = (*uint64)(req.BlobGasUsed)
+		header.ExcessBlobGas = (*uint64)(req.ExcessBlobGas)
 	}
 
-	if !s.config.IsCancun(header.Time) && (header.DataGasUsed != nil || header.ExcessDataGas != nil) {
-		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas present before Cancun"}
+	if !s.config.IsCancun(header.Time) && (header.BlobGasUsed != nil || header.ExcessBlobGas != nil) {
+		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas present before Cancun"}
 	}
 
-	if s.config.IsCancun(header.Time) && (header.DataGasUsed == nil || header.ExcessDataGas == nil) {
-		return nil, &rpc.InvalidParamsError{Message: "dataGasUsed/excessDataGas missing"}
+	if s.config.IsCancun(header.Time) && (header.BlobGasUsed == nil || header.ExcessBlobGas == nil) {
+		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas missing"}
 	}
 
 	blockHash := req.BlockHash
@@ -616,7 +621,7 @@ func (e *EngineServerExperimental) NewPayloadV2(ctx context.Context, payload *en
 	return e.newPayload(ctx, payload, clparams.CapellaVersion)
 }
 
-// NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & excess data gas.
+// NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv3
 func (e *EngineServerExperimental) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
 	return e.newPayload(ctx, payload, clparams.DenebVersion)
