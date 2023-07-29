@@ -1895,13 +1895,14 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	var idxFilePath = segmentFileName[0:len(segmentFileName)-len(extension)] + ".idx"
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      true,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		IndexFile:  idxFilePath,
-		BaseDataID: firstDataID,
+		KeyCount:    d.Count(),
+		Enums:       true,
+		BucketSize:  2000,
+		LeafSize:    8,
+		TmpDir:      tmpDir,
+		IndexFile:   idxFilePath,
+		BaseDataID:  firstDataID,
+		EtlBufLimit: etl.BufferOptimalSize / 2,
 	}, logger)
 	if err != nil {
 		return err
