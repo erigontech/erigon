@@ -919,6 +919,7 @@ func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash com
 	view := r.borSn.View()
 	defer view.Close()
 
+	fmt.Printf("Events: %d\n", len(view.Events()))
 	blockNum, ok, err := r.borBlockByEventHash(txnHash, view.Events(), nil)
 	if err != nil {
 		return 0, false, err
