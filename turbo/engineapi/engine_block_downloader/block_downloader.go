@@ -14,6 +14,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -262,7 +263,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 	log.Info("Beginning downloaded bodies insertion")
 
 	// then seek bodies
-	for k, v, err := bodiesCursors.Seek(dbutils.BlockBodyKey(fromBlock, fromHash)); k != nil; k, v, err = headersCursors.Next() {
+	for k, _, err := bodiesCursors.Seek(dbutils.BlockBodyKey(fromBlock, fromHash)); k != nil; k, _, err = bodiesCursors.Next() {
 		if err != nil {
 			return err
 		}
@@ -274,12 +275,12 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 			blockNumbersBatch = blockNumbersBatch[:0]
 			blockHashesBatch = blockHashesBatch[:0]
 		}
-		if len(v) != 40 {
+		if len(k) != 40 {
 			continue
 		}
-		blockNumber := binary.BigEndian.Uint64(v[:8])
+		blockNumber := binary.BigEndian.Uint64(k[:length.BlockNum])
 		var blockHash libcommon.Hash
-		copy(blockHash[:], v[8:])
+		copy(blockHash[:], k[length.BlockNum:])
 		blockBody, err := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNumber)
 		if err != nil {
 			return err

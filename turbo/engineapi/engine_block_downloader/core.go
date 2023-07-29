@@ -80,7 +80,8 @@ func (e *EngineBlockDownloader) Loop() {
 				e.status.Store(headerdownload.Idle)
 				continue
 			}
-			e.status.Store(headerdownload.Idle)
+			e.status.Store(headerdownload.Synced)
+			e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
 		case <-e.ctx.Done():
 			return
 		}
@@ -92,7 +93,7 @@ func (e *EngineBlockDownloader) Loop() {
 func (e *EngineBlockDownloader) StartDownloading(requestId int, hashToDownload libcommon.Hash, downloaderTip libcommon.Hash) bool {
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	if e.status.Load() != headerdownload.Idle {
+	if e.status.Load() == headerdownload.Syncing {
 		return false
 	}
 	e.status.Store(headerdownload.Syncing)

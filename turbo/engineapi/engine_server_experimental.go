@@ -336,12 +336,12 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 
-		if parent == nil && s.hd.PosStatus() != headerdownload.Idle {
+		if parent == nil && s.hd.PosStatus() == headerdownload.Syncing {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
-		if header == nil && s.hd.PosStatus() != headerdownload.Idle {
+		if header == nil && s.hd.PosStatus() == headerdownload.Syncing {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
@@ -410,23 +410,20 @@ func (s *EngineServerExperimental) getPayload(ctx context.Context, payloadId uin
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
 func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
 ) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	forkChoice := &engine_types.ForkChoiceState{
-		HeadHash:           forkchoiceState.HeadHash,
-		SafeBlockHash:      forkchoiceState.SafeBlockHash,
-		FinalizedBlockHash: forkchoiceState.FinalizedBlockHash,
-	}
+	fmt.Println(forkchoiceState)
+	fmt.Println("Lol2")
 
-	status, err := s.getQuickPayloadStatusIfPossible(forkChoice.HeadHash, 0, libcommon.Hash{}, forkChoice, false)
+	status, err := s.getQuickPayloadStatusIfPossible(forkchoiceState.HeadHash, 0, libcommon.Hash{}, forkchoiceState, false)
 	if err != nil {
 		return nil, err
 	}
-
+	fmt.Println("Lol")
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
 	if status == nil {
-		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadHash)
-		s.hd.BeaconRequestList.AddForkChoiceRequest(forkChoice)
+		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkchoiceState.HeadHash)
+		s.hd.BeaconRequestList.AddForkChoiceRequest(forkchoiceState)
 
 		statusDeref := <-s.hd.PayloadStatusCh
 		status = &statusDeref
@@ -436,6 +433,7 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 			return nil, status.CriticalError
 		}
 	}
+	fmt.Println("Lol3")
 
 	// No need for payload building
 	if payloadAttributes == nil || status.Status != engine_types.ValidStatus {
@@ -456,7 +454,7 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 	headHeader := rawdb.ReadHeader(tx2, headHash, *headNumber)
 	tx2.Rollback()
 
-	if headHeader.Hash() != forkChoice.HeadHash {
+	if headHeader.Hash() != forkchoiceState.HeadHash {
 		// Per Item 2 of https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.9/src/engine/specification.md#specification-1:
 		// Client software MAY skip an update of the forkchoice state and
 		// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree.
@@ -465,16 +463,17 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 		// {payloadStatus: {status: VALID, latestValidHash: forkchoiceState.headBlockHash, validationError: null}, payloadId: null}.
 
 		s.logger.Warn("Skipping payload building because forkchoiceState.headBlockHash is not the head of the canonical chain",
-			"forkChoice.HeadBlockHash", forkChoice.HeadHash, "headHeader.Hash", headHeader.Hash())
+			"forkChoice.HeadBlockHash", forkchoiceState.HeadHash, "headHeader.Hash", headHeader.Hash())
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
 	}
 
 	if headHeader.Time >= uint64(payloadAttributes.Timestamp) {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
+	fmt.Println("Lol5")
 
 	req := &execution.AssembleBlockRequest{
-		ParentHash:           gointerfaces.ConvertHashToH256(forkChoice.HeadHash),
+		ParentHash:           gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
 		Timestamp:            uint64(payloadAttributes.Timestamp),
 		MixDigest:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 		SuggestedFeeRecipent: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),

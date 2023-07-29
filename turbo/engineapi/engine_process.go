@@ -17,15 +17,16 @@ import (
 
 func (e *EngineServerExperimental) startEngineMessageHandler() {
 	go func() {
-		for {
-			interrupted, err := e.engineMessageHandler()
-			if interrupted {
-				return
-			}
+		fmt.Println("A")
+		var err error
+		interrupted := false
+		for !interrupted {
+			interrupted, err = e.engineMessageHandler()
 			if err != nil {
 				e.logger.Error("[EngineServer] error received", "err", err)
 			}
 		}
+		fmt.Println("B")
 	}()
 }
 
@@ -34,20 +35,14 @@ func (e *EngineServerExperimental) engineMessageHandler() (bool, error) {
 	logPrefix := "EngineApi"
 	e.hd.SetPOSSync(true)
 	syncing := e.blockDownloader.Status() != headerdownload.Idle
-	if !syncing {
-		e.logger.Info(fmt.Sprintf("[%s] Waiting for Consensus Layer...", logPrefix))
-	}
+	e.logger.Info(fmt.Sprintf("[%s] Waiting for Consensus Layer...", logPrefix))
+
 	interrupt, requestId, requestWithStatus := e.hd.BeaconRequestList.WaitForRequest(syncing, e.test)
 
 	chainReader := eth1_chain_reader.NewChainReaderEth1(e.ctx, e.config, e.executionService)
 	e.hd.SetHeaderReader(chainReader)
 
-	interrupted, err := e.handleInterrupt(interrupt)
-	if err != nil {
-		return false, err
-	}
-
-	if interrupted {
+	if e.handleInterrupt(interrupt) {
 		return true, nil
 	}
 
@@ -64,6 +59,7 @@ func (e *EngineServerExperimental) engineMessageHandler() (bool, error) {
 	e.hd.ClearPendingPayloadHash()
 	e.hd.SetPendingPayloadStatus(nil)
 
+	var err error
 	var payloadStatus *engine_types.PayloadStatus
 	if forkChoiceInsteadOfNewPayload {
 		payloadStatus, err = e.handlesForkChoice("ForkChoiceUpdated", chainReader, forkChoiceMessage, requestId)
@@ -71,7 +67,6 @@ func (e *EngineServerExperimental) engineMessageHandler() (bool, error) {
 		payloadMessage := request.(*types.Block)
 		payloadStatus, err = e.handleNewPayload("NewPayload", payloadMessage, requestStatus, requestId, chainReader)
 	}
-
 	if err != nil {
 		if requestStatus == engine_helpers.New {
 			e.hd.PayloadStatusCh <- engine_types.PayloadStatus{CriticalError: err}
@@ -91,15 +86,12 @@ func (e *EngineServerExperimental) engineMessageHandler() (bool, error) {
 	return false, nil
 }
 
-func (e *EngineServerExperimental) handleInterrupt(interrupt engine_helpers.Interrupt) (bool, error) {
-	if interrupt != engine_helpers.None {
-		if interrupt == engine_helpers.Stopping {
-			close(e.hd.ShutdownCh)
-			return false, fmt.Errorf("server is stopping")
-		}
-		return true, nil
+func (e *EngineServerExperimental) handleInterrupt(interrupt engine_helpers.Interrupt) bool {
+	if interrupt != engine_helpers.None && interrupt == engine_helpers.Stopping {
+		close(e.hd.ShutdownCh)
+		return true
 	}
-	return false, nil
+	return false
 }
 
 func (e *EngineServerExperimental) handleNewPayload(
@@ -115,6 +107,12 @@ func (e *EngineServerExperimental) handleNewPayload(
 
 	e.logger.Info(fmt.Sprintf("[%s] Handling new payload", logPrefix), "height", headerNumber, "hash", headerHash)
 
+	currentHeader := chainReader.CurrentHeader()
+	var currentHeadNumber *uint64
+	if currentHeader != nil {
+		currentHeadNumber = new(uint64)
+		*currentHeadNumber = currentHeader.Number.Uint64()
+	}
 	parent := chainReader.GetHeaderByHash(header.ParentHash)
 	if parent == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download parent", logPrefix), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
@@ -126,13 +124,8 @@ func (e *EngineServerExperimental) handleNewPayload(
 		if !e.blockDownloader.StartDownloading(requestId, header.ParentHash, headerHash) {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
-		currentHeader := chainReader.CurrentHeader()
-		var currentHeadNumber *uint64
-		if currentHeader != nil {
-			currentHeadNumber = new(uint64)
-			*currentHeadNumber = currentHeader.Number.Uint64()
-		}
-		if currentHeadNumber != nil && math.AbsoluteDifference(*currentHeadNumber, headerNumber) < 32 {
+
+		if currentHeadNumber != nil {
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
 			success := false
@@ -150,11 +143,15 @@ func (e *EngineServerExperimental) handleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	}
-
 	e.hd.BeaconRequestList.Remove(requestId)
+
 	// Save header and body
 	if err := eth1_utils.InsertHeaderAndBodyAndWait(e.ctx, e.executionService, header, block.RawBody()); err != nil {
 		return nil, err
+	}
+
+	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= 32 {
+		return &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}, nil
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
@@ -216,6 +213,7 @@ func (e *EngineServerExperimental) handlesForkChoice(
 		} else {
 			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash)
 		}
+
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
 	e.hd.BeaconRequestList.Remove(requestId)

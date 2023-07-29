@@ -23,7 +23,6 @@ func (e *EthereumExecutionModule) InsertBodies(ctx context.Context, req *executi
 	}
 	defer tx.Rollback()
 	for _, grpcBody := range req.Bodies {
-		fmt.Println(grpcBody.BlockNumber)
 		if _, err = rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(grpcBody.BlockHash), grpcBody.BlockNumber, eth1_utils.ConvertRawBlockBodyFromRpc(grpcBody)); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBodies: could not insert: %s", err)
 		}
