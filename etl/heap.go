@@ -45,17 +45,79 @@ func (h Heap) Swap(i, j int) {
 	h.elems[i], h.elems[j] = h.elems[j], h.elems[i]
 }
 
-func (h *Heap) Push(x interface{}) {
+func (h *Heap) Push(x HeapElem) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
-	h.elems = append(h.elems, x.(HeapElem))
+	h.elems = append(h.elems, x)
 }
 
-func (h *Heap) Pop() interface{} {
+func (h *Heap) Pop() HeapElem {
 	old := h.elems
 	n := len(old)
 	x := old[n-1]
 	old[n-1] = HeapElem{}
 	h.elems = old[0 : n-1]
 	return x
+}
+
+// ------ Copy-Paste of `container/heap/heap.go` without interface conversion
+
+// Init establishes the heap invariants required by the other routines in this package.
+// Init is idempotent with respect to the heap invariants
+// and may be called whenever the heap invariants may have been invalidated.
+// The complexity is O(n) where n = h.Len().
+func heapInit(h *Heap) {
+	// heapify
+	n := h.Len()
+	for i := n/2 - 1; i >= 0; i-- {
+		down(h, i, n)
+	}
+}
+
+// Push pushes the element x onto the heap.
+// The complexity is O(log n) where n = h.Len().
+func heapPush(h *Heap, x HeapElem) {
+	h.Push(x)
+	up(h, h.Len()-1)
+}
+
+// Pop removes and returns the minimum element (according to Less) from the heap.
+// The complexity is O(log n) where n = h.Len().
+// Pop is equivalent to Remove(h, 0).
+func heapPop(h *Heap) HeapElem {
+	n := h.Len() - 1
+	h.Swap(0, n)
+	down(h, 0, n)
+	return h.Pop()
+}
+
+func up(h *Heap, j int) {
+	for {
+		i := (j - 1) / 2 // parent
+		if i == j || !h.Less(j, i) {
+			break
+		}
+		h.Swap(i, j)
+		j = i
+	}
+}
+
+func down(h *Heap, i0, n int) bool {
+	i := i0
+	for {
+		j1 := 2*i + 1
+		if j1 >= n || j1 < 0 { // j1 < 0 after int overflow
+			break
+		}
+		j := j1 // left child
+		if j2 := j1 + 1; j2 < n && h.Less(j2, j1) {
+			j = j2 // = 2*i + 2  // right child
+		}
+		if !h.Less(j, i) {
+			break
+		}
+		h.Swap(i, j)
+		i = j
+	}
+	return i > i0
 }

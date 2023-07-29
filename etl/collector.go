@@ -18,7 +18,6 @@ package etl
 
 import (
 	"bytes"
-	"container/heap"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -134,6 +133,9 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	return nil
 }
 
+// Flush - an optional method (usually user don't need to call it) - forcing sort+flush current buffer.
+// it does trigger background sort and flush, reducing RAM-holding, etc...
+// it's useful when working with many collectors: to trigger background sort for all of them
 func (c *Collector) Flush() error {
 	if !c.allFlushed {
 		if e := c.flushBuffer(false); e != nil {
@@ -284,11 +286,11 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 	}
 
 	h := &Heap{}
-	heap.Init(h)
+	heapInit(h)
 	for i, provider := range providers {
 		if key, value, err := provider.Next(nil, nil); err == nil {
 			he := HeapElem{key, value, i}
-			heap.Push(h, he)
+			heapPush(h, he)
 		} else /* we must have at least one entry per file */ {
 			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%w",
 				logPrefix, len(providers), i, provider, err)
@@ -302,14 +304,14 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 			return err
 		}
 
-		element := (heap.Pop(h)).(HeapElem)
+		element := heapPop(h)
 		provider := providers[element.TimeIdx]
 		err := loadFunc(element.Key, element.Value)
 		if err != nil {
 			return err
 		}
 		if element.Key, element.Value, err = provider.Next(element.Key[:0], element.Value[:0]); err == nil {
-			heap.Push(h, element)
+			heapPush(h, element)
 		} else if !errors.Is(err, io.EOF) {
 			return fmt.Errorf("%s: error while reading next element from disk: %w", logPrefix, err)
 		}
