@@ -5,9 +5,9 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -32,7 +32,7 @@ type GossipManager struct {
 	genesisConfig *clparams.GenesisConfig
 
 	mu        sync.RWMutex
-	subs      map[int]chan *cltypes.SignedBeaconBlock
+	subs      map[int]chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]
 	totalSubs int
 }
 
@@ -45,12 +45,13 @@ func NewGossipReceiver(ctx context.Context, s sentinel.SentinelClient, forkChoic
 		beaconConfig:  beaconConfig,
 		genesisConfig: genesisConfig,
 		recorder:      recorder,
+		subs:          make(map[int]chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]),
 	}
 }
 
 // this subscribes to signed beacon blocks..... i wish this was better
-func (g *GossipManager) SubscribeSignedBeaconBlocks(ctx context.Context) <-chan *cltypes.SignedBeaconBlock {
-	out := make(chan *cltypes.SignedBeaconBlock, 8)
+func (g *GossipManager) SubscribeSignedBeaconBlocks(ctx context.Context) <-chan *peers.PeeredObject[*cltypes.SignedBeaconBlock] {
+	out := make(chan *peers.PeeredObject[*cltypes.SignedBeaconBlock], 8)
 	g.mu.Lock()
 	g.totalSubs++
 	idx := g.totalSubs
@@ -117,16 +118,10 @@ func (g *GossipManager) onRecv(data *sentinel.GossipData, l log.Ctx) error {
 			return err
 		}
 
-		peers := metrics.GetOrCreateGauge("caplin_peer_count", func() float64 {
-			return float64(count.Amount)
-		})
-
-		peers.Get()
-
 		g.mu.RLock()
 		for _, v := range g.subs {
 			select {
-			case v <- block:
+			case v <- &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block, Peer: data.Peer.Pid}:
 			default:
 			}
 		}

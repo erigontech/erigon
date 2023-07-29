@@ -11,6 +11,11 @@ import (
 
 const USERAGENT_UNKNOWN = "unknown"
 
+type PeeredObject[T any] struct {
+	Peer string
+	Data T
+}
+
 // Record Peer data.
 type Peer struct {
 	penalties int

@@ -17,7 +17,7 @@ import (
 func ConsensusStages(ctx context.Context,
 	forkchoice StageForkChoiceCfg,
 ) []*stagedsync.Stage {
-
+	gossipBlocks := forkchoice.gossipManager.SubscribeSignedBeaconBlocks(ctx)
 	return []*stagedsync.Stage{
 		{
 			ID:          "wait_for_peers",
@@ -34,14 +34,22 @@ func ConsensusStages(ctx context.Context,
 			Description: "catch up epochs",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				cfg := forkchoice
-				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch)
+				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) - 1
 				seenSlot := cfg.forkChoice.HighestSeen()
 				seenEpoch := seenSlot / cfg.beaconCfg.SlotsPerEpoch
+				currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 				if seenEpoch >= targetEpoch {
 					return nil
 				}
 				totalEpochs := targetEpoch - seenEpoch
-				logger.Info("we are epochs behind - downloading epochs from reqresp", "from", seenEpoch, "to", targetEpoch, "total", totalEpochs)
+				logger.Info("we are epochs behind - downloading epochs from reqresp",
+					"fromEpoch", seenEpoch,
+					"toEpoch", targetEpoch,
+					"epochs", totalEpochs,
+					"seenSlot", seenSlot,
+					"targetSlot", (1+targetEpoch)*cfg.beaconCfg.SlotsPerEpoch-1,
+					"currentSlot", currentSlot,
+				)
 				// now we download the missing blocks
 
 				type resp struct {
@@ -109,33 +117,34 @@ func ConsensusStages(ctx context.Context,
 			ID:          "process_gossip",
 			Description: "try all gossip received blocks in the mean time to see if any stick",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				//			cfg := forkchoice
-				////////if err := g.forkChoice.OnBlock(block, true, true); err != nil {
-				////////	// if we are within a quarter of an epoch within chain tip we ban it
-				////////	if currentSlotByTime < g.forkChoice.HighestSeen()+(g.beaconConfig.SlotsPerEpoch/4) {
-				////////		g.sentinel.BanPeer(g.ctx, data.Peer)
-				////////	}
-				////////	return err
-				////////}
-				////////block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
-				////////	if err = g.forkChoice.OnAttestation(a, true); err != nil {
-				////////		return false
-				////////	}
-				////////	return true
-				////////})
-				////////if err != nil {
-				////////	return err
-				////////}
-
-				return nil
+				cfg := forkchoice
+				//			targetSlot := utils.GetCurreforkChoice.ntSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+				//			slotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, targetSlot)
+				for {
+					select {
+					case sbb := <-gossipBlocks:
+						if err := cfg.forkChoice.OnBlock(sbb.Data, true, true); err != nil {
+							//TODO: rules for pruning
+							//if uint64(slotTime.Unix()) < cfg.forkChoice.HighestSeen()+(cfg.beaconCfg.SlotsPerEpoch/4) {
+							//	cfg.rpc.BanPeer(sbb.Peer)
+							//}
+							return err
+						}
+					default:
+						// nothing to read, so return and move to next stage
+						return nil
+					}
+				}
 			},
 			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
 				return nil
 			},
 		},
 		{
-			ID:          "catch_up_blocks",
-			Description: "catch up blocks",
+			ID: "catch_up_blocks",
+			Description: `this stage runs if the current node is not at head, otherwise it moves on.
+			that means that we missed the blocks from gossip in the previous stage.
+			`,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				cfg := forkchoice
 
@@ -186,6 +195,16 @@ func ConsensusStages(ctx context.Context,
 				nextSlot := targetSlot + 1
 				nextSlotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, nextSlot)
 				nextSlotDur := nextSlotTime.Sub(time.Now())
+
+				////////block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
+				////////	if err = g.forkChoice.OnAttestation(a, true); err != nil {
+				////////		return false
+				////////	}
+				////////	return true
+				////////})
+				////////if err != nil {
+				////////	return err
+				////////}
 
 				// Now check the head
 				headRoot, _, err := cfg.forkChoice.GetHead()
