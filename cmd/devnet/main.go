@@ -17,7 +17,7 @@ import (
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/admin"
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
 	account_services "github.com/ledgerwatch/erigon/cmd/devnet/services/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services/bor"
+	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
 	"github.com/ledgerwatch/erigon/core/types"
 
@@ -347,9 +347,9 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					config.Bor.Sprint = map[string]uint64{"0": sprintSize}
 				}
 
-				services = append(services, bor.NewHeimdall(&config, logger))
+				services = append(services, polygon.NewHeimdall(&config, logger))
 
-				heimdallGrpc = bor.HeimdallGRpc(devnet.WithCliContext(context.Background(), ctx))
+				heimdallGrpc = polygon.HeimdallGRpc(devnet.WithCliContext(context.Background(), ctx))
 			}
 
 			return []*devnet.Network{

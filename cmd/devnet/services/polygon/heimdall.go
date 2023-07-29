@@ -1,4 +1,4 @@
-package bor
+package polygon
 
 import (
 	"context"
@@ -143,10 +143,6 @@ func (f *Heimdall) StateSenderContract() *contracts.TestStateSender {
 	return f.syncSenderBinding
 }
 
-func (f *Heimdall) StateSenderContract() *contracts.TestStateSender {
-	return f.syncContractBinding
-}
-
 func (h *Heimdall) NodeCreated(ctx context.Context, node devnet.Node) {
 	h.Lock()
 	defer h.Unlock()
@@ -223,8 +219,8 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 				return
 			}
 
-			h.logger.Info("RootChain deployed", "chain", h.chainConfig.ChainName, "block", blocks[syncTx.Hash()].BlockNumber, "addr", h.rootChainAddress)
-			h.logger.Info("StateSender deployed", "chain", h.chainConfig.ChainName, "block", blocks[syncTx.Hash()].BlockNumber, "addr", h.syncSenderAddress)
+			h.logger.Info("RootChain deployed", "chain", h.chainConfig.ChainName, "block", blocks[syncTx.Hash()].Number, "addr", h.rootChainAddress)
+			h.logger.Info("StateSender deployed", "chain", h.chainConfig.ChainName, "block", blocks[syncTx.Hash()].Number, "addr", h.syncSenderAddress)
 
 			h.syncSubscription, err = syncContract.WatchStateSynced(&bind.WatchOpts{}, h.syncChan, nil, nil)
 

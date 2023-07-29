@@ -7,6 +7,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
 
@@ -93,7 +94,7 @@ var TraceOpts = struct {
 	StateDiff: "stateDiff",
 }
 
-func (reqGen *requestGenerator) TraceCall(blockRef string, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error) {
+func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error) {
 	var b TraceCall
 
 	if args.Data == nil {
@@ -130,9 +131,9 @@ func (reqGen *requestGenerator) TraceCall(blockRef string, args ethapi.CallArgs,
 	return &b.Result, nil
 }
 
-func (req *requestGenerator) traceCall(blockRef string, callArgs string, traceOpts string) (RPCMethod, string) {
+func (req *requestGenerator) traceCall(blockRef rpc.BlockReference, callArgs string, traceOpts string) (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[%s,%s,"%s"],"id":%d}`
-	return Methods.TraceCall, fmt.Sprintf(template, Methods.TraceCall, callArgs, traceOpts, blockRef, req.reqID)
+	return Methods.TraceCall, fmt.Sprintf(template, Methods.TraceCall, callArgs, traceOpts, blockRef.String(), req.reqID)
 }
 
 func (reqGen *requestGenerator) TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error) {

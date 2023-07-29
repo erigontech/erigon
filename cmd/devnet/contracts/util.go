@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 )
 
 func TransactOpts(ctx context.Context, sender libcommon.Address) (*bind.TransactOpts, error) {
@@ -72,7 +73,7 @@ func DeployWithOps[C any](ctx context.Context, auth *bind.TransactOpts, deploy f
 }
 
 var DeploymentChecker = blocks.BlockHandlerFunc(
-	func(ctx context.Context, node devnet.Node, block *requests.BlockResult, transaction *requests.Transaction) error {
+	func(ctx context.Context, node devnet.Node, block *requests.Block, transaction *jsonrpc.RPCTransaction) error {
 		if err := blocks.CompletionChecker(ctx, node, block, transaction); err != nil {
 			return nil
 		}

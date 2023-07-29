@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
 
@@ -127,7 +128,7 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 
 			logger.Info("Faucet account code", "address", faucet.Address(), "code", accountCode)
 
-			callResults, err := node.TraceCall(fmt.Sprintf("0x%x", blockNum), ethapi.CallArgs{
+			callResults, err := node.TraceCall(rpc.AsBlockReference(blockNum), ethapi.CallArgs{
 				From: &traceResult.Action.From,
 				To:   &traceResult.Action.To,
 				Data: &traceResult.Action.Input,

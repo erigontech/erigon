@@ -1,4 +1,4 @@
-package bor
+package polygon
 
 import (
 	"errors"

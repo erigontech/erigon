@@ -64,7 +64,7 @@ func (d *deployer) deploy(ctx context.Context, node devnet.Node) {
 		return
 	}
 
-	logger.Info("Faucet deployed", "chain", d.faucet.chainName, "block", block.BlockNumber, "addr", address)
+	logger.Info("Faucet deployed", "chain", d.faucet.chainName, "block", block.Number, "addr", address)
 
 	d.faucet.contractAddress = address
 	d.faucet.contract = contract
@@ -96,7 +96,7 @@ func (d *deployer) deploy(ctx context.Context, node devnet.Node) {
 		return
 	}
 
-	logger.Info("Faucet funded", "chain", d.faucet.chainName, "block", block.BlockNumber, "addr", address, "received", received)
+	logger.Info("Faucet funded", "chain", d.faucet.chainName, "block", block.Number, "addr", address, "received", received)
 
 	d.faucet.Lock()
 	defer d.faucet.Unlock()

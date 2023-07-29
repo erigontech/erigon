@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
 
@@ -88,7 +89,7 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 			return fmt.Errorf("Failed to wait for sync block: %w", err)
 		}
 
-		blockNum := block.BlockNumber.Uint64()
+		blockNum := block.Number.Uint64()
 
 		logs, err := stateSender.FilterStateSynced(&bind.FilterOpts{
 			Start: blockNum,
@@ -172,7 +173,7 @@ func DeployRootChainSender(ctx context.Context, deployerName string) (context.Co
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("RootSender deployed", "chain", networkname.BorDevnetChainName, "block", block.BlockNumber, "addr", address)
+	devnet.Logger(ctx).Info("RootSender deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "rootSenderAddress", address).
 		WithParam("rootSender", contract), nil
@@ -197,7 +198,7 @@ func DeployChildChainReceiver(ctx context.Context, deployerName string) (context
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("ChildReceiver deployed", "chain", networkname.BorDevnetChainName, "block", block.BlockNumber, "addr", address)
+	devnet.Logger(ctx).Info("ChildReceiver deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "childReceiverAddress", address).
 		WithParam("childReceiver", contract), nil
@@ -261,7 +262,7 @@ func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers 
 				}
 
 				for _, traceResult := range traceResults {
-					callResults, err := node.TraceCall(string(block.BlockNumber), ethapi.CallArgs{
+					callResults, err := node.TraceCall(rpc.AsBlockReference(block.Number), ethapi.CallArgs{
 						From: &traceResult.Action.From,
 						To:   &traceResult.Action.To,
 						Data: &traceResult.Action.Input,
@@ -278,7 +279,7 @@ func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers 
 				return terr
 			}
 
-			blockNum := block.BlockNumber.Uint64()
+			blockNum := block.Number.Uint64()
 
 			logs, err := stateSender.FilterStateSynced(&bind.FilterOpts{
 				Start: blockNum,
@@ -417,7 +418,7 @@ func BatchProcessTransfers(ctx context.Context, sourceName string, batches int, 
 		endBlock := uint64(0)
 
 		for _, block := range blocks {
-			blockNum := block.BlockNumber.Uint64()
+			blockNum := block.Number.Uint64()
 
 			if blockNum < startBlock {
 				startBlock = blockNum

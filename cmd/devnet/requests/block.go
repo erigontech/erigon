@@ -5,10 +5,11 @@ import (
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 )
 
 type EthBlockNumber struct {
@@ -45,26 +46,14 @@ var BlockNumbers = struct {
 
 type EthBlockByNumber struct {
 	CommonResponse
-	Result BlockResult `json:"result"`
+	Result Block `json:"result"`
 }
 
-type BlockResult struct {
-	BlockNumber  BlockNumber       `json:"number"`
-	Difficulty   hexutil.Big       `json:"difficulty"`
-	Miner        libcommon.Address `json:"miner"`
-	Transactions []Transaction     `json:"transactions"`
-	TxRoot       libcommon.Hash    `json:"transactionsRoot"`
-	Hash         libcommon.Hash    `json:"hash"`
-}
-
-type Transaction struct {
-	From     libcommon.Address  `json:"from"`
-	To       *libcommon.Address `json:"to"` // Pointer because it might be missing
-	Hash     string             `json:"hash"`
-	Gas      hexutil.Big        `json:"gas"`
-	GasPrice hexutil.Big        `json:"gasPrice"`
-	Input    hexutility.Bytes   `json:"input"`
-	Value    hexutil.Big        `json:"value"`
+type Block struct {
+	*types.Header
+	Hash         libcommon.Hash            `json:"hash"`
+	Miner        libcommon.Address         `json:"miner"`
+	Transactions []*jsonrpc.RPCTransaction `json:"transactions"`
 }
 
 type EthGetTransactionCount struct {
@@ -96,7 +85,7 @@ func (req *requestGenerator) blockNumber() (RPCMethod, string) {
 	return Methods.ETHBlockNumber, fmt.Sprintf(template, Methods.ETHBlockNumber, req.reqID)
 }
 
-func (reqGen *requestGenerator) GetBlockByNumber(blockNum uint64, withTxs bool) (*BlockResult, error) {
+func (reqGen *requestGenerator) GetBlockByNumber(blockNum uint64, withTxs bool) (*Block, error) {
 	var b EthBlockByNumber
 
 	method, body := reqGen.getBlockByNumber(blockNum, withTxs)
@@ -109,7 +98,7 @@ func (reqGen *requestGenerator) GetBlockByNumber(blockNum uint64, withTxs bool) 
 		return nil, fmt.Errorf("error populating response object: %v", b.Error)
 	}
 
-	b.Result.BlockNumber = BlockNumber(fmt.Sprint(blockNum))
+	b.Result.Number = big.NewInt(int64(blockNum))
 
 	return &b.Result, nil
 }
@@ -146,4 +135,14 @@ func (reqGen *requestGenerator) GetBlockDetailsByNumber(blockNum string, withTxs
 	}
 
 	return m, nil
+}
+
+func (req *requestGenerator) GetRootHash(startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
+	var result libcommon.Hash
+
+	if err := req.callCli(result, Methods.ETHGetTransactionReceipt, startBlock, endBlock); err != nil {
+		return libcommon.Hash{}, err
+	}
+
+	return result, nil
 }

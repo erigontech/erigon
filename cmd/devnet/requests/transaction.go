@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 )
 
 type ETHEstimateGas struct {
@@ -152,4 +153,24 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (lib
 func (req *requestGenerator) sendRawTransaction(signedTx []byte) (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x"],"id":%d}`
 	return Methods.ETHSendRawTransaction, fmt.Sprintf(template, Methods.ETHSendRawTransaction, signedTx, req.reqID)
+}
+
+func (req *requestGenerator) GetTransactionByHash(hash libcommon.Hash) (*jsonrpc.RPCTransaction, error) {
+	var result jsonrpc.RPCTransaction
+
+	if err := req.callCli(result, Methods.ETHGetTransactionByHash, hash); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (req *requestGenerator) GetTransactionReceipt(hash libcommon.Hash) (*types.Receipt, error) {
+	var result types.Receipt
+
+	if err := req.callCli(result, Methods.ETHGetTransactionReceipt, hash); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
 }
