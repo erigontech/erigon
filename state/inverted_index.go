@@ -477,6 +477,14 @@ func (ii *InvertedIndex) FinishWrites() {
 func (ii *InvertedIndex) Rotate() *invertedIndexWAL {
 	wal := ii.wal
 	if wal != nil {
+		if wal.buffered {
+			if err := wal.index.Flush(); err != nil {
+				panic(err)
+			}
+			if err := wal.indexKeys.Flush(); err != nil {
+				panic(err)
+			}
+		}
 		ii.wal = ii.newWriter(ii.wal.tmpdir, ii.wal.buffered, ii.wal.discard)
 	}
 	return wal

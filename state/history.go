@@ -452,6 +452,11 @@ func (h *History) Rotate() historyFlusher {
 
 	if h.wal != nil {
 		w := h.wal
+		if w.buffered {
+			if err := w.historyVals.Flush(); err != nil {
+				panic(err)
+			}
+		}
 		hf.h = w
 		h.wal = h.newWriter(h.wal.tmpdir, h.wal.buffered, h.wal.discard)
 	}

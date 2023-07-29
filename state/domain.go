@@ -1533,6 +1533,14 @@ func (d *Domain) Rotate() flusher {
 	hf := d.History.Rotate()
 	if d.wal != nil {
 		w := d.wal
+		if w.buffered {
+			if err := w.keys.Flush(); err != nil {
+				panic(err)
+			}
+			if err := w.values.Flush(); err != nil {
+				panic(err)
+			}
+		}
 		hf.d = w
 		d.wal = d.newWriter(d.wal.tmpdir, d.wal.buffered, d.wal.discard)
 	}

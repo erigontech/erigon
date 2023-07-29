@@ -117,8 +117,8 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		c.allFlushed = true
 	} else {
 		fullBuf := c.buf
+		prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
 		c.buf = getBufferByType(c.bufType, datasize.ByteSize(c.buf.SizeLimit()))
-		c.buf.Prealloc(fullBuf.Len()/8, fullBuf.SizeLimit()/8)
 
 		doFsync := !c.autoClean /* is critical collector */
 		var err error
@@ -126,9 +126,19 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		if err != nil {
 			return err
 		}
+		c.buf.Prealloc(prevLen/8, prevSize/8)
 	}
 	if provider != nil {
 		c.dataProviders = append(c.dataProviders, provider)
+	}
+	return nil
+}
+
+func (c *Collector) Flush() error {
+	if !c.allFlushed {
+		if e := c.flushBuffer(false); e != nil {
+			return e
+		}
 	}
 	return nil
 }
