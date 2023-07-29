@@ -815,7 +815,6 @@ type flusher interface {
 }
 
 func (a *AggregatorV3) rotate() []flusher {
-	defer func(t time.Time) { fmt.Printf("aggregator_v3.go rotate:818: %s\n", time.Since(t)) }(time.Now())
 	a.walLock.Lock()
 	defer a.walLock.Unlock()
 	return []flusher{
@@ -830,7 +829,6 @@ func (a *AggregatorV3) rotate() []flusher {
 	}
 }
 func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
-	defer func(t time.Time) { fmt.Printf("aggregator_v3.go flush:818: %s\n", time.Since(t)) }(time.Now())
 	flushers := a.rotate()
 	for _, f := range flushers {
 		if err := f.Flush(ctx, tx); err != nil {
