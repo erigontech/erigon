@@ -907,6 +907,7 @@ func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ances
 }
 
 func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+	fmt.Printf("EventLookup %x\n", txnHash)
 	n, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
 	if err != nil {
 		return 0, false, err
