@@ -627,6 +627,7 @@ func (s *BorRoSnapshots) ReopenWithDB(db kv.RoDB) error {
 		if err != nil {
 			return err
 		}
+		fmt.Printf("Snapshot list: %v\n", snList)
 		return s.ReopenList(snList, true)
 	}); err != nil {
 		return err
