@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
-func (e *EngineServerExperimental) StartEngineMessageHandler() {
+func (e *EngineServerExperimental) startEngineMessageHandler() {
 	go func() {
 		for {
 			interrupted, err := e.engineMessageHandler()

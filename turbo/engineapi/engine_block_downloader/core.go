@@ -2,8 +2,8 @@ package engine_block_downloader
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
@@ -27,12 +27,15 @@ func (e *EngineBlockDownloader) Loop() {
 			}
 			// see the outcome of header download
 			headersStatus := e.waitForEndOfHeadersDownload()
-			if headersStatus != engine_helpers.Synced {
+
+			if headersStatus != headerdownload.Synced {
 				// Could not sync. Set to idle
 				e.status.Store(headerdownload.Idle)
 				e.logger.Warn("[EngineBlockDownloader] Header download did not yield success")
 				continue
 			}
+			e.hd.SetPosStatus(headerdownload.Idle)
+
 			tx, err := e.db.BeginRo(e.ctx)
 			if err != nil {
 				e.logger.Warn("[EngineBlockDownloader] Could not begin tx: %s", err)
@@ -40,22 +43,40 @@ func (e *EngineBlockDownloader) Loop() {
 				continue
 			}
 
-			memoryMutation := memdb.NewMemoryBatch(tx, e.tmpdir)
+			tmpDb, err := mdbx.NewTemporaryMdbx()
+			if err != nil {
+				e.logger.Warn("[EngineBlockDownloader] Could create temporary mdbx", "err", err)
+				e.status.Store(headerdownload.Idle)
+				continue
+			}
+			defer tmpDb.Close()
+			tmpTx, err := tmpDb.BeginRw(e.ctx)
+			if err != nil {
+				e.logger.Warn("[EngineBlockDownloader] Could create temporary mdbx", "err", err)
+				e.status.Store(headerdownload.Idle)
+				continue
+			}
+			defer tmpTx.Rollback()
+
+			memoryMutation := memdb.NewMemoryBatchWithCustomDB(tx, tmpDb, tmpTx, e.tmpdir)
 			defer memoryMutation.Rollback()
 
 			startBlock, endBlock, startHash, err := e.loadDownloadedHeaders(memoryMutation)
 			if err != nil {
+				e.logger.Warn("[EngineBlockDownloader] Could load headers", "err", err)
 				e.status.Store(headerdownload.Idle)
 				continue
 			}
+
+			// bodiesCollector := etl.NewCollector("EngineBlockDownloader", e.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), e.logger)
 			if err := e.downloadAndLoadBodiesSyncronously(memoryMutation, startBlock, endBlock); err != nil {
-				e.logger.Warn("[EngineBlockDownloader] Could not download bodies: %s", err)
+				e.logger.Warn("[EngineBlockDownloader] Could not download bodies", "err", err)
 				e.status.Store(headerdownload.Idle)
 				continue
 			}
 			tx.Rollback() // Discard the original db tx
-			if err := e.insertHeadersAndBodies(memoryMutation.MemTx(), startBlock, startHash); err != nil {
-				e.logger.Warn("[EngineBlockDownloader] Could not insert headers and bodies: %s", err)
+			if err := e.insertHeadersAndBodies(tmpTx, startBlock, startHash); err != nil {
+				e.logger.Warn("[EngineBlockDownloader] Could not insert headers and bodies", "err", err)
 				e.status.Store(headerdownload.Idle)
 				continue
 			}
@@ -86,5 +107,5 @@ func (e *EngineBlockDownloader) StartDownloading(requestId int, hashToDownload l
 func (e *EngineBlockDownloader) Status() headerdownload.SyncStatus {
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	return e.status.Load().(headerdownload.SyncStatus)
+	return headerdownload.SyncStatus(e.status.Load().(int))
 }

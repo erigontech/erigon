@@ -163,10 +163,11 @@ type Ethereum struct {
 	sentriesClient *sentry.MultiClient
 	sentryServers  []*sentry.GrpcServer
 
-	stagedSync      *stagedsync.Sync
-	syncStages      []*stagedsync.Stage
-	syncUnwindOrder stagedsync.UnwindOrder
-	syncPruneOrder  stagedsync.PruneOrder
+	stagedSync         *stagedsync.Sync
+	pipelineStagedSync *stagedsync.Sync
+	syncStages         []*stagedsync.Stage
+	syncUnwindOrder    stagedsync.UnwindOrder
+	syncPruneOrder     stagedsync.PruneOrder
 
 	downloaderClient proto_downloader.DownloaderClient
 
@@ -573,8 +574,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, backend.notifications.Events, logger)
 
 	pipelineStages := stages2.NewPipelineStages(ctx, chainKv, &ethconfig.Defaults, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.agg, backend.forkValidator, logger)
-	pipelineStagedSync := stagedsync.New(pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
-	executionRpc := direct.NewExecutionClientDirect(eth1.NewEthereumExecutionModule(blockReader, chainKv, pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, logger, config.HistoryV3))
+	backend.pipelineStagedSync = stagedsync.New(pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
+	executionRpc := direct.NewExecutionClientDirect(eth1.NewEthereumExecutionModule(blockReader, chainKv, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, logger, config.HistoryV3))
 	if config.ExperimentalConsensusSeparation {
 		log.Info("Using experimental Engine API")
 		engineBackendRPC := engineapi.NewEngineServerExperimental(
@@ -587,7 +588,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			backend.sentriesClient.Hd,
 			engine_block_downloader.NewEngineBlockDownloader(ctx, logger, executionRpc, backend.sentriesClient.Hd,
 				backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, blockReader, backend.sentriesClient.SendBodyRequest,
-				tmpdir, config.Sync.BodyDownloadTimeoutSeconds),
+				chainKv, chainConfig, tmpdir, config.Sync.BodyDownloadTimeoutSeconds),
 			false,
 			config.Miner.EnabledPOS)
 		backend.engineBackendRPC = engineBackendRPC
@@ -810,9 +811,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 			return
 		}
 	}()
-	if !config.InternalCL {
-		go s.engineBackendRPC.Start(httpRpcCfg, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
-	}
+	go s.engineBackendRPC.Start(httpRpcCfg, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
 
 	// Register the backend on the node
 	stack.RegisterLifecycle(s)
@@ -1139,7 +1138,11 @@ func (s *Ethereum) Start() error {
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
 	hook := stages2.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentriesClient.UpdateHead)
-	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
+	if s.config.ExperimentalConsensusSeparation {
+		s.pipelineStagedSync.Run(s.chainDB, nil, true)
+	} else {
+		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
+	}
 
 	return nil
 }

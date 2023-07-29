@@ -80,8 +80,10 @@ func (e *EngineServerExperimental) Start(httpConfig httpcfg.HttpCfg,
 	base := jsonrpc.NewBaseApi(filters, stateCache, e.blockReader, agg, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs)
 
 	ethImpl := jsonrpc.NewEthAPI(base, e.db, eth, txPool, mining, httpConfig.Gascap, httpConfig.ReturnDataLimit, e.logger)
-	// engineImpl := NewEngineAPI(base, db, engineBackend)
 
+	// engineImpl := NewEngineAPI(base, db, engineBackend)
+	e.startEngineMessageHandler()
+	go e.blockDownloader.Loop()
 	apiList := []rpc.API{
 		{
 			Namespace: "eth",

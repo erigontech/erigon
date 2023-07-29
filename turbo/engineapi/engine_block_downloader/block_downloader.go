@@ -12,11 +12,13 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -58,6 +60,7 @@ type EngineBlockDownloader struct {
 	// Misc
 	tmpdir  string
 	timeout int
+	config  *chain.Config
 
 	// lock
 	lock sync.Mutex
@@ -68,14 +71,17 @@ type EngineBlockDownloader struct {
 
 func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, executionModule execution.ExecutionClient,
 	hd *headerdownload.HeaderDownload, bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
-	blockReader services.FullBlockReader, bodyReqSend RequestBodyFunction, tmpdir string, timeout int) *EngineBlockDownloader {
+	blockReader services.FullBlockReader, bodyReqSend RequestBodyFunction, db kv.RoDB, config *chain.Config,
+	tmpdir string, timeout int) *EngineBlockDownloader {
 	var s atomic.Value
 	s.Store(headerdownload.Idle)
 	return &EngineBlockDownloader{
 		ctx:             ctx,
 		hd:              hd,
 		bd:              bd,
+		db:              db,
 		status:          s,
+		config:          config,
 		tmpdir:          tmpdir,
 		logger:          logger,
 		blockPropagator: blockPropagator,
@@ -151,7 +157,7 @@ func (e *EngineBlockDownloader) loadDownloadedHeaders(tx kv.RwTx) (fromBlock uin
 			return nil
 		}
 		lastValidHash = h.ParentHash
-		if err := e.hd.VerifyHeader(&h); err != nil {
+		if err := e.hd.Engine().VerifyHeader(consensus.ChainReaderImpl{BlockReader: e.blockReader, Db: tx, Cfg: *e.config}, &h, false); err != nil {
 			e.logger.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "err", err)
 			badChainError = err
 			e.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
@@ -231,6 +237,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 	if err != nil {
 		return err
 	}
+	log.Info("Beginning downloaded headers insertion")
 	// Start by seeking headers
 	for k, v, err := headersCursors.Seek(dbutils.HeaderKey(fromBlock, fromHash)); k != nil; k, v, err = headersCursors.Next() {
 		if err != nil {
@@ -252,6 +259,8 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 	if err := eth1_utils.InsertHeadersAndWait(e.ctx, e.executionModule, headersBatch); err != nil {
 		return err
 	}
+	log.Info("Beginning downloaded bodies insertion")
+
 	// then seek bodies
 	for k, v, err := bodiesCursors.Seek(dbutils.BlockBodyKey(fromBlock, fromHash)); k != nil; k, v, err = headersCursors.Next() {
 		if err != nil {
