@@ -939,6 +939,7 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
 		blockEventId := reader.Lookup(txnHash[:])
 		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
+		fmt.Printf("Segment %d-%d, eventId %d, offset %d\n", sn.ranges.from, sn.ranges.to, blockEventId, offset)
 		gg := sn.seg.MakeGetter()
 		gg.Reset(offset)
 		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
