@@ -46,17 +46,16 @@ func (h Heap) Swap(i, j int) {
 }
 
 func (h *Heap) Push(x HeapElem) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
 	h.elems = append(h.elems, x)
 }
 
 func (h *Heap) Pop() HeapElem {
 	old := h.elems
-	n := len(old)
-	x := old[n-1]
-	old[n-1] = HeapElem{}
-	h.elems = old[0 : n-1]
+	n := len(old) - 1
+	x := old[n]
+	old[n].Key, old[n].Value, old[n].TimeIdx = nil, nil, 0
+	//old[n] = HeapElem{}
+	h.elems = old[0:n]
 	return x
 }
 

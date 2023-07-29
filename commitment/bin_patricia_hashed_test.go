@@ -20,7 +20,7 @@ func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {
 	trie := NewBinPatriciaHashed(length.Addr, ms.branchFn, ms.accountFn, ms.storageFn)
 	trieBatch := NewBinPatriciaHashed(length.Addr, ms2.branchFn, ms2.accountFn, ms2.storageFn)
 
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, _, updates := NewUpdateBuilder().
 		Balance("e25652aaa6b9417973d325f9a1246b48ff9420bf", 12).
 		Balance("cdd0a12034e978f7eccda72bd1bd89a8142b704e", 120000).
 		Balance("5bb6abae12c87592b940458437526cb6cad60d50", 170).
@@ -88,7 +88,7 @@ func Test_BinPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	ms := NewMockState(t)
 	ms2 := NewMockState(t)
 
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, _, updates := NewUpdateBuilder().
 		Balance("f5", 4).
 		Balance("ff", 900234).
 		Balance("04", 1233).
@@ -154,7 +154,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewBinPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	hph.SetTrace(false)
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, _, updates := NewUpdateBuilder().
 		Balance("00", 4).
 		Balance("01", 5).
 		Balance("02", 6).
@@ -184,7 +184,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 	// More updates
 	hph.Reset()
 	hph.SetTrace(false)
-	plainKeys, hashedKeys, updates = NewUpdateBuilder().
+	plainKeys, _, updates = NewUpdateBuilder().
 		Storage("03", "58", "050505").
 		Build()
 	err = ms.applyPlainUpdates(plainKeys, updates)
@@ -201,7 +201,7 @@ func Test_BinPatriciaHashed_EmptyState(t *testing.T) {
 	// More updates
 	hph.Reset()
 	hph.SetTrace(false)
-	plainKeys, hashedKeys, updates = NewUpdateBuilder().
+	plainKeys, _, updates = NewUpdateBuilder().
 		Storage("03", "58", "070807").
 		Build()
 	err = ms.applyPlainUpdates(plainKeys, updates)
@@ -220,7 +220,7 @@ func Test_BinPatriciaHashed_EmptyUpdateState(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewBinPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	hph.SetTrace(false)
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, _, updates := NewUpdateBuilder().
 		Balance("00", 4).
 		Nonce("00", 246462653).
 		Balance("01", 5).
@@ -245,7 +245,7 @@ func Test_BinPatriciaHashed_EmptyUpdateState(t *testing.T) {
 	// generate empty updates and do NOT reset tree
 	hph.SetTrace(true)
 
-	plainKeys, hashedKeys, updates = NewUpdateBuilder().Build()
+	plainKeys, _, updates = NewUpdateBuilder().Build()
 
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)

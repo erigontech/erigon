@@ -289,8 +289,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 	heapInit(h)
 	for i, provider := range providers {
 		if key, value, err := provider.Next(nil, nil); err == nil {
-			he := HeapElem{key, value, i}
-			heapPush(h, he)
+			heapPush(h, HeapElem{key, value, i})
 		} else /* we must have at least one entry per file */ {
 			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%w",
 				logPrefix, len(providers), i, provider, err)

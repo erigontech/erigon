@@ -30,7 +30,7 @@ func TestFixedSizeBitmaps(t *testing.T) {
 	tmpDir, require := t.TempDir(), require.New(t)
 	must := require.NoError
 	idxPath := filepath.Join(tmpDir, "idx.tmp")
-	wr, err := NewFixedSizeBitmapsWriter(idxPath, 14, 7, log.New())
+	wr, err := NewFixedSizeBitmapsWriter(idxPath, 14, 0, 7, log.New())
 	require.NoError(err)
 	defer wr.Close()
 
@@ -95,13 +95,13 @@ func TestPageAlined(t *testing.T) {
 	tmpDir, require := t.TempDir(), require.New(t)
 	idxPath := filepath.Join(tmpDir, "idx.tmp")
 
-	bm2, err := NewFixedSizeBitmapsWriter(idxPath, 128, 100, log.New())
+	bm2, err := NewFixedSizeBitmapsWriter(idxPath, 128, 0, 100, log.New())
 	require.NoError(err)
 	require.Equal((128/8*100/os.Getpagesize()+1)*os.Getpagesize(), bm2.size)
 	defer bm2.Close()
 	bm2.Close()
 
-	bm3, err := NewFixedSizeBitmapsWriter(idxPath, 128, 1000, log.New())
+	bm3, err := NewFixedSizeBitmapsWriter(idxPath, 128, 0, 1000, log.New())
 	require.NoError(err)
 	require.Equal((128/8*1000/os.Getpagesize()+1)*os.Getpagesize(), bm3.size)
 	defer bm3.Close()
