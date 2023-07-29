@@ -1151,12 +1151,13 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 	var rs *recsplit.RecSplit
 	var err error
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   count,
-		Enums:      false,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpdir,
-		IndexFile:  idxPath,
+		KeyCount:    count,
+		Enums:       false,
+		BucketSize:  2000,
+		LeafSize:    8,
+		TmpDir:      tmpdir,
+		IndexFile:   idxPath,
+		EtlBufLimit: etl.BufferOptimalSize / 2,
 	}, logger); err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
 	}

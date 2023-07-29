@@ -876,12 +876,13 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
 	}
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   collation.historyCount,
-		Enums:      false,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     h.tmpdir,
-		IndexFile:  historyIdxPath,
+		KeyCount:    collation.historyCount,
+		Enums:       false,
+		BucketSize:  2000,
+		LeafSize:    8,
+		TmpDir:      h.tmpdir,
+		IndexFile:   historyIdxPath,
+		EtlBufLimit: etl.BufferOptimalSize / 2,
 	}, h.logger); err != nil {
 		return HistoryFiles{}, fmt.Errorf("create recsplit: %w", err)
 	}
