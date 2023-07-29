@@ -1421,6 +1421,7 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
+	seek := make([]byte, 0, 256)
 	for k, v, err = keysCursor.First(); k != nil; k, v, err = keysCursor.Next() {
 		if err != nil {
 			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
@@ -1429,7 +1430,8 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 			continue
 		}
 		//fmt.Printf("prune: %x, %d,%d\n", k, ^binary.BigEndian.Uint64(v), step)
-		err = d.tx.Delete(d.valsTable, common.Append(k, v))
+		seek = append(append(seek[:0], k...), v...)
+		err = d.tx.Delete(d.valsTable, seek)
 		if err != nil {
 			return err
 		}

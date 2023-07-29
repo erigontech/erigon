@@ -447,14 +447,17 @@ func (sd *SharedDomains) DeleteAccount(addr, prev []byte) error {
 }
 
 func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value, preVal []byte) error {
-	composite := make([]byte, 0, len(addr)+len(loc))
-	composite = append(append(composite, addr...), loc...)
+	composite := addr
+	if loc != nil { // if caller passed already `composite` key, then just use it. otherwise join parts
+		composite = make([]byte, 0, len(addr)+len(loc))
+		composite = append(append(composite, addr...), loc...)
+	}
 	sd.Commitment.TouchPlainKey(composite, value, sd.Commitment.TouchStorage)
 	sd.put(kv.StorageDomain, composite, value)
 	if len(value) == 0 {
-		return sd.Storage.DeleteWithPrev(addr, loc, preVal)
+		return sd.Storage.DeleteWithPrev(composite, nil, preVal)
 	}
-	return sd.Storage.PutWithPrev(addr, loc, value, preVal)
+	return sd.Storage.PutWithPrev(composite, nil, value, preVal)
 }
 
 func (sd *SharedDomains) SetContext(ctx *AggregatorV3Context) {

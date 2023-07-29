@@ -1163,6 +1163,8 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 		}
 		defer valsCDup.Close()
 	}
+
+	seek := make([]byte, 0, 256)
 	for k, v, err = historyKeysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
@@ -1174,7 +1176,7 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 		limit--
 
 		if h.historyLargeValues {
-			seek := append(common.Copy(v), k...)
+			seek = append(append(seek[:0], v...), k...)
 			if err := valsC.Delete(seek); err != nil {
 				return err
 			}
