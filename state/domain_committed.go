@@ -537,7 +537,6 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 			if g.HasNext() {
 				key, _ := g.NextUncompressed()
 				val, _ := g.NextUncompressed()
-				d.logger.Trace("mergeFiles", "key", key)
 				heap.Push(&cp, &CursorItem{
 					t:        FILE_CURSOR,
 					dg:       g,
