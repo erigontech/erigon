@@ -303,7 +303,7 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 		aggCtx := a.MakeContext()
 		defer aggCtx.Close()
 		if err := aggCtx.buildOptionalMissedIndices(ctx, workers); err != nil {
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 				return
 			}
 			log.Warn("[snapshots] BuildOptionalMissedIndicesInBackground", "err", err)
@@ -319,7 +319,7 @@ func (a *AggregatorV3) BuildOptionalMissedIndices(ctx context.Context, workers i
 	aggCtx := a.MakeContext()
 	defer aggCtx.Close()
 	if err := aggCtx.buildOptionalMissedIndices(ctx, workers); err != nil {
-		if errors.Is(err, context.Canceled) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 			return nil
 		}
 		return err
@@ -1395,7 +1395,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for ; step < lastIdInDB(a.db, a.accounts); step++ { //`step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFiles(a.ctx, step); err != nil {
-				if errors.Is(err, context.Canceled) {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					close(fin)
 					return
 				}
@@ -1415,7 +1415,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 			defer a.mergeingFiles.Store(false)
 			defer func() { close(fin) }()
 			if err := a.MergeLoop(a.ctx, 1); err != nil {
-				if errors.Is(err, context.Canceled) {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					return
 				}
 				log.Warn("[snapshots] merge", "err", err)
