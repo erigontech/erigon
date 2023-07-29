@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -234,7 +235,12 @@ func (r *BlockReader) Snapshots() services.BlockSnapshots    { return r.sn }
 func (r *BlockReader) BorSnapshots() services.BlockSnapshots { return r.borSn }
 func (r *BlockReader) FrozenBlocks() uint64                  { return r.sn.BlocksAvailable() }
 func (r *BlockReader) FrozenBorBlocks() uint64               { return r.borSn.BlocksAvailable() }
-func (r *BlockReader) FrozenFiles() []string                 { return r.sn.Files() }
+func (r *BlockReader) FrozenFiles() []string {
+	files := r.sn.Files()
+	files = append(files, r.borSn.Files()...)
+	sort.Strings(files)
+	return files
+}
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
 
 func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
