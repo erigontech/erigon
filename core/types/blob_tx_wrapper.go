@@ -460,11 +460,11 @@ func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err := txw.Commitments.DecodeRLP(s); err != nil {
+	if err := txw.Blobs.DecodeRLP(s); err != nil {
 		return err
 	}
 
-	if err := txw.Blobs.DecodeRLP(s); err != nil {
+	if err := txw.Commitments.DecodeRLP(s); err != nil {
 		return err
 	}
 
