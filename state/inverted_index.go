@@ -319,7 +319,7 @@ func (ii *InvertedIndex) buildEfi(ctx context.Context, item *filesItem, ps *back
 	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 	fName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep)
 	idxPath := filepath.Join(ii.dir, fName)
-	p := ps.AddNew(fName, uint64(item.decompressor.Count()))
+	p := ps.AddNew(fName, uint64(item.decompressor.Count()/2))
 	defer ps.Delete(p)
 	//ii.logger.Info("[snapshots] build idx", "file", fName)
 	return buildIndex(ctx, item.decompressor, idxPath, ii.tmpdir, item.decompressor.Count()/2, false, p, ii.logger, ii.noFsync)

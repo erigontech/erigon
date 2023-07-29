@@ -821,7 +821,6 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	var pos, kp uint64
 	emptys := 0
 	for getter.HasNext() {
-		p.Processed.Add(1)
 		//if compressed {
 		key, kp = getter.Next(key[:0])
 		//} else {
@@ -846,6 +845,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 			ks[len(key)]++
 			emptys++
 		}
+		p.Processed.Add(1)
 	}
 	//fmt.Printf("emptys %d %#+v\n", emptys, ks)
 	if err := iw.Build(); err != nil {
