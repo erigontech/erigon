@@ -162,13 +162,12 @@ func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDom
 		case kv.StorageDomain:
 			for k, key := range list.Keys {
 				hkey := []byte(key)
-				addr, loc := hkey[:20], hkey[20:]
 				prev, err := domains.LatestStorage(hkey)
 				if err != nil {
 					return fmt.Errorf("latest account %x: %w", key, err)
 				}
 				//fmt.Printf("applied %x s=%x\n", hkey, list.Vals[k])
-				if err := domains.WriteAccountStorage(addr, loc, list.Vals[k], prev); err != nil {
+				if err := domains.WriteAccountStorage(hkey, nil, list.Vals[k], prev); err != nil {
 					return err
 				}
 			}
@@ -251,18 +250,14 @@ func (rs *StateV3) ApplyLogsAndTraces(txTask *exec22.TxTask, agg *libstate.Aggre
 	//		return err
 	//	}
 	//}
-	if txTask.TraceFroms != nil {
-		for addr := range txTask.TraceFroms {
-			if err := agg.PutIdx(kv.TblTracesFromIdx, addr[:]); err != nil {
-				return err
-			}
+	for addr := range txTask.TraceFroms {
+		if err := agg.PutIdx(kv.TblTracesFromIdx, addr[:]); err != nil {
+			return err
 		}
 	}
-	if txTask.TraceTos != nil {
-		for addr := range txTask.TraceTos {
-			if err := agg.PutIdx(kv.TblTracesToIdx, addr[:]); err != nil {
-				return err
-			}
+	for addr := range txTask.TraceTos {
+		if err := agg.PutIdx(kv.TblTracesToIdx, addr[:]); err != nil {
+			return err
 		}
 	}
 	for _, log := range txTask.Logs {
