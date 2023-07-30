@@ -65,9 +65,15 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, notifier services.DBEventNotifier, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
 	snapshots := blockReader.Snapshots()
+	borSnapshots := blockReader.BorSnapshots()
 	if blockReader.FreezingCfg().NoDownloader {
 		if err := snapshots.ReopenFolder(); err != nil {
 			return err
+		}
+		if cc.Bor != nil {
+			if err := borSnapshots.ReopenFolder(); err != nil {
+				return err
+			}
 		}
 		if notifier != nil { // can notify right here, even that write txn is not commit
 			notifier.OnNewSnapshot()
@@ -195,6 +201,11 @@ Finish:
 
 	if err := snapshots.ReopenFolder(); err != nil {
 		return err
+	}
+	if cc.Bor != nil {
+		if err := borSnapshots.ReopenFolder(); err != nil {
+			return err
+		}
 	}
 	if err := agg.OpenFolder(); err != nil {
 		return err
