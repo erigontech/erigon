@@ -203,8 +203,6 @@ func ConsensusStages(ctx context.Context,
 				if seenSlot != targetSlot {
 					return nil
 				}
-				nextSlot := targetSlot + 1
-				nextSlotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, nextSlot)
 
 				////////block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
 				////////	if err = g.forkChoice.OnAttestation(a, true); err != nil {
@@ -235,9 +233,6 @@ func ConsensusStages(ctx context.Context,
 						return err
 					}
 				}
-				nextSlotDur := nextSlotTime.Sub(time.Now())
-				logger.Info("sleeping until next slot", "slot", nextSlot, "time", nextSlotTime, "dur", nextSlotDur)
-				time.Sleep(nextSlotDur)
 				return nil
 			},
 			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
