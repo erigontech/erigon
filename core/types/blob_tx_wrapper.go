@@ -300,7 +300,7 @@ func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int { return txw.Tx.GetFeeCap() }
 
 func (txw *BlobTxWrapper) Cost() *uint256.Int { return txw.Tx.GetFeeCap() }
 
-func (txw *BlobTxWrapper) GetDataHashes() []libcommon.Hash { return txw.Tx.GetDataHashes() }
+func (txw *BlobTxWrapper) GetBlobHashes() []libcommon.Hash { return txw.Tx.GetBlobHashes() }
 
 func (txw *BlobTxWrapper) GetGas() uint64            { return txw.Tx.GetGas() }
 func (txw *BlobTxWrapper) GetBlobGas() uint64        { return txw.Tx.GetBlobGas() }
