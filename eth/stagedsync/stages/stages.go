@@ -30,7 +30,6 @@ type SyncStage string
 
 var (
 	Snapshots           SyncStage = "Snapshots"       // Snapshots
-	BorSnapshots        SyncStage = "BorSnapshots"    // Snapshots specific to Bor
 	Headers             SyncStage = "Headers"         // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
 	BorHeimdall         SyncStage = "BorHeimdall"     // Downloading data from heimdall corresponding to the downloaded headers (validator sets and sync events)
 	CumulativeIndex     SyncStage = "CumulativeIndex" // Calculate how much gas has been used up to each block.
@@ -62,7 +61,6 @@ var (
 
 var AllStages = []SyncStage{
 	Snapshots,
-	BorSnapshots,
 	Headers,
 	BorHeimdall,
 	BlockHashes,

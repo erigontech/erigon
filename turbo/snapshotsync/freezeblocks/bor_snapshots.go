@@ -19,7 +19,6 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -29,10 +28,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
@@ -109,48 +106,6 @@ func (sn *BorEventSegment) reopenIdxIfNeed(dir string, optimistic bool) (err err
 type borEventSegments struct {
 	lock     sync.RWMutex
 	segments []*BorEventSegment
-}
-
-type BorRetire struct {
-	working               atomic.Bool
-	needSaveFilesListInDB atomic.Bool
-
-	workers int
-	tmpDir  string
-	db      kv.RoDB
-
-	notifier    services.DBEventNotifier
-	logger      log.Logger
-	blockReader services.FullBlockReader
-	blockWriter *blockio.BlockWriter
-	dirs        datadir.Dirs
-}
-
-func NewBorRetire(workers int, dirs datadir.Dirs, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, db kv.RoDB, notifier services.DBEventNotifier, logger log.Logger) *BorRetire {
-	return &BorRetire{workers: workers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, db: db, notifier: notifier, logger: logger}
-}
-
-func (br *BorRetire) HasNewFrozenFiles() bool {
-	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
-}
-
-func (br *BorRetire) snapshots() *BorRoSnapshots {
-	return br.blockReader.BorSnapshots().(*BorRoSnapshots)
-}
-
-func (br *BorRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
-	if br.blockReader.FreezingCfg().KeepBlocks {
-		return nil
-	}
-	currentProgress, err := stages.GetStageProgress(tx, stages.Senders)
-	if err != nil {
-		return err
-	}
-	canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks())
-	if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
-		return nil
-	}
-	return nil
 }
 
 func (br *BlockRetire) RetireBorBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) error {
@@ -627,7 +582,6 @@ func (s *BorRoSnapshots) ReopenWithDB(db kv.RoDB) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Snapshot list: %v\n", snList)
 		return s.ReopenList(snList, true)
 	}); err != nil {
 		return err
