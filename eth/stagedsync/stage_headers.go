@@ -538,6 +538,8 @@ func handleNewPayload(
 		}
 	}
 
+	cfg.hd.BeaconRequestList.Remove(requestId)
+
 	logger.Debug(fmt.Sprintf("[%s] New payload begin verification", s.LogPrefix()))
 	response, success, err := verifyAndSaveNewPoSHeader(requestStatus, s, ctx, tx, cfg, block, headerInserter, logger)
 	logger.Debug(fmt.Sprintf("[%s] New payload verification ended", s.LogPrefix()), "success", success, "err", err)
