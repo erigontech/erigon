@@ -14,6 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
+const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
+
 func (e *EngineServerExperimental) handleNewPayload(
 	logPrefix string,
 	block *types.Block,
@@ -108,6 +110,7 @@ func (e *EngineServerExperimental) handlesForkChoice(
 		return nil, err
 	}
 
+	// We do not have header, download.
 	if headerNumber == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
 		if e.test {
@@ -132,7 +135,7 @@ func (e *EngineServerExperimental) handlesForkChoice(
 	}
 
 	// Call forkchoice here
-	status, latestValidHash, err := eth1_utils.UpdateForkChoice(e.ctx, e.executionService, forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash, 100)
+	status, latestValidHash, err := eth1_utils.UpdateForkChoice(e.ctx, e.executionService, forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash, fcuTimeout)
 	if err != nil {
 		return nil, err
 	}

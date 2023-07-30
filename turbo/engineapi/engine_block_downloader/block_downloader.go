@@ -116,8 +116,6 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 	e.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
 	e.hd.SetPOSSync(true) // This needs to be called after SetHeaderToDownloadPOS because SetHeaderToDownloadPOS sets `posAnchor` member field which is used by ProcessHeadersPOS
 
-	// headerCollector is closed in saveDownloadedPoSHeaders, thus nolint
-
 	//nolint
 	e.hd.SetHeadersCollector(etl.NewCollector("EngineBlockDownloader", e.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), e.logger))
 

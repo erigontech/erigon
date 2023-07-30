@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
+// download is the process that reverse download a specific block hash.
 func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, downloaderTip libcommon.Hash, requestId int, block *types.Block) {
 	/* Start download process*/
 	// First we schedule the headers download process
@@ -74,6 +75,7 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 		return
 	}
 	if block != nil {
+		// Can fail, not an issue in this case.
 		eth1_utils.InsertHeaderAndBodyAndWait(e.ctx, e.executionModule, block.Header(), block.RawBody())
 	}
 	e.status.Store(headerdownload.Synced)
@@ -95,7 +97,5 @@ func (e *EngineBlockDownloader) StartDownloading(requestId int, hashToDownload l
 }
 
 func (e *EngineBlockDownloader) Status() headerdownload.SyncStatus {
-	e.lock.Lock()
-	defer e.lock.Unlock()
 	return headerdownload.SyncStatus(e.status.Load().(int))
 }
