@@ -12,16 +12,18 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
@@ -44,8 +46,7 @@ type EngineBlockDownloader struct {
 	bodyReqSend RequestBodyFunction
 
 	// current status of the downloading process, aka: is it doing anything?
-	status          atomic.Value // it is a headerdownload.SyncStatus
-	startDownloadCh chan downloadRequest
+	status atomic.Value // it is a headerdownload.SyncStatus
 
 	// data reader
 	blockPropagator adapter.BlockPropagator
@@ -58,6 +59,7 @@ type EngineBlockDownloader struct {
 	// Misc
 	tmpdir  string
 	timeout int
+	config  *chain.Config
 
 	// lock
 	lock sync.Mutex
@@ -68,20 +70,22 @@ type EngineBlockDownloader struct {
 
 func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, executionModule execution.ExecutionClient,
 	hd *headerdownload.HeaderDownload, bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
-	blockReader services.FullBlockReader, bodyReqSend RequestBodyFunction, tmpdir string, timeout int) *EngineBlockDownloader {
+	blockReader services.FullBlockReader, bodyReqSend RequestBodyFunction, db kv.RoDB, config *chain.Config,
+	tmpdir string, timeout int) *EngineBlockDownloader {
 	var s atomic.Value
 	s.Store(headerdownload.Idle)
 	return &EngineBlockDownloader{
 		ctx:             ctx,
 		hd:              hd,
 		bd:              bd,
+		db:              db,
 		status:          s,
+		config:          config,
 		tmpdir:          tmpdir,
 		logger:          logger,
 		blockPropagator: blockPropagator,
 		timeout:         timeout,
 		blockReader:     blockReader,
-		startDownloadCh: make(chan downloadRequest),
 		bodyReqSend:     bodyReqSend,
 		executionModule: executionModule,
 	}
@@ -93,8 +97,6 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 	heightToDownload uint64,
 	downloaderTip libcommon.Hash,
 ) bool {
-	e.hd.BeaconRequestList.SetStatus(requestId, engine_helpers.DataWasMissing)
-
 	if e.hd.PosStatus() != headerdownload.Idle {
 		e.logger.Info("[EngineBlockDownloader] Postponing PoS download since another one is in progress", "height", heightToDownload, "hash", hashToDownload)
 		return false
@@ -111,8 +113,6 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 	e.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
 	e.hd.SetPOSSync(true) // This needs to be called after SetHeaderToDownloadPOS because SetHeaderToDownloadPOS sets `posAnchor` member field which is used by ProcessHeadersPOS
 
-	// headerCollector is closed in saveDownloadedPoSHeaders, thus nolint
-
 	//nolint
 	e.hd.SetHeadersCollector(etl.NewCollector("EngineBlockDownloader", e.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), e.logger))
 
@@ -125,9 +125,7 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 func (e *EngineBlockDownloader) waitForEndOfHeadersDownload() headerdownload.SyncStatus {
 	for e.hd.PosStatus() == headerdownload.Syncing {
 		time.Sleep(10 * time.Millisecond)
-
 	}
-
 	return e.hd.PosStatus()
 }
 
@@ -151,7 +149,7 @@ func (e *EngineBlockDownloader) loadDownloadedHeaders(tx kv.RwTx) (fromBlock uin
 			return nil
 		}
 		lastValidHash = h.ParentHash
-		if err := e.hd.VerifyHeader(&h); err != nil {
+		if err := e.hd.Engine().VerifyHeader(consensus.ChainReaderImpl{BlockReader: e.blockReader, Db: tx, Cfg: *e.config}, &h, false); err != nil {
 			e.logger.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "err", err)
 			badChainError = err
 			e.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
@@ -231,6 +229,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 	if err != nil {
 		return err
 	}
+	log.Info("Beginning downloaded headers insertion")
 	// Start by seeking headers
 	for k, v, err := headersCursors.Seek(dbutils.HeaderKey(fromBlock, fromHash)); k != nil; k, v, err = headersCursors.Next() {
 		if err != nil {
@@ -252,8 +251,10 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 	if err := eth1_utils.InsertHeadersAndWait(e.ctx, e.executionModule, headersBatch); err != nil {
 		return err
 	}
+	log.Info("Beginning downloaded bodies insertion")
+
 	// then seek bodies
-	for k, v, err := bodiesCursors.Seek(dbutils.BlockBodyKey(fromBlock, fromHash)); k != nil; k, v, err = headersCursors.Next() {
+	for k, _, err := bodiesCursors.Seek(dbutils.BlockBodyKey(fromBlock, fromHash)); k != nil; k, _, err = bodiesCursors.Next() {
 		if err != nil {
 			return err
 		}
@@ -265,12 +266,12 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 			blockNumbersBatch = blockNumbersBatch[:0]
 			blockHashesBatch = blockHashesBatch[:0]
 		}
-		if len(v) != 40 {
+		if len(k) != 40 {
 			continue
 		}
-		blockNumber := binary.BigEndian.Uint64(v[:8])
+		blockNumber := binary.BigEndian.Uint64(k[:length.BlockNum])
 		var blockHash libcommon.Hash
-		copy(blockHash[:], v[8:])
+		copy(blockHash[:], k[length.BlockNum:])
 		blockBody, err := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNumber)
 		if err != nil {
 			return err

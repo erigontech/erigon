@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -81,8 +82,9 @@ func (e *EngineServerExperimental) Start(httpConfig httpcfg.HttpCfg,
 	base := jsonrpc.NewBaseApi(filters, stateCache, e.blockReader, agg, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs)
 
 	ethImpl := jsonrpc.NewEthAPI(base, e.db, eth, txPool, mining, httpConfig.Gascap, httpConfig.ReturnDataLimit, e.logger)
-	// engineImpl := NewEngineAPI(base, db, engineBackend)
 
+	// engineImpl := NewEngineAPI(base, db, engineBackend)
+	// e.startEngineMessageHandler()
 	apiList := []rpc.API{
 		{
 			Namespace: "eth",
@@ -240,14 +242,18 @@ func (s *EngineServerExperimental) newPayload(ctx context.Context, req *engine_t
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 	s.hd.BeaconRequestList.AddPayloadRequest(block)
 
-	payloadStatus := <-s.hd.PayloadStatusCh
+	chainReader := eth1_chain_reader.NewChainReaderEth1(s.ctx, s.config, s.executionService)
+	payloadStatus, err := s.handleNewPayload("NewPayload", block, chainReader)
+	if err != nil {
+		return nil, err
+	}
 	s.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
 	}
 
-	return &payloadStatus, nil
+	return payloadStatus, nil
 }
 
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
@@ -351,12 +357,12 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 
-		if parent == nil && s.hd.PosStatus() != headerdownload.Idle {
+		if parent == nil && s.hd.PosStatus() == headerdownload.Syncing {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
-		if header == nil && s.hd.PosStatus() != headerdownload.Idle {
+		if header == nil && s.hd.PosStatus() == headerdownload.Syncing {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
@@ -372,12 +378,6 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 		if blockHash != headHash && canonicalHash == blockHash {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
-	}
-
-	// If another payload is already commissioned then we just reply with syncing
-	if s.stageLoopIsBusy() {
-		s.logger.Debug(fmt.Sprintf("[%s] stage loop is busy", prefix))
-		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
 
 	return nil, nil
@@ -425,26 +425,22 @@ func (s *EngineServerExperimental) getPayload(ctx context.Context, payloadId uin
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
 func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
 ) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	forkChoice := &engine_types.ForkChoiceState{
-		HeadHash:           forkchoiceState.HeadHash,
-		SafeBlockHash:      forkchoiceState.SafeBlockHash,
-		FinalizedBlockHash: forkchoiceState.FinalizedBlockHash,
-	}
-
-	status, err := s.getQuickPayloadStatusIfPossible(forkChoice.HeadHash, 0, libcommon.Hash{}, forkChoice, false)
+	status, err := s.getQuickPayloadStatusIfPossible(forkchoiceState.HeadHash, 0, libcommon.Hash{}, forkchoiceState, false)
 	if err != nil {
 		return nil, err
 	}
-
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if status == nil {
-		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadHash)
-		s.hd.BeaconRequestList.AddForkChoiceRequest(forkChoice)
+	chainReader := eth1_chain_reader.NewChainReaderEth1(s.ctx, s.config, s.executionService)
 
-		statusDeref := <-s.hd.PayloadStatusCh
-		status = &statusDeref
+	if status == nil {
+		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkchoiceState.HeadHash)
+
+		status, err = s.handlesForkChoice("ForkChoiceUpdated", chainReader, forkchoiceState, 0)
+		if err != nil {
+			return nil, err
+		}
 		s.logger.Debug("[ForkChoiceUpdated] got reply", "payloadStatus", status)
 
 		if status.CriticalError != nil {
@@ -471,7 +467,7 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 	headHeader := rawdb.ReadHeader(tx2, headHash, *headNumber)
 	tx2.Rollback()
 
-	if headHeader.Hash() != forkChoice.HeadHash {
+	if headHeader.Hash() != forkchoiceState.HeadHash {
 		// Per Item 2 of https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.9/src/engine/specification.md#specification-1:
 		// Client software MAY skip an update of the forkchoice state and
 		// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree.
@@ -480,7 +476,7 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 		// {payloadStatus: {status: VALID, latestValidHash: forkchoiceState.headBlockHash, validationError: null}, payloadId: null}.
 
 		s.logger.Warn("Skipping payload building because forkchoiceState.headBlockHash is not the head of the canonical chain",
-			"forkChoice.HeadBlockHash", forkChoice.HeadHash, "headHeader.Hash", headHeader.Hash())
+			"forkChoice.HeadBlockHash", forkchoiceState.HeadHash, "headHeader.Hash", headHeader.Hash())
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
 	}
 
@@ -489,7 +485,7 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 	}
 
 	req := &execution.AssembleBlockRequest{
-		ParentHash:           gointerfaces.ConvertHashToH256(forkChoice.HeadHash),
+		ParentHash:           gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
 		Timestamp:            uint64(payloadAttributes.Timestamp),
 		MixDigest:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 		SuggestedFeeRecipent: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
