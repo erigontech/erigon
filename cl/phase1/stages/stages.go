@@ -19,25 +19,22 @@ import (
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarly used to process side forks and memory execution.
 func ConsensusStages(ctx context.Context,
-	forkchoice StageForkChoiceCfg,
+	cfg CaplinStagedSyncCfg,
 ) []*stagedsync.Stage {
-	gossipBlocks := forkchoice.gossipManager.SubscribeSignedBeaconBlocks(ctx)
-	cfg := forkchoice
-
+	gossipBlocks := cfg.gossipManager.SubscribeSignedBeaconBlocks(ctx)
 	saveBlock := func(block *cltypes.SignedBeaconBlock) error {
-		err := clpersist.SaveBlockWithConfig(afero.NewBasePathFs(forkchoice.dataDirFs, "caplin/beacon"), block, cfg.beaconCfg)
+		err := clpersist.SaveBlockWithConfig(afero.NewBasePathFs(cfg.dataDirFs, "caplin/beacon"), block, cfg.beaconCfg)
 		if err != nil {
 			log.Error("failed to persist block to store", "slot", block.Block.Slot, "err", err)
 		}
 		return err
-
 	}
 	return []*stagedsync.Stage{
 		{
 			ID:          "WaitForPeers",
 			Description: "wait for enough peers",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				return SpawnStageWaitForPeers(forkchoice, s, tx, ctx)
+				return SpawnStageWaitForPeers(ctx, cfg, s)
 			},
 			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
 				return nil
@@ -127,7 +124,6 @@ func ConsensusStages(ctx context.Context,
 				return nil
 			},
 		},
-
 		{
 			ID: "CatchUpBlocks",
 			Description: `this stage runs if the current node is not at head, otherwise it moves on.
@@ -150,7 +146,6 @@ func ConsensusStages(ctx context.Context,
 				defer cn()
 
 				go func() {
-					cfg := forkchoice
 					for {
 						select {
 						case sbb := <-gossipBlocks:
@@ -204,8 +199,10 @@ func ConsensusStages(ctx context.Context,
 			},
 		},
 		{
-			ID:          "ForkChoice",
-			Description: `fork choice stage. the wait until the next block is also here (only if at head)`,
+			ID: "ForkChoice",
+			Description: `fork choice stage. We will send all fork choise things here
+			also, we will wait up to delay seconds to deal with attestations + side forks
+			`,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 				seenSlot := cfg.forkChoice.HighestSeen()
@@ -249,7 +246,7 @@ func ConsensusStages(ctx context.Context,
 			},
 		},
 		{
-			ID:          "SleepForEpoch",
+			ID:          "SleepForSlot",
 			Description: `if at head and we get to this stage, we sleep until the next slot`,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
@@ -269,4 +266,24 @@ func ConsensusStages(ctx context.Context,
 			},
 		},
 	}
+}
+
+func SpawnStageWaitForPeers(ctx context.Context, cfg CaplinStagedSyncCfg, s *stagedsync.StageState) error {
+	peersCount, err := cfg.rpc.Peers()
+	if err != nil {
+		return nil
+	}
+	waitWhenNotEnoughPeers := 3 * time.Second
+	for {
+		if peersCount > minPeersForDownload {
+			break
+		}
+		log.Debug("[Caplin] Waiting For Peers", "have", peersCount, "needed", minPeersForSyncStart, "retryIn", waitWhenNotEnoughPeers)
+		time.Sleep(waitWhenNotEnoughPeers)
+		peersCount, err = cfg.rpc.Peers()
+		if err != nil {
+			peersCount = 0
+		}
+	}
+	return nil
 }

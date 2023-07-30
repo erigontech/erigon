@@ -1,9 +1,6 @@
 package stages
 
 import (
-	"context"
-	"time"
-
 	"github.com/ledgerwatch/erigon/cl/clpersist"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -14,13 +11,11 @@ import (
 	"github.com/spf13/afero"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 )
 
-type StageForkChoiceCfg struct {
+type CaplinStagedSyncCfg struct {
 	db              kv.RwDB
 	rpc             *rpc.BeaconRpcP2P
 	source          clpersist.BlockSource
@@ -44,7 +39,7 @@ var (
 	gossipAction           = "gossip"
 )
 
-func StageForkChoice(db kv.RwDB,
+func CaplinStagedSync(db kv.RwDB,
 	rpc *rpc.BeaconRpcP2P,
 	source clpersist.BlockSource,
 	genesisCfg *clparams.GenesisConfig,
@@ -55,8 +50,8 @@ func StageForkChoice(db kv.RwDB,
 	forkChoice *forkchoice.ForkChoiceStore,
 	caplinFreezer freezer.Freezer,
 	dataDirFs afero.Fs,
-) StageForkChoiceCfg {
-	return StageForkChoiceCfg{
+) CaplinStagedSyncCfg {
+	return CaplinStagedSyncCfg{
 		db:              db,
 		rpc:             rpc,
 		genesisCfg:      genesisCfg,
@@ -69,24 +64,4 @@ func StageForkChoice(db kv.RwDB,
 		caplinFreezer:   caplinFreezer,
 		dataDirFs:       dataDirFs,
 	}
-}
-
-func SpawnStageWaitForPeers(cfg StageForkChoiceCfg, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context) error {
-	peersCount, err := cfg.rpc.Peers()
-	if err != nil {
-		return nil
-	}
-	waitWhenNotEnoughPeers := 3 * time.Second
-	for {
-		if peersCount > minPeersForDownload {
-			break
-		}
-		log.Debug("[Caplin] Waiting For Peers", "have", peersCount, "needed", minPeersForSyncStart, "retryIn", waitWhenNotEnoughPeers)
-		time.Sleep(waitWhenNotEnoughPeers)
-		peersCount, err = cfg.rpc.Peers()
-		if err != nil {
-			peersCount = 0
-		}
-	}
-	return nil
 }
