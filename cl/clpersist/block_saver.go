@@ -23,7 +23,7 @@ func SaveBlockWithConfig(
 	// file is to be stored at
 	// "/signedBeaconBlock/{superEpoch}/{epoch}/{slot}.ssz_snappy"
 
-	superEpoch := block.Block.Slot / (config.SlotsPerEpoch ^ 2)
+	superEpoch := block.Block.Slot / (config.SlotsPerEpoch * config.SlotsPerEpoch)
 	epoch := block.Block.Slot / config.SlotsPerEpoch
 
 	folderPath := path.Clean(fmt.Sprintf("%d/%d", superEpoch, epoch))
