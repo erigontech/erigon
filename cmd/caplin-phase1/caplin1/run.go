@@ -94,8 +94,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	//go initDownloader(beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
 
 	beaconSource := clpersist.NewBeaconRpcSource(beaconRpc)
-	cachingSource := clpersist.NewCachingSource(beaconSource)
-	source := clpersist.NewMutexSource(cachingSource)
+	source := clpersist.NewMutexSource(beaconSource)
 
 	forkChoiceConfig := stages.StageForkChoice(nil, beaconRpc, source, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
 

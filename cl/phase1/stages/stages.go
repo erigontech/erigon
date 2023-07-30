@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -21,7 +22,7 @@ func ConsensusStages(ctx context.Context,
 	gossipBlocks := forkchoice.gossipManager.SubscribeSignedBeaconBlocks(ctx)
 	return []*stagedsync.Stage{
 		{
-			ID:          "wait_for_peers",
+			ID:          "WaitForPeers",
 			Description: "wait for enough peers",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				return SpawnStageWaitForPeers(forkchoice, s, tx, ctx)
@@ -31,7 +32,7 @@ func ConsensusStages(ctx context.Context,
 			},
 		},
 		{
-			ID:          "catch_up_epochs",
+			ID:          "CatchUpEpochs",
 			Description: "catch up epochs",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				cfg := forkchoice
@@ -66,12 +67,12 @@ func ConsensusStages(ctx context.Context,
 					o := make(chan resp, 0)
 					chans = append(chans, o)
 					egg.Go(func() error {
-						log.Debug("request epoch from reqresp", "epoch", ii)
+						logger.Debug("request epoch from reqresp", "epoch", ii)
 						blocks, err := cfg.source.GetRange(ctx, ii*cfg.beaconCfg.SlotsPerEpoch, cfg.beaconCfg.SlotsPerEpoch)
 						if err != nil {
 							return err
 						}
-						log.Debug("got epoch from reqresp", "epoch", ii)
+						logger.Debug("got epoch from reqresp", "epoch", ii)
 						o <- resp{blocks}
 						return nil
 					})
@@ -116,7 +117,7 @@ func ConsensusStages(ctx context.Context,
 		},
 
 		{
-			ID: "catch_up_blocks",
+			ID: "CatchUpBlocks",
 			Description: `this stage runs if the current node is not at head, otherwise it moves on.
 			`,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
@@ -134,7 +135,8 @@ func ConsensusStages(ctx context.Context,
 					return nil
 				}
 
-				ctx, cn := context.WithCancel(ctx)
+				// wait for three slots... should be plenty enough time
+				ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot)*time.Second*3)
 				defer cn()
 
 				go func() {
@@ -168,6 +170,9 @@ func ConsensusStages(ctx context.Context,
 					if errors.Is(err, context.Canceled) {
 						return nil
 					}
+					if strings.Contains(err.Error(), "context canceled") {
+						return nil
+					}
 					return err
 				}
 				for _, block := range blocks {
@@ -189,8 +194,8 @@ func ConsensusStages(ctx context.Context,
 			},
 		},
 		{
-			ID:          "fork_choice",
-			Description: "fork choice stage",
+			ID:          "ForkChoice",
+			Description: `fork choice stage. the wait until the next block is also here (only if at head)`,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
 				cfg := forkchoice
 				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
@@ -200,7 +205,6 @@ func ConsensusStages(ctx context.Context,
 				}
 				nextSlot := targetSlot + 1
 				nextSlotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, nextSlot)
-				nextSlotDur := nextSlotTime.Sub(time.Now())
 
 				////////block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
 				////////	if err = g.forkChoice.OnAttestation(a, true); err != nil {
@@ -231,6 +235,7 @@ func ConsensusStages(ctx context.Context,
 						return err
 					}
 				}
+				nextSlotDur := nextSlotTime.Sub(time.Now())
 				logger.Info("sleeping until next slot", "slot", nextSlot, "time", nextSlotTime, "dur", nextSlotDur)
 				time.Sleep(nextSlotDur)
 				return nil
