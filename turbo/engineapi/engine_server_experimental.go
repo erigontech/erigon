@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -82,7 +83,7 @@ func (e *EngineServerExperimental) Start(httpConfig httpcfg.HttpCfg,
 	ethImpl := jsonrpc.NewEthAPI(base, e.db, eth, txPool, mining, httpConfig.Gascap, httpConfig.ReturnDataLimit, e.logger)
 
 	// engineImpl := NewEngineAPI(base, db, engineBackend)
-	e.startEngineMessageHandler()
+	// e.startEngineMessageHandler()
 	go e.blockDownloader.Loop()
 	apiList := []rpc.API{
 		{
@@ -225,14 +226,18 @@ func (s *EngineServerExperimental) newPayload(ctx context.Context, req *engine_t
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	s.hd.BeaconRequestList.AddPayloadRequest(block)
 
-	payloadStatus := <-s.hd.PayloadStatusCh
+	chainReader := eth1_chain_reader.NewChainReaderEth1(s.ctx, s.config, s.executionService)
+	payloadStatus, err := s.handleNewPayload("NewPayload", block, chainReader)
+	if err != nil {
+		return nil, err
+	}
 	s.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
 	}
 
-	return &payloadStatus, nil
+	return payloadStatus, nil
 }
 
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
@@ -359,12 +364,6 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 		}
 	}
 
-	// If another payload is already commissioned then we just reply with syncing
-	if s.stageLoopIsBusy() {
-		s.logger.Debug(fmt.Sprintf("[%s] stage loop is busy", prefix))
-		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
-	}
-
 	return nil, nil
 }
 
@@ -410,30 +409,28 @@ func (s *EngineServerExperimental) getPayload(ctx context.Context, payloadId uin
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
 func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
 ) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	fmt.Println(forkchoiceState)
-	fmt.Println("Lol2")
-
 	status, err := s.getQuickPayloadStatusIfPossible(forkchoiceState.HeadHash, 0, libcommon.Hash{}, forkchoiceState, false)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("Lol")
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
+	chainReader := eth1_chain_reader.NewChainReaderEth1(s.ctx, s.config, s.executionService)
+
 	if status == nil {
 		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkchoiceState.HeadHash)
-		s.hd.BeaconRequestList.AddForkChoiceRequest(forkchoiceState)
 
-		statusDeref := <-s.hd.PayloadStatusCh
-		status = &statusDeref
+		status, err = s.handlesForkChoice("ForkChoiceUpdated", chainReader, forkchoiceState, 0)
+		if err != nil {
+			return nil, err
+		}
 		s.logger.Debug("[ForkChoiceUpdated] got reply", "payloadStatus", status)
 
 		if status.CriticalError != nil {
 			return nil, status.CriticalError
 		}
 	}
-	fmt.Println("Lol3")
 
 	// No need for payload building
 	if payloadAttributes == nil || status.Status != engine_types.ValidStatus {
@@ -470,7 +467,6 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 	if headHeader.Time >= uint64(payloadAttributes.Timestamp) {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
-	fmt.Println("Lol5")
 
 	req := &execution.AssembleBlockRequest{
 		ParentHash:           gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),

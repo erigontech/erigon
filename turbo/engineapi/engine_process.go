@@ -8,97 +8,15 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
-func (e *EngineServerExperimental) startEngineMessageHandler() {
-	go func() {
-		fmt.Println("A")
-		var err error
-		interrupted := false
-		for !interrupted {
-			interrupted, err = e.engineMessageHandler()
-			if err != nil {
-				e.logger.Error("[EngineServer] error received", "err", err)
-			}
-		}
-		fmt.Println("B")
-	}()
-}
-
-// This loop is responsible for engine POS replacement.
-func (e *EngineServerExperimental) engineMessageHandler() (bool, error) {
-	logPrefix := "EngineApi"
-	e.hd.SetPOSSync(true)
-	syncing := e.blockDownloader.Status() != headerdownload.Idle
-	e.logger.Info(fmt.Sprintf("[%s] Waiting for Consensus Layer...", logPrefix))
-
-	interrupt, requestId, requestWithStatus := e.hd.BeaconRequestList.WaitForRequest(syncing, e.test)
-
-	chainReader := eth1_chain_reader.NewChainReaderEth1(e.ctx, e.config, e.executionService)
-	e.hd.SetHeaderReader(chainReader)
-
-	if e.handleInterrupt(interrupt) {
-		return true, nil
-	}
-
-	if requestWithStatus == nil {
-		e.logger.Warn(fmt.Sprintf("[%s] Nil beacon request. Should only happen in tests", logPrefix))
-		return false, nil
-	}
-
-	request := requestWithStatus.Message
-	requestStatus := requestWithStatus.Status
-
-	// Decide what kind of action we need to take place
-	forkChoiceMessage, forkChoiceInsteadOfNewPayload := request.(*engine_types.ForkChoiceState)
-	e.hd.ClearPendingPayloadHash()
-	e.hd.SetPendingPayloadStatus(nil)
-
-	var err error
-	var payloadStatus *engine_types.PayloadStatus
-	if forkChoiceInsteadOfNewPayload {
-		payloadStatus, err = e.handlesForkChoice("ForkChoiceUpdated", chainReader, forkChoiceMessage, requestId)
-	} else {
-		payloadMessage := request.(*types.Block)
-		payloadStatus, err = e.handleNewPayload("NewPayload", payloadMessage, requestStatus, requestId, chainReader)
-	}
-	if err != nil {
-		if requestStatus == engine_helpers.New {
-			e.hd.PayloadStatusCh <- engine_types.PayloadStatus{CriticalError: err}
-		}
-		return false, err
-	}
-
-	if requestStatus == engine_helpers.New && payloadStatus != nil {
-		if payloadStatus.Status == engine_types.SyncingStatus || payloadStatus.Status == engine_types.AcceptedStatus {
-			e.hd.PayloadStatusCh <- *payloadStatus
-		} else {
-			// Let the stage loop run to the end so that the transaction is committed prior to replying to CL
-			e.hd.SetPendingPayloadStatus(payloadStatus)
-		}
-	}
-
-	return false, nil
-}
-
-func (e *EngineServerExperimental) handleInterrupt(interrupt engine_helpers.Interrupt) bool {
-	if interrupt != engine_helpers.None && interrupt == engine_helpers.Stopping {
-		close(e.hd.ShutdownCh)
-		return true
-	}
-	return false
-}
-
 func (e *EngineServerExperimental) handleNewPayload(
 	logPrefix string,
 	block *types.Block,
-	requestStatus engine_helpers.RequestStatus,
-	requestId int,
 	chainReader consensus.ChainHeaderReader,
 ) (*engine_types.PayloadStatus, error) {
 	header := block.Header()
@@ -113,15 +31,14 @@ func (e *EngineServerExperimental) handleNewPayload(
 		currentHeadNumber = new(uint64)
 		*currentHeadNumber = currentHeader.Number.Uint64()
 	}
-	parent := chainReader.GetHeaderByHash(header.ParentHash)
+	parent := chainReader.GetHeader(header.ParentHash, headerNumber-1)
 	if parent == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download parent", logPrefix), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
 		if e.test {
-			e.hd.BeaconRequestList.Remove(requestId)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
-		if !e.blockDownloader.StartDownloading(requestId, header.ParentHash, headerHash) {
+		if !e.blockDownloader.StartDownloading(0, header.ParentHash, headerHash) {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
@@ -129,7 +46,7 @@ func (e *EngineServerExperimental) handleNewPayload(
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
 			success := false
-			for i := 0; i < 10; i++ {
+			for i := 0; i < 100; i++ {
 				time.Sleep(10 * time.Millisecond)
 				if e.blockDownloader.Status() == headerdownload.Synced {
 					success = true
@@ -143,9 +60,6 @@ func (e *EngineServerExperimental) handleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	}
-	e.hd.BeaconRequestList.Remove(requestId)
-
-	// Save header and body
 	if err := eth1_utils.InsertHeaderAndBodyAndWait(e.ctx, e.executionService, header, block.RawBody()); err != nil {
 		return nil, err
 	}

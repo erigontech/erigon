@@ -158,7 +158,7 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 		return validationError.Error()
 	}
 
-	if payloadStatus.Status != engine_types.ValidStatus && payloadStatus.Status != engine_types.AcceptedStatus {
+	if payloadStatus.Status == engine_types.InvalidStatus {
 		return fmt.Errorf("status: %s", payloadStatus.Status)
 	}
 	return nil
