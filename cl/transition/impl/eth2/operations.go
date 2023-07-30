@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/abstract"
 	"reflect"
-	"time"
+
+	"github.com/ledgerwatch/erigon/cl/abstract"
 
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/ledgerwatch/erigon/metrics/methelp"
@@ -859,11 +859,11 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 		}
 		// TODO(Someone): Add epoch transition.
 		if (sSlot+1)%beaconConfig.SlotsPerEpoch == 0 {
-			start := time.Now()
+			//	start := time.Now()
 			if err := statechange.ProcessEpoch(s); err != nil {
 				return err
 			}
-			log.Debug("Processed new epoch successfully", "epoch", state.Epoch(s), "process_epoch_elpsed", time.Since(start))
+			//log.Debug("Processed new epoch successfully", "epoch", state.Epoch(s), "process_epoch_elpsed", time.Since(start))
 		}
 		// TODO: add logic to process epoch updates.
 		sSlot += 1

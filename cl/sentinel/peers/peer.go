@@ -59,14 +59,14 @@ func (p *Peer) UserAgent() string {
 }
 
 func (p *Peer) Penalize() {
-	log.Debug("[Sentinel Peers] peer penalized", "peer-id", p.pid)
+	log.Trace("[Sentinel Peers] peer penalized", "peer-id", p.pid)
 	p.do(func(p *Peer) {
 		p.penalties++
 	})
 }
 
 func (p *Peer) Forgive() {
-	log.Debug("[Sentinel Peers] peer forgiven", "peer-id", p.pid)
+	log.Trace("[Sentinel Peers] peer forgiven", "peer-id", p.pid)
 	p.do(func(p *Peer) {
 		if p.penalties > 0 {
 			p.penalties--
@@ -79,14 +79,14 @@ func (p *Peer) MarkUsed() {
 		p.useCount++
 		p.lastRequest = time.Now()
 	})
-	log.Debug("[Sentinel Peers] peer used", "peer-id", p.pid, "uses", p.useCount)
+	log.Trace("[Sentinel Peers] peer used", "peer-id", p.pid, "uses", p.useCount)
 }
 
 func (p *Peer) MarkReplied() {
 	p.do(func(p *Peer) {
 		p.successCount++
 	})
-	log.Debug("[Sentinel Peers] peer replied", "peer-id", p.pid, "uses", p.useCount, "success", p.successCount)
+	log.Trace("[Sentinel Peers] peer replied", "peer-id", p.pid, "uses", p.useCount, "success", p.successCount)
 }
 
 func (p *Peer) IsAvailable() (available bool) {
@@ -135,7 +135,7 @@ func anySetInString(set []string, in string) bool {
 func (p *Peer) Disconnect(reason ...string) {
 	rzn := strings.Join(reason, " ")
 	if !anySetInString(skipReasons, rzn) {
-		log.Debug("[Sentinel Peers] disconnecting from peer", "peer-id", p.pid, "reason", strings.Join(reason, " "))
+		log.Trace("[Sentinel Peers] disconnecting from peer", "peer-id", p.pid, "reason", strings.Join(reason, " "))
 	}
 	p.m.host.Peerstore().RemovePeer(p.pid)
 	p.m.host.Network().ClosePeer(p.pid)

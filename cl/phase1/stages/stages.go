@@ -244,5 +244,26 @@ func ConsensusStages(ctx context.Context,
 				return nil
 			},
 		},
+		{
+			ID:          "SleepForEpoch",
+			Description: `if at head and we get to this stage, we sleep until the next slot`,
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
+				cfg := forkchoice
+				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+				seenSlot := cfg.forkChoice.HighestSeen()
+				if seenSlot != targetSlot {
+					return nil
+				}
+				nextSlot := targetSlot + 1
+				nextSlotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, nextSlot)
+				nextSlotDur := nextSlotTime.Sub(time.Now())
+				logger.Info("sleeping until next slot", "slot", nextSlot, "time", nextSlotTime, "dur", nextSlotDur)
+				time.Sleep(nextSlotDur)
+				return nil
+			},
+			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
+				return nil
+			},
+		},
 	}
 }
