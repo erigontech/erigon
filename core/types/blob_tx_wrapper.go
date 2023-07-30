@@ -399,11 +399,10 @@ func (txw BlobTxWrapper) encodePayload(w io.Writer, b []byte, total, txSize, com
 		return err
 	}
 
-	// TODO: encode in order (see EIP-4844 updates)
-	if err := txw.Commitments.encodePayload(w, b, commitmentsSize); err != nil {
+	if err := txw.Blobs.encodePayload(w, b, blobsSize); err != nil {
 		return err
 	}
-	if err := txw.Blobs.encodePayload(w, b, blobsSize); err != nil {
+	if err := txw.Commitments.encodePayload(w, b, commitmentsSize); err != nil {
 		return err
 	}
 	if err := txw.Proofs.encodePayload(w, b, proofsSize); err != nil {
@@ -460,11 +459,11 @@ func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err := txw.Commitments.DecodeRLP(s); err != nil {
+	if err := txw.Blobs.DecodeRLP(s); err != nil {
 		return err
 	}
 
-	if err := txw.Blobs.DecodeRLP(s); err != nil {
+	if err := txw.Commitments.DecodeRLP(s); err != nil {
 		return err
 	}
 

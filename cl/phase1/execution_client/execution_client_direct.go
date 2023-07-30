@@ -78,7 +78,7 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block) (invalid
 	case clparams.CapellaVersion:
 		payloadStatus, err = cc.api.NewPayloadV2(cc.ctx, &request)
 	case clparams.DenebVersion:
-		payloadStatus, err = cc.api.NewPayloadV3(cc.ctx, &request)
+		payloadStatus, err = cc.api.NewPayloadV3(cc.ctx, &request, nil)
 	default:
 		err = fmt.Errorf("invalid payload version")
 	}
