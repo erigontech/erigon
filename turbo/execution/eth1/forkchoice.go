@@ -2,6 +2,7 @@ package eth1
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -19,12 +20,7 @@ type forkchoiceOutcome struct {
 
 func sendForkchoiceReceiptWithoutWaiting(ch chan forkchoiceOutcome, receipt *execution.ForkChoiceReceipt) {
 	select {
-	case ch <- forkchoiceOutcome{
-		receipt: &execution.ForkChoiceReceipt{
-			LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-			Status:          execution.ValidationStatus_Busy,
-		},
-	}:
+	case ch <- forkchoiceOutcome{receipt: receipt}:
 	default:
 	}
 }
@@ -46,13 +42,16 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 	// So we wait at most the amount specified by req.Timeout before just sending out
 	go e.updateForkChoice(ctx, blockHash, safeHash, finalizedHash, outcomeCh)
 	fcuTimer := time.NewTimer(time.Duration(req.Timeout) * time.Millisecond)
+	fmt.Println(time.Duration(time.Duration(req.Timeout) * time.Millisecond).String())
 	select {
 	case <-fcuTimer.C:
+		e.logger.Debug("treating forkChoiceUpdated as asyncronous as it is taking too long")
 		return &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 			Status:          execution.ValidationStatus_Busy,
 		}, nil
 	case outcome := <-outcomeCh:
+		fmt.Println(outcome.receipt)
 		return outcome.receipt, outcome.err
 	}
 
