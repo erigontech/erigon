@@ -74,10 +74,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			if chainConfig.Bor == nil {
 				return nil, nil
 			}
-			borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
-			if borTx == nil {
-				return nil, nil
-			}
+			borTx := types2.NewBorTransaction()
 			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee, chainConfig.ChainID), nil
 		}
 
