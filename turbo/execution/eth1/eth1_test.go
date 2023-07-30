@@ -26,7 +26,7 @@ func TestInsertGetterHeader(t *testing.T) {
 	tx, _ := db.BeginRw(context.TODO())
 	rawdb.WriteTd(tx, libcommon.Hash{}, 1, libcommon.Big0)
 	tx.Commit()
-	e := eth1.NewEthereumExecutionModule(nil, db, nil, nil, nil, nil, nil, false)
+	e := eth1.NewEthereumExecutionModule(nil, db, nil, nil, nil, nil, nil, nil, nil, false)
 	_, err := e.InsertHeaders(context.TODO(), &execution.InsertHeadersRequest{
 		Headers: []*execution.Header{
 			eth1_utils.HeaderToHeaderRPC(header),

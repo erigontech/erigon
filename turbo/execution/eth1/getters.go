@@ -139,6 +139,7 @@ func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: could not open database: %s", err)
 	}
+	defer tx.Rollback()
 	hash := rawdb.ReadHeadHeaderHash(tx)
 	number := rawdb.ReadHeaderNumber(tx, hash)
 	h, _ := e.blockReader.Header(context.Background(), tx, hash, *number)

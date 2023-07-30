@@ -36,6 +36,7 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 		e.status.Store(headerdownload.Idle)
 		return
 	}
+	defer tx.Rollback()
 
 	tmpDb, err := mdbx.NewTemporaryMdbx()
 	if err != nil {

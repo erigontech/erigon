@@ -28,12 +28,15 @@ func (e *EngineServerExperimental) handleNewPayload(
 	e.logger.Info(fmt.Sprintf("[%s] Handling new payload", logPrefix), "height", headerNumber, "hash", headerHash)
 
 	currentHeader := chainReader.CurrentHeader()
+	fmt.Println("lol")
 	var currentHeadNumber *uint64
 	if currentHeader != nil {
 		currentHeadNumber = new(uint64)
 		*currentHeadNumber = currentHeader.Number.Uint64()
 	}
+	fmt.Println("lol2")
 	parent := chainReader.GetHeader(header.ParentHash, headerNumber-1)
+	fmt.Println("lol3")
 	if parent == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download parent", logPrefix), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
 		if e.test {
