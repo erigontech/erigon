@@ -38,7 +38,7 @@ func (e *EngineServerExperimental) handleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
-		if !e.blockDownloader.StartDownloading(0, header.ParentHash, headerHash) {
+		if !e.blockDownloader.StartDownloading(0, header.ParentHash, headerHash, block) {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
@@ -113,7 +113,7 @@ func (e *EngineServerExperimental) handlesForkChoice(
 		if e.test {
 			e.hd.BeaconRequestList.Remove(requestId)
 		} else {
-			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash)
+			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash, nil)
 		}
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
@@ -125,12 +125,11 @@ func (e *EngineServerExperimental) handlesForkChoice(
 		if e.test {
 			e.hd.BeaconRequestList.Remove(requestId)
 		} else {
-			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash)
+			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash, nil)
 		}
 
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
-	e.hd.BeaconRequestList.Remove(requestId)
 
 	// Call forkchoice here
 	status, latestValidHash, err := eth1_utils.UpdateForkChoice(e.ctx, e.executionService, forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash, 100)

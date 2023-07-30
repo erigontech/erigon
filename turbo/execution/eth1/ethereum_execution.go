@@ -172,9 +172,15 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 			}
 		}
 	}
+
 	// Run the unwind
 	if err := e.executionPipeline.RunUnwind(e.db, tx); err != nil {
 		return nil, err
+	}
+	if e.historyV3 {
+		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber); err != nil {
+			return nil, err
+		}
 	}
 	// Mark all new canonicals as canonicals
 	for _, canonicalSegment := range newCanonicals {

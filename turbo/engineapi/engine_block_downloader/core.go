@@ -4,10 +4,12 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
-func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, downloaderTip libcommon.Hash, requestId int) {
+func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, downloaderTip libcommon.Hash, requestId int, block *types.Block) {
 	/* Start download process*/
 	// First we schedule the headers download process
 	if !e.scheduleHeadersDownload(requestId, hashToDownload, 0, downloaderTip) {
@@ -71,20 +73,24 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 		e.status.Store(headerdownload.Idle)
 		return
 	}
+	if block != nil {
+		eth1_utils.InsertHeaderAndBodyAndWait(e.ctx, e.executionModule, block.Header(), block.RawBody())
+	}
 	e.status.Store(headerdownload.Synced)
 	e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
 
 }
 
 // StartDownloading triggers the download process and returns true if the process started or false if it could not.
-func (e *EngineBlockDownloader) StartDownloading(requestId int, hashToDownload libcommon.Hash, downloaderTip libcommon.Hash) bool {
+// blockTip is optional and should be the block tip of the download request. which will be inserted at the end of the procedure if specified.
+func (e *EngineBlockDownloader) StartDownloading(requestId int, hashToDownload libcommon.Hash, downloaderTip libcommon.Hash, blockTip *types.Block) bool {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	if e.status.Load() == headerdownload.Syncing {
 		return false
 	}
 	e.status.Store(headerdownload.Syncing)
-	go e.download(hashToDownload, downloaderTip, requestId)
+	go e.download(hashToDownload, downloaderTip, requestId, blockTip)
 	return true
 }
 
