@@ -24,7 +24,7 @@ contract TestStateSender {
     );
 
     modifier onlyRegistered(address receiver) {
-        require(registrations[receiver] == msg.sender, "Invalid sender");
+        //require(registrations[receiver] == msg.sender, "Invalid sender");
         _;
     }
 

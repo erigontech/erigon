@@ -22,7 +22,7 @@ type contractBackend struct {
 }
 
 func (cb contractBackend) CodeAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) ([]byte, error) {
-	return nil, fmt.Errorf("TODO")
+	return cb.node.GetCode(contract, requests.AsBlockNumber(blockNumber))
 }
 
 func (cb contractBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
@@ -30,7 +30,7 @@ func (cb contractBackend) CallContract(ctx context.Context, call ethereum.CallMs
 }
 
 func (cb contractBackend) PendingCodeAt(ctx context.Context, account libcommon.Address) ([]byte, error) {
-	return nil, fmt.Errorf("TODO")
+	return cb.node.GetCode(account, requests.BlockNumbers.Pending)
 }
 
 func (cb contractBackend) PendingNonceAt(ctx context.Context, account libcommon.Address) (uint64, error) {
@@ -44,11 +44,12 @@ func (cb contractBackend) PendingNonceAt(ctx context.Context, account libcommon.
 }
 
 func (cb contractBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
-	return nil, fmt.Errorf("TODO")
+	return cb.node.GasPrice()
 }
 
 func (cb contractBackend) EstimateGas(ctx context.Context, call ethereum.CallMsg) (gas uint64, err error) {
-	return 0, fmt.Errorf("TODO")
+	return 1_000_000, nil
+	//return cb.node.EstimateGas(call, requests.BlockNumbers.Pending)
 }
 
 func (cb contractBackend) SendTransaction(ctx context.Context, tx types.Transaction) error {

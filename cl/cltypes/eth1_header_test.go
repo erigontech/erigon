@@ -34,8 +34,8 @@ func TestEth1Header(t *testing.T) {
 	blockHash := libcommon.Hash{}
 	transactionsRoot := libcommon.Hash{}
 	withdrawalsRoot := libcommon.Hash{}
-	dataGasUsed := uint64(50)
-	excessDataGas := uint64(60)
+	blobGasUsed := uint64(50)
+	excessBlobGas := uint64(60)
 
 	// Test Eth1Header
 	header = &Eth1Header{
@@ -54,8 +54,8 @@ func TestEth1Header(t *testing.T) {
 		BlockHash:        blockHash,
 		TransactionsRoot: transactionsRoot,
 		WithdrawalsRoot:  withdrawalsRoot,
-		DataGasUsed:      dataGasUsed,
-		ExcessDataGas:    excessDataGas,
+		BlobGasUsed:      blobGasUsed,
+		ExcessBlobGas:    excessBlobGas,
 		version:          version,
 	}
 

@@ -119,7 +119,7 @@ type CallMsg struct {
 	From             libcommon.Address  // the sender of the 'transaction'
 	To               *libcommon.Address // the destination contract (nil for contract creation)
 	Gas              uint64             // if 0, the call executes with near-infinite gas
-	MaxFeePerDataGas *uint256.Int       // EIP-4844 max_fee_per_data_gas
+	MaxFeePerBlobGas *uint256.Int       // EIP-4844 max_fee_per_blob_gas
 	GasPrice         *uint256.Int       // wei <-> gas exchange ratio
 	Value            *uint256.Int       // amount of wei sent along with the call
 	Data             []byte             // input data, usually an ABI-encoded contract method invocation

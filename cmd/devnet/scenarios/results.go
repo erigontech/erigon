@@ -15,7 +15,7 @@ type StepResult struct {
 	Status     StepStatus
 	FinishedAt time.Time
 	Err        error
-
+	Returns    []interface{}
 	ScenarioId string
 
 	Step *Step

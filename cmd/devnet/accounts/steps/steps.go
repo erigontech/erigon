@@ -2,16 +2,20 @@ package accounts_steps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
 
 func init() {
@@ -56,29 +60,106 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 		return 0, fmt.Errorf("Unknown account: %s", name)
 	}
 
-	//if fbal, err := faucet.Balance(chainCtx); err == nil {
-	//	fmt.Println(faucet.Address(), fbal)
-	//}
+	facuetStartingBalance, _ := faucet.Balance(chainCtx)
 
-	_, hash, err := faucet.Send(chainCtx, account.Address, ethAmount)
+	sent, hash, err := faucet.Send(chainCtx, account, ethAmount)
 
 	if err != nil {
 		return 0, err
 	}
 
-	if _, err = transactions.AwaitTransactions(chainCtx, hash); err != nil {
+	blockMap, err := transactions.AwaitTransactions(chainCtx, hash)
+
+	if err != nil {
 		return 0, fmt.Errorf("Failed to get transfer tx: %w", err)
 	}
 
-	//if fbal, err := faucet.Balance(chainCtx); err == nil {
-	//	fmt.Println(faucet.Address(), fbal)
-	//}
+	blockNum, _ := blockMap[hash]
+
+	logs, err := faucet.Contract().FilterSent(&bind.FilterOpts{
+		Start: blockNum,
+		End:   &blockNum,
+	})
+
+	if err != nil {
+		return 0, fmt.Errorf("Failed to get post transfer logs: %w", err)
+	}
+
+	sendConfirmed := false
+
+	for logs.Next() {
+		if account.Address != logs.Event.Destination {
+			return 0, fmt.Errorf("Unexpected send destination: %s", logs.Event.Destination)
+		}
+
+		if sent.Cmp(logs.Event.Amount) != 0 {
+			return 0, fmt.Errorf("Unexpected send amount: %s", logs.Event.Amount)
+		}
+
+		sendConfirmed = true
+	}
 
 	node := devnet.SelectBlockProducer(chainCtx)
-	balance, err := node.GetBalance(account.Address, requests.BlockNumbers.Latest)
-	//fmt.Println(account.Address, balance)
+
+	if !sendConfirmed {
+		logger := devnet.Logger(chainCtx)
+
+		traceResults, err := node.TraceTransaction(hash)
+
+		if err != nil {
+			return 0, fmt.Errorf("Send transaction failure: transaction trace failed: %w", err)
+		}
+
+		for _, traceResult := range traceResults {
+			accountResult, err := node.DebugAccountAt(traceResult.BlockHash, traceResult.TransactionPosition, faucet.Address())
+
+			if err != nil {
+				return 0, fmt.Errorf("Send transaction failure: account debug failed: %w", err)
+			}
+
+			logger.Info("Faucet account details", "address", faucet.Address(), "account", accountResult)
+
+			accountCode, err := node.GetCode(faucet.Address(), requests.BlockNumber(traceResult.BlockHash.Hex()))
+
+			if err != nil {
+				return 0, fmt.Errorf("Send transaction failure: get account code failed: %w", err)
+			}
+
+			logger.Info("Faucet account code", "address", faucet.Address(), "code", accountCode)
+
+			callResults, err := node.TraceCall(fmt.Sprintf("0x%x", blockNum), ethapi.CallArgs{
+				From: &traceResult.Action.From,
+				To:   &traceResult.Action.To,
+				Data: &traceResult.Action.Input,
+			}, requests.TraceOpts.StateDiff, requests.TraceOpts.Trace, requests.TraceOpts.VmTrace)
+
+			if err != nil {
+				return 0, fmt.Errorf("Send transaction failure: trace call failed: %w", err)
+			}
+
+			results, _ := json.MarshalIndent(callResults, "  ", "  ")
+			logger.Debug("Send transaction call trace", "hash", hash, "trace", string(results))
+		}
+	}
+
+	balance, err := faucet.Balance(chainCtx)
+
+	if err != nil {
+		return 0, fmt.Errorf("Failed to get post transfer faucet balance: %w", err)
+	}
+
+	if balance.Cmp((&big.Int{}).Sub(facuetStartingBalance, sent)) != 0 {
+		return 0, fmt.Errorf("Unexpected post transfer faucet balance got: %s:, expected: %s", balance, (&big.Int{}).Sub(facuetStartingBalance, sent))
+	}
+
+	balance, err = node.GetBalance(account.Address, requests.BlockNumbers.Latest)
+
 	if err != nil {
 		return 0, fmt.Errorf("Failed to get post transfer balance: %w", err)
+	}
+
+	if balance.Cmp(sent) != 0 {
+		return 0, fmt.Errorf("Unexpected post transfer balance got: %s:, expected: %s", balance, sent)
 	}
 
 	return balance.Uint64(), nil
