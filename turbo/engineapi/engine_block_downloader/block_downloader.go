@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
@@ -98,8 +97,6 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 	heightToDownload uint64,
 	downloaderTip libcommon.Hash,
 ) bool {
-	e.hd.BeaconRequestList.SetStatus(requestId, engine_helpers.DataWasMissing)
-
 	if e.hd.PosStatus() != headerdownload.Idle {
 		e.logger.Info("[EngineBlockDownloader] Postponing PoS download since another one is in progress", "height", heightToDownload, "hash", hashToDownload)
 		return false
@@ -128,9 +125,7 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 func (e *EngineBlockDownloader) waitForEndOfHeadersDownload() headerdownload.SyncStatus {
 	for e.hd.PosStatus() == headerdownload.Syncing {
 		time.Sleep(10 * time.Millisecond)
-
 	}
-
 	return e.hd.PosStatus()
 }
 

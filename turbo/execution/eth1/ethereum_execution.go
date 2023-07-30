@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 // EthereumExecutionModule describes ethereum execution logic and indexing.
@@ -40,6 +41,10 @@ type EthereumExecutionModule struct {
 	builderFunc    builder.BlockBuilderFunc
 	builders       map[uint64]*builder.BlockBuilder
 
+	// Changes accumulator
+	accumulator         *shards.Accumulator
+	stateChangeConsumer shards.StateChangeConsumer
+
 	// configuration
 	config    *chain.Config
 	historyV3 bool
@@ -48,17 +53,19 @@ type EthereumExecutionModule struct {
 }
 
 func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
-	config *chain.Config, builderFunc builder.BlockBuilderFunc, logger log.Logger, historyV3 bool) *EthereumExecutionModule {
+	config *chain.Config, builderFunc builder.BlockBuilderFunc, accumulator *shards.Accumulator, stateChangeConsumer shards.StateChangeConsumer, logger log.Logger, historyV3 bool) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
-		blockReader:       blockReader,
-		db:                db,
-		executionPipeline: executionPipeline,
-		logger:            logger,
-		forkValidator:     forkValidator,
-		builders:          make(map[uint64]*builder.BlockBuilder),
-		builderFunc:       builderFunc,
-		config:            config,
-		semaphore:         semaphore.NewWeighted(1),
+		blockReader:         blockReader,
+		db:                  db,
+		executionPipeline:   executionPipeline,
+		logger:              logger,
+		forkValidator:       forkValidator,
+		builders:            make(map[uint64]*builder.BlockBuilder),
+		builderFunc:         builderFunc,
+		config:              config,
+		semaphore:           semaphore.NewWeighted(1),
+		accumulator:         accumulator,
+		stateChangeConsumer: stateChangeConsumer,
 	}
 }
 
@@ -104,6 +111,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 	defer tx.Rollback()
+	e.forkValidator.ClearWithUnwind(tx, e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
 	header, err := e.blockReader.Header(ctx, tx, blockHash, req.Number)
 	if err != nil {
@@ -114,6 +122,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if err != nil {
 		return nil, err
 	}
+
 	if header == nil || body == nil {
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
@@ -121,6 +130,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 			ValidationStatus: execution.ValidationStatus_MissingSegment,
 		}, nil
 	}
+
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), false)
 	if criticalError != nil {
 		return nil, criticalError
