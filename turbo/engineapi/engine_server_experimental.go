@@ -84,7 +84,6 @@ func (e *EngineServerExperimental) Start(httpConfig httpcfg.HttpCfg,
 
 	// engineImpl := NewEngineAPI(base, db, engineBackend)
 	// e.startEngineMessageHandler()
-	go e.blockDownloader.Loop()
 	apiList := []rpc.API{
 		{
 			Namespace: "eth",

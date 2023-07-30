@@ -115,6 +115,9 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 	// defer e.forkValidator.ClearWithUnwind(tx, e.notifications.Accumulator, e.notifications.StateChangesConsumer)
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.HeadBlockHash)
+	safeHash := gointerfaces.ConvertH256ToHash(req.SafeBlockHash)
+	finalizedHash := gointerfaces.ConvertH256ToHash(req.FinalizedBlockHash)
+
 	// Step one, find reconnection point, and mark all of those headers as canonical.
 	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, blockHash)
 	if err != nil {
@@ -201,17 +204,30 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)
 	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
-	if headNumber != nil && e.logger != nil {
-		e.logger.Info("Current forkchoice", "hash", headHash, "number", *headNumber)
-	}
+	log := headNumber != nil && e.logger != nil
+	// Update forks...
+	rawdb.WriteForkchoiceFinalized(tx, finalizedHash)
+	rawdb.WriteForkchoiceSafe(tx, safeHash)
+	rawdb.WriteHeadBlockHash(tx, blockHash)
+
 	status := execution.ValidationStatus_Success
 	if headHash != blockHash {
 		status = execution.ValidationStatus_BadBlock
+		if log {
+			e.logger.Warn("bad forkchoice", "hash", headHash)
+		}
+	} else {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		if log {
+			e.logger.Info("head updated", "hash", headHash, "number", *headNumber)
+		}
 	}
 	return &execution.ForkChoiceReceipt{
 		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
 		Status:          status,
-	}, tx.Commit()
+	}, nil
 }
 
 func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execution.ValidationRequest) (*execution.ValidationReceipt, error) {

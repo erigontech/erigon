@@ -47,8 +47,7 @@ type EngineBlockDownloader struct {
 	bodyReqSend RequestBodyFunction
 
 	// current status of the downloading process, aka: is it doing anything?
-	status          atomic.Value // it is a headerdownload.SyncStatus
-	startDownloadCh chan downloadRequest
+	status atomic.Value // it is a headerdownload.SyncStatus
 
 	// data reader
 	blockPropagator adapter.BlockPropagator
@@ -88,7 +87,6 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, executionM
 		blockPropagator: blockPropagator,
 		timeout:         timeout,
 		blockReader:     blockReader,
-		startDownloadCh: make(chan downloadRequest),
 		bodyReqSend:     bodyReqSend,
 		executionModule: executionModule,
 	}
