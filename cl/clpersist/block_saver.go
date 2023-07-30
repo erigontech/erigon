@@ -26,7 +26,10 @@ func SaveBlockWithConfig(
 	superEpoch := block.Block.Slot / (config.SlotsPerEpoch ^ 2)
 	epoch := block.Block.Slot / config.SlotsPerEpoch
 
-	path := path.Clean(fmt.Sprintf("%d/%d/%d.ssz_snappy", superEpoch, epoch, block.Block.Slot))
+	folderPath := path.Clean(fmt.Sprintf("%d/%d", superEpoch, epoch))
+	// ignore this error... reason: windows
+	fs.MkdirAll(folderPath, 0o755)
+	path := path.Clean(fmt.Sprintf("%s/%d.ssz_snappy", folderPath, block.Block.Slot))
 
 	fp, err := fs.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0o755)
 	if err != nil {

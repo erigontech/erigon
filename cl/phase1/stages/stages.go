@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cl/clpersist"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/spf13/afero"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -20,6 +22,16 @@ func ConsensusStages(ctx context.Context,
 	forkchoice StageForkChoiceCfg,
 ) []*stagedsync.Stage {
 	gossipBlocks := forkchoice.gossipManager.SubscribeSignedBeaconBlocks(ctx)
+	cfg := forkchoice
+
+	saveBlock := func(block *cltypes.SignedBeaconBlock) error {
+		err := clpersist.SaveBlockWithConfig(afero.NewBasePathFs(forkchoice.dataDirFs, "caplin/beacon"), block, cfg.beaconCfg)
+		if err != nil {
+			log.Error("failed to persist block to store", "slot", block.Block.Slot, "err", err)
+		}
+		return err
+
+	}
 	return []*stagedsync.Stage{
 		{
 			ID:          "WaitForPeers",
@@ -35,7 +47,6 @@ func ConsensusStages(ctx context.Context,
 			ID:          "CatchUpEpochs",
 			Description: "catch up epochs",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				cfg := forkchoice
 				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) - 1
 				seenSlot := cfg.forkChoice.HighestSeen()
 				seenEpoch := seenSlot / cfg.beaconCfg.SlotsPerEpoch
@@ -102,6 +113,7 @@ func ConsensusStages(ctx context.Context,
 								errchan <- err
 								return
 							}
+							saveBlock(block)
 						}
 					}
 				}()
@@ -121,8 +133,6 @@ func ConsensusStages(ctx context.Context,
 			Description: `this stage runs if the current node is not at head, otherwise it moves on.
 			`,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				cfg := forkchoice
-
 				seenSlot := cfg.forkChoice.HighestSeen()
 				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 
@@ -145,13 +155,10 @@ func ConsensusStages(ctx context.Context,
 						select {
 						case sbb := <-gossipBlocks:
 							if err := cfg.forkChoice.OnBlock(sbb.Data, true, true); err != nil {
-								//TODO: rules for pruning
-								//if uint64(slotTime.Unix()) < cfg.forkChoice.HighestSeen()+(cfg.beaconCfg.SlotsPerEpoch/4) {
-								//	cfg.rpc.BanPeer(sbb.Peer)
-								//}
 								logger.Info("gossip block unused", "err", err)
 							} else {
 								logger.Info("gossip block processed", "slot", sbb.Data.Block.Slot)
+								saveBlock(sbb.Data)
 							}
 							seenSlot := cfg.forkChoice.HighestSeen()
 							targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
@@ -164,7 +171,9 @@ func ConsensusStages(ctx context.Context,
 						}
 					}
 				}()
-				logger.Info("waiting for blocks...", "from", seenSlot, "to", targetSlot)
+				logger.Info("waiting for blocks...",
+					"seenSlot", seenSlot,
+					"targetSlot", targetSlot)
 				blocks, err := cfg.source.GetRange(ctx, seenSlot+1, targetSlot-seenSlot)
 				if err != nil {
 					if errors.Is(err, context.Canceled) {
@@ -185,6 +194,7 @@ func ConsensusStages(ctx context.Context,
 						return err
 					} else {
 						log.Info("block processed", "slot", block.Block.Slot)
+						saveBlock(block)
 					}
 				}
 				return nil
@@ -197,7 +207,6 @@ func ConsensusStages(ctx context.Context,
 			ID:          "ForkChoice",
 			Description: `fork choice stage. the wait until the next block is also here (only if at head)`,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				cfg := forkchoice
 				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 				seenSlot := cfg.forkChoice.HighestSeen()
 				if seenSlot != targetSlot {
@@ -243,7 +252,6 @@ func ConsensusStages(ctx context.Context,
 			ID:          "SleepForEpoch",
 			Description: `if at head and we get to this stage, we sleep until the next slot`,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				cfg := forkchoice
 				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 				seenSlot := cfg.forkChoice.HighestSeen()
 				if seenSlot != targetSlot {

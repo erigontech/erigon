@@ -67,6 +67,7 @@ func StageForkChoice(db kv.RwDB,
 		gossipManager:   gossipManager,
 		forkChoice:      forkChoice,
 		caplinFreezer:   caplinFreezer,
+		dataDirFs:       dataDirFs,
 	}
 }
 
