@@ -61,6 +61,16 @@ func NewMemoryBatch(tx kv.Tx, tmpDir string) *MemoryMutation {
 	}
 }
 
+func NewMemoryBatchWithCustomDB(tx kv.Tx, db kv.RwDB, uTx kv.RwTx, tmpDir string) *MemoryMutation {
+	return &MemoryMutation{
+		db:             tx,
+		memDb:          db,
+		memTx:          uTx,
+		deletedEntries: make(map[string]map[string]struct{}),
+		clearedTables:  make(map[string]struct{}),
+	}
+}
+
 func (m *MemoryMutation) UpdateTxn(tx kv.Tx) {
 	m.db = tx
 	m.statelessCursors = nil
