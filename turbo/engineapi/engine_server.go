@@ -598,7 +598,7 @@ func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.E
 
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv3
-func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
+func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload, versionedHashes []libcommon.Hash) (*engine_types.PayloadStatus, error) {
 	return e.newPayload(ctx, payload, clparams.DenebVersion)
 }
 
