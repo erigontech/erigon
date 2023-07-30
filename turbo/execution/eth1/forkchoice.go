@@ -42,7 +42,7 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 	// So we wait at most the amount specified by req.Timeout before just sending out
 	go e.updateForkChoice(ctx, blockHash, safeHash, finalizedHash, outcomeCh)
 	fcuTimer := time.NewTimer(time.Duration(req.Timeout) * time.Millisecond)
-	fmt.Println(time.Duration(time.Duration(req.Timeout) * time.Millisecond).String())
+
 	select {
 	case <-fcuTimer.C:
 		e.logger.Debug("treating forkChoiceUpdated as asyncronous as it is taking too long")
