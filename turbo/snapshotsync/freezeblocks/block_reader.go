@@ -949,7 +949,6 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 		fmt.Printf("Segment %d-%d, eventId %d, offset %d\n", sn.ranges.from, sn.ranges.to, blockEventId, offset)
 		gg := sn.seg.MakeGetter()
 		gg.Reset(offset)
-		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
 		if !gg.MatchPrefix(txnHash[:]) {
 			continue
 		}
