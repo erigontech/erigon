@@ -215,7 +215,7 @@ func (s *EngineServerExperimental) newPayload(ctx context.Context, req *engine_t
 	if version >= clparams.DenebVersion {
 		actualBlobHashes := []libcommon.Hash{}
 		for _, tx := range transactions {
-			actualBlobHashes = append(actualBlobHashes, tx.GetDataHashes()...)
+			actualBlobHashes = append(actualBlobHashes, tx.GetBlobHashes()...)
 		}
 		if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
 			s.logger.Warn("[NewPayload] mismatch in blob hashes",

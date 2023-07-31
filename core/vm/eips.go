@@ -243,22 +243,22 @@ func enable3860(jt *JumpTable) {
 	jt[CREATE2].dynamicGas = gasCreate2Eip3860
 }
 
-// enable4844 applies mini-danksharding (DATAHASH Opcode)
-// - Adds an opcode that returns the versioned data hash of the tx at a index.
+// enable4844 applies mini-danksharding (BLOBHASH opcode)
+// - Adds an opcode that returns the versioned blob hash of the tx at a index.
 func enable4844(jt *JumpTable) {
-	jt[DATAHASH] = &operation{
-		execute:     opDataHash,
+	jt[BLOBHASH] = &operation{
+		execute:     opBlobHash,
 		constantGas: GasFastestStep,
 		numPop:      1,
 		numPush:     1,
 	}
 }
 
-// opDataHash implements DATAHASH opcode
-func opDataHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+// opBlobHash implements the BLOBHASH opcode
+func opBlobHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	idx := scope.Stack.Peek()
-	if idx.LtUint64(uint64(len(interpreter.evm.TxContext().DataHashes))) {
-		hash := interpreter.evm.TxContext().DataHashes[idx.Uint64()]
+	if idx.LtUint64(uint64(len(interpreter.evm.TxContext().BlobHashes))) {
+		hash := interpreter.evm.TxContext().BlobHashes[idx.Uint64()]
 		idx.SetBytes(hash.Bytes())
 	} else {
 		idx.Clear()
