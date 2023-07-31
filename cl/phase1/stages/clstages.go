@@ -282,6 +282,9 @@ func ConsensusClStages(ctx context.Context,
 			},
 			"ListenForForks": {
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					defer func() {
+						shouldForkChoiceSinceReorg = false
+					}()
 					if args.seenEpoch < args.targetEpoch {
 						return "CatchUpEpochs"
 					}
@@ -289,7 +292,6 @@ func ConsensusClStages(ctx context.Context,
 						return "CatchUpBlocks"
 					}
 					if shouldForkChoiceSinceReorg {
-						shouldForkChoiceSinceReorg = false
 						return "ForkChoice"
 					}
 					if args.seenSlot%32 == 0 {
@@ -345,7 +347,7 @@ func ConsensusClStages(ctx context.Context,
 				},
 			},
 			"SleepForSlot": {
-				Description: `if at head and we get to this stage, we sleep until the next slot`,
+				Description: `sleep until the next slot`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
 					return "WaitForPeers"
 				},
