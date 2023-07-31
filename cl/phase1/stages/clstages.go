@@ -244,7 +244,7 @@ func ConsensusClStages(ctx context.Context,
 					if args.seenSlot < args.targetSlot {
 						return "CatchUpBlocks"
 					}
-					return "CleanupAndPruning"
+					return "ListenForForks"
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 
@@ -308,6 +308,9 @@ func ConsensusClStages(ctx context.Context,
 					blocks, err := gossipSource.GetRange(ctx, args.seenSlot, 1)
 					if err != nil {
 						if errors.Is(err, context.Canceled) {
+							return nil
+						}
+						if errors.Is(err, context.DeadlineExceeded) {
 							return nil
 						}
 						return err
