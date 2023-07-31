@@ -248,6 +248,7 @@ func ConsensusClStages(ctx context.Context,
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 
+					// TODO: we need to get the last run block in order to process attestations here
 					////////block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
 					////////	if err = g.forkChoice.OnAttestation(a, true); err != nil {
 					////////		return false
