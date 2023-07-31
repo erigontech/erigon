@@ -1,7 +1,6 @@
 package stages
 
 import (
-	"github.com/ledgerwatch/erigon/cl/clpersist"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
@@ -18,7 +17,6 @@ import (
 type CaplinStagedSyncCfg struct {
 	db              kv.RwDB
 	rpc             *rpc.BeaconRpcP2P
-	source          clpersist.BlockSource
 	genesisCfg      *clparams.GenesisConfig
 	beaconCfg       *clparams.BeaconChainConfig
 	executionClient *execution_client.ExecutionClient
@@ -41,7 +39,6 @@ var (
 
 func CaplinStagedSync(db kv.RwDB,
 	rpc *rpc.BeaconRpcP2P,
-	source clpersist.BlockSource,
 	genesisCfg *clparams.GenesisConfig,
 	beaconCfg *clparams.BeaconChainConfig,
 	state *state.CachingBeaconState,
@@ -56,7 +53,6 @@ func CaplinStagedSync(db kv.RwDB,
 		rpc:             rpc,
 		genesisCfg:      genesisCfg,
 		beaconCfg:       beaconCfg,
-		source:          source,
 		state:           state,
 		executionClient: executionClient,
 		gossipManager:   gossipManager,

@@ -5,13 +5,14 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/rpc"
+	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/tidwall/btree"
 )
 
 type BlockSource interface {
-	GetRange(ctx context.Context, from uint64, count uint64) ([]*cltypes.SignedBeaconBlock, error)
-	SaveBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error
+	GetRange(ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error)
 	PurgeRange(ctx context.Context, from uint64, count uint64) error
 }
 
@@ -21,7 +22,7 @@ type BeaconRpcSource struct {
 	rpc *rpc.BeaconRpcP2P
 }
 
-func (b *BeaconRpcSource) SaveBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
+func (b *BeaconRpcSource) SaveBlocks(ctx context.Context, blocks []*peers.PeeredObject[*cltypes.SignedBeaconBlock]) error {
 	// it is a no-op because there is no need to do this
 	return nil
 }
@@ -32,17 +33,20 @@ func NewBeaconRpcSource(rpc *rpc.BeaconRpcP2P) *BeaconRpcSource {
 	}
 }
 
-func (b *BeaconRpcSource) GetRange(ctx context.Context, from uint64, count uint64) ([]*cltypes.SignedBeaconBlock, error) {
+func (b *BeaconRpcSource) GetRange(ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
 	if count == 0 {
 		return nil, nil
 	}
 	responses, pid, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, from, from+count)
 	if err != nil {
 		b.rpc.BanPeer(pid)
-		// Wait a bit in this case (we do not need to be super performant here).
 		return nil, err
 	}
-	return responses, nil
+	out := make([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0, len(responses))
+	for _, v := range responses {
+		out = append(out, &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: v, Peer: pid})
+	}
+	return out, nil
 }
 
 // a noop for rpc source since we always return new data
@@ -50,51 +54,67 @@ func (b *BeaconRpcSource) PurgeRange(ctx context.Context, from uint64, count uin
 	return nil
 }
 
-var _ BlockSource = (*CachingSource)(nil)
+var _ BlockSource = (*GossipSource)(nil)
 
-type CachingSource struct {
-	parent BlockSource
+type GossipSource struct {
+	gossip       *network.GossipManager
+	gossipBlocks <-chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]
 
-	blocks *btree.Map[uint64, *cltypes.SignedBeaconBlock]
+	mu     sync.Mutex
+	blocks *btree.Map[uint64, chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]]
 }
 
-func NewCachingSource(parent BlockSource) *CachingSource {
-	return &CachingSource{
-		parent: parent,
-		blocks: btree.NewMap[uint64, *cltypes.SignedBeaconBlock](32),
+func NewGossipSource(ctx context.Context, gossip *network.GossipManager) *GossipSource {
+	g := &GossipSource{
+		gossip:       gossip,
+		gossipBlocks: gossip.SubscribeSignedBeaconBlocks(ctx),
+		blocks:       btree.NewMap[uint64, chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]](32),
 	}
-}
-
-func (b *CachingSource) GetRange(ctx context.Context, from uint64, count uint64) ([]*cltypes.SignedBeaconBlock, error) {
-	responses, err := b.parent.GetRange(ctx, from, count)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*cltypes.SignedBeaconBlock, 0, count)
-	err = b.SaveBlocks(ctx, responses)
-	if err != nil {
-		return nil, err
-	}
-	b.blocks.Ascend(from, func(key uint64, value *cltypes.SignedBeaconBlock) bool {
-		if len(out) >= int(count) {
-			return false
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case recv := <-g.gossipBlocks:
+				ch := g.grabOrCreate(ctx, recv.Data.Block.Slot)
+				select {
+				case ch <- recv:
+				default:
+				}
+			}
 		}
-		out = append(out, value)
-		return true
-	})
-	return out, err
+	}()
+	return g
 }
 
-func (b *CachingSource) SaveBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
-	for _, v := range blocks {
-		b.blocks.Set(v.Block.Slot, v)
+func (b *GossipSource) grabOrCreate(ctx context.Context, id uint64) chan *peers.PeeredObject[*cltypes.SignedBeaconBlock] {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ch, ok := b.blocks.Get(id)
+	if !ok {
+		ch = make(chan *peers.PeeredObject[*cltypes.SignedBeaconBlock], 3)
+		b.blocks.Set(id, ch)
 	}
-	return nil
+	return ch
+}
+func (b *GossipSource) GetRange(ctx context.Context, from uint64, count uint64) ([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
+	out := make([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0, count)
+	for i := from; i < from+count; i++ {
+		ch := b.grabOrCreate(ctx, i)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case item := <-ch:
+			out = append(out, item)
+		}
+	}
+	return out, nil
 }
 
-func (b *CachingSource) PurgeRange(ctx context.Context, from uint64, count uint64) error {
-	b.parent.PurgeRange(ctx, from, count)
-	b.blocks.AscendMut(from, func(key uint64, value *cltypes.SignedBeaconBlock) bool {
+func (b *GossipSource) PurgeRange(ctx context.Context, from uint64, count uint64) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.blocks.AscendMut(from, func(key uint64, value chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]) bool {
 		if key >= from+count {
 			return false
 		}
@@ -102,36 +122,4 @@ func (b *CachingSource) PurgeRange(ctx context.Context, from uint64, count uint6
 		return true
 	})
 	return nil
-}
-
-var _ BlockSource = (*MutexSource)(nil)
-
-type MutexSource struct {
-	parent BlockSource
-
-	mu sync.Mutex
-}
-
-func NewMutexSource(parent BlockSource) *MutexSource {
-	return &MutexSource{
-		parent: parent,
-	}
-}
-
-func (b *MutexSource) GetRange(ctx context.Context, from uint64, count uint64) ([]*cltypes.SignedBeaconBlock, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.parent.GetRange(ctx, from, count)
-}
-
-func (b *MutexSource) SaveBlocks(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.parent.SaveBlocks(ctx, blocks)
-}
-
-func (b *MutexSource) PurgeRange(ctx context.Context, from uint64, count uint64) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.parent.PurgeRange(ctx, from, count)
 }

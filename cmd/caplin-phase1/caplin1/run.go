@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/cl/clpersist"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -93,11 +92,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	// start the downloader service
 	//go initDownloader(beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
 
-	beaconSource := clpersist.NewBeaconRpcSource(beaconRpc)
-	source := clpersist.NewMutexSource(beaconSource)
-
-	forkChoiceConfig := stages.StageForkChoice(nil, beaconRpc, source, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
-
+	forkChoiceConfig := stages.CaplinStagedSync(nil, beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
 	sync := stagedsync.New(
 		stages.ConsensusStages(
 			ctx,

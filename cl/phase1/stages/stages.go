@@ -2,12 +2,11 @@ package stages
 
 import (
 	"context"
-	"errors"
-	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clpersist"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/spf13/afero"
 	"golang.org/x/sync/errgroup"
@@ -21,13 +20,19 @@ import (
 func ConsensusStages(ctx context.Context,
 	cfg CaplinStagedSyncCfg,
 ) []*stagedsync.Stage {
-	gossipBlocks := cfg.gossipManager.SubscribeSignedBeaconBlocks(ctx)
-	saveBlock := func(block *cltypes.SignedBeaconBlock) error {
-		err := clpersist.SaveBlockWithConfig(afero.NewBasePathFs(cfg.dataDirFs, "caplin/beacon"), block, cfg.beaconCfg)
-		if err != nil {
-			log.Error("failed to persist block to store", "slot", block.Block.Slot, "err", err)
+	rpcSource := clpersist.NewBeaconRpcSource(cfg.rpc)
+	gossipSource := clpersist.NewGossipSource(ctx, cfg.gossipManager)
+	processBlock := func(block *peers.PeeredObject[*cltypes.SignedBeaconBlock], newPayload, fullValidation bool) error {
+		if err := cfg.forkChoice.OnBlock(block.Data, newPayload, fullValidation); err != nil {
+			log.Warn("fail to process block", "reason", err, "slot", block.Data.Block.Slot)
+			return err
 		}
-		return err
+		// NOTE: this error is ignored and logged only!
+		err := clpersist.SaveBlockWithConfig(afero.NewBasePathFs(cfg.dataDirFs, "caplin/beacon"), block.Data, cfg.beaconCfg)
+		if err != nil {
+			log.Error("failed to persist block to store", "slot", block.Data.Block.Slot, "err", err)
+		}
+		return nil
 	}
 	return []*stagedsync.Stage{
 		{
@@ -42,15 +47,17 @@ func ConsensusStages(ctx context.Context,
 		},
 		{
 			ID:          "CatchUpEpochs",
-			Description: "catch up epochs",
+			Description: `if we are 1 or more epochs behind, we download in parallel by epoch`,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) - 1
-				seenSlot := cfg.forkChoice.HighestSeen()
-				seenEpoch := seenSlot / cfg.beaconCfg.SlotsPerEpoch
-				currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+				targetEpoch, seenEpoch := getEpochs(cfg)
 				if seenEpoch >= targetEpoch {
 					return nil
 				}
+				currentSlot, seenSlot := getSlots(cfg)
+				if seenSlot >= currentSlot {
+					return nil
+				}
+
 				totalEpochs := targetEpoch - seenEpoch
 				logger.Info("we are epochs behind - downloading epochs from reqresp",
 					"fromEpoch", seenEpoch,
@@ -61,56 +68,46 @@ func ConsensusStages(ctx context.Context,
 					"currentSlot", currentSlot,
 				)
 				// now we download the missing blocks
-
-				type resp struct {
-					blocks []*cltypes.SignedBeaconBlock
-				}
-				chans := make([]chan resp, 0, totalEpochs)
+				chans := make([]chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0, totalEpochs)
 				ctx, cn := context.WithCancel(ctx)
 				egg, ctx := errgroup.WithContext(ctx)
+
+				// is 8 too many?
 				egg.SetLimit(8)
 				defer cn()
 				for i := seenEpoch; i <= targetEpoch; i = i + 1 {
 					ii := i
-					o := make(chan resp, 0)
+					o := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0)
 					chans = append(chans, o)
 					egg.Go(func() error {
 						logger.Debug("request epoch from reqresp", "epoch", ii)
-						blocks, err := cfg.source.GetRange(ctx, ii*cfg.beaconCfg.SlotsPerEpoch, cfg.beaconCfg.SlotsPerEpoch)
+						blocks, err := rpcSource.GetRange(ctx, ii*cfg.beaconCfg.SlotsPerEpoch, cfg.beaconCfg.SlotsPerEpoch)
 						if err != nil {
 							return err
 						}
 						logger.Debug("got epoch from reqresp", "epoch", ii)
-						o <- resp{blocks}
+						o <- blocks
 						return nil
 					})
 				}
 				errchan := make(chan error)
 				go func() {
-					defer func() {
-						close(errchan)
-					}()
+					defer close(errchan)
 					for _, v := range chans {
 						select {
 						case <-ctx.Done():
 							return
-						default:
-						}
-						epochResp := <-v
-						for _, block := range epochResp.blocks {
-							if block.Block.Slot <= seenSlot {
-								continue
-							}
-							if err := cfg.forkChoice.OnBlock(block, false, true); err != nil {
-								log.Warn("fail to process block", "reason", err, "slot", block.Block.Slot)
-								err2 := cfg.source.PurgeRange(context.Background(), block.Block.Slot, totalEpochs)
-								if err2 != nil {
-									log.Error("failed to purge range", "err", err2)
+						case epochResp := <-v:
+							for _, block := range epochResp {
+								if block.Data.Block.Slot <= seenSlot {
+									continue
 								}
-								errchan <- err
-								return
+								err := processBlock(block, false, true)
+								if err != nil {
+									errchan <- err
+									return
+								}
 							}
-							saveBlock(block)
 						}
 					}
 				}()
@@ -129,67 +126,46 @@ func ConsensusStages(ctx context.Context,
 			Description: `this stage runs if the current node is not at head, otherwise it moves on.
 			`,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				seenSlot := cfg.forkChoice.HighestSeen()
-				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-
-				seenEpoch := seenSlot / cfg.beaconCfg.SlotsPerEpoch
-				targetEpoch := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) - 1
+				targetEpoch, seenEpoch := getEpochs(cfg)
 				if seenEpoch < targetEpoch {
 					return nil
 				}
+				targetSlot, seenSlot := getSlots(cfg)
 				if seenSlot >= targetSlot {
 					return nil
 				}
-
 				// wait for three slots... should be plenty enough time
 				ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot)*time.Second*3)
 				defer cn()
-
-				go func() {
-					for {
-						select {
-						case sbb := <-gossipBlocks:
-							if err := cfg.forkChoice.OnBlock(sbb.Data, true, true); err != nil {
-								logger.Info("gossip block unused", "err", err)
-							} else {
-								logger.Info("gossip block processed", "slot", sbb.Data.Block.Slot)
-								saveBlock(sbb.Data)
-							}
-							seenSlot := cfg.forkChoice.HighestSeen()
-							targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-							if seenSlot >= targetSlot {
-								cn()
-								return
-							}
-						case <-ctx.Done():
-							return
-						}
-					}
-				}()
 				logger.Info("waiting for blocks...",
 					"seenSlot", seenSlot,
-					"targetSlot", targetSlot)
-				blocks, err := cfg.source.GetRange(ctx, seenSlot+1, targetSlot-seenSlot)
-				if err != nil {
-					if errors.Is(err, context.Canceled) {
-						return nil
-					}
-					if strings.Contains(err.Error(), "context canceled") {
-						return nil
-					}
-					return err
-				}
-				for _, block := range blocks {
-					if err := cfg.forkChoice.OnBlock(block, false, true); err != nil {
-						log.Warn("fail to process block", "reason", err, "slot", block.Block.Slot)
-						err2 := cfg.source.PurgeRange(context.Background(), block.Block.Slot, targetSlot)
-						if err2 != nil {
-							log.Error("failed to purge range", "err", err2)
+					"targetSlot", targetSlot,
+				)
+				respCh := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock])
+				errCh := make(chan error)
+				sources := []clpersist.BlockSource{gossipSource, rpcSource}
+
+				for _, v := range sources {
+					sourceFunc := v.GetRange
+					go func() {
+						blocks, err := sourceFunc(ctx, seenSlot+1, targetSlot-seenSlot)
+						if err != nil {
+							errCh <- err
+							return
 						}
-						return err
-					} else {
-						log.Info("block processed", "slot", block.Block.Slot)
-						saveBlock(block)
+						respCh <- blocks
+					}()
+				}
+
+				select {
+				case err := <-errCh:
+					return err
+				case blocks := <-respCh:
+					for _, block := range blocks {
+						if err := processBlock(block, false, true); err != nil {
+							return err
+						}
+						log.Info("block processed", "slot", block.Data.Block.Slot)
 					}
 				}
 				return nil
@@ -204,8 +180,7 @@ func ConsensusStages(ctx context.Context,
 			also, we will wait up to delay seconds to deal with attestations + side forks
 			`,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-				seenSlot := cfg.forkChoice.HighestSeen()
+				targetSlot, seenSlot := getSlots(cfg)
 				if seenSlot != targetSlot {
 					return nil
 				}
@@ -246,11 +221,34 @@ func ConsensusStages(ctx context.Context,
 			},
 		},
 		{
+			ID: "CleanupAndPruning",
+			Description: ` cleanup and pruning is done here, but only if we are at head
+			`,
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
+				targetSlot, seenSlot := getSlots(cfg)
+				if seenSlot != targetSlot {
+					return nil
+				}
+				// things below this will only happen on epoch boundaries
+				if seenSlot%cfg.beaconCfg.SlotsPerEpoch != 0 {
+					return nil
+				}
+				// clean up some old ranges
+				err := gossipSource.PurgeRange(ctx, 1, seenSlot-cfg.beaconCfg.SlotsPerEpoch*4)
+				if err != nil {
+					logger.Error("could not prune old ranges", "err", err, "slot", seenSlot-cfg.beaconCfg.SlotsPerEpoch*4)
+				}
+				return nil
+			},
+			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, logger log.Logger) error {
+				return nil
+			},
+		},
+		{
 			ID:          "SleepForSlot",
 			Description: `if at head and we get to this stage, we sleep until the next slot`,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, logger log.Logger) error {
-				targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-				seenSlot := cfg.forkChoice.HighestSeen()
+				targetSlot, seenSlot := getSlots(cfg)
 				if seenSlot != targetSlot {
 					return nil
 				}
@@ -266,6 +264,18 @@ func ConsensusStages(ctx context.Context,
 			},
 		},
 	}
+}
+
+func getSlots(cfg CaplinStagedSyncCfg) (targetSlot, seenSlot uint64) {
+	targetSlot = utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+	seenSlot = cfg.forkChoice.HighestSeen()
+	return
+}
+func getEpochs(cfg CaplinStagedSyncCfg) (targetEpoch, seenEpoch uint64) {
+	seenSlot := cfg.forkChoice.HighestSeen()
+	seenEpoch = seenSlot / cfg.beaconCfg.SlotsPerEpoch
+	targetEpoch = utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) - 1
+	return
 }
 
 func SpawnStageWaitForPeers(ctx context.Context, cfg CaplinStagedSyncCfg, s *stagedsync.StageState) error {
