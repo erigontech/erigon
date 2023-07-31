@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -78,6 +79,9 @@ func ConsensusClStages(ctx context.Context,
 		}
 		return nil
 	}
+
+	// TODO: this is an ugly hack, but it works!
+	shouldForkChoiceSinceReorg := false
 	return &clstages.StageGraph[*Cfg, Args]{
 		ArgsFunc: func(ctx context.Context, cfg *Cfg) (args Args) {
 			args.seenSlot = cfg.forkChoice.HighestSeen()
@@ -166,7 +170,7 @@ func ConsensusClStages(ctx context.Context,
 									if block.Data.Block.Slot <= args.seenSlot {
 										continue
 									}
-									err := processBlock(block, false, true)
+									err := processBlock(block, false, false)
 									if err != nil {
 										errchan <- err
 										return
@@ -224,7 +228,7 @@ func ConsensusClStages(ctx context.Context,
 							if err := processBlock(block, false, true); err != nil {
 								return err
 							}
-							log.Info("block processed", "slot", block.Data.Block.Slot)
+							logger.Info("block processed", "slot", block.Data.Block.Slot)
 						}
 					}
 					return nil
@@ -284,12 +288,38 @@ func ConsensusClStages(ctx context.Context,
 					if args.seenSlot < args.targetSlot {
 						return "CatchUpBlocks"
 					}
+					if shouldForkChoiceSinceReorg {
+						shouldForkChoiceSinceReorg = false
+						return "ForkChoice"
+					}
 					if args.seenSlot%32 == 0 {
 						return "CleanupAndPruning"
 					}
 					return "SleepForSlot"
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+					slotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, args.targetSlot).Add(
+						time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second / 3,
+					)
+					waitDur := slotTime.Sub(time.Now())
+					ctx, cn := context.WithTimeout(ctx, waitDur)
+					defer cn()
+					// try to get the current block
+					blocks, err := gossipSource.GetRange(ctx, args.seenSlot, 1)
+					if err != nil {
+						if errors.Is(err, context.Canceled) {
+							return nil
+						}
+						return err
+					}
+					for _, block := range blocks {
+						if err := processBlock(block, false, true); err != nil {
+							// its okay if block processing fails
+							logger.Warn("reorg block failed validation", "err", err)
+							return nil
+						}
+						shouldForkChoiceSinceReorg = true
+					}
 					return nil
 				},
 			},
