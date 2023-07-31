@@ -33,6 +33,37 @@ func sendForkchoiceErrorWithoutWaiting(ch chan forkchoiceOutcome, err error) {
 	}
 }
 
+// verifyForkchoiceHashes verifies the finalized and safe hash of the forkchoice state
+func (e *EthereumExecutionModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, blockHash, finalizedHash, safeHash libcommon.Hash) (bool, error) {
+	// Client software MUST return -38002: Invalid forkchoice state error if the payload referenced by
+	// forkchoiceState.headBlockHash is VALID and a payload referenced by either forkchoiceState.finalizedBlockHash or
+	// forkchoiceState.safeBlockHash does not belong to the chain defined by forkchoiceState.headBlockHash
+	headNumber := rawdb.ReadHeaderNumber(tx, blockHash)
+	finalizedNumber := rawdb.ReadHeaderNumber(tx, finalizedHash)
+	safeNumber := rawdb.ReadHeaderNumber(tx, finalizedHash)
+
+	if finalizedHash != (libcommon.Hash{}) && finalizedHash != blockHash {
+		canonical, err := e.isCanonicalHash(ctx, tx, finalizedHash)
+		if err != nil {
+			return false, err
+		}
+		if !canonical || *headNumber <= *finalizedNumber {
+			return false, nil
+		}
+
+	}
+	if safeHash != (libcommon.Hash{}) && safeHash != blockHash {
+		canonical, err := e.isCanonicalHash(ctx, tx, safeHash)
+		if err != nil {
+			return false, err
+		}
+		if !canonical || *headNumber <= *safeNumber {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *execution.ForkChoice) (*execution.ForkChoiceReceipt, error) {
 	blockHash := gointerfaces.ConvertH256ToHash(req.HeadBlockHash)
 	safeHash := gointerfaces.ConvertH256ToHash(req.SafeBlockHash)
@@ -107,6 +138,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 	if canonicalHash == blockHash {
 		// if block hash is part of the canononical chain treat it as no-op.
 		writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
+		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+		if !valid {
+
+		}
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
 			Status:          execution.ValidationStatus_Success,
@@ -225,6 +264,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			e.logger.Warn("bad forkchoice", "hash", headHash)
 		}
 	} else {
+		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+		if !valid {
+
+		}
 		if err := tx.Commit(); err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
