@@ -60,7 +60,7 @@ func ClStagesCfg(
 	}
 }
 
-// StateStages are all stages necessary for basic unwind and stage computation, it is primarly used to process side forks and memory execution.
+// ConsensusClStages creates a stage loop container to be used to run caplin
 func ConsensusClStages(ctx context.Context,
 	cfg *Cfg,
 ) *clstages.StageGraph[*Cfg, Args] {
@@ -82,7 +82,6 @@ func ConsensusClStages(ctx context.Context,
 		ArgsFunc: func(ctx context.Context, cfg *Cfg) (args Args) {
 			args.seenSlot = cfg.forkChoice.HighestSeen()
 			args.seenEpoch = args.seenSlot / cfg.beaconCfg.SlotsPerEpoch
-
 			args.targetSlot = utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 			args.targetEpoch = utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) - 1
 			return
@@ -184,12 +183,12 @@ func ConsensusClStages(ctx context.Context,
 				},
 			},
 			"CatchUpBlocks": {
-				Description: `this stage runs if the current node is not at head, otherwise it moves on.`,
+				Description: `if we are within the epoch but not at head, we run catchupblocks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
 					if args.seenEpoch < args.targetEpoch {
 						return "CatchUpEpochs"
 					}
-					if args.seenSlot != args.targetSlot {
+					if args.seenSlot < args.targetSlot {
 						return "CatchUpBlocks"
 					}
 					return "ForkChoice"
@@ -238,7 +237,7 @@ func ConsensusClStages(ctx context.Context,
 					if args.seenEpoch < args.targetEpoch {
 						return "CatchUpEpochs"
 					}
-					if args.seenSlot != args.targetSlot {
+					if args.seenSlot < args.targetSlot {
 						return "CatchUpBlocks"
 					}
 					return "CleanupAndPruning"
@@ -282,7 +281,7 @@ func ConsensusClStages(ctx context.Context,
 					if args.seenEpoch < args.targetEpoch {
 						return "CatchUpEpochs"
 					}
-					if args.seenSlot != args.targetSlot {
+					if args.seenSlot < args.targetSlot {
 						return "CatchUpBlocks"
 					}
 					if args.seenSlot%32 == 0 {
@@ -300,7 +299,7 @@ func ConsensusClStages(ctx context.Context,
 					if args.seenEpoch < args.targetEpoch {
 						return "CatchUpEpochs"
 					}
-					if args.seenSlot != args.targetSlot {
+					if args.seenSlot < args.targetSlot {
 						return "CatchUpBlocks"
 					}
 					return "SleepForSlot"
@@ -320,7 +319,7 @@ func ConsensusClStages(ctx context.Context,
 					return "WaitForPeers"
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					nextSlot := args.targetSlot + 1
+					nextSlot := args.seenSlot + 1
 					nextSlotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, nextSlot)
 					nextSlotDur := nextSlotTime.Sub(time.Now())
 					logger.Info("sleeping until next slot", "slot", nextSlot, "time", nextSlotTime, "dur", nextSlotDur)
