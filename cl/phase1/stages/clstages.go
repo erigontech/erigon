@@ -70,6 +70,7 @@ func ConsensusClStages(ctx context.Context,
 	processBlock := func(block *peers.PeeredObject[*cltypes.SignedBeaconBlock], newPayload, fullValidation bool) error {
 		if err := cfg.forkChoice.OnBlock(block.Data, newPayload, fullValidation); err != nil {
 			log.Warn("fail to process block", "reason", err, "slot", block.Data.Block.Slot)
+			cfg.rpc.BanPeer(block.Peer)
 			return err
 		}
 		// NOTE: this error is ignored and logged only!
