@@ -2,6 +2,8 @@ package stages
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clpersist"
@@ -59,14 +61,12 @@ func ConsensusStages(ctx context.Context,
 				}
 
 				totalEpochs := targetEpoch - seenEpoch
-				logger.Info("we are epochs behind - downloading epochs from reqresp",
-					"fromEpoch", seenEpoch,
-					"toEpoch", targetEpoch,
-					"epochs", totalEpochs,
-					"seenSlot", seenSlot,
-					"targetSlot", (1+targetEpoch)*cfg.beaconCfg.SlotsPerEpoch-1,
-					"currentSlot", currentSlot,
+				logger = logger.New(
+					"slot", fmt.Sprintf("%d/%d", seenSlot, currentSlot),
+					"epoch", fmt.Sprintf("%d/%d(%d)", seenEpoch, targetEpoch, (1+targetEpoch)*cfg.beaconCfg.SlotsPerEpoch-1),
 				)
+				logger.Info("downloading epochs from reqresp")
+				counter := atomic.Int64{}
 				// now we download the missing blocks
 				chans := make([]chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0, totalEpochs)
 				ctx, cn := context.WithCancel(ctx)
@@ -80,12 +80,11 @@ func ConsensusStages(ctx context.Context,
 					o := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0)
 					chans = append(chans, o)
 					egg.Go(func() error {
-						logger.Debug("request epoch from reqresp", "epoch", ii)
 						blocks, err := rpcSource.GetRange(ctx, ii*cfg.beaconCfg.SlotsPerEpoch, cfg.beaconCfg.SlotsPerEpoch)
 						if err != nil {
 							return err
 						}
-						logger.Debug("got epoch from reqresp", "epoch", ii)
+						logger.Info("downloading epochs from reqresp", "progress", fmt.Sprintf("%f", float64(counter.Add(1))/float64(totalEpochs))+"%")
 						o <- blocks
 						return nil
 					})
