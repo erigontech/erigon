@@ -200,13 +200,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			return
 		}
 	}
-	if currentParentNumber != fcuHeader.Number.Uint64()-1 {
-		e.executionPipeline.UnwindTo(currentParentNumber, libcommon.Hash{})
-		if e.historyV3 {
-			if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber); err != nil {
-				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-				return
-			}
+
+	e.executionPipeline.UnwindTo(currentParentNumber, libcommon.Hash{})
+	if e.historyV3 {
+		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
 		}
 	}
 

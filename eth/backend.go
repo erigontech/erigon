@@ -741,15 +741,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			false,
 			config.Miner.EnabledPOS)
 		backend.engineBackendRPC = engineBackendRPC
-		engine, err = execution_client.NewExecutionClientDirect(ctx,
-			engineBackendRPC,
-		)
 	} else {
 		engineBackendRPC := engineapi.NewEngineServer(ctx, logger, chainConfig, executionRpc, backend.chainDB, blockReader, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
 		backend.engineBackendRPC = engineBackendRPC
-		engine, err = execution_client.NewExecutionClientDirect(ctx,
-			engineBackendRPC,
-		)
 	}
 
 	return backend, nil
