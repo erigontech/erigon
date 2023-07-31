@@ -102,11 +102,12 @@ func ConsensusClStages(ctx context.Context,
 						return nil
 					}
 					waitWhenNotEnoughPeers := 3 * time.Second
+					minPeersForDownload := uint64(4)
 					for {
 						if peersCount > minPeersForDownload {
 							break
 						}
-						log.Debug("[Caplin] Waiting For Peers", "have", peersCount, "needed", minPeersForSyncStart, "retryIn", waitWhenNotEnoughPeers)
+						log.Debug("[Caplin] Waiting For Peers", "have", peersCount, "needed", minPeersForDownload, "retryIn", waitWhenNotEnoughPeers)
 						time.Sleep(waitWhenNotEnoughPeers)
 						peersCount, err = cfg.rpc.Peers()
 						if err != nil {
