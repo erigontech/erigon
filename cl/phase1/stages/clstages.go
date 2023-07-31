@@ -307,10 +307,7 @@ func ConsensusClStages(ctx context.Context,
 					// try to get the current block
 					blocks, err := gossipSource.GetRange(ctx, args.seenSlot, 1)
 					if err != nil {
-						if errors.Is(err, context.Canceled) {
-							return nil
-						}
-						if errors.Is(err, context.DeadlineExceeded) {
+						if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 							return nil
 						}
 						return err
@@ -343,6 +340,7 @@ func ConsensusClStages(ctx context.Context,
 					if err != nil {
 						return err
 					}
+					//TODO: probably can clear old superepoch in fs here as well!
 					return nil
 				},
 			},
