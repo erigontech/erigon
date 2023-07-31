@@ -1,6 +1,9 @@
 package flags
 
-import "github.com/urfave/cli/v2"
+import (
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/urfave/cli/v2"
+)
 
 var CLDefaultFlags = []cli.Flag{
 	&SentinelDiscoveryPort,
@@ -30,4 +33,5 @@ var CLDefaultFlags = []cli.Flag{
 	&EngineApiHostFlag,
 	&EngineApiPortFlag,
 	&JwtSecret,
+	&utils.DataDirFlag,
 }
