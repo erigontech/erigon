@@ -226,7 +226,7 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					case blocks := <-respCh:
 						for _, block := range blocks {
-							if err := processBlock(block, false, true); err != nil {
+							if err := processBlock(block, true, true); err != nil {
 								return err
 							}
 							logger.Info("block processed", "slot", block.Data.Block.Slot)
