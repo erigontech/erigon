@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
@@ -86,15 +87,15 @@ func (e *EngineServerExperimental) handleNewPayload(
 	}, nil
 }
 
-func convertGrpcStatusToEngineStatus(status execution.ValidationStatus) engine_types.EngineStatus {
+func convertGrpcStatusToEngineStatus(status execution.ExecutionStatus) engine_types.EngineStatus {
 	switch status {
-	case execution.ValidationStatus_Success:
+	case execution.ExecutionStatus_Success:
 		return engine_types.ValidStatus
-	case execution.ValidationStatus_MissingSegment | execution.ValidationStatus_TooFarAway:
+	case execution.ExecutionStatus_MissingSegment | execution.ExecutionStatus_TooFarAway:
 		return engine_types.AcceptedStatus
-	case execution.ValidationStatus_BadBlock:
+	case execution.ExecutionStatus_BadBlock:
 		return engine_types.InvalidStatus
-	case execution.ValidationStatus_Busy:
+	case execution.ExecutionStatus_Busy:
 		return engine_types.SyncingStatus
 	}
 	panic("giulio u stupid.")
@@ -143,10 +144,13 @@ func (e *EngineServerExperimental) handlesForkChoice(
 	if err != nil {
 		return nil, err
 	}
-	if status == execution.ValidationStatus_Busy {
+	if status == execution.ExecutionStatus_InvalidForkchoice {
+		return nil, &engine_helpers.InvalidForkchoiceStateErr
+	}
+	if status == execution.ExecutionStatus_Busy {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
-	if status == execution.ValidationStatus_BadBlock {
+	if status == execution.ExecutionStatus_BadBlock {
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus}, nil
 	}
 	return &engine_types.PayloadStatus{

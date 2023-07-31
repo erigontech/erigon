@@ -320,8 +320,8 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 			return nil
 		}
 	}
-
 	if notifications != nil && notifications.Accumulator != nil && currentHeder != nil {
+
 		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeder)
 		if currentHeder.Number.Uint64() == 0 {
 			notifications.Accumulator.StartChange(0, currentHeder.Hash(), nil, false)
