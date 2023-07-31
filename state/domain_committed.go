@@ -627,6 +627,12 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	return
 }
 
+func (d *DomainCommitted) Close() {
+	d.Domain.Close()
+	d.updates.keys.Reset()
+	d.updates.tree.Clear(true)
+}
+
 // Evaluates commitment for processed state.
 func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
 	if dbg.DiscardCommitment() {
@@ -667,12 +673,6 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 		return nil, nil, fmt.Errorf("invalid commitment mode: %d", d.mode)
 	}
 	return rootHash, branchNodeUpdates, err
-}
-
-func (d *DomainCommitted) Close() {
-	d.Domain.Close()
-	d.updates.keys.Reset()
-	d.updates.tree.Clear(true)
 }
 
 var keyCommitmentState = []byte("state")

@@ -803,7 +803,8 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 			}
 			datsz += uint64(item.decompressor.Size())
 			idxsz += uint64(item.index.Size())
-			files += 2
+			idxsz += uint64(item.bindex.Size())
+			files += 3
 		}
 		return true
 	})
@@ -1548,7 +1549,11 @@ func (d *Domain) Rotate() flusher {
 	return hf
 }
 
-var COMPARE_INDEXES = false // if true, will compare values from Btree and INvertedIndex
+var (
+	CompareRecsplitBtreeIndexes = false // if true, will compare values from Btree and InvertedIndex
+	UseBtreeForColdFiles        = false // if true, will use btree for cold files
+	UseBtreeForWarmFiles        = false // if true, will use btree for warm files
+)
 
 func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint64) (v []byte, found bool, err error) {
 	dc.d.stats.FilesQueries.Add(1)
@@ -1604,11 +1609,34 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 			continue
 		}
 
-		reader := dc.statelessIdxReader(i)
-		if reader.Empty() {
-			continue
+		var offset uint64
+		switch UseBtreeForWarmFiles {
+		case true:
+			bt := dc.statelessBtree(i)
+			if bt.Empty() {
+				continue
+			}
+			_, v, ok, err := bt.Get(filekey)
+			if err != nil {
+				return nil, false, err
+			}
+			fmt.Printf("getLatestFromWarmFiles %x %x %v\n", filekey, v, ok)
+			if !ok {
+				LatestStateReadWarmNotFound.UpdateDuration(t)
+				return nil, false, nil
+			}
+			offset = binary.BigEndian.Uint64(v)
+		default:
+			reader := dc.statelessIdxReader(i)
+			if reader.Empty() {
+				continue
+				LatestStateReadWarmNotFound.UpdateDuration(t)
+				return nil, false, nil
+			}
+			offset = reader.Lookup(filekey)
 		}
-		offset := reader.Lookup(filekey)
+
+		//dc.d.stats.FilesQuerie.Add(1)
 		g := dc.statelessGetter(i)
 		g.Reset(offset)
 		k, _ := g.NextUncompressed()
@@ -1616,14 +1644,6 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 			continue
 		}
 		v, _ := g.NextUncompressed()
-		//_, v, ok, err := dc.statelessBtree(i).Get(filekey)
-		//if err != nil {
-		//	return nil, false, err
-		//}
-		//if !ok {
-		//	LatestStateReadWarmNotFound.UpdateDuration(t)
-		//	break
-		//}
 		LatestStateReadWarm.UpdateDuration(t)
 		return v, true, nil
 	}
@@ -1715,13 +1735,29 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 			continue
 		}
 
-		reader := dc.statelessIdxReader(i)
-		if reader.Empty() {
-			LatestStateReadColdNotFound.UpdateDuration(t)
-			return nil, false, nil
+		var offset uint64
+		switch UseBtreeForColdFiles {
+		case true:
+			_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey)
+			if err != nil {
+				return nil, false, err
+			}
+			fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
+			if !ok {
+				LatestStateReadColdNotFound.UpdateDuration(t)
+				return nil, false, nil
+			}
+			offset = binary.BigEndian.Uint64(v)
+		default:
+			reader := dc.statelessIdxReader(int(exactColdShard))
+			if reader.Empty() {
+				LatestStateReadColdNotFound.UpdateDuration(t)
+				return nil, false, nil
+			}
+			offset = reader.Lookup(filekey)
 		}
-		offset := reader.Lookup(filekey)
-		g := dc.statelessGetter(i)
+
+		g := dc.statelessGetter(int(exactColdShard))
 		g.Reset(offset)
 		k, _ := g.NextUncompressed()
 		if !bytes.Equal(filekey, k) {
@@ -1730,14 +1766,6 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 		}
 		v, _ = g.NextUncompressed()
 
-		//_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey)
-		//if err != nil {
-		//	return nil, false, err
-		//}
-		//if !ok {
-		//	LatestStateReadColdNotFound.UpdateDuration(t)
-		//	return nil, false, nil
-		//}
 		LatestStateReadCold.UpdateDuration(t)
 		return v, true, nil
 	}

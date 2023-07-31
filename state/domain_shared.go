@@ -72,6 +72,7 @@ type SharedDomains struct {
 	Storage    *Domain
 	Code       *Domain
 	Commitment *DomainCommitted
+	trace      bool
 	//TracesTo   *InvertedIndex
 	//LogAddrs   *InvertedIndex
 	//LogTopics  *InvertedIndex
@@ -128,11 +129,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, step uint64, 
 }
 
 func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn uint64, err error) {
-	//cmcx := sd.Commitment.MakeContext()
-	//defer cmcx.Close()
-	cmcx := sd.aggCtx.commitment
-
-	bn, txn, err = sd.Commitment.SeekCommitment(fromTx, toTx, cmcx)
+	bn, txn, err = sd.Commitment.SeekCommitment(fromTx, toTx, sd.aggCtx.commitment)
 	sd.SetBlockNum(bn)
 	sd.SetTxNum(txn)
 	return
@@ -473,6 +470,13 @@ func (sd *SharedDomains) SetTx(tx kv.RwTx) {
 }
 
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
+	if txNum%sd.Account.aggregationStep == 1 {
+		_, err := sd.Commit(true, sd.trace)
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	sd.txNum.Store(txNum)
 	sd.Account.SetTxNum(txNum)
 	sd.Code.SetTxNum(txNum)

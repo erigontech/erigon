@@ -31,6 +31,11 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/log/v3"
+	btree2 "github.com/tidwall/btree"
+	"golang.org/x/exp/slices"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -43,10 +48,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
-	btree2 "github.com/tidwall/btree"
-	"golang.org/x/exp/slices"
-	"golang.org/x/sync/errgroup"
 )
 
 type InvertedIndex struct {
@@ -1557,7 +1558,8 @@ func (ii *InvertedIndex) collectFilesStat() (filesCount, filesSize, idxSize uint
 			}
 			filesSize += uint64(item.decompressor.Size())
 			idxSize += uint64(item.index.Size())
-			filesCount += 2
+			idxSize += uint64(item.bindex.Size())
+			filesCount += 3
 		}
 		return true
 	})
