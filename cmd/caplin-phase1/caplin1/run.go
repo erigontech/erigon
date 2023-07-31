@@ -2,12 +2,8 @@ package caplin1
 
 import (
 	"context"
-	"errors"
-	"os"
-	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -22,8 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 )
 
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig,
@@ -92,30 +86,12 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	// start the downloader service
 	//go initDownloader(beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
 
-	forkChoiceConfig := stages.CaplinStagedSync(nil, beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
-	sync := stagedsync.New(
-		stages.ConsensusStages(
-			ctx,
-			forkChoiceConfig,
-		),
-		nil,
-		nil,
-		logger,
-	)
-	db := memdb.New(os.TempDir())
-	txn, err := db.BeginRw(ctx)
+	//forkChoiceConfig := stages.CaplinStagedSync(nil, beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, caplinFreezer, dataDirFs)
+	stageCfg := stages.ClStagesCfg(beaconRpc, genesisConfig, beaconConfig, state, nil, gossipManager, forkChoice, dataDirFs)
+	sync := stages.ConsensusClStages(ctx, stageCfg)
+	err = sync.StartWithStage(ctx, "WaitForPeers", logger, stageCfg)
 	if err != nil {
 		return err
-	}
-	var notFirst atomic.Bool
-	for {
-		err = sync.Run(db, txn, notFirst.CompareAndSwap(false, true))
-		if errors.Is(err, context.Canceled) {
-			break
-		}
-		if err != nil {
-			logger.Error("Caplin Sync Stage Fail", "err", err.Error())
-		}
 	}
 	return err
 }
