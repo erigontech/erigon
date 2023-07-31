@@ -29,10 +29,12 @@ func (s *StageGraph[CONFIG, ARGUMENTS]) StartWithStage(ctx context.Context, star
 		}
 		lg := logger.New("stage", stageName)
 		start := time.Now()
-		err := currentStage.ActionFunc(ctx, lg, cfg, args)
+		sctx, cn := context.WithCancel(ctx)
+		err := currentStage.ActionFunc(sctx, lg, cfg, args)
 		if err != nil {
 			lg.Error("error executing stage", "err", err)
 		}
+		cn()
 		dur := time.Since(start)
 		select {
 		case <-ctx.Done():
