@@ -116,7 +116,7 @@ func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *
 	return &execution.GetHeaderHashNumberResponse{BlockNumber: blockNumber}, nil
 }
 
-func (e *EthereumExecutionModule) CanonicalHash(ctx context.Context, req *types2.H256) (*execution.IsCanonicalResponse, error) {
+func (e *EthereumExecutionModule) IsCanonicalHash(ctx context.Context, req *types2.H256) (*execution.IsCanonicalResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not open database: %s", err)

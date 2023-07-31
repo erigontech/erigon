@@ -8,6 +8,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -57,6 +58,17 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 
 }
 
+func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash libcommon.Hash) {
+	if finalizedHash != (libcommon.Hash{}) {
+		rawdb.WriteForkchoiceFinalized(tx, finalizedHash)
+	}
+	if safeHash != (libcommon.Hash{}) {
+		rawdb.WriteForkchoiceFinalized(tx, safeHash)
+	}
+	rawdb.WriteHeadBlockHash(tx, blockHash)
+
+}
+
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHash, safeHash, finalizedHash libcommon.Hash, outcomeCh chan forkchoiceOutcome) {
 	if !e.semaphore.TryAcquire(1) {
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
@@ -86,6 +98,22 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
+	canonicalHash, err := e.blockReader.CanonicalHash(ctx, tx, fcuHeader.Nonce.Uint64())
+	if err != nil {
+		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		return
+	}
+
+	if canonicalHash == blockHash {
+		// if block hash is part of the canononical chain treat it as no-op.
+		writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
+		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
+			LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
+			Status:          execution.ValidationStatus_Success,
+		})
+		return
+	}
+
 	// If we dont have it, too bad
 	if fcuHeader == nil {
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
@@ -189,10 +217,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
 	log := headNumber != nil && e.logger != nil
 	// Update forks...
-	rawdb.WriteForkchoiceFinalized(tx, finalizedHash)
-	rawdb.WriteForkchoiceSafe(tx, safeHash)
-	rawdb.WriteHeadBlockHash(tx, blockHash)
-
+	writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 	status := execution.ValidationStatus_Success
 	if headHash != blockHash {
 		status = execution.ValidationStatus_BadBlock

@@ -313,11 +313,6 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &libcommon.Hash{}}, nil
 	}
 
-	if !s.hd.POSSync() {
-		s.logger.Info(fmt.Sprintf("[%s] Still in PoW sync", prefix), "hash", blockHash)
-		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
-	}
-
 	var canonicalHash libcommon.Hash
 	if header != nil {
 		canonicalHash, err = s.blockReader.CanonicalHash(context.Background(), tx, header.Number.Uint64())

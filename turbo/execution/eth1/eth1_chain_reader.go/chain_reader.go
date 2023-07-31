@@ -138,3 +138,14 @@ func (c ChainReaderEth1) HeaderNumber(hash libcommon.Hash) (*uint64, error) {
 	}
 	return resp.BlockNumber, nil
 }
+
+func (c ChainReaderEth1) IsCanonicalHash(hash libcommon.Hash) (bool, error) {
+	resp, err := c.executionModule.IsCanonicalHash(c.ctx, gointerfaces.ConvertHashToH256(hash))
+	if err != nil {
+		return false, err
+	}
+	if resp == nil {
+		return false, nil
+	}
+	return resp.Canonical, nil
+}

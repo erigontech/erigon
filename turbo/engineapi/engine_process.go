@@ -1,13 +1,16 @@
 package engineapi
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
@@ -15,6 +18,8 @@ import (
 )
 
 const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
+
+var errInvalidForkChoiceState = errors.New("forkchoice state is invalid")
 
 func (e *EngineServerExperimental) handleNewPayload(
 	logPrefix string,
@@ -97,6 +102,40 @@ func convertGrpcStatusToEngineStatus(status execution.ValidationStatus) engine_t
 	panic("giulio u stupid.")
 }
 
+// verifyForkchoiceHashes verifies the finalized and safe hash of the forkchoice state
+func verifyForkchoiceHashes(chainReader *eth1_chain_reader.ChainReaderEth1, blockHash, finalizedHash, safeHash libcommon.Hash) error {
+	// Client software MUST return -38002: Invalid forkchoice state error if the payload referenced by
+	// forkchoiceState.headBlockHash is VALID and a payload referenced by either forkchoiceState.finalizedBlockHash or
+	// forkchoiceState.safeBlockHash does not belong to the chain defined by forkchoiceState.headBlockHash
+	canonical, err := chainReader.IsCanonicalHash(blockHash)
+	if err != nil {
+		return err
+	}
+	if !canonical {
+		return nil
+	}
+	if finalizedHash != (libcommon.Hash{}) && finalizedHash != blockHash {
+
+		canonical, err := chainReader.IsCanonicalHash(finalizedHash)
+		if err != nil {
+			return err
+		}
+		if !canonical {
+			return &engine_helpers.InvalidForkchoiceStateErr
+		}
+	}
+	if safeHash != (libcommon.Hash{}) && safeHash != blockHash {
+		canonical, err := chainReader.IsCanonicalHash(safeHash)
+		if err != nil {
+			return err
+		}
+		if !canonical {
+			return &engine_helpers.InvalidForkchoiceStateErr
+		}
+	}
+	return nil
+}
+
 func (e *EngineServerExperimental) handlesForkChoice(
 	logPrefix string,
 	chainReader *eth1_chain_reader.ChainReaderEth1,
@@ -104,6 +143,11 @@ func (e *EngineServerExperimental) handlesForkChoice(
 	requestId int,
 ) (*engine_types.PayloadStatus, error) {
 	headerHash := forkChoice.HeadHash
+
+	// Validate message received
+	if err := verifyForkchoiceHashes(chainReader, forkChoice.HeadHash, forkChoice.FinalizedBlockHash, forkChoice.SafeBlockHash); err != nil {
+		return nil, err
+	}
 	e.logger.Debug(fmt.Sprintf("[%s] Handling fork choice", logPrefix), "headerHash", headerHash)
 	headerNumber, err := chainReader.HeaderNumber(headerHash)
 	if err != nil {
