@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"reflect"
 	"sync"
 	"time"
 
@@ -120,7 +121,9 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*type
 }
 
 // EngineNewPayload validates and possibly executes payload
-func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload, version clparams.StateVersion) (*engine_types.PayloadStatus, error) {
+func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
+	expectedBlobHashes []libcommon.Hash, version clparams.StateVersion,
+) (*engine_types.PayloadStatus, error) {
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
 
@@ -201,7 +204,20 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			ValidationError: engine_types.NewStringifiedError(err),
 		}, nil
 	}
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+	if version >= clparams.DenebVersion {
+		actualBlobHashes := []libcommon.Hash{}
+		for _, tx := range transactions {
+			actualBlobHashes = append(actualBlobHashes, tx.GetBlobHashes()...)
+		}
+		if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
+			s.logger.Warn("[NewPayload] mismatch in blob hashes",
+				"expectedBlobHashes", expectedBlobHashes, "actualBlobHashes", actualBlobHashes)
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString("mismatch in blob hashes"),
+			}, nil
+		}
+	}
 
 	possibleStatus, err := s.getQuickPayloadStatusIfPossible(blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
 	if err != nil {
@@ -215,6 +231,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 	s.hd.BeaconRequestList.AddPayloadRequest(block)
 
 	payloadStatus := <-s.hd.PayloadStatusCh
@@ -587,19 +604,20 @@ func (e *EngineServer) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_newpayloadv1
 func (e *EngineServer) NewPayloadV1(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, clparams.BellatrixVersion)
+	return e.newPayload(ctx, payload, nil, clparams.BellatrixVersion)
 }
 
 // NewPayloadV2 processes new payloads (blocks) from the beacon chain with withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_newpayloadv2
 func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, clparams.CapellaVersion)
+	return e.newPayload(ctx, payload, nil, clparams.CapellaVersion)
 }
 
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
-// See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv3
-func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, clparams.DenebVersion)
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_newpayloadv3
+func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload,
+	expectedBlobHashes []libcommon.Hash) (*engine_types.PayloadStatus, error) {
+	return e.newPayload(ctx, payload, expectedBlobHashes, clparams.DenebVersion)
 }
 
 // Receives consensus layer's transition configuration and checks if the execution layer has the correct configuration.

@@ -22,16 +22,11 @@ func (e *EthereumExecutionModule) InsertBodies(ctx context.Context, req *executi
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBodies: could not begin transaction: %s", err)
 	}
 	defer tx.Rollback()
+	e.forkValidator.ClearWithUnwind(tx, e.accumulator, e.stateChangeConsumer)
+
 	for _, grpcBody := range req.Bodies {
-		var ok bool
-		if ok, err = rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(grpcBody.BlockHash), grpcBody.BlockNumber, eth1_utils.ConvertRawBlockBodyFromRpc(grpcBody)); err != nil {
+		if _, err = rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(grpcBody.BlockHash), grpcBody.BlockNumber, eth1_utils.ConvertRawBlockBodyFromRpc(grpcBody)); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBodies: could not insert: %s", err)
-		}
-		// TODO: Replace.
-		if e.historyV3 && ok {
-			if err := rawdb.AppendCanonicalTxNums(tx, grpcBody.BlockNumber); err != nil {
-				return nil, fmt.Errorf("ethereumExecutionModule.InsertBodies: could not insert: %s", err)
-			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -55,6 +50,8 @@ func (e *EthereumExecutionModule) InsertHeaders(ctx context.Context, req *execut
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: could not begin transaction: %s", err)
 	}
 	defer tx.Rollback()
+	e.forkValidator.ClearWithUnwind(tx, e.accumulator, e.stateChangeConsumer)
+
 	for _, grpcHeader := range req.Headers {
 		header, err := eth1_utils.HeaderRpcToHeader(grpcHeader)
 		if err != nil {

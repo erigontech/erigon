@@ -38,7 +38,7 @@ func (stx BlobTx) copy() *BlobTx {
 
 func (stx BlobTx) Type() byte { return BlobTxType }
 
-func (stx BlobTx) GetDataHashes() []libcommon.Hash {
+func (stx BlobTx) GetBlobHashes() []libcommon.Hash {
 	return stx.BlobVersionedHashes
 }
 
@@ -51,7 +51,7 @@ func (stx BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Mes
 	if err != nil {
 		return Message{}, err
 	}
-	msg.dataHashes = stx.BlobVersionedHashes
+	msg.blobHashes = stx.BlobVersionedHashes
 	return msg, err
 }
 
