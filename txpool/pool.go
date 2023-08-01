@@ -837,12 +837,24 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		// more expensive to propagate; larger transactions also take more resources
 		// to validate whether they fit into the pool or not.
 		txMaxSize = 4 * txSlotSize // 128KB
+
+		// Should be enough for a transaction with 6 blobs
+		blobTxMaxSize = 800_000
 	)
-	if len(serializedTxn) > txMaxSize {
+	txType, err := types.PeekTransactionType(serializedTxn)
+	if err != nil {
+		return err
+	}
+	maxSize := txMaxSize
+	if txType == types.BlobTxType {
+		maxSize = blobTxMaxSize
+	}
+	if len(serializedTxn) > maxSize {
 		return types.ErrRlpTooBig
 	}
 	return nil
 }
+
 func (p *TxPool) validateTxs(txs *types.TxSlots, stateCache kvcache.CacheView) (reasons []txpoolcfg.DiscardReason, goodTxs types.TxSlots, err error) {
 	// reasons is pre-sized for direct indexing, with the default zero
 	// value DiscardReason of NotSet
