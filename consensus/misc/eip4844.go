@@ -79,7 +79,7 @@ func VerifyPresenceOfCancunHeaderFields(header *types.Header) error {
 		return fmt.Errorf("header is missing excessBlobGas")
 	}
 	if header.ParentBeaconBlockRoot == nil {
-		return fmt.Errorf("missing parentBeaconBlockRoot")
+		return fmt.Errorf("header is missing parentBeaconBlockRoot")
 	}
 	return nil
 }
