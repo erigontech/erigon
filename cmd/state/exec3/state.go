@@ -12,7 +12,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -31,7 +30,7 @@ type Worker struct {
 	chainTx     kv.Tx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
-	in          *exec22.QueueWithRetry
+	in          *QueueWithRetry
 	rs          *state.StateV3
 	stateWriter *state.StateWriterBufferedV3
 	stateReader *state.StateReaderV3
@@ -41,7 +40,7 @@ type Worker struct {
 	ctx      context.Context
 	engine   consensus.Engine
 	genesis  *types.Genesis
-	resultCh *exec22.ResultsQueue
+	resultCh *ResultsQueue
 	chain    ChainReader
 
 	callTracer  *CallTracer
@@ -51,7 +50,7 @@ type Worker struct {
 	ibs *state.IntraBlockState
 }
 
-func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec22.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec22.ResultsQueue, engine consensus.Engine) *Worker {
+func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *ResultsQueue, engine consensus.Engine) *Worker {
 	w := &Worker{
 		lock:        lock,
 		logger:      logger,
@@ -112,13 +111,13 @@ func (rw *Worker) Run() error {
 	return nil
 }
 
-func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
+func (rw *Worker) RunTxTask(txTask *TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.RunTxTaskNoLock(txTask)
 }
 
-func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
+func (rw *Worker) RunTxTaskNoLock(txTask *TxTask) {
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {
@@ -296,11 +295,11 @@ func (cr ChainReader) FrozenBlocks() uint64 {
 	return cr.blockReader.FrozenBlocks()
 }
 
-func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec22.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *exec22.ResultsQueue, clear func(), wait func()) {
+func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultChSize := workerCount * 8
-	rws = exec22.NewResultsQueue(resultChSize, workerCount) // workerCount * 4
+	rws = NewResultsQueue(resultChSize, workerCount) // workerCount * 4
 	{
 		// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 		// and in applyLoop all errors are critical

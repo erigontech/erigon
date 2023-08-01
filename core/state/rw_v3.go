@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
+	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -29,7 +29,7 @@ var ExecTxsDone = metrics.NewCounter(`exec_txs_done`)
 type StateV3 struct {
 	domains      *libstate.SharedDomains
 	triggerLock  sync.Mutex
-	triggers     map[uint64]*exec22.TxTask
+	triggers     map[uint64]*exec3.TxTask
 	senderTxNums map[common.Address]uint64
 
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
@@ -40,22 +40,22 @@ type StateV3 struct {
 func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
 	return &StateV3{
 		domains:             domains,
-		triggers:            map[uint64]*exec22.TxTask{},
+		triggers:            map[uint64]*exec3.TxTask{},
 		senderTxNums:        map[common.Address]uint64{},
 		applyPrevAccountBuf: make([]byte, 256),
 		logger:              logger,
 	}
 }
 
-func (rs *StateV3) ReTry(txTask *exec22.TxTask, in *exec22.QueueWithRetry) {
+func (rs *StateV3) ReTry(txTask *exec3.TxTask, in *exec3.QueueWithRetry) {
 	rs.resetTxTask(txTask)
 	in.ReTry(txTask)
 }
-func (rs *StateV3) AddWork(ctx context.Context, txTask *exec22.TxTask, in *exec22.QueueWithRetry) {
+func (rs *StateV3) AddWork(ctx context.Context, txTask *exec3.TxTask, in *exec3.QueueWithRetry) {
 	rs.resetTxTask(txTask)
 	in.Add(ctx, txTask)
 }
-func (rs *StateV3) resetTxTask(txTask *exec22.TxTask) {
+func (rs *StateV3) resetTxTask(txTask *exec3.TxTask) {
 	txTask.BalanceIncreaseSet = nil
 	returnReadList(txTask.ReadLists)
 	txTask.ReadLists = nil
@@ -66,7 +66,7 @@ func (rs *StateV3) resetTxTask(txTask *exec22.TxTask) {
 	txTask.TraceTos = nil
 }
 
-func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
+func (rs *StateV3) RegisterSender(txTask *exec3.TxTask) bool {
 	//TODO: it deadlocks on panic, fix it
 	defer func() {
 		rec := recover()
@@ -88,7 +88,7 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 	return !deferral
 }
 
-func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *exec22.QueueWithRetry) (count int) {
+func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *exec3.QueueWithRetry) (count int) {
 	ExecTxsDone.Inc()
 
 	if txNum > 0 && txNum%ethconfig.HistoryV3AggregationStep == 0 {
@@ -115,7 +115,7 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *exec22.
 
 const Assert = false
 
-func (rs *StateV3) applyState(txTask *exec22.TxTask, domains *libstate.SharedDomains) error {
+func (rs *StateV3) applyState(txTask *exec3.TxTask, domains *libstate.SharedDomains) error {
 	//return nil
 	var acc accounts.Account
 
@@ -217,7 +217,7 @@ func (rs *StateV3) Domains() *libstate.SharedDomains {
 	return rs.domains
 }
 
-func (rs *StateV3) ApplyState4(txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) ApplyState4(txTask *exec3.TxTask, agg *libstate.AggregatorV3) error {
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	agg.SetTxNum(txTask.TxNum)
@@ -233,7 +233,7 @@ func (rs *StateV3) ApplyState4(txTask *exec22.TxTask, agg *libstate.AggregatorV3
 	return nil
 }
 
-func (rs *StateV3) ApplyLogsAndTraces(txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) ApplyLogsAndTraces(txTask *exec3.TxTask, agg *libstate.AggregatorV3) error {
 	if dbg.DiscardHistory() {
 		return nil
 	}
