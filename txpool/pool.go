@@ -1532,17 +1532,17 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 						// Empty rlp can happen if a transaction we want to broadcast has just been mined, for example
 						slotsRlp = append(slotsRlp, slotRlp)
 						if p.IsLocal(hash) {
-							localTxTypes = append(localTxTypes, t)
-							localTxSizes = append(localTxSizes, size)
-							localTxHashes = append(localTxHashes, hash...)
 							if t != types.BlobTxType { // "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
+								localTxTypes = append(localTxTypes, t)
+								localTxSizes = append(localTxSizes, size)
+								localTxHashes = append(localTxHashes, hash...)
 								localTxRlps = append(localTxRlps, slotRlp)
 							}
 						} else {
-							remoteTxTypes = append(remoteTxTypes, t)
-							remoteTxSizes = append(remoteTxSizes, size)
-							remoteTxHashes = append(remoteTxHashes, hash...)
 							if t != types.BlobTxType { // "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
+								remoteTxTypes = append(remoteTxTypes, t)
+								remoteTxSizes = append(remoteTxSizes, size)
+								remoteTxHashes = append(remoteTxHashes, hash...)
 								remoteTxRlps = append(remoteTxRlps, slotRlp)
 							}
 						}
