@@ -201,6 +201,10 @@ func TestBlobTxParsing(t *testing.T) {
 	ctx.withSender = false
 
 	var thinTx TxSlot // only tx body, no blobs
+	txType, err := PeekTransactionType(bodyEnvelope)
+	require.NoError(t, err)
+	assert.Equal(t, BlobTxType, txType)
+
 	p, err := ctx.ParseTransaction(bodyEnvelope, 0, &thinTx, nil, hasEnvelope, wrappedWithBlobs, nil)
 	require.NoError(t, err)
 	assert.Equal(t, len(bodyEnvelope), p)
@@ -250,6 +254,10 @@ func TestBlobTxParsing(t *testing.T) {
 	wrapperRlp = append(wrapperRlp, proof1[:]...)
 
 	var fatTx TxSlot // with blobs/commitments/proofs
+	txType, err = PeekTransactionType(wrapperRlp)
+	require.NoError(t, err)
+	assert.Equal(t, BlobTxType, txType)
+
 	p, err = ctx.ParseTransaction(wrapperRlp, 0, &fatTx, nil, hasEnvelope, wrappedWithBlobs, nil)
 	require.NoError(t, err)
 	assert.Equal(t, len(wrapperRlp), p)

@@ -837,12 +837,24 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		// more expensive to propagate; larger transactions also take more resources
 		// to validate whether they fit into the pool or not.
 		txMaxSize = 4 * txSlotSize // 128KB
+
+		// Should be enough for a transaction with 6 blobs
+		blobTxMaxSize = 800_000
 	)
-	if len(serializedTxn) > txMaxSize {
+	txType, err := types.PeekTransactionType(serializedTxn)
+	if err != nil {
+		return err
+	}
+	maxSize := txMaxSize
+	if txType == types.BlobTxType {
+		maxSize = blobTxMaxSize
+	}
+	if len(serializedTxn) > maxSize {
 		return types.ErrRlpTooBig
 	}
 	return nil
 }
+
 func (p *TxPool) validateTxs(txs *types.TxSlots, stateCache kvcache.CacheView) (reasons []txpoolcfg.DiscardReason, goodTxs types.TxSlots, err error) {
 	// reasons is pre-sized for direct indexing, with the default zero
 	// value DiscardReason of NotSet
@@ -1520,17 +1532,17 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 						// Empty rlp can happen if a transaction we want to broadcast has just been mined, for example
 						slotsRlp = append(slotsRlp, slotRlp)
 						if p.IsLocal(hash) {
-							localTxTypes = append(localTxTypes, t)
-							localTxSizes = append(localTxSizes, size)
-							localTxHashes = append(localTxHashes, hash...)
 							if t != types.BlobTxType { // "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
+								localTxTypes = append(localTxTypes, t)
+								localTxSizes = append(localTxSizes, size)
+								localTxHashes = append(localTxHashes, hash...)
 								localTxRlps = append(localTxRlps, slotRlp)
 							}
 						} else {
-							remoteTxTypes = append(remoteTxTypes, t)
-							remoteTxSizes = append(remoteTxSizes, size)
-							remoteTxHashes = append(remoteTxHashes, hash...)
 							if t != types.BlobTxType { // "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
+								remoteTxTypes = append(remoteTxTypes, t)
+								remoteTxSizes = append(remoteTxSizes, size)
+								remoteTxHashes = append(remoteTxHashes, hash...)
 								remoteTxRlps = append(remoteTxRlps, slotRlp)
 							}
 						}

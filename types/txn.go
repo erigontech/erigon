@@ -131,6 +131,17 @@ func (ctx *TxParseContext) ChainIDRequired() *TxParseContext {
 	return ctx
 }
 
+func PeekTransactionType(serialized []byte) (byte, error) {
+	dataPos, _, legacy, err := rlp.Prefix(serialized, 0)
+	if err != nil {
+		return LegacyTxType, fmt.Errorf("%w: size Prefix: %s", ErrParseTxn, err) //nolint
+	}
+	if legacy {
+		return LegacyTxType, nil
+	}
+	return serialized[dataPos], nil
+}
+
 // ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot.
 // It also performs syntactic validation of the transactions.
 // wrappedWithBlobs means that for blob (type 3) transactions the full version with blobs/commitments/proofs is expected
