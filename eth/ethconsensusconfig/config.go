@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
@@ -26,7 +25,7 @@ import (
 
 func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
 	heimdallGrpcAddress string, heimdallUrl string, withoutHeimdall bool, dataDir string, readonly bool,
-	logger log.Logger, chaindb kv.RwDB,
+	logger log.Logger,
 ) consensus.Engine {
 	var eng consensus.Engine
 
@@ -80,14 +79,14 @@ func CreateConsensusEngine(chainConfig *chain.Config, config interface{}, notify
 
 			var heimdallClient bor.IHeimdallClient
 			if withoutHeimdall {
-				return bor.New(chainConfig, db, spanner, nil, genesisContractsClient, logger, chaindb)
+				return bor.New(chainConfig, db, spanner, nil, genesisContractsClient, logger)
 			} else {
 				if heimdallGrpcAddress != "" {
 					heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(heimdallGrpcAddress)
 				} else {
 					heimdallClient = heimdall.NewHeimdallClient(heimdallUrl)
 				}
-				eng = bor.New(chainConfig, db, spanner, heimdallClient, genesisContractsClient, logger, chaindb)
+				eng = bor.New(chainConfig, db, spanner, heimdallClient, genesisContractsClient, logger)
 			}
 		}
 	}
@@ -119,5 +118,5 @@ func CreateConsensusEngineBareBones(chainConfig *chain.Config, logger log.Logger
 	}
 
 	return CreateConsensusEngine(chainConfig, consensusConfig, nil /* notify */, true, /* noVerify */
-		"" /* heimdallGrpcAddress */, "" /* heimdallUrl */, true /* withoutHeimdall */, "" /*dataDir*/, false /* readonly */, logger, nil /*chainDB*/)
+		"" /* heimdallGrpcAddress */, "" /* heimdallUrl */, true /* withoutHeimdall */, "" /*dataDir*/, false /* readonly */, logger)
 }

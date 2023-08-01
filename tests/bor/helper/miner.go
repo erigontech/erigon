@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func InitGenesis(fileLocation string, sprintSize uint64) types.Genesis {
+func InitGenesis(fileLocation string, sprintSize uint64, chainName string) types.Genesis {
 
 	// sprint size = 8 in genesis
 	genesisData, err := os.ReadFile(fileLocation)
@@ -40,7 +40,7 @@ func InitGenesis(fileLocation string, sprintSize uint64) types.Genesis {
 	}
 
 	genesis.Config.Bor.Sprint["0"] = sprintSize
-	genesis.Config.ChainName = "bor-e2e-test"
+	genesis.Config.ChainName = chainName
 
 	return *genesis
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/tests/bor/helper"
 	"github.com/ledgerwatch/log/v3"
 
@@ -51,7 +52,7 @@ func TestMiningBenchmark(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 	fdlimit.Raise(2048)
 
-	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64)
+	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64, networkname.BorE2ETestChain2ValName)
 
 	var stacks []*node.Node
 	var ethbackends []*eth.Ethereum

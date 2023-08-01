@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -250,7 +249,6 @@ type Bor struct {
 
 	closeOnce sync.Once
 	logger    log.Logger
-	ChainDB   kv.RwDB
 }
 
 type signer struct {
@@ -266,7 +264,6 @@ func New(
 	heimdallClient IHeimdallClient,
 	genesisContracts GenesisContract,
 	logger log.Logger,
-	chaindb kv.RwDB,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor
@@ -291,7 +288,6 @@ func New(
 		spanCache:              btree.New(32),
 		execCtx:                context.Background(),
 		logger:                 logger,
-		ChainDB:                chaindb,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -491,27 +487,11 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	// once we start fetching validator data from contract.
 
 	if number > zerothSpanEnd && isSprintStart(number+1, sprintLength) {
-		ctx := context.Background()
-
-		tx, err := c.ChainDB.BeginRo(ctx)
-		if err != nil {
-			return err
-		}
-
-		stateReader := state.NewPlainStateReader(tx)
-
-		ibs := state.New(stateReader)
-
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, c.chainConfig, ibs, header, c, false /* constCall */)
-		}
-
-		producerSet, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, syscall, c.getSpanForBlock)
+		producerSet, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
 
 		if err != nil {
 			return err
 		}
-		tx.Rollback()
 
 		sort.Sort(valset.ValidatorsByAddress(producerSet))
 
@@ -597,25 +577,12 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 			if checkpoint != nil {
 				// get checkpoint data
 				hash := checkpoint.Hash()
-				ctx := context.Background()
 
-				tx, err := c.ChainDB.BeginRo(ctx)
-				if err != nil {
-					return nil, err
-				}
-
-				stateReader := state.NewPlainStateReader(tx)
-				ibs := state.New(stateReader)
-
-				syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-					return core.SysCallContract(contract, data, c.chainConfig, ibs, checkpoint, c, false /* constCall */)
-				}
 				// get validators and current span
-				validators, err := c.spanner.GetCurrentValidators(number+1, c.authorizedSigner.Load().signer, syscall, c.getSpanForBlock)
+				validators, err := c.spanner.GetCurrentValidators(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
 				if err != nil {
 					return nil, err
 				}
-				tx.Rollback()
 
 				// new snap shot
 				snap = newSnapshot(c.config, c.signatures, number, hash, validators, c.logger)
@@ -784,11 +751,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if isSprintStart(number+1, c.config.CalculateSprint(number)) {
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, c.chainConfig, state, header, c, true /* constCall */)
-		}
-
-		newValidators, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, syscall, c.getSpanForBlock)
+		newValidators, err := c.spanner.GetCurrentProducers(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
 		if err != nil {
 			return errUnknownValidators
 		}
@@ -1025,7 +988,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 
 	// Wait until sealing is terminated or delay timeout.
-	c.logger.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay-in-sec", uint(delay), "delay", common.PrettyDuration(delay), "TxCount", block.Transactions().Len())
+	c.logger.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay-in-sec", uint(delay), "delay", common.PrettyDuration(delay), "TxCount", block.Transactions().Len(), "Signer", signer)
 
 	go func() {
 		select {
@@ -1317,8 +1280,8 @@ func (c *Bor) SetHeimdallClient(h IHeimdallClient) {
 	c.HeimdallClient = h
 }
 
-func (c *Bor) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, syscall consensus.SystemCall, getSpanForBlock func(blockNum uint64) (*span.HeimdallSpan, error)) ([]*valset.Validator, error) {
-	return c.spanner.GetCurrentValidators(blockNumber, signer, syscall, getSpanForBlock)
+func (c *Bor) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*span.HeimdallSpan, error)) ([]*valset.Validator, error) {
+	return c.spanner.GetCurrentValidators(blockNumber, signer, getSpanForBlock)
 }
 
 //

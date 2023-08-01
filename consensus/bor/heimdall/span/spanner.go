@@ -5,7 +5,6 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/abi"
@@ -67,49 +66,8 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 	return &span, nil
 }
 
-// GetCurrentValidatorsFromContract get current validators from genesis contract
-func (c *ChainSpanner) GetCurrentValidatorsFromContract(blockNumber uint64, syscall consensus.SystemCall) ([]*valset.Validator, error) {
-
-	// method
-	const method = "getBorValidators"
-
-	data, err := c.validatorSet.Pack(method, big.NewInt(0).SetUint64(blockNumber))
-	if err != nil {
-		log.Error("Unable to pack tx for getValidator", "error", err)
-		return nil, err
-	}
-	result, err := syscall(libcommon.HexToAddress(c.chainConfig.Bor.ValidatorContract), data)
-	if err != nil {
-		return nil, err
-	}
-	var (
-		ret0 = new([]common.Address)
-		ret1 = new([]*big.Int)
-	)
-
-	out := &[]interface{}{
-		ret0,
-		ret1,
-	}
-
-	if err := c.validatorSet.UnpackIntoInterface(out, method, result); err != nil {
-		return nil, err
-	}
-
-	valz := make([]*valset.Validator, len(*ret0))
-	for i, a := range *ret0 {
-		valz[i] = &valset.Validator{
-			Address:     a,
-			VotingPower: (*ret1)[i].Int64(),
-		}
-	}
-
-	return valz, nil
-}
-
-func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, syscall consensus.SystemCall, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
+func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
 	// Use signer as validator in case of bor devent
-
 	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
 		validators := []*valset.Validator{
 			{
@@ -123,17 +81,20 @@ func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon
 		return validators, nil
 	}
 
-	vals, err := c.GetCurrentValidatorsFromContract(blockNumber, syscall)
+	if NetworkNameVals[c.chainConfig.ChainName] != nil {
+		return NetworkNameVals[c.chainConfig.ChainName], nil
+	}
+
+	span, err := getSpanForBlock(blockNumber)
 	if err != nil {
 		return nil, err
 	}
 
-	return vals, nil
+	return span.ValidatorSet.Validators, nil
 }
 
-func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.Address, syscall consensus.SystemCall, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
+func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
 	// Use signer as validator in case of bor devent
-
 	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
 		validators := []*valset.Validator{
 			{
@@ -147,11 +108,21 @@ func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.
 		return validators, nil
 	}
 
-	vals, err := c.GetCurrentValidatorsFromContract(blockNumber, syscall)
+	if NetworkNameVals[c.chainConfig.ChainName] != nil {
+		return NetworkNameVals[c.chainConfig.ChainName], nil
+	}
+
+	span, err := getSpanForBlock(blockNumber)
 	if err != nil {
 		return nil, err
 	}
-	return vals, nil
+
+	producers := make([]*valset.Validator, len(span.SelectedProducers))
+	for i := range span.SelectedProducers {
+		producers[i] = &span.SelectedProducers[i]
+	}
+
+	return producers, nil
 }
 
 func (c *ChainSpanner) CommitSpan(heimdallSpan HeimdallSpan, syscall consensus.SystemCall) error {
