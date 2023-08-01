@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 // EthereumExecutionModule describes ethereum execution logic and indexing.
@@ -42,6 +43,7 @@ type EthereumExecutionModule struct {
 	builders       map[uint64]*builder.BlockBuilder
 
 	// Changes accumulator
+	hook                *stages.Hook
 	accumulator         *shards.Accumulator
 	stateChangeConsumer shards.StateChangeConsumer
 
@@ -53,7 +55,7 @@ type EthereumExecutionModule struct {
 }
 
 func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
-	config *chain.Config, builderFunc builder.BlockBuilderFunc, accumulator *shards.Accumulator, stateChangeConsumer shards.StateChangeConsumer, logger log.Logger, historyV3 bool) *EthereumExecutionModule {
+	config *chain.Config, builderFunc builder.BlockBuilderFunc, hook *stages.Hook, accumulator *shards.Accumulator, stateChangeConsumer shards.StateChangeConsumer, logger log.Logger, historyV3 bool) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:         blockReader,
 		db:                  db,
@@ -64,6 +66,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		builderFunc:         builderFunc,
 		config:              config,
 		semaphore:           semaphore.NewWeighted(1),
+		hook:                hook,
 		accumulator:         accumulator,
 		stateChangeConsumer: stateChangeConsumer,
 	}
@@ -102,7 +105,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if !e.semaphore.TryAcquire(1) {
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-			ValidationStatus: execution.ValidationStatus_Busy,
+			ValidationStatus: execution.ExecutionStatus_Busy,
 		}, nil
 	}
 	defer e.semaphore.Release(1)
@@ -127,7 +130,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 			MissingHash:      req.Hash,
-			ValidationStatus: execution.ValidationStatus_MissingSegment,
+			ValidationStatus: execution.ExecutionStatus_MissingSegment,
 		}, nil
 	}
 
@@ -135,17 +138,20 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if criticalError != nil {
 		return nil, criticalError
 	}
-	validationStatus := execution.ValidationStatus_Success
+
+	// if the block is deemed invalid then we delete it. perhaps we want to keep bad blocks and just keep an index of bad ones.
+	validationStatus := execution.ExecutionStatus_Success
 	if status == engine_types.AcceptedStatus {
-		validationStatus = execution.ValidationStatus_MissingSegment
+		validationStatus = execution.ExecutionStatus_MissingSegment
 	}
 	if status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil {
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain %x is invalid. reason %s", blockHash, err)
-		validationStatus = execution.ValidationStatus_BadBlock
+		validationStatus = execution.ExecutionStatus_BadBlock
+		rawdb.DeleteHeader(tx, blockHash, header.Number.Uint64())
 	}
 	return &execution.ValidationReceipt{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  gointerfaces.ConvertHashToH256(lvh),
 		MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}), // TODO: implement
-	}, nil
+	}, tx.Commit()
 }
