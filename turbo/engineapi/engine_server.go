@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"reflect"
 	"sync"
 	"time"
 
@@ -120,7 +121,9 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*type
 }
 
 // EngineNewPayload validates and possibly executes payload
-func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload, expectedBlobVersionedHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, version clparams.StateVersion) (*engine_types.PayloadStatus, error) {
+func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
+   expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, version clparams.StateVersion
+) (*engine_types.PayloadStatus, error) {
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
 
@@ -208,7 +211,20 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			ValidationError: engine_types.NewStringifiedError(err),
 		}, nil
 	}
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+	if version >= clparams.DenebVersion {
+		actualBlobHashes := []libcommon.Hash{}
+		for _, tx := range transactions {
+			actualBlobHashes = append(actualBlobHashes, tx.GetBlobHashes()...)
+		}
+		if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
+			s.logger.Warn("[NewPayload] mismatch in blob hashes",
+				"expectedBlobHashes", expectedBlobHashes, "actualBlobHashes", actualBlobHashes)
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString("mismatch in blob hashes"),
+			}, nil
+		}
+	}
 
 	possibleStatus, err := s.getQuickPayloadStatusIfPossible(blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
 	if err != nil {
@@ -222,6 +238,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 	s.hd.BeaconRequestList.AddPayloadRequest(block)
 
 	payloadStatus := <-s.hd.PayloadStatusCh

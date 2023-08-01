@@ -125,7 +125,7 @@ func toBlobTxJSON(tx *BlobTx) *txJSON {
 	enc.R = (*hexutil.Big)(tx.R.ToBig())
 	enc.S = (*hexutil.Big)(tx.S.ToBig())
 	enc.MaxFeePerBlobGas = (*hexutil.Big)(tx.MaxFeePerBlobGas.ToBig())
-	enc.BlobVersionedHashes = tx.GetDataHashes()
+	enc.BlobVersionedHashes = tx.GetBlobHashes()
 	return &enc
 }
 

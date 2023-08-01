@@ -8,6 +8,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -16,6 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 )
 
+var errNotFound = errors.New("notfound")
+
 func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv.Tx, req *execution.GetSegmentRequest) (blockHash libcommon.Hash, blockNumber uint64, err error) {
 	switch {
 	// Case 1: Only hash is given.
@@ -23,7 +26,7 @@ func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv
 		blockHash = gointerfaces.ConvertH256ToHash(req.BlockHash)
 		blockNumberPtr := rawdb.ReadHeaderNumber(tx, blockHash)
 		if blockNumberPtr == nil {
-			err = fmt.Errorf("ethereumExecutionModule.parseSegmentRequest: could not read block: non existent index")
+			err = errNotFound
 			return
 		}
 		blockNumber = *blockNumberPtr
@@ -31,7 +34,7 @@ func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv
 		blockNumber = *req.BlockNumber
 		blockHash, err = e.canonicalHash(ctx, tx, blockNumber)
 		if err != nil {
-			err = fmt.Errorf("ethereumExecutionModule.parseSegmentRequest: could not read block %d: %s", blockNumber, err)
+			err = errNotFound
 			return
 		}
 	case req.BlockHash != nil && req.BlockNumber != nil:
@@ -53,6 +56,9 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.Ge
 	defer tx.Rollback()
 
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
+	if err == errNotFound {
+		return &execution.GetBodyResponse{Body: nil}, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: %s", err)
 	}
@@ -80,6 +86,9 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 	defer tx.Rollback()
 
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
+	if err == errNotFound {
+		return &execution.GetHeaderResponse{Header: nil}, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: %s", err)
 	}
@@ -102,25 +111,77 @@ func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *
 	defer tx.Rollback()
 	blockNumber := rawdb.ReadHeaderNumber(tx, gointerfaces.ConvertH256ToHash(req))
 	if blockNumber == nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.parseSegmentRequest: could not read block: non existent index")
+		return &execution.GetHeaderHashNumberResponse{BlockNumber: nil}, nil
 	}
 	return &execution.GetHeaderHashNumberResponse{BlockNumber: blockNumber}, nil
 }
 
-func (e *EthereumExecutionModule) CanonicalHash(ctx context.Context, req *types2.H256) (*execution.IsCanonicalResponse, error) {
+func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash libcommon.Hash) (bool, error) {
+	blockNumber := rawdb.ReadHeaderNumber(tx, hash)
+	if blockNumber == nil {
+		return false, nil
+	}
+	expectedHash, err := e.canonicalHash(ctx, tx, *blockNumber)
+	if err != nil {
+		return false, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not read canonical hash")
+	}
+	return expectedHash == hash, nil
+}
+
+func (e *EthereumExecutionModule) IsCanonicalHash(ctx context.Context, req *types2.H256) (*execution.IsCanonicalResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not open database: %s", err)
 	}
 	defer tx.Rollback()
-	blockHash := gointerfaces.ConvertH256ToHash(req)
-	blockNumber := rawdb.ReadHeaderNumber(tx, blockHash)
-	if blockNumber == nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not read block: non existent index")
-	}
-	expectedHash, err := e.canonicalHash(ctx, tx, *blockNumber)
+
+	isCanonical, err := e.isCanonicalHash(ctx, tx, gointerfaces.ConvertH256ToHash(req))
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not read canonical hash")
 	}
-	return &execution.IsCanonicalResponse{Canonical: expectedHash == blockHash}, nil
+
+	return &execution.IsCanonicalResponse{Canonical: isCanonical}, nil
+}
+
+func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.Empty) (*execution.GetHeaderResponse, error) {
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: could not open database: %s", err)
+	}
+	defer tx.Rollback()
+	hash := rawdb.ReadHeadHeaderHash(tx)
+	number := rawdb.ReadHeaderNumber(tx, hash)
+	h, _ := e.blockReader.Header(context.Background(), tx, hash, *number)
+	return &execution.GetHeaderResponse{
+		Header: eth1_utils.HeaderToHeaderRPC(h),
+	}, nil
+}
+
+func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *execution.GetSegmentRequest) (*execution.GetTDResponse, error) {
+	// Invalid case: request is invalid.
+	if req == nil || (req.BlockHash == nil && req.BlockNumber == nil) {
+		return nil, errors.New("ethereumExecutionModule.GetHeader: bad request")
+	}
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not open database: %s", err)
+	}
+	defer tx.Rollback()
+
+	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
+	if err == errNotFound {
+		return &execution.GetTDResponse{Td: nil}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: %s", err)
+	}
+	td, err := e.getTD(ctx, tx, blockHash, blockNumber)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: coild not read body: %s", err)
+	}
+	if td == nil {
+		return &execution.GetTDResponse{Td: nil}, nil
+	}
+
+	return &execution.GetTDResponse{Td: eth1_utils.ConvertBigIntToRpc(td)}, nil
 }

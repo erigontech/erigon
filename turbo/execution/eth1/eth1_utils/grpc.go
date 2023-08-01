@@ -157,3 +157,20 @@ func ConvertRawBlockBodyFromRpc(in *execution.BlockBody) *types.RawBody {
 		Withdrawals:  ConvertWithdrawalsFromRpc(in.Withdrawals),
 	}
 }
+
+func ConvertBigIntFromRpc(in *types2.H256) *big.Int {
+	if in == nil {
+		return nil
+	}
+	base := gointerfaces.ConvertH256ToUint256Int(in)
+	return base.ToBig()
+}
+
+func ConvertBigIntToRpc(in *big.Int) *types2.H256 {
+	if in == nil {
+		return nil
+	}
+	base := new(uint256.Int)
+	base.SetFromBig(in)
+	return gointerfaces.ConvertUint256IntToH256(base)
+}

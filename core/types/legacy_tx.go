@@ -87,8 +87,8 @@ func (ct CommonTx) IsContractDeploy() bool {
 	return ct.GetTo() == nil
 }
 
-func (ct *CommonTx) GetDataHashes() []libcommon.Hash {
-	// Only blob txs have data hashes
+func (ct *CommonTx) GetBlobHashes() []libcommon.Hash {
+	// Only blob txs have blob hashes
 	return []libcommon.Hash{}
 }
 
