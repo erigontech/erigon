@@ -71,6 +71,7 @@ func FakeExponential(factor, denom *uint256.Int, excessBlobGas uint64) (*uint256
 	return output.Div(output, denom), nil
 }
 
+// VerifyPresenceOfCancunHeaderFields checks that the fields introduced in Cancun (EIP-4844, EIP-4788) are present.
 func VerifyPresenceOfCancunHeaderFields(header *types.Header) error {
 	if header.BlobGasUsed == nil {
 		return fmt.Errorf("header is missing blobGasUsed")
@@ -84,6 +85,7 @@ func VerifyPresenceOfCancunHeaderFields(header *types.Header) error {
 	return nil
 }
 
+// VerifyAbsenceOfCancunHeaderFields checks that the header doesn't have any fields added in Cancun (EIP-4844, EIP-4788).
 func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
 	if header.BlobGasUsed != nil {
 		return fmt.Errorf("invalid blobGasUsed before fork: have %v, expected 'nil'", header.BlobGasUsed)
