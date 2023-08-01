@@ -5,23 +5,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/turbo/builder"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
 	"golang.org/x/exp/slices"
 
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/turbo/builder"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/commitment"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -174,6 +173,27 @@ var cmdStageTrie = &cobra.Command{
 		defer db.Close()
 
 		if err := stageTrie(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+var cmdStagePatriciaTrie = &cobra.Command{
+	Use:   "stage_patricia_trie",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := stagePatriciaTrie(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -473,6 +493,8 @@ func init() {
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
 	withNoCommit(cmdStageExec)
+	withBtreeCold(cmdStageExec)
+	withBtreeWarm(cmdStageExec)
 	withPruneTo(cmdStageExec)
 	withBatchSize(cmdStageExec)
 	withTxTrace(cmdStageExec)
@@ -502,6 +524,17 @@ func init() {
 	withChain(cmdStageTrie)
 	withHeimdall(cmdStageTrie)
 	rootCmd.AddCommand(cmdStageTrie)
+
+	withConfig(cmdStagePatriciaTrie)
+	withDataDir(cmdStagePatriciaTrie)
+	withReset(cmdStagePatriciaTrie)
+	withBlock(cmdStagePatriciaTrie)
+	withUnwind(cmdStagePatriciaTrie)
+	withPruneTo(cmdStagePatriciaTrie)
+	withIntegrityChecks(cmdStagePatriciaTrie)
+	withChain(cmdStagePatriciaTrie)
+	withHeimdall(cmdStagePatriciaTrie)
+	rootCmd.AddCommand(cmdStagePatriciaTrie)
 
 	withConfig(cmdStageHistory)
 	withDataDir(cmdStageHistory)
@@ -945,6 +978,72 @@ func stageTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	return tx.Commit()
 }
 
+func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error {
+	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), kvcfg.HistoryV3.FromDB(db)
+	sn, agg := allSnapshots(ctx, db, logger)
+	defer sn.Close()
+	defer agg.Close()
+	_, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	must(sync.SetCurrentStage(stages.PatriciaTrie))
+	if !ethconfig.EnableHistoryV4InTest {
+		panic("this method for v3 only")
+	}
+
+	if warmup {
+		return reset2.Warmup(ctx, db, log.LvlInfo, stages.PatriciaTrie)
+	}
+	if reset {
+		return reset2.Reset(ctx, db, stages.PatriciaTrie)
+	}
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	execStage := stage(sync, tx, nil, stages.Execution)
+	s := stage(sync, tx, nil, stages.PatriciaTrie)
+
+	if pruneTo > 0 {
+		pm.History = prune.Distance(s.BlockNumber - pruneTo)
+		pm.Receipts = prune.Distance(s.BlockNumber - pruneTo)
+		pm.CallTraces = prune.Distance(s.BlockNumber - pruneTo)
+		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
+	}
+
+	logger.Info("StageExec", "progress", execStage.BlockNumber)
+	logger.Info("StageTrie", "progress", s.BlockNumber)
+	br, _ := blocksIO(db, logger)
+	cfg := stagedsync.StageTrieCfg(db, true /* checkRoot */, true /* saveHashesToDb */, false /* badBlockHalt */, dirs.Tmp, br, nil /* hd */, historyV3, agg)
+	if unwind > 0 {
+		fmt.Printf("unwind to %d\n", s.BlockNumber-unwind)
+		//u := sync.NewUnwindState(stages.PatriciaTrie, s.BlockNumber-unwind, s.BlockNumber)
+		//if err := stagedsync.UnwindIntermediateHashesStage(u, s, tx, cfg, ctx, logger); err != nil {
+		//	return err
+		//}
+	} else if pruneTo > 0 {
+		fmt.Printf("prune to %d\n", pruneTo)
+		//p, err := sync.PruneStageState(stages.PatriciaTrie, s.BlockNumber, tx, db)
+		//if err != nil {
+		//	return err
+		//}
+		//err = stagedsync.PruneIntermediateHashesStage(p, tx, cfg, ctx)
+		//if err != nil {
+		//	return err
+		//}
+		//if err := stagedsync.PrunePatriciaTrie(s, ctx, tx, cfg, logger); err != nil {
+		//	return err
+		//}
+
+	} else {
+		if _, err := stagedsync.SpawnPatriciaTrieStage(s, sync /* Unwinder */, tx, cfg, ctx, logger); err != nil {
+			return err
+		}
+	}
+	integrity.Trie(db, tx, integritySlow, ctx)
+	return tx.Commit()
+}
+
 func stageHashState(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), kvcfg.HistoryV3.FromDB(db)
 	sn, agg := allSnapshots(ctx, db, logger)
@@ -1339,49 +1438,7 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 	return _blockReaderSingleton, _blockWriterSingleton
 }
 
-var openDomainsOnce sync.Once
-var _aggDomainSingleton *libstate.Aggregator
-
-func allDomains(ctx context.Context, db kv.RoDB, stepSize uint64, mode libstate.CommitmentMode, trie commitment.TrieVariant, logger log.Logger) (*freezeblocks.RoSnapshots, *libstate.Aggregator) {
-	openDomainsOnce.Do(func() {
-		var useSnapshots bool
-		_ = db.View(context.Background(), func(tx kv.Tx) error {
-			useSnapshots, _ = snap.Enabled(tx)
-			return nil
-		})
-		dirs := datadir.New(datadirCli)
-		dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
-
-		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
-		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, logger)
-
-		var err error
-		_aggDomainSingleton, err = libstate.NewAggregator(filepath.Join(dirs.DataDir, "state"), dirs.Tmp, stepSize, mode, trie, logger)
-		if err != nil {
-			panic(err)
-		}
-		if err = _aggDomainSingleton.ReopenFolder(); err != nil {
-			panic(err)
-		}
-
-		if useSnapshots {
-			if err := _allSnapshotsSingleton.ReopenFolder(); err != nil {
-				panic(err)
-			}
-			_allSnapshotsSingleton.LogStat()
-			//db.View(context.Background(), func(tx kv.Tx) error {
-			//	_aggSingleton.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-			//		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-			//		return histBlockNumProgress
-			//	})
-			//	return nil
-			//})
-		}
-	})
-	return _allSnapshotsSingleton, _aggDomainSingleton
-}
-
-func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.CommitmentMode, trie commitment.TrieVariant, logger log.Logger) (consensus.Engine, ethconfig.Config, *freezeblocks.RoSnapshots, *libstate.Aggregator) {
+func newDomains(ctx context.Context, db kv.RwDB, logger log.Logger) (consensus.Engine, ethconfig.Config, *freezeblocks.RoSnapshots, *libstate.AggregatorV3) {
 	historyV3, pm := kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 	//events := shards.NewEvents()
 	genesis := core.GenesisBlockByChainName(chain)
@@ -1403,12 +1460,9 @@ func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.
 	cfg.BatchSize = batchSize
 	cfg.DeprecatedTxPool.Disable = true
 	cfg.Genesis = core.GenesisBlockByChainName(chain)
-	//if miningConfig != nil {
-	//	cfg.Miner = *miningConfig
-	//}
 	cfg.Dirs = datadir.New(datadirCli)
 
-	allSn, agg := allDomains(ctx, db, stepSize, mode, trie, logger)
+	allSn, agg := allSnapshots(ctx, db, logger)
 	cfg.Snapshot = allSn.Cfg()
 
 	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, logger)

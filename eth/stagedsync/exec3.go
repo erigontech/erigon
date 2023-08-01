@@ -281,17 +281,13 @@ func ExecV3(ctx context.Context,
 	doms := cfg.agg.SharedDomains(applyTx.(*temporal.Tx).AggCtx())
 	defer cfg.agg.CloseSharedDomains()
 	rs := state.NewStateV3(doms, logger)
-	//fmt.Printf("input tx %d\n", inputTxNum)
-	//blockNum, inputTxNum, err = doms.SeekCommitment(0, math.MaxUint64)
-	//if err != nil {
-	//	return err
-	//}
-	//agg.SetTxNum(inputTxNum)
-	//log.Info("SeekCommitment", "bn", blockNum, "txn", inputTxNum)
-	defer func() {
-		defer agg.StartUnbufferedWrites().FinishWrites()
-		agg.ComputeCommitment(true, false)
-	}()
+	fmt.Printf("input tx %d\n", inputTxNum)
+	blockNum, inputTxNum, err = doms.SeekCommitment(0, inputTxNum)
+	if err != nil {
+		return err
+	}
+	agg.SetTxNum(inputTxNum)
+	log.Info("SeekCommitment", "bn", blockNum, "txn", inputTxNum)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)

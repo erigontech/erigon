@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -17,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) error {
@@ -169,6 +170,7 @@ func ResetTxLookup(tx kv.RwTx) error {
 var Tables = map[stages.SyncStage][]string{
 	stages.HashState:           {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
 	stages.IntermediateHashes:  {kv.TrieOfAccounts, kv.TrieOfStorage},
+	stages.PatriciaTrie:        {kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentIdx, kv.TblCommitmentHistoryVals, kv.TblCommitmentHistoryVals},
 	stages.CallTraces:          {kv.CallFromIndex, kv.CallToIndex},
 	stages.LogIndex:            {kv.LogAddressIndex, kv.LogTopicIndex},
 	stages.AccountHistoryIndex: {kv.E2AccountsHistory},

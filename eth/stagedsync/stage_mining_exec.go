@@ -10,7 +10,6 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 
@@ -18,6 +17,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
@@ -89,14 +89,24 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	noempty := true
 
 	histV3, _ := kvcfg.HistoryV3.Enabled(tx)
-	var stateReader state.StateReader
+	var (
+		stateReader state.StateReader
+		stateWriter state.WriterWithChangeSets
+	)
 	if histV3 {
+		//agg := tx.(*temporal.Tx).Agg()
+		//defer agg.StartWrites().FinishWrites()
 		stateReader = state.NewReaderV4(tx.(kv.TemporalTx))
-	} else {
+		//ca := agg.MakeContext()
+		//defer ca.Close()
+		//
+		//domains := agg.SharedDomains(ca)
+		stateWriter = state.NewWriterV4(tx.(kv.TemporalTx))
 		stateReader = state.NewPlainStateReader(tx)
+		stateWriter = state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
 	}
 	ibs := state.New(stateReader)
-	stateWriter := state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
+
 	if cfg.chainConfig.DAOForkBlock != nil && cfg.chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
@@ -133,8 +143,8 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 
 			var simStateReader state.StateReader
 			if histV3 {
-				panic("implement me")
-				//simStateReader = state.NewReaderV4(simulationTx)
+				//simStateReader = state.NewReaderV4(tx.(kv.TemporalTx))
+				simStateReader = state.NewSimReaderV4(simulationTx)
 			} else {
 				simStateReader = state.NewPlainStateReader(tx)
 			}

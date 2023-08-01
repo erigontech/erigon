@@ -23,7 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-// SyncStage represents the stages of syncronisation in the Mode.StagedSync mode
+// SyncStage represents the stages of synchronisation in the Mode.StagedSync mode
 // It is used to persist the information about the stage state into the database.
 // It should not be empty and should be unique.
 type SyncStage string
@@ -38,6 +38,7 @@ var (
 	Execution           SyncStage = "Execution"       // Executing each block w/o buildinf a trie
 	Translation         SyncStage = "Translation"     // Translation each marked for translation contract (from EVM to TEVM)
 	VerkleTrie          SyncStage = "VerkleTrie"
+	PatriciaTrie        SyncStage = "PatriciaTrie"        // PatriciaTrie is a stage for evaluating HashPatriciaTrie
 	IntermediateHashes  SyncStage = "IntermediateHashes"  // Generate intermediate hashes, calculate the state root hash
 	HashState           SyncStage = "HashState"           // Apply Keccak256 to all the keys in the state
 	AccountHistoryIndex SyncStage = "AccountHistoryIndex" // Generating history index for accounts
