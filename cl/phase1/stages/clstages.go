@@ -154,7 +154,7 @@ func ConsensusClStages(ctx context.Context,
 							if err != nil {
 								return err
 							}
-							logger.Info("downloading epochs from reqresp", "progress", fmt.Sprintf("%d", int(100*(float64(counter.Add(1))/float64(totalEpochs))))+"%")
+							logger.Info("downloading epochs from reqresp", "progress", fmt.Sprintf("%d", int(100*(float64(counter.Add(1))/float64(totalEpochs+1))))+"%")
 							o <- blocks
 							return nil
 						})
