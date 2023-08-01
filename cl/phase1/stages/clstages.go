@@ -136,10 +136,12 @@ func ConsensusClStages(ctx context.Context,
 						"epoch", fmt.Sprintf("%d/%d(%d)", args.seenEpoch, args.targetEpoch, (1+args.targetEpoch)*cfg.beaconCfg.SlotsPerEpoch-1),
 					)
 					logger.Info("downloading epochs from reqresp")
+					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot*cfg.beaconCfg.SlotsPerEpoch)*time.Second)
+					defer cn()
 					counter := atomic.Int64{}
 					// now we download the missing blocks
 					chans := make([]chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0, totalEpochs)
-					ctx, cn := context.WithCancel(ctx)
+					ctx, cn = context.WithCancel(ctx)
 					egg, ctx := errgroup.WithContext(ctx)
 
 					// is 8 too many?
@@ -209,7 +211,6 @@ func ConsensusClStages(ctx context.Context,
 					respCh := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock])
 					errCh := make(chan error)
 					sources := []clpersist.BlockSource{gossipSource, rpcSource}
-
 					for _, v := range sources {
 						sourceFunc := v.GetRange
 						go func() {
