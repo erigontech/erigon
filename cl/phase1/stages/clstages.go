@@ -213,7 +213,7 @@ func ConsensusClStages(ctx context.Context,
 					for _, v := range sources {
 						sourceFunc := v.GetRange
 						go func() {
-							blocks, err := sourceFunc(ctx, args.seenSlot+1, args.targetSlot-args.seenSlot)
+							blocks, err := sourceFunc(ctx, args.seenSlot+1, 1)
 							if err != nil {
 								errCh <- err
 								return
@@ -340,7 +340,7 @@ func ConsensusClStages(ctx context.Context,
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					// clean up some old ranges
-					err := gossipSource.PurgeRange(ctx, 1, args.seenSlot-cfg.beaconCfg.SlotsPerEpoch*4)
+					err := gossipSource.PurgeRange(ctx, 1, args.seenSlot-cfg.beaconCfg.SlotsPerEpoch*16)
 					if err != nil {
 						return err
 					}
