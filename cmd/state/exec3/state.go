@@ -30,7 +30,7 @@ type Worker struct {
 	chainTx     kv.Tx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
-	in          *QueueWithRetry
+	in          *state.QueueWithRetry
 	rs          *state.StateV3
 	stateWriter *state.StateWriterBufferedV3
 	stateReader *state.StateReaderV3
@@ -40,7 +40,7 @@ type Worker struct {
 	ctx      context.Context
 	engine   consensus.Engine
 	genesis  *types.Genesis
-	resultCh *ResultsQueue
+	resultCh *state.ResultsQueue
 	chain    ChainReader
 
 	callTracer  *CallTracer
@@ -50,7 +50,7 @@ type Worker struct {
 	ibs *state.IntraBlockState
 }
 
-func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *ResultsQueue, engine consensus.Engine) *Worker {
+func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine) *Worker {
 	w := &Worker{
 		lock:        lock,
 		logger:      logger,
@@ -111,13 +111,13 @@ func (rw *Worker) Run() error {
 	return nil
 }
 
-func (rw *Worker) RunTxTask(txTask *TxTask) {
+func (rw *Worker) RunTxTask(txTask *state.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.RunTxTaskNoLock(txTask)
 }
 
-func (rw *Worker) RunTxTaskNoLock(txTask *TxTask) {
+func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {
@@ -295,11 +295,11 @@ func (cr ChainReader) FrozenBlocks() uint64 {
 	return cr.blockReader.FrozenBlocks()
 }
 
-func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func()) {
+func NewWorkersPool(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultChSize := workerCount * 8
-	rws = NewResultsQueue(resultChSize, workerCount) // workerCount * 4
+	rws = state.NewResultsQueue(resultChSize, workerCount) // workerCount * 4
 	{
 		// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 		// and in applyLoop all errors are critical

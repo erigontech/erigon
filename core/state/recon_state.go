@@ -12,10 +12,9 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/state/exec3"
-
 	btree2 "github.com/tidwall/btree"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 type reconPair struct {
@@ -41,9 +40,9 @@ func ReconnLess(i, thanItem reconPair) bool {
 type ReconnWork struct {
 	lock          sync.RWMutex
 	doneBitmap    roaring64.Bitmap
-	triggers      map[uint64][]*exec3.TxTask
-	workCh        chan *exec3.TxTask
-	queue         exec3.TxTaskQueue
+	triggers      map[uint64][]*TxTask
+	workCh        chan *TxTask
+	queue         TxTaskQueue
 	rollbackCount uint64
 	maxTxNum      uint64
 }
@@ -58,11 +57,11 @@ type ReconState struct {
 	sizeEstimate int
 }
 
-func NewReconState(workCh chan *exec3.TxTask) *ReconState {
+func NewReconState(workCh chan *TxTask) *ReconState {
 	rs := &ReconState{
 		ReconnWork: &ReconnWork{
 			workCh:   workCh,
-			triggers: map[uint64][]*exec3.TxTask{},
+			triggers: map[uint64][]*TxTask{},
 		},
 		changes: map[string]*btree2.BTreeG[reconPair]{},
 		hints:   map[string]*btree2.PathHint{},
@@ -70,11 +69,11 @@ func NewReconState(workCh chan *exec3.TxTask) *ReconState {
 	return rs
 }
 
-func (rs *ReconState) Reset(workCh chan *exec3.TxTask) {
+func (rs *ReconState) Reset(workCh chan *TxTask) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	rs.workCh = workCh
-	rs.triggers = map[uint64][]*exec3.TxTask{}
+	rs.triggers = map[uint64][]*TxTask{}
 	rs.rollbackCount = 0
 	rs.queue = rs.queue[:cap(rs.queue)]
 	for i := 0; i < len(rs.queue); i++ {
@@ -188,7 +187,7 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *ReconnWork) Schedule(ctx context.Context) (*exec3.TxTask, bool, error) {
+func (rs *ReconnWork) Schedule(ctx context.Context) (*TxTask, bool, error) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 Loop:
@@ -205,7 +204,7 @@ Loop:
 		}
 	}
 	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(*exec3.TxTask), true, nil
+		return heap.Pop(&rs.queue).(*TxTask), true, nil
 	}
 	return nil, false, nil
 }
@@ -225,7 +224,7 @@ func (rs *ReconnWork) CommitTxNum(txNum uint64) {
 	}
 }
 
-func (rs *ReconnWork) RollbackTx(txTask *exec3.TxTask, dependency uint64) {
+func (rs *ReconnWork) RollbackTx(txTask *TxTask, dependency uint64) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	if rs.doneBitmap.Contains(dependency) {

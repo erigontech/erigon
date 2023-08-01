@@ -68,7 +68,7 @@ type Progress struct {
 	logger       log.Logger
 }
 
-func (p *Progress) Log(rs *state.StateV3, in *exec3.QueueWithRetry, rws *exec3.ResultsQueue, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64) {
+func (p *Progress) Log(rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64) {
 	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -293,7 +293,7 @@ func ExecV3(ctx context.Context,
 	// Maybe need split channels? Maybe don't exit from ApplyLoop? Maybe current way is also ok?
 
 	// input queue
-	in := exec3.NewQueueWithRetry(100_000)
+	in := state.NewQueueWithRetry(100_000)
 	defer in.Close()
 
 	rwsConsumed := make(chan struct{}, 1)
@@ -453,7 +453,7 @@ func ExecV3(ctx context.Context,
 						}
 
 						// Drain results channel because read sets do not carry over
-						rws.DropResults(func(txTask *exec3.TxTask) {
+						rws.DropResults(func(txTask *state.TxTask) {
 							rs.ReTry(txTask, in)
 						})
 
@@ -656,7 +656,7 @@ Loop:
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 
 			// Do not oversend, wait for the result heap to go under certain size
-			txTask := &exec3.TxTask{
+			txTask := &state.TxTask{
 				BlockNum:        blockNum,
 				Header:          header,
 				Coinbase:        b.Coinbase(),
@@ -959,7 +959,7 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, err
 }
 
-func processResultQueue(in *exec3.QueueWithRetry, rws *exec3.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueue(in *state.QueueWithRetry, rws *state.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
@@ -1114,7 +1114,7 @@ func reconstituteStep(last bool,
 	}
 	g, reconstWorkersCtx := errgroup.WithContext(ctx)
 	defer g.Wait()
-	workCh := make(chan *exec3.TxTask, workerCount*4)
+	workCh := make(chan *state.TxTask, workerCount*4)
 	defer func() {
 		fmt.Printf("close1\n")
 		safeCloseTxTaskCh(workCh)
@@ -1270,7 +1270,7 @@ func reconstituteStep(last bool,
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
 				if bitmap.Contains(inputTxNum) {
 					binary.BigEndian.PutUint64(txKey[:], inputTxNum)
-					txTask := &exec3.TxTask{
+					txTask := &state.TxTask{
 						BlockNum:        bn,
 						Header:          header,
 						Coinbase:        b.Coinbase(),
@@ -1526,7 +1526,7 @@ func reconstituteStep(last bool,
 	return nil
 }
 
-func safeCloseTxTaskCh(ch chan *exec3.TxTask) {
+func safeCloseTxTaskCh(ch chan *state.TxTask) {
 	if ch == nil {
 		return
 	}

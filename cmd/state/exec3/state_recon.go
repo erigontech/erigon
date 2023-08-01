@@ -282,7 +282,7 @@ func (rw *ReconWorker) Run() error {
 
 var noop = state.NewNoopWriter()
 
-func (rw *ReconWorker) runTxTask(txTask *TxTask) error {
+func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.stateReader.SetTxNum(txTask.TxNum)

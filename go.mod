@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.19
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230801152229-a7d0edb893df
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230801174843-a84cbbd0bc3d
 	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230727050819-5b1eb03d9caa
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -171,7 +171,7 @@ require (
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/ledgerwatch/interfaces v0.0.0-20230728174807-3151704f5687 // indirect
+	github.com/ledgerwatch/interfaces v0.0.0-20230731192530-801b5852e33e // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
