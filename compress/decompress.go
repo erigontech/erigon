@@ -26,9 +26,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/mmap"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type word []byte // plain text word associated with code from dictionary
@@ -674,8 +675,13 @@ func (g *Getter) SkipUncompressed() (uint64, int) {
 	return g.dataP, int(wordLen)
 }
 
-// Match returns true and next offset if the word at current offset fully matches the buf
-// returns false and current offset otherwise.
+// Match returns
+//
+//	1 if the word at current offset is greater than the buf
+//
+// -1 if it is less than the buf
+//
+//	0 if they are equal.
 func (g *Getter) Match(buf []byte) int {
 	savePos := g.dataP
 	wordLen := g.nextPos(true)

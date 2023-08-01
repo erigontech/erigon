@@ -15,10 +15,11 @@ func NewBpsTree(kv *compress.Getter, offt *eliasfano32.EliasFano, M uint64) *Bps
 
 type BpsTree struct {
 	offt *eliasfano32.EliasFano
-	kv   *compress.Getter
+	kv   *compress.Getter // Getter is thread unsafe
 	mx   [][]Node
 	M    uint64
 
+	trace   bool
 	naccess uint64
 }
 
@@ -54,7 +55,9 @@ func (b *BpsTree) lookup(i uint64) ([]byte, []byte, error) {
 	if i >= b.offt.Count() {
 		return nil, nil, ErrBtIndexLookupBounds
 	}
-	fmt.Printf("lookup %d count %d\n", i, b.offt.Count())
+	if b.trace {
+		fmt.Printf("lookup %d count %d\n", i, b.offt.Count())
+	}
 	b.kv.Reset(b.offt.Get(i))
 	buf, _ := b.kv.Next(nil)
 	val, _ := b.kv.Next(nil)
@@ -109,20 +112,13 @@ func (b *BpsTree) initialize() {
 	}
 	b.traverse(mx, k, 0, 0)
 
-	for i := 0; i < len(mx); i++ {
-		for j := 0; j < len(mx[i]); j++ {
-			fmt.Printf("mx[%d][%d] %x %d %d\n", i, j, mx[i][j].prefix, mx[i][j].off, mx[i][j].i)
+	if b.trace {
+		for i := 0; i < len(mx); i++ {
+			for j := 0; j < len(mx[i]); j++ {
+				fmt.Printf("mx[%d][%d] %x %d %d\n", i, j, mx[i][j].prefix, mx[i][j].off, mx[i][j].i)
+			}
 		}
 	}
-
-	//trie := newTrie()
-	//
-	//for i := 0; i < len(mx); i++ {
-	//	for j := 0; j < len(mx[i]); j++ {
-	//		trie.insert(mx[i][j])
-	//	}
-	//}
-
 	b.mx = mx
 }
 
@@ -301,7 +297,9 @@ func (a *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 			n = a.mx[d][m]
 
 			a.naccess++
-			fmt.Printf("smx[%d][%d] i=%d %x\n", d, m, n.i, n.prefix)
+			if a.trace {
+				fmt.Printf("smx[%d][%d] i=%d %x\n", d, m, n.i, n.prefix)
+			}
 			switch bytes.Compare(a.mx[d][m].prefix, x) {
 			case 0:
 				return n, n.i, n.i
@@ -322,9 +320,13 @@ func (b *BpsTree) Seek(key []byte) (*BpsTreeIterator, error) {
 		return &BpsTreeIterator{t: b, i: 0}, nil
 	}
 	l, r := uint64(0), b.offt.Count()
-	fmt.Printf("Seek %x %d %d\n", key, l, r)
+	if b.trace {
+		fmt.Printf("Seek %x %d %d\n", key, l, r)
+	}
 	defer func() {
-		fmt.Printf("found %x [%d %d] naccsess %d\n", key, l, r, b.naccess)
+		if b.trace {
+			fmt.Printf("found %x [%d %d] naccsess %d\n", key, l, r, b.naccess)
+		}
 		b.naccess = 0
 	}()
 
@@ -341,10 +343,11 @@ func (b *BpsTree) Seek(key []byte) (*BpsTreeIterator, error) {
 			l = dl
 		}
 	}
-	fmt.Printf("i %d n %x [%d %d]\n", n.i, n.prefix, l, r)
+	if b.trace {
+		fmt.Printf("i %d n %x [%d %d]\n", n.i, n.prefix, l, r)
+	}
 
 	m := uint64(0)
-	//var lastKey []byte
 	for l < r {
 		m = (l + r) >> 1
 		k, _ := b.lookupKey(m)
@@ -352,8 +355,9 @@ func (b *BpsTree) Seek(key []byte) (*BpsTreeIterator, error) {
 
 		}
 		b.naccess++
-		fmt.Printf("bs %x [%d %d]\n", k, l, r)
-		//lastKey = common.Copy(k)
+		if b.trace {
+			fmt.Printf("bs %x [%d %d]\n", k, l, r)
+		}
 
 		switch bytes.Compare(k, key) {
 		case 0:

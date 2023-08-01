@@ -162,6 +162,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	tmp := t.TempDir()
 	logger := log.New()
 	keyCount, M := 1_200_000, 1024
+	UseBpsTree = false
 
 	dataPath := generateCompressedKV(t, tmp, 52, 48 /*val size*/, keyCount, logger)
 
@@ -253,8 +254,10 @@ func TestBpsTree_Seek(t *testing.T) {
 		i++
 	}
 
+	tr := newTrie()
 	ef := eliasfano32.NewEliasFano(uint64(keyCount), ps[len(ps)-1])
 	for i := 0; i < len(ps); i++ {
+		tr.insert(Node{i: uint64(i), prefix: keys[i], off: ps[i]})
 		ef.AddOffset(ps[i])
 	}
 	ef.Build()

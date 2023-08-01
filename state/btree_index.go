@@ -775,18 +775,21 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 }
 
 type BtIndex struct {
-	alloc        *btAlloc
-	bplus        *BpsTree
-	m            mmap.MMap
-	data         []byte
-	file         *os.File
-	size         int64
-	modTime      time.Time
-	filePath     string
-	keyCount     uint64
-	bytesPerRec  int
-	dataoffset   uint64
-	auxBuf       []byte
+	alloc       *btAlloc // pointless?
+	bplus       *BpsTree
+	m           mmap.MMap
+	data        []byte
+	ef          *eliasfano32.EliasFano
+	file        *os.File
+	size        int64
+	modTime     time.Time
+	filePath    string
+	keyCount    uint64 // pointless?
+	bytesPerRec int    // pointless?
+	dataoffset  uint64 // pointless?
+	auxBuf      []byte // also pointless?
+
+	compressed   bool
 	decompressor *compress.Decompressor
 	getter       *compress.Getter
 }
@@ -915,21 +918,21 @@ func BuildBtreeIndex(dataPath, indexPath string, compressed bool, logger log.Log
 
 	var pos uint64
 	for getter.HasNext() {
-		//if compressed {
-		key, _ = getter.Next(key[:0])
-		//} else {
-		//	key, _ = getter.NextUncompressed()
-		//}
+		if compressed {
+			key, _ = getter.Next(key[:0])
+		} else {
+			key, _ = getter.NextUncompressed()
+		}
 		err = iw.AddKey(key, pos)
 		if err != nil {
 			return err
 		}
 
-		//if compressed {
-		//	pos, _ = getter.Skip()
-		//} else {
-		pos, _ = getter.SkipUncompressed()
-		//}
+		if compressed {
+			pos, _ = getter.Skip()
+		} else {
+			pos, _ = getter.SkipUncompressed()
+		}
 	}
 	decomp.Close()
 
@@ -957,13 +960,11 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 	if err != nil {
 		return nil, err
 	}
-
 	idx.m, err = mmap.MapRegion(idx.file, int(idx.size), mmap.RDONLY, 0, 0)
 	if err != nil {
 		return nil, err
 	}
 	idx.data = idx.m[:idx.size]
-	fmt.Printf("idx.data %d\n", len(idx.data))
 
 	// Read number of keys and bytes per record
 	pos := 8
@@ -975,9 +976,10 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 	}
 
 	ef, pos := eliasfano32.ReadEliasFano(idx.data[pos:])
-
+	idx.ef = ef
 	idx.decompressor = kv
 	idx.getter = idx.decompressor.MakeGetter()
+	defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 
 	switch UseBpsTree {
 	case true:
@@ -991,7 +993,6 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *compress.Dec
 			idx.alloc.dataLookup = idx.dataLookup
 			idx.alloc.keyCmp = idx.keyCmp
 			idx.alloc.traverseDfs()
-			defer idx.decompressor.EnableReadAhead().DisableReadAhead()
 			idx.alloc.fillSearchMx()
 		}
 	}
@@ -1018,33 +1019,42 @@ func (b *BtIndex) dataLookup(di uint64) ([]byte, []byte, error) {
 		return b.dataLookupBplus(di)
 	}
 
-	if di >= b.keyCount {
+	if di >= b.keyCount || di >= b.ef.Count() {
 		return nil, nil, fmt.Errorf("%w: keyCount=%d, item %d requested. file: %s", ErrBtIndexLookupBounds, b.keyCount, di+1, b.FileName())
 	}
-	p := int(b.dataoffset) + int(di)*b.bytesPerRec
-	if len(b.data) < p+b.bytesPerRec {
-		return nil, nil, fmt.Errorf("data lookup gone too far (%d after %d). keyCount=%d, requesed item %d. file: %s", p+b.bytesPerRec-len(b.data), len(b.data), b.keyCount, di, b.FileName())
-	}
 
-	var aux [8]byte
-	dst := aux[8-b.bytesPerRec:]
-	copy(dst, b.data[p:p+b.bytesPerRec])
-
-	offset := binary.BigEndian.Uint64(aux[:])
+	//p := int(b.dataoffset) + int(di)*b.bytesPerRec
+	//if len(b.data) < p+b.bytesPerRec {
+	//	return nil, nil, fmt.Errorf("data lookup gone too far (%d after %d). keyCount=%d, requesed item %d. file: %s", p+b.bytesPerRec-len(b.data), len(b.data), b.keyCount, di, b.FileName())
+	//}
+	//
+	//var aux [8]byte
+	//dst := aux[8-b.bytesPerRec:]
+	//copy(dst, b.data[p:p+b.bytesPerRec])
+	//
+	//offset := binary.BigEndian.Uint64(aux[:])
+	offset := b.ef.Get(di)
 	b.getter.Reset(offset)
 	if !b.getter.HasNext() {
 		return nil, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
 	}
 
-	//key, kp := b.getter.Next(kBuf[:0])
-	key, kp := b.getter.NextUncompressed()
-	if !b.getter.HasNext() {
-		return nil, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
+	var k, v []byte
+	switch b.compressed {
+	case true:
+		k, _ = b.getter.Next(nil)
+		if !b.getter.HasNext() {
+			return nil, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
+		}
+		v, _ = b.getter.Next(nil)
+	default:
+		k, _ = b.getter.NextUncompressed()
+		if !b.getter.HasNext() {
+			return nil, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
+		}
+		v, _ = b.getter.NextUncompressed()
 	}
-	//val, vp := b.getter.Next(vBuf[:0])
-	val, vp := b.getter.NextUncompressed()
-	_, _ = kp, vp
-	return key, val, nil
+	return k, v, nil
 }
 
 func (b *BtIndex) dataLookupBplus(di uint64) ([]byte, []byte, error) {
@@ -1053,29 +1063,35 @@ func (b *BtIndex) dataLookupBplus(di uint64) ([]byte, []byte, error) {
 
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
 func (b *BtIndex) keyCmp(k []byte, di uint64) (int, []byte, error) {
-	if di >= b.keyCount {
+	if di >= b.keyCount || di >= b.ef.Count() {
 		return 0, nil, fmt.Errorf("%w: keyCount=%d, item %d requested. file: %s", ErrBtIndexLookupBounds, b.keyCount, di+1, b.FileName())
 	}
-	p := int(b.dataoffset) + int(di)*b.bytesPerRec
-	if len(b.data) < p+b.bytesPerRec {
-		return 0, nil, fmt.Errorf("data lookup gone too far (%d after %d). keyCount=%d, requesed item %d. file: %s", p+b.bytesPerRec-len(b.data), len(b.data), b.keyCount, di, b.FileName())
-	}
-
-	var aux [8]byte
-	dst := aux[8-b.bytesPerRec:]
-	copy(dst, b.data[p:p+b.bytesPerRec])
-
-	offset := binary.BigEndian.Uint64(aux[:])
+	//p := int(b.dataoffset) + int(di)*b.bytesPerRec
+	//if len(b.data) < p+b.bytesPerRec {
+	//	return 0, nil, fmt.Errorf("data lookup gone too far (%d after %d). keyCount=%d, requesed item %d. file: %s", p+b.bytesPerRec-len(b.data), len(b.data), b.keyCount, di, b.FileName())
+	//}
+	//
+	//var aux [8]byte
+	//dst := aux[8-b.bytesPerRec:]
+	//copy(dst, b.data[p:p+b.bytesPerRec])
+	//
+	//offset := binary.BigEndian.Uint64(aux[:])
+	offset := b.ef.Get(di)
 	b.getter.Reset(offset)
 	if !b.getter.HasNext() {
 		return 0, nil, fmt.Errorf("pair %d not found. keyCount=%d. file: %s", di, b.keyCount, b.FileName())
 	}
 
 	//TODO: use `b.getter.Match` after https://github.com/ledgerwatch/erigon/issues/7855
-	//kBuf, _ = b.getter.Next(kBuf[:0])
-	result, _ := b.getter.NextUncompressed()
+	var result []byte
+	switch b.compressed {
+	case true:
+		result, _ = b.getter.Next(result[:0])
+	default:
+		result, _ = b.getter.NextUncompressed()
+	}
 	return bytes.Compare(result, k), result, nil
-	//return -b.getter.Match(k), kBuf, nil
+	//return b.getter.Match(k), result, nil
 }
 
 func (b *BtIndex) Size() int64 { return b.size }
@@ -1103,6 +1119,7 @@ func (b *BtIndex) Close() {
 		}
 		b.file = nil
 	}
+
 	if b.decompressor != nil {
 		b.decompressor.Close()
 		b.decompressor = nil
