@@ -37,7 +37,7 @@ func (b *BeaconRpcSource) GetRange(ctx context.Context, from uint64, count uint6
 	if count == 0 {
 		return nil, nil
 	}
-	responses, pid, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, from, from+count)
+	responses, pid, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	if err != nil {
 		b.rpc.BanPeer(pid)
 		return nil, err
