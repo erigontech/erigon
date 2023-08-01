@@ -81,6 +81,10 @@ func (e *EngineServerExperimental) handleNewPayload(
 		return nil, err
 	}
 
+	if status == execution.ExecutionStatus_BadBlock {
+		e.hd.ReportBadHeaderPoS(block.Hash(), latestValidHash)
+	}
+
 	return &engine_types.PayloadStatus{
 		Status:          convertGrpcStatusToEngineStatus(status),
 		LatestValidHash: &latestValidHash,

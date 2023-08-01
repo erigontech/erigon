@@ -38,12 +38,13 @@ type TrieCfg struct {
 	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
 	blockReader       services.FullBlockReader
 	hd                *headerdownload.HeaderDownload
+	latestValidNumber *uint64
 
 	historyV3 bool
 	agg       *state.AggregatorV3
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.AggregatorV3) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.AggregatorV3, latestValidBlockNumber *uint64) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
@@ -52,6 +53,7 @@ func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, t
 		badBlockHalt:      badBlockHalt,
 		blockReader:       blockReader,
 		hd:                hd,
+		latestValidNumber: latestValidBlockNumber,
 
 		historyV3: historyV3,
 		agg:       agg,
@@ -130,6 +132,9 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		}
 		if cfg.hd != nil {
 			cfg.hd.ReportBadHeaderPoS(headerHash, syncHeadHeader.ParentHash)
+		}
+		if cfg.latestValidNumber != nil {
+			*cfg.latestValidNumber = syncHeadHeader.Number.Uint64()
 		}
 		if to > s.BlockNumber {
 			unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers

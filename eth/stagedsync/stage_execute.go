@@ -77,6 +77,8 @@ type ExecuteBlockCfg struct {
 	accumulator   *shards.Accumulator
 	blockReader   services.FullBlockReader
 	hd            headerDownloader
+	// last valid number of the stage
+	latestValidNumber *uint64
 
 	dirs      datadir.Dirs
 	historyV3 bool
@@ -104,25 +106,27 @@ func StageExecuteBlocksCfg(
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	agg *libstate.AggregatorV3,
+	latestValidNumber *uint64,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
-		db:            db,
-		prune:         pm,
-		batchSize:     batchSize,
-		changeSetHook: changeSetHook,
-		chainConfig:   chainConfig,
-		engine:        engine,
-		vmConfig:      vmConfig,
-		dirs:          dirs,
-		accumulator:   accumulator,
-		stateStream:   stateStream,
-		badBlockHalt:  badBlockHalt,
-		blockReader:   blockReader,
-		hd:            hd,
-		genesis:       genesis,
-		historyV3:     historyV3,
-		syncCfg:       syncCfg,
-		agg:           agg,
+		db:                db,
+		prune:             pm,
+		batchSize:         batchSize,
+		changeSetHook:     changeSetHook,
+		chainConfig:       chainConfig,
+		engine:            engine,
+		vmConfig:          vmConfig,
+		dirs:              dirs,
+		accumulator:       accumulator,
+		stateStream:       stateStream,
+		badBlockHalt:      badBlockHalt,
+		blockReader:       blockReader,
+		hd:                hd,
+		genesis:           genesis,
+		historyV3:         historyV3,
+		syncCfg:           syncCfg,
+		agg:               agg,
+		latestValidNumber: latestValidNumber,
 	}
 }
 
@@ -458,6 +462,9 @@ Loop:
 				logger.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 				if cfg.hd != nil {
 					cfg.hd.ReportBadHeaderPoS(blockHash, block.ParentHash())
+				}
+				if cfg.latestValidNumber != nil {
+					*cfg.latestValidNumber = block.NonceU64() - 1
 				}
 				if cfg.badBlockHalt {
 					return err

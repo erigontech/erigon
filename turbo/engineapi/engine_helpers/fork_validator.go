@@ -35,7 +35,7 @@ import (
 // the maximum point from the current head, past which side forks are not validated anymore.
 const maxForkDepth = 32 // 32 slots is the duration of an epoch thus there cannot be side forks in PoS deeper than 32 blocks from head.
 
-type validatePayloadFunc func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody, *shards.Notifications) error
+type validatePayloadFunc func(kv.RwTx, *types.Header, *types.RawBody, uint64, []*types.Header, []*types.RawBody, *shards.Notifications) (uint64, error)
 
 type ForkValidator struct {
 	// current memory batch containing chain head that extend canonical fork.
@@ -281,10 +281,14 @@ func (fv *ForkValidator) ClearWithUnwind(tx kv.RwTx, accumulator *shards.Accumul
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
 func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 	notifications *shards.Notifications) (status engine_types.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
-	validationError = fv.validatePayload(tx, header, body, unwindPoint, headersChain, bodiesChain, notifications)
+	var latestValidNumber uint64
+	latestValidNumber, validationError = fv.validatePayload(tx, header, body, unwindPoint, headersChain, bodiesChain, notifications)
 	latestValidHash = header.Hash()
 	if validationError != nil {
-		latestValidHash = header.ParentHash
+		latestValidHash, criticalError = rawdb.ReadCanonicalHash(tx, latestValidNumber)
+		if criticalError != nil {
+			return
+		}
 		status = engine_types.InvalidStatus
 		if fv.extendingFork != nil {
 			fv.extendingFork.Rollback()

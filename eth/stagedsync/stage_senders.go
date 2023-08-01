@@ -30,36 +30,38 @@ import (
 )
 
 type SendersCfg struct {
-	db              kv.RwDB
-	batchSize       int
-	blockSize       int
-	bufferSize      int
-	numOfGoroutines int
-	readChLen       int
-	badBlockHalt    bool
-	tmpdir          string
-	prune           prune.Mode
-	chainConfig     *chain.Config
-	hd              *headerdownload.HeaderDownload
-	blockReader     services.FullBlockReader
+	db                kv.RwDB
+	batchSize         int
+	blockSize         int
+	bufferSize        int
+	numOfGoroutines   int
+	readChLen         int
+	badBlockHalt      bool
+	tmpdir            string
+	prune             prune.Mode
+	chainConfig       *chain.Config
+	hd                *headerdownload.HeaderDownload
+	latestValidNumber *uint64
+	blockReader       services.FullBlockReader
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, latestValidNumber *uint64) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
 	return SendersCfg{
-		db:              db,
-		batchSize:       sendersBatchSize,
-		blockSize:       sendersBlockSize,
-		bufferSize:      (sendersBlockSize * 10 / 20) * 10000, // 20*4096
-		numOfGoroutines: secp256k1.NumOfContexts(),            // we can only be as parallels as our crypto library supports,
-		readChLen:       4,
-		badBlockHalt:    badBlockHalt,
-		tmpdir:          tmpdir,
-		chainConfig:     chainCfg,
-		prune:           prune,
-		hd:              hd,
+		db:                db,
+		batchSize:         sendersBatchSize,
+		blockSize:         sendersBlockSize,
+		bufferSize:        (sendersBlockSize * 10 / 20) * 10000, // 20*4096
+		numOfGoroutines:   secp256k1.NumOfContexts(),            // we can only be as parallels as our crypto library supports,
+		readChLen:         4,
+		badBlockHalt:      badBlockHalt,
+		tmpdir:            tmpdir,
+		chainConfig:       chainCfg,
+		prune:             prune,
+		hd:                hd,
+		latestValidNumber: latestValidNumber,
 
 		blockReader: blockReader,
 	}
@@ -245,6 +247,9 @@ Loop:
 		minHeader := rawdb.ReadHeader(tx, minBlockHash, minBlockNum)
 		if cfg.hd != nil {
 			cfg.hd.ReportBadHeaderPoS(minBlockHash, minHeader.ParentHash)
+		}
+		if cfg.latestValidNumber != nil {
+			*cfg.latestValidNumber = minHeader.Number.Uint64()
 		}
 		if to > s.BlockNumber {
 			u.UnwindTo(minBlockNum-1, minBlockHash)
