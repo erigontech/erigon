@@ -617,6 +617,10 @@ func (e *EngineServerExperimental) ForkchoiceUpdatedV2(ctx context.Context, fork
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.CapellaVersion)
 }
 
+func (e *EngineServerExperimental) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.CapellaVersion)
+}
+
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_newpayloadv1
 func (e *EngineServerExperimental) NewPayloadV1(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
@@ -632,7 +636,7 @@ func (e *EngineServerExperimental) NewPayloadV2(ctx context.Context, payload *en
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_newpayloadv3
 func (e *EngineServerExperimental) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash) (*engine_types.PayloadStatus, error) {
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
 	return e.newPayload(ctx, payload, expectedBlobHashes, clparams.DenebVersion)
 }
 

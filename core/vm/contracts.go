@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/blake2b"
 	"github.com/ledgerwatch/erigon/crypto/bls12381"
@@ -46,6 +48,12 @@ import (
 type PrecompiledContract interface {
 	RequiredGas(input []byte) uint64  // RequiredPrice calculates the contract gas use
 	Run(input []byte) ([]byte, error) // Run runs the precompiled contract
+}
+
+type StatefulPrecompiledContract interface {
+	RequiredGas(input []byte) uint64                                          // RequiredPrice calculates the contract gas use
+	RunStateful(input []byte, state evmtypes.IntraBlockState) ([]byte, error) // Run runs the precompiled contract
+	Run(input []byte) ([]byte, error)                                         // Run runs the precompiled contract
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -99,16 +107,21 @@ var PrecompiledContractsBerlin = map[libcommon.Address]PrecompiledContract{
 }
 
 var PrecompiledContractsCancun = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{0x01}): &ecrecover{},
-	libcommon.BytesToAddress([]byte{0x02}): &sha256hash{},
-	libcommon.BytesToAddress([]byte{0x03}): &ripemd160hash{},
-	libcommon.BytesToAddress([]byte{0x04}): &dataCopy{},
-	libcommon.BytesToAddress([]byte{0x05}): &bigModExp{eip2565: true},
-	libcommon.BytesToAddress([]byte{0x06}): &bn256AddIstanbul{},
-	libcommon.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
-	libcommon.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
-	libcommon.BytesToAddress([]byte{0x09}): &blake2F{},
-	libcommon.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
+	libcommon.BytesToAddress([]byte{1}):                    &ecrecover{},
+	libcommon.BytesToAddress([]byte{2}):                    &sha256hash{},
+	libcommon.BytesToAddress([]byte{3}):                    &ripemd160hash{},
+	libcommon.BytesToAddress([]byte{4}):                    &dataCopy{},
+	libcommon.BytesToAddress([]byte{5}):                    &bigModExp{eip2565: true},
+	libcommon.BytesToAddress([]byte{6}):                    &bn256AddIstanbul{},
+	libcommon.BytesToAddress([]byte{7}):                    &bn256ScalarMulIstanbul{},
+	libcommon.BytesToAddress([]byte{8}):                    &bn256PairingIstanbul{},
+	libcommon.BytesToAddress([]byte{9}):                    &blake2F{},
+	libcommon.BytesToAddress([]byte{0x0a}):                 &pointEvaluation{},
+	libcommon.BytesToAddress(params.HistoryStorageAddress): &parentBeaconBlockRoot{},
+}
+
+var StatefulPrecompile = map[libcommon.Address]bool{
+	libcommon.BytesToAddress(params.HistoryStorageAddress): true,
 }
 
 // PrecompiledContractsBLS contains the set of pre-compiled Ethereum
@@ -172,13 +185,19 @@ func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64) (ret []byte, remainingGas uint64, err error) {
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, state evmtypes.IntraBlockState) (ret []byte, remainingGas uint64, err error) {
 	gasCost := p.RequiredGas(input)
 	if suppliedGas < gasCost {
 		return nil, 0, ErrOutOfGas
 	}
 	suppliedGas -= gasCost
-	output, err := p.Run(input)
+	var output []byte
+	sp, isStateful := p.(StatefulPrecompiledContract)
+	if isStateful {
+		output, err = sp.RunStateful(input, state)
+	} else {
+		output, err = p.Run(input)
+	}
 	return output, suppliedGas, err
 }
 
@@ -1095,4 +1114,37 @@ func (c *pointEvaluation) RequiredGas(input []byte) uint64 {
 
 func (c *pointEvaluation) Run(input []byte) ([]byte, error) {
 	return kzg.PointEvaluationPrecompile(input)
+}
+
+type parentBeaconBlockRoot struct{}
+
+func (c *parentBeaconBlockRoot) RequiredGas(input []byte) uint64 {
+	return params.ParentBeaconBlockRootGas
+}
+
+func (c *parentBeaconBlockRoot) Run(input []byte) ([]byte, error) {
+	return nil, nil
+}
+
+func (c *parentBeaconBlockRoot) RunStateful(input []byte, state evmtypes.IntraBlockState) ([]byte, error) {
+	timestampParam := input[:32]
+	if len(timestampParam) < 32 {
+		return nil, errors.New("timestamp param too short")
+	}
+
+	timestampReduced := uint256.NewInt(0).SetBytes(timestampParam).Uint64() % params.HistoricalRootsModulus
+	timestampIndex := libcommon.BigToHash(libcommon.Big256.SetUint64((timestampReduced)))
+	recordedTimestamp := uint256.NewInt(0)
+	root := uint256.NewInt(0)
+	state.GetState(libcommon.BytesToAddress(params.HistoryStorageAddress), &timestampIndex, recordedTimestamp)
+
+	recordedTimestampBytes := recordedTimestamp.Bytes32()
+	if !bytes.Equal(recordedTimestampBytes[:], timestampParam) {
+		return make([]byte, 32), nil
+	}
+	timestampExtended := timestampReduced + params.HistoricalRootsModulus
+	rootIndex := libcommon.BigToHash(libcommon.Big256.SetUint64((timestampExtended)))
+	state.GetState(libcommon.BytesToAddress(params.HistoryStorageAddress), &rootIndex, root)
+	res := root.Bytes32()
+	return res[:], nil
 }
