@@ -182,10 +182,13 @@ func ConsensusClStages(ctx context.Context,
 							}
 						}
 					}()
-					err := egg.Wait()
-					if err != nil {
-						return err
-					}
+					go func() {
+						// if either operations error, we exit with the error.
+						err := egg.Wait()
+						if err != nil {
+							errchan <- err
+						}
+					}()
 					return <-errchan
 				},
 			},
