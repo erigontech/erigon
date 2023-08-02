@@ -35,6 +35,8 @@ type Cfg struct {
 }
 
 type Args struct {
+	peers uint64
+
 	targetEpoch, seenEpoch uint64
 	targetSlot, seenSlot   uint64
 }
@@ -80,11 +82,18 @@ func ConsensusClStages(ctx context.Context,
 		}
 		return nil
 	}
+	minPeersForDownload := uint64(4)
 
 	// TODO: this is an ugly hack, but it works!
 	shouldForkChoiceSinceReorg := false
 	return &clstages.StageGraph[*Cfg, Args]{
 		ArgsFunc: func(ctx context.Context, cfg *Cfg) (args Args) {
+			var err error
+			args.peers, err = cfg.rpc.Peers()
+			if err != nil {
+				log.Error("failed to get sentinel peer count", "err", err)
+				args.peers = 0
+			}
 			args.seenSlot = cfg.forkChoice.HighestSeen()
 			args.seenEpoch = args.seenSlot / cfg.beaconCfg.SlotsPerEpoch
 			args.targetSlot = utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
@@ -106,7 +115,6 @@ func ConsensusClStages(ctx context.Context,
 						return nil
 					}
 					waitWhenNotEnoughPeers := 3 * time.Second
-					minPeersForDownload := uint64(4)
 					for {
 						if peersCount > minPeersForDownload {
 							break
@@ -124,6 +132,9 @@ func ConsensusClStages(ctx context.Context,
 			"CatchUpEpochs": {
 				Description: `if we are 1 or more epochs behind, we download in parallel by epoch`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if args.peers < minPeersForDownload {
+						return "WaitForPeers"
+					}
 					if args.seenEpoch < args.targetEpoch {
 						return "CatchUpEpochs"
 					}
@@ -161,9 +172,11 @@ func ConsensusClStages(ctx context.Context,
 							return nil
 						})
 					}
-					errchan := make(chan error)
+					errchan := make(chan error, 2)
 					go func() {
-						defer close(errchan)
+						defer func() {
+							errchan <- nil
+						}()
 						for _, v := range chans {
 							select {
 							case <-ctx.Done():
@@ -186,7 +199,7 @@ func ConsensusClStages(ctx context.Context,
 						// if either operations error, we exit with the error.
 						err := egg.Wait()
 						if err != nil {
-							errchan <- err
+							errchan <- nil
 						}
 					}()
 					return <-errchan
@@ -195,6 +208,9 @@ func ConsensusClStages(ctx context.Context,
 			"CatchUpBlocks": {
 				Description: `if we are within the epoch but not at head, we run catchupblocks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if args.peers < minPeersForDownload {
+						return "WaitForPeers"
+					}
 					if args.seenEpoch < args.targetEpoch {
 						return "CatchUpEpochs"
 					}
@@ -328,6 +344,7 @@ func ConsensusClStages(ctx context.Context,
 							return nil
 						}
 						shouldForkChoiceSinceReorg = true
+						logger.Warn("possible reorg", "slot", args.seenSlot)
 					}
 					return nil
 				},
