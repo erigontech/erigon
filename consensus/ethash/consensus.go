@@ -235,11 +235,9 @@ func VerifyHeaderBasics(chain consensus.ChainHeaderReader, header, parent *types
 		// Verify the header's EIP-1559 attributes.
 		return err
 	}
-	if header.BlobGasUsed != nil {
-		return fmt.Errorf("invalid blobGasUsed before fork: have %v, expected 'nil'", header.BlobGasUsed)
-	}
-	if header.ExcessBlobGas != nil {
-		return fmt.Errorf("invalid excessBlobGas before fork: have %v, expected 'nil'", header.ExcessBlobGas)
+
+	if err := misc.VerifyAbsenceOfCancunHeaderFields(header); err != nil {
+		return err
 	}
 
 	// Verify that the block number is parent's +1
