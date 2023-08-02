@@ -32,7 +32,17 @@ func initEmbeddedOts(ctx context.Context, logger log.Logger, httpRpcCfg httpcfg.
 	if err != nil {
 		return err
 	}
-	if err := http.ListenAndServe(addr, r); err != nil {
+
+	timeouts := httpRpcCfg.HTTPTimeouts
+	httpSrv := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadTimeout:       timeouts.ReadTimeout,
+		WriteTimeout:      timeouts.WriteTimeout,
+		IdleTimeout:       timeouts.IdleTimeout,
+		ReadHeaderTimeout: timeouts.ReadTimeout,
+	}
+	if err := httpSrv.ListenAndServe(); err != nil {
 		return err
 	}
 
