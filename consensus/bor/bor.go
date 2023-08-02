@@ -694,7 +694,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 		default:
 		}
 	}
-	if snap == nil && number < chain.FrozenBlocks() {
+	if snap == nil && number <= chain.FrozenBlocks() {
 		// Special handling of the headers in the snapshot
 		zeroHeader := chain.GetHeaderByNumber(0)
 		if zeroHeader != nil {
