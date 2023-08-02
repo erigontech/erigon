@@ -495,12 +495,12 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 		}
 	}
-	if g.ParentBeaconBlockRoot == nil && g.Config.IsCancun(g.Timestamp){
-		zeroBytes := zero.Bytes32()
-		br := libcommon.BytesToHash(zeroBytes[:])
-		head.ParentBeaconBlockRoot = &br
-	} else {
-		head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
+	if g.Config.IsCancun(g.Timestamp) {
+		if g.ParentBeaconBlockRoot == nil {
+			head.ParentBeaconBlockRoot = &libcommon.Hash{}
+		} else {
+			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
+		}
 	}
 
 	var withdrawals []*types.Withdrawal
