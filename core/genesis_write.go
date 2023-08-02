@@ -495,6 +495,13 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 		}
 	}
+	if g.Config.IsCancun(g.Timestamp) {
+		if g.ParentBeaconBlockRoot == nil {
+			head.ParentBeaconBlockRoot = &libcommon.Hash{}
+		} else {
+			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
+		}
+	}
 
 	var withdrawals []*types.Withdrawal
 	if g.Config != nil && (g.Config.IsShanghai(g.Timestamp)) {
