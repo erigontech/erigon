@@ -207,6 +207,7 @@ func ConsensusClStages(ctx context.Context,
 					logger.Info("waiting for blocks...",
 						"seenSlot", args.seenSlot,
 						"targetSlot", args.targetSlot,
+						"requestSlot", args.seenSlot+1,
 					)
 					respCh := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock])
 					errCh := make(chan error)
