@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -234,7 +235,12 @@ func (r *BlockReader) Snapshots() services.BlockSnapshots    { return r.sn }
 func (r *BlockReader) BorSnapshots() services.BlockSnapshots { return r.borSn }
 func (r *BlockReader) FrozenBlocks() uint64                  { return r.sn.BlocksAvailable() }
 func (r *BlockReader) FrozenBorBlocks() uint64               { return r.borSn.BlocksAvailable() }
-func (r *BlockReader) FrozenFiles() []string                 { return r.sn.Files() }
+func (r *BlockReader) FrozenFiles() []string {
+	files := r.sn.Files()
+	files = append(files, r.borSn.Files()...)
+	sort.Strings(files)
+	return files
+}
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
 
 func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
@@ -907,6 +913,7 @@ func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ances
 }
 
 func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+	fmt.Printf("EventLookup %x\n", txnHash)
 	n, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
 	if err != nil {
 		return 0, false, err
@@ -918,6 +925,7 @@ func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash com
 	view := r.borSn.View()
 	defer view.Close()
 
+	fmt.Printf("Events: %d\n", len(view.Events()))
 	blockNum, ok, err := r.borBlockByEventHash(txnHash, view.Events(), nil)
 	if err != nil {
 		return 0, false, err
@@ -938,9 +946,9 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
 		blockEventId := reader.Lookup(txnHash[:])
 		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
+		fmt.Printf("Segment %d-%d, eventId %d, offset %d\n", sn.ranges.from, sn.ranges.to, blockEventId, offset)
 		gg := sn.seg.MakeGetter()
 		gg.Reset(offset)
-		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
 		if !gg.MatchPrefix(txnHash[:]) {
 			continue
 		}

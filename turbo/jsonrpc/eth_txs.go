@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -41,6 +42,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		if err != nil {
 			return nil, err
 		}
+		fmt.Printf("Found block num %d, ok %t\n", blockNum, ok)
 	}
 	if ok {
 		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
@@ -72,10 +74,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			if chainConfig.Bor == nil {
 				return nil, nil
 			}
-			borTx := rawdb.ReadBorTransactionForBlock(tx, blockNum)
-			if borTx == nil {
-				return nil, nil
-			}
+			borTx := types2.NewBorTransaction()
 			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee, chainConfig.ChainID), nil
 		}
 

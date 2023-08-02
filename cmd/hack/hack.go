@@ -1330,11 +1330,13 @@ func readSeg(chaindata string) error {
 	g := vDecomp.MakeGetter()
 	var buf []byte
 	var count int
+	var offset, nextPos uint64
 	for g.HasNext() {
-		g.Next(buf[:0])
+		buf, nextPos = g.Next(buf[:0])
+		fmt.Printf("offset: %d, val: %x\n", offset, buf)
+		offset = nextPos
 		count++
 	}
-	fmt.Printf("count=%d\n", count)
 	return nil
 }
 
