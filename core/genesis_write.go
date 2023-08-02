@@ -495,7 +495,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 		}
 	}
-	if g.ParentBeaconBlockRoot == nil {
+	if g.ParentBeaconBlockRoot == nil && g.Config.IsCancun(g.Timestamp){
 		zeroBytes := zero.Bytes32()
 		br := libcommon.BytesToHash(zeroBytes[:])
 		head.ParentBeaconBlockRoot = &br
