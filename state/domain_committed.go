@@ -223,7 +223,6 @@ type DomainCommitted struct {
 	branchMerger *commitment.BranchMerger
 	prevState    []byte
 
-	comKeys uint64
 	comTook time.Duration
 	discard bool
 }
@@ -639,11 +638,10 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 		d.updates.List(true)
 		return nil, nil, nil
 	}
-
-	defer func(s time.Time) { d.comTook = time.Since(s) }(time.Now())
+	defer func(s time.Time) { mxCommitmentTook.UpdateDuration(s) }(time.Now())
 
 	touchedKeys, updates := d.updates.List(true)
-	d.comKeys = uint64(len(touchedKeys))
+	mxCommitmentKeys.Add(len(touchedKeys))
 
 	if len(touchedKeys) == 0 {
 		rootHash, err = d.patriciaTrie.RootHash()

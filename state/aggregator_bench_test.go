@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
@@ -23,7 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 )
 
-func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (string, kv.RwDB, *Aggregator) {
+func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (string, kv.RwDB, *AggregatorV3) {
 	b.Helper()
 	logger := log.New()
 	path := b.TempDir()
@@ -32,7 +31,7 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (string, kv.RwDB, *A
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	b.Cleanup(db.Close)
-	agg, err := NewAggregator(path, path, aggStep, CommitmentModeDirect, commitment.VariantHexPatriciaTrie, logger)
+	agg, err := NewAggregatorV3(context.Background(), path, path+"_tmp", aggStep, db, logger)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)
 	return path, db, agg
@@ -59,19 +58,29 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	agg.SetTx(tx)
 	defer agg.StartWrites().FinishWrites()
 	require.NoError(b, err)
+	ac := agg.MakeContext()
+	defer ac.Close()
+
+	domains := agg.SharedDomains(ac)
+	defer domains.Close()
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
+	var prev []byte
 	for i := 0; i < b.N; i++ {
 		key := <-longKeys
 		val := <-vals
 		txNum := uint64(i)
 		agg.SetTxNum(txNum)
-		err := agg.WriteAccountStorage(key[:length.Addr], key[length.Addr:], val)
+		err := domains.WriteAccountStorage(key[:length.Addr], key[length.Addr:], val, prev)
+		prev = val
 		require.NoError(b, err)
-		err = agg.FinishTx()
-		require.NoError(b, err)
+
+		if i%100000 == 0 {
+			_, err := domains.Commit(true, false)
+			require.NoError(b, err)
+		}
 	}
 }
 

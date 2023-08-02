@@ -257,7 +257,7 @@ func TestBpsTree_Seek(t *testing.T) {
 	tr := newTrie()
 	ef := eliasfano32.NewEliasFano(uint64(keyCount), ps[len(ps)-1])
 	for i := 0; i < len(ps); i++ {
-		tr.insert(Node{i: uint64(i), prefix: keys[i], off: ps[i]})
+		tr.insert(Node{i: uint64(i), prefix: common.Copy(keys[i]), off: ps[i]})
 		ef.AddOffset(ps[i])
 	}
 	ef.Build()

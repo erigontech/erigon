@@ -124,7 +124,8 @@ func (b *BpsTree) initialize() {
 
 // trieNode represents a node in the prefix tree
 type trieNode struct {
-	children map[byte]*trieNode // Children nodes indexed by the next byte of the key
+	children [16]*trieNode // Children nodes indexed by the next byte of the key
+	prefix   uint16
 	common   []byte
 	offset   uint64
 }
@@ -138,7 +139,7 @@ type trie struct {
 
 // newTrieNode creates a new trie node
 func newTrieNode() *trieNode {
-	return &trieNode{children: make(map[byte]*trieNode)}
+	return &trieNode{common: make([]byte, 0)}
 }
 
 // newTrie creates a new prefix tree
@@ -154,44 +155,72 @@ func (t *trie) insert(n Node) {
 	key := keybytesToHexNibbles(n.prefix)
 	fmt.Printf("node insert %x %d\n", key, n.off)
 
-	pext := 0
+	//pext := 0
 	for pi, b := range key {
 		fmt.Printf("currentKey %x c {%x} common [%x] branch {", key[:pi+1], b, node.common)
 		for n, t := range node.children {
-			fmt.Printf("\n %x) [%x] size %d", n, t.common, len(t.children))
+			if t != nil {
+				fmt.Printf("\n %x) [%x] size %d", n, t.common, len(t.children))
+			}
 		}
 		fmt.Printf("}\n")
 
-		child, found := node.children[b]
-		if found {
-			node = child
-			continue
-		}
-
-		if len(node.common) > 0 {
-			lc := commonPrefixLen(node.common, key[pi:])
-			fmt.Printf("key %x & %x branches at %d %x %x\n", key[:pi], node.common, pi, key[pi:], key[pi+lc:])
-			if lc > 0 {
-				fmt.Printf("branches at %d %x %x %x\n", pi, node.common, key[pi:], key[pi+lc:])
-				node.common = key[pi : pi+lc]
-
-				child = newTrieNode()
-				child.common = key[pext+lc:]
-				pext = pi
-				node.children[node.common[0]] = node
+		if node.prefix&uint16(b) != 0 {
+			// node exists
+			child := node.children[b]
+			if child.common == nil {
+				continue
 			}
+			lc := commonPrefixLen(child.common, key[pi+1:])
+			fmt.Printf("key %x & %x branches at %d %x %x\n", key[:pi+1], child.common, pi+1, key[pi+1:], key[pi+1+lc:])
+
+			if lc > 0 {
+				fmt.Printf("extension %x->%x\n", child.common, key[pi+1:pi+1+lc])
+				child.common = common.Copy(key[pi+1 : pi+1+lc])
+
+				nn := newTrieNode()
+				nn.children[key[pi+1+lc]] = child
+				//pext = pi + 1
+				node.children[b] = nn
+			}
+		} else {
+			nn := newTrieNode()
+			nn.common = common.Copy(key[pi+1:])
+			nn.offset = n.off
+			fmt.Printf("n %x\n", b)
+			node.children[b] = nn
 		}
 
-		//child = newTrieNode()
-		//node.children[b] = child
-		if len(node.children) == 1 {
-			node.common = key[pi:]
-			child.offset = n.i
-			fmt.Printf("insert leaf [%x|%x] %d\n", key[:pi], key[pi:], child.offset)
-			break
-		} else {
-			node.common = nil
-		}
+		//child, found := node.children[b]
+		//if found {
+		//	node = child
+		//	continue
+		//}
+		//
+		//if len(node.common) > 0 {
+		//	lc := commonPrefixLen(node.common, key[pi:])
+		//	fmt.Printf("key %x & %x branches at %d %x %x\n", key[:pi], node.common, pi, key[pi:], key[pi+lc:])
+		//	if lc > 0 {
+		//		fmt.Printf("branches at %d %x %x %x\n", pi, node.common, key[pi:], key[pi+lc:])
+		//		node.common = key[pi : pi+lc]
+		//
+		//		child = newTrieNode()
+		//		child.common = key[pext+lc:]
+		//		pext = pi
+		//		node.children[node.common[0]] = node
+		//	}
+		//}
+		//
+		////child = newTrieNode()
+		////node.children[b] = child
+		//if len(node.children) == 1 {
+		//	node.common = key[pi:]
+		//	child.offset = n.i
+		//	fmt.Printf("insert leaf [%x|%x] %d\n", key[:pi], key[pi:], child.offset)
+		//	break
+		//} else {
+		//	node.common = nil
+		//}
 
 	}
 
@@ -275,10 +304,10 @@ func (t *trie) search(key []byte) (bool, uint64) {
 		b := key[0]
 		key = key[1:]
 
-		child, found := node.children[b]
-		if !found {
-			return false, 0
-		}
+		child := node.children[b]
+		//if !found {
+		//	return false, 0
+		//}
 		node = child
 
 		if len(node.children) == 0 {

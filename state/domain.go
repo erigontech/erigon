@@ -61,34 +61,30 @@ var (
 	LatestStateReadGrindNotFound = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="no"}`)  //nolint
 	LatestStateReadCold          = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="yes"}`)  //nolint
 	LatestStateReadColdNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="no"}`)   //nolint
+	LatestStateReadDB            = metrics.GetOrCreateSummary(`latest_state_read{type="db",found="yes"}`)    //nolint
+	LatestStateReadDBNotFound    = metrics.GetOrCreateSummary(`latest_state_read{type="db",found="no"}`)     //nolint
+
+	mxRunningMerges           = metrics.GetOrCreateCounter("domain_running_merges")
+	mxRunningCollations       = metrics.GetOrCreateCounter("domain_running_collations")
+	mxCollateTook             = metrics.GetOrCreateHistogram("domain_collate_took")
+	mxPruneTook               = metrics.GetOrCreateHistogram("domain_prune_took")
+	mxPruneHistTook           = metrics.GetOrCreateHistogram("domain_prune_hist_took")
+	mxPruneInProgress         = metrics.GetOrCreateCounter("domain_pruning_progress")
+	mxCollationSize           = metrics.GetOrCreateCounter("domain_collation_size")
+	mxCollationSizeHist       = metrics.GetOrCreateCounter("domain_collation_hist_size")
+	mxPruneSize               = metrics.GetOrCreateCounter("domain_prune_size")
+	mxBuildTook               = metrics.GetOrCreateSummary("domain_build_files_took")
+	mxStepTook                = metrics.GetOrCreateHistogram("domain_step_took")
+	mxCommitmentKeys          = metrics.GetOrCreateCounter("domain_commitment_keys")
+	mxCommitmentRunning       = metrics.GetOrCreateCounter("domain_running_commitment")
+	mxCommitmentTook          = metrics.GetOrCreateSummary("domain_commitment_took")
+	mxCommitmentWriteTook     = metrics.GetOrCreateHistogram("domain_commitment_write_took")
+	mxCommitmentBranchUpdates = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
 )
 
 // StepsInColdFile - files of this size are completely frozen/immutable.
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
 const StepsInColdFile = 32
-
-var (
-	mxCurrentTx                = metrics.GetOrCreateCounter("domain_tx_processed")
-	mxCurrentBlock             = metrics.GetOrCreateCounter("domain_block_current")
-	mxRunningMerges            = metrics.GetOrCreateCounter("domain_running_merges")
-	mxRunningCollations        = metrics.GetOrCreateCounter("domain_running_collations")
-	mxCollateTook              = metrics.GetOrCreateHistogram("domain_collate_took")
-	mxPruneTook                = metrics.GetOrCreateHistogram("domain_prune_took")
-	mxPruneHistTook            = metrics.GetOrCreateHistogram("domain_prune_hist_took")
-	mxPruningProgress          = metrics.GetOrCreateCounter("domain_pruning_progress")
-	mxCollationSize            = metrics.GetOrCreateCounter("domain_collation_size")
-	mxCollationSizeHist        = metrics.GetOrCreateCounter("domain_collation_hist_size")
-	mxPruneSize                = metrics.GetOrCreateCounter("domain_prune_size")
-	mxBuildTook                = metrics.GetOrCreateSummary("domain_build_files_took")
-	mxStepCurrent              = metrics.GetOrCreateCounter("domain_step_current")
-	mxStepTook                 = metrics.GetOrCreateHistogram("domain_step_took")
-	mxCommitmentKeys           = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxCommitmentRunning        = metrics.GetOrCreateCounter("domain_running_commitment")
-	mxCommitmentTook           = metrics.GetOrCreateSummary("domain_commitment_took")
-	mxCommitmentWriteTook      = metrics.GetOrCreateHistogram("domain_commitment_write_took")
-	mxCommitmentUpdates        = metrics.GetOrCreateCounter("domain_commitment_updates")
-	mxCommitmentUpdatesApplied = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
-)
 
 // filesItem corresponding to a pair of files (.dat and .idx)
 type filesItem struct {
@@ -206,10 +202,10 @@ func (i *filesItem) closeFilesAndRemove() {
 		i.bm = nil
 	}
 	if i.bloom != nil {
-		//i.bloom.Close()
-		//if err := os.Remove(i.bloom.filePath); err != nil {
-		//	log.Trace("remove after close", "err", err, "file", i.bm.FileName())
-		//}
+		i.bloom.Close()
+		if err := os.Remove(i.bloom.filePath); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
+		}
 		i.bloom = nil
 	}
 }
@@ -1409,15 +1405,19 @@ func (d *Domain) canPruneFrom(tx kv.Tx) uint64 {
 	return math.MaxUint64
 }
 
-// history prunes keys in range [txFrom; txTo), domain prunes whole step.
+// history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
+// In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
 func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
 	if !d.canPrune(d.tx) {
 		return nil
 	}
 
 	mxPruneTook.Update(d.stats.LastPruneTook.Seconds())
+	mxPruneInProgress.Inc()
+	defer mxPruneInProgress.Dec()
+
 	if d.filenameBase == "commitment" {
-		log.Warn("[dbg] prune", "step", step, "txNum", step*d.aggregationStep)
+		log.Debug("[dbg] prune", "step", step, "txNum", step*d.aggregationStep)
 	}
 	keysCursorForDeletes, err := d.tx.RwCursorDupSort(d.keysTable)
 	if err != nil {
@@ -1431,28 +1431,6 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 	defer keysCursor.Close()
 
 	var k, v []byte
-	var valsC kv.RwCursor
-	var valsCDup kv.RwCursorDupSort
-	if d.domainLargeValues {
-		valsC, err = d.tx.RwCursor(d.valsTable)
-		if err != nil {
-			return err
-		}
-		defer valsC.Close()
-	} else {
-		valsCDup, err = d.tx.RwCursorDupSort(d.valsTable)
-		if err != nil {
-			return err
-		}
-		defer valsCDup.Close()
-	}
-
-	mc := d.MakeContext()
-	defer mc.Close()
-
-	stepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(stepBytes, ^step)
-
 	seek := make([]byte, 0, 256)
 	for k, v, err = keysCursor.First(); k != nil; k, v, err = keysCursor.Next() {
 		if err != nil {
@@ -1462,17 +1440,17 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 			continue
 		}
 		//fmt.Printf("prune: %x, %d,%d\n", k, ^binary.BigEndian.Uint64(v), step)
-		seek = append(append(seek[:0], k...), v...)
-		err = d.tx.Delete(d.valsTable, seek)
-		if err != nil {
-			return err
-		}
-		mxPruneSize.Inc()
-		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
 			return err
 		}
 		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
+			return err
+		}
+
+		mxPruneSize.Inc()
+		seek = append(append(seek[:0], k...), v...)
+		err = d.tx.Delete(d.valsTable, seek)
+		if err != nil {
 			return err
 		}
 
@@ -1650,7 +1628,6 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 			if err != nil {
 				return nil, false, err
 			}
-			fmt.Printf("getLatestFromWarmFiles %x %x %v\n", filekey, v, ok)
 			if !ok {
 				LatestStateReadWarmNotFound.UpdateDuration(t)
 				return nil, false, nil
@@ -1964,6 +1941,7 @@ func (dc *DomainContext) getBeforeTxNum(key []byte, fromTxNum uint64, roTx kv.Tx
 }
 
 func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
+	t := time.Now()
 	key := key1
 	if len(key2) > 0 {
 		key = dc.keyBuf[:len(key1)+len(key2)]
@@ -1985,8 +1963,10 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		if err != nil {
 			return nil, false, err
 		}
+		LatestStateReadDB.UpdateDuration(t)
 		return v, true, nil
 	}
+	LatestStateReadWarmNotFound.UpdateDuration(t)
 
 	v, found, err := dc.getLatestFromFiles(key)
 	if err != nil {

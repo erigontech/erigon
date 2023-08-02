@@ -490,6 +490,9 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 
 func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
+	mxCommitmentRunning.Inc()
+	defer mxCommitmentRunning.Dec()
+
 	rootHash, branchNodeUpdates, err := sd.Commitment.ComputeCommitment(trace)
 	if err != nil {
 		return nil, err
@@ -519,7 +522,7 @@ func (sd *SharedDomains) Commit(saveStateAfter, trace bool) (rootHash []byte, er
 		if err = sd.UpdateCommitmentData(prefix, merged, stated); err != nil {
 			return nil, err
 		}
-		mxCommitmentUpdatesApplied.Inc()
+		mxCommitmentBranchUpdates.Inc()
 	}
 
 	if saveStateAfter {

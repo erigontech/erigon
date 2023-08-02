@@ -527,8 +527,8 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 
 			mxRunningMerges.Inc()
-
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
+			mxRunningMerges.Dec()
 			collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
@@ -873,10 +873,12 @@ func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
 	return math2.MaxUint64
 }
 
-func (ac *AggregatorV3Context) PruneWithTiemout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
-	t := time.Now()
-	for ac.CanPrune(tx) && time.Since(t) < timeout {
-		if err := ac.a.Prune(ctx, 0.01); err != nil { // prune part of retired data, before commit
+func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
+	cc, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	for ac.CanPrune(tx) {
+		if err := ac.a.Prune(cc, 1); err != nil { // prune part of retired data, before commit
 			return err
 		}
 	}
@@ -927,6 +929,11 @@ func (a *AggregatorV3) prune(ctx context.Context, txFrom, txTo, limit uint64) er
 	if txTo > 0 {
 		step = (txTo - 1) / a.aggregationStep
 	}
+	if step == 0 {
+		return nil
+	}
+	step--
+	//a.logger.Debug("aggregator prune", "step", step, "range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit, "stepsLimit", limit/a.aggregationStep, "stepsRangeInDB", a.StepsRangeInDBAsStr(a.rwTx))
 	if err := a.accounts.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
