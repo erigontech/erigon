@@ -414,7 +414,7 @@ func BorSegments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range,
 			}
 			l = append(l, f)
 		}
-		l, m = noGaps(noOverlaps(allTypeOfSegmentsMustExist(dir, l)))
+		l, m = noGaps(noOverlaps(borSegmentsMustExist(dir, l)))
 		res = append(res, l...)
 		missingSnapshots = append(missingSnapshots, m...)
 	}

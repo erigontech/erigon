@@ -946,6 +946,23 @@ MainLoop:
 	return res
 }
 
+func borSegmentsMustExist(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
+MainLoop:
+	for _, f := range in {
+		if f.From == f.To {
+			continue
+		}
+		for _, t := range []snaptype.Type{snaptype.BorEvents} {
+			p := filepath.Join(dir, snaptype.SegmentFileName(f.From, f.To, t))
+			if !dir2.FileExist(p) {
+				continue MainLoop
+			}
+		}
+		res = append(res, f)
+	}
+	return res
+}
+
 // noOverlaps - keep largest ranges and avoid overlap
 func noOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 	for i := range in {
