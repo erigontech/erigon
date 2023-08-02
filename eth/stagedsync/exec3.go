@@ -644,9 +644,6 @@ Loop:
 						if cfg.hd != nil {
 							cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 						}
-						if cfg.latestValidNumber != nil {
-							*cfg.latestValidNumber = header.Number.Uint64() - 1
-						}
 						if cfg.badBlockHalt {
 							return err
 						}
