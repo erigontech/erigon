@@ -726,7 +726,7 @@ func (m *BorMerger) filesByRange(snapshots *BorRoSnapshots, from, to uint64) (ma
 		if sn.ranges.to > to {
 			break
 		}
-		toMerge[snaptype.BorEvents] = append(toMerge[snaptype.Headers], eSegments[i].seg.FilePath())
+		toMerge[snaptype.BorEvents] = append(toMerge[snaptype.BorEvents], eSegments[i].seg.FilePath())
 	}
 
 	return toMerge, nil
