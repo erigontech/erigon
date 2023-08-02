@@ -177,7 +177,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas missing"}
 	}
 
-	if s.config.IsCancun(header.Time) && header.ParentBeaconBlockRoot == nil{
+	if s.config.IsCancun(header.Time) && header.ParentBeaconBlockRoot == nil {
 		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot missing"}
 	}
 
