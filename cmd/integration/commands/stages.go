@@ -495,6 +495,7 @@ func init() {
 	withNoCommit(cmdStageExec)
 	withBtreeCold(cmdStageExec)
 	withBtreeWarm(cmdStageExec)
+	withBtreePlus(cmdStageExec)
 	withPruneTo(cmdStageExec)
 	withBatchSize(cmdStageExec)
 	withTxTrace(cmdStageExec)
@@ -912,6 +913,9 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		}
 		return nil
 	}
+	libstate.UseBpsTree = useBtreePlus
+	libstate.UseBtreeForColdFiles = useBtreeIdxCold
+	libstate.UseBtreeForWarmFiles = useBtreeIdxWarm
 
 	err := stagedsync.SpawnExecuteBlocksStage(s, sync, tx, block, ctx, cfg, true /* initialCycle */, logger)
 	if err != nil {

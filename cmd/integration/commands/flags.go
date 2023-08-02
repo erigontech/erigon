@@ -33,6 +33,7 @@ var (
 	chain                          string // Which chain to use (mainnet, goerli, sepolia, etc.)
 	useBtreeIdxCold                bool
 	useBtreeIdxWarm                bool
+	useBtreePlus                   bool
 
 	commitmentMode string
 	commitmentTrie string
@@ -93,11 +94,14 @@ func withNoCommit(cmd *cobra.Command) {
 }
 
 func withBtreeCold(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&useBtreeIdxCold, "btree-cold-idx", false, "use btree indexes instead recsplit for cold files read")
+	cmd.Flags().BoolVar(&useBtreeIdxCold, "btree.cold", false, "use btree indexes instead recsplit for cold files read")
 }
 
 func withBtreeWarm(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&useBtreeIdxWarm, "btree-warm-idx", false, "use btree indexes instead recsplit for warm files read")
+	cmd.Flags().BoolVar(&useBtreeIdxWarm, "btree.warm", false, "use btree indexes instead recsplit for warm files read")
+}
+func withBtreePlus(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&useBtreePlus, "btree.plus", false, "use alternative btree indexes instead recsplit for warm files read")
 }
 
 func withPruneTo(cmd *cobra.Command) {

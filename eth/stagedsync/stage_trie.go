@@ -1,19 +1,24 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
-func CollectPatriciaKeys(s *StageState, ctx context.Context, tx kv.RwTx, cfg TrieCfg) error {
+func collectAndComputeCommitment(s *StageState, ctx context.Context, tx kv.RwTx, cfg TrieCfg) ([]byte, error) {
+	defer cfg.agg.StartUnbufferedWrites().FinishWrites()
+
 	ac := cfg.agg.MakeContext()
 	defer ac.Close()
 
@@ -22,19 +27,77 @@ func CollectPatriciaKeys(s *StageState, ctx context.Context, tx kv.RwTx, cfg Tri
 
 	acc := domains.Account.MakeContext()
 	stc := domains.Storage.MakeContext()
-	ctc := domains.Code.MakeContext()
+	//ctc := domains.Code.MakeContext()
 
 	defer acc.Close()
 	defer stc.Close()
-	defer ctc.Close()
+
+	logger := log.New("stage", "patricia_trie", "block", s.BlockNumber)
+	logger.Info("Collecting account keys")
+	collector := etl.NewCollector("collect_keys", cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger)
+	defer collector.Close()
+
+	var totalKeys atomic.Uint64
+	for _, dc := range []*state.DomainContext{acc, stc} {
+		logger.Info("Collecting keys")
+		err := dc.IteratePrefix(tx, nil, func(k []byte, _ []byte) {
+			if err := collector.Collect(k, nil); err != nil {
+				panic(err)
+			}
+			totalKeys.Add(1)
+
+			if ctx.Err() != nil {
+				panic(ctx.Err())
+			}
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var (
+		batchSize = 10_000_000
+		batch     = make([][]byte, 0, batchSize)
+		processed atomic.Uint64
+	)
+
+	loadKeys := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if len(batch) >= batchSize {
+			rh, err := domains.Commit(true, false)
+			if err != nil {
+				return err
+			}
+			logger.Info("Committing batch",
+				"processed", fmt.Sprintf("%d/%d (%.2f%%)",
+					processed.Load(), totalKeys.Load(), 100*(float64(totalKeys.Load())/float64(processed.Load()))),
+				"intermediate root", rh)
+		}
+		processed.Add(1)
+		domains.Commitment.TouchPlainKey(k, nil, nil) // will panic if CommitmentModeUpdates is used. which is OK.
+
+		return nil
+	}
+	err := collector.Load(nil, "", loadKeys, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return nil, err
+	}
+	collector.Close()
+
+	rh, err := domains.Commit(true, false)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("Commitment has been reevaluated", "block", s.BlockNumber, "root", rh, "processed", processed.Load(), "total", totalKeys.Load())
+
+	if err := cfg.agg.Flush(ctx, tx); err != nil {
+		return nil, err
+	}
 
 	//acc.DomainRangeLatest()
-
-	return nil
+	return rh, nil
 }
 
 func SpawnPatriciaTrieStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
-	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -74,42 +137,22 @@ func SpawnPatriciaTrieStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, 
 		headerHash = syncHeadHeader.Hash()
 	}
 	logPrefix := s.LogPrefix()
-	if to > s.BlockNumber+16 {
-		logger.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
+	rh, err := collectAndComputeCommitment(s, ctx, tx, cfg)
+	if err != nil {
+		return trie.EmptyRoot, err
 	}
-
-	var root libcommon.Hash
-	tooBigJump := to > s.BlockNumber && to-s.BlockNumber > 100_000 // RetainList is in-memory structure and it will OOM if jump is too big, such big jump anyway invalidate most of existing Intermediate hashes
-	if !tooBigJump && cfg.historyV3 && to-s.BlockNumber > 10 {
-		//incremental can work only on DB data, not on snapshots
-		_, n, err := rawdbv3.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
-		if err != nil {
-			return trie.EmptyRoot, err
-		}
-		tooBigJump = s.BlockNumber < n
-	}
-	if s.BlockNumber == 0 || tooBigJump {
-		if root, err = RegenerateIntermediateHashes(logPrefix, tx, cfg, expectedRootHash, ctx, logger); err != nil {
-			return trie.EmptyRoot, err
-		}
-	} else {
-		if root, err = IncrementIntermediateHashes(logPrefix, s, tx, to, cfg, expectedRootHash, quit, logger); err != nil {
-			return trie.EmptyRoot, err
-		}
-	}
-
-	if cfg.checkRoot && root != expectedRootHash {
-		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
+	if cfg.checkRoot && bytes.Equal(rh, expectedRootHash[:]) {
+		logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, rh, expectedRootHash, headerHash))
 		if cfg.badBlockHalt {
 			return trie.EmptyRoot, fmt.Errorf("wrong trie root")
 		}
-		if cfg.hd != nil {
-			cfg.hd.ReportBadHeaderPoS(headerHash, syncHeadHeader.ParentHash)
-		}
+		//if cfg.hd != nil {
+		//	cfg.hd.ReportBadHeaderPoS(headerHash, syncHeadHeader.ParentHash)
+		//}
 		if to > s.BlockNumber {
 			unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
-			logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-			u.UnwindTo(unwindTo, headerHash)
+			logger.Warn("Unwinding (should to) due to incorrect root hash", "to", unwindTo)
+			//u.UnwindTo(unwindTo, headerHash)
 		}
 	} else if err = s.Update(tx, to); err != nil {
 		return trie.EmptyRoot, err
@@ -120,6 +163,5 @@ func SpawnPatriciaTrieStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, 
 			return trie.EmptyRoot, err
 		}
 	}
-
-	return root, err
+	return libcommon.BytesToHash(rh[:]), err
 }

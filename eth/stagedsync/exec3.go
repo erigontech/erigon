@@ -835,12 +835,12 @@ Loop:
 						applyWorker.ResetTx(applyTx)
 						agg.SetTx(applyTx)
 
-						doms.SetContext(applyTx.(*temporal.Tx).AggCtx())
+						nc := applyTx.(*temporal.Tx).AggCtx()
+						doms.SetContext(nc)
 
-						//applyTx.(*temporal.Tx).AggCtx().LogStats(applyTx, func(endTxNumMinimax uint64) uint64 {
-						//	_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(applyTx, endTxNumMinimax)
-						//	return histBlockNumProgress
-						//})
+						if err := nc.PruneWithTimeout(ctx, time.Second, applyTx); err != nil {
+							return err
+						}
 					}
 
 					return nil
