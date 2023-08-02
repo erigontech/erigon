@@ -41,10 +41,18 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 			if r.Ranges.To-r.Ranges.From != snaptype.Erigon2SegmentSize {
 				continue
 			}
-			for _, t := range snaptype.AllSnapshotTypes {
-				req.Items = append(req.Items, &proto_downloader.DownloadItem{
-					Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
-				})
+			if r.Bor {
+				for _, t := range []snaptype.Type{snaptype.BorEvents} {
+					req.Items = append(req.Items, &proto_downloader.DownloadItem{
+						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
+					})
+				}
+			} else {
+				for _, t := range snaptype.AllSnapshotTypes {
+					req.Items = append(req.Items, &proto_downloader.DownloadItem{
+						Path: snaptype.SegmentFileName(r.Ranges.From, r.Ranges.To, t),
+					})
+				}
 			}
 		}
 	}
@@ -110,19 +118,22 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *
 	// builds preverified snapshots request
 	for _, p := range preverifiedBlockSnapshots {
 		if _, exists := existingFilesMap[p.Name]; !exists { // Not to download existing files "behind the scenes"
-			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash))
+			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash, false /* Bor */))
 		}
 	}
 	if histV3 {
 		preverifiedHistorySnapshots := snapcfg.KnownCfg(cc.ChainName, snInDB, snHistInDB).PreverifiedHistory
 		for _, p := range preverifiedHistorySnapshots {
-			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash))
+			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash, false /* Bor */))
 		}
 	}
 
 	// builds missing snapshots request
 	for _, r := range missingSnapshots {
-		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", ""))
+		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", false /* Bor */))
+		if cc.Bor != nil {
+			downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", true /* Bor */))
+		}
 	}
 
 	log.Info(fmt.Sprintf("[%s] Fetching torrent files metadata", logPrefix))

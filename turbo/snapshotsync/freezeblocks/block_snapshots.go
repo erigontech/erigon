@@ -1152,7 +1152,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	downloadRequest := make([]services.DownloadRequest, 0, len(rangesToMerge))
 	for i := range rangesToMerge {
 		r := &services.Range{From: rangesToMerge[i].from, To: rangesToMerge[i].to}
-		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", ""))
+		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", false /* Bor */))
 	}
 
 	if seedNewSnapshots != nil {

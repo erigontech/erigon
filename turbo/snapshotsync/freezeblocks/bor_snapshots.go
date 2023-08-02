@@ -141,6 +141,17 @@ func (br *BlockRetire) RetireBorBlocks(ctx context.Context, blockFrom, blockTo u
 	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
+	downloadRequest := make([]services.DownloadRequest, 0, len(rangesToMerge))
+	for i := range rangesToMerge {
+		r := &services.Range{From: rangesToMerge[i].from, To: rangesToMerge[i].to}
+		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", true /* Bor */))
+	}
+
+	if seedNewSnapshots != nil {
+		if err := seedNewSnapshots(downloadRequest); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

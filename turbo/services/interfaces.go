@@ -122,10 +122,11 @@ type DownloadRequest struct {
 	Ranges      *Range
 	Path        string
 	TorrentHash string
+	Bor         bool
 }
 
-func NewDownloadRequest(ranges *Range, path string, torrentHash string) DownloadRequest {
-	return DownloadRequest{Ranges: ranges, Path: path, TorrentHash: torrentHash}
+func NewDownloadRequest(ranges *Range, path string, torrentHash string, bor bool) DownloadRequest {
+	return DownloadRequest{Ranges: ranges, Path: path, TorrentHash: torrentHash, Bor: bor}
 }
 
 type Range struct {
