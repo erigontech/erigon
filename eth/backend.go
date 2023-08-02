@@ -821,6 +821,15 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	}()
 	go s.engineBackendRPC.Start(httpRpcCfg, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
 
+	// Embedded Otterscan
+	if httpRpcCfg.EOtsEnabled {
+		go func() {
+			if err := initEmbeddedOts(ctx, s.logger, httpRpcCfg, apiList); err != nil {
+				s.logger.Error(err.Error())
+			}
+		}()
+	}
+
 	// Register the backend on the node
 	stack.RegisterLifecycle(s)
 	return nil

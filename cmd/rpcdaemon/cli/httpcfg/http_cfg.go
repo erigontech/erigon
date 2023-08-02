@@ -66,4 +66,9 @@ type HttpCfg struct {
 
 	// Ots API
 	OtsMaxPageSize uint64
+
+	// Embedded Ots
+	EOtsEnabled       bool
+	EOtsListenAddress string
+	EOtsPort          int
 }

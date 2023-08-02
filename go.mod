@@ -9,6 +9,7 @@ require (
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.1.0 // indirect
 	github.com/torquem-ch/mdbx-go v0.27.10
+	github.com/vearutop/statigz v1.4.0
 )
 
 require (
@@ -62,6 +63,7 @@ require (
 	github.com/maticnetwork/polyproto v0.0.2
 	github.com/multiformats/go-multiaddr v0.9.0
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
+	github.com/otterscan/go-otterscan v0.0.0-20230802030518-241df3c63788
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.0.8
@@ -129,6 +131,7 @@ require (
 	github.com/benbjohnson/immutable v0.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.5.0 // indirect
+	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
@@ -164,7 +167,7 @@ require (
 	github.com/ipfs/go-log/v2 v2.5.1 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
-	github.com/klauspost/compress v1.16.5 // indirect
+	github.com/klauspost/compress v1.16.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.5 // indirect
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
@@ -205,6 +208,10 @@ require (
 	github.com/multiformats/go-multistream v0.4.1 // indirect
 	github.com/multiformats/go-varint v0.0.7 // indirect
 	github.com/onsi/ginkgo/v2 v2.9.7 // indirect
+	github.com/openacid/errors v0.8.1 // indirect
+	github.com/openacid/low v0.1.14 // indirect
+	github.com/openacid/must v0.1.3 // indirect
+	github.com/openacid/slim v0.5.11 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
 	github.com/pion/datachannel v1.5.2 // indirect
 	github.com/pion/dtls/v2 v2.2.7 // indirect

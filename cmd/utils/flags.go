@@ -791,6 +791,23 @@ var (
 		Usage: "Max allowed page size for search methods",
 		Value: 25,
 	}
+
+	// Embedded Otterscan
+	EOtsFlag = cli.BoolFlag{
+		Name:  "experimental.ots",
+		Usage: "Enable experimental embedded Otterscan",
+		Value: false,
+	}
+	EOtsAddrFlag = cli.StringFlag{
+		Name:  "ots.embedded.addr",
+		Usage: "Server listening interface for the embedded Otterscan",
+		Value: nodecfg.DefaultHTTPHost,
+	}
+	EOtsPortFlag = cli.Uint64Flag{
+		Name:  "ots.embedded.port",
+		Usage: "Port for the embedded Otterscan",
+		Value: 9999,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}

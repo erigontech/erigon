@@ -407,6 +407,10 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 
 		OtsMaxPageSize: ctx.Uint64(utils.OtsSearchMaxCapFlag.Name),
 
+		EOtsEnabled:       ctx.Bool(utils.EOtsFlag.Name),
+		EOtsListenAddress: ctx.String(utils.EOtsAddrFlag.Name),
+		EOtsPort:          ctx.Int(utils.EOtsPortFlag.Name),
+
 		TxPoolApiAddr: ctx.String(utils.TxpoolApiAddrFlag.Name),
 
 		StateCache: kvcache.DefaultCoherentConfig,
