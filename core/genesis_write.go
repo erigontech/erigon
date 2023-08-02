@@ -477,8 +477,8 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 		MixDigest:     g.Mixhash,
 		Coinbase:      g.Coinbase,
 		BaseFee:       g.BaseFee,
-		DataGasUsed:   g.DataGasUsed,
-		ExcessDataGas: g.ExcessDataGas,
+		BlobGasUsed:   g.BlobGasUsed,
+		ExcessBlobGas: g.ExcessBlobGas,
 		AuRaStep:      g.AuRaStep,
 		AuRaSeal:      g.AuRaSeal,
 	}
@@ -493,6 +493,13 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			head.BaseFee = g.BaseFee
 		} else {
 			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+		}
+	}
+	if g.Config.IsCancun(g.Timestamp) {
+		if g.ParentBeaconBlockRoot == nil {
+			head.ParentBeaconBlockRoot = &libcommon.Hash{}
+		} else {
+			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
 		}
 	}
 

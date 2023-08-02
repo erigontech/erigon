@@ -19,6 +19,10 @@ contract faucet {
 
     function send(address payable _destination, uint256 _requested) public payable
     {
+        if (address(this).balance == 0) {
+            return;
+        }
+
         uint256 amount = 0;
         
         if (address(this).balance > _requested){

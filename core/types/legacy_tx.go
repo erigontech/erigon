@@ -52,7 +52,7 @@ func (ct CommonTx) GetTo() *libcommon.Address {
 	return ct.To
 }
 
-func (ct CommonTx) GetDataGas() uint64 {
+func (ct CommonTx) GetBlobGas() uint64 {
 	return 0
 }
 
@@ -87,8 +87,8 @@ func (ct CommonTx) IsContractDeploy() bool {
 	return ct.GetTo() == nil
 }
 
-func (ct *CommonTx) GetDataHashes() []libcommon.Hash {
-	// Only blob txs have data hashes
+func (ct *CommonTx) GetBlobHashes() []libcommon.Hash {
+	// Only blob txs have blob hashes
 	return []libcommon.Hash{}
 }
 

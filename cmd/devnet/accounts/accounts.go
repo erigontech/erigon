@@ -44,6 +44,10 @@ func NewAccount(name string) *Account {
 	return account
 }
 
+func (a *Account) SigKey() *ecdsa.PrivateKey {
+	return a.sigKey
+}
+
 func GetAccount(account string) *Account {
 	if account, ok := accountsByName[account]; ok {
 		return account

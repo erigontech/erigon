@@ -105,7 +105,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		}
 		vmenv.Reset(TxContext, statedb)
 		// Not yet the searched for transaction, execute on top of the current state
-		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(txn.GetGas()).AddDataGas(txn.GetDataGas()), true /* refunds */, false /* gasBailout */); err != nil {
+		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas()), true /* refunds */, false /* gasBailout */); err != nil {
 			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, fmt.Errorf("transaction %x failed: %w", txn.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state
@@ -195,7 +195,7 @@ func TraceTx(
 		callmsg := prepareCallMessage(message)
 		result, err = statefull.ApplyBorMessage(*vmenv, callmsg)
 	} else {
-		result, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()).AddDataGas(message.DataGas()), refunds, false /* gasBailout */)
+		result, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas()), refunds, false /* gasBailout */)
 	}
 
 	if err != nil {

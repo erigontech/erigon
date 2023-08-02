@@ -26,7 +26,7 @@ func NewExecutionClientDirect(ctx context.Context, api engineapi.EngineAPI) (*Ex
 	}, nil
 }
 
-func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block) (invalid bool, err error) {
+func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}
@@ -63,10 +63,10 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block) (invalid
 	}
 	// Process Deneb
 	if payload.Version() >= clparams.DenebVersion {
-		request.DataGasUsed = new(hexutil.Uint64)
-		request.ExcessDataGas = new(hexutil.Uint64)
-		*request.DataGasUsed = hexutil.Uint64(payload.DataGasUsed)
-		*request.ExcessDataGas = hexutil.Uint64(payload.ExcessDataGas)
+		request.BlobGasUsed = new(hexutil.Uint64)
+		request.ExcessBlobGas = new(hexutil.Uint64)
+		*request.BlobGasUsed = hexutil.Uint64(payload.BlobGasUsed)
+		*request.ExcessBlobGas = hexutil.Uint64(payload.ExcessBlobGas)
 	}
 
 	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon
@@ -78,7 +78,8 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block) (invalid
 	case clparams.CapellaVersion:
 		payloadStatus, err = cc.api.NewPayloadV2(cc.ctx, &request)
 	case clparams.DenebVersion:
-		payloadStatus, err = cc.api.NewPayloadV3(cc.ctx, &request)
+		//TODO: Add 4844 and 4788 fields correctly
+		payloadStatus, err = cc.api.NewPayloadV3(cc.ctx, &request, nil, beaconParentRoot)
 	default:
 		err = fmt.Errorf("invalid payload version")
 	}

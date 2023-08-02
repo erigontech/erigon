@@ -123,7 +123,8 @@ func (c *stepRunner) Run(ctx context.Context, text string, args []interface{}, l
 		values = append(values, reflect.ValueOf(arg))
 	}
 
-	logger.Info("Calling step: "+text, "handler", c.Handler, "args", args)
+	handler := c.Handler.String()
+	logger.Info("Calling step: "+text, "handler", handler[1:len(handler)-7], "args", args)
 
 	res := c.Handler.Call(values)
 

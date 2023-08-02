@@ -32,7 +32,7 @@ type BlockContext struct {
 	Difficulty    *big.Int       // Provides information for DIFFICULTY
 	BaseFee       *uint256.Int   // Provides information for BASEFEE
 	PrevRanDao    *common.Hash   // Provides information for PREVRANDAO
-	ExcessDataGas *uint64        // Provides information for handling data blobs
+	ExcessBlobGas *uint64        // Provides information for handling data blobs
 }
 
 // TxContext provides the EVM with information about a transaction.
@@ -42,7 +42,7 @@ type TxContext struct {
 	TxHash     common.Hash
 	Origin     common.Address // Provides information for ORIGIN
 	GasPrice   *uint256.Int   // Provides information for GASPRICE
-	DataHashes []common.Hash  // Provides versioned data hashes for DATAHASH
+	BlobHashes []common.Hash  // Provides versioned blob hashes for BLOBHASH
 }
 
 type (

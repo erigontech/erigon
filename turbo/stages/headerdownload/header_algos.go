@@ -240,6 +240,12 @@ func (hd *HeaderDownload) LogAnchorState() {
 	hd.logAnchorState()
 }
 
+func (hd *HeaderDownload) Engine() consensus.Engine {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.engine
+}
+
 func (hd *HeaderDownload) logAnchorState() {
 	//nolint:prealloc
 	var ss []string

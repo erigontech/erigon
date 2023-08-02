@@ -149,10 +149,10 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		payload.Withdrawals = eth1_utils.ConvertWithdrawalsToRpc(block.Withdrawals())
 	}
 
-	if header.DataGasUsed != nil && header.ExcessDataGas != nil {
+	if header.BlobGasUsed != nil && header.ExcessBlobGas != nil {
 		payload.Version = 3
-		payload.DataGasUsed = header.DataGasUsed
-		payload.ExcessDataGas = header.ExcessDataGas
+		payload.BlobGasUsed = header.BlobGasUsed
+		payload.ExcessBlobGas = header.ExcessBlobGas
 	}
 
 	blockValue := blockValue(blockWithReceipts, baseFee)
@@ -166,7 +166,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		if !ok {
 			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobTx)
 		}
-		versionedHashes, commitments, proofs, blobs := blobTx.GetDataHashes(), blobTx.Commitments, blobTx.Proofs, blobTx.Blobs
+		versionedHashes, commitments, proofs, blobs := blobTx.GetBlobHashes(), blobTx.Commitments, blobTx.Proofs, blobTx.Blobs
 		lenCheck := len(versionedHashes)
 		if lenCheck != len(commitments) || lenCheck != len(proofs) || lenCheck != len(blobs) {
 			return nil, fmt.Errorf("tx %d in block %s has inconsistent commitments (%d) / proofs (%d) / blobs (%d) / "+

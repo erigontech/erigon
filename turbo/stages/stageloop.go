@@ -321,8 +321,8 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 			return nil
 		}
 	}
-
 	if notifications != nil && notifications.Accumulator != nil && currentHeder != nil {
+
 		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeder)
 		if currentHeder.Number.Uint64() == 0 {
 			notifications.Accumulator.StartChange(0, currentHeder.Hash(), nil, false)
@@ -447,6 +447,58 @@ func NewDefaultStages(ctx context.Context,
 		stagedsync.StageBorHeimdallCfg(db, *controlServer.ChainConfig, heimdallClient, blockReader),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter),
+		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
+		stagedsync.StageExecuteBlocksCfg(
+			db,
+			cfg.Prune,
+			cfg.BatchSize,
+			nil,
+			controlServer.ChainConfig,
+			controlServer.Engine,
+			&vm.Config{},
+			notifications.Accumulator,
+			cfg.StateStream,
+			/*stateStream=*/ false,
+			cfg.HistoryV3,
+			dirs,
+			blockReader,
+			controlServer.Hd,
+			cfg.Genesis,
+			cfg.Sync,
+			agg,
+		),
+		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
+		stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg),
+		stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
+		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp),
+		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
+		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
+		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
+		runInTestMode)
+}
+
+func NewPipelineStages(ctx context.Context,
+	db kv.RwDB,
+	cfg *ethconfig.Config,
+	controlServer *sentry.MultiClient,
+	notifications *shards.Notifications,
+	snapDownloader proto_downloader.DownloaderClient,
+	blockReader services.FullBlockReader,
+	blockRetire services.BlockRetire,
+	agg *state.AggregatorV3,
+	forkValidator *engine_helpers.ForkValidator,
+	logger log.Logger,
+) []*stagedsync.Stage {
+	dirs := cfg.Dirs
+	blockWriter := blockio.NewBlockWriter(cfg.HistoryV3)
+
+	// During Import we don't want other services like header requests, body requests etc. to be running.
+	// Hence we run it in the test mode.
+	runInTestMode := cfg.ImportMode
+
+	return stagedsync.PipelineStages(ctx,
+		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, dirs, blockRetire, snapDownloader, blockReader, notifications.Events, cfg.HistoryV3, agg),
+		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
 		stagedsync.StageExecuteBlocksCfg(
 			db,
