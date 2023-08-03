@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -23,6 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
+
+const maxBlocksLookBehind = 32
 
 // EthereumExecutionModule describes ethereum execution logic and indexing.
 type EthereumExecutionModule struct {
@@ -133,6 +136,15 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 			ValidationStatus: execution.ExecutionStatus_MissingSegment,
 		}, nil
 	}
+	currentBlockNumber := rawdb.ReadCurrentBlockNumber(tx)
+
+	if math.AbsoluteDifference(*currentBlockNumber, req.Number) >= maxBlocksLookBehind {
+		return &execution.ValidationReceipt{
+			ValidationStatus: execution.ExecutionStatus_TooFarAway,
+			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+			MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+		}, tx.Commit()
+	}
 
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), false)
 	if criticalError != nil {
@@ -144,14 +156,36 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if status == engine_types.AcceptedStatus {
 		validationStatus = execution.ExecutionStatus_MissingSegment
 	}
-	if status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil {
-		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain %x is invalid. reason %s", blockHash, err)
+	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
+	if isInvalidChain && (lvh != libcommon.Hash{}) && lvh != blockHash {
+		if err := e.purgeBadChain(ctx, tx, lvh, blockHash); err != nil {
+			return nil, err
+		}
+	}
+	if isInvalidChain {
+		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", libcommon.Hash(blockHash))
 		validationStatus = execution.ExecutionStatus_BadBlock
-		rawdb.DeleteHeader(tx, blockHash, header.Number.Uint64())
 	}
 	return &execution.ValidationReceipt{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  gointerfaces.ConvertHashToH256(lvh),
 		MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}), // TODO: implement
 	}, tx.Commit()
+}
+
+func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash libcommon.Hash) error {
+	tip := rawdb.ReadHeaderNumber(tx, headHash)
+
+	currentHash := headHash
+	currentNumber := *tip
+	for currentHash != latestValidHash {
+		currentHeader, err := e.getHeader(ctx, tx, currentHash, currentNumber)
+		if err != nil {
+			return err
+		}
+		rawdb.DeleteHeader(tx, currentHash, currentNumber)
+		currentHash = currentHeader.ParentHash
+		currentNumber--
+	}
+	return nil
 }

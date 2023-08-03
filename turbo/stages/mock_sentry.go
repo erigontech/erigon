@@ -343,7 +343,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			return err
 		}
 		// We start the mining step
-		if err := StateStep(ctx, batch, blockWriter, stateSync, mock.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
+		if err := StateStep(ctx, nil, engine, batch, blockWriter, stateSync, mock.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}

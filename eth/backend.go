@@ -33,7 +33,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -77,9 +79,7 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	txpool2 "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
+	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cmd/caplin-phase1/caplin1"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -87,6 +87,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common/debug"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/clique"
@@ -431,28 +432,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}()
 	}
 
-	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
-		notifications *shards.Notifications) error {
-		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
-		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
-			dirs, notifications, blockReader, blockWriter, backend.agg, log.New() /* logging will be discarded */)
-		if err != nil {
-			return err
-		}
-		// We start the mining step
-		if err := stages2.StateStep(ctx, batch, backend.blockWriter, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
-			logger.Warn("Could not validate block", "err", err)
-			return err
-		}
-		progress, err := stages.GetStageProgress(batch, stages.IntermediateHashes)
-		if err != nil {
-			return err
-		}
-		if progress < header.Number.Uint64() {
-			return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, header.Number.Uint64())
-		}
-		return nil
-	}
 	var currentBlock *types.Block
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
 		currentBlock, err = blockReader.CurrentBlock(tx)
@@ -478,8 +457,33 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	} else {
 		consensusConfig = &config.Ethash
 	}
+
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress, config.HeimdallURL,
 		config.WithoutHeimdall, false /* readonly */, logger)
+
+	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+		notifications *shards.Notifications) error {
+		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
+		stateSync, err := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
+			dirs, notifications, blockReader, blockWriter, backend.agg, log.New() /* logging will be discarded */)
+		if err != nil {
+			return err
+		}
+		chainReader := stagedsync.NewChainReaderImpl(chainConfig, batch, blockReader)
+		// We start the mining step
+		if err := stages2.StateStep(ctx, chainReader, backend.engine, batch, backend.blockWriter, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
+			logger.Warn("Could not validate block", "err", err)
+			return err
+		}
+		progress, err := stages.GetStageProgress(batch, stages.IntermediateHashes)
+		if err != nil {
+			return err
+		}
+		if progress < header.Number.Uint64() {
+			return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, header.Number.Uint64())
+		}
+		return nil
+	}
 	backend.forkValidator = engine_helpers.NewForkValidator(ctx, currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader)
 
 	backend.sentriesClient, err = sentry.NewMultiClient(
@@ -598,44 +602,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 	}
 
-	// If we choose not to run a consensus layer, run our embedded.
-	if config.InternalCL && clparams.EmbeddedSupported(config.NetworkID) {
-		genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
-		if err != nil {
-			return nil, err
-		}
-		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg, genesisCfg,
-			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
-		if err != nil {
-			return nil, err
-		}
-		forkDigest, err := fork.ComputeForkDigest(beaconCfg, genesisCfg)
-		if err != nil {
-			return nil, err
-		}
-
-		client, err := service.StartSentinelService(&sentinel.SentinelConfig{
-			IpAddr:        config.LightClientDiscoveryAddr,
-			Port:          int(config.LightClientDiscoveryPort),
-			TCPPort:       uint(config.LightClientDiscoveryTCPPort),
-			GenesisConfig: genesisCfg,
-			NetworkConfig: networkCfg,
-			BeaconConfig:  beaconCfg,
-			TmpDir:        tmpdir,
-		}, chainKv, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, &cltypes.Status{
-			ForkDigest:     forkDigest,
-			FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
-			FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
-			HeadSlot:       state.FinalizedCheckpoint().Epoch() * beaconCfg.SlotsPerEpoch,
-			HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
-		}, logger)
-		if err != nil {
-			return nil, err
-		}
-
-		go caplin1.RunCaplinPhase1(ctx, client, beaconCfg, genesisCfg, engine, state, nil)
-	}
-
 	if currentBlock == nil {
 		currentBlock = genesis
 	}
@@ -741,9 +707,55 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			false,
 			config.Miner.EnabledPOS)
 		backend.engineBackendRPC = engineBackendRPC
+		engine, err = execution_client.NewExecutionClientDirect(ctx, engineBackendRPC)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		engineBackendRPC := engineapi.NewEngineServer(ctx, logger, chainConfig, executionRpc, backend.chainDB, blockReader, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
 		backend.engineBackendRPC = engineBackendRPC
+		engine, err = execution_client.NewExecutionClientDirect(ctx, engineBackendRPC)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// If we choose not to run a consensus layer, run our embedded.
+	if config.InternalCL && clparams.EmbeddedSupported(config.NetworkID) {
+		genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
+		if err != nil {
+			return nil, err
+		}
+		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg, genesisCfg,
+			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
+		if err != nil {
+			return nil, err
+		}
+		forkDigest, err := fork.ComputeForkDigest(beaconCfg, genesisCfg)
+		if err != nil {
+			return nil, err
+		}
+
+		client, err := service.StartSentinelService(&sentinel.SentinelConfig{
+			IpAddr:        config.LightClientDiscoveryAddr,
+			Port:          int(config.LightClientDiscoveryPort),
+			TCPPort:       uint(config.LightClientDiscoveryTCPPort),
+			GenesisConfig: genesisCfg,
+			NetworkConfig: networkCfg,
+			BeaconConfig:  beaconCfg,
+			TmpDir:        tmpdir,
+		}, chainKv, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, &cltypes.Status{
+			ForkDigest:     forkDigest,
+			FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
+			FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
+			HeadSlot:       state.FinalizedCheckpoint().Epoch() * beaconCfg.SlotsPerEpoch,
+			HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
+		}, logger)
+		if err != nil {
+			return nil, err
+		}
+
+		go caplin1.RunCaplinPhase1(ctx, client, beaconCfg, genesisCfg, engine, state, nil)
 	}
 
 	return backend, nil

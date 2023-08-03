@@ -62,6 +62,7 @@ func (e *EngineServerExperimental) handleNewPayload(
 			if !success {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
+			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &headerHash}, nil
 		} else {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
@@ -81,6 +82,10 @@ func (e *EngineServerExperimental) handleNewPayload(
 		return nil, err
 	}
 
+	if status == execution.ExecutionStatus_BadBlock {
+		e.hd.ReportBadHeaderPoS(block.Hash(), latestValidHash)
+	}
+
 	return &engine_types.PayloadStatus{
 		Status:          convertGrpcStatusToEngineStatus(status),
 		LatestValidHash: &latestValidHash,
@@ -91,7 +96,9 @@ func convertGrpcStatusToEngineStatus(status execution.ExecutionStatus) engine_ty
 	switch status {
 	case execution.ExecutionStatus_Success:
 		return engine_types.ValidStatus
-	case execution.ExecutionStatus_MissingSegment | execution.ExecutionStatus_TooFarAway:
+	case execution.ExecutionStatus_MissingSegment:
+		return engine_types.AcceptedStatus
+	case execution.ExecutionStatus_TooFarAway:
 		return engine_types.AcceptedStatus
 	case execution.ExecutionStatus_BadBlock:
 		return engine_types.InvalidStatus

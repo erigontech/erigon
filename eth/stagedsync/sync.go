@@ -211,6 +211,70 @@ func (s *Sync) RunUnwind(db kv.RwDB, tx kv.RwTx) error {
 	}
 	return nil
 }
+
+func (s *Sync) RunNoInterrupt(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
+	s.prevUnwindPoint = nil
+	s.timings = s.timings[:0]
+
+	for !s.IsDone() {
+		var badBlockUnwind bool
+		if s.unwindPoint != nil {
+			for j := 0; j < len(s.unwindOrder); j++ {
+				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
+					continue
+				}
+				if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, tx); err != nil {
+					return err
+				}
+			}
+			s.prevUnwindPoint = s.unwindPoint
+			s.unwindPoint = nil
+			if s.badBlock != (libcommon.Hash{}) {
+				badBlockUnwind = true
+			}
+			s.badBlock = libcommon.Hash{}
+			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
+				return err
+			}
+			// If there were unwinds at the start, a heavier but invalid chain may be present, so
+			// we relax the rules for Stage1
+			firstCycle = false
+		}
+
+		stage := s.stages[s.currentStage]
+
+		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
+			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
+			return libcommon.ErrStopped
+		}
+
+		if stage.Disabled || stage.Forward == nil {
+			s.logger.Trace(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
+
+			s.NextStage()
+			continue
+		}
+
+		if err := s.runStage(stage, db, tx, firstCycle, badBlockUnwind); err != nil {
+			return err
+		}
+
+		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
+			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
+			return libcommon.ErrStopped
+		}
+
+		s.NextStage()
+	}
+
+	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
+		return err
+	}
+
+	s.currentStage = 0
+	return nil
+}
+
 func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
@@ -278,6 +342,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 	s.currentStage = 0
 	return nil
 }
+
 func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {

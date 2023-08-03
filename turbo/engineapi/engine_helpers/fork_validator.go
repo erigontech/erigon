@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
@@ -284,7 +285,16 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 	validationError = fv.validatePayload(tx, header, body, unwindPoint, headersChain, bodiesChain, notifications)
 	latestValidHash = header.Hash()
 	if validationError != nil {
-		latestValidHash = header.ParentHash
+		var latestValidNumber uint64
+		latestValidNumber, criticalError = stages.GetStageProgress(tx, stages.IntermediateHashes)
+		if criticalError != nil {
+			return
+		}
+		fmt.Println(latestValidNumber)
+		latestValidHash, criticalError = rawdb.ReadCanonicalHash(tx, latestValidNumber)
+		if criticalError != nil {
+			return
+		}
 		status = engine_types.InvalidStatus
 		if fv.extendingFork != nil {
 			fv.extendingFork.Rollback()

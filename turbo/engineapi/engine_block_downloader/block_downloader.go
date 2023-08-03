@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -149,12 +148,6 @@ func (e *EngineBlockDownloader) loadDownloadedHeaders(tx kv.RwTx) (fromBlock uin
 			return nil
 		}
 		lastValidHash = h.ParentHash
-		if err := e.hd.Engine().VerifyHeader(consensus.ChainReaderImpl{BlockReader: e.blockReader, Db: tx, Cfg: *e.config}, &h, false); err != nil {
-			e.logger.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "err", err)
-			badChainError = err
-			e.hd.ReportBadHeaderPoS(h.Hash(), lastValidHash)
-			return nil
-		}
 		// If we are in PoW range then block validation is not required anymore.
 		if foundPow {
 			if (fromHash == libcommon.Hash{}) {
