@@ -929,13 +929,10 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 	g.SetLimit(workers)
 	for _, t := range []snaptype.Type{snaptype.BorEvents} {
 		for _, segment := range segments {
-			fmt.Printf("segment: %v\n", segment.Path)
 			if segment.T != t {
-				fmt.Printf("wrong type\n")
 				continue
 			}
 			if hasIdxFile(&segment, logger) {
-				fmt.Printf("hasIdxFile\n")
 				continue
 			}
 			sn := segment
