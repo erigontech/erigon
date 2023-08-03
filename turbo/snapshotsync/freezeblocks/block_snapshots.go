@@ -913,6 +913,59 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	}
 }
 
+func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
+	dir, tmpDir := dirs.Snap, dirs.Tmp
+	//log.Log(lvl, "[snapshots] Build indices", "from", min)
+
+	segments, _, err := BorSegments(dir)
+	if err != nil {
+		return err
+	}
+	ps := background.NewProgressSet()
+	startIndexingTime := time.Now()
+
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
+	for _, t := range []snaptype.Type{snaptype.BorEvents} {
+		for index := range segments {
+			segment := segments[index]
+			if segment.T != t {
+				continue
+			}
+			if hasIdxFile(&segment, logger) {
+				continue
+			}
+			sn := segment
+			g.Go(func() error {
+				p := &background.Progress{}
+				ps.Add(p)
+				defer ps.Delete(p)
+				return buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, logger)
+			})
+		}
+	}
+	finish := make(chan struct{})
+	go func() {
+		defer close(finish)
+		g.Wait()
+	}()
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	for {
+		select {
+		case <-finish:
+			return g.Wait()
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+		}
+	}
+}
+
 func noGaps(in []snaptype.FileInfo) (out []snaptype.FileInfo, missingSnapshots []Range) {
 	var prevTo uint64
 	for _, f := range in {
@@ -1220,31 +1273,62 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	snapshots.LogStat()
 
 	// Create .idx files
-	if snapshots.IndicesMax() >= snapshots.SegmentsMax() {
-		return nil
-	}
+	if snapshots.IndicesMax() < snapshots.SegmentsMax() {
 
-	if !snapshots.Cfg().Produce && snapshots.IndicesMax() == 0 {
-		return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
-	}
-	if snapshots.Cfg().Produce {
-		if !snapshots.SegmentsReady() {
-			return fmt.Errorf("not all snapshot segments are available")
+		if !snapshots.Cfg().Produce && snapshots.IndicesMax() == 0 {
+			return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
 		}
+		if snapshots.Cfg().Produce {
+			if !snapshots.SegmentsReady() {
+				return fmt.Errorf("not all snapshot segments are available")
+			}
 
-		// wait for Downloader service to download all expected snapshots
-		if snapshots.IndicesMax() < snapshots.SegmentsMax() {
-			indexWorkers := estimate.IndexSnapshot.Workers()
-			if err := BuildMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
-				return fmt.Errorf("BuildMissedIndices: %w", err)
+			// wait for Downloader service to download all expected snapshots
+			if snapshots.IndicesMax() < snapshots.SegmentsMax() {
+				indexWorkers := estimate.IndexSnapshot.Workers()
+				if err := BuildMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
+					return fmt.Errorf("BuildMissedIndices: %w", err)
+				}
+			}
+
+			if err := snapshots.ReopenFolder(); err != nil {
+				return err
+			}
+			if notifier != nil {
+				notifier.OnNewSnapshot()
 			}
 		}
+	}
+	if cc.Bor != nil {
+		borSnapshots := br.borSnapshots()
+		borSnapshots.LogStat()
 
-		if err := snapshots.ReopenFolder(); err != nil {
-			return err
-		}
-		if notifier != nil {
-			notifier.OnNewSnapshot()
+		// Create .idx files
+		if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
+
+			if !borSnapshots.Cfg().Produce && borSnapshots.IndicesMax() == 0 {
+				return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
+			}
+			if borSnapshots.Cfg().Produce {
+				if !borSnapshots.SegmentsReady() {
+					return fmt.Errorf("not all bor snapshot segments are available")
+				}
+
+				// wait for Downloader service to download all expected snapshots
+				if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
+					indexWorkers := estimate.IndexSnapshot.Workers()
+					if err := BuildBorMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
+						return fmt.Errorf("BuildMissedIndices: %w", err)
+					}
+				}
+
+				if err := borSnapshots.ReopenFolder(); err != nil {
+					return err
+				}
+				if notifier != nil {
+					notifier.OnNewSnapshot()
+				}
+			}
 		}
 	}
 	return nil
