@@ -928,12 +928,14 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
 	for _, t := range []snaptype.Type{snaptype.BorEvents} {
-		for index := range segments {
-			segment := segments[index]
+		for _, segment := range segments {
+			fmt.Printf("segment: %v\n", segment.Path)
 			if segment.T != t {
+				fmt.Printf("wrong type\n")
 				continue
 			}
 			if hasIdxFile(&segment, logger) {
+				fmt.Printf("hasIdxFile\n")
 				continue
 			}
 			sn := segment
@@ -1320,9 +1322,6 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 				if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
 					indexWorkers := estimate.IndexSnapshot.Workers()
 					fmt.Printf("indexWorkers = %d\n", indexWorkers)
-					if indexWorkers == 0 {
-						indexWorkers = 1
-					}
 					if err := BuildBorMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
 						return fmt.Errorf("BuildMissedIndices: %w", err)
 					}
