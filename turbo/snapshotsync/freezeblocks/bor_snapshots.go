@@ -497,6 +497,7 @@ func (s *BorRoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
 	var segmentsMaxSet bool
 Loop:
 	for _, fName := range fileNames {
+		fmt.Printf("fName=%s\n", fName)
 		f, err := snaptype.ParseFileName(s.dir, fName)
 		if err != nil {
 			s.logger.Warn("invalid segment name", "err", err, "name", fName)
@@ -520,6 +521,7 @@ Loop:
 			if !exists {
 				sn = &BorEventSegment{ranges: Range{f.From, f.To}}
 			}
+			fmt.Printf("Created sn for %s\n", fName)
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
@@ -541,6 +543,7 @@ Loop:
 				// then make segment availabe even if index open may fail
 				s.Events.segments = append(s.Events.segments, sn)
 			}
+			fmt.Printf("Added sn for %s\n", fName)
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
