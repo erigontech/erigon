@@ -40,7 +40,7 @@ type Config struct {
 	MinFeeCap             uint64
 	AccountSlots          uint64 // Number of executable transaction slots guaranteed per account
 	PriceBump             uint64 // Price bump percentage to replace an already existing transaction
-	OverrideShanghaiTime  *big.Int
+	OverrideCancunTime    *big.Int
 }
 
 var DefaultConfig = Config{
@@ -53,10 +53,9 @@ var DefaultConfig = Config{
 	BaseFeeSubPoolLimit: 10_000,
 	QueuedSubPoolLimit:  10_000,
 
-	MinFeeCap:            1,
-	AccountSlots:         16, //TODO: to choose right value (16 to be compatible with Geth)
-	PriceBump:            10, // Price bump percentage to replace an already existing transaction
-	OverrideShanghaiTime: nil,
+	MinFeeCap:    1,
+	AccountSlots: 16, //TODO: to choose right value (16 to be compatible with Geth)
+	PriceBump:    10, // Price bump percentage to replace an already existing transaction
 }
 
 type DiscardReason uint8
