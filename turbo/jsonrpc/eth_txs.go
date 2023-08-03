@@ -98,7 +98,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		return nil, err
 	}
 	if len(reply.RlpTxs[0]) > 0 {
-		txn, err := types2.DecodeTransaction(reply.RlpTxs[0])
+		txn, err := types2.DecodeWrappedTransaction(reply.RlpTxs[0])
 		if err != nil {
 			return nil, err
 		}

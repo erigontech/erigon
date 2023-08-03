@@ -166,6 +166,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if version >= clparams.DenebVersion {
 		header.BlobGasUsed = (*uint64)(req.BlobGasUsed)
 		header.ExcessBlobGas = (*uint64)(req.ExcessBlobGas)
+		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
 	if !s.config.IsCancun(header.Time) && (header.BlobGasUsed != nil || header.ExcessBlobGas != nil) {
@@ -176,11 +177,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas missing"}
 	}
 
-	if s.config.IsCancun(header.Time) {
-		if header.ParentBeaconBlockRoot == nil {
-			return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot missing"}
-		}
-		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
+	if s.config.IsCancun(header.Time) && header.ParentBeaconBlockRoot == nil {
+		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot missing"}
 	}
 
 	blockHash := req.BlockHash

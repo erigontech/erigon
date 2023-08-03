@@ -243,29 +243,11 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	}
 
 	cancun := chain.Config().IsCancun(header.Time)
-
-	if !cancun {
-		if header.BlobGasUsed != nil {
-			return fmt.Errorf("invalid blobGasUsed before fork: have %v, expected 'nil'", header.BlobGasUsed)
-		}
-		if header.ExcessBlobGas != nil {
-			return fmt.Errorf("invalid excessBlobGas before fork: have %v, expected 'nil'", header.ExcessBlobGas)
-		}
-	}
-
 	if cancun {
-		if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil {
-			// Verify the header's EIP-4844 attributes.
-			return err
-		}
-		if header.ParentBeaconBlockRoot == nil {
-			return fmt.Errorf("missing parentBeaconBlockRoot")
-		}
-		if header.ParentBeaconBlockRoot != chain.CurrentHeader().ParentBeaconBlockRoot {
-			return fmt.Errorf("parentBeaconBlockRoot mismatch")
-		}
+		return misc.VerifyPresenceOfCancunHeaderFields(header)
+	} else {
+		return misc.VerifyAbsenceOfCancunHeaderFields(header)
 	}
-	return nil
 }
 
 func (s *Merge) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
