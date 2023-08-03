@@ -835,8 +835,8 @@ func (s *RoSnapshots) PrintDebug() {
 }
 
 func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
-	//_, fName := filepath.Split(sn.Path)
-	//log.Debug("[snapshots] build idx", "file", fName)
+	_, fName := filepath.Split(sn.Path)
+	log.Info("[snapshots] build idx", "file", fName)
 	switch sn.T {
 	case snaptype.Headers:
 		if err := HeadersIdx(ctx, chainConfig, sn.Path, sn.From, tmpDir, p, lvl, logger); err != nil {
@@ -857,6 +857,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 			return err
 		}
 	}
+	log.Info("[snapshots] finish build idx", "file", fName)
 	return nil
 }
 
