@@ -2,6 +2,7 @@ package engine_block_downloader
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -79,8 +80,27 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 		// Can fail, not an issue in this case.
 		eth1_utils.InsertHeaderAndBodyAndWait(e.ctx, e.executionModule, block.Header(), block.RawBody())
 	}
-	e.status.Store(headerdownload.Synced)
 	e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
+	// Lastly attempt verification
+	status, latestValidHash, err := eth1_utils.ValidateChain(e.ctx, e.executionModule, block.Hash(), block.NumberU64())
+	if err != nil {
+		e.logger.Warn("[EngineBlockDownloader] block verification failed", "reason", err)
+		e.status.Store(headerdownload.Idle)
+		return
+	}
+	if status == execution.ExecutionStatus_TooFarAway || status == execution.ExecutionStatus_Busy {
+		e.logger.Info("[EngineBlockDownloader] block verification skipped")
+		e.status.Store(headerdownload.Synced)
+		return
+	}
+	if status == execution.ExecutionStatus_BadBlock {
+		e.logger.Warn("[EngineBlockDownloader] block segments downloaded are invalid")
+		e.status.Store(headerdownload.Idle)
+		e.hd.ReportBadHeaderPoS(block.Hash(), latestValidHash)
+		return
+	}
+	e.logger.Info("[EngineBlockDownloader] blocks verification successful")
+	e.status.Store(headerdownload.Synced)
 
 }
 

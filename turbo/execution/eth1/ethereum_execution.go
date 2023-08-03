@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -23,6 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
+
+const maxBlocksLookBehind = 32
 
 // EthereumExecutionModule describes ethereum execution logic and indexing.
 type EthereumExecutionModule struct {
@@ -132,6 +135,15 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 			MissingHash:      req.Hash,
 			ValidationStatus: execution.ExecutionStatus_MissingSegment,
 		}, nil
+	}
+	currentBlockNumber := rawdb.ReadCurrentBlockNumber(tx)
+
+	if math.AbsoluteDifference(*currentBlockNumber, req.Number) >= maxBlocksLookBehind {
+		return &execution.ValidationReceipt{
+			ValidationStatus: execution.ExecutionStatus_TooFarAway,
+			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+			MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}),
+		}, tx.Commit()
 	}
 
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), false)

@@ -84,6 +84,7 @@ func (e *EngineServerExperimental) handleNewPayload(
 	if status == execution.ExecutionStatus_BadBlock {
 		e.hd.ReportBadHeaderPoS(block.Hash(), latestValidHash)
 	}
+	fmt.Println(status)
 
 	return &engine_types.PayloadStatus{
 		Status:          convertGrpcStatusToEngineStatus(status),
@@ -95,7 +96,9 @@ func convertGrpcStatusToEngineStatus(status execution.ExecutionStatus) engine_ty
 	switch status {
 	case execution.ExecutionStatus_Success:
 		return engine_types.ValidStatus
-	case execution.ExecutionStatus_MissingSegment | execution.ExecutionStatus_TooFarAway:
+	case execution.ExecutionStatus_MissingSegment:
+		return engine_types.AcceptedStatus
+	case execution.ExecutionStatus_TooFarAway:
 		return engine_types.AcceptedStatus
 	case execution.ExecutionStatus_BadBlock:
 		return engine_types.InvalidStatus

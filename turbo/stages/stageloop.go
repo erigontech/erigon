@@ -372,50 +372,51 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 			return err
 		}
 	}
-	latestValidatedHeader := rawdb.ReadCurrentHeader(batch)
-	wasHeaderChainValid := true
 	// Once we unwound we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
-	for i := len(headersChain) - 1; i >= 0; i-- {
+	for i := range headersChain {
 		currentHeader := headersChain[i]
 		currentBody := bodiesChain[i]
 		currentHeight := headersChain[i].Number.Uint64()
 		currentHash := headersChain[i].Hash()
 		if chainReader != nil {
 			if err := engine.VerifyHeader(chainReader, currentHeader, true); err != nil {
-				wasHeaderChainValid = false
 				log.Warn("Header Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
-				header = latestValidatedHeader
-				break
+				return err
 			}
 		}
 
 		// Prepare memory state for block execution
-		Bd.AddToPrefetch(currentHeader, currentBody)
 		if err := rawdb.WriteHeader(batch, currentHeader); err != nil {
 			return err
 		}
+		if currentBody != nil {
+			Bd.AddToPrefetch(currentHeader, currentBody)
+		}
+
 		if err := rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
 			return err
 		}
-		latestValidatedHeader = currentHeader
+		if err := rawdb.WriteHeadHeaderHash(batch, currentHash); err != nil {
+			return err
+		}
+		if err = stages.SaveStageProgress(batch, stages.Headers, currentHeight); err != nil {
+			return err
+		}
+		// Run state sync
+		if err = stateSync.RunNoInterrupt(nil, batch, false /* firstCycle */); err != nil {
+			return err
+		}
 	}
 
-	// If we did not specify header or body we stop here
+	// If we did not specify header we stop here
 	if header == nil {
 		return nil
 	}
-	if wasHeaderChainValid {
-		if err := engine.VerifyHeader(chainReader, header, true); err != nil {
-			wasHeaderChainValid = false
-			log.Warn("Header Verification Failed", "number", header.Number.Uint64(), "hash", header.Hash(), "reason", err)
-			// if tip is wrong validate up to parent hash.
-			header, err = rawdb.ReadHeaderByHash(batch, header.ParentHash)
-			if err != nil {
-				return err
-			}
-			body = nil
-		}
+	if err := engine.VerifyHeader(chainReader, header, true); err != nil {
+		log.Warn("Header Verification Failed", "number", header.Number.Uint64(), "hash", header.Hash(), "reason", err)
+		return err
 	}
+
 	// Setup
 	height := header.Number.Uint64()
 	hash := header.Hash()
@@ -426,11 +427,9 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 	if err = rawdb.WriteCanonicalHash(batch, hash, height); err != nil {
 		return err
 	}
-
 	if err := rawdb.WriteHeadHeaderHash(batch, hash); err != nil {
 		return err
 	}
-
 	if err = stages.SaveStageProgress(batch, stages.Headers, height); err != nil {
 		return err
 	}
@@ -438,11 +437,8 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 		Bd.AddToPrefetch(header, body)
 	}
 	// Run state sync
-	if err = stateSync.Run(nil, batch, false /* firstCycle */); err != nil {
+	if err = stateSync.RunNoInterrupt(nil, batch, false /* firstCycle */); err != nil {
 		return err
-	}
-	if !wasHeaderChainValid {
-		return fmt.Errorf("header chain was invalid")
 	}
 	return nil
 }
@@ -562,7 +558,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, nil, nil),
 			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter),
 			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
@@ -573,7 +569,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				&vm.Config{},
 				notifications.Accumulator,
 				cfg.StateStream,
-				false,
+				true,
 				cfg.HistoryV3,
 				cfg.Dirs,
 				blockReader,
@@ -583,7 +579,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				agg,
 			),
 			stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
-			stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg)),
+			stagedsync.StageTrieCfg(db, true, true, true, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg)),
 		stagedsync.StateUnwindOrder,
 		nil, /* pruneOrder */
 		logger,
