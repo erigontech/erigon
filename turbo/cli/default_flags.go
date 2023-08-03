@@ -158,4 +158,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.SentinelPortFlag,
 
 	&utils.OtsSearchMaxCapFlag,
+
+	&utils.TrustedSetupFile,
 }
