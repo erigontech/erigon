@@ -357,7 +357,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, tmpDir
 	return nil
 }
 
-func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, engine consensus.Engine, batch kv.RwTx, blockWriter *blockio.BlockWriter, stateSync *stagedsync.Sync, Bd *bodydownload.BodyDownload, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
+func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine consensus.Engine, batch kv.RwTx, blockWriter *blockio.BlockWriter, stateSync *stagedsync.Sync, Bd *bodydownload.BodyDownload, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -389,7 +389,12 @@ func StateStep(ctx context.Context, chainReader consensus.ChainHeaderReader, eng
 		if err := rawdb.WriteHeader(batch, currentHeader); err != nil {
 			return err
 		}
+
 		if currentBody != nil {
+			if err := engine.VerifyUncles(chainReader, currentHeader, body.Uncles); err != nil {
+				log.Warn("Header Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
+				return err
+			}
 			Bd.AddToPrefetch(currentHeader, currentBody)
 		}
 

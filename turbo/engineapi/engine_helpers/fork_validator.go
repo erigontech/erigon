@@ -290,7 +290,6 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 		if criticalError != nil {
 			return
 		}
-		fmt.Println(latestValidNumber)
 		latestValidHash, criticalError = rawdb.ReadCanonicalHash(tx, latestValidNumber)
 		if criticalError != nil {
 			return

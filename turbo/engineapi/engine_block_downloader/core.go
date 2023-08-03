@@ -71,6 +71,8 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 		return
 	}
 	tx.Rollback() // Discard the original db tx
+	e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
+
 	if err := e.insertHeadersAndBodies(tmpTx, startBlock, startHash); err != nil {
 		e.logger.Warn("[EngineBlockDownloader] Could not insert headers and bodies", "err", err)
 		e.status.Store(headerdownload.Idle)
@@ -80,7 +82,7 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 		// Can fail, not an issue in this case.
 		eth1_utils.InsertHeaderAndBodyAndWait(e.ctx, e.executionModule, block.Header(), block.RawBody())
 	}
-	e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
+	e.logger.Info("[EngineBlockDownloader] Finished inserting blocks", "from", startBlock-1, "to", endBlock)
 	// Lastly attempt verification
 	status, latestValidHash, err := eth1_utils.ValidateChain(e.ctx, e.executionModule, block.Hash(), block.NumberU64())
 	if err != nil {

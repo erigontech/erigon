@@ -143,10 +143,14 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 			ValidationStatus: execution.ExecutionStatus_TooFarAway,
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 			MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-		}, tx.Commit()
+		}, nil
 	}
+	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), false)
+	extendingHash := e.forkValidator.ExtendingForkHeadHash()
+	extendCanonical := (extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
+
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), extendCanonical)
 	if criticalError != nil {
 		return nil, criticalError
 	}

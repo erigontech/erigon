@@ -15,6 +15,7 @@ package engine_helpers
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -185,10 +186,6 @@ func (fv *ThreadedForkValidator) ValidatePayload(tx kv.Tx, header *types.Header,
 func (fv *ThreadedForkValidator) Clear() {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-	fv.clear()
-}
-
-func (fv *ThreadedForkValidator) clear() {
 	fv.extendingForkOperationsCh <- clearOp{}
 	<-fv.finishedExtendingForkOperationCh
 }
@@ -209,7 +206,6 @@ func (fv *ThreadedForkValidator) validateAndStorePayload(tx kv.RwTx, header *typ
 			return
 		}
 		status = engine_types.InvalidStatus
-		fv.clear()
 		return
 	}
 	fv.validHashes.Add(header.Hash(), true)
@@ -243,11 +239,13 @@ func (fv *ThreadedForkValidator) loop() {
 	for {
 		select {
 		case <-fv.ctx.Done():
+			fmt.Println("stopping...")
 			return
 		case op := <-fv.extendingForkOperationsCh:
 			fv.finishedExtendingForkOperationCh <- fv.handleExtendingForkOperation(op)
 		}
 	}
+
 }
 
 func (fv *ThreadedForkValidator) handleExtendingForkOperation(op interface{}) interface{} {
@@ -273,6 +271,17 @@ func (fv *ThreadedForkValidator) handleExtendingForkOperation(op interface{}) in
 		fv.extendingForkHeadHash = header.Hash()
 		fv.extendingForkNumber = header.Number.Uint64()
 		status, latestValidHash, validationError, criticalError := fv.validateAndStorePayload(fv.extendingFork, header, body, 0, nil, nil, notifications)
+		if validationError != nil || criticalError != nil {
+			if fv.extendingFork != nil {
+				fv.extendingFork.Rollback()
+			}
+			fv.extendingForkHeadHash = libcommon.Hash{}
+			fv.extendingForkNumber = 0
+			fv.extendingFork = nil
+		} else {
+			fv.extendingForkHeadHash = header.Hash()
+			fv.extendingForkNumber = header.Number.Uint64()
+		}
 		return validateResult{status: status, latestValidHash: latestValidHash, validationError: validationError, criticalError: criticalError}
 	case flushOp:
 		tx, err := fv.db.BeginRw(fv.ctx)
@@ -285,12 +294,15 @@ func (fv *ThreadedForkValidator) handleExtendingForkOperation(op interface{}) in
 			return err
 		}
 		// Clean extending fork data
-		fv.extendingFork.Rollback()
+		if fv.extendingFork != nil {
+			fv.extendingFork.Rollback()
+		}
 		fv.extendingForkHeadHash = libcommon.Hash{}
 		fv.extendingForkNumber = 0
 		fv.extendingFork = nil
 		return tx.Commit()
 	case clearOp:
+		fmt.Println("received clear")
 		if fv.extendingFork != nil {
 			fv.extendingFork.Rollback()
 		}
