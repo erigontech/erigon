@@ -1319,6 +1319,10 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 				// wait for Downloader service to download all expected snapshots
 				if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
 					indexWorkers := estimate.IndexSnapshot.Workers()
+					fmt.Printf("indexWorkers = %d\n", indexWorkers)
+					if indexWorkers == 0 {
+						indexWorkers = 1
+					}
 					if err := BuildBorMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
 						return fmt.Errorf("BuildMissedIndices: %w", err)
 					}
