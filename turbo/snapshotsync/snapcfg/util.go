@@ -116,11 +116,11 @@ var KnownCfgs = map[string]*Cfg{
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
 func KnownCfg(networkName string, whiteList, whiteListHistory []string) *Cfg {
-	fmt.Printf("networkName: %s, %s\n", networkName, snapshothashes.BorMainnet)
 	c, ok := KnownCfgs[networkName]
 	if !ok {
 		return newCfg(Preverified{}, Preverified{})
 	}
+	fmt.Printf("networkName: %s, %v\n", networkName, c)
 
 	var result, result2 Preverified
 	if len(whiteList) == 0 {
