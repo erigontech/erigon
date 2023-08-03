@@ -1502,6 +1502,17 @@ func hasIdxFile(sn *snaptype.FileInfo, logger log.Logger) bool {
 			result = false
 		}
 		idx.Close()
+	case snaptype.BorEvents:
+		idx, err := recsplit.OpenIndex(path.Join(dir, fName))
+		if err != nil {
+			return false
+		}
+		// If index was created before the segment file, it needs to be ignored (and rebuilt)
+		if idx.ModTime().Before(stat.ModTime()) {
+			logger.Warn("Index file has timestamp before segment file, will be recreated", "segfile", sn.Path, "segtime", stat.ModTime(), "idxfile", fName, "idxtime", idx.ModTime())
+			result = false
+		}
+		idx.Close()
 	}
 	return result
 }
