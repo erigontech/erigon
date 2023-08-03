@@ -835,8 +835,8 @@ func (s *RoSnapshots) PrintDebug() {
 }
 
 func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
-	_, fName := filepath.Split(sn.Path)
-	log.Info("[snapshots] build idx", "file", fName)
+	//_, fName := filepath.Split(sn.Path)
+	//log.Info("[snapshots] build idx", "file", fName)
 	switch sn.T {
 	case snaptype.Headers:
 		if err := HeadersIdx(ctx, chainConfig, sn.Path, sn.From, tmpDir, p, lvl, logger); err != nil {
@@ -857,7 +857,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 			return err
 		}
 	}
-	log.Info("[snapshots] finish build idx", "file", fName)
+	//log.Info("[snapshots] finish build idx", "file", fName)
 	return nil
 }
 
@@ -1305,7 +1305,6 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 
 		// Create .idx files
 		if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
-			fmt.Printf("Rebuild bor indicez %d %d\n", borSnapshots.IndicesMax(), borSnapshots.SegmentsMax())
 
 			if !borSnapshots.Cfg().Produce && borSnapshots.IndicesMax() == 0 {
 				return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
@@ -1318,7 +1317,6 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 				// wait for Downloader service to download all expected snapshots
 				if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
 					indexWorkers := estimate.IndexSnapshot.Workers()
-					fmt.Printf("indexWorkers = %d\n", indexWorkers)
 					if err := BuildBorMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
 						return fmt.Errorf("BuildMissedIndices: %w", err)
 					}
