@@ -99,10 +99,14 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *
 		return err
 	}
 	dbEmpty := len(snInDB) == 0
-	var existingFilesMap map[string]struct{}
-	var missingSnapshots []*services.Range
+	var existingFilesMap, borExistingFilesMap map[string]struct{}
+	var missingSnapshots, borMissingSnapshots []*services.Range
 	if !dbEmpty {
 		existingFilesMap, missingSnapshots, err = snapshots.ScanDir()
+		if err != nil {
+			return err
+		}
+		borExistingFilesMap, borMissingSnapshots, err = borSnapshots.ScanDir()
 		if err != nil {
 			return err
 		}
@@ -117,7 +121,9 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *
 	// build all download requests
 	// builds preverified snapshots request
 	for _, p := range preverifiedBlockSnapshots {
-		if _, exists := existingFilesMap[p.Name]; !exists { // Not to download existing files "behind the scenes"
+		_, exists := existingFilesMap[p.Name]
+		_, borExists := borExistingFilesMap[p.Name]
+		if !exists && !borExists { // Not to download existing files "behind the scenes"
 			downloadRequest = append(downloadRequest, services.NewDownloadRequest(nil, p.Name, p.Hash, false /* Bor */))
 		}
 	}
@@ -131,7 +137,9 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *
 	// builds missing snapshots request
 	for _, r := range missingSnapshots {
 		downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", false /* Bor */))
-		if cc.Bor != nil {
+	}
+	if cc.Bor != nil {
+		for _, r := range borMissingSnapshots {
 			downloadRequest = append(downloadRequest, services.NewDownloadRequest(r, "", "", true /* Bor */))
 		}
 	}
