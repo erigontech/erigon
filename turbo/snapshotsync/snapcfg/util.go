@@ -2,6 +2,7 @@ package snapcfg
 
 import (
 	_ "embed"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -115,6 +116,7 @@ var KnownCfgs = map[string]*Cfg{
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
 func KnownCfg(networkName string, whiteList, whiteListHistory []string) *Cfg {
+	fmt.Printf("networkName: %s, %s\n", networkName, snapshothashes.BorMainnet)
 	c, ok := KnownCfgs[networkName]
 	if !ok {
 		return newCfg(Preverified{}, Preverified{})
