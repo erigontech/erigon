@@ -2,7 +2,6 @@ package snapcfg
 
 import (
 	_ "embed"
-	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -120,7 +119,6 @@ func KnownCfg(networkName string, whiteList, whiteListHistory []string) *Cfg {
 	if !ok {
 		return newCfg(Preverified{}, Preverified{})
 	}
-	fmt.Printf("networkName: %s, %v\n", networkName, c)
 
 	var result, result2 Preverified
 	if len(whiteList) == 0 {

@@ -116,12 +116,11 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, agg *
 	}
 
 	// send all hashes to the Downloader service
-	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName, snInDB, snHistInDB).Preverified
+	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName, []string{} /* whitelist */, snHistInDB).Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots)+len(missingSnapshots))
 	// build all download requests
 	// builds preverified snapshots request
 	for _, p := range preverifiedBlockSnapshots {
-		fmt.Printf("Preverified: %s\n", p.Name)
 		_, exists := existingFilesMap[p.Name]
 		_, borExists := borExistingFilesMap[p.Name]
 		if !exists && !borExists { // Not to download existing files "behind the scenes"
