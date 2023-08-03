@@ -36,7 +36,7 @@ type EthereumExecutionModule struct {
 	db                kv.RwDB // main database
 	semaphore         *semaphore.Weighted
 	executionPipeline *stagedsync.Sync
-	forkValidator     *engine_helpers.ForkValidator
+	forkValidator     *engine_helpers.ThreadedForkValidator
 
 	logger log.Logger
 	// Block building
@@ -57,7 +57,7 @@ type EthereumExecutionModule struct {
 	execution.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
+func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ThreadedForkValidator,
 	config *chain.Config, builderFunc builder.BlockBuilderFunc, hook *stages.Hook, accumulator *shards.Accumulator, stateChangeConsumer shards.StateChangeConsumer, logger log.Logger, historyV3 bool) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:         blockReader,
@@ -117,7 +117,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 	defer tx.Rollback()
-	e.forkValidator.ClearWithUnwind(tx, e.accumulator, e.stateChangeConsumer)
+	e.forkValidator.Clear()
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
 	header, err := e.blockReader.Header(ctx, tx, blockHash, req.Number)
 	if err != nil {
