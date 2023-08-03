@@ -60,29 +60,7 @@ func configureRouter(cfg httpcfg.HttpCfg, logger log.Logger, apiList []rpc.API) 
 	r := chi.NewRouter()
 	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.RpcStreamingDisable, logger)
 
-	// allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
-	// if err != nil {
-	// 	return err
-	// }
-	srv.SetAllowList(nil)
-	srv.SetBatchLimit(cfg.BatchLimit)
-
-	var defaultAPIList []rpc.API
-
-	for _, api := range apiList {
-		if api.Namespace != "engine" {
-			defaultAPIList = append(defaultAPIList, api)
-		}
-	}
-
-	var apiFlags []string
-	for _, flag := range cfg.API {
-		if flag != "engine" {
-			apiFlags = append(apiFlags, flag)
-		}
-	}
-
-	if err := node.RegisterApisFromWhitelist(defaultAPIList, apiFlags, srv, false, logger); err != nil {
+	if err := node.RegisterApisFromWhitelist(apiList, nil, srv, false, logger); err != nil {
 		return nil, nil, err
 	}
 

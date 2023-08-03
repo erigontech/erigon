@@ -824,7 +824,13 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	// Embedded Otterscan
 	if httpRpcCfg.EOtsEnabled {
 		go func() {
-			if err := initEmbeddedOts(ctx, s.logger, httpRpcCfg, apiList); err != nil {
+			// Copy/uses rpcdaemon cfg as basis, but override it to explicitly enable all necessary
+			// eots APIs
+			cfgCopy := httpRpcCfg
+			cfgCopy.API = []string{"eth", "erigon", "ots"}
+			eotsApiList := jsonrpc.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, cfgCopy, s.engine, s.logger)
+
+			if err := initEmbeddedOts(ctx, s.logger, httpRpcCfg, eotsApiList); err != nil {
 				s.logger.Error(err.Error())
 			}
 		}()
