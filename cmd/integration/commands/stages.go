@@ -527,6 +527,9 @@ func init() {
 	rootCmd.AddCommand(cmdStageTrie)
 
 	withConfig(cmdStagePatriciaTrie)
+	withBtreePlus(cmdStagePatriciaTrie)
+	withBtreeWarm(cmdStagePatriciaTrie)
+	withBtreeCold(cmdStagePatriciaTrie)
 	withDataDir(cmdStagePatriciaTrie)
 	withReset(cmdStagePatriciaTrie)
 	withBlock(cmdStagePatriciaTrie)
@@ -992,6 +995,10 @@ func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error
 	if !ethconfig.EnableHistoryV4InTest {
 		panic("this method for v3 only")
 	}
+
+	libstate.UseBpsTree = useBtreePlus
+	libstate.UseBtreeForColdFiles = useBtreeIdxCold
+	libstate.UseBtreeForWarmFiles = useBtreeIdxWarm
 
 	if warmup {
 		return reset2.Warmup(ctx, db, log.LvlInfo, stages.PatriciaTrie)

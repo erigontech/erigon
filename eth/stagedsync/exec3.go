@@ -421,7 +421,7 @@ func ExecV3(ctx context.Context,
 
 					var t0, t1, t2, t3, t4 time.Duration
 					commitStart := time.Now()
-					logger.Info("Committing...", "blockComplete.Load()", blockComplete.Load())
+					logger.Info("Committing (parallel)...", "blockComplete.Load()", blockComplete.Load())
 					if err := func() error {
 						//Drain results (and process) channel because read sets do not carry over
 						for !blockComplete.Load() {
@@ -838,7 +838,7 @@ Loop:
 						nc := applyTx.(*temporal.Tx).AggCtx()
 						doms.SetContext(nc)
 
-						if err := nc.PruneWithTimeout(ctx, time.Second, applyTx); err != nil {
+						if err := nc.PruneWithTimeout(ctx, time.Second, applyTx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 							return err
 						}
 					}
