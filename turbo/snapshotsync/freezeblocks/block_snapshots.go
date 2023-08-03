@@ -1305,6 +1305,7 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 
 		// Create .idx files
 		if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
+			fmt.Printf("Rebuild bor indicez %d %d\n", borSnapshots.IndicesMax(), borSnapshots.SegmentsMax())
 
 			if !borSnapshots.Cfg().Produce && borSnapshots.IndicesMax() == 0 {
 				return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
