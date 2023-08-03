@@ -26,7 +26,7 @@ func NewExecutionClientDirect(ctx context.Context, api engineapi.EngineAPI) (*Ex
 	}, nil
 }
 
-func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block) (invalid bool, err error) {
+func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}
@@ -78,7 +78,8 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block) (invalid
 	case clparams.CapellaVersion:
 		payloadStatus, err = cc.api.NewPayloadV2(cc.ctx, &request)
 	case clparams.DenebVersion:
-		payloadStatus, err = cc.api.NewPayloadV3(cc.ctx, &request)
+		//TODO: Add 4844 and 4788 fields correctly
+		payloadStatus, err = cc.api.NewPayloadV3(cc.ctx, &request, nil, beaconParentRoot)
 	default:
 		err = fmt.Errorf("invalid payload version")
 	}

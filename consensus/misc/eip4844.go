@@ -21,7 +21,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 
 	"github.com/ledgerwatch/erigon/core/types"
@@ -72,13 +71,30 @@ func FakeExponential(factor, denom *uint256.Int, excessBlobGas uint64) (*uint256
 	return output.Div(output, denom), nil
 }
 
-// VerifyEip4844Header verifies that the header is not malformed
-func VerifyEip4844Header(config *chain.Config, parent, header *types.Header) error {
+// VerifyPresenceOfCancunHeaderFields checks that the fields introduced in Cancun (EIP-4844, EIP-4788) are present.
+func VerifyPresenceOfCancunHeaderFields(header *types.Header) error {
 	if header.BlobGasUsed == nil {
 		return fmt.Errorf("header is missing blobGasUsed")
 	}
 	if header.ExcessBlobGas == nil {
 		return fmt.Errorf("header is missing excessBlobGas")
+	}
+	if header.ParentBeaconBlockRoot == nil {
+		return fmt.Errorf("header is missing parentBeaconBlockRoot")
+	}
+	return nil
+}
+
+// VerifyAbsenceOfCancunHeaderFields checks that the header doesn't have any fields added in Cancun (EIP-4844, EIP-4788).
+func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
+	if header.BlobGasUsed != nil {
+		return fmt.Errorf("invalid blobGasUsed before fork: have %v, expected 'nil'", header.BlobGasUsed)
+	}
+	if header.ExcessBlobGas != nil {
+		return fmt.Errorf("invalid excessBlobGas before fork: have %v, expected 'nil'", header.ExcessBlobGas)
+	}
+	if header.ParentBeaconBlockRoot != nil {
+		return fmt.Errorf("invalid parentBeaconBlockRoot before fork: have %v, expected 'nil'", header.ParentBeaconBlockRoot)
 	}
 	return nil
 }

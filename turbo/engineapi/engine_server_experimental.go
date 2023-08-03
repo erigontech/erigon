@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"reflect"
 	"sync"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -80,8 +82,9 @@ func (e *EngineServerExperimental) Start(httpConfig httpcfg.HttpCfg,
 	base := jsonrpc.NewBaseApi(filters, stateCache, e.blockReader, agg, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs)
 
 	ethImpl := jsonrpc.NewEthAPI(base, e.db, eth, txPool, mining, httpConfig.Gascap, httpConfig.ReturnDataLimit, e.logger)
-	// engineImpl := NewEngineAPI(base, db, engineBackend)
 
+	// engineImpl := NewEngineAPI(base, db, engineBackend)
+	// e.startEngineMessageHandler()
 	apiList := []rpc.API{
 		{
 			Namespace: "eth",
@@ -126,7 +129,9 @@ func (s *EngineServerExperimental) checkWithdrawalsPresence(time uint64, withdra
 }
 
 // EngineNewPayload validates and possibly executes payload
-func (s *EngineServerExperimental) newPayload(ctx context.Context, req *engine_types.ExecutionPayload, version clparams.StateVersion) (*engine_types.PayloadStatus, error) {
+func (s *EngineServerExperimental) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
+	expectedBlobHashes []libcommon.Hash, version clparams.StateVersion,
+) (*engine_types.PayloadStatus, error) {
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
 
@@ -207,7 +212,20 @@ func (s *EngineServerExperimental) newPayload(ctx context.Context, req *engine_t
 			ValidationError: engine_types.NewStringifiedError(err),
 		}, nil
 	}
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+	if version >= clparams.DenebVersion {
+		actualBlobHashes := []libcommon.Hash{}
+		for _, tx := range transactions {
+			actualBlobHashes = append(actualBlobHashes, tx.GetBlobHashes()...)
+		}
+		if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
+			s.logger.Warn("[NewPayload] mismatch in blob hashes",
+				"expectedBlobHashes", expectedBlobHashes, "actualBlobHashes", actualBlobHashes)
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString("mismatch in blob hashes"),
+			}, nil
+		}
+	}
 
 	possibleStatus, err := s.getQuickPayloadStatusIfPossible(blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
 	if err != nil {
@@ -221,16 +239,21 @@ func (s *EngineServerExperimental) newPayload(ctx context.Context, req *engine_t
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 	s.hd.BeaconRequestList.AddPayloadRequest(block)
 
-	payloadStatus := <-s.hd.PayloadStatusCh
+	chainReader := eth1_chain_reader.NewChainReaderEth1(s.ctx, s.config, s.executionService)
+	payloadStatus, err := s.handleNewPayload("NewPayload", block, chainReader)
+	if err != nil {
+		return nil, err
+	}
 	s.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
 	}
 
-	return &payloadStatus, nil
+	return payloadStatus, nil
 }
 
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
@@ -290,11 +313,6 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &libcommon.Hash{}}, nil
 	}
 
-	if !s.hd.POSSync() {
-		s.logger.Info(fmt.Sprintf("[%s] Still in PoW sync", prefix), "hash", blockHash)
-		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
-	}
-
 	var canonicalHash libcommon.Hash
 	if header != nil {
 		canonicalHash, err = s.blockReader.CanonicalHash(context.Background(), tx, header.Number.Uint64())
@@ -334,12 +352,12 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 
-		if parent == nil && s.hd.PosStatus() != headerdownload.Idle {
+		if parent == nil && s.hd.PosStatus() == headerdownload.Syncing {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
-		if header == nil && s.hd.PosStatus() != headerdownload.Idle {
+		if header == nil && s.hd.PosStatus() == headerdownload.Syncing {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
@@ -355,12 +373,6 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 		if blockHash != headHash && canonicalHash == blockHash {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
-	}
-
-	// If another payload is already commissioned then we just reply with syncing
-	if s.stageLoopIsBusy() {
-		s.logger.Debug(fmt.Sprintf("[%s] stage loop is busy", prefix))
-		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
 
 	return nil, nil
@@ -408,26 +420,22 @@ func (s *EngineServerExperimental) getPayload(ctx context.Context, payloadId uin
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
 func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
 ) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	forkChoice := &engine_types.ForkChoiceState{
-		HeadHash:           forkchoiceState.HeadHash,
-		SafeBlockHash:      forkchoiceState.SafeBlockHash,
-		FinalizedBlockHash: forkchoiceState.FinalizedBlockHash,
-	}
-
-	status, err := s.getQuickPayloadStatusIfPossible(forkChoice.HeadHash, 0, libcommon.Hash{}, forkChoice, false)
+	status, err := s.getQuickPayloadStatusIfPossible(forkchoiceState.HeadHash, 0, libcommon.Hash{}, forkchoiceState, false)
 	if err != nil {
 		return nil, err
 	}
-
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if status == nil {
-		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadHash)
-		s.hd.BeaconRequestList.AddForkChoiceRequest(forkChoice)
+	chainReader := eth1_chain_reader.NewChainReaderEth1(s.ctx, s.config, s.executionService)
 
-		statusDeref := <-s.hd.PayloadStatusCh
-		status = &statusDeref
+	if status == nil {
+		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkchoiceState.HeadHash)
+
+		status, err = s.handlesForkChoice("ForkChoiceUpdated", chainReader, forkchoiceState, 0)
+		if err != nil {
+			return nil, err
+		}
 		s.logger.Debug("[ForkChoiceUpdated] got reply", "payloadStatus", status)
 
 		if status.CriticalError != nil {
@@ -454,7 +462,7 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 	headHeader := rawdb.ReadHeader(tx2, headHash, *headNumber)
 	tx2.Rollback()
 
-	if headHeader.Hash() != forkChoice.HeadHash {
+	if headHeader.Hash() != forkchoiceState.HeadHash {
 		// Per Item 2 of https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.9/src/engine/specification.md#specification-1:
 		// Client software MAY skip an update of the forkchoice state and
 		// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree.
@@ -463,7 +471,7 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 		// {payloadStatus: {status: VALID, latestValidHash: forkchoiceState.headBlockHash, validationError: null}, payloadId: null}.
 
 		s.logger.Warn("Skipping payload building because forkchoiceState.headBlockHash is not the head of the canonical chain",
-			"forkChoice.HeadBlockHash", forkChoice.HeadHash, "headHeader.Hash", headHeader.Hash())
+			"forkChoice.HeadBlockHash", forkchoiceState.HeadHash, "headHeader.Hash", headHeader.Hash())
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
 	}
 
@@ -472,7 +480,7 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 	}
 
 	req := &execution.AssembleBlockRequest{
-		ParentHash:           gointerfaces.ConvertHashToH256(forkChoice.HeadHash),
+		ParentHash:           gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
 		Timestamp:            uint64(payloadAttributes.Timestamp),
 		MixDigest:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 		SuggestedFeeRecipent: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
@@ -609,22 +617,27 @@ func (e *EngineServerExperimental) ForkchoiceUpdatedV2(ctx context.Context, fork
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.CapellaVersion)
 }
 
+func (e *EngineServerExperimental) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.CapellaVersion)
+}
+
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_newpayloadv1
 func (e *EngineServerExperimental) NewPayloadV1(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, clparams.BellatrixVersion)
+	return e.newPayload(ctx, payload, nil, clparams.BellatrixVersion)
 }
 
 // NewPayloadV2 processes new payloads (blocks) from the beacon chain with withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_newpayloadv2
 func (e *EngineServerExperimental) NewPayloadV2(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, clparams.CapellaVersion)
+	return e.newPayload(ctx, payload, nil, clparams.CapellaVersion)
 }
 
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
-// See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv3
-func (e *EngineServerExperimental) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, clparams.DenebVersion)
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_newpayloadv3
+func (e *EngineServerExperimental) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload,
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
+	return e.newPayload(ctx, payload, expectedBlobHashes, clparams.DenebVersion)
 }
 
 // Receives consensus layer's transition configuration and checks if the execution layer has the correct configuration.
@@ -672,10 +685,10 @@ var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV2",
 	"engine_newPayloadV1",
 	"engine_newPayloadV2",
-	// "engine_newPayloadV3",
+	"engine_newPayloadV3",
 	"engine_getPayloadV1",
 	"engine_getPayloadV2",
-	// "engine_getPayloadV3",
+	"engine_getPayloadV3",
 	"engine_exchangeTransitionConfigurationV1",
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByRangeV1",

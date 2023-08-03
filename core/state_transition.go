@@ -92,7 +92,7 @@ type Message interface {
 	CheckNonce() bool
 	Data() []byte
 	AccessList() types2.AccessList
-	DataHashes() []libcommon.Hash
+	BlobHashes() []libcommon.Hash
 
 	IsFree() bool
 }

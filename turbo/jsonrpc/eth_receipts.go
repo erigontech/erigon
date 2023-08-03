@@ -765,7 +765,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		fields["contractAddress"] = receipt.ContractAddress
 	}
 	// Set derived blob related fields
-	numBlobs := len(txn.GetDataHashes())
+	numBlobs := len(txn.GetBlobHashes())
 	if numBlobs > 0 {
 		if header.ExcessBlobGas == nil {
 			log.Warn("excess blob gas not set when trying to marshal blob tx")

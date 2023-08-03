@@ -172,13 +172,17 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 
 		stack := scope.Stack
 		stackData := stack.Data
-
+		stackSize := len(stackData)
+		if stackSize < 2 {
+			return
+		}
 		// Don't modify the stack
-		mStart := stackData[len(stackData)-1]
-		mSize := stackData[len(stackData)-2]
+		mStart := stackData[stackSize-1]
+		mSize := stackData[stackSize-2]
 		topics := make([]libcommon.Hash, size)
-		for i := 0; i < size; i++ {
-			topic := stackData[len(stackData)-2-(i+1)]
+		dataStart := stackSize - 3
+		for i := 0; i < size && dataStart-i >= 0; i++ {
+			topic := stackData[dataStart-i]
 			topics[i] = libcommon.Hash(topic.Bytes32())
 		}
 

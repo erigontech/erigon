@@ -246,6 +246,7 @@ Loop:
 		if cfg.hd != nil {
 			cfg.hd.ReportBadHeaderPoS(minBlockHash, minHeader.ParentHash)
 		}
+
 		if to > s.BlockNumber {
 			u.UnwindTo(minBlockNum-1, minBlockHash)
 		}

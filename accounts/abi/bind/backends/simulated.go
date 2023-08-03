@@ -836,6 +836,6 @@ func (m callMsg) Data() []byte                  { return m.CallMsg.Data }
 func (m callMsg) AccessList() types2.AccessList { return m.CallMsg.AccessList }
 func (m callMsg) IsFree() bool                  { return false }
 
-func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.DataHashes)) }
+func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
 func (m callMsg) MaxFeePerBlobGas() *uint256.Int { return m.CallMsg.MaxFeePerBlobGas }
-func (m callMsg) DataHashes() []libcommon.Hash   { return m.CallMsg.DataHashes }
+func (m callMsg) BlobHashes() []libcommon.Hash   { return m.CallMsg.BlobHashes }

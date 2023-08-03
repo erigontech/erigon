@@ -461,7 +461,7 @@ func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumb
 		// if the transaction has been mined, compute the effective gas price
 		result.GasPrice = computeGasPrice(tx, blockHash, baseFee)
 		result.MaxFeePerBlobGas = (*hexutil.Big)(t.MaxFeePerBlobGas.ToBig())
-		result.BlobVersionedHashes = t.GetDataHashes()
+		result.BlobVersionedHashes = t.GetBlobHashes()
 	}
 	signer := types.LatestSignerForChainID(chainId.ToBig())
 	var err error
