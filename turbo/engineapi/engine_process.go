@@ -62,6 +62,7 @@ func (e *EngineServerExperimental) handleNewPayload(
 			if !success {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
+			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &headerHash}, nil
 		} else {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
@@ -84,7 +85,6 @@ func (e *EngineServerExperimental) handleNewPayload(
 	if status == execution.ExecutionStatus_BadBlock {
 		e.hd.ReportBadHeaderPoS(block.Hash(), latestValidHash)
 	}
-	fmt.Println(status)
 
 	return &engine_types.PayloadStatus{
 		Status:          convertGrpcStatusToEngineStatus(status),
