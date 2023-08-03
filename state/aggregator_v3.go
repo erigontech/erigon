@@ -933,7 +933,7 @@ func (a *AggregatorV3) prune(ctx context.Context, txFrom, txTo, limit uint64) er
 		return nil
 	}
 	step--
-	//a.logger.Debug("aggregator prune", "step", step, "range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit, "stepsLimit", limit/a.aggregationStep, "stepsRangeInDB", a.StepsRangeInDBAsStr(a.rwTx))
+	a.logger.Debug("aggregator prune", "step", step, "range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit, "stepsLimit", limit/a.aggregationStep, "stepsRangeInDB", a.StepsRangeInDBAsStr(a.rwTx))
 	if err := a.accounts.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}

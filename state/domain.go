@@ -1464,7 +1464,7 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 		}
 	}
 
-	if err := d.History.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := d.History.prune(ctx, 0, txFrom, limit, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	mxPruneHistTook.Update(d.stats.LastPruneHistTook.Seconds())
