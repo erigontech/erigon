@@ -460,6 +460,12 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
+	timestamp := uint64(payloadAttributes.Timestamp)
+	if (!s.config.IsCancun(timestamp) && version >= clparams.DenebVersion) ||
+		(s.config.IsCancun(timestamp) && version < clparams.DenebVersion) {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+
 	tx2, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -483,13 +489,13 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
 	}
 
-	if headHeader.Time >= uint64(payloadAttributes.Timestamp) {
+	if headHeader.Time >= timestamp {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 
 	req := &execution.AssembleBlockRequest{
 		ParentHash:            gointerfaces.ConvertHashToH256(forkChoice.HeadHash),
-		Timestamp:             uint64(payloadAttributes.Timestamp),
+		Timestamp:             timestamp,
 		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 	}
