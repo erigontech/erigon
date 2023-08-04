@@ -18,23 +18,17 @@ package state
 
 import (
 	"bytes"
-	"container/heap"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"hash"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
@@ -194,7 +188,9 @@ func (t *UpdateTree) List(clear bool) ([][]byte, []commitment.Update) {
 			key, _ := t.keys.Get(i, keyBuf, nil)
 			plainKeys[i] = common.Copy(key)
 		}
-		t.keys.Reset()
+		if clear {
+			t.keys.Reset()
+		}
 		return plainKeys, nil
 	case CommitmentModeUpdate:
 		plainKeys := make([][]byte, t.tree.Len())
@@ -457,173 +453,33 @@ func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, mer
 	return transValBuf, nil
 }
 
-func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStaticFiles, mergedFiles MergedFiles, r DomainRanges, workers int, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *filesItem, err error) {
-	if !r.any() {
-		return
+type ArchiveWriter interface {
+	AddWord(word []byte) error
+	Compress() error
+	DisableFsync()
+	Close()
+}
+
+type compWriter struct {
+	*compress.Compressor
+	c bool
+}
+
+func NewArchiveWriter(kv *compress.Compressor, compress bool) ArchiveWriter {
+	return &compWriter{kv, compress}
+}
+
+func (c *compWriter) AddWord(word []byte) error {
+	if c.c {
+		return c.Compressor.AddWord(word)
 	}
+	return c.Compressor.AddUncompressedWord(word)
+}
 
-	domainFiles := oldFiles.commitment
-	indexFiles := oldFiles.commitmentIdx
-	historyFiles := oldFiles.commitmentHist
-
-	var comp *compress.Compressor
-	var closeItem bool = true
-	defer func() {
-		if closeItem {
-			if comp != nil {
-				comp.Close()
-			}
-			if indexIn != nil {
-				if indexIn.decompressor != nil {
-					indexIn.decompressor.Close()
-				}
-				if indexIn.index != nil {
-					indexIn.index.Close()
-				}
-				if indexIn.bindex != nil {
-					indexIn.bindex.Close()
-				}
-			}
-			if historyIn != nil {
-				if historyIn.decompressor != nil {
-					historyIn.decompressor.Close()
-				}
-				if historyIn.index != nil {
-					historyIn.index.Close()
-				}
-				if historyIn.bindex != nil {
-					historyIn.bindex.Close()
-				}
-			}
-			if valuesIn != nil {
-				if valuesIn.decompressor != nil {
-					valuesIn.decompressor.Close()
-				}
-				if valuesIn.index != nil {
-					valuesIn.index.Close()
-				}
-				if valuesIn.bindex != nil {
-					valuesIn.bindex.Close()
-				}
-			}
-		}
-	}()
-	if indexIn, historyIn, err = d.History.mergeFiles(ctx, indexFiles, historyFiles,
-		HistoryRanges{
-			historyStartTxNum: r.historyStartTxNum,
-			historyEndTxNum:   r.historyEndTxNum,
-			history:           r.history,
-			indexStartTxNum:   r.indexStartTxNum,
-			indexEndTxNum:     r.indexEndTxNum,
-			index:             r.index}, workers, ps); err != nil {
-		return nil, nil, nil, err
+func (c *compWriter) Close() {
+	if c.Compressor != nil {
+		c.Compressor.Close()
 	}
-
-	if r.values {
-		datFileName := fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
-		datPath := filepath.Join(d.dir, datFileName)
-		p := ps.AddNew(datFileName, 1)
-		defer ps.Delete(p)
-
-		if comp, err = compress.NewCompressor(ctx, "merge", datPath, d.dir, compress.MinPatternScore, workers, log.LvlTrace, d.logger); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", d.filenameBase, err)
-		}
-		var cp CursorHeap
-		heap.Init(&cp)
-		for _, item := range domainFiles {
-			g := item.decompressor.MakeGetter()
-			g.Reset(0)
-			if g.HasNext() {
-				key, _ := g.NextUncompressed()
-				val, _ := g.NextUncompressed()
-				heap.Push(&cp, &CursorItem{
-					t:        FILE_CURSOR,
-					dg:       g,
-					key:      key,
-					val:      val,
-					endTxNum: item.endTxNum,
-					reverse:  true,
-				})
-			}
-		}
-		keyCount := 0
-		// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
-		// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
-		// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
-		// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
-		// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
-		var keyBuf, valBuf []byte
-		for cp.Len() > 0 {
-			lastKey := common.Copy(cp[0].key)
-			lastVal := common.Copy(cp[0].val)
-			// Advance all the items that have this key (including the top)
-			for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-				ci1 := cp[0]
-				if ci1.dg.HasNext() {
-					ci1.key, _ = ci1.dg.NextUncompressed()
-					ci1.val, _ = ci1.dg.NextUncompressed()
-					heap.Fix(&cp, 0)
-				} else {
-					heap.Pop(&cp)
-				}
-			}
-			// For the rest of types, empty value means deletion
-			skip := r.valuesStartTxNum == 0 && len(lastVal) == 0
-			if !skip {
-				if keyBuf != nil {
-					if err = comp.AddUncompressedWord(keyBuf); err != nil {
-						return nil, nil, nil, err
-					}
-					keyCount++ // Only counting keys, not values
-					if err = comp.AddUncompressedWord(valBuf); err != nil {
-						return nil, nil, nil, err
-					}
-				}
-				keyBuf = append(keyBuf[:0], lastKey...)
-				valBuf = append(valBuf[:0], lastVal...)
-			}
-		}
-		if keyBuf != nil {
-			if err = comp.AddUncompressedWord(keyBuf); err != nil {
-				return nil, nil, nil, err
-			}
-			keyCount++ // Only counting keys, not values
-			//fmt.Printf("last heap key %x\n", keyBuf)
-			valBuf, err = d.commitmentValTransform(&oldFiles, &mergedFiles, valBuf)
-			if err != nil {
-				return nil, nil, nil, fmt.Errorf("merge: 2valTransform [%x] %w", valBuf, err)
-			}
-			if err = comp.AddUncompressedWord(valBuf); err != nil {
-				return nil, nil, nil, err
-			}
-		}
-		if err = comp.Compress(); err != nil {
-			return nil, nil, nil, err
-		}
-		comp.Close()
-		comp = nil
-		valuesIn = newFilesItem(r.valuesStartTxNum, r.valuesEndTxNum, d.aggregationStep)
-		valuesIn.frozen = false
-		if valuesIn.decompressor, err = compress.NewDecompressor(datPath); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-		}
-		ps.Delete(p)
-
-		idxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep)
-		idxPath := filepath.Join(d.dir, idxFileName)
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, idxPath, d.dir, false, ps, d.logger, d.noFsync); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-		}
-
-		btPath := strings.TrimSuffix(idxPath, "kvi") + "bt"
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, 2048, valuesIn.decompressor, false, ps, d.tmpdir, d.logger)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("create btindex %s [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-		}
-	}
-	closeItem = false
-	d.stats.MergesCount++
-	return
 }
 
 func (d *DomainCommitted) Close() {

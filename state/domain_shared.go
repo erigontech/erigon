@@ -12,10 +12,12 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -96,7 +98,7 @@ func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 }
 
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, step uint64, txUnwindTo uint64) error {
-	sd.ClearRam()
+	sd.ClearRam(true)
 	if err := sd.Account.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
 		return err
 	}
@@ -130,19 +132,26 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, step uint64, 
 
 func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn uint64, err error) {
 	bn, txn, err = sd.Commitment.SeekCommitment(fromTx, toTx, sd.aggCtx.commitment)
+	if bn > 0 {
+		bn++
+	}
 	sd.SetBlockNum(bn)
 	sd.SetTxNum(txn)
 	return
 }
 
-func (sd *SharedDomains) ClearRam() {
+func (sd *SharedDomains) ClearRam(commitment bool) {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
+	log.Crit("ClearRam", "commitment", commitment, "tx", sd.txNum.Load(), "block", sd.blockNum.Load())
 	sd.account = map[string][]byte{}
 	sd.code = map[string][]byte{}
 	sd.commitment = btree2.NewMap[string, []byte](128)
-	sd.Commitment.updates.List(true)
-	sd.Commitment.patriciaTrie.Reset()
+	if commitment {
+		sd.Commitment.updates.List(true)
+		sd.Commitment.patriciaTrie.Reset()
+	}
+
 	sd.storage = btree2.NewMap[string, []byte](128)
 	sd.estSize.Store(0)
 }
@@ -241,11 +250,21 @@ func (sd *SharedDomains) LatestCode(addr []byte) ([]byte, error) {
 }
 
 func (sd *SharedDomains) LatestAccount(addr []byte) ([]byte, error) {
-	v0, ok := sd.Get(kv.AccountsDomain, addr)
+	var v0, v []byte
+	var err error
+	var ok bool
+
+	defer func() {
+		curious := "0da27ef618846cfa981516da2891fe0693a54f8418b85c91c384d2c0f4e14727"
+		if bytes.Equal(hexutility.MustDecodeString(curious), addr) {
+			fmt.Printf("found %s vDB/File %x vCache %x step %d\n", curious, v, v0, sd.txNum.Load()/sd.Account.aggregationStep)
+		}
+	}()
+	v0, ok = sd.Get(kv.AccountsDomain, addr)
 	if ok {
 		return v0, nil
 	}
-	v, _, err := sd.aggCtx.GetLatest(kv.AccountsDomain, addr, nil, sd.roTx)
+	v, _, err = sd.aggCtx.GetLatest(kv.AccountsDomain, addr, nil, sd.roTx)
 	if err != nil {
 		return nil, fmt.Errorf("account %x read error: %w", addr, err)
 	}

@@ -35,6 +35,7 @@ import (
 	"github.com/VictoriaMetrics/metrics"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/holiman/uint256"
+	"github.com/pkg/errors"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -276,6 +277,7 @@ type Domain struct {
 	logger       log.Logger
 
 	domainLargeValues bool
+	compressValues    bool // true if all key-values in domain are compressed
 
 	dir string
 }
@@ -469,6 +471,7 @@ func (d *Domain) openFiles() (err error) {
 				continue
 			}
 			if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
+				err = errors.Wrap(err, "decompressor")
 				d.logger.Debug("Domain.openFiles: %w, %s", err, datPath)
 				return false
 			}
@@ -477,6 +480,7 @@ func (d *Domain) openFiles() (err error) {
 				idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
 				if dir.FileExist(idxPath) {
 					if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
+						err = errors.Wrap(err, "recsplit index")
 						d.logger.Debug("Domain.openFiles: %w, %s", err, idxPath)
 						return false
 					}
@@ -486,7 +490,8 @@ func (d *Domain) openFiles() (err error) {
 			if item.bindex == nil {
 				bidxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, fromStep, toStep))
 				if dir.FileExist(bidxPath) {
-					if item.bindex, err = OpenBtreeIndexWithDecompressor(bidxPath, DefaultBtreeM, item.decompressor); err != nil {
+					if item.bindex, err = OpenBtreeIndexWithDecompressor(bidxPath, DefaultBtreeM, item.decompressor, d.compressValues); err != nil {
+						err = errors.Wrap(err, "btree index")
 						d.logger.Debug("Domain.openFiles: %w, %s", err, bidxPath)
 						return false
 					}
@@ -744,8 +749,8 @@ const (
 type CursorItem struct {
 	c        kv.CursorDupSort
 	iter     btree2.MapIter[string, []byte]
-	dg       *compress.Getter
-	dg2      *compress.Getter
+	dg       ArchiveGetter
+	dg2      ArchiveGetter
 	btCursor *Cursor
 	key      []byte
 	val      []byte
@@ -810,7 +815,7 @@ type ctxLocalityIdx struct {
 type DomainContext struct {
 	d          *Domain
 	files      []ctxItem
-	getters    []*compress.Getter
+	getters    []ArchiveGetter
 	readers    []*BtIndex
 	idxReaders []*recsplit.IndexReader
 	hc         *HistoryContext
@@ -968,13 +973,23 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 				return fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
 			}
 
-			if err = coll.valuesComp.AddUncompressedWord(k); err != nil {
-				return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
+			switch d.compressValues {
+			case true:
+				if err = coll.valuesComp.AddWord(k); err != nil {
+					return fmt.Errorf("add %s compressed values key [%x]: %w", d.filenameBase, k, err)
+				}
+				if err = coll.valuesComp.AddWord(v); err != nil {
+					return fmt.Errorf("add %s compressed values val [%x]=>[%x]: %w", d.filenameBase, k, err)
+				}
+			default:
+				if err = coll.valuesComp.AddUncompressedWord(k); err != nil {
+					return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
+				}
+				if err = coll.valuesComp.AddUncompressedWord(v); err != nil {
+					return fmt.Errorf("add %s values val [%x]=>[%x]: %w", d.filenameBase, k, v, err)
+				}
 			}
 			mxCollationSize.Inc()
-			if err = coll.valuesComp.AddUncompressedWord(v); err != nil {
-				return fmt.Errorf("add %s values val [%x]=>[%x]: %w", d.filenameBase, k, v, err)
-			}
 
 			select {
 			case <-ctx.Done():
@@ -1028,7 +1043,7 @@ func (sf StaticFiles) CleanupOnError() {
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
 	if d.filenameBase == AggTraceFileLife {
-		d.logger.Warn("[dbg.agg] buildFiles", "step", step, "domain", d.filenameBase)
+		d.logger.Warn("[snapshots] buildFiles", "step", step, "domain", d.filenameBase)
 	}
 
 	start := time.Now()
@@ -1072,15 +1087,15 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 
 	valuesIdxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, step, step+1)
 	valuesIdxPath := filepath.Join(d.dir, valuesIdxFileName)
-	if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, valuesIdxPath, d.tmpdir, false, ps, d.logger, d.noFsync); err != nil {
+	if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, d.compressValues, valuesIdxPath, d.tmpdir, false, ps, d.logger, d.noFsync); err != nil {
 		return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 	}
 
 	var bt *BtIndex
 	{
-		btFileName := strings.TrimSuffix(valuesIdxFileName, "kvi") + "bt"
+		btFileName := fmt.Sprintf("%s.%d-%d.bt", d.filenameBase, step, step+1)
 		btPath := filepath.Join(d.dir, btFileName)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, false, ps, d.tmpdir, d.logger)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compressValues, ps, d.tmpdir, d.logger)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values bt idx: %w", d.filenameBase, err)
 		}
@@ -1151,16 +1166,17 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 		g.Go(func() error {
 			idxPath := fitem.decompressor.FilePath()
 			idxPath = strings.TrimSuffix(idxPath, "kv") + "kvi"
-			_, err := buildIndexThenOpen(ctx, fitem.decompressor, idxPath, d.tmpdir, false, ps, d.logger, d.noFsync)
+			ix, err := buildIndexThenOpen(ctx, fitem.decompressor, d.compressValues, idxPath, d.tmpdir, false, ps, d.logger, d.noFsync)
 			if err != nil {
-				return fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
+				return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
 			}
+			ix.Close()
 			return nil
 		})
 	}
 }
 
-func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, values bool, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*recsplit.Index, error) {
+func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, compressed bool, idxPath, tmpdir string, values bool, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*recsplit.Index, error) {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {
@@ -1168,13 +1184,16 @@ func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, idxPath, 
 	}
 	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
-	if err := buildIndex(ctx, d, idxPath, tmpdir, count, values, p, logger, noFsync); err != nil {
+	defer d.EnableReadAhead().DisableReadAhead()
+
+	g := NewArchiveGetter(d.MakeGetter(), compressed)
+	if err := buildIndex(ctx, g, idxPath, tmpdir, count, values, p, logger, noFsync); err != nil {
 		return nil, err
 	}
 	return recsplit.OpenIndex(idxPath)
 }
 
-func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool, p *background.Progress, logger log.Logger, noFsync bool) error {
+func buildIndex(ctx context.Context, g ArchiveGetter, idxPath, tmpdir string, count int, values bool, p *background.Progress, logger log.Logger, noFsync bool) error {
 	var rs *recsplit.RecSplit
 	var err error
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -1193,22 +1212,16 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 	if noFsync {
 		rs.DisableFsync()
 	}
-	defer d.EnableReadAhead().DisableReadAhead()
 
 	word := make([]byte, 0, 256)
 	var keyPos, valPos uint64
-	g := d.MakeGetter()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		g.Reset(0)
 		for g.HasNext() {
-			//if compressedFile {
 			word, valPos = g.Next(word[:0])
-			//} else {
-			//	word, valPos = g.NextUncompressed()
-			//}
 			if values {
 				if err = rs.AddKey(word, valPos); err != nil {
 					return fmt.Errorf("add idx key [%x]: %w", word, err)
@@ -1220,11 +1233,7 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 			}
 
 			// Skip value
-			//if compressedFile {
 			keyPos, _ = g.Skip()
-			//} else {
-			//	keyPos = g.SkipUncompressed()
-			//}
 
 			p.Processed.Add(1)
 		}
@@ -1431,12 +1440,18 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 	defer keysCursor.Close()
 
 	var k, v []byte
+
+	var prunedKeys uint
+	var prunedMinStep, prunedMaxStep uint64
+	prunedMinStep = math.MaxUint64
+
 	seek := make([]byte, 0, 256)
 	for k, v, err = keysCursor.First(); k != nil; k, v, err = keysCursor.Next() {
 		if err != nil {
 			return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
 		}
-		if ^binary.BigEndian.Uint64(v) > step {
+		is := ^binary.BigEndian.Uint64(v)
+		if is > step {
 			continue
 		}
 		//fmt.Printf("prune: %x, %d,%d\n", k, ^binary.BigEndian.Uint64(v), step)
@@ -1448,10 +1463,17 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 		}
 
 		mxPruneSize.Inc()
+		prunedKeys++
 		seek = append(append(seek[:0], k...), v...)
 		err = d.tx.Delete(d.valsTable, seek)
 		if err != nil {
 			return err
+		}
+		if is < prunedMinStep {
+			prunedMinStep = is
+		}
+		if is > prunedMaxStep {
+			prunedMaxStep = is
 		}
 
 		select {
@@ -1463,6 +1485,10 @@ func (d *Domain) prune(ctx context.Context, step, txFrom, txTo, limit uint64, lo
 		default:
 		}
 	}
+	if prunedMinStep == math.MaxUint64 {
+		prunedMinStep = 0
+	}
+	d.logger.Crit("[snapshots] prune domain", "name", d.filenameBase, "step range", fmt.Sprintf("[%d, %d] requested {%d}", prunedMinStep, prunedMaxStep, step), "pruned keys now", prunedKeys, "pruned keys total", mxPruneSize.Get())
 
 	if err := d.History.prune(ctx, 0, txFrom, limit, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
@@ -1559,8 +1585,9 @@ func (d *Domain) Rotate() flusher {
 
 var (
 	CompareRecsplitBtreeIndexes = false // if true, will compare values from Btree and InvertedIndex
-	UseBtreeForColdFiles        = false // if true, will use btree for cold files
-	UseBtreeForWarmFiles        = false // if true, will use btree for warm files
+	UseBtreeForColdFiles        = true  // if true, will use btree for cold files
+	UseBtreeForWarmFiles        = true  // if true, will use btree for warm files
+	UseBtree                    = true  // if true, will use btree for all files
 )
 
 func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint64) (v []byte, found bool, err error) {
@@ -1570,15 +1597,33 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 		if dc.files[i].endTxNum < fromTxNum {
 			break
 		}
-		_, v, ok, err = dc.statelessBtree(i).Get(filekey)
-		if err != nil {
-			return nil, false, err
+		if UseBtree {
+			_, v, ok, err = dc.statelessBtree(i).Get(filekey, dc.statelessGetter(i))
+			if err != nil {
+				return nil, false, err
+			}
+			if !ok {
+				continue
+			}
+			found = true
+			break
+		} else {
+			reader := dc.statelessIdxReader(i)
+			if reader.Empty() {
+				continue
+			}
+			offset := reader.Lookup(filekey)
+			g := dc.statelessGetter(i)
+			g.Reset(offset)
+			k, _ := g.Next(nil)
+			if !bytes.Equal(filekey, k) {
+				continue
+			}
+			v, _ = g.Next(nil)
+			found = true
+			break
 		}
-		if !ok {
-			continue
-		}
-		found = true
-		break
+
 	}
 	return v, found, nil
 }
@@ -1618,39 +1663,60 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 		}
 
 		var offset uint64
-		switch UseBtreeForWarmFiles {
-		case true:
+		if UseBtreeForWarmFiles {
 			bt := dc.statelessBtree(i)
 			if bt.Empty() {
 				continue
 			}
-			_, v, ok, err := bt.Get(filekey)
+			fmt.Printf("warm [%d] want %x keys in idx %v %v\n", i, filekey, bt.ef.Count(), bt.decompressor.FileName())
+			_, v, ok, err := bt.Get(filekey, dc.statelessGetter(i))
 			if err != nil {
 				return nil, false, err
 			}
 			if !ok {
+				//c, err := bt.Seek(nil)
+				//if err != nil {
+				//	panic(err)
+				//}
+				//found := false
+				//for {
+				//	if bytes.Equal(c.Key(), filekey) {
+				//		offset = binary.BigEndian.Uint64(c.Value())
+				//		found = true
+				//		fmt.Printf("warm [%d] actually found %x -> %x; idx keys %v\n", i, filekey, c.Value(), bt.ef.Count())
+				//		break
+				//	}
+				//	if !c.Next() {
+				//		break
+				//	}
+				//}
+				//if !found {
 				LatestStateReadWarmNotFound.UpdateDuration(t)
-				return nil, false, nil
-			}
-			offset = binary.BigEndian.Uint64(v)
-		default:
-			reader := dc.statelessIdxReader(i)
-			if reader.Empty() {
 				continue
-				LatestStateReadWarmNotFound.UpdateDuration(t)
-				return nil, false, nil
+				//}
+				//return nil, false, nil
 			}
-			offset = reader.Lookup(filekey)
+			//offset = binary.BigEndian.Uint64(v)
+			fmt.Printf("warm %x %x\n", filekey, v)
+			return v, true, nil
 		}
+
+		reader := dc.statelessIdxReader(i)
+		if reader.Empty() {
+			continue
+			LatestStateReadWarmNotFound.UpdateDuration(t)
+			return nil, false, nil
+		}
+		offset = reader.Lookup(filekey)
 
 		//dc.d.stats.FilesQuerie.Add(1)
 		g := dc.statelessGetter(i)
 		g.Reset(offset)
-		k, _ := g.NextUncompressed()
+		k, _ := g.Next(nil)
 		if !bytes.Equal(filekey, k) {
 			continue
 		}
-		v, _ := g.NextUncompressed()
+		v, _ := g.Next(nil)
 		LatestStateReadWarm.UpdateDuration(t)
 		return v, true, nil
 	}
@@ -1700,11 +1766,11 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 		offset := reader.Lookup(filekey)
 		g := dc.statelessGetter(i)
 		g.Reset(offset)
-		k, _ := g.NextUncompressed()
+		k, _ := g.Next(nil)
 		if !bytes.Equal(filekey, k) {
 			continue
 		}
-		v, _ = g.NextUncompressed()
+		v, _ = g.Next(nil)
 		LatestStateReadWarm.UpdateDuration(t)
 		//var ok bool
 		//dc.d.stats.FilesQuerie.Add(1)
@@ -1743,35 +1809,33 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 		}
 
 		var offset uint64
-		switch UseBtreeForColdFiles {
-		case true:
-			_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey)
+		if UseBtreeForColdFiles {
+			_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey, dc.statelessGetter(int(exactColdShard)))
 			if err != nil {
 				return nil, false, err
 			}
-			fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
 			if !ok {
 				LatestStateReadColdNotFound.UpdateDuration(t)
 				return nil, false, nil
 			}
-			offset = binary.BigEndian.Uint64(v)
-		default:
-			reader := dc.statelessIdxReader(int(exactColdShard))
-			if reader.Empty() {
-				LatestStateReadColdNotFound.UpdateDuration(t)
-				return nil, false, nil
-			}
-			offset = reader.Lookup(filekey)
+			fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
+			return v, true, nil
 		}
 
+		reader := dc.statelessIdxReader(int(exactColdShard))
+		if reader.Empty() {
+			LatestStateReadColdNotFound.UpdateDuration(t)
+			return nil, false, nil
+		}
+		offset = reader.Lookup(filekey)
 		g := dc.statelessGetter(int(exactColdShard))
 		g.Reset(offset)
-		k, _ := g.NextUncompressed()
+		k, _ := g.Next(nil)
 		if !bytes.Equal(filekey, k) {
 			LatestStateReadColdNotFound.UpdateDuration(t)
 			return nil, false, nil
 		}
-		v, _ = g.NextUncompressed()
+		v, _ = g.Next(nil)
 
 		LatestStateReadCold.UpdateDuration(t)
 		return v, true, nil
@@ -1812,7 +1876,7 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 			if dc.files[i].startTxNum > topState.startTxNum {
 				continue
 			}
-			_, v, ok, err = dc.statelessBtree(i).Get(key)
+			_, v, ok, err = dc.statelessBtree(i).Get(key, dc.statelessGetter(i))
 			if err != nil {
 				return nil, false, err
 			}
@@ -1874,13 +1938,13 @@ func (dc *DomainContext) Close() {
 	dc.hc.Close()
 }
 
-func (dc *DomainContext) statelessGetter(i int) *compress.Getter {
+func (dc *DomainContext) statelessGetter(i int) ArchiveGetter {
 	if dc.getters == nil {
-		dc.getters = make([]*compress.Getter, len(dc.files))
+		dc.getters = make([]ArchiveGetter, len(dc.files))
 	}
 	r := dc.getters[i]
 	if r == nil {
-		r = dc.files[i].src.decompressor.MakeGetter()
+		r = NewArchiveGetter(dc.files[i].src.decompressor.MakeGetter(), dc.d.compressValues)
 		dc.getters[i] = r
 	}
 	return r

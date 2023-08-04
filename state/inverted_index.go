@@ -323,7 +323,9 @@ func (ii *InvertedIndex) buildEfi(ctx context.Context, item *filesItem, ps *back
 	p := ps.AddNew(fName, uint64(item.decompressor.Count()/2))
 	defer ps.Delete(p)
 	//ii.logger.Info("[snapshots] build idx", "file", fName)
-	return buildIndex(ctx, item.decompressor, idxPath, ii.tmpdir, item.decompressor.Count()/2, false, p, ii.logger, ii.noFsync)
+	defer item.decompressor.EnableReadAhead().DisableReadAhead()
+	g := NewArchiveGetter(item.decompressor.MakeGetter(), true)
+	return buildIndex(ctx, g, idxPath, ii.tmpdir, item.decompressor.Count()/2, false, p, ii.logger, ii.noFsync)
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
@@ -1312,7 +1314,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 
 	idxFileName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, step, step+1)
 	idxPath := filepath.Join(ii.dir, idxFileName)
-	if index, err = buildIndexThenOpen(ctx, decomp, idxPath, ii.tmpdir, false, ps, ii.logger, ii.noFsync); err != nil {
+	if index, err = buildIndexThenOpen(ctx, decomp, false, idxPath, ii.tmpdir, false, ps, ii.logger, ii.noFsync); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
 	}
 
@@ -1487,6 +1489,8 @@ func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, 
 			select {
 			case <-logEvery.C:
 				ii.logger.Info("[snapshots] prune history", "name", ii.filenameBase, "to_step", fmt.Sprintf("%.2f", float64(txTo)/float64(ii.aggregationStep)), "prefix", fmt.Sprintf("%x", key[:8]))
+			case <-ctx.Done():
+				return ctx.Err()
 			default:
 			}
 		}

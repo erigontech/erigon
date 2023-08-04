@@ -47,7 +47,7 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), decomp, false, background.NewProgressSet(), tmp, logger)
 	require.NoError(t, err)
 
-	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, decomp)
+	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, decomp, true)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	bt.Close()
@@ -64,7 +64,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		err := BuildBtreeIndex(dataPath, indexPath, false, logger)
 		require.NoError(t, err)
 
-		bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), false)
+		bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), true, false)
 		require.NoError(t, err)
 		require.EqualValues(t, 0, bt.KeyCount())
 	})
@@ -74,7 +74,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	err := BuildBtreeIndex(dataPath, indexPath, false, logger)
 	require.NoError(t, err)
 
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), false)
+	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), true, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 
@@ -82,14 +82,14 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
-		_, _, err := bt.dataLookup(bt.keyCount + 1)
+		_, _, err := bt.dataLookup(bt.ef.Count() + 1)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(bt.keyCount)
+		_, _, err = bt.dataLookup(bt.ef.Count())
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
-		_, _, err = bt.dataLookup(bt.keyCount - 1)
+		_, _, err = bt.dataLookup(bt.ef.Count() - 1)
 		require.NoError(t, err)
 
 		cur, err := bt.Seek(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
@@ -142,7 +142,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	err = BuildBtreeIndex(dataPath, indexPath, false, logger)
 	require.NoError(t, err)
 
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), false)
+	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), true, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 
@@ -154,6 +154,11 @@ func Test_BtreeIndex_Build(t *testing.T) {
 			fmt.Printf("\tinvalid, want %x\n", keys[i])
 		}
 		c.Next()
+	}
+	for i := 0; i < 10000; i++ {
+		c, err := bt.Seek(keys[i])
+		require.NoError(t, err)
+		require.EqualValues(t, keys[i], c.Key())
 	}
 	defer bt.Close()
 }
@@ -170,7 +175,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	err := BuildBtreeIndex(dataPath, indexPath, false, logger)
 	require.NoError(t, err)
 
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), false)
+	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), true, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 
@@ -178,14 +183,14 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("seek beyond the last key", func(t *testing.T) {
-		_, _, err := bt.dataLookup(bt.keyCount + 1)
+		_, _, err := bt.dataLookup(bt.ef.Count() + 1)
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 
-		_, _, err = bt.dataLookup(bt.keyCount)
+		_, _, err = bt.dataLookup(bt.ef.Count())
 		require.ErrorIs(t, err, ErrBtIndexLookupBounds)
 		require.Error(t, err)
 
-		_, _, err = bt.dataLookup(bt.keyCount - 1)
+		_, _, err = bt.dataLookup(bt.ef.Count() - 1)
 		require.NoError(t, err)
 
 		cur, err := bt.Seek(common.FromHex("0xffffffffffffff")) //seek beyeon the last key
@@ -273,4 +278,58 @@ func TestBpsTree_Seek(t *testing.T) {
 	require.NotNil(t, it)
 	k, _ := it.KV()
 	require.EqualValues(t, keys[len(keys)/2], k)
+}
+
+func TestBpsTreeLookup(t *testing.T) {
+	// Create a mock eliasfano32.EliasFano and compress.Getter
+	// Initialize BpsTree with the mock objects
+	bpsTree := NewBpsTree(mockCompressGetter, mockEliasFano, 16) // Use your mock objects here
+
+	// Test a valid lookup
+	key := []byte("sample_key")
+	value := []byte("sample_value")
+	mockCompressGetter.SetExpectedResult(key, value) // Set expected results for the mock
+	lookupKey := []byte("sample_key")
+	buf, val, err := bpsTree.lookup(0) // Replace with appropriate index
+	if err != nil {
+		t.Errorf("Expected no error, but got: %v", err)
+	}
+	if !bytes.Equal(buf, key) || !bytes.Equal(val, value) {
+		t.Errorf("Expected %s:%s, but got %s:%s", key, value, buf, val)
+	}
+
+	// Test out-of-bounds lookup
+	_, _, err = bpsTree.lookup(999) // Replace with an out-of-bounds index
+	if err != ErrBtIndexLookupBounds {
+		t.Errorf("Expected ErrBtIndexLookupBounds, but got: %v", err)
+	}
+}
+
+func TestBpsTreeSeek(t *testing.T) {
+	// Create a mock eliasfano32.EliasFano and compress.Getter
+	// Initialize BpsTree with the mock objects
+	bpsTree := NewBpsTree(mockCompressGetter, mockEliasFano, 16) // Use your mock objects here
+
+	// Test seek with a key that exists
+	mockCompressGetter.SetExpectedResult([]byte("sample_key"), []byte("sample_value")) // Set expected results for the mock
+	seekKey := []byte("sample_key")
+	iterator, err := bpsTree.Seek(seekKey)
+	if err != nil {
+		t.Errorf("Expected no error, but got: %v", err)
+	}
+	k, v := iterator.KV()
+	if !bytes.Equal(k, seekKey) {
+		t.Errorf("Expected %s, but got: %s", seekKey, k)
+	}
+	// Test iterator.Next()
+	if !iterator.Next() {
+		t.Error("Expected iterator to have next item, but it doesn't")
+	}
+
+	// Test seek with a key that doesn't exist
+	_, err = bpsTree.Seek([]byte("non_existent_key"))
+	if err != nil {
+		t.Errorf("Expected no error, but got: %v", err)
+		// Add more test cases and assertions here
+	}
 }

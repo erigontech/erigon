@@ -68,6 +68,8 @@ type AggregatorV3 struct {
 	keepInDB         uint64
 
 	minimaxTxNumInFiles atomic.Uint64
+	stepToPrune         atomic.Uint64
+	aggregatedStep      atomic.Uint64
 
 	filesMutationLock sync.Mutex
 
@@ -595,6 +597,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	}
 	mxStepTook.UpdateDuration(stepStartedAt)
 	a.integrateFiles(static, txFrom, txTo)
+	a.aggregatedStep.Store(step)
 
 	a.logger.Info("[snapshots] aggregation", "step", step, "took", time.Since(stepStartedAt))
 
@@ -865,10 +868,12 @@ func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
 func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, ac.a.tracesTo.indexKeysTable)
 	fst2, _ := kv.FirstKey(tx, ac.a.storage.History.indexKeysTable)
-	if len(fst) > 0 && len(fst2) > 0 {
+	fst3, _ := kv.FirstKey(tx, ac.a.commitment.History.indexKeysTable)
+	if len(fst) > 0 && len(fst2) > 0 && len(fst3) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
 		fstInDb2 := binary.BigEndian.Uint64(fst2)
-		return cmp.Min(fstInDb, fstInDb2)
+		fstInDb3 := binary.BigEndian.Uint64(fst3)
+		return cmp.Min(cmp.Min(fstInDb, fstInDb2), fstInDb3)
 	}
 	return math2.MaxUint64
 }
@@ -880,6 +885,9 @@ func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout tim
 	for ac.CanPrune(tx) {
 		if err := ac.a.Prune(cc, 1); err != nil { // prune part of retired data, before commit
 			return err
+		}
+		if cc.Err() != nil {
+			return nil
 		}
 	}
 	return nil
@@ -901,9 +909,20 @@ func (a *AggregatorV3) Prune(ctx context.Context, stepsLimit float64) error {
 	if dbg.NoPrune() {
 		return nil
 	}
+	//if stepsLimit < 1 {
+	//stepsLimit = 1
+	//}
 	limit := uint64(stepsLimit * float64(a.aggregationStep))
-	to := a.minimaxTxNumInFiles.Load()
-	if to == 0 {
+	step := a.stepToPrune.Load()
+	if a.aggregatedStep.Load() <= step {
+		return nil
+	}
+	if limit > a.aggregatedStep.Load()*a.aggregationStep {
+		limit = a.aggregatedStep.Load() * a.aggregationStep
+	}
+	from := step * a.aggregationStep
+	to := from + limit
+	if a.minimaxTxNumInFiles.Load() == 0 {
 		return nil
 	}
 
@@ -917,8 +936,11 @@ func (a *AggregatorV3) Prune(ctx context.Context, stepsLimit float64) error {
 	//		_ = a.Warmup(ctx, 0, cmp.Max(a.aggregationStep, limit)) // warmup is asyn and moving faster than data deletion
 	//	}()
 	//}
-
-	return a.prune(ctx, 0, to, limit)
+	if err := a.prune(ctx, from, to, limit); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	a.stepToPrune.Add(1)
+	return nil
 }
 
 // [from, to)
@@ -929,11 +951,7 @@ func (a *AggregatorV3) prune(ctx context.Context, txFrom, txTo, limit uint64) er
 	if txTo > 0 {
 		step = (txTo - 1) / a.aggregationStep
 	}
-	if step == 0 {
-		return nil
-	}
-	step--
-	a.logger.Debug("aggregator prune", "step", step, "range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit, "stepsLimit", limit/a.aggregationStep, "stepsRangeInDB", a.StepsRangeInDBAsStr(a.rwTx))
+	a.logger.Info("aggregator prune", "step", step, "range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit, "stepsLimit", limit/a.aggregationStep, "stepsRangeInDB", a.StepsRangeInDBAsStr(a.rwTx))
 	if err := a.accounts.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}

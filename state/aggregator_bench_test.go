@@ -125,20 +125,18 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	require.NoError(b, err)
 
 	M := 1024
-	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), false)
+	bt, err := OpenBtreeIndex(indexPath, dataPath, uint64(M), true, false)
 
 	require.NoError(b, err)
-
-	idx := NewBtIndexReader(bt)
 
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(b, err)
 
 	for i := 0; i < b.N; i++ {
 		p := rnd.Intn(len(keys))
-		cur, err := idx.Seek(keys[p])
+		cur, err := bt.Seek(keys[p])
 		require.NoErrorf(b, err, "i=%d", i)
-		require.EqualValues(b, keys[p], cur.key)
+		require.EqualValues(b, keys[p], cur.Key())
 		require.NotEmptyf(b, cur.Value(), "i=%d", i)
 	}
 
