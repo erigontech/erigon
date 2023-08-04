@@ -81,7 +81,6 @@ func configureRouter(cfg httpcfg.HttpCfg, logger log.Logger, apiList []rpc.API) 
 		r.HandleFunc("/config.json", func(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(map[string]any{
 				"erigonURL":       "/rpc",
-				"beaconAPI":       "",
 				"assetsURLPrefix": "",
 			})
 		})
