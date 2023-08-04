@@ -149,6 +149,8 @@ type Ethereum struct {
 	genesisBlock *types.Block
 	genesisHash  libcommon.Hash
 
+	eth1ExecutionServer *eth1.EthereumExecutionModule
+
 	ethBackendRPC      *privateapi.EthBackendServer
 	engineBackendRPC   StartableEngineRPC
 	miningRPC          txpool_proto.MiningServer
@@ -690,7 +692,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	pipelineStages := stages2.NewPipelineStages(ctx, chainKv, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.agg, backend.forkValidator, logger)
 	backend.pipelineStagedSync = stagedsync.New(pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
-	executionRpc := direct.NewExecutionClientDirect(eth1.NewEthereumExecutionModule(blockReader, chainKv, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.StateChangesConsumer, logger, config.HistoryV3))
+	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, chainKv, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.StateChangesConsumer, logger, config.HistoryV3)
+	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 	if config.ExperimentalConsensusSeparation {
 		log.Info("Using experimental Engine API")
 		engineBackendRPC := engineapi.NewEngineServerExperimental(
@@ -1147,7 +1150,7 @@ func (s *Ethereum) Start() error {
 
 	hook := stages2.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentriesClient.UpdateHead)
 	if s.config.ExperimentalConsensusSeparation {
-		s.pipelineStagedSync.Run(s.chainDB, nil, true)
+		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
 	}
