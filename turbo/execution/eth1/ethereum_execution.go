@@ -102,8 +102,6 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	return e.blockReader.CanonicalHash(ctx, tx, blockNumber)
 }
 
-// Remaining
-
 func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execution.ValidationRequest) (*execution.ValidationReceipt, error) {
 	if !e.semaphore.TryAcquire(1) {
 		return &execution.ValidationReceipt{
@@ -193,4 +191,23 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 		currentNumber--
 	}
 	return nil
+}
+
+func (e *EthereumExecutionModule) Start(ctx context.Context) {
+	e.semaphore.Acquire(ctx, 1)
+	defer e.semaphore.Release(1)
+	tx, err := e.db.BeginRw(ctx)
+	if err != nil {
+		e.logger.Error("Could not start execution service", "err", err)
+		return
+	}
+	defer tx.Rollback()
+	// Run the forkchoice
+	if err := e.executionPipeline.Run(e.db, tx, false); err != nil {
+		e.logger.Error("Could not start execution service", "err", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		e.logger.Error("Could not start execution service", "err", err)
+	}
 }
