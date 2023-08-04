@@ -54,8 +54,7 @@ type RequestGenerator interface {
 	PingErigonRpc() PingResult
 	GetBalance(address libcommon.Address, blockNum BlockNumber) (*big.Int, error)
 	AdminNodeInfo() (p2p.NodeInfo, error)
-	GetBlockDetailsByNumber(blockNum string, withTxs bool) (map[string]interface{}, error)
-	GetBlockByNumber(blockNum uint64, withTxs bool) (*Block, error)
+	GetBlockByNumber(blockNum rpc.BlockNumber, withTxs bool) (*Block, error)
 	GetTransactionByHash(hash libcommon.Hash) (*jsonrpc.RPCTransaction, error)
 	GetTransactionReceipt(hash libcommon.Hash) (*types.Receipt, error)
 	TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error)
@@ -64,8 +63,9 @@ type RequestGenerator interface {
 	SendTransaction(signedTx types.Transaction) (libcommon.Hash, error)
 	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error)
 	SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
-	TxpoolContent() (int, int, int, error)
 	Subscribe(ctx context.Context, method SubMethod, subChan interface{}, args ...interface{}) (ethereum.Subscription, error)
+	TxpoolContent() (int, int, int, error)
+	Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error)
 	TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)
 	DebugAccountAt(blockHash libcommon.Hash, txIndex uint64, account libcommon.Address) (*AccountResult, error)
 	GetCode(address libcommon.Address, blockNum BlockNumber) (hexutility.Bytes, error)
@@ -125,6 +125,7 @@ var Methods = struct {
 	ETHGetTransactionByHash  RPCMethod
 	ETHGetTransactionReceipt RPCMethod
 	BorGetRootHash           RPCMethod
+	ETHCall                  RPCMethod
 }{
 	ETHGetTransactionCount:   "eth_getTransactionCount",
 	ETHGetBalance:            "eth_getBalance",
@@ -147,6 +148,7 @@ var Methods = struct {
 	ETHGetTransactionByHash:  "eth_getTransactionByHash",
 	ETHGetTransactionReceipt: "eth_getTransactionReceipt",
 	BorGetRootHash:           "bor_getRootHash",
+	ETHCall:                  "eth_call",
 }
 
 func (req *requestGenerator) call(method RPCMethod, body string, response interface{}) callResult {
@@ -172,7 +174,7 @@ func (req *requestGenerator) callCli(result interface{}, method RPCMethod, args 
 		return err
 	}
 
-	return cli.Call(result, string(method), args)
+	return cli.Call(result, string(method), args...)
 }
 
 type PingResult callResult

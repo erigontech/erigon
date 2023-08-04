@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 )
@@ -115,6 +116,16 @@ func (reqGen *requestGenerator) GasPrice() (*big.Int, error) {
 func (req *requestGenerator) gasPrice() (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"id":%d}`
 	return Methods.ETHGasPrice, fmt.Sprintf(template, Methods.ETHGasPrice, req.reqID)
+}
+
+func (reqGen *requestGenerator) Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error) {
+	var result hexutility.Bytes
+
+	if err := reqGen.callCli(&result, Methods.ETHCall, args, blockRef, overrides); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (libcommon.Hash, error) {

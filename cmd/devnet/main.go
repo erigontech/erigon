@@ -280,6 +280,16 @@ func action(ctx *cli.Context) error {
 				{Text: "BatchProcessTransfers", Args: []any{"root-funder", 1, 10, 2, 2}},
 			},
 		},
+		"child-chain-exit": {
+			Steps: []*scenarios.Step{
+				{Text: "CreateAccountWithFunds", Args: []any{networkname.DevChainName, "root-funder", 200.0}},
+				{Text: "CreateAccountWithFunds", Args: []any{networkname.BorDevnetChainName, "child-funder", 200.0}},
+				{Text: "DeployRootChainReceiver", Args: []any{"root-funder"}},
+				{Text: "DeployChildChainSender", Args: []any{"child-funder"}},
+				//{Text: "ProcessTransfers", Args: []any{"child-funder", 10, 2, 2}},
+				//{Text: "BatchProcessTransfers", Args: []any{"child-funder", 1, 10, 2, 2}},
+			},
+		},
 	}.Run(runCtx, strings.Split(ctx.String("scenarios"), ",")...)
 
 	if ctx.Bool("wait") || (metrics && len(diagnosticsUrl) > 0) {
@@ -340,6 +350,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 			var heimdallGrpc string
 			var services []devnet.Service
 
+			checkpointOwner := accounts.NewAccount("checkpoint-owner")
+
 			if ctx.Bool(LocalHeimdallFlag.Name) {
 				config := *params.BorDevnetChainConfig
 
@@ -347,7 +359,12 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					config.Bor.Sprint = map[string]uint64{"0": sprintSize}
 				}
 
-				services = append(services, polygon.NewHeimdall(&config, logger))
+				services = append(services, polygon.NewHeimdall(&config,
+					&polygon.CheckpointConfig{
+						CheckpointBufferTime: 120 * time.Second,
+						CheckpointAccount:    checkpointOwner,
+					},
+					logger))
 
 				heimdallGrpc = polygon.HeimdallGRpc(devnet.WithCliContext(context.Background(), ctx))
 			}
@@ -361,7 +378,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BasePrivateApiAddr: "localhost:10090",
 					BaseRPCHost:        "localhost",
 					BaseRPCPort:        8545,
-					BorStateSyncDelay:  30 * time.Second,
+					BorStateSyncDelay:  10 * time.Second,
 					Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
 						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
@@ -402,7 +419,8 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 					BaseRPCPort:        8645,
 					Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource)),
 					Alloc: types.GenesisAlloc{
-						faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
+						faucetSource.Address:    {Balance: accounts.EtherAmount(200_000)},
+						checkpointOwner.Address: {Balance: accounts.EtherAmount(10_000)},
 					},
 					Nodes: []devnet.Node{
 						args.BlockProducer{

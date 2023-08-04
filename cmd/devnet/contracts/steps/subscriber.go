@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 func init() {
@@ -60,7 +61,7 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 
 	blockNum := txToBlockMap[eventHash]
 
-	block, err := node.GetBlockByNumber(blockNum, true)
+	block, err := node.GetBlockByNumber(rpc.AsBlockNumber(blockNum), true)
 
 	if err != nil {
 		return nil, err

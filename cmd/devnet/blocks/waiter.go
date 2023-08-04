@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -122,6 +123,7 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers cha
 	defer close(c.result)
 
 	for header := range headers {
+
 		select {
 		case <-ctx.Done():
 			c.headersSub.Unsubscribe()
@@ -130,9 +132,7 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers cha
 		default:
 		}
 
-		blockNum := header.Number
-
-		block, err := node.GetBlockByNumber(blockNum.Uint64(), true)
+		block, err := node.GetBlockByNumber(rpc.AsBlockNumber(header.Number), true)
 
 		if err != nil {
 			c.logger.Error("Block waiter failed to get block", "err", err)

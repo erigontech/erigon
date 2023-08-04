@@ -45,9 +45,6 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 
 	heimdall := services.Heimdall(ctx)
 
-	waiter, cancel := blocks.BlockWaiter(ctx, contracts.DeploymentChecker)
-	defer cancel()
-
 	stateSender := heimdall.StateSenderContract()
 
 	receiver, _ := scenarios.Param[*contracts.ChildReceiver](ctx, "childReceiver")
@@ -71,73 +68,83 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 	}
 
 	for i := 0; i < numberOfTransfers; i++ {
-		sendData, err := args.Pack(sender.Address, big.NewInt(int64(minTransfer)))
+		err := func() error {
+			sendData, err := args.Pack(sender.Address, big.NewInt(int64(minTransfer)))
+
+			if err != nil {
+				return err
+			}
+
+			waiter, cancel := blocks.BlockWaiter(ctx, contracts.DeploymentChecker)
+			defer cancel()
+
+			transaction, err := stateSender.SyncState(auth, receiverAddress, sendData)
+
+			if err != nil {
+				return err
+			}
+
+			block, err := waiter.Await(transaction.Hash())
+
+			if err != nil {
+				return fmt.Errorf("Failed to wait for sync block: %w", err)
+			}
+
+			blockNum := block.Number.Uint64()
+
+			logs, err := stateSender.FilterStateSynced(&bind.FilterOpts{
+				Start: blockNum,
+				End:   &blockNum,
+			}, nil, nil)
+
+			if err != nil {
+				return fmt.Errorf("Failed to get post sync logs: %w", err)
+			}
+
+			sendConfirmed := false
+
+			for logs.Next() {
+				if logs.Event.ContractAddress != receiverAddress {
+					return fmt.Errorf("Receiver address mismatched: expected: %s, got: %s", receiverAddress, logs.Event.ContractAddress)
+				}
+
+				if !bytes.Equal(logs.Event.Data, sendData) {
+					return fmt.Errorf("Send data mismatched: expected: %s, got: %s", sendData, logs.Event.Data)
+				}
+
+				sendConfirmed = true
+			}
+
+			if !sendConfirmed {
+				return fmt.Errorf("No post sync log received")
+			}
+
+			auth.Nonce = (&big.Int{}).Add(auth.Nonce, big.NewInt(1))
+
+			return nil
+		}()
 
 		if err != nil {
 			return err
 		}
+	}
 
-		transaction, err := stateSender.SyncState(auth, receiverAddress, sendData)
+	receivedCount := 0
 
-		if err != nil {
-			return err
+	devnet.Logger(ctx).Info("Waiting for receive events")
+
+	for received := range receivedChan {
+		if received.Source != sender.Address {
+			return fmt.Errorf("Source address mismatched: expected: %s, got: %s", sender.Address, received.Source)
 		}
 
-		block, err := waiter.Await(transaction.Hash())
-
-		if err != nil {
-			return fmt.Errorf("Failed to wait for sync block: %w", err)
+		if received.Amount.Cmp(big.NewInt(int64(minTransfer))) != 0 {
+			return fmt.Errorf("Amount mismatched: expected: %s, got: %s", big.NewInt(int64(minTransfer)), received.Amount)
 		}
 
-		blockNum := block.Number.Uint64()
-
-		logs, err := stateSender.FilterStateSynced(&bind.FilterOpts{
-			Start: blockNum,
-			End:   &blockNum,
-		}, nil, nil)
-
-		if err != nil {
-			return fmt.Errorf("Failed to get post sync logs: %w", err)
-		}
-
-		sendConfirmed := false
-
-		for logs.Next() {
-			if logs.Event.ContractAddress != receiverAddress {
-				return fmt.Errorf("Receiver address mismatched: expected: %s, got: %s", receiverAddress, logs.Event.ContractAddress)
-			}
-
-			if !bytes.Equal(logs.Event.Data, sendData) {
-				return fmt.Errorf("Send data mismatched: expected: %s, got: %s", sendData, logs.Event.Data)
-			}
-
-			sendConfirmed = true
-		}
-
-		if !sendConfirmed {
-			return fmt.Errorf("No post sync log received")
-		}
-
-		//	auth.Nonce = (&big.Int{}).Add(auth.Nonce, big.NewInt(1))
-		//}
-
-		receivedCount := 0
-
-		devnet.Logger(ctx).Info("Waiting for receive events")
-
-		for received := range receivedChan {
-			if received.Source != sender.Address {
-				return fmt.Errorf("Source address mismatched: expected: %s, got: %s", sender.Address, received.Source)
-			}
-
-			if received.Amount.Cmp(big.NewInt(int64(minTransfer))) != 0 {
-				return fmt.Errorf("Amount mismatched: expected: %s, got: %s", big.NewInt(int64(minTransfer)), received.Amount)
-			}
-
-			receivedCount++
-			if receivedCount == numberOfTransfers {
-				break
-			}
+		receivedCount++
+		if receivedCount == numberOfTransfers {
+			break
 		}
 	}
 
@@ -173,7 +180,7 @@ func DeployRootChainSender(ctx context.Context, deployerName string) (context.Co
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("RootSender deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
+	devnet.Logger(ctx).Info("RootSender deployed", "chain", networkname.DevChainName, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "rootSenderAddress", address).
 		WithParam("rootSender", contract), nil

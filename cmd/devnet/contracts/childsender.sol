@@ -9,6 +9,10 @@ contract ChildSender  {
     // MessageTunnel on L1 will get data from this event
     event MessageSent(bytes message);
 
+    constructor(address childStateReceiver_) {
+        rootStateReceiver = childStateReceiver_;
+    }
+
     function _sendMessageToRoot(bytes memory message) internal {
         emit MessageSent(message);
     }

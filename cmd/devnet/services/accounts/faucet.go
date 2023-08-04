@@ -139,6 +139,11 @@ func (f *Faucet) Balance(ctx context.Context) (*big.Int, error) {
 	}
 
 	node := devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, f.chainName))
+
+	if node == nil {
+		return nil, fmt.Errorf("%s has no block producers", f.chainName)
+	}
+
 	return node.GetBalance(f.contractAddress, requests.BlockNumbers.Latest)
 }
 

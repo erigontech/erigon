@@ -133,11 +133,14 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 }
 
 func (bn BlockNumber) MarshalText() ([]byte, error) {
-	if bn < LatestExecutedBlockNumber {
+	switch {
+	case bn < LatestExecutedBlockNumber:
 		return nil, fmt.Errorf("Invalid block number %d", bn)
+	case bn < 0:
+		return []byte(bn.String()), nil
+	default:
+		return []byte(bn.string(16)), nil
 	}
-
-	return []byte(bn.String()), nil
 }
 
 func (bn BlockNumber) Int64() int64 {
@@ -149,6 +152,10 @@ func (bn BlockNumber) Uint64() uint64 {
 }
 
 func (bn BlockNumber) String() string {
+	return bn.string(10)
+}
+
+func (bn BlockNumber) string(base int) string {
 	switch bn {
 	case EarliestBlockNumber:
 		return "earliest"
@@ -164,7 +171,38 @@ func (bn BlockNumber) String() string {
 		return "latestExecuted"
 	}
 
-	return strconv.FormatUint(bn.Uint64(), 10)
+	if base == 16 {
+		return "0x" + strconv.FormatUint(bn.Uint64(), base)
+	}
+
+	return strconv.FormatUint(bn.Uint64(), base)
+}
+
+func AsBlockNumber(no interface{}) BlockNumber {
+	switch no := no.(type) {
+	case *big.Int:
+		return BlockNumber(no.Int64())
+	case BlockNumber:
+		return no
+	case *BlockNumber:
+		return *no
+	case int64:
+		return BlockNumber(no)
+	case uint64:
+		return BlockNumber(no)
+	case string:
+		var bn BlockNumber
+		if err := json.Unmarshal([]byte(strconv.Quote(no)), &bn); err == nil {
+			return bn
+		}
+	case fmt.Stringer:
+		var bn BlockNumber
+		if err := json.Unmarshal([]byte(strconv.Quote(no.String())), &bn); err == nil {
+			return bn
+		}
+	}
+
+	return LatestExecutedBlockNumber - 1
 }
 
 type BlockNumberOrHash struct {
@@ -326,6 +364,10 @@ func AsBlockReference(ref interface{}) BlockReference {
 }
 
 func IntBlockReference(blockNr *big.Int) BlockReference {
+	if blockNr == nil {
+		return BlockReference{}
+	}
+
 	bn := BlockNumber(blockNr.Int64())
 	return BlockReference{
 		BlockNumber:      &bn,

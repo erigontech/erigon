@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -40,29 +41,83 @@ type syncRecordKey struct {
 	index uint64
 }
 
+const (
+	DefaultRootChainTxConfirmations  uint64        = 6
+	DefaultChildChainTxConfirmations uint64        = 10
+	DefaultAvgCheckpointLength       uint64        = 256
+	DefaultMaxCheckpointLength       uint64        = 1024
+	DefaultChildBlockInterval        uint64        = 10000
+	DefaultCheckpointBufferTime      time.Duration = 1000 * time.Second
+)
+
+type CheckpointConfig struct {
+	RootChainTxConfirmations  uint64
+	ChildChainTxConfirmations uint64
+	ChildBlockInterval        uint64
+	AvgCheckpointLength       uint64
+	MaxCheckpointLength       uint64
+	CheckpointBufferTime      time.Duration
+	CheckpointAccount         *accounts.Account
+}
+
 type Heimdall struct {
 	sync.Mutex
-	currentSpan        *span.HeimdallSpan
 	chainConfig        *chain.Config
 	validatorSet       *valset.ValidatorSet
+	pendingCheckpoint  *checkpoint.Checkpoint
+	currentSpan        *span.HeimdallSpan
 	spans              map[uint64]*span.HeimdallSpan
 	logger             log.Logger
 	cancelFunc         context.CancelFunc
-	syncChan           chan *contracts.TestStateSenderStateSynced
 	syncSenderAddress  libcommon.Address
 	syncSenderBinding  *contracts.TestStateSender
 	rootChainAddress   libcommon.Address
 	rootChainBinding   *contracts.TestRootChain
 	syncSubscription   ethereum.Subscription
+	rootHeaderBlockSub ethereum.Subscription
+	childHeaderSub     ethereum.Subscription
 	pendingSyncRecords map[syncRecordKey]*EventRecordWithBlock
+	checkpointConfig   CheckpointConfig
+	startTime          time.Time
 }
 
-func NewHeimdall(chainConfig *chain.Config, logger log.Logger) *Heimdall {
-	return &Heimdall{
+func NewHeimdall(chainConfig *chain.Config, checkpointConfig *CheckpointConfig, logger log.Logger) *Heimdall {
+	heimdall := &Heimdall{
 		chainConfig:        chainConfig,
+		checkpointConfig:   *checkpointConfig,
 		spans:              map[uint64]*span.HeimdallSpan{},
 		pendingSyncRecords: map[syncRecordKey]*EventRecordWithBlock{},
 		logger:             logger}
+
+	if heimdall.checkpointConfig.RootChainTxConfirmations == 0 {
+		heimdall.checkpointConfig.RootChainTxConfirmations = DefaultRootChainTxConfirmations
+	}
+
+	if heimdall.checkpointConfig.ChildChainTxConfirmations == 0 {
+		heimdall.checkpointConfig.ChildChainTxConfirmations = DefaultChildChainTxConfirmations
+	}
+
+	if heimdall.checkpointConfig.ChildBlockInterval == 0 {
+		heimdall.checkpointConfig.ChildBlockInterval = DefaultChildBlockInterval
+	}
+
+	if heimdall.checkpointConfig.AvgCheckpointLength == 0 {
+		heimdall.checkpointConfig.AvgCheckpointLength = DefaultAvgCheckpointLength
+	}
+
+	if heimdall.checkpointConfig.MaxCheckpointLength == 0 {
+		heimdall.checkpointConfig.MaxCheckpointLength = DefaultMaxCheckpointLength
+	}
+
+	if heimdall.checkpointConfig.CheckpointBufferTime == 0 {
+		heimdall.checkpointConfig.CheckpointBufferTime = DefaultCheckpointBufferTime
+	}
+
+	if heimdall.checkpointConfig.CheckpointAccount == nil {
+		heimdall.checkpointConfig.CheckpointAccount = accounts.NewAccount("checkpoint-owner")
+	}
+
+	return heimdall
 }
 
 func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan, error) {
@@ -133,6 +188,30 @@ func (h *Heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
 }
 
 func (h *Heimdall) Close() {
+	h.unsubscribe()
+}
+
+func (h *Heimdall) unsubscribe() {
+	h.Lock()
+	defer h.Unlock()
+
+	if h.syncSubscription != nil {
+		syncSubscription := h.syncSubscription
+		h.syncSubscription = nil
+		syncSubscription.Unsubscribe()
+	}
+
+	if h.rootHeaderBlockSub != nil {
+		rootHeaderBlockSub := h.rootHeaderBlockSub
+		h.rootHeaderBlockSub = nil
+		rootHeaderBlockSub.Unsubscribe()
+	}
+
+	if h.childHeaderSub != nil {
+		childHeaderSub := h.childHeaderSub
+		h.childHeaderSub = nil
+		childHeaderSub.Unsubscribe()
+	}
 }
 
 func (h *Heimdall) StateSenderAddress() libcommon.Address {
@@ -141,6 +220,10 @@ func (h *Heimdall) StateSenderAddress() libcommon.Address {
 
 func (f *Heimdall) StateSenderContract() *contracts.TestStateSender {
 	return f.syncSenderBinding
+}
+
+func (h *Heimdall) RootChainAddress() libcommon.Address {
+	return h.rootChainAddress
 }
 
 func (h *Heimdall) NodeCreated(ctx context.Context, node devnet.Node) {
@@ -158,63 +241,52 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 		h.Lock()
 		defer h.Unlock()
 
-		if h.syncChan != nil {
+		if h.syncSenderBinding != nil {
 			return
 		}
 
-		h.syncChan = make(chan *contracts.TestStateSenderStateSynced, 100)
+		h.startTime = time.Now().UTC()
+
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(accounts.SigKey(node.Account().Address), node.ChainID())
+
+		if err != nil {
+			h.unsubscribe()
+			h.logger.Error("Failed to deploy state sender", "err", err)
+			return
+		}
+
+		deployCtx := devnet.WithCurrentNode(ctx, node)
+		waiter, cancel := blocks.BlockWaiter(deployCtx, contracts.DeploymentChecker)
+
+		address, syncTx, syncContract, err := contracts.DeployWithOps(deployCtx, transactOpts, contracts.DeployTestStateSender)
+
+		if err != nil {
+			h.logger.Error("Failed to deploy state sender", "err", err)
+			cancel()
+			return
+		}
+
+		h.syncSenderAddress = address
+		h.syncSenderBinding = syncContract
+
+		address, rootChainTx, rootChainContract, err := contracts.DeployWithOps(deployCtx, transactOpts, contracts.DeployTestRootChain)
+
+		if err != nil {
+			h.syncSenderBinding = nil
+			h.logger.Error("Failed to deploy root chain", "err", err)
+			cancel()
+			return
+		}
+
+		h.rootChainAddress = address
+		h.rootChainBinding = rootChainContract
 
 		go func() {
-			transactOpts, err := bind.NewKeyedTransactorWithChainID(accounts.SigKey(node.Account().Address), node.ChainID())
-
-			if err != nil {
-				h.Lock()
-				defer h.Unlock()
-
-				h.syncChan = nil
-				h.logger.Error("Failed to deploy state sender", "err", err)
-				return
-			}
-
-			deployCtx := devnet.WithCurrentNode(ctx, node)
-			waiter, cancel := blocks.BlockWaiter(deployCtx, contracts.DeploymentChecker)
 			defer cancel()
-
-			address, syncTx, syncContract, err := contracts.DeployWithOps(deployCtx, transactOpts, contracts.DeployTestStateSender)
-
-			if err != nil {
-				h.Lock()
-				defer h.Unlock()
-
-				h.syncChan = nil
-				h.logger.Error("Failed to deploy state sender", "err", err)
-				return
-			}
-
-			h.syncSenderAddress = address
-			h.syncSenderBinding = syncContract
-
-			address, rootChainTx, rootChainContract, err := contracts.DeployWithOps(deployCtx, transactOpts, contracts.DeployTestRootChain)
-
-			if err != nil {
-				h.Lock()
-				defer h.Unlock()
-
-				h.syncChan = nil
-				h.logger.Error("Failed to deploy root chain", "err", err)
-				return
-			}
-
-			h.rootChainAddress = address
-			h.rootChainBinding = rootChainContract
-
 			blocks, err := waiter.AwaitMany(syncTx.Hash(), rootChainTx.Hash())
 
 			if err != nil {
-				h.Lock()
-				defer h.Unlock()
-
-				h.syncChan = nil
+				h.syncSenderBinding = nil
 				h.logger.Error("Failed to deploy root contracts", "err", err)
 				return
 			}
@@ -222,24 +294,9 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 			h.logger.Info("RootChain deployed", "chain", h.chainConfig.ChainName, "block", blocks[syncTx.Hash()].Number, "addr", h.rootChainAddress)
 			h.logger.Info("StateSender deployed", "chain", h.chainConfig.ChainName, "block", blocks[syncTx.Hash()].Number, "addr", h.syncSenderAddress)
 
-			h.syncSubscription, err = syncContract.WatchStateSynced(&bind.WatchOpts{}, h.syncChan, nil, nil)
-
-			if err != nil {
-				h.Lock()
-				defer h.Unlock()
-
-				h.syncChan = nil
-				h.logger.Error("Failed to subscribe to sync events", "err", err)
-				return
-			}
-
-			for stateSyncedEvent := range h.syncChan {
-				if err := h.handleStateSynced(stateSyncedEvent); err != nil {
-					h.logger.Error("L1 sync event processing failed", "event", stateSyncedEvent.Raw.Index, "err", err)
-				}
-			}
-
-			h.logger.Info("Sync event channel closed")
+			go h.startStateSyncSubacription()
+			go h.startChildHeaderSubscription(deployCtx)
+			go h.startRootHeaderBlockSubscription()
 		}()
 	}
 }
@@ -276,15 +333,8 @@ func (h *Heimdall) Start(ctx context.Context) error {
 	ctx, h.cancelFunc = context.WithCancel(ctx)
 	h.Unlock()
 
-	if h.syncSubscription != nil {
-		h.syncSubscription.Unsubscribe()
-		h.syncSubscription = nil
-	}
-
-	if h.syncChan != nil {
-		close(h.syncChan)
-		h.syncChan = nil
-	}
+	// if this is a restart
+	h.unsubscribe()
 
 	return heimdallgrpc.StartHeimdallServer(ctx, h, HeimdallGRpc(ctx), h.logger)
 }
@@ -315,4 +365,20 @@ func (h *Heimdall) Stop() {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func (h *Heimdall) isOldTx(txHash libcommon.Hash, logIndex uint64, eventType BridgeEvent, event interface{}) (bool, error) {
+
+	// define the endpoint based on the type of event
+	var status bool
+
+	switch eventType {
+	case BridgeEvents.StakingEvent:
+	case BridgeEvents.TopupEvent:
+	case BridgeEvents.ClerkEvent:
+		_, status = h.pendingSyncRecords[syncRecordKey{txHash, logIndex}]
+	case BridgeEvents.SlashingEvent:
+	}
+
+	return status, nil
 }

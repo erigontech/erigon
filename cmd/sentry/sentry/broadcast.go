@@ -5,13 +5,16 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"math/rand"
 	"strings"
 	"syscall"
 
+	"github.com/ledgerwatch/erigon-lib/direct"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -84,25 +87,49 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 		log.Error("broadcastNewBlock", "err", err)
 	}
 	var req66 *proto_sentry.SendMessageToRandomPeersRequest
+
+	maxPeers := uint64(1024)
+
+	if bor, ok := cs.Engine.(*bor.Bor); ok {
+		if sendAll, _ := bor.IsProposer(header); sendAll {
+			// max peers is overloaded a zero value is interpreted as send all
+			maxPeers = 0
+		}
+	}
+
 	// Send the block to a subset of our peers
 	sendToAmount := int(math.Sqrt(float64(len(cs.sentries))))
-	for i, sentry := range cs.sentries {
+
+	sentries := make([]direct.SentryClient, len(cs.sentries))
+	copy(sentries, cs.sentries)
+
+	rand.Shuffle(len(sentries), func(i int, j int) {
+		sentries[i], sentries[j] = sentries[j], sentries[i]
+	})
+
+	sent := 0
+
+	for i, sentry := range sentries {
 		if !sentry.Ready() {
 			continue
 		}
-		if i > sendToAmount { //TODO: send to random sentries, not just to fi
+
+		sent++
+
+		if maxPeers > 0 && i > sendToAmount {
 			break
 		}
 
 		if req66 == nil {
 			req66 = &proto_sentry.SendMessageToRandomPeersRequest{
-				MaxPeers: 1024,
+				MaxPeers: maxPeers,
 				Data: &proto_sentry.OutboundMessageData{
 					Id:   proto_sentry.MessageId_NEW_BLOCK_66,
 					Data: data,
 				},
 			}
 		}
+
 		if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 			if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
 				log.Debug("broadcastNewBlock", "err", err)

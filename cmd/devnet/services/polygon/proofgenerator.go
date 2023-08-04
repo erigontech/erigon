@@ -14,24 +14,34 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 var ErrTokenIndexOutOfRange = errors.New("Index is grater than the number of tokens in transaction")
 
-func (h *Heimdall) GenerateExitPayload(ctx context.Context, burnTxHash libcommon.Hash, eventSignature string, tokenIndex int) (string, error) {
+type ProofGenerator struct {
+	rootChainBinding *contracts.TestRootChain
+}
+
+func NewProofGenerator(rootChainBinding *contracts.TestRootChain) *ProofGenerator {
+	return &ProofGenerator{rootChainBinding}
+}
+
+func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash libcommon.Hash, eventSignature string, tokenIndex int) (string, error) {
 	logger := devnet.Logger(ctx)
 
 	logger.Info("Checking for checkpoint status", "hash", burnTxHash)
 
-	isCheckpointed, err := h.isCheckPointed(ctx, burnTxHash)
+	isCheckpointed, err := pg.isCheckPointed(ctx, burnTxHash)
 
 	if err != nil {
 		return "", fmt.Errorf("Error getting burn transaction: %w", err)
@@ -42,7 +52,7 @@ func (h *Heimdall) GenerateExitPayload(ctx context.Context, burnTxHash libcommon
 	}
 
 	// build payload for exit
-	result, err := h.buildPayloadForExit(ctx, burnTxHash, eventSignature, tokenIndex)
+	result, err := pg.buildPayloadForExit(ctx, burnTxHash, eventSignature, tokenIndex)
 
 	if err != nil {
 		if errors.Is(err, ErrTokenIndexOutOfRange) {
@@ -59,7 +69,7 @@ func (h *Heimdall) GenerateExitPayload(ctx context.Context, burnTxHash libcommon
 	return result, nil
 }
 
-func (h *Heimdall) getChainBlockInfo(ctx context.Context, burnTxHash libcommon.Hash) (uint64, uint64, error) {
+func (pg *ProofGenerator) getChainBlockInfo(ctx context.Context, burnTxHash libcommon.Hash) (uint64, uint64, error) {
 	childNode := devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName))
 
 	var wg sync.WaitGroup
@@ -71,7 +81,7 @@ func (h *Heimdall) getChainBlockInfo(ctx context.Context, burnTxHash libcommon.H
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		lastChild, err[0] = h.rootChainBinding.GetLastChildBlock(&bind.CallOpts{})
+		lastChild, err[0] = pg.rootChainBinding.GetLastChildBlock(&bind.CallOpts{})
 	}()
 
 	wg.Add(1)
@@ -93,8 +103,8 @@ func (h *Heimdall) getChainBlockInfo(ctx context.Context, burnTxHash libcommon.H
 }
 
 // lastchild block is greater equal to transacton block number;
-func (h *Heimdall) isCheckPointed(ctx context.Context, burnTxHash libcommon.Hash) (bool, error) {
-	lastChildBlockNum, burnTxBlockNum, err := h.getChainBlockInfo(ctx, burnTxHash)
+func (pg *ProofGenerator) isCheckPointed(ctx context.Context, burnTxHash libcommon.Hash) (bool, error) {
+	lastChildBlockNum, burnTxBlockNum, err := pg.getChainBlockInfo(ctx, burnTxHash)
 
 	if err != nil {
 		return false, err
@@ -103,7 +113,7 @@ func (h *Heimdall) isCheckPointed(ctx context.Context, burnTxHash libcommon.Hash
 	return lastChildBlockNum >= burnTxBlockNum, nil
 }
 
-func (h *Heimdall) buildPayloadForExit(ctx context.Context, burnTxHash libcommon.Hash, logEventSig string, index int) (string, error) {
+func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash libcommon.Hash, logEventSig string, index int) (string, error) {
 
 	node := devnet.SelectBlockProducer(ctx)
 
@@ -119,7 +129,7 @@ func (h *Heimdall) buildPayloadForExit(ctx context.Context, burnTxHash libcommon
 	var block *requests.Block
 
 	// step 1 - Get Block number from transaction hash
-	lastChildBlockNum, txBlockNum, err := h.getChainBlockInfo(ctx, burnTxHash)
+	lastChildBlockNum, txBlockNum, err := pg.getChainBlockInfo(ctx, burnTxHash)
 
 	if err != nil {
 		return "", err
@@ -143,7 +153,7 @@ func (h *Heimdall) buildPayloadForExit(ctx context.Context, burnTxHash libcommon
 
 	go func() {
 		defer wg.Done()
-		block, errs[1] = node.GetBlockByNumber(txBlockNum, true)
+		block, errs[1] = node.GetBlockByNumber(rpc.AsBlockNumber(txBlockNum), true)
 	}()
 
 	wg.Wait()
@@ -159,7 +169,7 @@ func (h *Heimdall) buildPayloadForExit(ctx context.Context, burnTxHash libcommon
 	var rootBlockNumber uint64
 	var start, end uint64
 
-	rootBlockNumber, start, end, err = h.getRootBlockInfo(txBlockNum)
+	rootBlockNumber, start, end, err = pg.getRootBlockInfo(txBlockNum)
 
 	if err != nil {
 		return "", err
@@ -247,7 +257,7 @@ type receiptProof struct {
 }
 
 func getReceiptProof(receipt *types.Receipt, block *requests.Block, node devnet.Node, receipts []*types.Receipt) (*receiptProof, error) {
-	stateSyncTxHash := getStateSyncTxHash(block)
+	stateSyncTxHash := types.ComputeBorTxHash(block.Number.Uint64(), block.Hash)
 	receiptsTrie := trie.New(trie.EmptyRoot)
 
 	if len(receipts) == 0 {
@@ -295,7 +305,6 @@ func getReceiptProof(receipt *types.Receipt, block *requests.Block, node devnet.
 		return nil, fmt.Errorf("Node does not contain the key")
 	}
 
-	// result.node.value
 	var nodeValue any
 
 	if isTypedReceipt(receipt) {
@@ -306,7 +315,7 @@ func getReceiptProof(receipt *types.Receipt, block *requests.Block, node devnet.
 
 	return &receiptProof{
 		blockHash:   receipt.BlockHash,
-		parentNodes: nil, //result.stack.map(s => s.raw()),
+		parentNodes: nil, //TODO - not sure how to get this result.stack.map(s => s.raw()),
 		root:        block.ReceiptHash[:],
 		path:        path,
 		value:       nodeValue,
@@ -497,15 +506,15 @@ func getLogIndex(logEventSig string, receipt *types.Receipt) int {
 	return -1
 }
 
-func (h *Heimdall) getRootBlockInfo(txBlockNumber uint64) (rootBlockNumber uint64, start uint64, end uint64, err error) {
+func (pg *ProofGenerator) getRootBlockInfo(txBlockNumber uint64) (rootBlockNumber uint64, start uint64, end uint64, err error) {
 	// find in which block child was included in parent
-	rootBlockNumber, err = h.findRootBlockFromChild(txBlockNumber)
+	rootBlockNumber, err = pg.findRootBlockFromChild(txBlockNumber)
 
 	if err != nil {
 		return 0, 0, 0, err
 	}
 
-	headerBlock, err := h.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(rootBlockNumber)))
+	headerBlock, err := pg.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(rootBlockNumber)))
 
 	if err != nil {
 		return 0, 0, 0, err
@@ -516,11 +525,11 @@ func (h *Heimdall) getRootBlockInfo(txBlockNumber uint64) (rootBlockNumber uint6
 
 const checkPointInterval = uint64(10000)
 
-func (h *Heimdall) findRootBlockFromChild(childBlockNumber uint64) (uint64, error) {
+func (pg *ProofGenerator) findRootBlockFromChild(childBlockNumber uint64) (uint64, error) {
 	// first checkpoint id = start * 10000
 	start := uint64(1)
 
-	currentHeaderBlock, err := h.rootChainBinding.CurrentHeaderBlock(&bind.CallOpts{})
+	currentHeaderBlock, err := pg.rootChainBinding.CurrentHeaderBlock(&bind.CallOpts{})
 
 	if err != nil {
 		return 0, err
@@ -538,7 +547,7 @@ func (h *Heimdall) findRootBlockFromChild(childBlockNumber uint64) (uint64, erro
 		}
 
 		mid := (start + end) / 2
-		headerBlock, err := h.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(mid*checkPointInterval)))
+		headerBlock, err := pg.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(mid*checkPointInterval)))
 
 		if err != nil {
 			return 0, err
@@ -570,8 +579,4 @@ func getReceiptBytes(receipt *types.Receipt) []byte {
 	buffer := &bytes.Buffer{}
 	receipt.EncodeRLP(buffer)
 	return buffer.Bytes()
-}
-
-func getStateSyncTxHash(block *requests.Block) libcommon.Hash {
-	return types.ComputeBorTxHash(block.Number.Uint64(), block.Hash)
 }
