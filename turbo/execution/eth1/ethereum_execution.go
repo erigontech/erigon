@@ -146,7 +146,12 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		}, tx.Commit()
 	}
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), false)
+	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
+
+	extendingHash := e.forkValidator.ExtendingForkHeadHash()
+	extendCanonical := (extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
+
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), extendCanonical)
 	if criticalError != nil {
 		return nil, criticalError
 	}

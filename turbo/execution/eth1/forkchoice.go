@@ -2,7 +2,6 @@ package eth1
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -83,7 +82,6 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 			Status:          execution.ExecutionStatus_Busy,
 		}, nil
 	case outcome := <-outcomeCh:
-		fmt.Println(outcome.receipt)
 		return outcome.receipt, outcome.err
 	}
 
@@ -231,6 +229,13 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 	if err := e.executionPipeline.RunUnwind(e.db, tx); err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
+	}
+	if blockHash == e.forkValidator.ExtendingForkHeadHash() {
+		e.logger.Info("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
+		if err := e.forkValidator.FlushExtendingFork(tx, e.accumulator); err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
 	}
 	if e.historyV3 {
 		if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber); err != nil {
