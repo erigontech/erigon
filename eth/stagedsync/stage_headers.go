@@ -587,7 +587,7 @@ func verifyAndSaveNewPoSHeader(
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 
 	extendingHash := cfg.forkValidator.ExtendingForkHeadHash()
-	extendCanonical := (extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
+	extendCanonical := extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash
 	status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, block.RawBody(), extendCanonical)
 	if criticalError != nil {
 		return nil, false, criticalError
