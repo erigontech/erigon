@@ -68,5 +68,5 @@ func (w *WriterV4) Commitment(saveStateAfter, trace bool) (rootHash []byte, err 
 }
 func (w *WriterV4) Reset() {
 	//w.domains.Commitment.Reset()
-	w.domains.ClearRam()
+	w.domains.ClearRam(true)
 }

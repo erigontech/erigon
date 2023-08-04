@@ -470,7 +470,7 @@ func ExecV3(ctx context.Context,
 						if err := agg.Flush(ctx, tx); err != nil {
 							return err
 						}
-						doms.ClearRam()
+						doms.ClearRam(true)
 						t3 = time.Since(tt)
 
 						if err = execStage.Update(tx, outputBlockNum.Get()); err != nil {
@@ -787,7 +787,6 @@ Loop:
 					if err := agg.Flush(ctx, applyTx); err != nil {
 						return err
 					}
-					doms.ClearRam()
 					t3 = time.Since(tt)
 
 					if err = execStage.Update(applyTx, outputBlockNum.Get()); err != nil {
@@ -827,6 +826,7 @@ Loop:
 						}
 						t6 = time.Since(tt)
 
+						doms.ClearRam(false)
 						applyTx, err = cfg.db.BeginRw(context.Background())
 						if err != nil {
 							return err
@@ -837,10 +837,6 @@ Loop:
 
 						nc := applyTx.(*temporal.Tx).AggCtx()
 						doms.SetContext(nc)
-
-						if err := nc.PruneWithTimeout(ctx, time.Second, applyTx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
-							return err
-						}
 					}
 
 					return nil
@@ -852,6 +848,17 @@ Loop:
 			default:
 			}
 		}
+		//if blockNum%100000 == 0 {
+		//	if err := agg.Flush(ctx, applyTx); err != nil {
+		//		return err
+		//	}
+		//	doms.ClearRam(false)
+		//	if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
+		//		return err
+		//	} else if !ok {
+		//		break Loop
+		//	}
+		//}
 
 		if parallel && blocksFreezeCfg.Produce { // sequential exec - does aggregate right after commit
 			agg.BuildFilesInBackground(outputTxNum.Load())
@@ -918,7 +925,11 @@ func checkCommitmentV3(header *types.Header, applyTx kv.RwTx, agg *state2.Aggreg
 		panic(err)
 	}
 	if common.BytesToHash(rh) != oldAlogNonIncrementalHahs {
-		log.Error(fmt.Sprintf("block hash mismatch - but new-algorithm hash is bad! (means latest state is correct): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
+		if oldAlogNonIncrementalHahs != header.Root {
+			log.Error(fmt.Sprintf("block hash mismatch - both algorithm hashes are bad! (means latest state is NOT correct AND new commitment issue): %x != %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
+		} else {
+			log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is bad! (means latest state is NOT correct): %x != %x == %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
+		}
 	} else {
 		log.Error(fmt.Sprintf("block hash mismatch - and new-algorithm hash is good! (means latest state is NOT correct): %x == %x != %x bn =%d", common.BytesToHash(rh), oldAlogNonIncrementalHahs, header.Root, header.Number))
 	}

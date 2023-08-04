@@ -407,7 +407,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 
 	if ethconfig.EnableHistoryV4InTest {
 		agg := tx.(*temporal.Tx).Agg()
-		agg.SharedDomains(agg.MakeContext()).ClearRam()
+		agg.SharedDomains(agg.MakeContext()).ClearRam(true)
 	}
 
 	tx.Rollback()
