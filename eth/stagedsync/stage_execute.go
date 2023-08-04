@@ -77,6 +77,7 @@ type ExecuteBlockCfg struct {
 	accumulator   *shards.Accumulator
 	blockReader   services.FullBlockReader
 	hd            headerDownloader
+	// last valid number of the stage
 
 	dirs      datadir.Dirs
 	historyV3 bool

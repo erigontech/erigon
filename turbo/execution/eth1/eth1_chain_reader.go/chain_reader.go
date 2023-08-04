@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type ChainReaderEth1 struct {
@@ -32,7 +33,20 @@ func (c ChainReaderEth1) Config() *chain.Config {
 }
 
 func (c ChainReaderEth1) CurrentHeader() *types.Header {
-	panic("ChainReaderEth1.CurrentHeader not implemented")
+	resp, err := c.executionModule.CurrentHeader(c.ctx, &emptypb.Empty{})
+	if err != nil {
+		log.Error("GetHeader failed", "err", err)
+		return nil
+	}
+	if resp == nil || resp.Header == nil {
+		return nil
+	}
+	ret, err := eth1_utils.HeaderRpcToHeader(resp.Header)
+	if err != nil {
+		log.Error("GetHeader decoding", "err", err)
+		return nil
+	}
+	return ret
 }
 
 func (ChainReaderEth1) FrozenBlocks() uint64 {
@@ -123,4 +137,15 @@ func (c ChainReaderEth1) HeaderNumber(hash libcommon.Hash) (*uint64, error) {
 		return nil, nil
 	}
 	return resp.BlockNumber, nil
+}
+
+func (c ChainReaderEth1) IsCanonicalHash(hash libcommon.Hash) (bool, error) {
+	resp, err := c.executionModule.IsCanonicalHash(c.ctx, gointerfaces.ConvertHashToH256(hash))
+	if err != nil {
+		return false, err
+	}
+	if resp == nil {
+		return false, nil
+	}
+	return resp.Canonical, nil
 }

@@ -23,7 +23,7 @@ func InsertHeadersAndWait(ctx context.Context, executionModule execution.Executi
 	}
 	retryInterval := time.NewTicker(retryTimeout)
 	defer retryInterval.Stop()
-	for response.Result == execution.ValidationStatus_Busy {
+	for response.Result == execution.ExecutionStatus_Busy {
 		select {
 		case <-retryInterval.C:
 			response, err = executionModule.InsertHeaders(ctx, request)
@@ -34,7 +34,7 @@ func InsertHeadersAndWait(ctx context.Context, executionModule execution.Executi
 			return context.Canceled
 		}
 	}
-	if response.Result != execution.ValidationStatus_Success {
+	if response.Result != execution.ExecutionStatus_Success {
 		return fmt.Errorf("insertHeadersAndWait: invalid code recieved from execution module: %s", response.Result.String())
 	}
 	return nil
@@ -50,7 +50,7 @@ func InsertBodiesAndWait(ctx context.Context, executionModule execution.Executio
 	}
 	retryInterval := time.NewTicker(retryTimeout)
 	defer retryInterval.Stop()
-	for response.Result == execution.ValidationStatus_Busy {
+	for response.Result == execution.ExecutionStatus_Busy {
 		select {
 		case <-retryInterval.C:
 			response, err = executionModule.InsertBodies(ctx, request)
@@ -61,7 +61,7 @@ func InsertBodiesAndWait(ctx context.Context, executionModule execution.Executio
 			return context.Canceled
 		}
 	}
-	if response.Result != execution.ValidationStatus_Success {
+	if response.Result != execution.ExecutionStatus_Success {
 		return fmt.Errorf("InsertBodiesAndWait: invalid code recieved from execution module: %s", response.Result.String())
 	}
 	return nil
@@ -82,7 +82,7 @@ func InsertHeaderAndBodyAndWait(ctx context.Context, executionModule execution.E
 	return InsertBodyAndWait(ctx, executionModule, body, header.Number.Uint64(), header.Hash())
 }
 
-func ValidateChain(ctx context.Context, executionModule execution.ExecutionClient, hash libcommon.Hash, number uint64) (execution.ValidationStatus, libcommon.Hash, error) {
+func ValidateChain(ctx context.Context, executionModule execution.ExecutionClient, hash libcommon.Hash, number uint64) (execution.ExecutionStatus, libcommon.Hash, error) {
 	resp, err := executionModule.ValidateChain(ctx, &execution.ValidationRequest{
 		Hash:   gointerfaces.ConvertHashToH256(hash),
 		Number: number,
@@ -95,7 +95,7 @@ func ValidateChain(ctx context.Context, executionModule execution.ExecutionClien
 
 func UpdateForkChoice(ctx context.Context, executionModule execution.ExecutionClient,
 	headHash, safeHash, finalizeHash libcommon.Hash,
-	timeout uint64) (execution.ValidationStatus, libcommon.Hash, error) {
+	timeout uint64) (execution.ExecutionStatus, libcommon.Hash, error) {
 	resp, err := executionModule.UpdateForkChoice(ctx, &execution.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(headHash),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(safeHash),

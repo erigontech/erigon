@@ -27,18 +27,18 @@ import (
 	"strings"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
-	"github.com/urfave/cli/v2"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
+	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
@@ -104,9 +104,13 @@ var (
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
-	OverrideShanghaiTime = flags.BigFlag{
-		Name:  "override.shanghaiTime",
-		Usage: "Manually specify Shanghai fork time, overriding the bundled setting",
+	OverrideCancunFlag = flags.BigFlag{
+		Name:  "override.cancun",
+		Usage: "Manually specify the Cancun fork time, overriding the bundled setting",
+	}
+	TrustedSetupFile = cli.StringFlag{
+		Name:  "trusted-setup-file",
+		Usage: "Absolute path to trusted_setup.json file",
 	}
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
@@ -1580,9 +1584,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 	}
 
-	if ctx.IsSet(OverrideShanghaiTime.Name) {
-		cfg.OverrideShanghaiTime = flags.GlobalBig(ctx, OverrideShanghaiTime.Name)
-		cfg.TxPool.OverrideShanghaiTime = cfg.OverrideShanghaiTime
+	if ctx.IsSet(OverrideCancunFlag.Name) {
+		cfg.OverrideCancunTime = flags.GlobalBig(ctx, OverrideCancunFlag.Name)
+		cfg.TxPool.OverrideCancunTime = cfg.OverrideCancunTime
 	}
 
 	if ctx.IsSet(InternalConsensusFlag.Name) && clparams.EmbeddedEnabledByDefault(cfg.NetworkID) {
@@ -1591,6 +1595,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(SentryDropUselessPeers.Name) {
 		cfg.DropUselessPeers = ctx.Bool(SentryDropUselessPeers.Name)
+	}
+
+	if ctx.IsSet(TrustedSetupFile.Name) {
+		libkzg.SetTrustedSetupFilePath(ctx.String(TrustedSetupFile.Name))
 	}
 }
 

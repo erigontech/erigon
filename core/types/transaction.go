@@ -66,7 +66,7 @@ type Transaction interface {
 	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
 	GetFeeCap() *uint256.Int
 	Cost() *uint256.Int
-	GetDataHashes() []libcommon.Hash
+	GetBlobHashes() []libcommon.Hash
 	GetGas() uint64
 	GetBlobGas() uint64
 	GetValue() *uint256.Int
@@ -525,7 +525,7 @@ type Message struct {
 	accessList       types2.AccessList
 	checkNonce       bool
 	isFree           bool
-	dataHashes       []libcommon.Hash
+	blobHashes       []libcommon.Hash
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -593,13 +593,13 @@ func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
 	m.gasLimit = gas
 }
 
-func (m Message) BlobGas() uint64 { return fixedgas.BlobGasPerBlob * uint64(len(m.dataHashes)) }
+func (m Message) BlobGas() uint64 { return fixedgas.BlobGasPerBlob * uint64(len(m.blobHashes)) }
 
 func (m Message) MaxFeePerBlobGas() *uint256.Int {
 	return &m.maxFeePerBlobGas
 }
 
-func (m Message) DataHashes() []libcommon.Hash { return m.dataHashes }
+func (m Message) BlobHashes() []libcommon.Hash { return m.blobHashes }
 
 func DecodeSSZ(data []byte, dest codec.Deserializable) error {
 	err := dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))

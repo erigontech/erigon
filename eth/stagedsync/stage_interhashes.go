@@ -131,6 +131,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		if cfg.hd != nil {
 			cfg.hd.ReportBadHeaderPoS(headerHash, syncHeadHeader.ParentHash)
 		}
+
 		if to > s.BlockNumber {
 			unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
 			logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)

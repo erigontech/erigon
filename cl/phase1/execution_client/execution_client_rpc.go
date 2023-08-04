@@ -52,7 +52,7 @@ func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string, p
 	}, nil
 }
 
-func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block) (invalid bool, err error) {
+func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}
@@ -158,7 +158,7 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 		return validationError.Error()
 	}
 
-	if payloadStatus.Status != engine_types.ValidStatus && payloadStatus.Status != engine_types.AcceptedStatus {
+	if payloadStatus.Status == engine_types.InvalidStatus {
 		return fmt.Errorf("status: %s", payloadStatus.Status)
 	}
 	return nil

@@ -147,7 +147,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.BorBlockPeriodFlag,
 	&utils.BorBlockSizeFlag,
 	&utils.EthStatsURLFlag,
-	&utils.OverrideShanghaiTime,
+	&utils.OverrideCancunFlag,
 
 	&utils.ConfigFlag,
 
@@ -158,4 +158,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.SentinelPortFlag,
 
 	&utils.OtsSearchMaxCapFlag,
+
+	&utils.TrustedSetupFile,
 }

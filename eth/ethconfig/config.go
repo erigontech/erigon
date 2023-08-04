@@ -246,7 +246,7 @@ type Config struct {
 	SentinelPort                    uint64
 	ExperimentalConsensusSeparation bool
 
-	OverrideShanghaiTime *big.Int `toml:",omitempty"`
+	OverrideCancunTime *big.Int `toml:",omitempty"`
 
 	DropUselessPeers bool
 }

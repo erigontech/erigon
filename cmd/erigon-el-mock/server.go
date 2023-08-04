@@ -55,7 +55,7 @@ func (e *Eth1Execution) InsertHeaders(ctx context.Context, req *execution.Insert
 		}
 	}
 	return &execution.InsertionResult{
-		Result: execution.ValidationStatus_Success,
+		Result: execution.ExecutionStatus_Success,
 	}, tx.Commit()
 }
 
@@ -97,7 +97,7 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 		}
 	}
 	return &execution.InsertionResult{
-		Result: execution.ValidationStatus_Success,
+		Result: execution.ExecutionStatus_Success,
 	}, tx.Commit()
 }
 
@@ -111,7 +111,7 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, fcu *execution.For
 	defer e.mu.Unlock()
 	return &execution.ForkChoiceReceipt{
 		LatestValidHash: fcu.HeadBlockHash,
-		Status:          execution.ValidationStatus_Success,
+		Status:          execution.ExecutionStatus_Success,
 	}, nil
 }
 

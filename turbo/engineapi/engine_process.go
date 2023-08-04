@@ -1,6 +1,7 @@
 package engineapi
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,98 +16,13 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
-func (e *EngineServerExperimental) StartEngineMessageHandler() {
-	go func() {
-		for {
-			interrupted, err := e.engineMessageHandler()
-			if interrupted {
-				return
-			}
-			if err != nil {
-				e.logger.Error("[EngineServer] error received", "err", err)
-			}
-		}
-	}()
-}
+const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 
-// This loop is responsible for engine POS replacement.
-func (e *EngineServerExperimental) engineMessageHandler() (bool, error) {
-	logPrefix := "EngineApi"
-	e.hd.SetPOSSync(true)
-	syncing := e.blockDownloader.Status() != headerdownload.Idle
-	if !syncing {
-		e.logger.Info(fmt.Sprintf("[%s] Waiting for Consensus Layer...", logPrefix))
-	}
-	interrupt, requestId, requestWithStatus := e.hd.BeaconRequestList.WaitForRequest(syncing, e.test)
-
-	chainReader := eth1_chain_reader.NewChainReaderEth1(e.ctx, e.config, e.executionService)
-	e.hd.SetHeaderReader(chainReader)
-
-	interrupted, err := e.handleInterrupt(interrupt)
-	if err != nil {
-		return false, err
-	}
-
-	if interrupted {
-		return true, nil
-	}
-
-	if requestWithStatus == nil {
-		e.logger.Warn(fmt.Sprintf("[%s] Nil beacon request. Should only happen in tests", logPrefix))
-		return false, nil
-	}
-
-	request := requestWithStatus.Message
-	requestStatus := requestWithStatus.Status
-
-	// Decide what kind of action we need to take place
-	forkChoiceMessage, forkChoiceInsteadOfNewPayload := request.(*engine_types.ForkChoiceState)
-	e.hd.ClearPendingPayloadHash()
-	e.hd.SetPendingPayloadStatus(nil)
-
-	var payloadStatus *engine_types.PayloadStatus
-	if forkChoiceInsteadOfNewPayload {
-		payloadStatus, err = e.handlesForkChoice("ForkChoiceUpdated", chainReader, forkChoiceMessage, requestId)
-	} else {
-		payloadMessage := request.(*types.Block)
-		payloadStatus, err = e.handleNewPayload("NewPayload", payloadMessage, requestStatus, requestId, chainReader)
-	}
-
-	if err != nil {
-		if requestStatus == engine_helpers.New {
-			e.hd.PayloadStatusCh <- engine_types.PayloadStatus{CriticalError: err}
-		}
-		return false, err
-	}
-
-	if requestStatus == engine_helpers.New && payloadStatus != nil {
-		if payloadStatus.Status == engine_types.SyncingStatus || payloadStatus.Status == engine_types.AcceptedStatus {
-			e.hd.PayloadStatusCh <- *payloadStatus
-		} else {
-			// Let the stage loop run to the end so that the transaction is committed prior to replying to CL
-			e.hd.SetPendingPayloadStatus(payloadStatus)
-		}
-	}
-
-	return false, nil
-}
-
-func (e *EngineServerExperimental) handleInterrupt(interrupt engine_helpers.Interrupt) (bool, error) {
-	if interrupt != engine_helpers.None {
-		if interrupt == engine_helpers.Stopping {
-			close(e.hd.ShutdownCh)
-			return false, fmt.Errorf("server is stopping")
-		}
-		return true, nil
-	}
-	return false, nil
-}
+var errInvalidForkChoiceState = errors.New("forkchoice state is invalid")
 
 func (e *EngineServerExperimental) handleNewPayload(
 	logPrefix string,
 	block *types.Block,
-	requestStatus engine_helpers.RequestStatus,
-	requestId int,
 	chainReader consensus.ChainHeaderReader,
 ) (*engine_types.PayloadStatus, error) {
 	header := block.Header()
@@ -115,28 +31,28 @@ func (e *EngineServerExperimental) handleNewPayload(
 
 	e.logger.Info(fmt.Sprintf("[%s] Handling new payload", logPrefix), "height", headerNumber, "hash", headerHash)
 
-	parent := chainReader.GetHeaderByHash(header.ParentHash)
+	currentHeader := chainReader.CurrentHeader()
+	var currentHeadNumber *uint64
+	if currentHeader != nil {
+		currentHeadNumber = new(uint64)
+		*currentHeadNumber = currentHeader.Number.Uint64()
+	}
+	parent := chainReader.GetHeader(header.ParentHash, headerNumber-1)
 	if parent == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download parent", logPrefix), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
 		if e.test {
-			e.hd.BeaconRequestList.Remove(requestId)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
-		if !e.blockDownloader.StartDownloading(requestId, header.ParentHash, headerHash) {
+		if !e.blockDownloader.StartDownloading(0, header.ParentHash, headerHash, block) {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
-		currentHeader := chainReader.CurrentHeader()
-		var currentHeadNumber *uint64
-		if currentHeader != nil {
-			currentHeadNumber = new(uint64)
-			*currentHeadNumber = currentHeader.Number.Uint64()
-		}
-		if currentHeadNumber != nil && math.AbsoluteDifference(*currentHeadNumber, headerNumber) < 32 {
+
+		if currentHeadNumber != nil {
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
 			success := false
-			for i := 0; i < 10; i++ {
+			for i := 0; i < 100; i++ {
 				time.Sleep(10 * time.Millisecond)
 				if e.blockDownloader.Status() == headerdownload.Synced {
 					success = true
@@ -146,15 +62,17 @@ func (e *EngineServerExperimental) handleNewPayload(
 			if !success {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
+			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &headerHash}, nil
 		} else {
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	}
-
-	e.hd.BeaconRequestList.Remove(requestId)
-	// Save header and body
 	if err := eth1_utils.InsertHeaderAndBodyAndWait(e.ctx, e.executionService, header, block.RawBody()); err != nil {
 		return nil, err
+	}
+
+	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= 32 {
+		return &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}, nil
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
@@ -164,21 +82,27 @@ func (e *EngineServerExperimental) handleNewPayload(
 		return nil, err
 	}
 
+	if status == execution.ExecutionStatus_BadBlock {
+		e.hd.ReportBadHeaderPoS(block.Hash(), latestValidHash)
+	}
+
 	return &engine_types.PayloadStatus{
 		Status:          convertGrpcStatusToEngineStatus(status),
 		LatestValidHash: &latestValidHash,
 	}, nil
 }
 
-func convertGrpcStatusToEngineStatus(status execution.ValidationStatus) engine_types.EngineStatus {
+func convertGrpcStatusToEngineStatus(status execution.ExecutionStatus) engine_types.EngineStatus {
 	switch status {
-	case execution.ValidationStatus_Success:
+	case execution.ExecutionStatus_Success:
 		return engine_types.ValidStatus
-	case execution.ValidationStatus_MissingSegment | execution.ValidationStatus_TooFarAway:
+	case execution.ExecutionStatus_MissingSegment:
 		return engine_types.AcceptedStatus
-	case execution.ValidationStatus_BadBlock:
+	case execution.ExecutionStatus_TooFarAway:
+		return engine_types.AcceptedStatus
+	case execution.ExecutionStatus_BadBlock:
 		return engine_types.InvalidStatus
-	case execution.ValidationStatus_Busy:
+	case execution.ExecutionStatus_Busy:
 		return engine_types.SyncingStatus
 	}
 	panic("giulio u stupid.")
@@ -191,18 +115,20 @@ func (e *EngineServerExperimental) handlesForkChoice(
 	requestId int,
 ) (*engine_types.PayloadStatus, error) {
 	headerHash := forkChoice.HeadHash
+
 	e.logger.Debug(fmt.Sprintf("[%s] Handling fork choice", logPrefix), "headerHash", headerHash)
 	headerNumber, err := chainReader.HeaderNumber(headerHash)
 	if err != nil {
 		return nil, err
 	}
 
+	// We do not have header, download.
 	if headerNumber == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
 		if e.test {
 			e.hd.BeaconRequestList.Remove(requestId)
 		} else {
-			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash)
+			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash, nil)
 		}
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
@@ -214,21 +140,24 @@ func (e *EngineServerExperimental) handlesForkChoice(
 		if e.test {
 			e.hd.BeaconRequestList.Remove(requestId)
 		} else {
-			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash)
+			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash, nil)
 		}
+
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
-	e.hd.BeaconRequestList.Remove(requestId)
 
 	// Call forkchoice here
-	status, latestValidHash, err := eth1_utils.UpdateForkChoice(e.ctx, e.executionService, forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash, 100)
+	status, latestValidHash, err := eth1_utils.UpdateForkChoice(e.ctx, e.executionService, forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash, fcuTimeout)
 	if err != nil {
 		return nil, err
 	}
-	if status == execution.ValidationStatus_Busy {
+	if status == execution.ExecutionStatus_InvalidForkchoice {
+		return nil, &engine_helpers.InvalidForkchoiceStateErr
+	}
+	if status == execution.ExecutionStatus_Busy {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
-	if status == execution.ValidationStatus_BadBlock {
+	if status == execution.ExecutionStatus_BadBlock {
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus}, nil
 	}
 	return &engine_types.PayloadStatus{

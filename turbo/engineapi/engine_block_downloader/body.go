@@ -18,7 +18,7 @@ import (
 // downloadBodies executes bodies download.
 func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(tx kv.RwTx, fromBlock, toBlock uint64) (err error) {
 	headerProgress := toBlock
-	bodyProgress := fromBlock
+	bodyProgress := fromBlock - 1
 
 	if err := stages.SaveStageProgress(tx, stages.Bodies, bodyProgress); err != nil {
 		return err
@@ -109,7 +109,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(tx kv.RwTx, fr
 			default:
 			}
 			nextBlock := requestedLow + i
-			rawBody := e.bd.GetBodyFromCache(nextBlock, write /* delete */)
+			rawBody := e.bd.GetBodyFromCache(nextBlock, write)
 			if rawBody == nil {
 				e.bd.NotDelivered(nextBlock)
 				write = false
@@ -117,6 +117,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(tx kv.RwTx, fr
 			if !write {
 				continue
 			}
+
 			e.bd.NotDelivered(nextBlock)
 			header, _, err := e.bd.GetHeader(nextBlock, e.blockReader, tx)
 			if err != nil {
