@@ -157,9 +157,11 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		if criticalError != nil {
 			return
 		}
-		fv.memoryDiff, criticalError = extendingFork.Diff()
-		if criticalError != nil {
-			return
+		if validationError == nil {
+			fv.memoryDiff, criticalError = extendingFork.Diff()
+			if criticalError != nil {
+				return
+			}
 		}
 		return status, latestValidHash, validationError, criticalError
 	}
