@@ -169,8 +169,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
-	if !s.config.IsCancun(header.Time) && (header.BlobGasUsed != nil || header.ExcessBlobGas != nil) {
-		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas present before Cancun"}
+	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
+		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
 	if s.config.IsCancun(header.Time) && (header.BlobGasUsed == nil || header.ExcessBlobGas == nil) {

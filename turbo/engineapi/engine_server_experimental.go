@@ -177,12 +177,17 @@ func (s *EngineServerExperimental) newPayload(ctx context.Context, req *engine_t
 		header.ExcessBlobGas = (*uint64)(req.ExcessBlobGas)
 	}
 
-	if !s.config.IsCancun(header.Time) && (header.BlobGasUsed != nil || header.ExcessBlobGas != nil) {
-		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas present before Cancun"}
+	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
+		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
 	if s.config.IsCancun(header.Time) && (header.BlobGasUsed == nil || header.ExcessBlobGas == nil) {
 		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas missing"}
+	}
+
+	if s.config.IsCancun(header.Time) && header.ParentBeaconBlockRoot == nil {
+		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot missing"}
 	}
 
 	blockHash := req.BlockHash
