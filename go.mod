@@ -63,7 +63,7 @@ require (
 	github.com/maticnetwork/polyproto v0.0.2
 	github.com/multiformats/go-multiaddr v0.9.0
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
-	github.com/otterscan/go-otterscan v0.0.0-20230802030518-241df3c63788
+	github.com/otterscan/go-otterscan v0.0.0-20230804182934-1c48c923e648
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.0.8
