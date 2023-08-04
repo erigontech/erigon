@@ -23,7 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -53,7 +53,7 @@ type EngineBlockDownloader struct {
 	db              kv.RoDB
 
 	// Execution module
-	executionModule execution.ExecutionClient
+	chainRW eth1_chain_reader.ChainReaderWriterEth1
 
 	// Misc
 	tmpdir  string
@@ -67,9 +67,9 @@ type EngineBlockDownloader struct {
 	logger log.Logger
 }
 
-func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, executionModule execution.ExecutionClient,
-	hd *headerdownload.HeaderDownload, bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
-	blockReader services.FullBlockReader, bodyReqSend RequestBodyFunction, db kv.RoDB, config *chain.Config,
+func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient execution.ExecutionClient,
+	bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
+	bodyReqSend RequestBodyFunction, blockReader services.FullBlockReader, db kv.RoDB, config *chain.Config,
 	tmpdir string, timeout int) *EngineBlockDownloader {
 	var s atomic.Value
 	s.Store(headerdownload.Idle)
@@ -82,11 +82,11 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, executionM
 		config:          config,
 		tmpdir:          tmpdir,
 		logger:          logger,
+		blockReader:     blockReader,
 		blockPropagator: blockPropagator,
 		timeout:         timeout,
-		blockReader:     blockReader,
 		bodyReqSend:     bodyReqSend,
-		executionModule: executionModule,
+		chainRW:         eth1_chain_reader.NewChainReaderEth1(ctx, config, executionClient, 1000),
 	}
 }
 
@@ -229,7 +229,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 			return err
 		}
 		if len(headersBatch) == blockBatchSize {
-			if err := eth1_utils.InsertHeadersAndWait(e.ctx, e.executionModule, headersBatch); err != nil {
+			if err := e.chainRW.InsertHeadersAndWait(headersBatch); err != nil {
 				return err
 			}
 			headersBatch = headersBatch[:0]
@@ -241,7 +241,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 		}
 		headersBatch = append(headersBatch, header)
 	}
-	if err := eth1_utils.InsertHeadersAndWait(e.ctx, e.executionModule, headersBatch); err != nil {
+	if err := e.chainRW.InsertHeadersAndWait(headersBatch); err != nil {
 		return err
 	}
 	log.Info("Beginning downloaded bodies insertion")
@@ -252,7 +252,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 			return err
 		}
 		if len(bodiesBatch) == blockBatchSize {
-			if err := eth1_utils.InsertBodiesAndWait(e.ctx, e.executionModule, bodiesBatch, blockNumbersBatch, blockHashesBatch); err != nil {
+			if err := e.chainRW.InsertBodiesAndWait(bodiesBatch, blockNumbersBatch, blockHashesBatch); err != nil {
 				return err
 			}
 			bodiesBatch = bodiesBatch[:0]
@@ -273,5 +273,5 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 		blockNumbersBatch = append(blockNumbersBatch, blockNumber)
 		blockHashesBatch = append(blockHashesBatch, blockHash)
 	}
-	return eth1_utils.InsertBodiesAndWait(e.ctx, e.executionModule, bodiesBatch, blockNumbersBatch, blockHashesBatch)
+	return e.chainRW.InsertBodiesAndWait(bodiesBatch, blockNumbersBatch, blockHashesBatch)
 }

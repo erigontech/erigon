@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -19,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/log/v3"
 
@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/merge"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
@@ -51,26 +50,27 @@ type EngineServerExperimental struct {
 	proposing        bool
 	test             bool
 	executionService execution.ExecutionClient
-
-	ctx    context.Context
-	lock   sync.Mutex
-	logger log.Logger
-
+	// exclusively used for rpc
 	db          kv.RoDB
 	blockReader services.FullBlockReader
+
+	chainRW eth1_chain_reader.ChainReaderWriterEth1
+	ctx     context.Context
+	lock    sync.Mutex
+	logger  log.Logger
 }
 
-func NewEngineServerExperimental(ctx context.Context, logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
-	db kv.RoDB, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload,
+func NewEngineServerExperimental(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
+	hd *headerdownload.HeaderDownload,
 	blockDownloader *engine_block_downloader.EngineBlockDownloader, test bool, proposing bool) *EngineServerExperimental {
 	return &EngineServerExperimental{
 		ctx:              ctx,
+		db:               db,
 		logger:           logger,
 		config:           config,
 		executionService: executionService,
 		blockDownloader:  blockDownloader,
-		db:               db,
-		blockReader:      blockReader,
+		chainRW:          eth1_chain_reader.NewChainReaderEth1(ctx, config, executionService, fcuTimeout),
 		proposing:        proposing,
 		hd:               hd,
 	}
@@ -242,8 +242,7 @@ func (s *EngineServerExperimental) newPayload(ctx context.Context, req *engine_t
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 	s.hd.BeaconRequestList.AddPayloadRequest(block)
 
-	chainReader := eth1_chain_reader.NewChainReaderEth1(s.ctx, s.config, s.executionService)
-	payloadStatus, err := s.handleNewPayload("NewPayload", block, chainReader)
+	payloadStatus, err := s.handleNewPayload("NewPayload", block)
 	if err != nil {
 		return nil, err
 	}
@@ -274,38 +273,30 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 		return nil, fmt.Errorf("headerdownload is nil")
 	}
 
-	tx, err := s.db.BeginRo(s.ctx)
+	headHash, finalizedHash, safeHash, err := s.chainRW.GetForkchoice()
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+
 	// Some Consensus layer clients sometimes sends us repeated FCUs and make Erigon print a gazillion logs.
 	// E.G teku sometimes will end up spamming fcu on the terminal block if it has not synced to that point.
 	if forkchoiceMessage != nil &&
-		forkchoiceMessage.FinalizedBlockHash == rawdb.ReadForkchoiceFinalized(tx) &&
-		forkchoiceMessage.HeadHash == rawdb.ReadForkchoiceHead(tx) &&
-		forkchoiceMessage.SafeBlockHash == rawdb.ReadForkchoiceSafe(tx) {
+		forkchoiceMessage.FinalizedBlockHash == finalizedHash &&
+		forkchoiceMessage.HeadHash == headHash &&
+		forkchoiceMessage.SafeBlockHash == safeHash {
 		return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 	}
 
-	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
-	if err != nil {
-		return nil, err
-	}
+	header := s.chainRW.GetHeaderByHash(blockHash)
+
 	// Retrieve parent and total difficulty.
 	var parent *types.Header
 	var td *big.Int
 	if newPayload {
-		parent, err = rawdb.ReadHeaderByHash(tx, parentHash)
-		if err != nil {
-			return nil, err
-		}
-		td, err = rawdb.ReadTdByHash(tx, parentHash)
+		parent = s.chainRW.GetHeaderByHash(parentHash)
+		td = s.chainRW.GetTd(parentHash, blockNumber-1)
 	} else {
-		td, err = rawdb.ReadTdByHash(tx, blockHash)
-	}
-	if err != nil {
-		return nil, err
+		td = s.chainRW.GetTd(blockHash, blockNumber)
 	}
 
 	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
@@ -313,9 +304,9 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &libcommon.Hash{}}, nil
 	}
 
-	var canonicalHash libcommon.Hash
+	var isCanonical bool
 	if header != nil {
-		canonicalHash, err = s.blockReader.CanonicalHash(context.Background(), tx, header.Number.Uint64())
+		isCanonical, err = s.chainRW.IsCanonicalHash(blockHash)
 	}
 	if err != nil {
 		return nil, err
@@ -348,7 +339,7 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 
 	// If header is already validated or has a missing parent, you can either return VALID or SYNCING.
 	if newPayload {
-		if header != nil && canonicalHash == blockHash {
+		if header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 
@@ -361,16 +352,11 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
-		// Following code ensures we skip the fork choice state update if if forkchoiceState.headBlockHash references an ancestor of the head of canonical chain
-		headHash := rawdb.ReadHeadBlockHash(tx)
-		if err != nil {
-			return nil, err
-		}
 
 		// We add the extra restriction blockHash != headHash for the FCU case of canonicalHash == blockHash
 		// because otherwise (when FCU points to the head) we want go to stage headers
 		// so that it calls writeForkChoiceHashes.
-		if blockHash != headHash && canonicalHash == blockHash {
+		if blockHash != headHash && header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
@@ -427,12 +413,10 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	chainReader := eth1_chain_reader.NewChainReaderEth1(s.ctx, s.config, s.executionService)
-
 	if status == nil {
 		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkchoiceState.HeadHash)
 
-		status, err = s.handlesForkChoice("ForkChoiceUpdated", chainReader, forkchoiceState, 0)
+		status, err = s.handlesForkChoice("ForkChoiceUpdated", forkchoiceState, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -452,15 +436,7 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
-	tx2, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx2.Rollback()
-	headHash := rawdb.ReadHeadBlockHash(tx2)
-	headNumber := rawdb.ReadHeaderNumber(tx2, headHash)
-	headHeader := rawdb.ReadHeader(tx2, headHash, *headNumber)
-	tx2.Rollback()
+	headHeader := s.chainRW.GetHeaderByHash(forkchoiceState.HeadHash)
 
 	if headHeader.Hash() != forkchoiceState.HeadHash {
 		// Per Item 2 of https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.9/src/engine/specification.md#specification-1:
@@ -500,26 +476,18 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 	return &engine_types.ForkChoiceUpdatedResponse{
 		PayloadStatus: &engine_types.PayloadStatus{
 			Status:          engine_types.ValidStatus,
-			LatestValidHash: &headHash,
+			LatestValidHash: &forkchoiceState.HeadHash,
 		},
 		PayloadId: engine_types.ConvertPayloadId(resp.Id),
 	}, nil
 }
 
 func (s *EngineServerExperimental) getPayloadBodiesByHash(ctx context.Context, request []libcommon.Hash, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
 
 	bodies := make([]*engine_types.ExecutionPayloadBodyV1, len(request))
 
 	for hashIdx, hash := range request {
-		block, err := s.blockReader.BlockByHash(ctx, tx, hash)
-		if err != nil {
-			return nil, err
-		}
+		block := s.chainRW.GetBlockByHash(hash)
 		body, err := extractPayloadBodyFromBlock(block)
 		if err != nil {
 			return nil, err
@@ -550,28 +518,11 @@ func extractPayloadBodyFromBlock(block *types.Block) (*engine_types.ExecutionPay
 }
 
 func (s *EngineServerExperimental) getPayloadBodiesByRange(ctx context.Context, start, count uint64, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	bodies := make([]*engine_types.ExecutionPayloadBodyV1, 0, count)
 
 	for i := uint64(0); i < count; i++ {
-		hash, err := rawdb.ReadCanonicalHash(tx, start+i)
-		if err != nil {
-			return nil, err
-		}
-		if hash == (libcommon.Hash{}) {
-			// break early if beyond the last known canonical header
-			break
-		}
+		block := s.chainRW.GetBlockByNumber(start + i)
 
-		block, _, err := s.blockReader.BlockWithSenders(ctx, tx, hash, start+i)
-		if err != nil {
-			return nil, err
-		}
 		body, err := extractPayloadBodyFromBlock(block)
 		if err != nil {
 			return nil, err
