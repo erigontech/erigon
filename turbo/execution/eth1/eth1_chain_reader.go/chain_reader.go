@@ -107,10 +107,8 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(number uint64) *types.Block {
 		return nil
 	}
 
-	hash := header.Hash()
 	resp, err := c.executionModule.GetBody(c.ctx, &execution.GetSegmentRequest{
 		BlockNumber: &number,
-		BlockHash:   gointerfaces.ConvertHashToH256(hash),
 	})
 	if err != nil {
 		log.Error("GetBlockByNumber failed", "err", err)
@@ -181,6 +179,14 @@ func (c ChainReaderWriterEth1) GetTd(hash libcommon.Hash, number uint64) *big.In
 		return nil
 	}
 	return eth1_utils.ConvertBigIntFromRpc(resp.Td)
+}
+
+func (c ChainReaderWriterEth1) Ready() (bool, error) {
+	resp, err := c.executionModule.Ready(c.ctx, &emptypb.Empty{})
+	if err != nil {
+		return false, err
+	}
+	return resp.Ready, nil
 }
 
 func (c ChainReaderWriterEth1) HeaderNumber(hash libcommon.Hash) (*uint64, error) {

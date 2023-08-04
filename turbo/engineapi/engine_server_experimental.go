@@ -361,6 +361,13 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
+	executionReady, err := s.chainRW.Ready()
+	if err != nil {
+		return nil, err
+	}
+	if !executionReady {
+		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+	}
 
 	return nil, nil
 }
@@ -527,6 +534,9 @@ func (s *EngineServerExperimental) getPayloadBodiesByRange(ctx context.Context, 
 		body, err := extractPayloadBodyFromBlock(block)
 		if err != nil {
 			return nil, err
+		}
+		if body == nil {
+			break
 		}
 		bodies = append(bodies, body)
 	}
