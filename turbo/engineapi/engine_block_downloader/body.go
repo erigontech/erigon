@@ -101,6 +101,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(tx kv.RwTx, fr
 
 		toProcess := e.bd.NextProcessingCount()
 
+		write := true
 		for i := uint64(0); i < toProcess; i++ {
 			select {
 			case <-logEvery.C:
@@ -108,9 +109,12 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(tx kv.RwTx, fr
 			default:
 			}
 			nextBlock := requestedLow + i
-			rawBody := e.bd.GetBodyFromCache(nextBlock, true)
+			rawBody := e.bd.GetBodyFromCache(nextBlock, write)
 			if rawBody == nil {
 				e.bd.NotDelivered(nextBlock)
+				write = false
+			}
+			if !write {
 				continue
 			}
 
