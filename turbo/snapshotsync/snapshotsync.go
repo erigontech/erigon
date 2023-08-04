@@ -217,6 +217,13 @@ Finish:
 			return err
 		}
 	}
+	stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
+	if err != nil {
+		return err
+	}
+	if !stats.Completed {
+		goto Loop
+	}
 
 	if err := snapshots.ReopenFolder(); err != nil {
 		return err
