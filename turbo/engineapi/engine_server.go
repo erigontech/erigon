@@ -488,14 +488,18 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	req := &execution.AssembleBlockRequest{
-		ParentHash:           gointerfaces.ConvertHashToH256(forkChoice.HeadHash),
-		Timestamp:            uint64(payloadAttributes.Timestamp),
-		MixDigest:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
-		SuggestedFeeRecipent: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		ParentHash:            gointerfaces.ConvertHashToH256(forkChoice.HeadHash),
+		Timestamp:             uint64(payloadAttributes.Timestamp),
+		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 	}
 
 	if version >= clparams.CapellaVersion {
 		req.Withdrawals = engine_types.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
+	}
+
+	if version >= clparams.DenebVersion {
+		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(payloadAttributes.ParentBeaconBlockRoot)
 	}
 
 	resp, err := s.executionService.AssembleBlock(ctx, req)
@@ -606,9 +610,8 @@ func (e *EngineServer) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState 
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.CapellaVersion)
 }
 
-// Currently not implemented properly
 func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.CapellaVersion)
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
 }
 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
@@ -624,7 +627,7 @@ func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.E
 }
 
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
-// See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv3
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_newpayloadv3
 func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload, expectedBlobVersionedHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
 	return e.newPayload(ctx, payload, expectedBlobVersionedHashes, parentBeaconBlockRoot, clparams.DenebVersion)
 }

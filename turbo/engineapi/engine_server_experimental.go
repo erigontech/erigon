@@ -485,14 +485,18 @@ func (s *EngineServerExperimental) forkchoiceUpdated(ctx context.Context, forkch
 	}
 
 	req := &execution.AssembleBlockRequest{
-		ParentHash:           gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
-		Timestamp:            uint64(payloadAttributes.Timestamp),
-		MixDigest:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
-		SuggestedFeeRecipent: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		ParentHash:            gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
+		Timestamp:             uint64(payloadAttributes.Timestamp),
+		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 	}
 
 	if version >= clparams.CapellaVersion {
 		req.Withdrawals = engine_types.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
+	}
+
+	if version >= clparams.DenebVersion {
+		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(payloadAttributes.ParentBeaconBlockRoot)
 	}
 
 	resp, err := s.executionService.AssembleBlock(ctx, req)
@@ -623,7 +627,7 @@ func (e *EngineServerExperimental) ForkchoiceUpdatedV2(ctx context.Context, fork
 }
 
 func (e *EngineServerExperimental) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.CapellaVersion)
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
 }
 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
@@ -688,6 +692,7 @@ func (e *EngineServerExperimental) GetPayloadBodiesByRangeV1(ctx context.Context
 var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV1",
 	"engine_forkchoiceUpdatedV2",
+	"engine_forkchoiceUpdatedV3",
 	"engine_newPayloadV1",
 	"engine_newPayloadV2",
 	"engine_newPayloadV3",
