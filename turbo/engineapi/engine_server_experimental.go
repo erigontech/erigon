@@ -337,6 +337,7 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash}, nil
 	}
 
+	currentHeader := s.chainRW.CurrentHeader()
 	// If header is already validated or has a missing parent, you can either return VALID or SYNCING.
 	if newPayload {
 		if header != nil && isCanonical {
@@ -356,7 +357,7 @@ func (s *EngineServerExperimental) getQuickPayloadStatusIfPossible(blockHash lib
 		// We add the extra restriction blockHash != headHash for the FCU case of canonicalHash == blockHash
 		// because otherwise (when FCU points to the head) we want go to stage headers
 		// so that it calls writeForkChoiceHashes.
-		if blockHash != headHash && header != nil && isCanonical {
+		if currentHeader != nil && blockHash != currentHeader.Hash() && header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
