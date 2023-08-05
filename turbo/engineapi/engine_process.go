@@ -17,7 +17,7 @@ const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 
 var errInvalidForkChoiceState = errors.New("forkchoice state is invalid")
 
-func (e *EngineServerExperimental) handleNewPayload(
+func (e *EngineServer) handleNewPayload(
 	logPrefix string,
 	block *types.Block,
 ) (*engine_types.PayloadStatus, error) {
@@ -104,7 +104,7 @@ func convertGrpcStatusToEngineStatus(status execution.ExecutionStatus) engine_ty
 	panic("giulio u stupid.")
 }
 
-func (e *EngineServerExperimental) handlesForkChoice(
+func (e *EngineServer) handlesForkChoice(
 	logPrefix string,
 	forkChoice *engine_types.ForkChoiceState,
 	requestId int,
