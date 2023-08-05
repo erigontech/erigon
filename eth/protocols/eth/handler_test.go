@@ -35,7 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 var (
@@ -130,8 +130,8 @@ func TestGetBlockReceipts(t *testing.T) {
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
-func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *stages.MockSentry {
-	m := stages.MockWithGenesis(t, &types.Genesis{
+func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *mock.MockSentry {
+	m := mock.MockWithGenesis(t, &types.Genesis{
 		Config: params.TestChainConfig,
 		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}, testKey, false)

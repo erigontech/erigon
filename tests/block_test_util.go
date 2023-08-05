@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -45,7 +46,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -114,7 +114,7 @@ func (bt *BlockTest) Run(t *testing.T, _ bool) error {
 		return UnsupportedForkError{bt.json.Network}
 	}
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(config, log.New())
-	m := stages.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
+	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
@@ -177,7 +177,7 @@ See https://github.com/ethereum/tests/wiki/Blockchain-Tests-II
 	expected we are expected to ignore it and continue processing and then validate the
 	post state.
 */
-func (bt *BlockTest) insertBlocks(m *stages.MockSentry, tx kv.RwTx) ([]btBlock, error) {
+func (bt *BlockTest) insertBlocks(m *mock.MockSentry, tx kv.RwTx) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
 	// insert the test blocks, which will execute all transaction
 	for bi, b := range bt.json.Blocks {
@@ -303,7 +303,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	return nil
 }
 
-func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *stages.MockSentry) error {
+func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *mock.MockSentry) error {
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
 	bmap := make(map[libcommon.Hash]btBlock, len(bt.json.Blocks))
 	for _, b := range validBlocks {

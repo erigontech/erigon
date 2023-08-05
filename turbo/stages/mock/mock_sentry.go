@@ -107,6 +107,7 @@ type MockSentry struct {
 	agg            *libstate.AggregatorV3
 	BlockSnapshots *freezeblocks.RoSnapshots
 	BlockReader    services.FullBlockReader
+	posStagedSync  *stagedsync.Sync
 }
 
 func (ms *MockSentry) Close() {
@@ -457,6 +458,9 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		logger,
 	)
 
+	pipelineStages := stages2.NewPipelineStages(ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapshotsDownloader, mock.BlockReader, blockRetire, mock.agg, forkValidator, logger)
+	mock.posStagedSync = stagedsync.New(pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
+
 	mock.StreamWg.Add(1)
 	go mock.sentriesClient.RecvMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
@@ -620,36 +624,47 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 		return nil
 	}
 
+	firstHeight := int64(-1)
+
 	for i := n; i < chain.Length(); i++ {
 		if err := chain.Blocks[i].HashCheck(); err != nil {
 			return err
 		}
-		ms.SendPayloadRequest(chain.Blocks[i])
+		if firstHeight == -1 {
+			firstHeight = int64(chain.Blocks[i].NumberU64())
+		}
+		rawdb.WriteHeader(tx, chain.Blocks[i].Header())
+		if _, err := rawdb.WriteRawBodyIfNotExists(tx, chain.Blocks[i].Hash(), chain.Blocks[i].NumberU64(), chain.Blocks[i].RawBody()); err != nil {
+			return err
+		}
+
+		parentTd, err := rawdb.ReadTd(tx, chain.Blocks[i].ParentHash(), chain.Blocks[i].NumberU64()-1)
+		if err != nil || parentTd == nil {
+			return fmt.Errorf("no td %s", err)
+		}
+		td := new(big.Int).Add(parentTd, chain.Blocks[i].Difficulty())
+
+		if err = rawdb.WriteTd(tx, chain.Blocks[i].Hash(), chain.Blocks[i].NumberU64(), td); err != nil {
+			return err
+		}
+		rawdb.WriteCanonicalHash(tx, chain.Blocks[i].Hash(), chain.Blocks[i].NumberU64())
+	}
+	if firstHeight == -1 {
+		return nil
 	}
 
-	initialCycle := MockInsertAsInitialCycle
 	hook := stages2.NewHook(ms.Ctx, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
-	err := stages2.StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook)
-	if err != nil {
+
+	if err := stages.SaveStageProgress(tx, stages.Headers, chain.TopBlock.NumberU64()); err != nil {
 		return err
 	}
-	stages2.SendPayloadStatus(ms.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
-	ms.ReceivePayloadStatus()
-
-	fc := engine_types.ForkChoiceState{
-		HeadHash:           chain.TopBlock.Hash(),
-		SafeBlockHash:      chain.TopBlock.Hash(),
-		FinalizedBlockHash: chain.TopBlock.Hash(),
-	}
-	ms.SendForkChoiceRequest(&fc)
-	err = stages2.StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook)
-	if err != nil {
+	if err := stages.SaveStageProgress(tx, stages.Bodies, chain.TopBlock.NumberU64()); err != nil {
 		return err
 	}
-	stages2.SendPayloadStatus(ms.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
-	ms.ReceivePayloadStatus()
+	rawdb.WriteHeadHeaderHash(tx, chain.TopBlock.Hash())
 
-	return nil
+	return stages2.StageLoopIteration(ms.Ctx, ms.DB, tx, ms.posStagedSync, MockInsertAsInitialCycle, ms.Log, ms.BlockReader, hook)
+
 }
 
 func (ms *MockSentry) InsertChain(chain *core.ChainPack, tx kv.RwTx) error {
