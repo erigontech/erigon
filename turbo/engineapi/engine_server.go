@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -27,12 +28,12 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_handler"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
@@ -55,8 +56,6 @@ type EngineServer struct {
 	ctx     context.Context
 	lock    sync.Mutex
 	logger  log.Logger
-
-	engineHandler *engine_handler.EngineHandler
 }
 
 const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
@@ -74,7 +73,6 @@ func NewEngineServer(ctx context.Context, logger log.Logger, config *chain.Confi
 		chainRW:          chainRW,
 		proposing:        proposing,
 		hd:               hd,
-		engineHandler:    engine_handler.NewEngineHandler(logger, chainRW, blockDownloader, false, hd),
 	}
 }
 
@@ -228,7 +226,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 
-	payloadStatus, err := s.engineHandler.HandleNewPayload("NewPayload", block)
+	payloadStatus, err := s.HandleNewPayload("NewPayload", block)
 	if err != nil {
 		return nil, err
 	}
@@ -379,12 +377,12 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64) (*engin
 		return nil, err
 	}
 	if resp.Busy {
-		log.Warn("Cannot build payload, execution is busy", "payloadId", payloadId)
+		s.logger.Warn("Cannot build payload, execution is busy", "payloadId", payloadId)
 		return nil, &engine_helpers.UnknownPayloadErr
 	}
 	// If the service is busy or there is no data for the given id then respond accordingly.
 	if resp.Data == nil {
-		log.Warn("Payload not stored", "payloadId", payloadId)
+		s.logger.Warn("Payload not stored", "payloadId", payloadId)
 		return nil, &engine_helpers.UnknownPayloadErr
 
 	}
@@ -410,7 +408,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	if status == nil {
 		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkchoiceState.HeadHash)
 
-		status, err = s.engineHandler.HandlesForkChoice("ForkChoiceUpdated", forkchoiceState, 0)
+		status, err = s.HandlesForkChoice("ForkChoiceUpdated", forkchoiceState, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -533,7 +531,7 @@ func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count
 func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.Bytes) (*engine_types.ExecutionPayload, error) {
 
 	decodedPayloadId := binary.BigEndian.Uint64(payloadId)
-	log.Info("Received GetPayloadV1", "payloadId", decodedPayloadId)
+	e.logger.Info("Received GetPayloadV1", "payloadId", decodedPayloadId)
 
 	response, err := e.getPayload(ctx, decodedPayloadId)
 	if err != nil {
@@ -545,14 +543,14 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.By
 
 func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
-	log.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
+	e.logger.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
 
 	return e.getPayload(ctx, decodedPayloadId)
 }
 
 func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
-	log.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
+	e.logger.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
 
 	return e.getPayload(ctx, decodedPayloadId)
 }
@@ -647,7 +645,7 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 	missingCl := compareCapabilities(ourCapabilities, fromCl)
 
 	if len(missingCl) > 0 || len(missingOurs) > 0 {
-		log.Debug("ExchangeCapabilities mismatches", "cl_unsupported", missingCl, "erigon_unsupported", missingOurs)
+		e.logger.Debug("ExchangeCapabilities mismatches", "cl_unsupported", missingCl, "erigon_unsupported", missingOurs)
 	}
 
 	return ourCapabilities
@@ -669,4 +667,144 @@ func compareCapabilities(from []string, to []string) []string {
 	}
 
 	return result
+}
+
+func (e *EngineServer) HandleNewPayload(
+	logPrefix string,
+	block *types.Block,
+) (*engine_types.PayloadStatus, error) {
+	header := block.Header()
+	headerNumber := header.Number.Uint64()
+	headerHash := block.Hash()
+
+	e.logger.Info(fmt.Sprintf("[%s] Handling new payload", logPrefix), "height", headerNumber, "hash", headerHash)
+
+	currentHeader := e.chainRW.CurrentHeader()
+	var currentHeadNumber *uint64
+	if currentHeader != nil {
+		currentHeadNumber = new(uint64)
+		*currentHeadNumber = currentHeader.Number.Uint64()
+	}
+	parent := e.chainRW.GetHeader(header.ParentHash, headerNumber-1)
+	if parent == nil {
+		e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download parent", logPrefix), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
+		if e.test {
+			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+		}
+
+		if !e.blockDownloader.StartDownloading(0, header.ParentHash, headerHash, block) {
+			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+		}
+
+		if currentHeadNumber != nil {
+			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
+			// so that we will perform full validation.
+			success := false
+			for i := 0; i < 100; i++ {
+				time.Sleep(10 * time.Millisecond)
+				if e.blockDownloader.Status() == headerdownload.Synced {
+					success = true
+					break
+				}
+			}
+			if !success {
+				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+			}
+			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &headerHash}, nil
+		} else {
+			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+		}
+	}
+	if err := e.chainRW.InsertHeaderAndBodyAndWait(header, block.RawBody()); err != nil {
+		return nil, err
+	}
+
+	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= 32 {
+		return &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}, nil
+	}
+
+	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
+	status, latestValidHash, err := e.chainRW.ValidateChain(headerHash, headerNumber)
+	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
+	if err != nil {
+		return nil, err
+	}
+
+	if status == execution.ExecutionStatus_BadBlock {
+		e.hd.ReportBadHeaderPoS(block.Hash(), latestValidHash)
+	}
+
+	return &engine_types.PayloadStatus{
+		Status:          convertGrpcStatusToEngineStatus(status),
+		LatestValidHash: &latestValidHash,
+	}, nil
+}
+
+func convertGrpcStatusToEngineStatus(status execution.ExecutionStatus) engine_types.EngineStatus {
+	switch status {
+	case execution.ExecutionStatus_Success:
+		return engine_types.ValidStatus
+	case execution.ExecutionStatus_MissingSegment:
+		return engine_types.AcceptedStatus
+	case execution.ExecutionStatus_TooFarAway:
+		return engine_types.AcceptedStatus
+	case execution.ExecutionStatus_BadBlock:
+		return engine_types.InvalidStatus
+	case execution.ExecutionStatus_Busy:
+		return engine_types.SyncingStatus
+	}
+	panic("giulio u stupid.")
+}
+
+func (e *EngineServer) HandlesForkChoice(
+	logPrefix string,
+	forkChoice *engine_types.ForkChoiceState,
+	requestId int,
+) (*engine_types.PayloadStatus, error) {
+	headerHash := forkChoice.HeadHash
+
+	e.logger.Debug(fmt.Sprintf("[%s] Handling fork choice", logPrefix), "headerHash", headerHash)
+	headerNumber, err := e.chainRW.HeaderNumber(headerHash)
+	if err != nil {
+		return nil, err
+	}
+
+	// We do not have header, download.
+	if headerNumber == nil {
+		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
+		if !e.test {
+			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash, nil)
+		}
+		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+	}
+
+	// Header itself may already be in the snapshots, if CL starts off at much earlier state than Erigon
+	header := e.chainRW.GetHeader(headerHash, *headerNumber)
+	if header == nil {
+		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
+		if !e.test {
+			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash, nil)
+		}
+
+		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+	}
+
+	// Call forkchoice here
+	status, latestValidHash, err := e.chainRW.UpdateForkChoice(forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash)
+	if err != nil {
+		return nil, err
+	}
+	if status == execution.ExecutionStatus_InvalidForkchoice {
+		return nil, &engine_helpers.InvalidForkchoiceStateErr
+	}
+	if status == execution.ExecutionStatus_Busy {
+		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
+	}
+	if status == execution.ExecutionStatus_BadBlock {
+		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus}, nil
+	}
+	return &engine_types.PayloadStatus{
+		Status:          convertGrpcStatusToEngineStatus(status),
+		LatestValidHash: &latestValidHash,
+	}, nil
 }
