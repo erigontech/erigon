@@ -220,8 +220,8 @@ func ConsensusClStages(ctx context.Context,
 					return "ForkChoice"
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					// wait for a slot... should be plenty enough time
-					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot)*time.Second)
+					// wait for 3/4th slot... should be plenty enough time
+					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot)*time.Second*3/4)
 					defer cn()
 					logger.Info("waiting for blocks...",
 						"seenSlot", args.seenSlot,
