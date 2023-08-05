@@ -139,9 +139,7 @@ func (e *EngineHandler) HandlesForkChoice(
 	// We do not have header, download.
 	if headerNumber == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
-		if e.test {
-			e.hd.BeaconRequestList.Remove(requestId)
-		} else {
+		if !e.test {
 			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash, nil)
 		}
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -151,9 +149,7 @@ func (e *EngineHandler) HandlesForkChoice(
 	header := e.chainRW.GetHeader(headerHash, *headerNumber)
 	if header == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
-		if e.test {
-			e.hd.BeaconRequestList.Remove(requestId)
-		} else {
+		if !e.test {
 			e.blockDownloader.StartDownloading(requestId, headerHash, headerHash, nil)
 		}
 

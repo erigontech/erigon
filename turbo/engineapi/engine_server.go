@@ -9,7 +9,6 @@ import (
 	"math/big"
 	"reflect"
 	"sync"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -104,21 +103,6 @@ func (e *EngineServer) Start(httpConfig httpcfg.HttpCfg, db kv.RoDB, blockReader
 	if err := cli.StartRpcServerWithJwtAuthentication(e.ctx, httpConfig, apiList, e.logger); err != nil {
 		e.logger.Error(err.Error())
 	}
-}
-
-func (s *EngineServer) stageLoopIsBusy() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-	wait, ok := s.hd.BeaconRequestList.WaitForWaiting(ctx)
-	if !ok {
-		select {
-		case <-wait:
-			return false
-		case <-ctx.Done():
-			return true
-		}
-	}
-	return false
 }
 
 func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
@@ -243,7 +227,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
-	s.hd.BeaconRequestList.AddPayloadRequest(block)
 
 	payloadStatus, err := s.engineHandler.HandleNewPayload("NewPayload", block)
 	if err != nil {

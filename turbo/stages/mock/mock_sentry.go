@@ -55,7 +55,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -721,18 +720,6 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack, tx kv.RwTx) error {
 		}
 	}
 	return nil
-}
-
-func (ms *MockSentry) SendPayloadRequest(message *types.Block) {
-	ms.sentriesClient.Hd.BeaconRequestList.AddPayloadRequest(message)
-}
-
-func (ms *MockSentry) SendForkChoiceRequest(message *engine_types.ForkChoiceState) {
-	ms.sentriesClient.Hd.BeaconRequestList.AddForkChoiceRequest(message)
-}
-
-func (ms *MockSentry) ReceivePayloadStatus() engine_types.PayloadStatus {
-	return <-ms.sentriesClient.Hd.PayloadStatusCh
 }
 
 func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
