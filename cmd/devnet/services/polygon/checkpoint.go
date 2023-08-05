@@ -161,17 +161,17 @@ func (h *Heimdall) handleChildHeader(ctx context.Context, header *types.Header) 
 		return errors.New("no of blocks on childchain is less than confirmations required")
 	}
 
-	expectedCheckpointState, err := h.nextExpectedCheckpoint(ctx, uint64(latestConfirmedChildBlock))
-
-	if err != nil {
-		h.logger.Error("Error while calculate next expected checkpoint", "error", err)
-		return err
-	}
-
 	timeStamp := uint64(time.Now().Unix())
 	checkpointBufferTime := uint64(h.checkpointConfig.CheckpointBufferTime.Seconds())
 
 	if h.pendingCheckpoint == nil {
+		expectedCheckpointState, err := h.nextExpectedCheckpoint(ctx, uint64(latestConfirmedChildBlock))
+
+		if err != nil {
+			h.logger.Error("Error while calculate next expected checkpoint", "error", err)
+			return err
+		}
+
 		h.pendingCheckpoint = &checkpoint.Checkpoint{
 			Timestamp:  timeStamp,
 			StartBlock: big.NewInt(int64(expectedCheckpointState.newStart)),
@@ -196,8 +196,6 @@ func (h *Heimdall) handleChildHeader(ctx context.Context, header *types.Header) 
 
 	start := h.pendingCheckpoint.StartBlock.Uint64()
 	end := h.pendingCheckpoint.EndBlock.Uint64()
-
-	h.pendingCheckpoint.RootHash, err = h.getRootHash(ctx, start, end)
 
 	shouldSend, err := h.shouldSendCheckpoint(start, end)
 
@@ -265,19 +263,19 @@ func (h *Heimdall) nextExpectedCheckpoint(ctx context.Context, latestChildBlock 
 	}
 
 	// get diff
-	diff := latestChildBlock - start + 1
+	diff := int(latestChildBlock - start + 1)
 	// process if diff > 0 (positive)
 	if diff > 0 {
-		expectedDiff := diff - diff%h.checkpointConfig.AvgCheckpointLength
+		expectedDiff := diff - diff%int(h.checkpointConfig.AvgCheckpointLength)
 		if expectedDiff > 0 {
 			expectedDiff = expectedDiff - 1
 		}
 		// cap with max checkpoint length
-		if expectedDiff > h.checkpointConfig.MaxCheckpointLength-1 {
-			expectedDiff = h.checkpointConfig.MaxCheckpointLength - 1
+		if expectedDiff > int(h.checkpointConfig.MaxCheckpointLength-1) {
+			expectedDiff = int(h.checkpointConfig.MaxCheckpointLength - 1)
 		}
 		// get end result
-		end = expectedDiff + start
+		end = uint64(expectedDiff) + start
 		h.logger.Debug("Calculating checkpoint eligibility",
 			"latest", latestChildBlock,
 			"start", start,
@@ -286,7 +284,7 @@ func (h *Heimdall) nextExpectedCheckpoint(ctx context.Context, latestChildBlock 
 	}
 
 	// Handle when block producers go down
-	if end == 0 || end == start || (0 < diff && diff < h.checkpointConfig.AvgCheckpointLength) {
+	if end == 0 || end == start || (0 < diff && diff < int(h.checkpointConfig.AvgCheckpointLength)) {
 		h.logger.Debug("Fetching last header block to calculate time")
 
 		currentTime := time.Now().UTC().Unix()
@@ -446,6 +444,12 @@ func (h *Heimdall) createAndSendCheckpointToRootchain(ctx context.Context, start
 
 	if shouldSend {
 		accountRoot, err := h.fetchDividendAccountRoot()
+
+		if err != nil {
+			return err
+		}
+
+		h.pendingCheckpoint.RootHash, err = h.getRootHash(ctx, start, end)
 
 		if err != nil {
 			return err

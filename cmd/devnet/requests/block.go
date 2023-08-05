@@ -96,11 +96,11 @@ func (reqGen *requestGenerator) GetBlockByNumber(blockNum rpc.BlockNumber, withT
 }
 
 func (req *requestGenerator) GetRootHash(startBlock uint64, endBlock uint64) (libcommon.Hash, error) {
-	var result libcommon.Hash
+	var result string
 
 	if err := req.callCli(&result, Methods.BorGetRootHash, startBlock, endBlock); err != nil {
 		return libcommon.Hash{}, err
 	}
 
-	return result, nil
+	return libcommon.HexToHash(result), nil
 }
