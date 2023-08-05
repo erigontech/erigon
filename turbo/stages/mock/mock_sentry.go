@@ -1,4 +1,4 @@
-package stages
+package mock
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"os"
 	"sync"
 	"testing"
+
+	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -338,12 +340,12 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
-		stateSync, err := NewInMemoryExecution(ctx, mock.DB, &ethconfig.Defaults, mock.sentriesClient, dirs, notifications, mock.BlockReader, blockWriter, agg, log.New() /* logging will be discarded */)
+		stateSync, err := stages2.NewInMemoryExecution(ctx, mock.DB, &ethconfig.Defaults, mock.sentriesClient, dirs, notifications, mock.BlockReader, blockWriter, agg, log.New() /* logging will be discarded */)
 		if err != nil {
 			return err
 		}
 		// We start the mining step
-		if err := StateStep(ctx, nil, engine, batch, blockWriter, stateSync, mock.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
+		if err := stages2.StateStep(ctx, nil, engine, batch, blockWriter, stateSync, mock.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
@@ -602,8 +604,8 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 		ms.ReceiveWg.Add(1)
 	}
 	initialCycle := MockInsertAsInitialCycle
-	hook := NewHook(ms.Ctx, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
-	if err = StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook); err != nil {
+	hook := stages2.NewHook(ms.Ctx, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
+	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {
@@ -626,12 +628,12 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 	}
 
 	initialCycle := MockInsertAsInitialCycle
-	hook := NewHook(ms.Ctx, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
-	err := StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook)
+	hook := stages2.NewHook(ms.Ctx, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
+	err := stages2.StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook)
 	if err != nil {
 		return err
 	}
-	SendPayloadStatus(ms.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
+	stages2.SendPayloadStatus(ms.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	ms.ReceivePayloadStatus()
 
 	fc := engine_types.ForkChoiceState{
@@ -640,11 +642,11 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
 	ms.SendForkChoiceRequest(&fc)
-	err = StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook)
+	err = stages2.StageLoopIteration(ms.Ctx, ms.DB, tx, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook)
 	if err != nil {
 		return err
 	}
-	SendPayloadStatus(ms.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
+	stages2.SendPayloadStatus(ms.HeaderDownload(), rawdb.ReadHeadBlockHash(tx), err)
 	ms.ReceivePayloadStatus()
 
 	return nil
