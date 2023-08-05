@@ -52,7 +52,7 @@ import (
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 // This nil assignment ensures at compile time that SimulatedBackend implements bind.ContractBackend.
@@ -70,7 +70,7 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	m         *stages.MockSentry
+	m         *mock.MockSentry
 	getHeader func(hash libcommon.Hash, number uint64) *types.Header
 
 	mu              sync.Mutex
@@ -93,7 +93,7 @@ type SimulatedBackend struct {
 func NewSimulatedBackendWithConfig(alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
-	m := stages.MockWithGenesisEngine(nil, &genesis, engine, false)
+	m := mock.MockWithGenesisEngine(nil, &genesis, engine, false)
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,

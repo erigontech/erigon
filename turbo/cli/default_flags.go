@@ -47,7 +47,6 @@ var DefaultFlags = []cli.Flag{
 	&StateStreamDisableFlag,
 	&SyncLoopThrottleFlag,
 	&BadBlockFlag,
-	&ExperimentalConsensusSeparationFlag,
 
 	&utils.HTTPEnabledFlag,
 	&utils.GraphQLEnabledFlag,

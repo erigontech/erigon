@@ -10,16 +10,16 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 func TestBodiesUnwind(t *testing.T) {
 	require := require.New(t)
-	m := stages2.Mock(t)
+	m := mock.Mock(t)
 	db := m.DB
 	tx, err := db.BeginRw(m.Ctx)
 	require.NoError(err)

@@ -23,7 +23,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon/turbo/stages"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 func TestGenerateChain(t *testing.T) {
@@ -55,7 +55,7 @@ func TestGenerateChain(t *testing.T) {
 		Config: &chain.Config{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
 		Alloc:  types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
-	m := stages.MockWithGenesis(t, gspec, key1, false)
+	m := mock.MockWithGenesis(t, gspec, key1, false)
 
 	// This call generates a chain of 5 blocks. The function runs for
 	// each block and adds different features to gen based on the
