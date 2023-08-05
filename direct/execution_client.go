@@ -88,3 +88,7 @@ func (s *ExecutionClientDirect) GetHeaderHashNumber(ctx context.Context, in *typ
 func (s *ExecutionClientDirect) GetForkChoice(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*execution.ForkChoice, error) {
 	return s.server.GetForkChoice(ctx, in)
 }
+
+func (s *ExecutionClientDirect) Ready(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*execution.ReadyResponse, error) {
+	return s.server.Ready(ctx, in)
+}
