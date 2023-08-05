@@ -338,13 +338,14 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					for _, block := range blocks {
-						if err := processBlock(block, false, true); err != nil {
+						err := processBlock(block, false, true)
+						if err != nil {
 							// its okay if block processing fails
 							logger.Warn("reorg block failed validation", "err", err)
 							return nil
 						}
 						shouldForkChoiceSinceReorg = true
-						logger.Warn("possible reorg", "slot", args.seenSlot)
+						logger.Warn("possible reorg/missed slot", "slot", args.seenSlot)
 					}
 					return nil
 				},
