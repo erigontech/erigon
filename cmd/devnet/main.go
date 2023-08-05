@@ -361,7 +361,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 
 				services = append(services, polygon.NewHeimdall(&config,
 					&polygon.CheckpointConfig{
-						CheckpointBufferTime: 120 * time.Second,
+						CheckpointBufferTime: 60 * time.Second,
 						CheckpointAccount:    checkpointOwner,
 					},
 					logger))

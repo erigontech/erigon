@@ -52,13 +52,13 @@ func (e EthError) Error() string {
 
 type RequestGenerator interface {
 	PingErigonRpc() PingResult
-	GetBalance(address libcommon.Address, blockNum BlockNumber) (*big.Int, error)
+	GetBalance(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error)
 	AdminNodeInfo() (p2p.NodeInfo, error)
 	GetBlockByNumber(blockNum rpc.BlockNumber, withTxs bool) (*Block, error)
 	GetTransactionByHash(hash libcommon.Hash) (*jsonrpc.RPCTransaction, error)
 	GetTransactionReceipt(hash libcommon.Hash) (*types.Receipt, error)
 	TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error)
-	GetTransactionCount(address libcommon.Address, blockNum BlockNumber) (*big.Int, error)
+	GetTransactionCount(address libcommon.Address, blockRef rpc.BlockReference) (*big.Int, error)
 	BlockNumber() (uint64, error)
 	SendTransaction(signedTx types.Transaction) (libcommon.Hash, error)
 	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error)
@@ -68,7 +68,7 @@ type RequestGenerator interface {
 	Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error)
 	TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)
 	DebugAccountAt(blockHash libcommon.Hash, txIndex uint64, account libcommon.Address) (*AccountResult, error)
-	GetCode(address libcommon.Address, blockNum BlockNumber) (hexutility.Bytes, error)
+	GetCode(address libcommon.Address, blockRef rpc.BlockReference) (hexutility.Bytes, error)
 	EstimateGas(args ethereum.CallMsg, blockNum BlockNumber) (uint64, error)
 	GasPrice() (*big.Int, error)
 

@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 type Faucet struct {
@@ -144,7 +144,7 @@ func (f *Faucet) Balance(ctx context.Context) (*big.Int, error) {
 		return nil, fmt.Errorf("%s has no block producers", f.chainName)
 	}
 
-	return node.GetBalance(f.contractAddress, requests.BlockNumbers.Latest)
+	return node.GetBalance(f.contractAddress, rpc.LatestBlock)
 }
 
 func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth float64) (*big.Int, libcommon.Hash, error) {
@@ -162,7 +162,7 @@ func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth fl
 
 	node := devnet.SelectNode(ctx)
 
-	count, err := node.GetTransactionCount(f.source.Address, requests.BlockNumbers.Pending)
+	count, err := node.GetTransactionCount(f.source.Address, rpc.PendingBlock)
 
 	if err != nil {
 		return nil, libcommon.Hash{}, err
@@ -189,7 +189,7 @@ func (f *Faucet) Receive(ctx context.Context, source *accounts.Account, eth floa
 		return nil, libcommon.Hash{}, err
 	}
 
-	count, err := node.GetTransactionCount(f.source.Address, requests.BlockNumbers.Pending)
+	count, err := node.GetTransactionCount(f.source.Address, rpc.PendingBlock)
 
 	if err != nil {
 		return nil, libcommon.Hash{}, err

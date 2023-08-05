@@ -64,11 +64,6 @@ type TraceCallStateDiffStorage struct {
 	To   libcommon.Hash `json:"to"`
 }
 
-type TraceTransaction struct {
-	CommonResponse
-	Result []TransactionTrace `json:"result"`
-}
-
 type TransactionTrace struct {
 	Type                string          `json:"type"`
 	Action              TraceCallAction `json:"action"`
@@ -137,23 +132,11 @@ func (req *requestGenerator) traceCall(blockRef rpc.BlockReference, callArgs str
 }
 
 func (reqGen *requestGenerator) TraceTransaction(hash libcommon.Hash) ([]TransactionTrace, error) {
-	var b TraceTransaction
+	var result []TransactionTrace
 
-	method, body := reqGen.traceTransaction(hash)
-	res := reqGen.call(method, body, &b)
-
-	if res.Err != nil {
-		return nil, fmt.Errorf("TraceTransaction rpc failed: %w", res.Err)
+	if err := reqGen.callCli(&result, Methods.TraceTransaction, hash); err != nil {
+		return nil, err
 	}
 
-	if b.Error != nil {
-		return nil, fmt.Errorf("TraceTransaction rpc failed: %w", b.Error)
-	}
-
-	return b.Result, nil
-}
-
-func (req *requestGenerator) traceTransaction(hash libcommon.Hash) (RPCMethod, string) {
-	const template = `{"jsonrpc":"2.0","method":%q,"params":[%q],"id":%d}`
-	return Methods.TraceTransaction, fmt.Sprintf(template, Methods.TraceTransaction, hash.Hex(), req.reqID)
+	return result, nil
 }

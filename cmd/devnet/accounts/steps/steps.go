@@ -120,7 +120,7 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 
 			logger.Info("Faucet account details", "address", faucet.Address(), "account", accountResult)
 
-			accountCode, err := node.GetCode(faucet.Address(), requests.BlockNumber(traceResult.BlockHash.Hex()))
+			accountCode, err := node.GetCode(faucet.Address(), rpc.AsBlockReference(traceResult.BlockHash))
 
 			if err != nil {
 				return 0, fmt.Errorf("Send transaction failure: get account code failed: %w", err)
@@ -153,7 +153,7 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 		return 0, fmt.Errorf("Unexpected post transfer faucet balance got: %s:, expected: %s", balance, (&big.Int{}).Sub(facuetStartingBalance, sent))
 	}
 
-	balance, err = node.GetBalance(account.Address, requests.BlockNumbers.Latest)
+	balance, err = node.GetBalance(account.Address, rpc.LatestBlock)
 
 	if err != nil {
 		return 0, fmt.Errorf("Failed to get post transfer balance: %w", err)
@@ -166,7 +166,7 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 	return balance.Uint64(), nil
 }
 
-func GetBalance(ctx context.Context, accountName string, blockNum requests.BlockNumber) (uint64, error) {
+func GetBalance(ctx context.Context, accountName string, blockNum rpc.BlockNumber) (uint64, error) {
 	logger := devnet.Logger(ctx)
 
 	node := devnet.CurrentNode(ctx)
@@ -185,7 +185,7 @@ func GetBalance(ctx context.Context, accountName string, blockNum requests.Block
 
 	logger.Info("Getting balance", "address", account.Address)
 
-	bal, err := node.GetBalance(account.Address, blockNum)
+	bal, err := node.GetBalance(account.Address, rpc.AsBlockReference(blockNum))
 
 	if err != nil {
 		logger.Error("FAILURE", "error", err)
@@ -204,7 +204,7 @@ func GetNonce(ctx context.Context, address libcommon.Address) (uint64, error) {
 		node = devnet.SelectBlockProducer(ctx)
 	}
 
-	res, err := node.GetTransactionCount(address, requests.BlockNumbers.Latest)
+	res, err := node.GetTransactionCount(address, rpc.LatestBlock)
 
 	if err != nil {
 		return 0, fmt.Errorf("failed to get transaction count for address 0x%x: %v", address, err)

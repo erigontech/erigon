@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
@@ -18,8 +20,95 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
+
+type CheckpointBlock struct {
+	Proposer        libcommon.Address `json:"proposer"`
+	StartBlock      uint64            `json:"start_block"`
+	EndBlock        uint64            `json:"end_block"`
+	RootHash        libcommon.Hash    `json:"root_hash"`
+	AccountRootHash libcommon.Hash    `json:"account_root_hash"`
+	BorChainID      string            `json:"bor_chain_id"`
+}
+
+func (c CheckpointBlock) GetSigners() []byte {
+	return c.Proposer[:]
+}
+
+func (c CheckpointBlock) GetSignBytes() ([]byte, error) {
+	/*b, err := ModuleCdc.MarshalJSON(msg)
+
+	if err != nil {
+		nil, err
+	}
+
+	return sdk.SortJSON(b)*/
+	return nil, fmt.Errorf("TODO")
+}
+
+type CheckpointAck struct {
+	From       libcommon.Address `json:"from"`
+	Number     uint64            `json:"number"`
+	Proposer   libcommon.Address `json:"proposer"`
+	StartBlock uint64            `json:"start_block"`
+	EndBlock   uint64            `json:"end_block"`
+	RootHash   libcommon.Hash    `json:"root_hash"`
+	TxHash     libcommon.Hash    `json:"tx_hash"`
+	LogIndex   uint64            `json:"log_index"`
+}
+
+var zeroHash libcommon.Hash
+var zeroAddress libcommon.Address
+
+func (c CheckpointBlock) ValidateBasic() error {
+
+	if c.RootHash == zeroHash {
+		return fmt.Errorf("Invalid rootHash %v", c.RootHash.String())
+	}
+
+	if c.Proposer == zeroAddress {
+		return fmt.Errorf("Invalid proposer %v", c.Proposer.String())
+	}
+
+	if c.StartBlock >= c.EndBlock || c.EndBlock == 0 {
+		return fmt.Errorf("Invalid startBlock %v or/and endBlock %v", c.StartBlock, c.EndBlock)
+	}
+
+	return nil
+}
+
+func (c CheckpointBlock) GetSideSignBytes() []byte {
+	borChainID, _ := strconv.ParseUint(c.BorChainID, 10, 64)
+
+	return appendBytes32(
+		c.Proposer.Bytes(),
+		(&big.Int{}).SetUint64(c.StartBlock).Bytes(),
+		(&big.Int{}).SetUint64(c.EndBlock).Bytes(),
+		c.RootHash.Bytes(),
+		c.AccountRootHash.Bytes(),
+		(&big.Int{}).SetUint64(borChainID).Bytes(),
+	)
+}
+
+func appendBytes32(data ...[]byte) []byte {
+	var result []byte
+
+	for _, v := range data {
+		l := len(v)
+
+		var padded [32]byte
+
+		if l > 0 && l <= 32 {
+			copy(padded[32-l:], v[:])
+		}
+
+		result = append(result, padded[:]...)
+	}
+
+	return result
+}
 
 func (h *Heimdall) startChildHeaderSubscription(ctx context.Context) {
 
@@ -238,7 +327,8 @@ func (h *Heimdall) currentHeaderBlock(childBlockInterval uint64) (uint64, error)
 }
 
 func (h *Heimdall) fetchDividendAccountRoot() (libcommon.Hash, error) {
-	return libcommon.Hash{}, nil
+	//TODO
+	return crypto.Keccak256Hash([]byte("dividendaccountroot")), nil
 }
 
 func (h *Heimdall) getHeaderInfo(number uint64) (
@@ -347,17 +437,6 @@ func (h *Heimdall) createAndSendCheckpointToRootchain(ctx context.Context, start
 			return err
 		}
 	*/
-	// side-tx data
-	sideTxData := []byte{} //sideMsg.GetSideSignBytes()
-
-	// get sigs
-	sigs /*, err*/ := [][3]*big.Int{} //helper.FetchSideTxSigs(cp.httpClient, height, tx.Tx.Hash(), sideTxData)
-
-	/*
-		if err != nil {
-			h.logger.Error("Error fetching votes for checkpoint tx", "height", height)
-			return err
-		}*/
 
 	shouldSend, err := h.shouldSendCheckpoint(start, end)
 
@@ -366,6 +445,33 @@ func (h *Heimdall) createAndSendCheckpointToRootchain(ctx context.Context, start
 	}
 
 	if shouldSend {
+		accountRoot, err := h.fetchDividendAccountRoot()
+
+		if err != nil {
+			return err
+		}
+
+		checkpoint := CheckpointBlock{
+			Proposer:        h.checkpointConfig.CheckpointAccount.Address,
+			StartBlock:      start,
+			EndBlock:        end,
+			RootHash:        h.pendingCheckpoint.RootHash,
+			AccountRootHash: accountRoot,
+			BorChainID:      h.chainConfig.ChainID.String(),
+		}
+
+		// side-tx data
+		sideTxData := checkpoint.GetSideSignBytes()
+
+		// get sigs
+		sigs /*, err*/ := [][3]*big.Int{} //helper.FetchSideTxSigs(cp.httpClient, height, tx.Tx.Hash(), sideTxData)
+
+		/*
+			if err != nil {
+				h.logger.Error("Error fetching votes for checkpoint tx", "height", height)
+				return err
+			}*/
+
 		if err := h.sendCheckpoint(ctx, sideTxData, sigs); err != nil {
 			h.logger.Info("Error submitting checkpoint to rootchain", "error", err)
 			return err
@@ -420,5 +526,61 @@ func (h *Heimdall) sendCheckpoint(ctx context.Context, signedData []byte, sigs [
 
 func (h *Heimdall) handleRootHeaderBlock(event *contracts.TestRootChainNewHeaderBlock) error {
 	h.logger.Info("Received root header")
+
+	checkpointNumber := big.NewInt(0).Div(event.HeaderBlockId, big.NewInt(0).SetUint64(h.checkpointConfig.ChildBlockInterval))
+
+	h.logger.Info(
+		"✅ Received checkpoint-ack for heimdall",
+		"event", "NewHeaderBlock",
+		"start", event.Start,
+		"end", event.End,
+		"reward", event.Reward,
+		"root", hexutility.Bytes(event.Root[:]),
+		"proposer", event.Proposer.Hex(),
+		"checkpointNumber", checkpointNumber,
+		"txHash", event.Raw.TxHash,
+		"logIndex", uint64(event.Raw.Index),
+	)
+
+	// event checkpoint is older than or equal to latest checkpoint
+	if h.latestCheckpoint != nil && h.latestCheckpoint.EndBlock >= event.End.Uint64() {
+		h.logger.Debug("Checkpoint ack is already submitted", "start", event.Start, "end", event.End)
+		return nil
+	}
+
+	// create msg checkpoint ack message
+	ack := CheckpointAck{
+		//From       libcommon.Address `json:"from"`
+		Number:     checkpointNumber.Uint64(),
+		Proposer:   event.Proposer,
+		StartBlock: event.Start.Uint64(),
+		EndBlock:   event.End.Uint64(),
+		RootHash:   event.Root,
+		TxHash:     event.Raw.TxHash,
+		LogIndex:   uint64(event.Raw.Index),
+	}
+
+	if ack.StartBlock != h.pendingCheckpoint.StartBlock.Uint64() {
+		h.logger.Error("Invalid start block", "startExpected", h.pendingCheckpoint.StartBlock, "startReceived", ack.StartBlock)
+		return fmt.Errorf("Invalid Checkpoint Ack: Invalid start block")
+	}
+
+	// Return err if start and end matches but contract root hash doesn't match
+	if ack.StartBlock == h.pendingCheckpoint.StartBlock.Uint64() &&
+		ack.EndBlock == h.pendingCheckpoint.EndBlock.Uint64() && ack.RootHash != h.pendingCheckpoint.RootHash {
+		h.logger.Error("Invalid ACK",
+			"startExpected", h.pendingCheckpoint.StartBlock,
+			"startReceived", ack.StartBlock,
+			"endExpected", h.pendingCheckpoint.EndBlock,
+			"endReceived", ack.StartBlock,
+			"rootExpected", h.pendingCheckpoint.RootHash.String(),
+			"rootRecieved", ack.RootHash.String(),
+		)
+
+		return fmt.Errorf("Invalid Checkpoint Ack: Invalid root hash")
+	}
+
+	h.latestCheckpoint = &ack
+
 	return nil
 }

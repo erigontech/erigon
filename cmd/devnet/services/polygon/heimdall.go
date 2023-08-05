@@ -65,6 +65,7 @@ type Heimdall struct {
 	chainConfig        *chain.Config
 	validatorSet       *valset.ValidatorSet
 	pendingCheckpoint  *checkpoint.Checkpoint
+	latestCheckpoint   *CheckpointAck
 	currentSpan        *span.HeimdallSpan
 	spans              map[uint64]*span.HeimdallSpan
 	logger             log.Logger

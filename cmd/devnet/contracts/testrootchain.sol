@@ -44,8 +44,8 @@ contract ProxyStorage {
 }
 
 contract ChainIdMixin {
-  bytes constant public networkId = hex"0000"; //{{ borChainIdHex }}"
-  uint256 constant public CHAINID = 1234; //{{ borChainId }};
+  bytes constant public networkId = hex"0539"; 
+  uint256 constant public CHAINID = 1337; 
 }
 
 interface IGovernance {
@@ -231,9 +231,9 @@ contract TestRootChain is RootChainStorage, IRootChain {
     }
 
     function submitCheckpoint(bytes calldata data, uint[3][] calldata /*sigs*/) external {
-        (address proposer, uint256 start, uint256 end, bytes32 rootHash,/*bytes32 accountHash*/, uint256 _borChainID) = abi
-            .decode(data, (address, uint256, uint256, bytes32, bytes32, uint256));
-        require(CHAINID == _borChainID, "Invalid bor chain id");
+        (address proposer, uint256 start, uint256 end, bytes32 rootHash, bytes32 accountHash, uint256 borChainID) = 
+            abi.decode(data, (address, uint256, uint256, bytes32, bytes32, uint256));
+        require(CHAINID == borChainID, "Invalid bor chain id");
 
         require(_buildHeaderBlock(proposer, start, end, rootHash), "INCORRECT_HEADER_DATA");
 

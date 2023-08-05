@@ -21,11 +21,6 @@ type ETHEstimateGas struct {
 	Number hexutil.Uint64 `json:"result"`
 }
 
-type ETHGasPrice struct {
-	CommonResponse
-	Price hexutil.Big `json:"result"`
-}
-
 func (reqGen *requestGenerator) EstimateGas(args ethereum.CallMsg, blockRef BlockNumber) (uint64, error) {
 	var b ETHEstimateGas
 
@@ -103,19 +98,13 @@ func (req *requestGenerator) estimateGas(callArgs string, blockRef BlockNumber) 
 }
 
 func (reqGen *requestGenerator) GasPrice() (*big.Int, error) {
-	var b ETHGasPrice
+	var result hexutil.Big
 
-	method, body := reqGen.gasPrice()
-	if res := reqGen.call(method, body, &b); res.Err != nil {
-		return nil, fmt.Errorf("failed to get gas price: %w", res.Err)
+	if err := reqGen.callCli(&result, Methods.ETHGasPrice); err != nil {
+		return nil, err
 	}
 
-	return b.Price.ToInt(), nil
-}
-
-func (req *requestGenerator) gasPrice() (RPCMethod, string) {
-	const template = `{"jsonrpc":"2.0","method":%q,"id":%d}`
-	return Methods.ETHGasPrice, fmt.Sprintf(template, Methods.ETHGasPrice, req.reqID)
+	return result.ToInt(), nil
 }
 
 func (reqGen *requestGenerator) Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error) {
@@ -129,25 +118,20 @@ func (reqGen *requestGenerator) Call(args ethapi.CallArgs, blockRef rpc.BlockRef
 }
 
 func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (libcommon.Hash, error) {
-	var b EthSendRawTransaction
+	var result libcommon.Hash
 
 	var buf bytes.Buffer
 	if err := signedTx.MarshalBinary(&buf); err != nil {
 		return libcommon.Hash{}, fmt.Errorf("failed to marshal binary: %v", err)
 	}
 
-	method, body := reqGen.sendRawTransaction(buf.Bytes())
-	if res := reqGen.call(method, body, &b); res.Err != nil {
-		return libcommon.Hash{}, fmt.Errorf("could not make to request to eth_sendRawTransaction: %v", res.Err)
-	}
-
-	if b.Error != nil {
-		return libcommon.Hash{}, fmt.Errorf("SendTransaction rpc failed: %w", b.Error)
+	if err := reqGen.callCli(&result, Methods.ETHSendRawTransaction, hexutility.Bytes(buf.Bytes())); err != nil {
+		return libcommon.Hash{}, err
 	}
 
 	zeroHash := true
 
-	for _, hb := range b.TxnHash {
+	for _, hb := range result {
 		if hb != 0 {
 			zeroHash = false
 			break
@@ -155,21 +139,16 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (lib
 	}
 
 	if zeroHash {
-		return libcommon.Hash{}, fmt.Errorf("Request: %d, hash: %s, nonce  %d: returned a zero transaction hash", b.RequestId, signedTx.Hash().Hex(), signedTx.GetNonce())
+		return libcommon.Hash{}, fmt.Errorf("Hash: %s, nonce  %d: returned a zero transaction hash", signedTx.Hash().Hex(), signedTx.GetNonce())
 	}
 
-	return b.TxnHash, nil
-}
-
-func (req *requestGenerator) sendRawTransaction(signedTx []byte) (RPCMethod, string) {
-	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x"],"id":%d}`
-	return Methods.ETHSendRawTransaction, fmt.Sprintf(template, Methods.ETHSendRawTransaction, signedTx, req.reqID)
+	return result, nil
 }
 
 func (req *requestGenerator) GetTransactionByHash(hash libcommon.Hash) (*jsonrpc.RPCTransaction, error) {
 	var result jsonrpc.RPCTransaction
 
-	if err := req.callCli(result, Methods.ETHGetTransactionByHash, hash); err != nil {
+	if err := req.callCli(&result, Methods.ETHGetTransactionByHash, hash); err != nil {
 		return nil, err
 	}
 
@@ -179,7 +158,7 @@ func (req *requestGenerator) GetTransactionByHash(hash libcommon.Hash) (*jsonrpc
 func (req *requestGenerator) GetTransactionReceipt(hash libcommon.Hash) (*types.Receipt, error) {
 	var result types.Receipt
 
-	if err := req.callCli(result, Methods.ETHGetTransactionReceipt, hash); err != nil {
+	if err := req.callCli(&result, Methods.ETHGetTransactionReceipt, hash); err != nil {
 		return nil, err
 	}
 

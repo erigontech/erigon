@@ -81,6 +81,15 @@ const (
 	EarliestBlockNumber       = BlockNumber(0)
 )
 
+var (
+	LatestExecutedBlock = LatestExecutedBlockNumber.AsBlockReference()
+	FinalizedBlock      = FinalizedBlockNumber.AsBlockReference()
+	SafeBlock           = SafeBlockNumber.AsBlockReference()
+	PendingBlock        = PendingBlockNumber.AsBlockReference()
+	LatestBlock         = LatestBlockNumber.AsBlockReference()
+	EarliestBlock       = EarliestBlockNumber.AsBlockReference()
+)
+
 // UnmarshalJSON parses the given JSON fragment into a BlockNumber. It supports:
 // - "latest", "earliest", "pending", "safe", or "finalized" as string arguments
 // - the block number
@@ -153,6 +162,10 @@ func (bn BlockNumber) Uint64() uint64 {
 
 func (bn BlockNumber) String() string {
 	return bn.string(10)
+}
+
+func (bn BlockNumber) AsBlockReference() BlockReference {
+	return AsBlockReference(bn)
 }
 
 func (bn BlockNumber) string(base int) string {

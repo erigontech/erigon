@@ -75,11 +75,6 @@ type EthGetTransactionCount struct {
 	Result hexutil.Uint64 `json:"result"`
 }
 
-type EthSendRawTransaction struct {
-	CommonResponse
-	TxnHash libcommon.Hash `json:"result"`
-}
-
 func (reqGen *requestGenerator) BlockNumber() (uint64, error) {
 	var result hexutil.Uint64
 

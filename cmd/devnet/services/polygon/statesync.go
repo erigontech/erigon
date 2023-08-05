@@ -58,8 +58,10 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64,
 				events = append(events, event)
 			}
 
-			if minEventTime == nil || event.Time.Before(*minEventTime) {
-				minEventTime = &event.Time
+			eventTime := event.Time.Round(1 * time.Second)
+
+			if minEventTime == nil || eventTime.Before(*minEventTime) {
+				minEventTime = &eventTime
 			}
 		}
 		//else {
@@ -68,7 +70,7 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64,
 	}
 
 	if len(events) == 0 {
-		h.logger.Info("Processed sync request", "from", fromID, "to", time.Unix(to, 0), "min-time", minEventTime.Round(1*time.Second),
+		h.logger.Info("Processed sync request", "from", fromID, "to", time.Unix(to, 0), "min-time", minEventTime,
 			"pending", len(h.pendingSyncRecords), "filtered", len(events))
 		return 0, nil, nil
 	}

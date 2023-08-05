@@ -401,14 +401,16 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 }
 
 func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
-	if cs.dropUselessPeers && len(pkt) == 0 {
-		outreq := proto_sentry.PenalizePeerRequest{
-			PeerId: peerID,
+	if len(pkt) == 0 {
+		if cs.dropUselessPeers {
+			outreq := proto_sentry.PenalizePeerRequest{
+				PeerId: peerID,
+			}
+			if _, err := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+				return fmt.Errorf("sending peer useless request: %v", err)
+			}
+			cs.logger.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8])
 		}
-		if _, err := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-			return fmt.Errorf("sending peer useless request: %v", err)
-		}
-		cs.logger.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8])
 		// No point processing empty response
 		return nil
 	}

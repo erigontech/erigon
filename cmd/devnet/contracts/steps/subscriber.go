@@ -127,7 +127,7 @@ func EmitFallbackEvent(node devnet.Node, subContract *contracts.Subscription, op
 
 // initializeTransactOps initializes the transactOpts object for a contract transaction
 func initializeTransactOps(node devnet.Node, transactor libcommon.Address) (*bind.TransactOpts, error) {
-	count, err := node.GetTransactionCount(transactor, requests.BlockNumbers.Latest)
+	count, err := node.GetTransactionCount(transactor, rpc.LatestBlock)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get transaction count for address 0x%x: %v", transactor, err)
