@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_handler"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
@@ -55,20 +56,26 @@ type EngineServer struct {
 	ctx     context.Context
 	lock    sync.Mutex
 	logger  log.Logger
+
+	engineHandler *engine_handler.EngineHandler
 }
+
+const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
 
 func NewEngineServer(ctx context.Context, logger log.Logger, config *chain.Config, executionService execution.ExecutionClient,
 	hd *headerdownload.HeaderDownload,
 	blockDownloader *engine_block_downloader.EngineBlockDownloader, test bool, proposing bool) *EngineServer {
+	chainRW := eth1_chain_reader.NewChainReaderEth1(ctx, config, executionService, fcuTimeout)
 	return &EngineServer{
 		ctx:              ctx,
 		logger:           logger,
 		config:           config,
 		executionService: executionService,
 		blockDownloader:  blockDownloader,
-		chainRW:          eth1_chain_reader.NewChainReaderEth1(ctx, config, executionService, fcuTimeout),
+		chainRW:          chainRW,
 		proposing:        proposing,
 		hd:               hd,
+		engineHandler:    engine_handler.NewEngineHandler(logger, chainRW, blockDownloader, false, hd),
 	}
 }
 
@@ -238,7 +245,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 	s.hd.BeaconRequestList.AddPayloadRequest(block)
 
-	payloadStatus, err := s.handleNewPayload("NewPayload", block)
+	payloadStatus, err := s.engineHandler.HandleNewPayload("NewPayload", block)
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +427,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	if status == nil {
 		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkchoiceState.HeadHash)
 
-		status, err = s.handlesForkChoice("ForkChoiceUpdated", forkchoiceState, 0)
+		status, err = s.engineHandler.HandlesForkChoice("ForkChoiceUpdated", forkchoiceState, 0)
 		if err != nil {
 			return nil, err
 		}

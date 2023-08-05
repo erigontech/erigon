@@ -1,4 +1,4 @@
-package engineapi
+package engine_handler
 
 import (
 	"errors"
@@ -8,16 +8,35 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/log/v3"
 )
 
-const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
+type EngineHandler struct {
+	logger          log.Logger
+	chainRW         eth1_chain_reader.ChainReaderWriterEth1
+	blockDownloader *engine_block_downloader.EngineBlockDownloader
+	hd              *headerdownload.HeaderDownload
+	test            bool
+}
+
+func NewEngineHandler(log log.Logger, chainRW eth1_chain_reader.ChainReaderWriterEth1, blockDownloader *engine_block_downloader.EngineBlockDownloader, test bool, hd *headerdownload.HeaderDownload) *EngineHandler {
+	return &EngineHandler{
+		logger:          log,
+		chainRW:         chainRW,
+		blockDownloader: blockDownloader,
+		hd:              hd,
+		test:            test,
+	}
+}
 
 var errInvalidForkChoiceState = errors.New("forkchoice state is invalid")
 
-func (e *EngineServer) handleNewPayload(
+func (e *EngineHandler) HandleNewPayload(
 	logPrefix string,
 	block *types.Block,
 ) (*engine_types.PayloadStatus, error) {
@@ -104,7 +123,7 @@ func convertGrpcStatusToEngineStatus(status execution.ExecutionStatus) engine_ty
 	panic("giulio u stupid.")
 }
 
-func (e *EngineServer) handlesForkChoice(
+func (e *EngineHandler) HandlesForkChoice(
 	logPrefix string,
 	forkChoice *engine_types.ForkChoiceState,
 	requestId int,
