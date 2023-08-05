@@ -698,14 +698,14 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		log.Info("Using experimental Engine API")
 		engineBackendRPC := engineapi.NewEngineServerExperimental(
 			ctx,
+			chainKv,
+			blockReader,
 			logger,
 			chainConfig,
 			executionRpc,
-			backend.chainDB,
-			blockReader,
 			backend.sentriesClient.Hd,
-			engine_block_downloader.NewEngineBlockDownloader(ctx, logger, executionRpc, backend.sentriesClient.Hd,
-				backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, blockReader, backend.sentriesClient.SendBodyRequest,
+			engine_block_downloader.NewEngineBlockDownloader(ctx, logger, backend.sentriesClient.Hd, executionRpc,
+				backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, backend.sentriesClient.SendBodyRequest, blockReader,
 				chainKv, chainConfig, tmpdir, config.Sync.BodyDownloadTimeoutSeconds),
 			false,
 			config.Miner.EnabledPOS)

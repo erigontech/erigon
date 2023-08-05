@@ -7,12 +7,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
@@ -23,7 +20,6 @@ var errInvalidForkChoiceState = errors.New("forkchoice state is invalid")
 func (e *EngineServerExperimental) handleNewPayload(
 	logPrefix string,
 	block *types.Block,
-	chainReader consensus.ChainHeaderReader,
 ) (*engine_types.PayloadStatus, error) {
 	header := block.Header()
 	headerNumber := header.Number.Uint64()
@@ -31,13 +27,13 @@ func (e *EngineServerExperimental) handleNewPayload(
 
 	e.logger.Info(fmt.Sprintf("[%s] Handling new payload", logPrefix), "height", headerNumber, "hash", headerHash)
 
-	currentHeader := chainReader.CurrentHeader()
+	currentHeader := e.chainRW.CurrentHeader()
 	var currentHeadNumber *uint64
 	if currentHeader != nil {
 		currentHeadNumber = new(uint64)
 		*currentHeadNumber = currentHeader.Number.Uint64()
 	}
-	parent := chainReader.GetHeader(header.ParentHash, headerNumber-1)
+	parent := e.chainRW.GetHeader(header.ParentHash, headerNumber-1)
 	if parent == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] New payload: need to download parent", logPrefix), "height", headerNumber, "hash", headerHash, "parentHash", header.ParentHash)
 		if e.test {
@@ -67,7 +63,7 @@ func (e *EngineServerExperimental) handleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	}
-	if err := eth1_utils.InsertHeaderAndBodyAndWait(e.ctx, e.executionService, header, block.RawBody()); err != nil {
+	if err := e.chainRW.InsertHeaderAndBodyAndWait(header, block.RawBody()); err != nil {
 		return nil, err
 	}
 
@@ -76,7 +72,7 @@ func (e *EngineServerExperimental) handleNewPayload(
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
-	status, latestValidHash, err := eth1_utils.ValidateChain(e.ctx, e.executionService, headerHash, headerNumber)
+	status, latestValidHash, err := e.chainRW.ValidateChain(headerHash, headerNumber)
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
 		return nil, err
@@ -110,14 +106,13 @@ func convertGrpcStatusToEngineStatus(status execution.ExecutionStatus) engine_ty
 
 func (e *EngineServerExperimental) handlesForkChoice(
 	logPrefix string,
-	chainReader *eth1_chain_reader.ChainReaderEth1,
 	forkChoice *engine_types.ForkChoiceState,
 	requestId int,
 ) (*engine_types.PayloadStatus, error) {
 	headerHash := forkChoice.HeadHash
 
 	e.logger.Debug(fmt.Sprintf("[%s] Handling fork choice", logPrefix), "headerHash", headerHash)
-	headerNumber, err := chainReader.HeaderNumber(headerHash)
+	headerNumber, err := e.chainRW.HeaderNumber(headerHash)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +129,7 @@ func (e *EngineServerExperimental) handlesForkChoice(
 	}
 
 	// Header itself may already be in the snapshots, if CL starts off at much earlier state than Erigon
-	header := chainReader.GetHeader(headerHash, *headerNumber)
+	header := e.chainRW.GetHeader(headerHash, *headerNumber)
 	if header == nil {
 		e.logger.Debug(fmt.Sprintf("[%s] Fork choice: need to download header with hash %x", logPrefix, headerHash))
 		if e.test {
@@ -147,7 +142,7 @@ func (e *EngineServerExperimental) handlesForkChoice(
 	}
 
 	// Call forkchoice here
-	status, latestValidHash, err := eth1_utils.UpdateForkChoice(e.ctx, e.executionService, forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash, fcuTimeout)
+	status, latestValidHash, err := e.chainRW.UpdateForkChoice(forkChoice.HeadHash, forkChoice.SafeBlockHash, forkChoice.FinalizedBlockHash)
 	if err != nil {
 		return nil, err
 	}
