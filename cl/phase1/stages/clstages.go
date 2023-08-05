@@ -226,7 +226,7 @@ func ConsensusClStages(ctx context.Context,
 					logger.Info("waiting for blocks...",
 						"seenSlot", args.seenSlot,
 						"targetSlot", args.targetSlot,
-						"requestSlot", args.seenSlot+1,
+						"requestSlot", args.targetSlot,
 					)
 					respCh := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock])
 					errCh := make(chan error)
@@ -234,7 +234,7 @@ func ConsensusClStages(ctx context.Context,
 					for _, v := range sources {
 						sourceFunc := v.GetRange
 						go func() {
-							blocks, err := sourceFunc(ctx, args.seenSlot+1, 1)
+							blocks, err := sourceFunc(ctx, args.seenSlot+1, args.targetSlot-args.seenSlot)
 							if err != nil {
 								errCh <- err
 								return
@@ -250,7 +250,7 @@ func ConsensusClStages(ctx context.Context,
 							if err := processBlock(block, true, true); err != nil {
 								return err
 							}
-							logger.Info("block processed", "slot", block.Data.Block.Slot)
+							logger.Info("block processed", "slot", blocks[0].Data.Block.Slot)
 						}
 					}
 					return nil
