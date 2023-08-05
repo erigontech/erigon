@@ -656,8 +656,8 @@ github.com/opencontainers/runtime-spec v1.0.2/go.mod h1:jwyrGlmzljRJv/Fgzds9SsS/
 github.com/opentracing/opentracing-go v1.1.0/go.mod h1:UkNAQd3GIcIGf0SeVgPpRdFStlNbqXla1AfSYxPUl2o=
 github.com/openzipkin/zipkin-go v0.1.1/go.mod h1:NtoC/o8u3JlF1lSlyPNswIbeQH9bJTmOf0Erfk+hxe8=
 github.com/openzipkin/zipkin-go v0.1.6/go.mod h1:QgAqvLzwWbR/WpD4A3cGpPtJrZXNIiJc5AZX7/PBEpw=
-github.com/otterscan/go-otterscan v0.0.0-20230804182934-1c48c923e648 h1:FSsOiFYQQDvL8g/f8UEHi6BGbvV/umtjdfqWMFvy5ls=
-github.com/otterscan/go-otterscan v0.0.0-20230804182934-1c48c923e648/go.mod h1:FWaIgVBiIdUXKeqkJsg7VirIr7HdQ5IMGnXeXWY3bOw=
+github.com/otterscan/go-otterscan v0.0.0-20230805200439-93abaa76b77e h1:ckGrxCuwEUbHET9NJtsQE0Wc3wJ15d8gBVUtJRcsmA0=
+github.com/otterscan/go-otterscan v0.0.0-20230805200439-93abaa76b77e/go.mod h1:FWaIgVBiIdUXKeqkJsg7VirIr7HdQ5IMGnXeXWY3bOw=
 github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 h1:onHthvaw9LFnH4t2DcNVpwGmV9E1BkGknEliJkfwQj0=
 github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58/go.mod h1:DXv8WO4yhMYhSNPKjeNKa5WY9YCIEBRbNzFFPJbWO6Y=
 github.com/pelletier/go-toml v1.9.5 h1:4yBQzkHv+7BHq2PQUZF3Mx0IYxG7LsP222s7Agd3ve8=
