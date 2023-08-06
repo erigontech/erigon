@@ -28,8 +28,8 @@ func init() {
 		scenarios.StepHandler(DeployChildChainReceiver),
 		scenarios.StepHandler(DeployRootChainSender),
 		scenarios.StepHandler(GenerateSyncEvents),
-		scenarios.StepHandler(ProcessTransfers),
-		scenarios.StepHandler(BatchProcessTransfers),
+		scenarios.StepHandler(ProcessRootTransfers),
+		scenarios.StepHandler(BatchProcessRootTransfers),
 	)
 }
 
@@ -211,7 +211,7 @@ func DeployChildChainReceiver(ctx context.Context, deployerName string) (context
 		WithParam("childReceiver", contract), nil
 }
 
-func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers int, minTransfer int, maxTransfer int) error {
+func ProcessRootTransfers(ctx context.Context, sourceName string, numberOfTransfers int, minTransfer int, maxTransfer int) error {
 	source := accounts.GetAccount(sourceName)
 	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
 
@@ -361,7 +361,7 @@ func ProcessTransfers(ctx context.Context, sourceName string, numberOfTransfers 
 	return nil
 }
 
-func BatchProcessTransfers(ctx context.Context, sourceName string, batches int, transfersPerBatch, minTransfer int, maxTransfer int) error {
+func BatchProcessRootTransfers(ctx context.Context, sourceName string, batches int, transfersPerBatch, minTransfer int, maxTransfer int) error {
 	source := accounts.GetAccount(sourceName)
 	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
 

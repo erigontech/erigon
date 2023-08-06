@@ -3,6 +3,7 @@ package polygon
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -66,6 +67,7 @@ type Heimdall struct {
 	validatorSet       *valset.ValidatorSet
 	pendingCheckpoint  *checkpoint.Checkpoint
 	latestCheckpoint   *CheckpointAck
+	ackWaiter          *sync.Cond
 	currentSpan        *span.HeimdallSpan
 	spans              map[uint64]*span.HeimdallSpan
 	logger             log.Logger
@@ -89,6 +91,8 @@ func NewHeimdall(chainConfig *chain.Config, checkpointConfig *CheckpointConfig, 
 		spans:              map[uint64]*span.HeimdallSpan{},
 		pendingSyncRecords: map[syncRecordKey]*EventRecordWithBlock{},
 		logger:             logger}
+
+	heimdall.ackWaiter = sync.NewCond(heimdall)
 
 	if heimdall.checkpointConfig.RootChainTxConfirmations == 0 {
 		heimdall.checkpointConfig.RootChainTxConfirmations = DefaultRootChainTxConfirmations
@@ -366,6 +370,28 @@ func (h *Heimdall) Stop() {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func (h *Heimdall) AwaitCheckpoint(ctx context.Context, blockNumber *big.Int) error {
+	h.Lock()
+	defer h.Unlock()
+
+	if ctx.Done() != nil {
+		go func() {
+			defer h.ackWaiter.Broadcast()
+			<-ctx.Done()
+		}()
+	}
+
+	for h.latestCheckpoint == nil || h.latestCheckpoint.EndBlock < blockNumber.Uint64() {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		h.ackWaiter.Wait()
+	}
+
+	return nil
 }
 
 func (h *Heimdall) isOldTx(txHash libcommon.Hash, logIndex uint64, eventType BridgeEvent, event interface{}) (bool, error) {

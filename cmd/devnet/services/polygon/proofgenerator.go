@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -29,26 +28,55 @@ import (
 var ErrTokenIndexOutOfRange = errors.New("Index is grater than the number of tokens in transaction")
 
 type ProofGenerator struct {
-	rootChainBinding *contracts.TestRootChain
+	heimdall *Heimdall
 }
 
-func NewProofGenerator(rootChainBinding *contracts.TestRootChain) *ProofGenerator {
-	return &ProofGenerator{rootChainBinding}
+func NewProofGenerator() *ProofGenerator {
+	return &ProofGenerator{}
 }
 
-func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash libcommon.Hash, eventSignature string, tokenIndex int) (string, error) {
+func (pg *ProofGenerator) NodeCreated(ctx context.Context, node devnet.Node) {
+
+	if pg.heimdall == nil {
+		if strings.HasPrefix(node.Name(), "bor") {
+			if network := devnet.CurrentNetwork(ctx); network != nil {
+				for _, service := range network.Services {
+					if heimdall, ok := service.(*Heimdall); ok {
+						pg.heimdall = heimdall
+					}
+				}
+			}
+		}
+	}
+}
+
+func (pg *ProofGenerator) NodeStarted(ctx context.Context, node devnet.Node) {
+}
+
+func (pg *ProofGenerator) Start(ctx context.Context) error {
+	return nil
+}
+
+func (pg *ProofGenerator) Stop() {
+}
+
+func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash libcommon.Hash, eventSignature libcommon.Hash, tokenIndex int) ([]byte, error) {
 	logger := devnet.Logger(ctx)
+
+	if pg.heimdall == nil || pg.heimdall.rootChainBinding == nil {
+		return nil, fmt.Errorf("ProofGenerator not initialized")
+	}
 
 	logger.Info("Checking for checkpoint status", "hash", burnTxHash)
 
 	isCheckpointed, err := pg.isCheckPointed(ctx, burnTxHash)
 
 	if err != nil {
-		return "", fmt.Errorf("Error getting burn transaction: %w", err)
+		return nil, fmt.Errorf("Error getting burn transaction: %w", err)
 	}
 
 	if !isCheckpointed {
-		return "", fmt.Errorf("Burn transaction has not been checkpointed yet")
+		return nil, fmt.Errorf("Burn transaction has not been checkpointed yet")
 	}
 
 	// build payload for exit
@@ -56,14 +84,14 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 
 	if err != nil {
 		if errors.Is(err, ErrTokenIndexOutOfRange) {
-			return "", fmt.Errorf("Block not included: %w", err)
+			return nil, fmt.Errorf("Block not included: %w", err)
 		}
 
-		return "", fmt.Errorf("Null receipt received")
+		return nil, fmt.Errorf("Null receipt received")
 	}
 
 	if len(result) == 0 {
-		return "", fmt.Errorf("Null result received")
+		return nil, fmt.Errorf("Null result received")
 	}
 
 	return result, nil
@@ -81,11 +109,10 @@ func (pg *ProofGenerator) getChainBlockInfo(ctx context.Context, burnTxHash libc
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		lastChild, err[0] = pg.rootChainBinding.GetLastChildBlock(&bind.CallOpts{})
+		lastChild, err[0] = pg.heimdall.rootChainBinding.GetLastChildBlock(&bind.CallOpts{})
 	}()
 
 	wg.Add(1)
-
 	go func() {
 		defer wg.Done()
 		burnTransaction, err[1] = childNode.GetTransactionByHash(burnTxHash)
@@ -113,16 +140,16 @@ func (pg *ProofGenerator) isCheckPointed(ctx context.Context, burnTxHash libcomm
 	return lastChildBlockNum >= burnTxBlockNum, nil
 }
 
-func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash libcommon.Hash, logEventSig string, index int) (string, error) {
+func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash libcommon.Hash, logEventSig libcommon.Hash, index int) ([]byte, error) {
 
 	node := devnet.SelectBlockProducer(ctx)
 
 	if node == nil {
-		return "", fmt.Errorf("No node available")
+		return nil, fmt.Errorf("No node available")
 	}
 
 	if index < 0 {
-		return "", fmt.Errorf("Index must not negative")
+		return nil, fmt.Errorf("Index must not negative")
 	}
 
 	var receipt *types.Receipt
@@ -132,11 +159,11 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	lastChildBlockNum, txBlockNum, err := pg.getChainBlockInfo(ctx, burnTxHash)
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if lastChildBlockNum < txBlockNum {
-		return "", fmt.Errorf("Burn transaction has not been checkpointed as yet")
+		return nil, fmt.Errorf("Burn transaction has not been checkpointed as yet")
 	}
 
 	// step 2-  get transaction receipt from txhash and
@@ -160,7 +187,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 
 	for _, err := range errs {
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 
@@ -172,20 +199,20 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	rootBlockNumber, start, end, err = pg.getRootBlockInfo(txBlockNum)
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	blockProof, err := getBlockProof(node, txBlockNum, start, end)
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// step 5- create receipt proof
 	receiptProof, err := getReceiptProof(receipt, block, node, nil)
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// step 6 - encode payload, convert into hex
@@ -193,7 +220,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 		logIndices := getAllLogIndices(logEventSig, receipt)
 
 		if index >= len(logIndices) {
-			return "", ErrTokenIndexOutOfRange
+			return nil, ErrTokenIndexOutOfRange
 		}
 
 		return encodePayload(
@@ -212,7 +239,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 	logIndex := getLogIndex(logEventSig, receipt)
 
 	if logIndex < 0 {
-		return "", fmt.Errorf("Log not found in receipt")
+		return nil, fmt.Errorf("Log not found in receipt")
 	}
 
 	return encodePayload(
@@ -228,7 +255,7 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 		logIndex), nil
 }
 
-func encodePayload(headerNumber uint64, buildBlockProof string, blockNumber uint64, timestamp uint64, transactionsRoot libcommon.Hash, receiptsRoot libcommon.Hash, receipt []byte, receiptParentNodes [][]byte, path []byte, logIndex int) string {
+func encodePayload(headerNumber uint64, buildBlockProof string, blockNumber uint64, timestamp uint64, transactionsRoot libcommon.Hash, receiptsRoot libcommon.Hash, receipt []byte, receiptParentNodes [][]byte, path []byte, logIndex int) []byte {
 	parentNodesBytes, _ := rlp.EncodeToBytes(receiptParentNodes)
 
 	bytes, _ := rlp.EncodeToBytes(
@@ -245,7 +272,7 @@ func encodePayload(headerNumber uint64, buildBlockProof string, blockNumber uint
 			logIndex,
 		})
 
-	return hexutility.Encode(bytes)
+	return bytes
 }
 
 type receiptProof struct {
@@ -434,23 +461,23 @@ func recursiveZeroHash(n int) libcommon.Hash {
 	return crypto.Keccak256Hash(bytes)
 }
 
-func getAllLogIndices(logEventSig string, receipt *types.Receipt) []int {
+func getAllLogIndices(logEventSig libcommon.Hash, receipt *types.Receipt) []int {
 	var logIndices []int
 
-	switch logEventSig {
+	switch logEventSig.Hex() {
 	case "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef":
 	case "0xf94915c6d1fd521cee85359239227480c7e8776d7caf1fc3bacad5c269b66a14":
 		for index, log := range receipt.Logs {
-			if strings.EqualFold(hexutility.Encode(log.Topics[0][:]), logEventSig) &&
-				strings.EqualFold(hexutility.Encode(log.Topics[2][:]), "0x0000000000000000000000000000000000000000000000000000000000000000") {
+			if log.Topics[0] == logEventSig &&
+				log.Topics[2] == zeroHash {
 				logIndices = append(logIndices, index)
 			}
 		}
 	case "0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62":
 	case "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb":
 		for index, log := range receipt.Logs {
-			if strings.EqualFold(hexutility.Encode(log.Topics[0][:]), logEventSig) &&
-				strings.EqualFold(hexutility.Encode(log.Topics[3][:]), "0x0000000000000000000000000000000000000000000000000000000000000000") {
+			if log.Topics[0] == logEventSig &&
+				log.Topics[3] == zeroHash {
 				logIndices = append(logIndices, index)
 			}
 		}
@@ -458,14 +485,14 @@ func getAllLogIndices(logEventSig string, receipt *types.Receipt) []int {
 	case "0xf871896b17e9cb7a64941c62c188a4f5c621b86800e3d15452ece01ce56073df":
 		for index, log := range receipt.Logs {
 			if strings.EqualFold(hexutility.Encode(log.Topics[0][:]), "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef") &&
-				strings.EqualFold(hexutility.Encode(log.Topics[2][:]), "0x0000000000000000000000000000000000000000000000000000000000000000") {
+				log.Topics[2] == zeroHash {
 				logIndices = append(logIndices, index)
 			}
 		}
 
 	default:
 		for index, log := range receipt.Logs {
-			if strings.EqualFold(hexutility.Encode(log.Topics[0][:]), logEventSig) {
+			if log.Topics[0] == logEventSig {
 				logIndices = append(logIndices, index)
 			}
 		}
@@ -474,13 +501,13 @@ func getAllLogIndices(logEventSig string, receipt *types.Receipt) []int {
 	return logIndices
 }
 
-func getLogIndex(logEventSig string, receipt *types.Receipt) int {
-	switch logEventSig {
+func getLogIndex(logEventSig libcommon.Hash, receipt *types.Receipt) int {
+	switch logEventSig.Hex() {
 	case "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef":
 	case "0xf94915c6d1fd521cee85359239227480c7e8776d7caf1fc3bacad5c269b66a14":
 		for index, log := range receipt.Logs {
-			if strings.EqualFold(hexutility.Encode(log.Topics[0][:]), logEventSig) &&
-				strings.EqualFold(hexutility.Encode(log.Topics[2][:]), "0x0000000000000000000000000000000000000000000000000000000000000000") {
+			if log.Topics[0] == logEventSig &&
+				log.Topics[2] == zeroHash {
 				return index
 			}
 		}
@@ -488,19 +515,18 @@ func getLogIndex(logEventSig string, receipt *types.Receipt) int {
 	case "0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62":
 	case "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb":
 		for index, log := range receipt.Logs {
-			if strings.EqualFold(hexutility.Encode(log.Topics[0][:]), logEventSig) &&
-				strings.EqualFold(hexutility.Encode(log.Topics[3][:]), "0x0000000000000000000000000000000000000000000000000000000000000000") {
+			if log.Topics[0] == logEventSig &&
+				log.Topics[3] == zeroHash {
 				return index
 			}
 		}
 
 	default:
 		for index, log := range receipt.Logs {
-			if strings.EqualFold(hexutility.Encode(log.Topics[0][:]), logEventSig) {
+			if log.Topics[0] == logEventSig {
 				return index
 			}
 		}
-
 	}
 
 	return -1
@@ -514,7 +540,7 @@ func (pg *ProofGenerator) getRootBlockInfo(txBlockNumber uint64) (rootBlockNumbe
 		return 0, 0, 0, err
 	}
 
-	headerBlock, err := pg.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(rootBlockNumber)))
+	headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(rootBlockNumber)))
 
 	if err != nil {
 		return 0, 0, 0, err
@@ -529,7 +555,7 @@ func (pg *ProofGenerator) findRootBlockFromChild(childBlockNumber uint64) (uint6
 	// first checkpoint id = start * 10000
 	start := uint64(1)
 
-	currentHeaderBlock, err := pg.rootChainBinding.CurrentHeaderBlock(&bind.CallOpts{})
+	currentHeaderBlock, err := pg.heimdall.rootChainBinding.CurrentHeaderBlock(&bind.CallOpts{})
 
 	if err != nil {
 		return 0, err
@@ -547,7 +573,7 @@ func (pg *ProofGenerator) findRootBlockFromChild(childBlockNumber uint64) (uint6
 		}
 
 		mid := (start + end) / 2
-		headerBlock, err := pg.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(mid*checkPointInterval)))
+		headerBlock, err := pg.heimdall.rootChainBinding.HeaderBlocks(&bind.CallOpts{}, big.NewInt(int64(mid*checkPointInterval)))
 
 		if err != nil {
 			return 0, err

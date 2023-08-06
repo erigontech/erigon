@@ -586,5 +586,7 @@ func (h *Heimdall) handleRootHeaderBlock(event *contracts.TestRootChainNewHeader
 
 	h.latestCheckpoint = &ack
 
+	h.ackWaiter.Broadcast()
+
 	return nil
 }

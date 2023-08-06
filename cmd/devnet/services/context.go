@@ -37,3 +37,15 @@ func Heimdall(ctx context.Context) *polygon.Heimdall {
 
 	return nil
 }
+
+func ProofGenerator(ctx context.Context) *polygon.ProofGenerator {
+	if network := devnet.CurrentNetwork(ctx); network != nil {
+		for _, service := range network.Services {
+			if proofGenerator, ok := service.(*polygon.ProofGenerator); ok {
+				return proofGenerator
+			}
+		}
+	}
+
+	return nil
+}
