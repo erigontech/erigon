@@ -956,7 +956,12 @@ func (b *BtIndex) FileName() string { return path.Base(b.filePath) }
 
 func (b *BtIndex) Empty() bool { return b == nil || b.ef == nil || b.ef.Count() == 0 }
 
-func (b *BtIndex) KeyCount() uint64 { return b.ef.Count() }
+func (b *BtIndex) KeyCount() uint64 {
+	if b.Empty() {
+		return 0
+	}
+	return b.ef.Count()
+}
 
 func (b *BtIndex) Close() {
 	if b == nil {
