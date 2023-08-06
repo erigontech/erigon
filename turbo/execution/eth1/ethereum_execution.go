@@ -131,7 +131,6 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if header == nil || body == nil {
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-			MissingHash:      req.Hash,
 			ValidationStatus: execution.ExecutionStatus_MissingSegment,
 		}, nil
 	}
@@ -141,7 +140,6 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return &execution.ValidationReceipt{
 			ValidationStatus: execution.ExecutionStatus_TooFarAway,
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-			MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 		}, tx.Commit()
 	}
 
@@ -173,7 +171,6 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	return &execution.ValidationReceipt{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  gointerfaces.ConvertHashToH256(lvh),
-		MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}), // TODO: implement
 	}, tx.Commit()
 }
 
