@@ -623,14 +623,22 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 		return nil
 	}
 
-	firstHeight := int64(-1)
+	var bottomBlock *types.Block
 
 	for i := n; i < chain.Length(); i++ {
 		if err := chain.Blocks[i].HashCheck(); err != nil {
 			return err
 		}
-		if firstHeight == -1 {
-			firstHeight = int64(chain.Blocks[i].NumberU64())
+		if bottomBlock == nil {
+			bottomBlock = chain.Blocks[i]
+		}
+		cr := stagedsync.ChainReader{Cfg: *ms.ChainConfig, Db: tx, BlockReader: ms.BlockReader}
+		if err := ms.Engine.VerifyHeader(cr, chain.Blocks[i].Header(), true); err != nil {
+			return err
+		}
+
+		if err := ms.Engine.VerifyUncles(cr, chain.Blocks[i].Header(), chain.Blocks[i].Uncles()); err != nil {
+			return err
 		}
 		rawdb.WriteHeader(tx, chain.Blocks[i].Header())
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, chain.Blocks[i].Hash(), chain.Blocks[i].NumberU64(), chain.Blocks[i].RawBody()); err != nil {
@@ -648,10 +656,29 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack, tx kv.RwTx) error {
 		}
 		rawdb.WriteCanonicalHash(tx, chain.Blocks[i].Hash(), chain.Blocks[i].NumberU64())
 	}
-	if firstHeight == -1 {
+	if bottomBlock == nil {
 		return nil
 	}
+	currentHash := bottomBlock.ParentHash()
+	currentNumber := bottomBlock.NumberU64() - 1
+	for canonical, err := rawdb.IsCanonicalHash(tx, currentHash, currentNumber); !canonical; canonical, err = rawdb.IsCanonicalHash(tx, currentHash, currentNumber) {
+		if err != nil {
+			return err
+		}
+		currentHeader := rawdb.ReadHeader(tx, currentHash, currentNumber)
+		if currentHeader == nil {
+			return fmt.Errorf("missing header")
+		}
+		if err := rawdb.WriteCanonicalHash(tx, currentHash, currentNumber); err != nil {
+			return err
+		}
 
+		currentHash = currentHeader.ParentHash
+		currentNumber--
+	}
+
+	ms.posStagedSync.UnwindTo(currentNumber, libcommon.Hash{})
+	ms.posStagedSync.RunUnwind(ms.DB, tx)
 	hook := stages2.NewHook(ms.Ctx, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
 
 	if err := stages.SaveStageProgress(tx, stages.Headers, chain.TopBlock.NumberU64()); err != nil {

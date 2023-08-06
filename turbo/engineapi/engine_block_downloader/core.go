@@ -75,11 +75,13 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 		e.status.Store(headerdownload.Idle)
 		return
 	}
-	if block != nil {
-		// Can fail, not an issue in this case.
-		e.chainRW.InsertHeaderAndBodyAndWait(block.Header(), block.RawBody())
-	}
 	e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
+	if block == nil {
+		e.status.Store(headerdownload.Idle)
+		return
+	}
+	// Can fail, not an issue in this case.
+	e.chainRW.InsertHeaderAndBodyAndWait(block.Header(), block.RawBody())
 	// Lastly attempt verification
 	status, latestValidHash, err := e.chainRW.ValidateChain(block.Hash(), block.NumberU64())
 	if err != nil {
