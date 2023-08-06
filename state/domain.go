@@ -979,7 +979,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 					return fmt.Errorf("add %s compressed values key [%x]: %w", d.filenameBase, k, err)
 				}
 				if err = coll.valuesComp.AddWord(v); err != nil {
-					return fmt.Errorf("add %s compressed values val [%x]=>[%x]: %w", d.filenameBase, k, err)
+					return fmt.Errorf("add %s compressed values val [%x]: %w", d.filenameBase, k, err)
 				}
 			default:
 				if err = coll.valuesComp.AddUncompressedWord(k); err != nil {
