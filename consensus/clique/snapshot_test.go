@@ -34,7 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -427,7 +427,7 @@ func TestClique(t *testing.T) {
 			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB, log.New())
 			engine.FakeDiff = true
 			// Create a pristine blockchain with the genesis injected
-			m := stages.MockWithGenesisEngine(t, genesis, engine, false)
+			m := mock.MockWithGenesisEngine(t, genesis, engine, false)
 
 			chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(tt.votes), func(j int, gen *core.BlockGen) {
 				// Cast the vote contained in this block

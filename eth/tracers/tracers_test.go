@@ -32,7 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/holiman/uint256"
@@ -95,7 +95,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Balance: big.NewInt(500000000000000),
 	}
 
-	m := stages.Mock(t)
+	m := mock.Mock(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()

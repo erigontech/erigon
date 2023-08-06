@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -167,7 +167,7 @@ func (c *spanner) CommitSpan(heimdallSpan span.HeimdallSpan, syscall consensus.S
 }
 
 type validator struct {
-	*stages.MockSentry
+	*mock.MockSentry
 	heimdall *test_heimdall
 	blocks   map[uint64]*types.Block
 }
@@ -264,7 +264,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 	})
 
 	return validator{
-		stages.MockWithEverything(t, &types.Genesis{Config: heimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false),
+		mock.MockWithEverything(t, &types.Genesis{Config: heimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false),
 		heimdall,
 		blocks,
 	}

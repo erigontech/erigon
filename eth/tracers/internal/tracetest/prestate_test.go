@@ -26,7 +26,6 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -36,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/tests"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 // prestateTrace is the result of a prestateTrace run.
@@ -114,7 +114,7 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 				}
 				rules = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 			)
-			m := stages.Mock(t)
+			m := mock.Mock(t)
 			dbTx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()

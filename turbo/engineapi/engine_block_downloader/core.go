@@ -6,7 +6,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
@@ -78,11 +77,11 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 	}
 	if block != nil {
 		// Can fail, not an issue in this case.
-		eth1_utils.InsertHeaderAndBodyAndWait(e.ctx, e.executionModule, block.Header(), block.RawBody())
+		e.chainRW.InsertHeaderAndBodyAndWait(block.Header(), block.RawBody())
 	}
 	e.logger.Info("[EngineBlockDownloader] Finished downloading blocks", "from", startBlock-1, "to", endBlock)
 	// Lastly attempt verification
-	status, latestValidHash, err := eth1_utils.ValidateChain(e.ctx, e.executionModule, block.Hash(), block.NumberU64())
+	status, latestValidHash, err := e.chainRW.ValidateChain(block.Hash(), block.NumberU64())
 	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] block verification failed", "reason", err)
 		e.status.Store(headerdownload.Idle)

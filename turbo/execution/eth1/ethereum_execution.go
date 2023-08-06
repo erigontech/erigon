@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -130,7 +131,6 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if header == nil || body == nil {
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-			MissingHash:      req.Hash,
 			ValidationStatus: execution.ExecutionStatus_MissingSegment,
 		}, nil
 	}
@@ -140,7 +140,6 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return &execution.ValidationReceipt{
 			ValidationStatus: execution.ExecutionStatus_TooFarAway,
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-			MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 		}, tx.Commit()
 	}
 
@@ -172,7 +171,6 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	return &execution.ValidationReceipt{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  gointerfaces.ConvertHashToH256(lvh),
-		MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}), // TODO: implement
 	}, tx.Commit()
 }
 
@@ -203,11 +201,19 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	}
 	defer tx.Rollback()
 	// Run the forkchoice
-	if err := e.executionPipeline.Run(e.db, tx, false); err != nil {
+	if err := e.executionPipeline.Run(e.db, tx, true); err != nil {
 		e.logger.Error("Could not start execution service", "err", err)
 		return
 	}
 	if err := tx.Commit(); err != nil {
 		e.logger.Error("Could not start execution service", "err", err)
 	}
+}
+
+func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execution.ReadyResponse, error) {
+	if !e.semaphore.TryAcquire(1) {
+		return &execution.ReadyResponse{Ready: false}, nil
+	}
+	defer e.semaphore.Release(1)
+	return &execution.ReadyResponse{Ready: true}, nil
 }

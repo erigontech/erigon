@@ -31,7 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -58,7 +58,7 @@ func TestReimportMirroredState(t *testing.T) {
 		Config: params.AllCliqueProtocolChanges,
 	}
 	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
-	m := stages.MockWithGenesisEngine(t, genspec, engine, false)
+	m := mock.MockWithGenesisEngine(t, genspec, engine, false)
 
 	// Generate a batch of blocks, each properly signed
 	getHeader := func(hash libcommon.Hash, number uint64) (h *types.Header) {

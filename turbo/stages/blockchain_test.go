@@ -50,7 +50,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 // So we can deterministically seed different blockchains
@@ -60,7 +60,7 @@ var (
 )
 
 // makeBlockChain creates a deterministic chain of blocks rooted at parent.
-func makeBlockChain(parent *types.Block, n int, m *stages.MockSentry, seed int) *core.ChainPack {
+func makeBlockChain(parent *types.Block, n int, m *mock.MockSentry, seed int) *core.ChainPack {
 	chain, _ := core.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, n, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{0: byte(seed), 19: byte(i)})
 	})
@@ -70,8 +70,8 @@ func makeBlockChain(parent *types.Block, n int, m *stages.MockSentry, seed int) 
 // newCanonical creates a chain database, and injects a deterministic canonical
 // chain. Depending on the full flag, if creates either a full block chain or a
 // header only chain.
-func newCanonical(t *testing.T, n int) *stages.MockSentry {
-	m := stages.Mock(t)
+func newCanonical(t *testing.T, n int) *mock.MockSentry {
+	m := mock.Mock(t)
 
 	// Create and inject the requested chain
 	if n == 0 {
@@ -87,7 +87,7 @@ func newCanonical(t *testing.T, n int) *stages.MockSentry {
 }
 
 // Test fork of length N starting from block i
-func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1, td2 *big.Int)) {
+func testFork(t *testing.T, m *mock.MockSentry, i, n int, comparator func(td1, td2 *big.Int)) {
 	// Copy old chain up to #i into a new db
 	canonicalMock := newCanonical(t, i)
 	var err error
@@ -407,8 +407,8 @@ func TestChainTxReorgs(t *testing.T) {
 		signer = types.LatestSigner(gspec.Config)
 	)
 
-	m := stages.MockWithGenesis(t, gspec, key1, false)
-	m2 := stages.MockWithGenesis(t, gspec, key1, false)
+	m := mock.MockWithGenesis(t, gspec, key1, false)
+	m2 := mock.MockWithGenesis(t, gspec, key1, false)
 	defer m2.DB.Close()
 
 	// Create two transactions shared between the chains:
@@ -610,7 +610,7 @@ func TestEIP155Transition(t *testing.T) {
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	chain, chainErr := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var (
@@ -733,7 +733,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
-	m := stages.MockWithGenesisPruneMode(t, gspec, key, 128, pm, false)
+	m := mock.MockWithGenesisPruneMode(t, gspec, key, 128, pm, false)
 
 	head := uint64(4)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, int(head), func(i int, block *core.BlockGen) {
@@ -955,7 +955,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 			Alloc: types.GenesisAlloc{address: {Balance: funds}},
 		}
 	)
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		var (
@@ -1026,7 +1026,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
-	m := stages.MockWithGenesis(t, gspec, bankKey, false)
+	m := mock.MockWithGenesis(t, gspec, bankKey, false)
 
 	var theAddr libcommon.Address
 
@@ -1090,7 +1090,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 // https://github.com/ethereum/go-ethereum/pull/15941
 func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	// Generate a canonical chain to act as the main dataset
-	m, m2 := stages.Mock(t), stages.Mock(t)
+	m, m2 := mock.Mock(t), mock.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *core.BlockGen) { b.SetCoinbase(libcommon.Address{1}) })
 	if err != nil {
@@ -1153,7 +1153,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 func TestLargeReorgTrieGC(t *testing.T) {
 	// Generate the original common chain segment and the two competing forks
 
-	m, m2 := stages.Mock(t), stages.Mock(t)
+	m, m2 := mock.Mock(t), mock.Mock(t)
 
 	shared, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
@@ -1211,7 +1211,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 //   - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
 	// Generate a canonical chain to act as the main dataset
-	m := stages.Mock(t)
+	m := mock.Mock(t)
 
 	// We must use a pretty long chain to ensure that the fork doesn't overtake us
 	// until after at least 128 blocks post tip
@@ -1236,7 +1236,7 @@ func TestLowDiffLongChain(t *testing.T) {
 	}
 
 	// Import the canonical chain
-	m2 := stages.Mock(t)
+	m2 := mock.Mock(t)
 
 	if err := m2.InsertChain(chain, nil); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
@@ -1319,7 +1319,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 			},
 		}
 	)
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
@@ -1425,7 +1425,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 			},
 		},
 	}
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
 		// One transaction to AA, to kill it
@@ -1542,7 +1542,7 @@ func TestCVE2020_26265(t *testing.T) {
 			},
 		},
 	}
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
@@ -1609,7 +1609,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 			},
 		},
 	}
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
@@ -1735,7 +1735,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			},
 		},
 	}
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 	var nonce uint64
 
 	type expectation struct {
@@ -1924,7 +1924,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 			},
 		},
 	}
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 	nonce := uint64(0)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, b *core.BlockGen) {
@@ -2001,7 +2001,7 @@ func TestEIP2718Transition(t *testing.T) {
 			},
 		}
 	)
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
@@ -2096,7 +2096,7 @@ func TestEIP1559Transition(t *testing.T) {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := stages.MockWithGenesis(t, gspec, key1, false)
+	m := mock.MockWithGenesis(t, gspec, key1, false)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 501, func(i int, b *core.BlockGen) {
 		if i == 500 {
@@ -2218,7 +2218,7 @@ func TestEIP1559Transition(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func current(m *stages.MockSentry, tx kv.Tx) *types.Block {
+func current(m *mock.MockSentry, tx kv.Tx) *types.Block {
 	if tx != nil {
 		b, err := m.BlockReader.CurrentBlock(tx)
 		if err != nil {

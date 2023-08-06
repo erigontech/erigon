@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -37,34 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
-
-func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash libcommon.Hash, err error) {
-	if pendingPayloadStatus := hd.GetPendingPayloadStatus(); pendingPayloadStatus != nil {
-		if err != nil {
-			hd.PayloadStatusCh <- engine_types.PayloadStatus{CriticalError: err}
-		} else {
-			hd.PayloadStatusCh <- *pendingPayloadStatus
-		}
-	} else if pendingPayloadHash := hd.GetPendingPayloadHash(); pendingPayloadHash != (libcommon.Hash{}) {
-		if err != nil {
-			hd.PayloadStatusCh <- engine_types.PayloadStatus{CriticalError: err}
-		} else {
-			var status engine_types.EngineStatus
-			if headBlockHash == pendingPayloadHash {
-				status = engine_types.ValidStatus
-			} else {
-				log.Warn("Failed to execute pending payload", "pendingPayload", pendingPayloadHash, "headBlock", headBlockHash)
-				status = engine_types.InvalidStatus
-			}
-			hd.PayloadStatusCh <- engine_types.PayloadStatus{
-				Status:          status,
-				LatestValidHash: &headBlockHash,
-			}
-		}
-	}
-	hd.ClearPendingPayloadHash()
-	hd.SetPendingPayloadStatus(nil)
-}
 
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(ctx context.Context,
@@ -92,10 +63,6 @@ func StageLoop(ctx context.Context,
 
 		// Estimate the current top height seen from the peer
 		err := StageLoopIteration(ctx, db, nil, sync, initialCycle, logger, blockReader, hook)
-		db.View(ctx, func(tx kv.Tx) error {
-			SendPayloadStatus(hd, rawdb.ReadHeadBlockHash(tx), err)
-			return nil
-		})
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
