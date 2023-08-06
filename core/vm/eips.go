@@ -28,6 +28,7 @@ import (
 )
 
 var activators = map[int]func(*JumpTable){
+	6780: enable6780,
 	5656: enable5656,
 	4844: enable4844,
 	3860: enable3860,
@@ -290,4 +291,15 @@ func opMcopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	// (the memorySize function on the opcode).
 	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
 	return nil, nil
+}
+
+// enable6780 applies EIP-6780 (deactivate SELFDESTRUCT)
+func enable6780(jt *JumpTable) {
+	jt[SELFDESTRUCT] = &operation{
+		execute:     opSelfdestruct6780,
+		dynamicGas:  gasSelfdestructEIP3529,
+		constantGas: params.SelfdestructGasEIP150,
+		numPop:      1,
+		numPush:     0,
+	}
 }
