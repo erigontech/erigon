@@ -85,10 +85,10 @@ type stateObject struct {
 	// Cache flags.
 	// When an object is marked selfdestructed it will be delete from the trie
 	// during the "update" phase of the state transition.
-	dirtyCode      bool // true if the code was updated
-	selfdestructed bool
-	deleted        bool // true if account was deleted during the lifetime of this object
-	created        bool // true if this object represents a newly created contract
+	dirtyCode       bool // true if the code was updated
+	selfdestructed  bool
+	deleted         bool // true if account was deleted during the lifetime of this object
+	createdContract bool // true if this object represents a newly created contract
 }
 
 // empty returns whether the account is considered empty.
@@ -179,7 +179,7 @@ func (so *stateObject) GetCommittedState(key *libcommon.Hash, out *uint256.Int) 
 			return
 		}
 	}
-	if so.created {
+	if so.createdContract {
 		out.Clear()
 		return
 	}
