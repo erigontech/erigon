@@ -455,10 +455,10 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	req := &execution.AssembleBlockRequest{
-		ParentHash:           gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
-		Timestamp:            timestamp,
-		MixDigest:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
-		SuggestedFeeRecipent: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		ParentHash:            gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
+		Timestamp:             timestamp,
+		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 	}
 
 	if version >= clparams.CapellaVersion {
