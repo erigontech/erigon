@@ -14,6 +14,6 @@ type BlockBuilderParameters struct {
 	Timestamp             uint64
 	PrevRandao            libcommon.Hash
 	SuggestedFeeRecipient libcommon.Address
-	Withdrawals           []*types.Withdrawal // added in Shanghai (EIP-4895)
-	ParentBeaconBlockRoot *libcommon.Hash     // added in Cancun (EIP-4788)
+	Withdrawals           []*types.Withdrawal // added in Shapella (EIP-4895)
+	ParentBeaconBlockRoot *libcommon.Hash     // added in Dencun (EIP-4788)
 }
