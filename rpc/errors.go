@@ -74,6 +74,13 @@ func (e *InvalidParamsError) ErrorCode() int { return -32602 }
 
 func (e *InvalidParamsError) Error() string { return e.Message }
 
+// mismatch between the Engine API method version and the fork
+type UnsupportedForkError struct{ Message string }
+
+func (e *UnsupportedForkError) ErrorCode() int { return -38005 }
+
+func (e *UnsupportedForkError) Error() string { return e.Message }
+
 type CustomError struct {
 	Code    int
 	Message string

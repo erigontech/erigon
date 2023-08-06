@@ -6,9 +6,12 @@ import (
 	"reflect"
 
 	"github.com/holiman/uint256"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -49,13 +52,18 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	param := core.BlockBuilderParameters{
 		ParentHash:            gointerfaces.ConvertH256ToHash(req.ParentHash),
 		Timestamp:             req.Timestamp,
-		PrevRandao:            gointerfaces.ConvertH256ToHash(req.MixDigest),
-		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.SuggestedFeeRecipent),
+		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PrevRandao),
+		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.SuggestedFeeRecipient),
 		Withdrawals:           eth1_utils.ConvertWithdrawalsFromRpc(req.Withdrawals),
 	}
 
 	if err := e.checkWithdrawalsPresence(param.Timestamp, param.Withdrawals); err != nil {
 		return nil, err
+	}
+
+	if req.ParentBeaconBlockRoot != nil {
+		pbbr := libcommon.Hash(gointerfaces.ConvertH256ToHash(req.ParentBeaconBlockRoot))
+		param.ParentBeaconBlockRoot = &pbbr
 	}
 
 	// First check if we're already building a block with the requested parameters

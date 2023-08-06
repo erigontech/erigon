@@ -115,7 +115,7 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*type
 
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, version clparams.StateVersion,
+	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
@@ -160,14 +160,20 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if version >= clparams.DenebVersion {
 		header.BlobGasUsed = (*uint64)(req.BlobGasUsed)
 		header.ExcessBlobGas = (*uint64)(req.ExcessBlobGas)
+		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
-	if !s.config.IsCancun(header.Time) && (header.BlobGasUsed != nil || header.ExcessBlobGas != nil) {
-		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas present before Cancun"}
+	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
+		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
 	if s.config.IsCancun(header.Time) && (header.BlobGasUsed == nil || header.ExcessBlobGas == nil) {
 		return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas missing"}
+	}
+
+	if s.config.IsCancun(header.Time) && header.ParentBeaconBlockRoot == nil {
+		return nil, &rpc.InvalidParamsError{Message: "parentBeaconBlockRoot missing"}
 	}
 
 	blockHash := req.BlockHash
@@ -428,6 +434,12 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
+	timestamp := uint64(payloadAttributes.Timestamp)
+	if (!s.config.IsCancun(timestamp) && version >= clparams.DenebVersion) ||
+		(s.config.IsCancun(timestamp) && version < clparams.DenebVersion) {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+
 	headHeader := s.chainRW.GetHeaderByHash(forkchoiceState.HeadHash)
 
 	if headHeader.Hash() != forkchoiceState.HeadHash {
@@ -443,19 +455,23 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
 	}
 
-	if headHeader.Time >= uint64(payloadAttributes.Timestamp) {
+	if headHeader.Time >= timestamp {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 
 	req := &execution.AssembleBlockRequest{
-		ParentHash:           gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
-		Timestamp:            uint64(payloadAttributes.Timestamp),
-		MixDigest:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
-		SuggestedFeeRecipent: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		ParentHash:            gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
+		Timestamp:             timestamp,
+		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 	}
 
 	if version >= clparams.CapellaVersion {
 		req.Withdrawals = engine_types.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
+	}
+
+	if version >= clparams.DenebVersion {
+		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(payloadAttributes.ParentBeaconBlockRoot)
 	}
 
 	resp, err := s.executionService.AssembleBlock(ctx, req)
@@ -564,26 +580,26 @@ func (e *EngineServer) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState 
 }
 
 func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.CapellaVersion)
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
 }
 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_newpayloadv1
 func (e *EngineServer) NewPayloadV1(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, nil, clparams.BellatrixVersion)
+	return e.newPayload(ctx, payload, nil, nil, clparams.BellatrixVersion)
 }
 
 // NewPayloadV2 processes new payloads (blocks) from the beacon chain with withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_newpayloadv2
 func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, nil, clparams.CapellaVersion)
+	return e.newPayload(ctx, payload, nil, nil, clparams.CapellaVersion)
 }
 
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_newpayloadv3
 func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, clparams.DenebVersion)
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, clparams.DenebVersion)
 }
 
 // Receives consensus layer's transition configuration and checks if the execution layer has the correct configuration.
