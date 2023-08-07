@@ -112,6 +112,7 @@ func ConsensusClStages(ctx context.Context,
 			args.seenSlot = cfg.forkChoice.HighestSeen()
 			args.seenEpoch = args.seenSlot / cfg.beaconCfg.SlotsPerEpoch
 			args.targetSlot = utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+			// Note that the target epoch is always one behind. this is because we are always behind in the current epoch, so it would not be very useful
 			args.targetEpoch = utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) - 1
 			return
 		},
@@ -238,7 +239,7 @@ func ConsensusClStages(ctx context.Context,
 					logger.Info("waiting for blocks...",
 						"seenSlot", args.seenSlot,
 						"targetSlot", args.targetSlot,
-						"requestSlot", args.targetSlot,
+						"requestedSlots", totalRequest,
 					)
 					respCh := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock])
 					errCh := make(chan error)
