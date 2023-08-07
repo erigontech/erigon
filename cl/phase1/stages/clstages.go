@@ -155,8 +155,7 @@ func ConsensusClStages(ctx context.Context,
 					ctx, cn = context.WithCancel(ctx)
 					egg, ctx := errgroup.WithContext(ctx)
 
-					// is 8 too many?
-					egg.SetLimit(8)
+					egg.SetLimit(3)
 					defer cn()
 					for i := args.seenEpoch; i <= args.targetEpoch; i = i + 1 {
 						ii := i
@@ -220,9 +219,7 @@ func ConsensusClStages(ctx context.Context,
 					return "ForkChoice"
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					// wait for 3/4th slot... should be plenty enough time
-					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot)*time.Second*3/4)
-					defer cn()
+					totalRequest := args.targetSlot - args.seenSlot
 					logger.Info("waiting for blocks...",
 						"seenSlot", args.seenSlot,
 						"targetSlot", args.targetSlot,
@@ -231,10 +228,13 @@ func ConsensusClStages(ctx context.Context,
 					respCh := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock])
 					errCh := make(chan error)
 					sources := []clpersist.BlockSource{gossipSource, rpcSource}
+					// the timeout is equal to the amount of blocks to fetch multiplied by the seconds per slot
+					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot*totalRequest)*time.Second)
+					defer cn()
 					for _, v := range sources {
 						sourceFunc := v.GetRange
 						go func() {
-							blocks, err := sourceFunc(ctx, args.seenSlot+1, args.targetSlot-args.seenSlot)
+							blocks, err := sourceFunc(ctx, args.seenSlot+1, totalRequest)
 							if err != nil {
 								errCh <- err
 								return
