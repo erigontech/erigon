@@ -2113,7 +2113,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		prunedKeys    uint64
 		prunedMaxStep uint64
 		prunedMinStep = uint64(math.MaxUint64)
-		//seek          = make([]byte, 0, 256)
+		seek          = make([]byte, 0, 256)
 	)
 
 	//fmt.Printf("largeValues %t\n", dc.d.domainLargeValues)
@@ -2129,7 +2129,14 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		}
 		is := ^binary.BigEndian.Uint64(v)
 		if is > step {
-			continue
+			k, v, err = keysCursor.NextNoDup()
+			if len(v) != 8 {
+				continue
+			}
+			is = ^binary.BigEndian.Uint64(v)
+			if is > step {
+				continue
+			}
 		}
 		if limit == 0 {
 			return nil
@@ -2141,8 +2148,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 			return err
 		}
 		//fmt.Printf("prune key: %x->%x, step %d dom %s\n", kk, vv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
-		//seek = append(append(seek[:0], k...), v...)
-		seek := common.Append(kk, vv)
+		seek = append(append(seek[:0], kk...), vv...)
 
 		mxPruneSize.Inc()
 		prunedKeys++
@@ -2171,7 +2177,6 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 		//kk, pv, err := valC.Seek(kk)
 		//pv, err := rwTx.GetOne(dc.d.valsTable, seek)
-
 		//if !bytes.Equal(kkv, seek) {
 		//	fmt.Printf("lookup next\n")
 		//	kn, vn, err := valC.Next()

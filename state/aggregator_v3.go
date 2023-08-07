@@ -859,7 +859,7 @@ func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout tim
 	cc, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	for s := uint64(0); s < ac.a.aggregatedStep.Load(); s++ {
+	for s := ac.a.stepToPrune.Load(); s < ac.a.aggregatedStep.Load(); s++ {
 		if err := ac.Prune(cc, s, math2.MaxUint64, tx); err != nil { // prune part of retired data, before commit
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil
@@ -897,8 +897,8 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64, tx
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ac.a.logger.Info("aggregator prune", "step", step,
-		"range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
-		"stepsLimit", limit/ac.a.aggregationStep, "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(ac.a.rwTx))
+		"range", fmt.Sprintf("[%d,%d)", txFrom, txTo), /*"limit", limit,
+		"stepsLimit", limit/ac.a.aggregationStep,*/"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(ac.a.rwTx))
 
 	if err := ac.accounts.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
@@ -924,6 +924,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64, tx
 	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
+	ac.a.stepToPrune.Store(step + 1)
 	return nil
 }
 
