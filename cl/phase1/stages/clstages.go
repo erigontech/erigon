@@ -211,7 +211,7 @@ func ConsensusClStages(ctx context.Context,
 						}
 					}()
 					go func() {
-						// if either operations error, we exit with the error.
+						// we don't actually care if one of our things error. so if one of them do error, lets just return with nil and try again or something
 						err := egg.Wait()
 						if err != nil {
 							errchan <- nil
