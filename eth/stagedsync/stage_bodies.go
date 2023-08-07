@@ -75,6 +75,7 @@ func BodiesForward(
 		defer tx.Rollback()
 	}
 	timeout := cfg.timeout
+
 	// this update is required, because cfg.bd.UpdateFromDb(tx) below reads it and initialises requestedLow accordingly
 	// if not done, it will cause downloading from block 1
 	if doUpdate {
@@ -166,9 +167,7 @@ func BodiesForward(
 		toProcess := cfg.bd.NextProcessingCount()
 
 		write := true
-
 		for i := uint64(0); i < toProcess; i++ {
-
 			select {
 			case <-logEvery.C:
 				logWritingBodies(logPrefix, bodyProgress, headerProgress, logger)
@@ -238,7 +237,6 @@ func BodiesForward(
 		}
 		timer.Stop()
 		timer = time.NewTimer(1 * time.Second)
-
 		select {
 		case <-ctx.Done():
 			stopped = true

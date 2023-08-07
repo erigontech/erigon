@@ -110,6 +110,7 @@ func StageLoop(ctx context.Context,
 
 		initialCycle = false
 		hd.AfterInitialCycle()
+
 		if loopMinTime != 0 {
 			waitTime := loopMinTime - time.Since(start)
 			logger.Info("Wait time until next loop", "for", waitTime)
@@ -135,7 +136,6 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stagedsync
 	if err != nil {
 		return err
 	}
-
 	// Sync from scratch must be able Commit partial progress
 	// In all other cases - process blocks batch in 1 RwTx
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
@@ -165,12 +165,10 @@ func StageLoopStep(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stagedsync
 			return err
 		}
 	}
-
 	err = sync.Run(db, tx, initialCycle)
 	if err != nil {
 		return err
 	}
-
 	logCtx := sync.PrintTimings()
 	var tableSizes []interface{}
 	var commitTime time.Duration

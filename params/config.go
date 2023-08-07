@@ -33,7 +33,7 @@ import (
 //go:embed chainspecs
 var chainspecs embed.FS
 
-func ReadChainSpec(filename string) *chain.Config {
+func readChainSpec(filename string) *chain.Config {
 	f, err := chainspecs.Open(filename)
 	if err != nil {
 		panic(fmt.Sprintf("Could not open chainspec for %s: %v", filename, err))
@@ -67,13 +67,13 @@ var (
 
 var (
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
-	MainnetChainConfig = ReadChainSpec("chainspecs/mainnet.json")
+	MainnetChainConfig = readChainSpec("chainspecs/mainnet.json")
 
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
-	SepoliaChainConfig = ReadChainSpec("chainspecs/sepolia.json")
+	SepoliaChainConfig = readChainSpec("chainspecs/sepolia.json")
 
 	// GoerliChainConfig contains the chain parameters to run a node on the Görli test network.
-	GoerliChainConfig = ReadChainSpec("chainspecs/goerli.json")
+	GoerliChainConfig = readChainSpec("chainspecs/goerli.json")
 
 	// AllProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the main net protocol.
@@ -116,15 +116,15 @@ var (
 		Clique:                &chain.CliqueConfig{Period: 0, Epoch: 30000},
 	}
 
-	MumbaiChainConfig = ReadChainSpec("chainspecs/mumbai.json")
+	MumbaiChainConfig = readChainSpec("chainspecs/mumbai.json")
 
-	BorMainnetChainConfig = ReadChainSpec("chainspecs/bor-mainnet.json")
+	BorMainnetChainConfig = readChainSpec("chainspecs/bor-mainnet.json")
 
-	BorDevnetChainConfig = ReadChainSpec("chainspecs/bor-devnet.json")
+	BorDevnetChainConfig = readChainSpec("chainspecs/bor-devnet.json")
 
-	GnosisChainConfig = ReadChainSpec("chainspecs/gnosis.json")
+	GnosisChainConfig = readChainSpec("chainspecs/gnosis.json")
 
-	ChiadoChainConfig = ReadChainSpec("chainspecs/chiado.json")
+	ChiadoChainConfig = readChainSpec("chainspecs/chiado.json")
 
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
