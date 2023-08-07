@@ -187,7 +187,7 @@ func ConsensusClStages(ctx context.Context,
 							return nil
 						})
 					}
-					errchan := make(chan error, 2)
+					errchan := make(chan error, 1)
 					go func() {
 						defer func() {
 							errchan <- nil
@@ -247,6 +247,7 @@ func ConsensusClStages(ctx context.Context,
 					// the timeout is equal to the amount of blocks to fetch multiplied by the seconds per slot
 					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot*totalRequest)*time.Second)
 					defer cn()
+					// we go ask all the sources and see who gets back to us first. whoever does is the winner!!
 					for _, v := range sources {
 						sourceFunc := v.GetRange
 						go func() {
@@ -333,7 +334,7 @@ func ConsensusClStages(ctx context.Context,
 					if shouldForkChoiceSinceReorg {
 						return ForkChoice
 					}
-					if args.seenSlot%32 == 0 {
+					if args.seenSlot%cfg.beaconCfg.SlotsPerEpoch == 0 {
 						return CleanupAndPruning
 					}
 					return SleepForSlot
