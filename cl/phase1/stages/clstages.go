@@ -89,8 +89,54 @@ func MetaCatchingUp(args Args) string {
 	if args.seenSlot < args.targetSlot {
 		return CatchUpBlocks
 	}
-	return ""
+	return WaitForPeers
 }
+
+/*
+
+this graph describes the state transitions for cl
+
+digraph {
+    compound=true;
+    subgraph cluster_0 {
+        label="syncing";
+        WaitForPeers;
+        CatchUpBlocks;
+        CatchUpEpochs;
+    }
+
+    subgraph cluster_3 {
+        label="if behind (transition function)"
+        MetaCatchingUp;
+    }
+
+    subgraph cluster_1 {
+        label="head";
+        ForkChoice; CleanupAndPruning; ListenForForks; SleepForSlot;
+    }
+
+    MetaCatchingUp -> WaitForPeers
+    MetaCatchingUp -> CatchUpEpochs
+    MetaCatchingUp -> CatchUpBlocks
+
+    WaitForPeers -> MetaCatchingUp[lhead=cluster_3]
+    CatchUpEpochs -> MetaCatchingUp[lhead=cluster_3]
+    CatchUpBlocks -> MetaCatchingUp[lhead=cluster_3]
+    CleanupAndPruning -> MetaCatchingUp[lhead=cluster_3]
+    ListenForForks -> MetaCatchingUp[lhead=cluster_3]
+    ForkChoice -> MetaCatchingUp[lhead=cluster_3]
+
+    CatchUpBlocks -> ForkChoice
+    ForkChoice -> ListenForForks
+
+    SleepForSlot -> WaitForPeers
+
+    ListenForForks -> ForkChoice
+    ListenForForks -> SleepForSlot
+    ListenForForks -> CleanupAndPruning
+    CleanupAndPruning -> SleepForSlot
+}
+*/
 
 // ConsensusClStages creates a stage loop container to be used to run caplin
 func ConsensusClStages(ctx context.Context,
