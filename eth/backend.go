@@ -1254,5 +1254,7 @@ func isChainPoS(chainConfig *chain.Config, currentTD *big.Int) bool {
 		id == 5 ||
 		id == 11155111 ||
 		id == 100 ||
-		id == 10200 || chainConfig.TerminalTotalDifficulty.Cmp(currentTD) <= 0 || chainConfig.TerminalTotalDifficultyPassed
+		id == 10200 ||
+		(chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.Cmp(currentTD) <= 0) ||
+		chainConfig.TerminalTotalDifficultyPassed
 }
