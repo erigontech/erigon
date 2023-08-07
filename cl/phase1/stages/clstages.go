@@ -324,7 +324,7 @@ func ConsensusClStages(ctx context.Context,
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					slotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, args.targetSlot).Add(
-						time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second / 3,
+						time.Duration(cfg.beaconCfg.SecondsPerSlot) * (time.Second / 3),
 					)
 					waitDur := slotTime.Sub(time.Now())
 					ctx, cn := context.WithTimeout(ctx, waitDur)
