@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/abi"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -68,19 +67,6 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 
 func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
 	// Use signer as validator in case of bor devent
-	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
-		validators := []*valset.Validator{
-			{
-				ID:               1,
-				Address:          signer,
-				VotingPower:      1000,
-				ProposerPriority: 1,
-			},
-		}
-
-		return validators, nil
-	}
-
 	if NetworkNameVals[c.chainConfig.ChainName] != nil {
 		return NetworkNameVals[c.chainConfig.ChainName], nil
 	}
@@ -95,19 +81,6 @@ func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon
 
 func (c *ChainSpanner) GetCurrentProducers(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
 	// Use signer as validator in case of bor devent
-	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
-		validators := []*valset.Validator{
-			{
-				ID:               1,
-				Address:          signer,
-				VotingPower:      1000,
-				ProposerPriority: 1,
-			},
-		}
-
-		return validators, nil
-	}
-
 	if NetworkNameVals[c.chainConfig.ChainName] != nil {
 		return NetworkNameVals[c.chainConfig.ChainName], nil
 	}

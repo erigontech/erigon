@@ -23,6 +23,16 @@ var BorE2ETestChain2Valset = []*valset.Validator{
 	},
 }
 
+var BorDevnetChainVals = []*valset.Validator{
+	{
+		ID:               1,
+		Address:          common.HexToAddress("0x67b1d87101671b127f5f8714789C7192f7ad340e"),
+		VotingPower:      1000,
+		ProposerPriority: 1,
+	},
+}
+
 func init() {
 	NetworkNameVals[networkname.BorE2ETestChain2ValName] = BorE2ETestChain2Valset
+	NetworkNameVals[networkname.BorDevnetChainName] = BorDevnetChainVals
 }
