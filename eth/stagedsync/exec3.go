@@ -400,18 +400,17 @@ func ExecV3(ctx context.Context,
 					}
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
-						if tx.(*temporal.Tx).AggCtx().CanPrune(tx) {
-							if err = agg.Prune(ctx, 10); err != nil { // prune part of retired data, before commit
-								return err
-							}
-						} else {
-							_, err := agg.ComputeCommitment(true, false)
-							if err != nil {
-								return err
-							}
-							if err = agg.Flush(ctx, tx); err != nil {
-								return err
-							}
+						_, err := agg.ComputeCommitment(true, false)
+						if err != nil {
+							return err
+						}
+						ac := agg.MakeContext()
+						if err = ac.PruneWithTimeout(ctx, 10*time.Second, tx); err != nil { // prune part of retired data, before commit
+							return err
+						}
+						ac.Close()
+						if err = agg.Flush(ctx, tx); err != nil {
+							return err
 						}
 						break
 					}
@@ -817,8 +816,8 @@ Loop:
 							if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
 								return err
 							}
-							if tx.(*temporal.Tx).AggCtx().CanPrune(tx) {
-								return agg.Prune(ctx, 100)
+							if err := tx.(*temporal.Tx).AggCtx().PruneWithTimeout(ctx, time.Second*1, tx); err != nil {
+								return err
 							}
 							return nil
 						}); err != nil {

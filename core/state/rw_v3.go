@@ -349,10 +349,12 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-
-	if err := agg.Unwind(ctx, txUnwindTo); err != nil {
+	ac := agg.MakeContext()
+	if err := ac.Unwind(ctx, txUnwindTo); err != nil {
 		return err
 	}
+	ac.Close()
+
 	return nil
 }
 

@@ -11,9 +11,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/ledgerwatch/erigon/common/math"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -695,9 +696,12 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack, tx kv.RwTx) error {
 			return err
 		}
 		ms.agg.SetTx(tx)
-		if err := ms.agg.Prune(ms.Ctx, math.MaxUint64); err != nil {
+		ac := ms.agg.MakeContext()
+
+		if err := ac.Prune(ms.Ctx, math.MaxUint64, math.MaxUint64, nil); err != nil {
 			return err
 		}
+		ac.Close()
 	}
 	return nil
 }
