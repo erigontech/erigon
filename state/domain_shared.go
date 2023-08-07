@@ -118,7 +118,7 @@ func (sd *SharedDomains) SeekCommitment(fromTx, toTx uint64) (bn, txn uint64, er
 func (sd *SharedDomains) ClearRam(commitment bool) {
 	sd.muMaps.Lock()
 	defer sd.muMaps.Unlock()
-	log.Crit("ClearRam", "commitment", commitment, "tx", sd.txNum.Load(), "block", sd.blockNum.Load())
+	log.Debug("ClearRam", "commitment", commitment, "tx", sd.txNum.Load(), "block", sd.blockNum.Load())
 	sd.account = map[string][]byte{}
 	sd.code = map[string][]byte{}
 	sd.commitment = btree2.NewMap[string, []byte](128)

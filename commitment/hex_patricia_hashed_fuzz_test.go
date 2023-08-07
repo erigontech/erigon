@@ -40,7 +40,7 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 		hph.SetTrace(false)
 		hphAnother.SetTrace(false)
 
-		plainKeys, hashedKeys, updates := builder.Build()
+		plainKeys, updates := builder.Build()
 		if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +143,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 		hph := NewHexPatriciaHashed(20, ms.branchFn, ms.accountFn, ms.storageFn)
 		hphAnother := NewHexPatriciaHashed(20, ms2.branchFn, ms2.accountFn, ms2.storageFn)
 
-		plainKeys, hashedKeys, updates := builder.Build()
+		plainKeys, updates := builder.Build()
 
 		hph.SetTrace(false)
 		hphAnother.SetTrace(false)
@@ -200,7 +200,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 
 		hph.SetTrace(false)
 
-		plainKeys, hashedKeys, updates := builder.Build()
+		plainKeys, updates := builder.Build()
 		if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
 			t.Fatal(err)
 		}

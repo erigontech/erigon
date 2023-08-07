@@ -328,7 +328,7 @@ func (ub *UpdateBuilder) DeleteStorage(addr string, loc string) *UpdateBuilder {
 // 1. Plain keys
 // 2. Corresponding hashed keys
 // 3. Corresponding updates
-func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Update) {
+func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	hashed := make([]string, 0, len(ub.keyset)+len(ub.keyset2))
 	preimages := make(map[string][]byte)
 	preimages2 := make(map[string][]byte)
@@ -371,10 +371,8 @@ func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Upda
 	}
 	slices.Sort(hashed)
 	plainKeys = make([][]byte, len(hashed))
-	hashedKeys = make([][]byte, len(hashed))
 	updates = make([]Update, len(hashed))
 	for i, hashedKey := range hashed {
-		hashedKeys[i] = []byte(hashedKey)
 		key := preimages[hashedKey]
 		key2 := preimages2[hashedKey]
 		plainKey := make([]byte, len(key)+len(key2))

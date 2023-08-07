@@ -34,7 +34,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	hph.SetTrace(false)
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, updates := NewUpdateBuilder().
 		Balance("00", 4).
 		Balance("01", 5).
 		Balance("02", 6).
@@ -64,7 +64,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	// More updates
 	hph.Reset()
 	hph.SetTrace(false)
-	plainKeys, hashedKeys, updates = NewUpdateBuilder().
+	plainKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "050505").
 		Build()
 	err = ms.applyPlainUpdates(plainKeys, updates)
@@ -81,7 +81,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	// More updates
 	hph.Reset()
 	hph.SetTrace(false)
-	plainKeys, hashedKeys, updates = NewUpdateBuilder().
+	plainKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "070807").
 		Build()
 	err = ms.applyPlainUpdates(plainKeys, updates)
@@ -100,7 +100,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	hph.SetTrace(false)
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, updates := NewUpdateBuilder().
 		Balance("00", 4).
 		Nonce("00", 246462653).
 		Balance("01", 5).
@@ -125,7 +125,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	// generate empty updates and do NOT reset tree
 	//hph.SetTrace(true)
 
-	plainKeys, hashedKeys, updates = NewUpdateBuilder().Build()
+	plainKeys, updates = NewUpdateBuilder().Build()
 
 	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
@@ -143,7 +143,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 	ms := NewMockState(t)
 	ms2 := NewMockState(t)
 
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, updates := NewUpdateBuilder().
 		Balance("71562b71999873db5b286df957af199ec94617f7", 999860099).
 		Nonce("71562b71999873db5b286df957af199ec94617f7", 3).
 		Balance("3a220f351252089d385b29beca14e27f204c296a", 900234).
@@ -189,7 +189,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 	}
 	require.EqualValues(t, ra, rb)
 
-	plainKeys, hashedKeys, updates = NewUpdateBuilder().
+	plainKeys, updates = NewUpdateBuilder().
 		//Balance("71562b71999873db5b286df957af199ec94617f7", 999860099).
 		//Nonce("71562b71999873db5b286df957af199ec94617f7", 3).
 		//Balance("3a220f351252089d385b29beca14e27f204c296a", 900234).
@@ -207,7 +207,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
 	renderUpdates(branchNodeUpdates)
 
-	plainKeys, hashedKeys, updates = NewUpdateBuilder().
+	plainKeys, updates = NewUpdateBuilder().
 		Balance("71562b71999873db5b286df957af199ec94617f7", 999860099).
 		Nonce("71562b71999873db5b286df957af199ec94617f7", 3).
 		Balance("3a220f351252089d385b29beca14e27f204c296a", 900234).
@@ -240,7 +240,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	ms := NewMockState(t)
 	ms2 := NewMockState(t)
 
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, updates := NewUpdateBuilder().
 		Balance("f5", 4).
 		Balance("ff", 900234).
 		Balance("04", 1233).
@@ -353,7 +353,7 @@ func Test_Sepolia(t *testing.T) {
 		for address, balance := range testData.balances {
 			builder.IncrementBalance(address, balance)
 		}
-		plainKeys, hashedKeys, updates := builder.Build()
+		plainKeys, updates := builder.Build()
 
 		if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
 			t.Fatal(err)
@@ -466,7 +466,7 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 	ms := NewMockState(t)
 
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, updates := NewUpdateBuilder().
 		Balance("f5", 4).
 		Balance("ff", 900234).
 		Balance("03", 7).
@@ -500,7 +500,7 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 	require.EqualValues(t, rhBefore, rhAfter)
 
 	// create new update and apply it to both tries
-	nextPK, nextHashed, nextUpdates := NewUpdateBuilder().
+	nextPK, nextUpdates := NewUpdateBuilder().
 		Nonce("ff", 4).
 		Balance("b9", 6000000000).
 		Balance("ad", 8000000000).
@@ -524,7 +524,7 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	ms := NewMockState(t)
 
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, updates := NewUpdateBuilder().
 		Balance("f5", 4).
 		Balance("ff", 900234).
 		Build()
@@ -551,7 +551,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, beforeRestore, hashAfterRestore)
 
-	plainKeys, hashedKeys, updates = NewUpdateBuilder().
+	plainKeys, updates = NewUpdateBuilder().
 		Balance("ff", 900234).
 		Balance("04", 1233).
 		Storage("04", "01", "0401").
@@ -590,7 +590,7 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 	ms := NewMockState(t)
 	ms2 := NewMockState(t)
 
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, updates := NewUpdateBuilder().
 		Balance("f5", 4).
 		Balance("ff", 900234).
 		Balance("04", 1233).
@@ -640,7 +640,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 	ms := NewMockState(t)
 	ms2 := NewMockState(t)
 
-	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+	plainKeys, updates := NewUpdateBuilder().
 		Balance("f5", 4).
 		Balance("ff", 900234).
 		Balance("04", 1233).

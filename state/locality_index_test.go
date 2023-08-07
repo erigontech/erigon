@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/common/background"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 )
 
 func TestScanStaticFilesLocality(t *testing.T) {
@@ -308,6 +309,7 @@ func TestLocalityDomain(t *testing.T) {
 		fmt.Printf("--case1\n")
 		v, ok, err = dc.getLatestFromFiles(hexutility.EncodeTs(1))
 		require.NoError(err)
+		require.NotNil(v)
 		require.True(ok)
 		require.Equal(3*txsInColdFile-1, int(binary.BigEndian.Uint64(v)))
 

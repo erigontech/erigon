@@ -414,13 +414,11 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
 			if txNum >= keyNum {
-				fmt.Printf("dbg")
+				//fmt.Printf("dbg")
 			}
 			val, err := dc.GetBeforeTxNum(k[:], txNum+1, roTx)
 			require.NoError(err, label)
 			if txNum >= keyNum {
-
-				fmt.Printf("val %d\n", binary.BigEndian.Uint64(val[:]))
 				require.Equal(v[:], val, label)
 			} else {
 				require.Nil(val, label)

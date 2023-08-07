@@ -1028,7 +1028,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 				var g2 ArchiveGetter
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = NewArchiveGetter(hi.decompressor.MakeGetter(), h.compressHistoryVals)
+						g2 = NewArchiveGetter(hi.decompressor.MakeGetter(), true)
 						break
 					}
 				}

@@ -1590,36 +1590,15 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 			if bt.Empty() {
 				continue
 			}
-			fmt.Printf("warm [%d] want %x keys in idx %v %v\n", i, filekey, bt.ef.Count(), bt.decompressor.FileName())
+			//fmt.Printf("warm [%d] want %x keys in idx %v %v\n", i, filekey, bt.ef.Count(), bt.decompressor.FileName())
 			_, v, ok, err := bt.Get(filekey, dc.statelessGetter(i))
 			if err != nil {
 				return nil, false, err
 			}
 			if !ok {
-				//c, err := bt.Seek(nil)
-				//if err != nil {
-				//	panic(err)
-				//}
-				//found := false
-				//for {
-				//	if bytes.Equal(c.Key(), filekey) {
-				//		offset = binary.BigEndian.Uint64(c.Value())
-				//		found = true
-				//		fmt.Printf("warm [%d] actually found %x -> %x; idx keys %v\n", i, filekey, c.Value(), bt.ef.Count())
-				//		break
-				//	}
-				//	if !c.Next() {
-				//		break
-				//	}
-				//}
-				//if !found {
 				LatestStateReadWarmNotFound.UpdateDuration(t)
 				continue
-				//}
-				//return nil, false, nil
 			}
-			//offset = binary.BigEndian.Uint64(v)
-			fmt.Printf("warm %x %x\n", filekey, v)
 			return v, true, nil
 		}
 
@@ -1740,7 +1719,7 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 				LatestStateReadColdNotFound.UpdateDuration(t)
 				return nil, false, nil
 			}
-			fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
+			//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
 			return v, true, nil
 		}
 
@@ -2161,7 +2140,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		if err != nil {
 			return err
 		}
-		fmt.Printf("prune key: %x->%x, step %d dom %s\n", kk, vv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
+		//fmt.Printf("prune key: %x->%x, step %d dom %s\n", kk, vv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
 		//seek = append(append(seek[:0], k...), v...)
 		seek := common.Append(kk, vv)
 
@@ -2169,7 +2148,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		prunedKeys++
 
 		//if dc.d.domainLargeValues {
-		fmt.Printf("seek %x, %x , %x\n", seek, kk, vv)
+		//fmt.Printf("seek %x, %x , %x\n", seek, kk, vv)
 		//kkv, pv, err := valC.SeekExact(seek)
 		//fmt.Printf("prune value: %x->%x, step %d dom %s\n", kkv, pv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
 		//_ = pv

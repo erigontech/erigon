@@ -896,7 +896,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	var historyKey []byte
 	var txKey [8]byte
 	var valOffset uint64
-	g := historyDecomp.MakeGetter()
+	g := NewArchiveGetter(historyDecomp.MakeGetter(), h.compressHistoryVals)
 	for {
 		g.Reset(0)
 		valOffset = 0

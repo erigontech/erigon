@@ -860,7 +860,10 @@ func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout tim
 	defer cancel()
 
 	for s := uint64(0); s < ac.a.aggregatedStep.Load(); s++ {
-		if err := ac.Prune(cc, s, math2.MaxUint64); err != nil { // prune part of retired data, before commit
+		if err := ac.Prune(cc, s, math2.MaxUint64, tx); err != nil { // prune part of retired data, before commit
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil
+			}
 			return err
 		}
 		if cc.Err() != nil {
@@ -883,7 +886,7 @@ func (a *AggregatorV3) StepsRangeInDBAsStr(tx kv.Tx) string {
 	}, ", ")
 }
 
-func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64) error {
+func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64, tx kv.RwTx) error {
 	if dbg.NoPrune() {
 		return nil
 	}
@@ -897,28 +900,28 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64) er
 		"range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
 		"stepsLimit", limit/ac.a.aggregationStep, "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(ac.a.rwTx))
 
-	if err := ac.accounts.Prune(ctx, ac.a.rwTx, step, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.accounts.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := ac.storage.Prune(ctx, ac.a.rwTx, step, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.storage.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := ac.code.Prune(ctx, ac.a.rwTx, step, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.code.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := ac.commitment.Prune(ctx, ac.a.rwTx, step, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.commitment.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := ac.logAddrs.Prune(ctx, ac.a.rwTx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := ac.logTopics.Prune(ctx, ac.a.rwTx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := ac.tracesFrom.Prune(ctx, ac.a.rwTx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := ac.tracesTo.Prune(ctx, ac.a.rwTx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
 	return nil
