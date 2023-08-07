@@ -63,6 +63,18 @@ func ClStagesCfg(
 	}
 }
 
+type StageName = string
+
+const (
+	WaitForPeers      StageName = "WaitForPeers"
+	CatchUpEpochs     StageName = "CatchUpEpochs"
+	CatchUpBlocks     StageName = "CatchUpBlocks"
+	ForkChoice        StageName = "ForkChoice"
+	ListenForForks    StageName = "ListenForForks"
+	CleanupAndPruning StageName = "CleanupAndPruning"
+	SleepForSlot      StageName = "SleepForSlot"
+)
+
 // ConsensusClStages creates a stage loop container to be used to run caplin
 func ConsensusClStages(ctx context.Context,
 	cfg *Cfg,
@@ -86,7 +98,10 @@ func ConsensusClStages(ctx context.Context,
 
 	// TODO: this is an ugly hack, but it works!
 	shouldForkChoiceSinceReorg := false
+
+	// clstages run in a single thread - so we don't need to worry about any synchronization.
 	return &clstages.StageGraph[*Cfg, Args]{
+		// the ArgsFunc is run after every stage. It is passed into the transition function, and the same args are passed into the next stage.
 		ArgsFunc: func(ctx context.Context, cfg *Cfg) (args Args) {
 			var err error
 			args.peers, err = cfg.rpc.Peers()
@@ -101,13 +116,13 @@ func ConsensusClStages(ctx context.Context,
 			return
 		},
 		Stages: map[string]clstages.Stage[*Cfg, Args]{
-			"WaitForPeers": {
+			WaitForPeers: {
 				Description: `wait for enough peers. This is also a safe stage to go to when unsure of what stage to use`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
 					if args.seenEpoch < args.targetEpoch {
-						return "CatchUpEpochs"
+						return CatchUpEpochs
 					}
-					return "CatchUpBlocks"
+					return CatchUpBlocks
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					peersCount, err := cfg.rpc.Peers()
@@ -129,16 +144,16 @@ func ConsensusClStages(ctx context.Context,
 					return nil
 				},
 			},
-			"CatchUpEpochs": {
+			CatchUpEpochs: {
 				Description: `if we are 1 or more epochs behind, we download in parallel by epoch`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
 					if args.peers < minPeersForDownload {
-						return "WaitForPeers"
+						return WaitForPeers
 					}
 					if args.seenEpoch < args.targetEpoch {
-						return "CatchUpEpochs"
+						return CatchUpEpochs
 					}
-					return "CatchUpBlocks"
+					return CatchUpBlocks
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					totalEpochs := args.targetEpoch - args.seenEpoch
@@ -158,11 +173,11 @@ func ConsensusClStages(ctx context.Context,
 					egg.SetLimit(3)
 					defer cn()
 					for i := args.seenEpoch; i <= args.targetEpoch; i = i + 1 {
-						ii := i
+						startBlock := i * cfg.beaconCfg.SlotsPerEpoch
 						o := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0)
 						chans = append(chans, o)
 						egg.Go(func() error {
-							blocks, err := rpcSource.GetRange(ctx, ii*cfg.beaconCfg.SlotsPerEpoch, cfg.beaconCfg.SlotsPerEpoch)
+							blocks, err := rpcSource.GetRange(ctx, startBlock, cfg.beaconCfg.SlotsPerEpoch)
 							if err != nil {
 								return err
 							}
@@ -204,19 +219,19 @@ func ConsensusClStages(ctx context.Context,
 					return <-errchan
 				},
 			},
-			"CatchUpBlocks": {
+			CatchUpBlocks: {
 				Description: `if we are within the epoch but not at head, we run catchupblocks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
 					if args.peers < minPeersForDownload {
-						return "WaitForPeers"
+						return WaitForPeers
 					}
 					if args.seenEpoch < args.targetEpoch {
-						return "CatchUpEpochs"
+						return CatchUpEpochs
 					}
 					if args.seenSlot < args.targetSlot {
-						return "CatchUpBlocks"
+						return CatchUpBlocks
 					}
-					return "ForkChoice"
+					return ForkChoice
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					totalRequest := args.targetSlot - args.seenSlot
@@ -256,17 +271,17 @@ func ConsensusClStages(ctx context.Context,
 					return nil
 				},
 			},
-			"ForkChoice": {
+			ForkChoice: {
 				Description: `fork choice stage. We will send all fork choise things here
 			also, we will wait up to delay seconds to deal with attestations + side forks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
 					if args.seenEpoch < args.targetEpoch {
-						return "CatchUpEpochs"
+						return CatchUpEpochs
 					}
 					if args.seenSlot < args.targetSlot {
-						return "CatchUpBlocks"
+						return CatchUpBlocks
 					}
-					return "ListenForForks"
+					return ListenForForks
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 
@@ -303,24 +318,24 @@ func ConsensusClStages(ctx context.Context,
 					return nil
 				},
 			},
-			"ListenForForks": {
+			ListenForForks: {
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
 					defer func() {
 						shouldForkChoiceSinceReorg = false
 					}()
 					if args.seenEpoch < args.targetEpoch {
-						return "CatchUpEpochs"
+						return CatchUpEpochs
 					}
 					if args.seenSlot < args.targetSlot {
-						return "CatchUpBlocks"
+						return CatchUpBlocks
 					}
 					if shouldForkChoiceSinceReorg {
-						return "ForkChoice"
+						return ForkChoice
 					}
 					if args.seenSlot%32 == 0 {
-						return "CleanupAndPruning"
+						return CleanupAndPruning
 					}
-					return "SleepForSlot"
+					return SleepForSlot
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					slotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, args.targetSlot).Add(
@@ -350,16 +365,16 @@ func ConsensusClStages(ctx context.Context,
 					return nil
 				},
 			},
-			"CleanupAndPruning": {
+			CleanupAndPruning: {
 				Description: `cleanup and pruning is done here`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
 					if args.seenEpoch < args.targetEpoch {
-						return "CatchUpEpochs"
+						return CatchUpEpochs
 					}
 					if args.seenSlot < args.targetSlot {
-						return "CatchUpBlocks"
+						return CatchUpBlocks
 					}
-					return "SleepForSlot"
+					return SleepForSlot
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					// clean up some old ranges
@@ -371,10 +386,10 @@ func ConsensusClStages(ctx context.Context,
 					return nil
 				},
 			},
-			"SleepForSlot": {
+			SleepForSlot: {
 				Description: `sleep until the next slot`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					return "WaitForPeers"
+					return WaitForPeers
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					nextSlot := args.seenSlot + 1
