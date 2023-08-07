@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/ledgerwatch/erigon-lib v0.0.0-20230804160542-9f29a7cbdea5
-	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230622075030-1d69651854c2
+	github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230803145829-7084b7b6433a
 	github.com/ledgerwatch/log/v3 v3.8.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.1.0 // indirect
@@ -273,3 +273,5 @@ require (
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
 
 replace github.com/VictoriaMetrics/metrics => github.com/greyireland/metrics v0.0.5
+
+replace github.com/anacrolix/torrent => github.com/AlexeyAkhunov/torrent v1.52.1-0.20230807082831-152366b44bb9
