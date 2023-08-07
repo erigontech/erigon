@@ -610,7 +610,7 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 }
 
 type HistoryCollation struct {
-	historyComp  *compress.Compressor
+	historyComp  ArchiveWriter
 	indexBitmaps map[string]*roaring64.Bitmap
 	historyPath  string
 	historyCount int
@@ -626,7 +626,7 @@ func (c HistoryCollation) Close() {
 }
 
 func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
-	var historyComp *compress.Compressor
+	var historyComp ArchiveWriter
 	var err error
 	closeComp := true
 	defer func() {
@@ -705,7 +705,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 				if len(val) == 0 {
 					val = nil
 				}
-				if err = historyComp.AddUncompressedWord(val); err != nil {
+				if err = historyComp.AddWord(val); err != nil {
 					return HistoryCollation{}, fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, k, val, err)
 				}
 			} else {
@@ -718,7 +718,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 				} else {
 					val = nil
 				}
-				if err = historyComp.AddUncompressedWord(val); err != nil {
+				if err = historyComp.AddWord(val); err != nil {
 					return HistoryCollation{}, fmt.Errorf("add %s history val [%x]=>[%x]: %w", h.filenameBase, k, val, err)
 				}
 			}
@@ -770,10 +770,12 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	if h.noFsync {
 		historyComp.DisableFsync()
 	}
-	var historyDecomp, efHistoryDecomp *compress.Decompressor
-	var historyIdx, efHistoryIdx *recsplit.Index
-	var efHistoryComp *compress.Compressor
-	var rs *recsplit.RecSplit
+	var (
+		historyDecomp, efHistoryDecomp *compress.Decompressor
+		historyIdx, efHistoryIdx       *recsplit.Index
+		efHistoryComp                  *compress.Compressor
+		rs                             *recsplit.RecSplit
+	)
 	closeComp := true
 	defer func() {
 		if closeComp {
@@ -1141,83 +1143,6 @@ func (h *History) unwindKey(key []byte, beforeTxNum uint64, tx kv.RwTx) ([]Histo
 	return res, nil
 }
 
-func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
-	historyKeysCursorForDeletes, err := h.tx.RwCursorDupSort(h.indexKeysTable)
-	if err != nil {
-		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
-	}
-	defer historyKeysCursorForDeletes.Close()
-	historyKeysCursor, err := h.tx.RwCursorDupSort(h.indexKeysTable)
-	if err != nil {
-		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
-	}
-	defer historyKeysCursor.Close()
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
-	var k, v []byte
-	var valsC kv.RwCursor
-	var valsCDup kv.RwCursorDupSort
-	if h.historyLargeValues {
-		valsC, err = h.tx.RwCursor(h.historyValsTable)
-		if err != nil {
-			return err
-		}
-		defer valsC.Close()
-	} else {
-		valsCDup, err = h.tx.RwCursorDupSort(h.historyValsTable)
-		if err != nil {
-			return err
-		}
-		defer valsCDup.Close()
-	}
-
-	seek := make([]byte, 0, 256)
-	for k, v, err = historyKeysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
-		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo {
-			break
-		}
-		if limit == 0 {
-			return nil
-		}
-		limit--
-
-		if h.historyLargeValues {
-			seek = append(append(seek[:0], v...), k...)
-			if err := valsC.Delete(seek); err != nil {
-				return err
-			}
-		} else {
-			vv, err := valsCDup.SeekBothRange(v, k)
-			if err != nil {
-				return err
-			}
-			if binary.BigEndian.Uint64(vv) != txNum {
-				continue
-			}
-			if err = valsCDup.DeleteCurrent(); err != nil {
-				return err
-			}
-		}
-		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if _, _, err = historyKeysCursorForDeletes.SeekBothExact(k, v); err != nil {
-			return err
-		}
-		if err = historyKeysCursorForDeletes.DeleteCurrent(); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			h.logger.Info("[snapshots] prune history", "name", h.filenameBase, "from", txFrom, "to", txTo)
-			//"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)))
-		default:
-		}
-	}
-	return nil
-}
-
 type HistoryContext struct {
 	h  *History
 	ic *InvertedIndexContext
@@ -1268,6 +1193,88 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 		hc.readers[i] = r
 	}
 	return r
+}
+
+func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+	historyKeysCursorForDeletes, err := rwTx.RwCursorDupSort(hc.h.indexKeysTable)
+	if err != nil {
+		return fmt.Errorf("create %s history cursor: %w", hc.h.filenameBase, err)
+	}
+	defer historyKeysCursorForDeletes.Close()
+	historyKeysCursor, err := rwTx.RwCursorDupSort(hc.h.indexKeysTable)
+	if err != nil {
+		return fmt.Errorf("create %s history cursor: %w", hc.h.filenameBase, err)
+	}
+	defer historyKeysCursor.Close()
+
+	var (
+		txKey    [8]byte
+		k, v     []byte
+		valsC    kv.RwCursor
+		valsCDup kv.RwCursorDupSort
+	)
+
+	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	if hc.h.historyLargeValues {
+		valsC, err = rwTx.RwCursor(hc.h.historyValsTable)
+		if err != nil {
+			return err
+		}
+		defer valsC.Close()
+	} else {
+		valsCDup, err = rwTx.RwCursorDupSort(hc.h.historyValsTable)
+		if err != nil {
+			return err
+		}
+		defer valsCDup.Close()
+	}
+
+	seek := make([]byte, 0, 256)
+	for k, v, err = historyKeysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
+		txNum := binary.BigEndian.Uint64(k)
+		if txNum >= txTo {
+			break
+		}
+		if limit == 0 {
+			return nil
+		}
+		limit--
+
+		if hc.h.historyLargeValues {
+			seek = append(append(seek[:0], v...), k...)
+			if err := valsC.Delete(seek); err != nil {
+				return err
+			}
+		} else {
+			vv, err := valsCDup.SeekBothRange(v, k)
+			if err != nil {
+				return err
+			}
+			if binary.BigEndian.Uint64(vv) != txNum {
+				continue
+			}
+			if err = valsCDup.DeleteCurrent(); err != nil {
+				return err
+			}
+		}
+		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
+		if _, _, err = historyKeysCursorForDeletes.SeekBothExact(k, v); err != nil {
+			return err
+		}
+		if err = historyKeysCursorForDeletes.DeleteCurrent(); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			hc.h.logger.Info("[snapshots] prune history", "name", hc.h.filenameBase, "from", txFrom, "to", txTo)
+
+			//"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)))
+		default:
+		}
+	}
+	return nil
 }
 
 func (hc *HistoryContext) Close() {
@@ -1405,6 +1412,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
 		g := hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
+
 		if hc.h.compressHistoryVals {
 			v, _ := g.Next(nil)
 			return v, true, nil

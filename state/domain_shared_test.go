@@ -30,13 +30,20 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	defer ac.Close()
 	d := agg.SharedDomains(ac)
 	d.SetTx(rwTx)
+	agg.SetTx(rwTx)
 
 	maxTx := stepSize
 	hashes := make([][]byte, maxTx)
 	count := 10
 	rnd := rand.New(rand.NewSource(0))
+	rwTx.Commit()
 
 Loop:
+	rwTx, err = db.BeginRw(ctx)
+	require.NoError(t, err)
+
+	agg.SetTx(rwTx)
+
 	i := 0
 	k0 := make([]byte, length.Addr)
 	commitStep := 3
@@ -68,7 +75,13 @@ Loop:
 	require.NoError(t, err)
 
 	unwindTo := uint64(commitStep * rnd.Intn(int(maxTx)/commitStep))
-	err = d.Unwind(ctx, rwTx, 0, unwindTo)
+
+	acu := agg.MakeContext()
+	err = acu.Unwind(ctx, unwindTo)
+	require.NoError(t, err)
+	acu.Close()
+
+	err = rwTx.Commit()
 	require.NoError(t, err)
 	if count > 0 {
 		count--

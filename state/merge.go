@@ -843,13 +843,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 				decomp.Close()
 			}
 			if outItem != nil {
-				if outItem.decompressor != nil {
-					outItem.decompressor.Close()
-				}
-				if outItem.index != nil {
-					outItem.index.Close()
-				}
-				outItem = nil
+				outItem.closeFilesAndRemove()
 			}
 		}
 	}()
@@ -1007,12 +1001,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 					index.Close()
 				}
 				if historyIn != nil {
-					if historyIn.decompressor != nil {
-						historyIn.decompressor.Close()
-					}
-					if historyIn.index != nil {
-						historyIn.index.Close()
-					}
+					historyIn.closeFilesAndRemove()
 				}
 			}
 		}()
@@ -1023,11 +1012,13 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 		if comp, err = compress.NewCompressor(ctx, "merge", datPath, h.tmpdir, compress.MinPatternScore, workers, log.LvlTrace, h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", h.filenameBase, err)
 		}
+		compr := NewArchiveWriter(comp, h.compressHistoryVals)
 		if h.noFsync {
-			comp.DisableFsync()
+			compr.DisableFsync()
 		}
 		p := ps.AddNew(datFileName, 1)
 		defer ps.Delete(p)
+
 		var cp CursorHeap
 		heap.Init(&cp)
 		for _, item := range indexFiles {
@@ -1076,7 +1067,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 					}
 
 					valBuf, _ = ci1.dg2.Next(valBuf[:0])
-					if err = comp.AddWord(valBuf); err != nil {
+					if err = compr.AddWord(valBuf); err != nil {
 						return nil, nil, err
 					}
 				}
@@ -1090,10 +1081,10 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 				}
 			}
 		}
-		if err = comp.Compress(); err != nil {
+		if err = compr.Compress(); err != nil {
 			return nil, nil, err
 		}
-		comp.Close()
+		compr.Close()
 		comp = nil
 		if decomp, err = compress.NewDecompressor(datPath); err != nil {
 			return nil, nil, err

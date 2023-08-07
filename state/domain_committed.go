@@ -455,6 +455,7 @@ func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, mer
 
 type ArchiveWriter interface {
 	AddWord(word []byte) error
+	Count() int
 	Compress() error
 	DisableFsync()
 	Close()

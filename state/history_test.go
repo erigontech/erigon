@@ -27,6 +27,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -35,9 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
-	btree2 "github.com/tidwall/btree"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
@@ -226,7 +227,10 @@ func TestHistoryAfterPrune(t *testing.T) {
 
 		h.integrateFiles(sf, 0, 16)
 
-		err = h.prune(ctx, 0, 16, math.MaxUint64, logEvery)
+		hc := h.MakeContext()
+		err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery)
+		hc.Close()
+
 		require.NoError(err)
 		h.SetTx(tx)
 
@@ -355,7 +359,10 @@ func TestHistoryHistory(t *testing.T) {
 				sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 				require.NoError(err)
 				h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
-				err = h.prune(ctx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
+
+				hc := h.MakeContext()
+				err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
+				hc.Close()
 				require.NoError(err)
 			}()
 		}
@@ -391,7 +398,10 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 		sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(err)
 		h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
-		err = h.prune(ctx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
+
+		hc := h.MakeContext()
+		err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
+		hc.Close()
 		require.NoError(err)
 	}
 

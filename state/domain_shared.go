@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -97,33 +96,9 @@ func NewSharedDomains(a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
 	return sd
 }
 
-func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, step uint64, txUnwindTo uint64) error {
+// aggregator context should call Unwind before this one.
+func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo uint64) error {
 	sd.ClearRam(true)
-	if err := sd.Account.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
-		return err
-	}
-	if err := sd.Storage.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
-		return err
-	}
-	if err := sd.Code.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
-		return err
-	}
-	if err := sd.Commitment.unwind(ctx, step, txUnwindTo, math.MaxUint64, math.MaxUint64, nil); err != nil {
-		return err
-	}
-
-	//if err := sd.logAddrs.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-	//	return err
-	//}
-	//if err := sd.logTopics.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-	//	return err
-	//}
-	//if err := sd.tracesFrom.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-	//	return err
-	//}
-	//if err := sd.tracesTo.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-	//	return err
-	//}
 
 	bn, txn, err := sd.SeekCommitment(0, txUnwindTo)
 	fmt.Printf("Unwinded domains to block %d, txn %d wanted to %d\n", bn, txn, txUnwindTo)

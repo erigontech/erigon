@@ -767,6 +767,111 @@ func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTx
 	return it, nil
 }
 
+// [txFrom; txTo)
+func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+	ii := ic.ii
+
+	keysCursor, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
+	if err != nil {
+		return fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
+	}
+	defer keysCursor.Close()
+	var txKey [8]byte
+	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	k, v, err := keysCursor.Seek(txKey[:])
+	if err != nil {
+		return err
+	}
+	if k == nil {
+		return nil
+	}
+	txFrom = binary.BigEndian.Uint64(k)
+	if limit != math.MaxUint64 && limit != 0 {
+		txTo = cmp.Min(txTo, txFrom+limit)
+	}
+	if txFrom >= txTo {
+		return nil
+	}
+
+	collector := etl.NewCollector("snapshots", ii.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
+	defer collector.Close()
+
+	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxCForDeletes.Close()
+	idxC, err := rwTx.RwCursorDupSort(ii.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxC.Close()
+
+	// Invariant: if some `txNum=N` pruned - it's pruned Fully
+	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
+	for ; k != nil; k, v, err = keysCursor.NextNoDup() {
+		if err != nil {
+			return err
+		}
+
+		txNum := binary.BigEndian.Uint64(k)
+		if txNum >= txTo {
+			break
+		}
+		for ; v != nil; _, v, err = keysCursor.NextDup() {
+			if err != nil {
+				return err
+			}
+			if err := collector.Collect(v, nil); err != nil {
+				return err
+			}
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
+		if err = rwTx.Delete(ii.indexKeysTable, k); err != nil {
+			return err
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("iterate over %s keys: %w", ii.filenameBase, err)
+	}
+
+	if err := collector.Load(rwTx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		for v, err := idxC.SeekBothRange(key, txKey[:]); v != nil; _, v, err = idxC.NextDup() {
+			if err != nil {
+				return err
+			}
+			txNum := binary.BigEndian.Uint64(v)
+			if txNum >= txTo {
+				break
+			}
+
+			if _, _, err = idxCForDeletes.SeekBothExact(key, v); err != nil {
+				return err
+			}
+			if err = idxCForDeletes.DeleteCurrent(); err != nil {
+				return err
+			}
+
+			select {
+			case <-logEvery.C:
+				ii.logger.Info("[snapshots] prune history", "name", ii.filenameBase, "to_step", fmt.Sprintf("%.2f", float64(txTo)/float64(ii.aggregationStep)), "prefix", fmt.Sprintf("%x", key[:8]))
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+		return nil
+	}, etl.TransformArgs{}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // FrozenInvertedIdxIter allows iteration over range of tx numbers
 // Iteration is not implmented via callback function, because there is often
 // a requirement for interators to be composable (for example, to implement AND and OR for indices)

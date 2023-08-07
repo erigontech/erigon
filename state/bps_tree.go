@@ -189,6 +189,7 @@ func (b *BpsTree) initialize() {
 }
 
 func (a *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
+	dr = a.offt.Count()
 	for d, _ := range a.mx {
 		m, l, r := 0, 0, len(a.mx[d])
 		for l < r {

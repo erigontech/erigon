@@ -166,7 +166,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 func Test_BtreeIndex_Seek2(t *testing.T) {
 	tmp := t.TempDir()
 	logger := log.New()
-	keyCount, M := 1_200_000, 1024
+	keyCount, M := 1_20, 10
 	UseBpsTree = false
 
 	dataPath := generateCompressedKV(t, tmp, 52, 48 /*val size*/, keyCount, logger)

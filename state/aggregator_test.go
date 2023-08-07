@@ -701,8 +701,10 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	err = agg.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
 
-	err = agg.Unwind(context.Background(), pruneFrom)
+	ac := agg.MakeContext()
+	err = ac.Unwind(context.Background(), pruneFrom)
 	require.NoError(t, err)
+	ac.Close()
 
 	for i = int(pruneFrom); i < len(vals); i++ {
 		domains.SetTxNum(uint64(i))
@@ -728,7 +730,12 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 
 	pruneFrom = 3
-	err = agg.Unwind(context.Background(), pruneFrom)
+
+	ac.Close()
+
+	ac = agg.MakeContext()
+	err = ac.Unwind(context.Background(), pruneFrom)
+	ac.Close()
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {

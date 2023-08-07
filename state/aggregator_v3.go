@@ -704,30 +704,6 @@ func (a *AggregatorV3) HasNewFrozenFiles() bool {
 	return a.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 
-func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64) error {
-	step := txUnwindTo / a.aggregationStep
-	if err := a.domains.Unwind(ctx, a.rwTx, step, txUnwindTo); err != nil {
-		return err
-	}
-
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	if err := a.logAddrs.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		return err
-	}
-	if err := a.logTopics.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		return err
-	}
-	if err := a.tracesFrom.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		return err
-	}
-	if err := a.tracesTo.prune(ctx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (a *AggregatorV3) Warmup(ctx context.Context, txFrom, limit uint64) error {
 	if a.db == nil {
 		return nil
@@ -861,6 +837,7 @@ func (ac *AggregatorV3Context) maxTxNumInFiles(cold bool) uint64 {
 		),
 	)
 }
+
 func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
 	//fmt.Printf("can prune: from=%d < current=%d, keep=%d\n", ac.CanPruneFrom(tx)/ac.a.aggregationStep, ac.maxTxNumInFiles(false)/ac.a.aggregationStep, ac.a.keepInDB)
 	return ac.CanPruneFrom(tx) < ac.maxTxNumInFiles(false)
@@ -882,8 +859,8 @@ func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout tim
 	cc, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	for ac.CanPrune(tx) {
-		if err := ac.a.Prune(cc, 1); err != nil { // prune part of retired data, before commit
+	for s := uint64(0); s < ac.a.aggregatedStep.Load(); s++ {
+		if err := ac.Prune(cc, s, math2.MaxUint64); err != nil { // prune part of retired data, before commit
 			return err
 		}
 		if cc.Err() != nil {
@@ -905,75 +882,81 @@ func (a *AggregatorV3) StepsRangeInDBAsStr(tx kv.Tx) string {
 		a.tracesTo.stepsRangeInDBAsStr(tx),
 	}, ", ")
 }
-func (a *AggregatorV3) Prune(ctx context.Context, stepsLimit float64) error {
+
+func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64) error {
 	if dbg.NoPrune() {
 		return nil
 	}
-	//if stepsLimit < 1 {
-	//stepsLimit = 1
-	//}
-	limit := uint64(stepsLimit * float64(a.aggregationStep))
-	step := a.stepToPrune.Load()
-	if a.aggregatedStep.Load() <= step {
-		return nil
-	}
-	if limit > a.aggregatedStep.Load()*a.aggregationStep {
-		limit = a.aggregatedStep.Load() * a.aggregationStep
-	}
-	from := step * a.aggregationStep
-	to := from + limit
-	if a.minimaxTxNumInFiles.Load() == 0 {
-		return nil
-	}
 
-	//if limit/a.aggregationStep > StepsInColdFile {
-	//	ctx, cancel := context.WithCancel(ctx)
-	//	defer cancel()
-	//
-	//	a.wg.Add(1)
-	//	go func() {
-	//		defer a.wg.Done()
-	//		_ = a.Warmup(ctx, 0, cmp.Max(a.aggregationStep, limit)) // warmup is asyn and moving faster than data deletion
-	//	}()
-	//}
-	if err := a.prune(ctx, from, to, limit); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+	txTo := step * ac.a.aggregationStep
+	var txFrom uint64
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ac.a.logger.Info("aggregator prune", "step", step,
+		"range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
+		"stepsLimit", limit/ac.a.aggregationStep, "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(ac.a.rwTx))
+
+	if err := ac.accounts.Prune(ctx, ac.a.rwTx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	a.stepToPrune.Add(1)
+	if err := ac.storage.Prune(ctx, ac.a.rwTx, step, txFrom, txTo, limit, logEvery); err != nil {
+		return err
+	}
+	if err := ac.code.Prune(ctx, ac.a.rwTx, step, txFrom, txTo, limit, logEvery); err != nil {
+		return err
+	}
+	if err := ac.commitment.Prune(ctx, ac.a.rwTx, step, txFrom, txTo, limit, logEvery); err != nil {
+		return err
+	}
+	if err := ac.logAddrs.Prune(ctx, ac.a.rwTx, txFrom, txTo, limit, logEvery); err != nil {
+		return err
+	}
+	if err := ac.logTopics.Prune(ctx, ac.a.rwTx, txFrom, txTo, limit, logEvery); err != nil {
+		return err
+	}
+	if err := ac.tracesFrom.Prune(ctx, ac.a.rwTx, txFrom, txTo, limit, logEvery); err != nil {
+		return err
+	}
+	if err := ac.tracesTo.Prune(ctx, ac.a.rwTx, txFrom, txTo, limit, logEvery); err != nil {
+		return err
+	}
 	return nil
 }
 
-// [from, to)
-func (a *AggregatorV3) prune(ctx context.Context, txFrom, txTo, limit uint64) error {
+func (ac *AggregatorV3Context) Unwind(ctx context.Context, txUnwindTo uint64) error {
+	step := txUnwindTo / ac.a.aggregationStep
+
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	step := uint64(0)
-	if txTo > 0 {
-		step = (txTo - 1) / a.aggregationStep
-	}
-	a.logger.Info("aggregator prune", "step", step, "range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit, "stepsLimit", limit/a.aggregationStep, "stepsRangeInDB", a.StepsRangeInDBAsStr(a.rwTx))
-	if err := a.accounts.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
+	ac.a.logger.Info("aggregator unwind", "step", step,
+		"txUnwindTo", txUnwindTo, "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(ac.a.rwTx))
+
+	if err := ac.accounts.Unwind(ctx, ac.a.rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
 		return err
 	}
-	if err := a.storage.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.storage.Unwind(ctx, ac.a.rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
 		return err
 	}
-	if err := a.code.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.code.Unwind(ctx, ac.a.rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
 		return err
 	}
-	if err := a.commitment.prune(ctx, step, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.commitment.Unwind(ctx, ac.a.rwTx, step, txUnwindTo, math2.MaxUint64, math2.MaxUint64, nil); err != nil {
 		return err
 	}
-	if err := a.logAddrs.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.logAddrs.Prune(ctx, ac.a.rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
 		return err
 	}
-	if err := a.logTopics.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.logTopics.Prune(ctx, ac.a.rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
 		return err
 	}
-	if err := a.tracesFrom.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.tracesFrom.Prune(ctx, ac.a.rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
 		return err
 	}
-	if err := a.tracesTo.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.tracesTo.Prune(ctx, ac.a.rwTx, txUnwindTo, math2.MaxUint64, math2.MaxUint64, logEvery); err != nil {
+		return err
+	}
+	if err := ac.a.domains.Unwind(ctx, ac.a.rwTx, txUnwindTo); err != nil {
 		return err
 	}
 	return nil

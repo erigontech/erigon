@@ -271,25 +271,42 @@ func TestDomain_AfterPrune(t *testing.T) {
 	d.StartWrites()
 	defer d.FinishWrites()
 
+	var (
+		k1 = []byte("key1")
+		k2 = []byte("key2")
+		p1 []byte
+		p2 []byte
+
+		n1, n2 = []byte("value1.1"), []byte("value2.1")
+	)
+
 	d.SetTxNum(2)
-	err = d.Put([]byte("key1"), nil, []byte("value1.1"))
+	err = d.PutWithPrev(k1, nil, n1, p1)
 	require.NoError(t, err)
 
 	d.SetTxNum(3)
-	err = d.Put([]byte("key2"), nil, []byte("value2.1"))
+	err = d.PutWithPrev(k2, nil, n2, p2)
 	require.NoError(t, err)
+
+	p1, p2 = n1, n2
+	n1, n2 = []byte("value1.2"), []byte("value2.2")
 
 	d.SetTxNum(6)
-	err = d.Put([]byte("key1"), nil, []byte("value1.2"))
+	err = d.PutWithPrev(k1, nil, n1, p1)
 	require.NoError(t, err)
+
+	p1, n1 = n1, []byte("value1.3")
 
 	d.SetTxNum(17)
-	err = d.Put([]byte("key1"), nil, []byte("value1.3"))
+	err = d.PutWithPrev(k1, nil, n1, p1)
 	require.NoError(t, err)
 
+	p1 = n1
+
 	d.SetTxNum(18)
-	err = d.Put([]byte("key2"), nil, []byte("value2.2"))
+	err = d.PutWithPrev(k2, nil, n2, p2)
 	require.NoError(t, err)
+	p2 = n2
 
 	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
@@ -304,31 +321,31 @@ func TestDomain_AfterPrune(t *testing.T) {
 	var v []byte
 	dc := d.MakeContext()
 	defer dc.Close()
-	v, found, err := dc.GetLatest([]byte("key1"), nil, tx)
+	v, found, err := dc.GetLatest(k1, nil, tx)
 	require.Truef(t, found, "key1 not found")
 	require.NoError(t, err)
-	require.Equal(t, []byte("value1.3"), v)
-	v, found, err = dc.GetLatest([]byte("key2"), nil, tx)
+	require.Equal(t, p1, v)
+	v, found, err = dc.GetLatest(k2, nil, tx)
 	require.Truef(t, found, "key2 not found")
 	require.NoError(t, err)
-	require.Equal(t, []byte("value2.2"), v)
+	require.Equal(t, p2, v)
 
-	err = d.prune(ctx, 0, 0, 16, math.MaxUint64, logEvery)
+	err = dc.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, logEvery)
 	require.NoError(t, err)
 
 	isEmpty, err := d.isEmpty(tx)
 	require.NoError(t, err)
 	require.False(t, isEmpty)
 
-	v, found, err = dc.GetLatest([]byte("key1"), nil, tx)
+	v, found, err = dc.GetLatest(k1, nil, tx)
 	require.NoError(t, err)
 	require.Truef(t, found, "key1 not found")
-	require.Equal(t, []byte("value1.3"), v)
+	require.Equal(t, p1, v)
 
-	v, found, err = dc.GetLatest([]byte("key2"), nil, tx)
+	v, found, err = dc.GetLatest(k2, nil, tx)
 	require.NoError(t, err)
 	require.Truef(t, found, "key2 not found")
-	require.Equal(t, []byte("value2.2"), v)
+	require.Equal(t, p2, v)
 }
 
 func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
@@ -396,9 +413,14 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			label := fmt.Sprintf("txNum=%d, keyNum=%d", txNum, keyNum)
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
+			if txNum >= keyNum {
+				fmt.Printf("dbg")
+			}
 			val, err := dc.GetBeforeTxNum(k[:], txNum+1, roTx)
 			require.NoError(err, label)
 			if txNum >= keyNum {
+
+				fmt.Printf("val %d\n", binary.BigEndian.Uint64(val[:]))
 				require.Equal(v[:], val, label)
 			} else {
 				require.Nil(val, label)
@@ -433,7 +455,9 @@ func TestHistory(t *testing.T) {
 			require.NoError(t, err)
 			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
 
-			err = d.prune(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
+			dc := d.MakeContext()
+			err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
+			dc.Close()
 			require.NoError(t, err)
 		}()
 	}
@@ -495,7 +519,10 @@ func TestIterationMultistep(t *testing.T) {
 			sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 			require.NoError(t, err)
 			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
-			err = d.prune(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
+
+			dc := d.MakeContext()
+			err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
+			dc.Close()
 			require.NoError(t, err)
 		}()
 	}
@@ -549,7 +576,10 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(t, err)
 		d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
-		err = d.prune(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
+
+		dc := d.MakeContext()
+		err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
+		dc.Close()
 		require.NoError(t, err)
 	}
 	var r DomainRanges
@@ -596,7 +626,9 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	require.NoError(t, err)
 	d.integrateFiles(sf, txFrom, txTo)
 
-	err = d.prune(ctx, step, txFrom, txTo, math.MaxUint64, logEvery)
+	dc := d.MakeContext()
+	err = dc.Prune(ctx, d.tx, step, txFrom, txTo, math.MaxUint64, logEvery)
+	dc.Close()
 	require.NoError(t, err)
 
 	maxEndTxNum := d.endTxNumMinimax()
@@ -620,8 +652,12 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 func TestDomain_MergeFiles(t *testing.T) {
 	logger := log.New()
 	db, d, txs := filledDomain(t, logger)
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 
-	collateAndMerge(t, db, nil, d, txs)
+	collateAndMerge(t, db, rwTx, d, txs)
+	err = rwTx.Commit()
+	require.NoError(t, err)
 	checkHistory(t, db, d, txs)
 }
 
@@ -834,7 +870,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites()
+	d.StartUnbufferedWrites()
 	defer d.FinishWrites()
 
 	// keys are encodings of numbers 1..31
@@ -917,6 +953,11 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 		require.NoErrorf(t, err, label)
 		require.EqualValues(t, v[:], storedV, label)
 	}
+	//tx.Commit()
+
+	//tx, err = db.BeginRw(ctx)
+	//require.NoError(t, err)
+	//d.SetTx(tx)
 
 	from, to := d.stepsRangeInDB(tx)
 	require.Equal(t, 3, int(from))
@@ -1180,7 +1221,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 		logEvery := time.NewTicker(time.Second * 30)
 
-		err = d.prune(ctx, step, txFrom, txTo, math.MaxUint64, logEvery)
+		err = dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		require.NoError(t, err)
 
 		ranges := dc.findMergeRange(txFrom, txTo)
@@ -1263,7 +1304,11 @@ func TestDomain_Unwind(t *testing.T) {
 	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 
-	err = d.unwind(ctx, 0, 5, maxTx, maxTx, nil)
+	dc := d.MakeContext()
+	err = dc.Unwind(ctx, tx, 0, 5, maxTx, math.MaxUint64, nil)
+	require.NoError(t, err)
+	dc.Close()
+
 	require.NoError(t, err)
 	d.MakeContext().IteratePrefix(tx, []byte("key1"), func(k, v []byte) {
 		fmt.Printf("%s: %s\n", k, v)
