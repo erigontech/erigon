@@ -1604,8 +1604,8 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 
 		reader := dc.statelessIdxReader(i)
 		if reader.Empty() {
-			continue
 			LatestStateReadWarmNotFound.UpdateDuration(t)
+			continue
 			return nil, false, nil
 		}
 		offset = reader.Lookup(filekey)
@@ -1615,13 +1615,13 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 		g.Reset(offset)
 		k, _ := g.Next(nil)
 		if !bytes.Equal(filekey, k) {
+			LatestStateReadColdNotFound.UpdateDuration(t)
 			continue
 		}
 		v, _ := g.Next(nil)
 		LatestStateReadWarm.UpdateDuration(t)
 		return v, true, nil
 	}
-	LatestStateReadWarmNotFound.UpdateDuration(t)
 	return nil, false, nil
 }
 
@@ -1669,10 +1669,10 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 		g.Reset(offset)
 		k, _ := g.Next(nil)
 		if !bytes.Equal(filekey, k) {
+			LatestStateReadGrindNotFound.UpdateDuration(t)
 			continue
 		}
 		v, _ = g.Next(nil)
-		LatestStateReadWarm.UpdateDuration(t)
 		//var ok bool
 		//dc.d.stats.FilesQuerie.Add(1)
 		//_, v, ok, err := dc.statelessBtree(i).Get(filekey)
@@ -1686,7 +1686,6 @@ func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, 
 		LatestStateReadGrind.UpdateDuration(t)
 		return v, true, nil
 	}
-	LatestStateReadGrindNotFound.UpdateDuration(t)
 	return nil, false, nil
 }
 
@@ -1741,7 +1740,6 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 		LatestStateReadCold.UpdateDuration(t)
 		return v, true, nil
 	}
-	LatestStateReadColdNotFound.UpdateDuration(t)
 	return nil, false, nil
 }
 
