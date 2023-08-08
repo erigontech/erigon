@@ -206,7 +206,7 @@ func (i *filesItem) closeFilesAndRemove() {
 	if i.bloom != nil {
 		i.bloom.Close()
 		if err := os.Remove(i.bloom.filePath); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
+			log.Trace("remove after close", "err", err, "file", i.bloom.fileName)
 		}
 		i.bloom = nil
 	}
