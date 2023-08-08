@@ -89,7 +89,7 @@ func MetaCatchingUp(args Args) string {
 	if args.seenSlot < args.targetSlot {
 		return CatchUpBlocks
 	}
-	return WaitForPeers
+	return ""
 }
 
 /*
