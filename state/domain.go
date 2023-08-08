@@ -1929,7 +1929,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		LatestStateReadDB.UpdateDuration(t)
 		return v, true, nil
 	}
-	LatestStateReadWarmNotFound.UpdateDuration(t)
+	LatestStateReadDBNotFound.UpdateDuration(t)
 
 	v, found, err := dc.getLatestFromFiles(key)
 	if err != nil {
