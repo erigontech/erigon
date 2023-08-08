@@ -126,6 +126,8 @@ func NewBloom(keysCount uint64, filePath string) (*bloomFilter, error) {
 	_, fileName := filepath.Split(filePath)
 	return &bloomFilter{filePath: filePath, fileName: fileName, Filter: bloom}, nil
 }
+func (b *bloomFilter) FileName() string { return b.fileName }
+
 func (b *bloomFilter) Build() error {
 	//TODO: fsync and tmp-file rename
 	if _, err := b.Filter.WriteFile(b.filePath); err != nil {
