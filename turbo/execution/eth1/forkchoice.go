@@ -95,6 +95,7 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash libcom
 		rawdb.WriteForkchoiceSafe(tx, safeHash)
 	}
 	rawdb.WriteHeadBlockHash(tx, blockHash)
+	rawdb.WriteForkchoiceHead(tx, blockHash)
 
 }
 
