@@ -1514,6 +1514,8 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 
 	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, logger)
 
+	logger.Info("Initialised chain configuration", "config", chainConfig)
+
 	blockReader, blockWriter := blocksIO(db, logger)
 	sentryControlServer, err := sentry.NewMultiClient(
 		db,
