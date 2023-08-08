@@ -1599,6 +1599,7 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 				LatestStateReadWarmNotFound.UpdateDuration(t)
 				continue
 			}
+			LatestStateReadWarm.UpdateDuration(t)
 			return v, true, nil
 		}
 
@@ -1615,7 +1616,7 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 		g.Reset(offset)
 		k, _ := g.Next(nil)
 		if !bytes.Equal(filekey, k) {
-			LatestStateReadColdNotFound.UpdateDuration(t)
+			LatestStateReadWarmNotFound.UpdateDuration(t)
 			continue
 		}
 		v, _ := g.Next(nil)
