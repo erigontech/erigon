@@ -58,3 +58,26 @@ func TestBlockchain(t *testing.T) {
 		}
 	})
 }
+
+func TestBlockchainEIP(t *testing.T) {
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+
+	bt := new(testMatcher)
+
+	// EOF is not supported yet
+	bt.skipLoad(`^StateTests/stEOF/`)
+
+	// TODO(yperbasis): fix me
+	bt.skipLoad(`^StateTests/stEIP4844-blobtransactions/`)
+	bt.skipLoad(`^StateTests/stExample/`)
+
+	// TODO(yperbasis): re-enable checkStateRoot
+	checkStateRoot := false
+
+	bt.walk(t, blockEipTestDir, func(t *testing.T, name string, test *BlockTest) {
+		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
+			t.Error(err)
+		}
+	})
+}
