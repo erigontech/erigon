@@ -158,7 +158,9 @@ func ConsensusClStages(ctx context.Context,
 		return nil
 	}
 
-	// TODO: this is an ugly hack, but it works!
+	// TODO: this is an ugly hack, but it works! Basically, we want shared state in the clstages.
+	// Probably the correct long term solution is to create a third generic parameter that defines shared state
+	// but for now, all it would have are the two gossip sources and the forkChoicesSinceReorg, so i don't think its worth it (yet).
 	shouldForkChoiceSinceReorg := false
 
 	// clstages run in a single thread - so we don't need to worry about any synchronization.
