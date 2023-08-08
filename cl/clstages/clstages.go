@@ -32,7 +32,7 @@ func (s *StageGraph[CONFIG, ARGUMENTS]) StartWithStage(ctx context.Context, star
 		sctx, cn := context.WithCancel(ctx)
 		err := currentStage.ActionFunc(sctx, lg, cfg, args)
 		if err != nil {
-			lg.Error("error executing stage", "err", err)
+			lg.Error("error executing clstage", "err", err)
 		}
 		cn()
 		dur := time.Since(start)
@@ -42,7 +42,7 @@ func (s *StageGraph[CONFIG, ARGUMENTS]) StartWithStage(ctx context.Context, star
 		default:
 			args = s.ArgsFunc(ctx, cfg)
 			nextStage := currentStage.TransitionFunc(cfg, args, err)
-			logger.Info("stage done", "stage", stageName, "in", dur, "next", nextStage)
+			logger.Info("clstage finish", "stage", stageName, "in", dur, "next", nextStage)
 			stageName = nextStage
 		}
 	}
