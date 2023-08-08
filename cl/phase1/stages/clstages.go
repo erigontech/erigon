@@ -272,10 +272,10 @@ func ConsensusClStages(ctx context.Context,
 						}
 					}()
 					go func() {
-						// we don't actually care if one of our things error. so if one of them do error, lets just return with nil and try again or something
+						// if any error, lets just return the error and retry. we will make any progress we did... but we should really make sure all parts succeed when catching up
 						err := egg.Wait()
 						if err != nil {
-							errchan <- nil
+							errchan <- err
 						}
 					}()
 					return <-errchan
