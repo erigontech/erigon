@@ -93,7 +93,8 @@ type SimulatedBackend struct {
 func NewSimulatedBackendWithConfig(alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
-	m := mock.MockWithGenesisEngine(nil, &genesis, engine, false)
+	checkStateRoot := true
+	m := mock.MockWithGenesisEngine(nil, &genesis, engine, false, checkStateRoot)
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
