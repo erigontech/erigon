@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -603,7 +602,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
 			if ac.CanPrune(tx) {
-				if err = ac.Prune(ctx, math.MaxUint64, 10, tx); err != nil {
+				if err = ac.PruneWithTimeout(ctx, time.Hour, tx); err != nil {
 					return err
 				}
 			}
@@ -644,7 +643,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
 			if ac.CanPrune(tx) {
-				if err = ac.Prune(ctx, math.MaxUint64, 10, tx); err != nil {
+				if err = ac.PruneWithTimeout(ctx, time.Hour, tx); err != nil {
 					return err
 				}
 			}
