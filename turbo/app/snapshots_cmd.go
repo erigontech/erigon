@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -599,11 +600,10 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	logger.Info("Prune state history")
 	for i := 0; i < 1; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			agg.SetTx(tx)
 			ac := agg.MakeContext()
 			defer ac.Close()
 			if ac.CanPrune(tx) {
-				if err = agg.Prune(ctx, 100); err != nil {
+				if err = ac.Prune(ctx, math.MaxUint64, 10, tx); err != nil {
 					return err
 				}
 			}
@@ -641,11 +641,10 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 	for i := 0; i < 10; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			agg.SetTx(tx)
 			ac := agg.MakeContext()
 			defer ac.Close()
 			if ac.CanPrune(tx) {
-				if err = agg.Prune(ctx, 10); err != nil {
+				if err = ac.Prune(ctx, math.MaxUint64, 10, tx); err != nil {
 					return err
 				}
 			}
