@@ -457,6 +457,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		logger,
 	)
 
+	cfg.Genesis = gspec
 	pipelineStages := stages2.NewPipelineStages(ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapshotsDownloader, mock.BlockReader, blockRetire, mock.agg, forkValidator, logger)
 	mock.posStagedSync = stagedsync.New(pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
 
