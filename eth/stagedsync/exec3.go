@@ -816,7 +816,7 @@ Loop:
 							if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
 								return err
 							}
-							if err := tx.(*temporal.Tx).AggCtx().PruneWithTimeout(ctx, time.Second*30, tx); err != nil {
+							if err := tx.(*temporal.Tx).AggCtx().PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
 								return err
 							}
 							return nil
