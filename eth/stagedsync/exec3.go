@@ -771,7 +771,7 @@ Loop:
 					return err
 				}
 
-				var t1, t2, t3, t32, t4, t5, t6 time.Duration
+				var t1, t3, t32, t4, t5, t6 time.Duration
 				commtitStart := time.Now()
 				tt := time.Now()
 				if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
@@ -816,7 +816,7 @@ Loop:
 							if err := tx.(*temporal.Tx).MdbxTx.WarmupDB(false); err != nil {
 								return err
 							}
-							if err := tx.(*temporal.Tx).AggCtx().PruneWithTimeout(ctx, time.Second*1, tx); err != nil {
+							if err := tx.(*temporal.Tx).AggCtx().PruneWithTimeout(ctx, time.Second*30, tx); err != nil {
 								return err
 							}
 							return nil
@@ -843,21 +843,10 @@ Loop:
 					return err
 				}
 				logger.Info("Committed", "time", time.Since(commtitStart),
-					"commitment", t1, "prune", t2, "flush", t3, "tx.CollectMetrics", t32, "tx.commit", t4, "aggregate", t5, "prune2", t6)
+					"commitment", t1, "flush", t3, "tx.CollectMetrics", t32, "tx.commit", t4, "aggregate", t5, "prune", t6)
 			default:
 			}
 		}
-		//if blockNum%100000 == 0 {
-		//	if err := agg.Flush(ctx, applyTx); err != nil {
-		//		return err
-		//	}
-		//	doms.ClearRam(false)
-		//	if ok, err := checkCommitmentV3(b.HeaderNoCopy(), applyTx, agg, cfg.badBlockHalt, cfg.hd, execStage, maxBlockNum, logger, u); err != nil {
-		//		return err
-		//	} else if !ok {
-		//		break Loop
-		//	}
-		//}
 
 		if parallel && blocksFreezeCfg.Produce { // sequential exec - does aggregate right after commit
 			agg.BuildFilesInBackground(outputTxNum.Load())
