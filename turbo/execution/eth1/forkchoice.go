@@ -96,7 +96,6 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash libcom
 	}
 	rawdb.WriteHeadBlockHash(tx, blockHash)
 	rawdb.WriteForkchoiceHead(tx, blockHash)
-
 }
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHash, safeHash, finalizedHash libcommon.Hash, outcomeCh chan forkchoiceOutcome) {
