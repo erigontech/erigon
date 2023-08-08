@@ -15,7 +15,7 @@ func TestExecutionSpec(t *testing.T) {
 
 	dir := filepath.Join(".", "execution-spec-tests")
 
-	// TODO(yperbasis): make it work
+	// Probably failing due to pre-Byzantium receipts
 	bt.skipLoad(`^frontier/`)
 	bt.skipLoad(`^homestead/`)
 
