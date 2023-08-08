@@ -376,8 +376,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		cfg.DropUselessPeers,
 		logger,
 	)
-
-	mock.sentriesClient.IsMock = true
 	if err != nil {
 		if tb != nil {
 			tb.Fatal(err)
@@ -385,6 +383,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			panic(err)
 		}
 	}
+	mock.sentriesClient.IsMock = true
 
 	var snapshotsDownloader proto_downloader.DownloaderClient
 

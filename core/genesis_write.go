@@ -488,24 +488,35 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 	if g.Difficulty == nil {
 		head.Difficulty = params.GenesisDifficulty
 	}
-	if g.Config != nil && (g.Config.IsLondon(0)) {
+	if g.Config != nil && g.Config.IsLondon(0) {
 		if g.BaseFee != nil {
 			head.BaseFee = g.BaseFee
 		} else {
 			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 		}
 	}
-	if g.Config.IsCancun(g.Timestamp) {
-		if g.ParentBeaconBlockRoot == nil {
-			head.ParentBeaconBlockRoot = &libcommon.Hash{}
-		} else {
-			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
-		}
-	}
 
 	var withdrawals []*types.Withdrawal
-	if g.Config != nil && (g.Config.IsShanghai(g.Timestamp)) {
+	if g.Config != nil && g.Config.IsShanghai(g.Timestamp) {
 		withdrawals = []*types.Withdrawal{}
+	}
+
+	if g.Config != nil && g.Config.IsCancun(g.Timestamp) {
+		if g.BlobGasUsed != nil {
+			head.BlobGasUsed = g.BlobGasUsed
+		} else {
+			head.BlobGasUsed = new(uint64)
+		}
+		if g.ExcessBlobGas != nil {
+			head.ExcessBlobGas = g.ExcessBlobGas
+		} else {
+			head.ExcessBlobGas = new(uint64)
+		}
+		if g.ParentBeaconBlockRoot != nil {
+			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
+		} else {
+			head.ParentBeaconBlockRoot = &libcommon.Hash{}
+		}
 	}
 
 	var root libcommon.Hash
