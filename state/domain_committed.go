@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 )
 
@@ -451,36 +450,6 @@ func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, mer
 		return nil, err
 	}
 	return transValBuf, nil
-}
-
-type ArchiveWriter interface {
-	AddWord(word []byte) error
-	Count() int
-	Compress() error
-	DisableFsync()
-	Close()
-}
-
-type compWriter struct {
-	*compress.Compressor
-	c bool
-}
-
-func NewArchiveWriter(kv *compress.Compressor, compress bool) ArchiveWriter {
-	return &compWriter{kv, compress}
-}
-
-func (c *compWriter) AddWord(word []byte) error {
-	if c.c {
-		return c.Compressor.AddWord(word)
-	}
-	return c.Compressor.AddUncompressedWord(word)
-}
-
-func (c *compWriter) Close() {
-	if c.Compressor != nil {
-		c.Compressor.Close()
-	}
 }
 
 func (d *DomainCommitted) Close() {

@@ -859,17 +859,17 @@ func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout tim
 	cc, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	for s := ac.a.stepToPrune.Load(); s < ac.a.aggregatedStep.Load(); s++ {
-		if err := ac.Prune(cc, s, math2.MaxUint64, tx); err != nil { // prune part of retired data, before commit
-			if errors.Is(err, context.DeadlineExceeded) {
-				return nil
-			}
-			return err
-		}
-		if cc.Err() != nil {
+	//for s := ac.a.stepToPrune.Load(); s < ac.a.aggregatedStep.Load(); s++ {
+	if err := ac.Prune(cc, ac.a.aggregatedStep.Load(), math2.MaxUint64, tx); err != nil { // prune part of retired data, before commit
+		if errors.Is(err, context.DeadlineExceeded) {
 			return nil
 		}
+		return err
 	}
+	if cc.Err() != nil {
+		return nil
+	}
+	//}
 	return nil
 }
 

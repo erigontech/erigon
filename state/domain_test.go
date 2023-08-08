@@ -413,9 +413,6 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			label := fmt.Sprintf("txNum=%d, keyNum=%d", txNum, keyNum)
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
-			if txNum >= keyNum {
-				//fmt.Printf("dbg")
-			}
 			val, err := dc.GetBeforeTxNum(k[:], txNum+1, roTx)
 			require.NoError(err, label)
 			if txNum >= keyNum {
@@ -951,11 +948,6 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 		require.NoErrorf(t, err, label)
 		require.EqualValues(t, v[:], storedV, label)
 	}
-	//tx.Commit()
-
-	//tx, err = db.BeginRw(ctx)
-	//require.NoError(t, err)
-	//d.SetTx(tx)
 
 	from, to := d.stepsRangeInDB(tx)
 	require.Equal(t, 3, int(from))

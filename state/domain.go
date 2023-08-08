@@ -2114,22 +2114,24 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		prunedMaxStep uint64
 		prunedMinStep = uint64(math.MaxUint64)
 		seek          = make([]byte, 0, 256)
+		valsDup       kv.RwCursorDupSort
 	)
 
-	//fmt.Printf("largeValues %t\n", dc.d.domainLargeValues)
-	valC, err := rwTx.RwCursor(dc.d.valsTable)
-	if err != nil {
-		return err
+	if !dc.d.domainLargeValues {
+		valsDup, err = rwTx.RwCursorDupSort(dc.d.valsTable)
+		if err != nil {
+			return err
+		}
+		defer valsDup.Close()
 	}
-	defer valC.Close()
 
-	for k, v, err = keysCursor.First(); k != nil; k, v, err = keysCursor.Next() {
+	for k, v, err = keysCursor.Last(); k != nil; k, v, err = keysCursor.Prev() {
 		if err != nil {
 			return fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
 		}
 		is := ^binary.BigEndian.Uint64(v)
 		if is > step {
-			k, v, err = keysCursor.NextNoDup()
+			k, v, err = keysCursor.PrevNoDup()
 			if len(v) != 8 {
 				continue
 			}
@@ -2143,72 +2145,34 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		}
 		limit--
 
-		kk, vv, err := keysCursorForDeletes.SeekBothExact(k, v)
+		k, v, err = keysCursorForDeletes.SeekBothExact(k, v)
 		if err != nil {
 			return err
 		}
-		//fmt.Printf("prune key: %x->%x, step %d dom %s\n", kk, vv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
-		seek = append(append(seek[:0], kk...), vv...)
+		seek = append(append(seek[:0], k...), v...)
+		//fmt.Printf("prune key: %x->%x [%x] step %d dom %s\n", k, v, seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
 
 		mxPruneSize.Inc()
 		prunedKeys++
 
-		//if dc.d.domainLargeValues {
-		//fmt.Printf("seek %x, %x , %x\n", seek, kk, vv)
-		//kkv, pv, err := valC.SeekExact(seek)
-		//fmt.Printf("prune value: %x->%x, step %d dom %s\n", kkv, pv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
-		//_ = pv
-		//for {
-		//	if err != nil {
-		//		return err
-		//	}
-		//	if !bytes.HasPrefix(kkv, k) {
-		//		break
-		//	}
-		//	if bytes.Equal(kkv[len(k):], seek[len(k):]) {
-		//		fmt.Printf("prune value: %x->%x, step %d dom %s\n", kkv, pv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
-		//		if err := valC.DeleteCurrent(); err != nil {
-		//			return err
-		//		}
-		//		break
-		//	}
-		//	kkv, pv, err = valC.Next()
-		//}
-
-		//kk, pv, err := valC.Seek(kk)
-		//pv, err := rwTx.GetOne(dc.d.valsTable, seek)
-		//if !bytes.Equal(kkv, seek) {
-		//	fmt.Printf("lookup next\n")
-		//	kn, vn, err := valC.Next()
-		//	if err != nil {
-		//		return err
-		//	}
-		//	fmt.Printf("prune valuenext: %x->%x, step %d dom %s\n", kn, vn, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
-		//
-		//}
-
-		//fmt.Printf("prune value: %x->%x, step %d dom %s\n", kk, pv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
-
-		err = rwTx.Delete(dc.d.valsTable, seek)
-		//err = valC.DeleteCurrent()
-		if err != nil {
-			return err
+		if dc.d.domainLargeValues {
+			//fmt.Printf("prune value: %x step %d dom %s\n", seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
+			if err = rwTx.Delete(dc.d.valsTable, seek); err != nil {
+				return err
+			}
+		} else {
+			sv, err := valsDup.SeekBothRange(k, v)
+			if bytes.HasPrefix(sv, v) {
+				//fmt.Printf("prune value: %x->%x, step %d dom %s\n", k, sv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
+				if err = valsDup.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
 		}
+
 		if err = keysCursorForDeletes.DeleteCurrent(); err != nil { // invalidates kk, vv
 			return err
 		}
-		//} else {
-		//	pv, err := rwTx.GetOne(dc.d.valsTable, k)
-		//	if err != nil {
-		//		return err
-		//	}
-		//	fmt.Printf("prune: %x->%x, step %d\n", k, pv, ^binary.BigEndian.Uint64(v))
-		//
-		//	err = rwTx.Delete(dc.d.valsTable, k)
-		//	if err != nil {
-		//		return err
-		//	}
-		//}
 
 		if is < prunedMinStep {
 			prunedMinStep = is
