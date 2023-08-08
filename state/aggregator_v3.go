@@ -898,7 +898,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64, tx
 	defer logEvery.Stop()
 	ac.a.logger.Info("aggregator prune", "step", step,
 		"range", fmt.Sprintf("[%d,%d)", txFrom, txTo), /*"limit", limit,
-		"stepsLimit", limit/ac.a.aggregationStep,*/"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(ac.a.rwTx))
+		"stepsLimit", limit/ac.a.aggregationStep,*/"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
 
 	if err := ac.accounts.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
