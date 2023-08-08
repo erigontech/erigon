@@ -55,6 +55,7 @@ github.com/99designs/gqlgen v0.17.33 h1:VTUpAtElDszatPSe26N0SD0deJCSxb7TZLlUb6Jn
 github.com/99designs/gqlgen v0.17.33/go.mod h1:ygDK+m8zGpoQuSh8xoq80UfisR5JTZr7mN57qXlSIZs=
 github.com/AlexeyAkhunov/torrent v1.52.1-0.20230808193135-be3d5d5d780f h1:7YszEN5Qr2cD2LS/YsCw4K6v7RnucHxQej/Iz2YCQQ8=
 github.com/AlexeyAkhunov/torrent v1.52.1-0.20230808193135-be3d5d5d780f/go.mod h1:+XzcWXQU97PPEWSvpC85MJyqzP1vz47M5BYGno4vIHg=
+github.com/AlexeyAkhunov/torrent v1.52.1-0.20230808195141-801d85d8b037/go.mod h1:+XzcWXQU97PPEWSvpC85MJyqzP1vz47M5BYGno4vIHg=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
 github.com/Giulio2002/bls v0.0.0-20230611172327-c0b9800e7b57 h1:583GFQgWYOAz3dKqHqARVY3KkgebRcJtU4tzy+87gzc=
@@ -501,6 +502,8 @@ github.com/leanovate/gopter v0.2.9 h1:fQjYxZaynp97ozCzfOyOuAGOU4aU/z37zf/tOujFk7
 github.com/leanovate/gopter v0.2.9/go.mod h1:U2L/78B+KVFIx2VmW6onHJQzXtFb+p5y3y2Sh+Jxxv8=
 github.com/ledgerwatch/erigon-lib v0.0.0-20230808193215-e481841dab41 h1:BsgGi7N+PaAdiENWTQi7lhUUXlTCEUIwSVssciWbEbs=
 github.com/ledgerwatch/erigon-lib v0.0.0-20230808193215-e481841dab41/go.mod h1:VfFe4hlpBXOA5m7moPgkGw5/+gjPd4j3ARm+Wxu9YD4=
+github.com/ledgerwatch/erigon-lib v0.0.0-20230808195222-95fd7739d758 h1:hNMXXA0nspW0FCP1j+H1dyZ/f5r/67EQkBW+wt6qKBE=
+github.com/ledgerwatch/erigon-lib v0.0.0-20230808195222-95fd7739d758/go.mod h1:bFVxpATWsSngx504Y5Mk7kfV9WfB3DFphylpc0R4uNg=
 github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230803145829-7084b7b6433a h1:HfE6Ivipmx7sz3VRdzRRHG6OEvd94rpXN+VzAH1HF0g=
 github.com/ledgerwatch/erigon-snapshot v1.2.1-0.20230803145829-7084b7b6433a/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
 github.com/ledgerwatch/log/v3 v3.8.0 h1:gCpp7uGtIerEz1jKVPeDnbIopFPud9ZnCpBLlLBGqPU=
