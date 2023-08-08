@@ -36,7 +36,8 @@ func TestHeaderVerification(t *testing.T) {
 		gspec  = &types.Genesis{Config: params.TestChainConfig}
 		engine = ethash.NewFaker()
 	)
-	m := mock.MockWithGenesisEngine(t, gspec, engine, false)
+	checkStateRoot := true
+	m := mock.MockWithGenesisEngine(t, gspec, engine, false, checkStateRoot)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {
@@ -76,7 +77,8 @@ func TestHeaderWithSealVerification(t *testing.T) {
 		gspec  = &types.Genesis{Config: params.TestChainAuraConfig}
 		engine = ethash.NewFaker()
 	)
-	m := mock.MockWithGenesisEngine(t, gspec, engine, false)
+	checkStateRoot := true
+	m := mock.MockWithGenesisEngine(t, gspec, engine, false, checkStateRoot)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {

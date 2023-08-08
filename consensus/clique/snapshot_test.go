@@ -426,8 +426,9 @@ func TestClique(t *testing.T) {
 
 			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB, log.New())
 			engine.FakeDiff = true
+			checkStateRoot := true
 			// Create a pristine blockchain with the genesis injected
-			m := mock.MockWithGenesisEngine(t, genesis, engine, false)
+			m := mock.MockWithGenesisEngine(t, genesis, engine, false, checkStateRoot)
 
 			chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(tt.votes), func(j int, gen *core.BlockGen) {
 				// Cast the vote contained in this block
