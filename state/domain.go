@@ -1847,8 +1847,6 @@ func (dc *DomainContext) statelessGetter(i int) ArchiveGetter {
 	if r == nil {
 		r = NewArchiveGetter(dc.files[i].src.decompressor.MakeGetter(), dc.d.compressValues)
 		dc.getters[i] = r
-	} else {
-		panic(fmt.Sprintf("statelessGetter is nil: %s, %d\n", dc.d.filenameBase, i))
 	}
 	return r
 }
@@ -1873,8 +1871,6 @@ func (dc *DomainContext) statelessBtree(i int) *BtIndex {
 	if r == nil {
 		r = dc.files[i].src.bindex
 		dc.readers[i] = r
-	} else {
-		panic(fmt.Sprintf("statelessBtree is nil: %s, %d\n", dc.d.filenameBase, i))
 	}
 	return r
 }
