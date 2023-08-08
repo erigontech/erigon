@@ -28,14 +28,24 @@ func (s *StageGraph[CONFIG, ARGUMENTS]) StartWithStage(ctx context.Context, star
 			return fmt.Errorf("attempted to transition to unknown stage: %s", stageName)
 		}
 		lg := logger.New("stage", stageName)
+		errch := make(chan error)
 		start := time.Now()
-		sctx, cn := context.WithCancel(ctx)
-		err := currentStage.ActionFunc(sctx, lg, cfg, args)
+		go func() {
+			sctx, cn := context.WithCancel(ctx)
+			defer cn()
+			// we run this is a goroutine so that the process can exit in the middle of a stage
+			// since caplin is designed to always be able to recover regardless of db state, this should be safe
+			select {
+			case errch <- currentStage.ActionFunc(sctx, lg, cfg, args):
+			case <-ctx.Done():
+				errch <- ctx.Err()
+			}
+		}()
+		err := <-errch
+		dur := time.Since(start)
 		if err != nil {
 			lg.Error("error executing clstage", "err", err)
 		}
-		cn()
-		dur := time.Since(start)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
