@@ -116,22 +116,31 @@ func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *
 	return &execution.GetHeaderHashNumberResponse{BlockNumber: blockNumber}, nil
 }
 
-func (e *EthereumExecutionModule) CanonicalHash(ctx context.Context, req *types2.H256) (*execution.IsCanonicalResponse, error) {
+func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash libcommon.Hash) (bool, error) {
+	blockNumber := rawdb.ReadHeaderNumber(tx, hash)
+	if blockNumber == nil {
+		return false, nil
+	}
+	expectedHash, err := e.canonicalHash(ctx, tx, *blockNumber)
+	if err != nil {
+		return false, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not read canonical hash")
+	}
+	return expectedHash == hash, nil
+}
+
+func (e *EthereumExecutionModule) IsCanonicalHash(ctx context.Context, req *types2.H256) (*execution.IsCanonicalResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not open database: %s", err)
 	}
 	defer tx.Rollback()
-	blockHash := gointerfaces.ConvertH256ToHash(req)
-	blockNumber := rawdb.ReadHeaderNumber(tx, blockHash)
-	if blockNumber == nil {
-		return &execution.IsCanonicalResponse{Canonical: false}, nil
-	}
-	expectedHash, err := e.canonicalHash(ctx, tx, *blockNumber)
+
+	isCanonical, err := e.isCanonicalHash(ctx, tx, gointerfaces.ConvertH256ToHash(req))
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not read canonical hash")
 	}
-	return &execution.IsCanonicalResponse{Canonical: expectedHash == blockHash}, nil
+
+	return &execution.IsCanonicalResponse{Canonical: isCanonical}, nil
 }
 
 func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.Empty) (*execution.GetHeaderResponse, error) {
@@ -175,4 +184,17 @@ func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *execution.GetS
 	}
 
 	return &execution.GetTDResponse{Td: eth1_utils.ConvertBigIntToRpc(td)}, nil
+}
+
+func (e *EthereumExecutionModule) GetForkChoice(ctx context.Context, _ *emptypb.Empty) (*execution.ForkChoice, error) {
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not open database: %s", err)
+	}
+	defer tx.Rollback()
+	return &execution.ForkChoice{
+		HeadBlockHash:      gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceHead(tx)),
+		FinalizedBlockHash: gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceFinalized(tx)),
+		SafeBlockHash:      gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceSafe(tx)),
+	}, nil
 }

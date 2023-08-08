@@ -32,7 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc/contracts"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -65,7 +65,7 @@ func makeTestAddresses() testAddresses {
 	}
 }
 
-func CreateTestSentry(t *testing.T) (*stages.MockSentry, *core.ChainPack, []*core.ChainPack) {
+func CreateTestSentry(t *testing.T) (*mock.MockSentry, *core.ChainPack, []*core.ChainPack) {
 	addresses := makeTestAddresses()
 	var (
 		key      = addresses.key
@@ -85,7 +85,7 @@ func CreateTestSentry(t *testing.T) (*stages.MockSentry, *core.ChainPack, []*cor
 			GasLimit: 10000000,
 		}
 	)
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 
 	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -284,7 +284,7 @@ type IsMiningMock struct{}
 
 func (*IsMiningMock) IsMining() bool { return false }
 
-func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *grpc.ClientConn) { //nolint
+func CreateTestGrpcConn(t *testing.T, m *mock.MockSentry) (context.Context, *grpc.ClientConn) { //nolint
 	ctx, cancel := context.WithCancel(context.Background())
 
 	apis := m.Engine.APIs(nil)
@@ -324,7 +324,7 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 	return ctx, conn
 }
 
-func CreateTestSentryForTraces(t *testing.T) *stages.MockSentry {
+func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 	var (
 		a0 = libcommon.HexToAddress("0x00000000000000000000000000000000000000ff")
 		a1 = libcommon.HexToAddress("0x00000000000000000000000000000000000001ff")
@@ -416,7 +416,7 @@ func CreateTestSentryForTraces(t *testing.T) *stages.MockSentry {
 			},
 		}
 	)
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
 		// One transaction to AAAA
@@ -434,7 +434,7 @@ func CreateTestSentryForTraces(t *testing.T) *stages.MockSentry {
 	return m
 }
 
-func CreateTestSentryForTracesCollision(t *testing.T) *stages.MockSentry {
+func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 	var (
 		// Generate a canonical chain to act as the main dataset
 		// A sender who makes transactions, has some funds
@@ -515,7 +515,7 @@ func CreateTestSentryForTracesCollision(t *testing.T) *stages.MockSentry {
 			},
 		},
 	}
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
 		// One transaction to AA, to kill it

@@ -98,6 +98,7 @@ func IsCanonicalHashDeprecated(db kv.Getter, hash libcommon.Hash) (bool, *uint64
 	}
 	return canonicalHash != (libcommon.Hash{}) && canonicalHash == hash, number, nil
 }
+
 func IsCanonicalHash(db kv.Getter, hash libcommon.Hash, number uint64) (bool, error) {
 	canonicalHash, err := ReadCanonicalHash(db, number)
 	if err != nil {

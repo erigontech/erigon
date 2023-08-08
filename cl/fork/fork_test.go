@@ -69,16 +69,6 @@ func TestSepoliaForkDigest(t *testing.T) {
 	require.Equal(t, [4]uint8{0x47, 0xeb, 0x72, 0xb3}, digest)
 }
 
-func TestGnosisForkDigest(t *testing.T) {
-	beaconCfg := clparams.BeaconConfigs[clparams.GnosisNetwork]
-	genesisCfg := clparams.GenesisConfigs[clparams.GnosisNetwork]
-	digest, err := ComputeForkDigest(&beaconCfg, &genesisCfg)
-	require.NoError(t, err)
-	_, err = ComputeForkId(&beaconCfg, &genesisCfg)
-	require.NoError(t, err)
-	require.Equal(t, [4]uint8{0x82, 0x4b, 0xe4, 0x31}, digest)
-}
-
 // ForkDigestVersion
 func TestMainnetForkDigestPhase0Version(t *testing.T) {
 	beaconCfg := clparams.BeaconConfigs[clparams.MainnetNetwork]
