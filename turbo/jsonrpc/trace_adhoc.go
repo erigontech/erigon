@@ -453,7 +453,7 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 			// Set the "push" of the last operation
 			var showStack int
 			switch {
-			case ot.lastOp >= vm.PUSH1 && ot.lastOp <= vm.PUSH32:
+			case ot.lastOp >= vm.PUSH0 && ot.lastOp <= vm.PUSH32:
 				showStack = 1
 			case ot.lastOp >= vm.SWAP1 && ot.lastOp <= vm.SWAP16:
 				showStack = int(ot.lastOp-vm.SWAP1) + 2

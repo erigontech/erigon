@@ -12,8 +12,8 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 func TestInserter1(t *testing.T) {
@@ -27,7 +27,7 @@ func TestInserter1(t *testing.T) {
 			address: {Balance: funds},
 		},
 	}
-	m := stages.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key, false)
 	db := m.DB
 	_, genesis, err := core.CommitGenesisBlock(db, gspec, "", m.Log)
 	if err != nil {

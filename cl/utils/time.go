@@ -15,6 +15,12 @@ package utils
 
 import "time"
 
+// compute time of slot.
+func GetSlotTime(genesisTime uint64, secondsPerSlot uint64, slot uint64) time.Time {
+	slotTime := genesisTime + secondsPerSlot*slot
+	return time.Unix(int64(slotTime), 0)
+}
+
 // compute current slot.
 func GetCurrentSlot(genesisTime uint64, secondsPerSlot uint64) uint64 {
 	now := uint64(time.Now().Unix())

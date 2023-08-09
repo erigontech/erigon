@@ -22,7 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 func nonceRange(from, to int) []uint64 {
@@ -245,7 +245,7 @@ func TestDump(t *testing.T) {
 	}
 }
 
-func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *stages.MockSentry {
+func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *mock.MockSentry {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
@@ -256,7 +256,7 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *s
 		signer = types.LatestSigner(gspec.Config)
 	)
 
-	m := stages.MockWithGenesisPruneMode(t, gspec, key, chainSize, prune.DefaultMode, false)
+	m := mock.MockWithGenesisPruneMode(t, gspec, key, chainSize, prune.DefaultMode, false)
 
 	// Generate testing blocks
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *core.BlockGen) {

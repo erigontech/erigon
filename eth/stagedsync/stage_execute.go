@@ -106,6 +106,9 @@ func StageExecuteBlocksCfg(
 	syncCfg ethconfig.Sync,
 	agg *libstate.AggregatorV3,
 ) ExecuteBlockCfg {
+	if genesis == nil {
+		panic("assert: nil genesis")
+	}
 	return ExecuteBlockCfg{
 		db:            db,
 		prune:         pm,
