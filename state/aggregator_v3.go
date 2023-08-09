@@ -68,7 +68,6 @@ type AggregatorV3 struct {
 	keepInDB         uint64
 
 	minimaxTxNumInFiles atomic.Uint64
-	stepToPrune         atomic.Uint64
 	aggregatedStep      atomic.Uint64
 
 	filesMutationLock sync.Mutex
@@ -198,6 +197,8 @@ func (a *AggregatorV3) OpenFolder() error {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
 	a.recalcMaxTxNum()
+	a.aggregatedStep.Store(a.minimaxTxNumInFiles.Load() / a.aggregationStep)
+
 	return nil
 }
 func (a *AggregatorV3) OpenList(fNames, warmNames []string) error {
@@ -924,7 +925,6 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, step, limit uint64, tx
 	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	ac.a.stepToPrune.Store(step + 1)
 	return nil
 }
 
