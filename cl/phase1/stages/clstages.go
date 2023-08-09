@@ -28,7 +28,7 @@ type Cfg struct {
 	rpc             *rpc.BeaconRpcP2P
 	genesisCfg      *clparams.GenesisConfig
 	beaconCfg       *clparams.BeaconChainConfig
-	executionClient *execution_client.ExecutionClient
+	executionClient *execution_client.ExecutionEngine
 	state           *state.CachingBeaconState
 	gossipManager   *network2.GossipManager
 	forkChoice      *forkchoice.ForkChoiceStore
@@ -47,7 +47,7 @@ func ClStagesCfg(
 	genesisCfg *clparams.GenesisConfig,
 	beaconCfg *clparams.BeaconChainConfig,
 	state *state.CachingBeaconState,
-	executionClient *execution_client.ExecutionClient,
+	executionClient *execution_client.ExecutionEngine,
 	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
 	dataDirFs afero.Fs,

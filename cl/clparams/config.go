@@ -819,6 +819,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.DenebForkEpoch = math.MaxUint64
 	cfg.InactivityScoreRecoveryRate = 16
 	cfg.InactivityScoreBias = 4
+	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.InitializeForkSchedule()
 	return cfg
 }
