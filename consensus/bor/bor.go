@@ -1145,6 +1145,24 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	return nil
 }
 
+// IsValidator returns true if this instance is the validator for this block
+func (c *Bor) IsValidator(header *types.Header) (bool, error) {
+	number := header.Number.Uint64()
+
+	if number == 0 {
+		return false, nil
+	}
+
+	snap, err := c.snapshot(nil, number-1, header.ParentHash, nil)
+	if err != nil {
+		return false, err
+	}
+
+	currentSigner := c.authorizedSigner.Load()
+
+	return snap.ValidatorSet.HasAddress(currentSigner.signer), nil
+}
+
 // IsProposer returns true if this instance is the proposer for this block
 func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 	number := header.Number.Uint64()

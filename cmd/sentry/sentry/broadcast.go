@@ -91,7 +91,7 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 	maxPeers := uint64(1024)
 
 	if bor, ok := cs.Engine.(*bor.Bor); ok {
-		if sendAll, _ := bor.IsProposer(header); sendAll {
+		if sendAll, _ := bor.IsValidator(header); sendAll {
 			// max peers is overloaded a zero value is interpreted as send all
 			maxPeers = 0
 		}
