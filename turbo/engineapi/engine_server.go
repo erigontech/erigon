@@ -471,7 +471,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	if version >= clparams.DenebVersion {
-		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(payloadAttributes.ParentBeaconBlockRoot)
+		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
 	}
 
 	resp, err := s.executionService.AssembleBlock(ctx, req)
