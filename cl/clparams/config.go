@@ -809,14 +809,16 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.AltairForkVersion = 0x01000064
 	cfg.BellatrixForkEpoch = 385536
 	cfg.BellatrixForkVersion = 0x02000064
+	cfg.CapellaForkEpoch = 648704
+	cfg.CapellaForkVersion = 0x03000064
 	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
 	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
-	cfg.CapellaForkEpoch = 648704
-	cfg.CapellaForkVersion = 0x03000064
 	cfg.DenebForkEpoch = math.MaxUint64
+	cfg.InactivityScoreRecoveryRate = 16
+	cfg.InactivityScoreBias = 4
 	cfg.InitializeForkSchedule()
 	return cfg
 }

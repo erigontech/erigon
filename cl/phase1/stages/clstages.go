@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clpersist"
@@ -14,13 +15,13 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
-	"golang.org/x/sync/errgroup"
 )
 
 type Cfg struct {
@@ -199,7 +200,7 @@ func ConsensusClStages(ctx context.Context,
 						if peersCount > minPeersForDownload {
 							break
 						}
-						logger.Debug("[Caplin] Waiting For Peers", "have", peersCount, "needed", minPeersForDownload, "retryIn", waitWhenNotEnoughPeers)
+						logger.Info("[Caplin] Waiting For Peers", "have", peersCount, "needed", minPeersForDownload, "retryIn", waitWhenNotEnoughPeers)
 						time.Sleep(waitWhenNotEnoughPeers)
 						peersCount, err = cfg.rpc.Peers()
 						if err != nil {
@@ -218,67 +219,30 @@ func ConsensusClStages(ctx context.Context,
 					return CatchUpBlocks
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					totalEpochs := args.targetEpoch - args.seenEpoch
 					logger = logger.New(
 						"slot", fmt.Sprintf("%d/%d", args.seenSlot, args.targetSlot),
 						"epoch", fmt.Sprintf("%d/%d(%d)", args.seenEpoch, args.targetEpoch, (1+args.targetEpoch)*cfg.beaconCfg.SlotsPerEpoch-1),
 					)
 					logger.Info("downloading epochs from reqresp")
-					ctx, cn := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot*cfg.beaconCfg.SlotsPerEpoch)*time.Second)
-					defer cn()
-					counter := atomic.Int64{}
-					// now we download the missing blocks
-					chans := make([]chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0, totalEpochs)
-					ctx, cn = context.WithCancel(ctx)
-					egg, ctx := errgroup.WithContext(ctx)
 
-					egg.SetLimit(3)
-					defer cn()
-					for i := args.seenEpoch; i <= args.targetEpoch; i = i + 1 {
+					i := args.seenEpoch
+				MainLoop:
+					for i <= args.targetEpoch {
 						startBlock := i * cfg.beaconCfg.SlotsPerEpoch
-						o := make(chan []*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0)
-						chans = append(chans, o)
-						egg.Go(func() error {
-							blocks, err := rpcSource.GetRange(ctx, startBlock, cfg.beaconCfg.SlotsPerEpoch)
-							if err != nil {
-								return err
-							}
-							logger.Info("downloading epochs from reqresp", "progress", fmt.Sprintf("%d", int(100*(float64(counter.Add(1))/float64(totalEpochs+1))))+"%")
-							o <- blocks
-							return nil
-						})
-					}
-					errchan := make(chan error, 1)
-					go func() {
-						defer func() {
-							errchan <- nil
-						}()
-						for _, v := range chans {
-							select {
-							case <-ctx.Done():
-								return
-							case epochResp := <-v:
-								for _, block := range epochResp {
-									if block.Data.Block.Slot <= args.seenSlot {
-										continue
-									}
-									err := processBlock(block, false, false)
-									if err != nil {
-										errchan <- err
-										return
-									}
-								}
-							}
-						}
-					}()
-					go func() {
-						// if any error, lets just return the error and retry. we will make any progress we did... but we should really make sure all parts succeed when catching up
-						err := egg.Wait()
+						blocks, err := rpcSource.GetRange(ctx, startBlock, cfg.beaconCfg.SlotsPerEpoch)
 						if err != nil {
-							errchan <- err
+							return err
 						}
-					}()
-					return <-errchan
+						logger.Info("downloading epochs from reqresp", "epoch", i)
+						for _, block := range blocks {
+							if err := processBlock(block, false, false); err != nil {
+								log.Warn("bad blocks segment received", "err", err)
+								continue MainLoop
+							}
+						}
+						i = i + 1
+					}
+					return nil
 				},
 			},
 			CatchUpBlocks: {
@@ -291,7 +255,7 @@ func ConsensusClStages(ctx context.Context,
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					totalRequest := args.targetSlot - args.seenSlot
-					logger.Info("waiting for blocks...",
+					logger.Debug("waiting for blocks...",
 						"seenSlot", args.seenSlot,
 						"targetSlot", args.targetSlot,
 						"requestedSlots", totalRequest,
@@ -322,7 +286,11 @@ func ConsensusClStages(ctx context.Context,
 							if err := processBlock(block, true, true); err != nil {
 								return err
 							}
-							logger.Info("block processed", "slot", block.Data.Block.Slot)
+							hash, err := block.Data.HashSSZ()
+							if err != nil {
+								return err
+							}
+							logger.Info("Imported chain segment", "slot", block.Data.Block.Slot, "hash", libcommon.Hash(hash))
 						}
 					}
 					return nil
@@ -359,7 +327,7 @@ func ConsensusClStages(ctx context.Context,
 					// Do forkchoice if possible
 					if cfg.forkChoice.Engine() != nil {
 						finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
-						logger.Info("Caplin is sending forkchoice")
+						logger.Debug("Caplin is sending forkchoice")
 						// Run forkchoice
 						if err := cfg.forkChoice.Engine().ForkChoiceUpdate(
 							cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
@@ -443,7 +411,7 @@ func ConsensusClStages(ctx context.Context,
 					nextSlot := args.seenSlot + 1
 					nextSlotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, nextSlot)
 					nextSlotDur := nextSlotTime.Sub(time.Now())
-					logger.Info("sleeping until next slot", "slot", nextSlot, "time", nextSlotTime, "dur", nextSlotDur)
+					logger.Debug("sleeping until next slot", "slot", nextSlot, "time", nextSlotTime, "dur", nextSlotDur)
 					time.Sleep(nextSlotDur)
 					return nil
 				},
