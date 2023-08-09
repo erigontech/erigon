@@ -572,7 +572,6 @@ func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutility.By
 }
 
 func (e *EngineServer) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	fmt.Println("Calling ForkchoiceUpdatedV1")
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.BellatrixVersion)
 }
 
