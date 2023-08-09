@@ -268,8 +268,7 @@ func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, bl
 func (back *RemoteBackend) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
 	return back.blockReader.EventLookup(ctx, tx, txnHash)
 }
-
-func (back *RemoteBackend) EventsByBlock(ctx context.Context, tx kv.Getter, blockNum uint64) ([]rlp.RawValue, error) {
+func (back *RemoteBackend) EventsByBlock(ctx context.Context, tx kv.Tx, blockNum uint64) ([]rlp.RawValue, error) {
 	return back.blockReader.EventsByBlock(ctx, tx, blockNum)
 }
 

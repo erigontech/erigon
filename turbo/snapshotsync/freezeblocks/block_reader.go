@@ -211,10 +211,17 @@ func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash comm
 }
 
 func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
-	return 0, false, nil
+	reply, err := r.client.BorEvent(ctx, &remote.BorEventRequest{BorTxHash: gointerfaces.ConvertHashToH256(txnHash)})
+	if err != nil {
+		return 0, false, err
+	}
+	if reply == nil || len(reply.EventRlps) == 0 {
+		return 0, false, nil
+	}
+	return reply.BlockNumber, true, nil
 }
 
-func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Getter, blockNum uint64) ([]rlp.RawValue, error) {
+func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, blockNum uint64) ([]rlp.RawValue, error) {
 	return nil, nil
 }
 
@@ -913,7 +920,6 @@ func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ances
 }
 
 func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
-	fmt.Printf("EventLookup %x\n", txnHash)
 	n, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
 	if err != nil {
 		return 0, false, err
@@ -925,7 +931,6 @@ func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash com
 	view := r.borSn.View()
 	defer view.Close()
 
-	fmt.Printf("Events: %d\n", len(view.Events()))
 	blockNum, ok, err := r.borBlockByEventHash(txnHash, view.Events(), nil)
 	if err != nil {
 		return 0, false, err
@@ -946,7 +951,6 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
 		blockEventId := reader.Lookup(txnHash[:])
 		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
-		fmt.Printf("Segment %d-%d, eventId %d, offset %d\n", sn.ranges.from, sn.ranges.to, blockEventId, offset)
 		gg := sn.seg.MakeGetter()
 		gg.Reset(offset)
 		if !gg.MatchPrefix(txnHash[:]) {
@@ -960,6 +964,11 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 	return
 }
 
-func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Getter, blockNum uint64) ([]rlp.RawValue, error) {
+func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, blockNum uint64) ([]rlp.RawValue, error) {
+	c, err := tx.Cursor(kv.BorEventNums)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
 	return nil, nil
 }
