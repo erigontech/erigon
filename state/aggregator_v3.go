@@ -197,7 +197,11 @@ func (a *AggregatorV3) OpenFolder() error {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
 	a.recalcMaxTxNum()
-	a.aggregatedStep.Store(a.minimaxTxNumInFiles.Load() / a.aggregationStep)
+	mx := a.minimaxTxNumInFiles.Load()
+	if mx > 0 {
+		mx--
+	}
+	a.aggregatedStep.Store(mx / a.aggregationStep)
 
 	return nil
 }
