@@ -171,7 +171,7 @@ func (a *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 			if a.trace {
 				fmt.Printf("smx[%d][%d] i=%d %x\n", d, m, n.i, n.prefix)
 			}
-			switch bytes.Compare(a.mx[d][m].prefix, x) {
+			switch bytes.Compare(n.prefix, x) {
 			case 0:
 				return n, n.i, n.i
 			case 1:
@@ -182,6 +182,7 @@ func (a *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 				dl = n.i
 			}
 		}
+
 	}
 	return n, dl, dr
 }
@@ -334,6 +335,8 @@ func (t *trie) insert(n Node) {
 	node := t.root
 	key := keybytesToHexNibbles(n.prefix)
 	key = key[:len(key)-1]
+	n.prefix = common.Copy(key)
+
 	fmt.Printf("node insert %x %d\n", key, n.off)
 
 	//pext := 0
@@ -348,47 +351,113 @@ func (t *trie) insert(n Node) {
 		}
 		fmt.Printf("\n}\n")
 
-		if node.prefix&(1<<uint16(b)) != 0 {
-			// node exists
-			existed := node.children[b]
-			if existed.common == nil {
-				continue
-			}
-			lc := commonPrefixLen(existed.common, key[pi+1:])
-			fmt.Printf("key ..%x & %x branches at %d: common %x rest %x\n", key[pi+1:], existed.common, lc, key[pi+1:pi+1+lc], key[pi+1+lc:])
-
-			if lc > 0 {
-				fmt.Printf("extension %x->%x\n", existed.common, key[pi+1:pi+1+lc])
-				existed.common = common.Copy(key[pi+1 : pi+1+lc])
-
-				nn := newTrieNode()
-				b := key[pi+1+lc]
-				nn.children[b] = existed
-				//pext = pi + 1
-				node.children[b] = nn
-				node.prefix |= 1 << uint16(b)
-				pi = pi + lc
-			} else {
-				nn := newTrieNode()
-				nn.common = common.Copy(key[pi+1:])
-				nn.offset = n.off
-				fmt.Printf("new char %x common %x\n", key[pi+1], nn.common)
-				node.children[key[pi+1]] = nn
-				node.prefix |= 1 << uint16(key[pi+1])
-				break
-			}
-		} else {
-			nn := newTrieNode()
-			nn.common = common.Copy(key[pi+1:])
-			nn.offset = n.off
-			fmt.Printf("new char %x common %x\n", b, nn.common)
-			node.children[b] = nn
-			node.prefix |= 1 << uint16(b)
+		if node.prefix == 0 && len(node.common) == 0 {
+			node.common = common.Copy(key[pi:])
+			node.offset = n.off
 			break
 		}
+		if len(node.common) != 0 {
+			// has extension
+			lc := commonPrefixLen(node.common, key[pi+1:])
+			p := node.common[lc]
+			nn := newTrieNode()
+			for i := 0; i < len(node.children); i++ {
+				if node.children[i] != nil {
+					nn.children[i] = node.children[i]
+					node.children[i] = nil
+					nn.prefix |= 1 << i
+				}
+			}
+			nn.common = common.Copy(node.common[1:])
+			nn.offset = node.offset
+			node.common = nil
+			node.prefix, node.offset = 0, 0
+
+			node.prefix |= 1 << p
+			node.children[p] = nn
+
+			n1 := newTrieNode()
+			n1.common = common.Copy(key[pi+1 : pi+1+lc])
+			n1.offset = n.off
+			node.children[b] = n1
+			node.prefix |= 1 << uint16(b)
+		}
+
+		if node.prefix&(1<<uint16(b)) != 0 {
+			// node exists
+			node = node.children[b]
+			continue
+		} else {
+			// no branch
+
+		}
+
+		//	if node.prefix&(1<<uint16(b)) != 0 {
+		//		// node exists
+		//		existed := node.children[b]
+		//		if existed.common == nil {
+		//			continue
+		//		}
+		//		lc := commonPrefixLen(existed.common, key[pi+1:])
+		//		fmt.Printf("key ..%x & %x branches at %d: common %x rest %x\n", key[pi+1:], existed.common, lc, key[pi+1:pi+1+lc], key[pi+1+lc:])
+		//
+		//		if lc > 0 {
+		//			fmt.Printf("extension %x->%x\n", existed.common, key[pi+1:pi+1+lc])
+		//			existed.common = common.Copy(key[pi+1 : pi+1+lc])
+		//
+		//			nn := newTrieNode()
+		//			b := key[pi+1+lc]
+		//
+		//			nn.children[b] = existed
+		//			//pext = pi + 1
+		//			node.children[b] = nn
+		//			node.prefix |= 1 << uint16(b)
+		//			pi = pi + lc
+		//		} else {
+		//			nn := newTrieNode()
+		//			nn.common = common.Copy(key[pi+1:])
+		//			nn.offset = n.off
+		//			fmt.Printf("new char %x common %x\n", key[pi+1], nn.common)
+		//			node.children[key[pi+1]] = nn
+		//			node.prefix |= 1 << uint16(key[pi+1])
+		//			break
+		//		}
+		//	} else {
+		//		if len(node.common) != 0 {
+		//			lc := commonPrefixLen(node.common, key[pi:])
+		//			if lc > 0 {
+		//				fmt.Printf("extension %x->%x\n", node.common, key[pi:pi+lc])
+		//				nn := newTrieNode()
+		//				nn.common = common.Copy(key[pi : pi+lc])
+		//				nn.offset = node.offset
+		//				node.common = common.Copy(key[pi+lc:])
+		//				node.offset = 0
+		//				node.prefix = 0
+		//				node.children[key[pi+lc]] = nn
+		//				node.prefix |= 1 << uint16(key[pi+lc])
+		//				pi = pi + lc
+		//			} else {
+		//				nn := newTrieNode()
+		//				nn.common = common.Copy(key[pi:])
+		//				nn.offset = n.off
+		//				fmt.Printf("new char %x common %x\n", b, nn.common)
+		//				node.children[b] = nn
+		//				node.prefix |= 1 << uint16(b)
+		//				break
+		//			}
+		//			continue
+		//		}
+		//		nn := newTrieNode()
+		//		nn.common = common.Copy(key[pi+1:])
+		//		nn.offset = n.off
+		//		fmt.Printf("new char %x common %x\n", b, nn.common)
+		//		node.children[b] = nn
+		//		node.prefix |= 1 << uint16(b)
+		//		break
+		//	}
 	}
 
-	node.offset = n.off
+	//node.offset = n.off
 }
 
 // search finds if a key exists in the prefix tree

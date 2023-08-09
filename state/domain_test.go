@@ -45,6 +45,10 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 	return testDbAndDomainOfStep(t, 16, logger)
 }
 func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
+	return testDbAndDomainOfStepValsDup(t, aggStep, logger, false)
+}
+
+func testDbAndDomainOfStepValsDup(t *testing.T, aggStep uint64, logger log.Logger, dupSortVals bool) (kv.RwDB, *Domain) {
 	t.Helper()
 	datadir := t.TempDir()
 	coldDir := filepath.Join(datadir, "snapshots", "history")
@@ -57,7 +61,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	settingsTable := "Settings"
 	indexTable := "Index"
 	db := mdbx.NewMDBX(logger).InMem(datadir).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{
+		tcfg := kv.TableCfg{
 			keysTable:        kv.TableCfgItem{Flags: kv.DupSort},
 			valsTable:        kv.TableCfgItem{},
 			historyKeysTable: kv.TableCfgItem{Flags: kv.DupSort},
@@ -65,6 +69,10 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 			settingsTable:    kv.TableCfgItem{},
 			indexTable:       kv.TableCfgItem{Flags: kv.DupSort},
 		}
+		if dupSortVals {
+			tcfg[valsTable] = kv.TableCfgItem{Flags: kv.DupSort}
+		}
+		return tcfg
 	}).MustOpen()
 	t.Cleanup(db.Close)
 	cfg := domainCfg{
@@ -80,12 +88,31 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 }
 
 func TestDomain_CollationBuild(t *testing.T) {
+
+	t.Run("compressDomainVals=false, domainLargeValues=false", func(t *testing.T) {
+		testCollationBuild(t, false, false)
+	})
+	t.Run("compressDomainVals=true, domainLargeValues=false", func(t *testing.T) {
+		testCollationBuild(t, true, false)
+	})
+	t.Run("compressDomainVals=true, domainLargeValues=true", func(t *testing.T) {
+		testCollationBuild(t, true, true)
+	})
+	t.Run("compressDomainVals=false, domainLargeValues=true", func(t *testing.T) {
+		testCollationBuild(t, false, true)
+	})
+}
+
+func testCollationBuild(t *testing.T, compressDomainVals, domainLargeValues bool) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, d := testDbAndDomain(t, logger)
+	db, d := testDbAndDomainOfStepValsDup(t, 16, logger, !domainLargeValues)
 	ctx := context.Background()
 	defer d.Close()
+
+	d.domainLargeValues = domainLargeValues
+	d.compressValues = compressDomainVals
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -95,27 +122,44 @@ func TestDomain_CollationBuild(t *testing.T) {
 	defer d.FinishWrites()
 
 	d.SetTxNum(2)
-	err = d.Put([]byte("key1"), nil, []byte("value1.1"))
+
+	var (
+		k1     = []byte("key1")
+		k2     = []byte("key2")
+		v1     = []byte("value1.1")
+		v2     = []byte("value2.1")
+		p1, p2 []byte
+	)
+
+	err = d.PutWithPrev(k1, nil, v1, p1)
 	require.NoError(t, err)
 
 	d.SetTxNum(3)
-	err = d.Put([]byte("key2"), nil, []byte("value2.1"))
+	err = d.PutWithPrev(k2, nil, v2, p2)
 	require.NoError(t, err)
+
+	p1, p2 = v1, v2
+	v1, v2 = []byte("value1.2"), []byte("value2.2")
+	expectedStep1 := uint64(0)
 
 	d.SetTxNum(6)
-	err = d.Put([]byte("key1"), nil, []byte("value1.2"))
+	err = d.PutWithPrev(k1, nil, v1, p1)
 	require.NoError(t, err)
 
+	p1, v1 = v1, []byte("value1.3")
 	d.SetTxNum(d.aggregationStep + 2)
-	err = d.Put([]byte("key1"), nil, []byte("value1.3"))
+	err = d.PutWithPrev(k1, nil, v1, p1)
 	require.NoError(t, err)
 
+	p1, v1 = v1, []byte("value1.4")
 	d.SetTxNum(d.aggregationStep + 3)
-	err = d.Put([]byte("key1"), nil, []byte("value1.4"))
+	err = d.PutWithPrev(k1, nil, v1, p1)
 	require.NoError(t, err)
 
-	d.SetTxNum(2*d.aggregationStep + 2)
-	err = d.Put([]byte("key1"), nil, []byte("value1.5"))
+	p1, v1 = v1, []byte("value1.5")
+	expectedStep2 := uint64(2)
+	d.SetTxNum(expectedStep2*d.aggregationStep + 2)
+	err = d.PutWithPrev(k1, nil, v1, p1)
 	require.NoError(t, err)
 
 	err = d.Rotate().Flush(ctx, tx)
@@ -136,14 +180,24 @@ func TestDomain_CollationBuild(t *testing.T) {
 		require.NoError(t, err)
 		c.Close()
 
-		g := sf.valuesDecomp.MakeGetter()
+		g := NewArchiveGetter(sf.valuesDecomp.MakeGetter(), d.compressValues)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
 			w, _ := g.Next(nil)
 			words = append(words, string(w))
 		}
-		require.Equal(t, []string{"key1", "value1.2", "key2", "value2.1"}, words)
+		switch domainLargeValues {
+		case true:
+			require.Equal(t, []string{"key1", "value1.2", "key2", "value2.1"}, words)
+		default:
+			is := make([]byte, 8)
+			binary.BigEndian.PutUint64(is, ^expectedStep1)
+			v1 := string(is) + "value1.2"
+			//binary.BigEndian.PutUint64(is, ^expectedStep2)
+			v2 := string(is) + "value2.1"
+			require.Equal(t, []string{"key1", v1, "key2", v2}, words)
+		}
 		// Check index
 		//require.Equal(t, 2, int(sf.valuesIdx.KeyCount()))
 		require.Equal(t, 2, int(sf.valuesBt.KeyCount()))

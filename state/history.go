@@ -1196,6 +1196,8 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+	defer func(t time.Time) { mxPruneTookHistory.UpdateDuration(t) }(time.Now())
+
 	historyKeysCursorForDeletes, err := rwTx.RwCursorDupSort(hc.h.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s history cursor: %w", hc.h.filenameBase, err)
@@ -1230,6 +1232,7 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 	}
 
 	seek := make([]byte, 0, 256)
+	var pruneSize uint64
 	for k, v, err = historyKeysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
@@ -1264,12 +1267,15 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		if err = historyKeysCursorForDeletes.DeleteCurrent(); err != nil {
 			return err
 		}
+
+		pruneSize++
+		mxPruneSizeHistory.Inc()
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			hc.h.logger.Info("[snapshots] prune history", "name", hc.h.filenameBase, "from", txFrom, "to", txTo)
-
+			hc.h.logger.Info("[snapshots] prune history", "name", hc.h.filenameBase, "from", txFrom, "to", txTo,
+				"pruned records", pruneSize)
 			//"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)))
 		default:
 		}

@@ -69,12 +69,15 @@ var (
 	mxRunningMerges           = metrics.GetOrCreateCounter("domain_running_merges")
 	mxRunningCollations       = metrics.GetOrCreateCounter("domain_running_collations")
 	mxCollateTook             = metrics.GetOrCreateHistogram("domain_collate_took")
-	mxPruneTook               = metrics.GetOrCreateHistogram("domain_prune_took")
-	mxPruneHistTook           = metrics.GetOrCreateHistogram("domain_prune_hist_took")
+	mxPruneTookDomain         = metrics.GetOrCreateHistogram(`domain_prune_took{type="domain"}`)
+	mxPruneTookHistory        = metrics.GetOrCreateHistogram(`domain_prune_took{type="history"}`)
+	mxPruneTookIndex          = metrics.GetOrCreateHistogram(`domain_prune_took{type="index"}`)
 	mxPruneInProgress         = metrics.GetOrCreateCounter("domain_pruning_progress")
 	mxCollationSize           = metrics.GetOrCreateCounter("domain_collation_size")
 	mxCollationSizeHist       = metrics.GetOrCreateCounter("domain_collation_hist_size")
-	mxPruneSize               = metrics.GetOrCreateCounter("domain_prune_size")
+	mxPruneSizeDomain         = metrics.GetOrCreateCounter(`domain_prune_size{type="domain"}`)
+	mxPruneSizeHistory        = metrics.GetOrCreateCounter(`domain_prune_size{type="history"}`)
+	mxPruneSizeIndex          = metrics.GetOrCreateCounter(`domain_prune_size{type="index"}`)
 	mxBuildTook               = metrics.GetOrCreateSummary("domain_build_files_took")
 	mxStepTook                = metrics.GetOrCreateHistogram("domain_step_took")
 	mxCommitmentKeys          = metrics.GetOrCreateCounter("domain_commitment_keys")
@@ -252,15 +255,6 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 //  2. acc exists, then update/delete:  .kv - yes, .v - yes
 //  3. acc doesn’t exists, then delete: .kv - no,  .v - no
 type Domain struct {
-	/*
-	   not large:
-	    	keys: key -> ^step
-	    	vals: key -> ^step+value (DupSort)
-	   large:
-	    	keys: key -> ^step
-	   	  vals: key + ^step -> value
-	*/
-
 	*History
 	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 
@@ -278,6 +272,15 @@ type Domain struct {
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 	logger       log.Logger
+
+	/*
+	   not large:
+	    	keys: key -> ^step
+	    	vals: key -> ^step+value (DupSort)
+	   large:
+	    	keys: key -> ^step
+	   	  vals: key + ^step -> value
+	*/
 
 	domainLargeValues bool
 	compressValues    bool // true if all key-values in domain are compressed
@@ -722,7 +725,7 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	}
 
 	if d.buffered {
-		if err := d.keys.Collect(fullkey[kl:], fullkey[:kl]); err != nil {
+		if err := d.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
 			return err
 		}
 		if err := d.values.Collect(fullkey[:kl], common.Append(fullkey[kl:], value)); err != nil {
@@ -730,7 +733,7 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 		}
 		return nil
 	}
-	if err := d.d.tx.Put(d.d.keysTable, fullkey[kl:], fullkey[:kl]); err != nil {
+	if err := d.d.tx.Put(d.d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
 		return err
 	}
 	if err := d.d.tx.Put(d.d.valsTable, fullkey[:kl], common.Append(fullkey[kl:], value)); err != nil {
@@ -939,6 +942,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	if coll.valuesComp, err = compress.NewCompressor(context.Background(), "collate values", coll.valuesPath, d.tmpdir, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
+	comp := NewArchiveWriter(coll.valuesComp, d.compressValues)
 
 	keysCursor, err := roTx.CursorDupSort(d.keysTable)
 	if err != nil {
@@ -947,50 +951,64 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	defer keysCursor.Close()
 
 	var (
-		pos uint64
-	)
-
-	var (
+		pos       uint64
 		stepBytes = make([]byte, 8)
 		keySuffix = make([]byte, 256+8)
+		v         []byte
+
+		valsDup kv.CursorDupSort
 	)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
-	if err := func() error {
-		if !d.domainLargeValues {
-			panic(fmt.Sprintf("implement me: %s", d.filenameBase))
+	if !d.domainLargeValues {
+		valsDup, err = roTx.CursorDupSort(d.valsTable)
+		if err != nil {
+			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.filenameBase, err)
 		}
+		defer valsDup.Close()
+	}
 
+	if err := func() error {
 		for k, stepInDB, err := keysCursor.First(); k != nil; k, stepInDB, err = keysCursor.Next() {
 			if err != nil {
 				return err
 			}
 			pos++
-			if ^binary.BigEndian.Uint64(stepInDB) != step {
+			fmt.Printf("key: %x, step: %x\n", k, stepInDB)
+			if !bytes.Equal(stepBytes, stepInDB) {
 				continue
 			}
 
 			copy(keySuffix, k)
 			copy(keySuffix[len(k):], stepInDB)
-			v, err := roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
+
+			switch d.domainLargeValues {
+			case true:
+				v, err = roTx.GetOne(d.valsTable, keySuffix[:len(k)+8])
+			default:
+				v, err = valsDup.SeekBothRange(keySuffix[:len(k)], keySuffix[len(k):len(k)+8])
+				fmt.Printf("seek: %x -> %x\n", keySuffix[:len(k)], v)
+				for {
+					k, v, _ := valsDup.Next()
+					if len(k) == 0 {
+						break
+					}
+
+					if bytes.HasPrefix(k, keySuffix[:len(k)]) {
+						fmt.Printf("next: %x -> %x\n", k, v)
+					} else {
+						break
+					}
+				}
+			}
 			if err != nil {
 				return fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
 			}
 
-			switch d.compressValues {
-			case true:
-				if err = coll.valuesComp.AddWord(k); err != nil {
-					return fmt.Errorf("add %s compressed values key [%x]: %w", d.filenameBase, k, err)
-				}
-				if err = coll.valuesComp.AddWord(v); err != nil {
-					return fmt.Errorf("add %s compressed values [%x]=>[%x]: %w", d.filenameBase, k, v, err)
-				}
-			default:
-				if err = coll.valuesComp.AddUncompressedWord(k); err != nil {
-					return fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
-				}
-				if err = coll.valuesComp.AddUncompressedWord(v); err != nil {
-					return fmt.Errorf("add %s values val [%x]=>[%x]: %w", d.filenameBase, k, v, err)
-				}
+			if err = comp.AddWord(k); err != nil {
+				return fmt.Errorf("add %s compressed values key [%x]: %w", d.filenameBase, k, err)
+			}
+			if err = comp.AddWord(v); err != nil {
+				return fmt.Errorf("add %s compressed values [%x]=>[%x]: %w", d.filenameBase, k, v, err)
 			}
 			mxCollationSize.Inc()
 
@@ -1286,22 +1304,17 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 	var valsCDup kv.RwCursorDupSort
 
 	if d.domainLargeValues {
-		valsC, err = d.tx.RwCursor(d.valsTable)
-		if err != nil {
-			return err
-		}
+		valsC, err = rwTx.RwCursor(d.valsTable)
 		defer valsC.Close()
 	} else {
-		valsCDup, err = d.tx.RwCursorDupSort(d.valsTable)
-		if err != nil {
-			return err
-		}
+		valsCDup, err = rwTx.RwCursorDupSort(d.valsTable)
 		defer valsCDup.Close()
+	}
+	if err != nil {
+		return err
 	}
 
 	//fmt.Printf("unwind %s txs [%d; %d) step %d\n", d.filenameBase, txFrom, txTo, step)
-	//mc := d.MakeContext()
-	//defer mc.Close()
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
@@ -1360,7 +1373,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 				}
 			}
 		} else {
-			vv, err := valsCDup.SeekBothRange(seek, nil)
+			vv, err := valsCDup.SeekBothRange(seek, stepBytes)
 			if err != nil {
 				return err
 			}
@@ -1369,11 +1382,6 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txFrom,
 					return err
 				}
 			}
-			//dups, err := valsCDup.CountDuplicates()
-			//if err != nil {
-			//	return err
-			//}
-			//
 			//fmt.Printf("rm %d dupes %x v %x\n", dups, seek, vv)
 			if err = valsCDup.DeleteCurrentDuplicates(); err != nil {
 				return err
@@ -1915,19 +1923,36 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		copy(key[len(key1):], key2)
 	}
 
+	var (
+		v       []byte
+		err     error
+		valsDup kv.CursorDupSort
+	)
+
+	if !dc.d.domainLargeValues {
+		valsDup, err = roTx.CursorDupSort(dc.d.valsTable)
+		if err != nil {
+			return nil, false, err
+		}
+		defer valsDup.Close()
+	}
+
 	foundInvStep, err := roTx.GetOne(dc.d.keysTable, key) // reads first DupSort value
 	if err != nil {
 		return nil, false, err
 	}
 	if foundInvStep != nil {
-		if !dc.d.domainLargeValues {
-			panic("implement me")
-		}
 		copy(dc.valKeyBuf[:], key)
 		copy(dc.valKeyBuf[len(key):], foundInvStep)
-		v, err := roTx.GetOne(dc.d.valsTable, dc.valKeyBuf[:len(key)+8])
+
+		switch dc.d.domainLargeValues {
+		case true:
+			v, err = roTx.GetOne(dc.d.valsTable, dc.valKeyBuf[:len(key)+8])
+		default:
+			v, err = valsDup.SeekBothRange(dc.valKeyBuf[:len(key)], dc.valKeyBuf[len(key):len(key)+8])
+		}
 		if err != nil {
-			return nil, false, err
+			return nil, false, fmt.Errorf("GetLatest value: %w", err)
 		}
 		LatestStateReadDB.UpdateDuration(t)
 		return v, true, nil
@@ -2092,11 +2117,9 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		return nil
 	}
 
+	st := time.Now()
 	mxPruneInProgress.Inc()
-	defer func(n time.Time) {
-		mxPruneTook.UpdateDuration(n)
-		mxPruneInProgress.Dec()
-	}(time.Now())
+	defer mxPruneInProgress.Dec()
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(dc.d.keysTable)
 	if err != nil {
@@ -2153,22 +2176,24 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		seek = append(append(seek[:0], k...), v...)
 		//fmt.Printf("prune key: %x->%x [%x] step %d dom %s\n", k, v, seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
 
-		mxPruneSize.Inc()
+		mxPruneSizeDomain.Inc()
 		prunedKeys++
 
 		if dc.d.domainLargeValues {
 			//fmt.Printf("prune value: %x step %d dom %s\n", seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
-			if err = rwTx.Delete(dc.d.valsTable, seek); err != nil {
+			err = rwTx.Delete(dc.d.valsTable, seek)
+		} else {
+			sv, err := valsDup.SeekBothRange(seek[:len(k)], seek[len(k):len(k)+len(v)])
+			if err != nil {
 				return err
 			}
-		} else {
-			sv, err := valsDup.SeekBothRange(k, v)
 			if bytes.HasPrefix(sv, v) {
 				//fmt.Printf("prune value: %x->%x, step %d dom %s\n", k, sv, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
-				if err = valsDup.DeleteCurrent(); err != nil {
-					return err
-				}
+				err = valsDup.DeleteCurrent()
 			}
+		}
+		if err != nil {
+			return fmt.Errorf("prune domain value: %w", err)
 		}
 
 		if err = keysCursorForDeletes.DeleteCurrent(); err != nil { // invalidates kk, vv
@@ -2194,9 +2219,9 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	if prunedMinStep == math.MaxUint64 {
 		prunedMinStep = 0
 	} // minMax pruned step doesn't mean that we pruned all kv pairs for those step - we just pruned some keys of those steps.
-	dc.d.logger.Crit("[snapshots] prune domain", "name", dc.d.filenameBase, "step range", fmt.Sprintf("[%d, %d] requested {%d}", prunedMinStep, prunedMaxStep, step), "pruned keys now", prunedKeys, "pruned keys total", mxPruneSize.Get())
 
-	defer func(h time.Time) { mxPruneHistTook.UpdateDuration(h) }(time.Now())
+	dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase, "step range", fmt.Sprintf("[%d, %d] requested %d", prunedMinStep, prunedMaxStep, step), "pruned keys", prunedKeys)
+	mxPruneTookDomain.UpdateDuration(st)
 
 	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)

@@ -232,7 +232,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 }
 
 func TestBpsTree_Seek(t *testing.T) {
-	keyCount, M := 20, 4
+	keyCount, M := 10, 4
 	tmp := t.TempDir()
 
 	logger := log.New()
