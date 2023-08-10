@@ -1071,6 +1071,29 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+	c, err := tx.Cursor(kv.BorEventNums)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	var blockNumBytes [8]byte
+	binary.BigEndian.PutUint64(blockNumBytes[:], blockTo)
+	k, v, err := c.Seek(blockNumBytes[:])
+	if err != nil {
+		return err
+	}
+	var eventIdTo uint64 = math.MaxUint64
+	if k != nil {
+		eventIdTo = binary.BigEndian.Uint64(v)
+	}
+	c1, err := tx.Cursor(kv.BorEvents)
+	if err != nil {
+		return err
+	}
+	defer c1.Close()
+	for k, v, err = c1.First(); err == nil && k != nil; k, v, err = c1.Next() {
+
+	}
 	//TODO
 	return nil
 }
