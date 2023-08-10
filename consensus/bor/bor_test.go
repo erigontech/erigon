@@ -230,6 +230,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 	bor := bor.New(
 		heimdall.chainConfig,
 		memdb.New(""),
+		nil, /* blockReader */
 		&spanner{span.NewChainSpanner(contract.ValidatorSet(), heimdall.chainConfig, false, logger), span.Span{}},
 		heimdall,
 		test_genesisContract{},
