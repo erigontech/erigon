@@ -3,10 +3,7 @@ package stages
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
-
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clpersist"
@@ -197,7 +194,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 					waitWhenNotEnoughPeers := 3 * time.Second
 					for {
-						if peersCount > minPeersForDownload {
+						if peersCount >= minPeersForDownload {
 							break
 						}
 						logger.Info("[Caplin] Waiting For Peers", "have", peersCount, "needed", minPeersForDownload, "retryIn", waitWhenNotEnoughPeers)
@@ -219,28 +216,24 @@ func ConsensusClStages(ctx context.Context,
 					return CatchUpBlocks
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					logger = logger.New(
-						"slot", fmt.Sprintf("%d/%d", args.seenSlot, args.targetSlot),
-						"epoch", fmt.Sprintf("%d/%d(%d)", args.seenEpoch, args.targetEpoch, (1+args.targetEpoch)*cfg.beaconCfg.SlotsPerEpoch-1),
-					)
-					logger.Info("downloading epochs from reqresp")
-
-					i := args.seenEpoch
+					logger.Info("[Caplin] Downloading epochs from reqresp", "from", args.seenEpoch, "to", args.targetEpoch)
+					currentEpoch := args.seenEpoch
 				MainLoop:
-					for i <= args.targetEpoch {
-						startBlock := i * cfg.beaconCfg.SlotsPerEpoch
+					for currentEpoch <= args.targetEpoch {
+						startBlock := currentEpoch * cfg.beaconCfg.SlotsPerEpoch
 						blocks, err := rpcSource.GetRange(ctx, startBlock, cfg.beaconCfg.SlotsPerEpoch)
 						if err != nil {
 							return err
 						}
-						logger.Info("downloading epochs from reqresp", "epoch", i)
+						logger.Info("[Caplin] Epoch downloaded", "epoch", currentEpoch)
 						for _, block := range blocks {
-							if err := processBlock(block, false, false); err != nil {
+							if err := processBlock(block, false, true); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
+								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
 								continue MainLoop
 							}
 						}
-						i = i + 1
+						currentEpoch++
 					}
 					return nil
 				},
@@ -278,6 +271,8 @@ func ConsensusClStages(ctx context.Context,
 							respCh <- blocks
 						}()
 					}
+					logTimer := time.NewTicker(30 * time.Second)
+					defer logTimer.Stop()
 					select {
 					case err := <-errCh:
 						return err
@@ -286,12 +281,9 @@ func ConsensusClStages(ctx context.Context,
 							if err := processBlock(block, true, true); err != nil {
 								return err
 							}
-							hash, err := block.Data.HashSSZ()
-							if err != nil {
-								return err
-							}
-							logger.Info("Imported chain segment", "slot", block.Data.Block.Slot, "hash", libcommon.Hash(hash))
 						}
+					case <-logTimer.C:
+						logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenEpoch, "to", args.targetSlot)
 					}
 					return nil
 				},
@@ -319,7 +311,7 @@ func ConsensusClStages(ctx context.Context,
 					////////}
 
 					// Now check the head
-					headRoot, _, err := cfg.forkChoice.GetHead()
+					headRoot, headSlot, err := cfg.forkChoice.GetHead()
 					if err != nil {
 						return err
 					}
@@ -337,6 +329,7 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						}
 					}
+					logger.Info("Imported chain segment", "hash", headRoot, "slot", headSlot)
 					return nil
 				},
 			},
