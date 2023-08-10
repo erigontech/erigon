@@ -36,7 +36,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	expectedCheckpoint := solid.NewCheckpointFromParameters(libcommon.HexToHash("0x564d76d91f66c1fb2977484a6184efda2e1c26dd01992e048353230e10f83201"), 0)
 
 	// Decode test blocks
-	block0x3a, block0xc2, block0xd4 := &cltypes.SignedBeaconBlock{}, &cltypes.SignedBeaconBlock{}, &cltypes.SignedBeaconBlock{}
+	block0x3a, block0xc2, block0xd4 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig), cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig), cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(block0x3a, block3aEncoded, int(clparams.AltairVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(block0xc2, blockc2Encoded, int(clparams.AltairVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(block0xd4, blockd4Encoded, int(clparams.AltairVersion)))
