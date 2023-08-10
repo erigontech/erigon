@@ -1091,10 +1091,17 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 		return err
 	}
 	defer c1.Close()
-	for k, v, err = c1.First(); err == nil && k != nil; k, v, err = c1.Next() {
-
+	counter := blocksDeleteLimit
+	for k, _, err = c1.First(); err == nil && k != nil && counter > 0; k, _, err = c1.Next() {
+		eventId := binary.BigEndian.Uint64(k)
+		if eventId >= eventIdTo {
+			break
+		}
+		counter--
 	}
-	//TODO
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
