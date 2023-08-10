@@ -611,7 +611,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *AggregatorV3
 	logger := log.New()
 	dir := filepath.Join(path, "snapshots", "history")
 	require.NoError(t, os.MkdirAll(filepath.Join(path, "db4"), 0740))
-	require.NoError(t, os.MkdirAll(filepath.Join(path, "warm"), 0740))
+	require.NoError(t, os.MkdirAll(filepath.Join(path, "snapshots", "warm"), 0740))
 	require.NoError(t, os.MkdirAll(dir, 0740))
 	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg

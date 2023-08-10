@@ -96,7 +96,6 @@ func NewInvertedIndex(
 	logger log.Logger,
 ) (*InvertedIndex, error) {
 	baseDir := filepath.Dir(dir)
-	baseDir = filepath.Dir(baseDir)
 	ii := InvertedIndex{
 		dir:                     dir,
 		warmDir:                 filepath.Join(baseDir, "warm"),
