@@ -222,7 +222,7 @@ func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHa
 }
 
 func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, blockNum uint64) ([]rlp.RawValue, error) {
-	return nil, nil
+	panic("not supported")
 }
 
 // BlockReader can read blocks from db and snapshots
@@ -970,5 +970,19 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, blockNum uint
 		return nil, err
 	}
 	defer c.Close()
-	return nil, nil
+	var k, v []byte
+	var blockNumBytes [8]byte
+	binary.BigEndian.PutUint64(blockNumBytes[:], blockNum)
+	result := []rlp.RawValue{}
+	for k, v, err = c.Seek(blockNumBytes[:]); err == nil && bytes.Equal(k, blockNumBytes[:]); k, v, err = c.Next() {
+		eventRlp, err := tx.GetOne(kv.BorEvents, v)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, rlp.RawValue(common.Copy(eventRlp)))
+	}
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
