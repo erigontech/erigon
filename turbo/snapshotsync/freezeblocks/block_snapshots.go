@@ -880,7 +880,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			if segment.T != t {
 				continue
 			}
-			if hasIdxFile(&segment, logger) {
+			if hasIdxFile(segment, logger) {
 				continue
 			}
 			sn := segment
@@ -932,7 +932,7 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 			if segment.T != t {
 				continue
 			}
-			if hasIdxFile(&segment, logger) {
+			if hasIdxFile(segment, logger) {
 				continue
 			}
 			sn := segment
@@ -1443,7 +1443,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	return nil
 }
 
-func hasIdxFile(sn *snaptype.FileInfo, logger log.Logger) bool {
+func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 	stat, err := os.Stat(sn.Path)
 	if err != nil {
 		return false
