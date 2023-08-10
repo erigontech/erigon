@@ -395,7 +395,7 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64) (*engin
 	data := resp.Data
 
 	return &engine_types.GetPayloadResponse{
-		ExecutionPayload: engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
+		ExecutionPayload: engine_types.ConvertRpcBlockToExecutionPayload(data.ExecutionPayload),
 		BlockValue:       (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
 		BlobsBundle:      engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
 	}, nil
@@ -731,7 +731,7 @@ func (e *EngineServer) HandleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	}
-	if err := e.chainRW.InsertHeaderAndBodyAndWait(header, block.RawBody()); err != nil {
+	if err := e.chainRW.InsertBlockAndWait(block); err != nil {
 		return nil, err
 	}
 

@@ -31,6 +31,11 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 	if header.ParentBeaconBlockRoot != nil {
 		parentBeaconBlockRootReply = gointerfaces.ConvertHashToH256(*header.ParentBeaconBlockRoot)
 	}
+	var auraStep *uint64
+	if len(header.AuRaSeal) > 0 {
+		auraStep = new(uint64)
+		*auraStep = header.AuRaStep
+	}
 	return &execution.Header{
 		ParentHash:            gointerfaces.ConvertHashToH256(header.ParentHash),
 		Coinbase:              gointerfaces.ConvertAddressToH160(header.Coinbase),
@@ -53,6 +58,8 @@ func HeaderToHeaderRPC(header *types.Header) *execution.Header {
 		ExcessBlobGas:         header.ExcessBlobGas,
 		BlobGasUsed:           header.BlobGasUsed,
 		ParentBeaconBlockRoot: parentBeaconBlockRootReply,
+		AuraSeal:              header.AuRaSeal,
+		AuraStep:              auraStep,
 	}
 }
 
@@ -62,6 +69,22 @@ func HeadersToHeadersRPC(headers []*types.Header) []*execution.Header {
 		ret = append(ret, HeaderToHeaderRPC(header))
 	}
 	return ret
+}
+
+func ConvertBlocksToRPC(blocks []*types.Block) []*execution.Block {
+	ret := []*execution.Block{}
+	for _, block := range blocks {
+		ret = append(ret, ConvertBlockToRPC(block))
+	}
+	return ret
+}
+
+func ConvertBlockToRPC(block *types.Block) *execution.Block {
+	h := block.Header()
+	return &execution.Block{
+		Header: HeaderToHeaderRPC(h),
+		Body:   ConvertRawBlockBodyToRpc(block.RawBody(), h.Number.Uint64(), h.Hash()),
+	}
 }
 
 func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
@@ -85,6 +108,10 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		Nonce:         blockNonce,
 		BlobGasUsed:   header.BlobGasUsed,
 		ExcessBlobGas: header.ExcessBlobGas,
+	}
+	if header.AuraStep != nil {
+		h.AuRaSeal = header.AuraSeal
+		h.AuRaStep = *header.AuraStep
 	}
 	if header.BaseFeePerGas != nil {
 		h.BaseFee = gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
