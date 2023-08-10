@@ -1392,7 +1392,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			return nil
 		})
 		dirs := datadir.New(datadirCli)
-		dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
+		dir.MustExist(dirs.SnapHistory, dirs.SnapWarm)
 
 		//useSnapshots = true
 		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
