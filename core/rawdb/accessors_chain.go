@@ -1086,7 +1086,7 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 	if k != nil {
 		eventIdTo = binary.BigEndian.Uint64(v)
 	}
-	c1, err := tx.Cursor(kv.BorEvents)
+	c1, err := tx.RwCursor(kv.BorEvents)
 	if err != nil {
 		return err
 	}
@@ -1096,6 +1096,9 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 		eventId := binary.BigEndian.Uint64(k)
 		if eventId >= eventIdTo {
 			break
+		}
+		if err = c1.DeleteCurrent(); err != nil {
+			return err
 		}
 		counter--
 	}
