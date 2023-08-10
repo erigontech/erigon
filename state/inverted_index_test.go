@@ -43,7 +43,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	tb.Helper()
 	path := tb.TempDir()
 	dir := filepath.Join(path, "snapshots", "history")
-	require.NoError(tb, os.MkdirAll(filepath.Join(path, "warm"), 0740))
+	require.NoError(tb, os.MkdirAll(filepath.Join(path, "snapshots", "warm"), 0740))
 	require.NoError(tb, os.MkdirAll(dir, 0740))
 	keysTable := "Keys"
 	indexTable := "Index"

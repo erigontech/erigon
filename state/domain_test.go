@@ -52,7 +52,7 @@ func testDbAndDomainOfStepValsDup(t *testing.T, aggStep uint64, logger log.Logge
 	t.Helper()
 	datadir := t.TempDir()
 	coldDir := filepath.Join(datadir, "snapshots", "history")
-	require.NoError(t, os.MkdirAll(filepath.Join(datadir, "warm"), 0740))
+	require.NoError(t, os.MkdirAll(filepath.Join(datadir, "snapshots", "warm"), 0740))
 	require.NoError(t, os.MkdirAll(coldDir, 0740))
 	keysTable := "Keys"
 	valsTable := "Vals"

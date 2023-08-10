@@ -295,7 +295,6 @@ type domainCfg struct {
 
 func NewDomain(cfg domainCfg, dir, tmpdir string, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
 	baseDir := filepath.Dir(dir)
-	baseDir = filepath.Dir(baseDir)
 	d := &Domain{
 		dir:       filepath.Join(baseDir, "warm"),
 		keysTable: keysTable,
