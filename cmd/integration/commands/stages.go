@@ -493,8 +493,6 @@ func init() {
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
 	withNoCommit(cmdStageExec)
-	withBtreeCold(cmdStageExec)
-	withBtreeWarm(cmdStageExec)
 	withBtreePlus(cmdStageExec)
 	withPruneTo(cmdStageExec)
 	withBatchSize(cmdStageExec)
@@ -528,8 +526,6 @@ func init() {
 
 	withConfig(cmdStagePatriciaTrie)
 	withBtreePlus(cmdStagePatriciaTrie)
-	withBtreeWarm(cmdStagePatriciaTrie)
-	withBtreeCold(cmdStagePatriciaTrie)
 	withDataDir(cmdStagePatriciaTrie)
 	withReset(cmdStagePatriciaTrie)
 	withBlock(cmdStagePatriciaTrie)
@@ -917,8 +913,6 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return nil
 	}
 	libstate.UseBpsTree = useBtreePlus
-	libstate.UseBtreeForColdFiles = useBtreeIdxCold
-	libstate.UseBtreeForWarmFiles = useBtreeIdxWarm
 
 	err := stagedsync.SpawnExecuteBlocksStage(s, sync, tx, block, ctx, cfg, true /* initialCycle */, logger)
 	if err != nil {
@@ -997,8 +991,6 @@ func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	libstate.UseBpsTree = useBtreePlus
-	libstate.UseBtreeForColdFiles = useBtreeIdxCold
-	libstate.UseBtreeForWarmFiles = useBtreeIdxWarm
 
 	if warmup {
 		return reset2.Warmup(ctx, db, log.LvlInfo, stages.PatriciaTrie)
