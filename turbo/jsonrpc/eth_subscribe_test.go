@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -26,7 +27,7 @@ func TestEthSubscribe(t *testing.T) {
 	if ethconfig.EnableHistoryV4InTest {
 		t.Skip("fix me")
 	}
-	m, require := stages.Mock(t), require.New(t)
+	m, require := mock.Mock(t), require.New(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 7, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
 	})
@@ -54,7 +55,7 @@ func TestEthSubscribe(t *testing.T) {
 	newHeads, id := ff.SubscribeNewHeads(16)
 	defer ff.UnsubscribeHeads(id)
 
-	initialCycle := stages.MockInsertAsInitialCycle
+	initialCycle := mock.MockInsertAsInitialCycle
 	highestSeenHeader := chain.TopBlock.NumberU64()
 
 	hook := stages.NewHook(m.Ctx, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, m.UpdateHead)

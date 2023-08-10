@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -42,6 +41,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 
 	// Force-load native and js packages, to trigger registration
 	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
@@ -149,7 +149,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				}
 				rules = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 			)
-			m := stages.Mock(t)
+			m := mock.Mock(t)
 			dbTx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
@@ -256,7 +256,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		Difficulty:  (*big.Int)(test.Context.Difficulty),
 		GasLimit:    uint64(test.Context.GasLimit),
 	}
-	m := stages.Mock(b)
+	m := mock.Mock(b)
 	dbTx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(b, err)
 	defer dbTx.Rollback()
@@ -332,7 +332,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		},
 	}
 	rules := params.MainnetChainConfig.Rules(context.BlockNumber, context.Time)
-	m := stages.Mock(t)
+	m := mock.Mock(t)
 	dbTx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer dbTx.Rollback()

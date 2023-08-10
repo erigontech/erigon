@@ -55,7 +55,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 	// Prepare output slice.
 	responsePacket := []*cltypes.SignedBeaconBlock{}
 
-	ctx, cn := context.WithTimeout(ctx, time.Second*time.Duration(5+10*count))
+	ctx, cn := context.WithTimeout(ctx, time.Second*time.Duration(16+30*count))
 	defer cn()
 	message, err := b.sentinel.SendRequest(ctx, &sentinel.RequestData{
 		Data:  reqData,
@@ -84,7 +84,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 		// Read varint for length of message.
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
 		if err != nil {
-			return nil, message.Peer.Pid, fmt.Errorf("unable to read varint from message prefix: %v", err)
+			return nil, message.Peer.Pid, fmt.Errorf("unable to read varint from message prefix: %w", err)
 		}
 		// Sanity check for message size.
 		if encodedLn > uint64(maxMessageLength) {

@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -102,8 +103,6 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	return e.blockReader.CanonicalHash(ctx, tx, blockNumber)
 }
 
-// Remaining
-
 func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execution.ValidationRequest) (*execution.ValidationReceipt, error) {
 	if !e.semaphore.TryAcquire(1) {
 		return &execution.ValidationReceipt{
@@ -132,7 +131,6 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if header == nil || body == nil {
 		return &execution.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-			MissingHash:      req.Hash,
 			ValidationStatus: execution.ExecutionStatus_MissingSegment,
 		}, nil
 	}
@@ -142,11 +140,15 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return &execution.ValidationReceipt{
 			ValidationStatus: execution.ExecutionStatus_TooFarAway,
 			LatestValidHash:  gointerfaces.ConvertHashToH256(libcommon.Hash{}),
-			MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}),
 		}, tx.Commit()
 	}
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), false)
+	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
+
+	extendingHash := e.forkValidator.ExtendingForkHeadHash()
+	extendCanonical := extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash
+
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), extendCanonical)
 	if criticalError != nil {
 		return nil, criticalError
 	}
@@ -169,7 +171,6 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	return &execution.ValidationReceipt{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  gointerfaces.ConvertHashToH256(lvh),
-		MissingHash:      gointerfaces.ConvertHashToH256(libcommon.Hash{}), // TODO: implement
 	}, tx.Commit()
 }
 
@@ -188,4 +189,31 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 		currentNumber--
 	}
 	return nil
+}
+
+func (e *EthereumExecutionModule) Start(ctx context.Context) {
+	e.semaphore.Acquire(ctx, 1)
+	defer e.semaphore.Release(1)
+	tx, err := e.db.BeginRw(ctx)
+	if err != nil {
+		e.logger.Error("Could not start execution service", "err", err)
+		return
+	}
+	defer tx.Rollback()
+	// Run the forkchoice
+	if err := e.executionPipeline.Run(e.db, tx, true); err != nil {
+		e.logger.Error("Could not start execution service", "err", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		e.logger.Error("Could not start execution service", "err", err)
+	}
+}
+
+func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execution.ReadyResponse, error) {
+	if !e.semaphore.TryAcquire(1) {
+		return &execution.ReadyResponse{Ready: false}, nil
+	}
+	defer e.semaphore.Release(1)
+	return &execution.ReadyResponse{Ready: true}, nil
 }
