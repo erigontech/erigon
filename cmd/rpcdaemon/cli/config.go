@@ -298,7 +298,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	onNewSnapshot := func() {}
 	if cfg.WithDatadir {
 		var rwKv kv.RwDB
-		dir.MustExist(cfg.Dirs.SnapHistory, cfg.Dirs.SnapCold, cfg.Dirs.SnapWarm)
+		dir.MustExist(cfg.Dirs.SnapHistory, cfg.Dirs.SnapWarm)
 		logger.Trace("Creating chain db", "path", cfg.Dirs.Chaindata)
 		limiter := semaphore.NewWeighted(int64(cfg.DBReadConcurrency))
 		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Readonly().Open()

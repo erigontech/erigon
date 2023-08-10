@@ -1106,7 +1106,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	blockReader := freezeblocks.NewBlockReader(allSnapshots)
 	blockWriter := blockio.NewBlockWriter(histV3)
 
-	dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
+	dir.MustExist(dirs.SnapHistory, dirs.SnapWarm)
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, err

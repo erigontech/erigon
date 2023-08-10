@@ -308,7 +308,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
+	dir.MustExist(dirs.SnapHistory, dirs.SnapWarm)
 
 	if rebuild {
 		panic("not implemented")
@@ -359,7 +359,7 @@ func doLocalityIdx(cliCtx *cli.Context) error {
 	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	dir.MustExist(dirs.SnapHistory, dirs.SnapCold, dirs.SnapWarm)
+	dir.MustExist(dirs.SnapHistory, dirs.SnapWarm)
 
 	if rebuild {
 		panic("not implemented")
