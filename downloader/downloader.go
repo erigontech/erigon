@@ -387,9 +387,9 @@ func (d *Downloader) addSegments() error {
 	if err != nil {
 		return err
 	}
-	files, err := seedableSegmentFiles(d.SnapDir())
+	files, err := seedableBlocksSnapshots(d.SnapDir())
 	if err != nil {
-		return fmt.Errorf("seedableSegmentFiles: %w", err)
+		return fmt.Errorf("seedableBlocksSnapshots: %w", err)
 	}
 	files2, err := seedableHistorySnapshots(d.SnapDir())
 	if err != nil {
