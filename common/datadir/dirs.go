@@ -31,7 +31,6 @@ type Dirs struct {
 	Tmp             string
 	Snap            string
 	SnapHistory     string
-	SnapCold        string
 	SnapWarm        string
 	TxPool          string
 	Nodes           string
