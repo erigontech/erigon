@@ -120,10 +120,10 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	shanghaiTime := chainConfig.ShanghaiTime
-	if cfg.OverrideShanghaiTime != nil {
-		shanghaiTime = cfg.OverrideShanghaiTime
-	}
 	cancunTime := chainConfig.CancunTime
+	if cfg.OverrideCancunTime != nil {
+		cancunTime = cfg.OverrideCancunTime
+	}
 
 	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, cancunTime, logger)
 	if err != nil {
