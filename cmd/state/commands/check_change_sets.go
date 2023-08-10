@@ -116,7 +116,7 @@ func CheckChangeSets(genesis *types.Genesis, blockNum uint64, chaindata string, 
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 
-	engine := initConsensusEngine(chainConfig, allSnapshots, logger)
+	engine := initConsensusEngine(chainConfig, allSnapshots, blockReader, logger)
 
 	for !interrupt {
 

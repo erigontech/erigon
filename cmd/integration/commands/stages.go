@@ -1466,7 +1466,8 @@ func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.
 	allSn, agg := allDomains(ctx, db, stepSize, mode, trie, logger)
 	cfg.Snapshot = allSn.Cfg()
 
-	engine, _ := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, logger)
+	blockReader, _ := blocksIO(db, logger)
+	engine, _ := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
 	return engine, cfg, allSn, agg
 }
 
@@ -1502,9 +1503,9 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	allSn, _, agg := allSnapshots(ctx, db, logger)
 	cfg.Snapshot = allSn.Cfg()
 
-	engine, heimdallClient := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, logger)
-
 	blockReader, blockWriter := blocksIO(db, logger)
+	engine, heimdallClient := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
+
 	sentryControlServer, err := sentry.NewMultiClient(
 		db,
 		"",
@@ -1590,7 +1591,7 @@ func overrideStorageMode(db kv.RwDB, logger log.Logger) error {
 	})
 }
 
-func initConsensusEngine(cc *chain2.Config, dir string, db kv.RwDB, logger log.Logger) (engine consensus.Engine, heimdallClient bor.IHeimdallClient) {
+func initConsensusEngine(cc *chain2.Config, dir string, db kv.RwDB, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine, heimdallClient bor.IHeimdallClient) {
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}
@@ -1611,5 +1612,5 @@ func initConsensusEngine(cc *chain2.Config, dir string, db kv.RwDB, logger log.L
 		consensusConfig = &config.Ethash
 	}
 	return ethconsensusconfig.CreateConsensusEngine(&nodecfg.Config{Dirs: datadir.New(dir)}, cc, consensusConfig, config.Miner.Notify, config.Miner.Noverify,
-		heimdallClient, config.WithoutHeimdall, db.ReadOnly(), logger), heimdallClient
+		heimdallClient, config.WithoutHeimdall, blockReader, db.ReadOnly(), logger), heimdallClient
 }

@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 const (
@@ -234,6 +235,7 @@ type Bor struct {
 	chainConfig *chain.Config    // Chain config
 	config      *chain.BorConfig // Consensus engine configuration parameters for bor consensus
 	DB          kv.RwDB          // Database to store and retrieve snapshot checkpoints
+	blockReader services.FullBlockReader
 
 	recents    *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
@@ -353,6 +355,7 @@ func CalculateSprint(config *chain.BorConfig, number uint64) uint64 {
 func New(
 	chainConfig *chain.Config,
 	db kv.RwDB,
+	blockReader services.FullBlockReader,
 	spanner Spanner,
 	heimdallClient IHeimdallClient,
 	genesisContracts GenesisContract,
@@ -373,6 +376,7 @@ func New(
 		chainConfig:            chainConfig,
 		config:                 borConfig,
 		DB:                     db,
+		blockReader:            blockReader,
 		recents:                recents,
 		signatures:             signatures,
 		spanner:                spanner,
