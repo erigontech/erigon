@@ -276,6 +276,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_newPayloadV3                        | Yes     |                                      |
 | engine_forkchoiceUpdatedV1                 | Yes     |                                      |
 | engine_forkchoiceUpdatedV2                 | Yes     |                                      |
+| engine_forkchoiceUpdatedV3                 | Yes     |                                      |
 | engine_getPayloadV1                        | Yes     |                                      |
 | engine_getPayloadV2                        | Yes     |                                      |
 | engine_getPayloadV3                        | Yes     |                                      |

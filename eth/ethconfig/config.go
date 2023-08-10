@@ -239,15 +239,14 @@ type Config struct {
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
-	InternalCL                      bool
-	LightClientDiscoveryAddr        string
-	LightClientDiscoveryPort        uint64
-	LightClientDiscoveryTCPPort     uint64
-	SentinelAddr                    string
-	SentinelPort                    uint64
-	ExperimentalConsensusSeparation bool
+	InternalCL                  bool
+	LightClientDiscoveryAddr    string
+	LightClientDiscoveryPort    uint64
+	LightClientDiscoveryTCPPort uint64
+	SentinelAddr                string
+	SentinelPort                uint64
 
-	OverrideShanghaiTime *big.Int `toml:",omitempty"`
+	OverrideCancunTime *big.Int `toml:",omitempty"`
 
 	DropUselessPeers bool
 }

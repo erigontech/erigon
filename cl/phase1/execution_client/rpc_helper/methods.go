@@ -6,3 +6,4 @@ const EngineNewPayloadV3 = "engine_newPayloadV3"
 
 const ForkChoiceUpdatedV1 = "engine_forkchoiceUpdatedV1"
 const ForkChoiceUpdatedV2 = "engine_forkchoiceUpdatedV2"
+const ForkChoiceUpdatedV3 = "engine_forkchoiceUpdatedV3"

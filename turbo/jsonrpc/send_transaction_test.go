@@ -24,10 +24,11 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func newBaseApiForTest(m *stages.MockSentry) *jsonrpc.BaseAPI {
+func newBaseApiForTest(m *mock.MockSentry) *jsonrpc.BaseAPI {
 	agg := m.HistoryV3Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
@@ -35,7 +36,7 @@ func newBaseApiForTest(m *stages.MockSentry) *jsonrpc.BaseAPI {
 
 func TestSendRawTransaction(t *testing.T) {
 	t.Skip("Flaky test")
-	m, require := stages.Mock(t), require.New(t)
+	m, require := mock.Mock(t), require.New(t)
 	logger := log.New()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
@@ -66,7 +67,7 @@ func TestSendRawTransaction(t *testing.T) {
 		}
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
-		initialCycle := stages.MockInsertAsInitialCycle
+		initialCycle := mock.MockInsertAsInitialCycle
 		if err := stages.StageLoopIteration(m.Ctx, m.DB, nil, m.Sync, initialCycle, logger, m.BlockReader, nil); err != nil {
 			t.Fatal(err)
 		}

@@ -26,7 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
 // Tests that simple header verification works, for both good and bad blocks.
@@ -36,7 +36,8 @@ func TestHeaderVerification(t *testing.T) {
 		gspec  = &types.Genesis{Config: params.TestChainConfig}
 		engine = ethash.NewFaker()
 	)
-	m := stages.MockWithGenesisEngine(t, gspec, engine, false)
+	checkStateRoot := true
+	m := mock.MockWithGenesisEngine(t, gspec, engine, false, checkStateRoot)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {
@@ -76,7 +77,8 @@ func TestHeaderWithSealVerification(t *testing.T) {
 		gspec  = &types.Genesis{Config: params.TestChainAuraConfig}
 		engine = ethash.NewFaker()
 	)
-	m := stages.MockWithGenesisEngine(t, gspec, engine, false)
+	checkStateRoot := true
+	m := mock.MockWithGenesisEngine(t, gspec, engine, false, checkStateRoot)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {

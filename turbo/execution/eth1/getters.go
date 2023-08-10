@@ -185,3 +185,16 @@ func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *execution.GetS
 
 	return &execution.GetTDResponse{Td: eth1_utils.ConvertBigIntToRpc(td)}, nil
 }
+
+func (e *EthereumExecutionModule) GetForkChoice(ctx context.Context, _ *emptypb.Empty) (*execution.ForkChoice, error) {
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not open database: %s", err)
+	}
+	defer tx.Rollback()
+	return &execution.ForkChoice{
+		HeadBlockHash:      gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceHead(tx)),
+		FinalizedBlockHash: gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceFinalized(tx)),
+		SafeBlockHash:      gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceSafe(tx)),
+	}, nil
+}
