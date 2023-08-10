@@ -1516,10 +1516,8 @@ func (d *Domain) Rotate() flusher {
 }
 
 var (
-	CompareRecsplitBtreeIndexes = true // if true, will compare values from Btree and InvertedIndex
-	UseBtreeForColdFiles        = true // if true, will use btree for cold files
-	UseBtreeForWarmFiles        = true // if true, will use btree for warm files
-	UseBtree                    = true // if true, will use btree for all files
+	CompareRecsplitBtreeIndexes = true  // if true, will compare values from Btree and InvertedIndex
+	UseBtree                    = false // if true, will use btree for all files
 )
 
 func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint64) (v []byte, found bool, err error) {
@@ -1529,7 +1527,7 @@ func (dc *DomainContext) getBeforeTxNumFromFiles(filekey []byte, fromTxNum uint6
 		if dc.files[i].endTxNum < fromTxNum {
 			break
 		}
-		if UseBtree {
+		if UseBtree || UseBpsTree {
 			_, v, ok, err = dc.statelessBtree(i).Get(filekey, dc.statelessGetter(i))
 			if err != nil {
 				return nil, false, err
@@ -1595,7 +1593,7 @@ func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, e
 		}
 
 		var offset uint64
-		if UseBtreeForWarmFiles {
+		if UseBpsTree || UseBtree {
 			bt := dc.statelessBtree(i)
 			if bt.Empty() {
 				continue
@@ -1720,7 +1718,7 @@ func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found
 		}
 
 		var offset uint64
-		if UseBtreeForColdFiles {
+		if UseBtree || UseBpsTree {
 			_, v, ok, err = dc.statelessBtree(int(exactColdShard)).Get(filekey, dc.statelessGetter(int(exactColdShard)))
 			if err != nil {
 				return nil, false, err
@@ -1995,20 +1993,36 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k, v [
 	}
 
 	for i, item := range dc.files {
-		cursor, err := dc.statelessBtree(i).Seek(prefix)
-		if err != nil {
-			return err
-		}
-		if cursor == nil {
-			continue
+		if UseBtree || UseBpsTree {
+			cursor, err := dc.statelessBtree(i).Seek(prefix)
+			if err != nil {
+				return err
+			}
+			if cursor == nil {
+				continue
+			}
+			dc.d.stats.FilesQueries.Add(1)
+			key := cursor.Key()
+			if key != nil && bytes.HasPrefix(key, prefix) {
+				val := cursor.Value()
+				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
+			}
+			//} else {
+			//	ir := dc.statelessIdxReader(i)
+			//	offset := ir.Lookup(prefix)
+			//	g := dc.statelessGetter(i)
+			//	g.Reset(offset)
+			//	if !g.HasNext() {
+			//		continue
+			//	}
+			//	key, _ := g.Next(nil)
+			//dc.d.stats.FilesQueries.Add(1)
+			//if key != nil && bytes.HasPrefix(key, prefix) {
+			//  val, _ := g.Next(nil)
+			//	heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
+			//}
 		}
 
-		dc.d.stats.FilesQueries.Add(1)
-		key := cursor.Key()
-		if key != nil && bytes.HasPrefix(key, prefix) {
-			val := cursor.Value()
-			heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
-		}
 	}
 
 	for cp.Len() > 0 {
