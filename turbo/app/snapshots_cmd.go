@@ -622,12 +622,14 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	var lastTxNum uint64
-	if err := db.View(ctx, func(tx kv.Tx) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
 		lastTxNum, err = rawdbv3.TxNums.Max(tx, execProgress)
 		if err != nil {
 			return err
 		}
+		defer agg.StartWrites().FinishWrites()
+		agg.SetTx(tx)
 		agg.SetTxNum(lastTxNum)
 		return nil
 	}); err != nil {
