@@ -221,8 +221,17 @@ func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHa
 	return reply.BlockNumber, true, nil
 }
 
-func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, blockNum uint64) ([]rlp.RawValue, error) {
-	panic("not supported")
+func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
+	borTxnHash := types.ComputeBorTxHash(blockHeight, hash)
+	reply, err := r.client.BorEvent(ctx, &remote.BorEventRequest{BorTxHash: gointerfaces.ConvertHashToH256(borTxnHash)})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]rlp.RawValue, len(reply.EventRlps))
+	for i, r := range reply.EventRlps {
+		result[i] = rlp.RawValue(r)
+	}
+	return result, nil
 }
 
 // BlockReader can read blocks from db and snapshots
@@ -964,7 +973,7 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 	return
 }
 
-func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, blockNum uint64) ([]rlp.RawValue, error) {
+func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	c, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
 		return nil, err
@@ -972,7 +981,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, blockNum uint
 	defer c.Close()
 	var k, v []byte
 	var blockNumBytes [8]byte
-	binary.BigEndian.PutUint64(blockNumBytes[:], blockNum)
+	binary.BigEndian.PutUint64(blockNumBytes[:], blockHeight)
 	result := []rlp.RawValue{}
 	for k, v, err = c.Seek(blockNumBytes[:]); err == nil && bytes.Equal(k, blockNumBytes[:]); k, v, err = c.Next() {
 		eventRlp, err := tx.GetOne(kv.BorEvents, v)
